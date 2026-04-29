@@ -5,6 +5,7 @@ dotenv.config()
 
 
 import { getStartOfTodayUTC } from '../../services/util.service.js'
+import { llmService } from '../../services/llm.service.js'
 
 export const newsFeedService = {
     query,
@@ -13,7 +14,6 @@ export const newsFeedService = {
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY
 
 const newsFeed = _loadFromFile()
-
 const POLL_INTERVAL = 1000 * 10
 let gIntervalId
 
@@ -35,19 +35,22 @@ async function _updateNewsFeed() {
 
 async function _newsCycle() {
     const news = await _fetchNews()
+
     const today = _filterTodaysNewsFeed(news)
+    console.log("today:",today.length)
+
     const unique = _deduplicateNewsFeed(today)
-    const updated = [...newsFeed, ...unique]
+    console.log(unique.length)
+
+    if ("unique:",unique.length === 0) return
+    
+    const relevant = await llmService.filterRelevantNews(unique)
+    console.log("llm:",relevant.length)
+
+    const updated = [...newsFeed, ...relevant]
+    console.log("updated:",updated.length)
+
     _saveToFile(updated)
-    console.log(updated.length)
-    // if(unique.length === 0) {
-    //     const updated = [...newsFeed, ...unique]
-    //     _saveToFile(updated)
-    //     return
-    // }
-
-    // const relevant = await llmFilter(unique)
-
 }
 
 
