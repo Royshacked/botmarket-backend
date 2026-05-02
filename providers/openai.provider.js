@@ -12,6 +12,6 @@ export async function callOpenAI(model,prompt) {
       input: prompt,
     });
   
-    return response.output_text;
-  }
+    return response.output_text;  
+}
 

@@ -1,4 +1,3 @@
-import axios from 'axios'
 import fs from 'fs'
 import dotenv from 'dotenv'
 dotenv.config()
@@ -6,25 +5,30 @@ dotenv.config()
 
 import { getStartOfTodayUTC } from '../../services/util.service.js'
 import { llmService } from '../../services/llm.service.js'
+import { fetchNews } from '../../providers/finnhub.provider.js'
 
 export const newsFeedService = {
     query,
 }
 
-const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY
-
-const newsFeed = _loadFromFile()
 const POLL_INTERVAL = 1000 * 10
 let gIntervalId
 
-// _updateNewsFeed()
+_getNewFeed()
+_updateNewsFeed()
 
 async function query() {
-    let filteredNewsFeed = newsFeed
+    let filteredNewsFeed = _loadFromFile("newsFeed")
     filteredNewsFeed = _filterTodaysNewsFeed(filteredNewsFeed)
     return Promise.resolve(filteredNewsFeed)
 }
 
+async function _getNewFeed() {
+    const newsFeed = _loadFromFile("newsFeed")
+    if(newsFeed.length > 0) return newsFeed
+    const news =await fetchNews()
+    return _saveToFile("newsFeed",news)
+}
 
 async function _updateNewsFeed() {
     if(gIntervalId) return
@@ -34,33 +38,36 @@ async function _updateNewsFeed() {
 
 
 async function _newsCycle() {
-    const news = await _fetchNews()
-
+    const newsFeed = _loadFromFile("newsFeed")
+    const news = await fetchNews()
+    console.log("news:",news.length)
+    
     const today = _filterTodaysNewsFeed(news)
     console.log("today:",today.length)
 
-    const unique = _deduplicateNewsFeed(today)
-    console.log(unique.length)
+    const unique = _deduplicateNewsFeed(today, "newsFeed")
+    console.log("unique:",unique.length)
+    
+    const filteredNews = [...newsFeed, ...unique]
+    console.log("filteredNews:",filteredNews.length)
+    _saveToFile("newsFeed",filteredNews)
 
     if ("unique:",unique.length === 0) return
     
-    const relevant = await llmService.filterRelevantNews(unique)
-    console.log("llm:",relevant.length)
-
-    const updated = [...newsFeed, ...relevant]
-    console.log("updated:",updated.length)
-
-    _saveToFile(updated)
+    _llmFilterNews(unique)
 }
 
 
-async function _fetchNews() {
+async function _llmFilterNews(news) {
+    const relevantNews = _loadFromFile("relevantNews")
     try {
-        const response = await axios.get(`https://finnhub.io/api/v1/news?category=general&token=${FINNHUB_API_KEY}`)
-        return response.data
+        const relevant = await llmService.filterRelevantNews(news)
+        const unique = _deduplicateNewsFeed(relevant, "relevantNews")
+        const llmFilteredNews = [...relevantNews, ...unique]
+        _saveToFile("relevantNews",llmFilteredNews)
     } catch (error) {
-        console.error('Error getting news feeds', error)
-        throw error
+        console.error("Error filtering news", error)
+        return []
     }
 }
 
@@ -71,36 +78,24 @@ function _filterTodaysNewsFeed(data) {
 }
 
 
-function _deduplicateNewsFeed(data) {
-    const unique = []
-    const seenIds =  _setSeenIds(newsFeed)
+function _deduplicateNewsFeed(data, destination) {
+    const news = _loadFromFile(destination)
+    const today = _filterTodaysNewsFeed(news)
+    if(today.length === 0) return data
 
-    data.forEach(item => {
-        if(!seenIds.has(item.datetime + item.headline)) {
-            unique.push(item)
-        }
-    })
+    const unique = data.filter(item => !today.some(todayItem => todayItem.datetime === item.datetime && todayItem.headline === item.headline))
     return unique
 }
 
 
-function _saveToFile(data) {
-    fs.writeFileSync('./data/newsFeeds.json', JSON.stringify(data, null, 2))
+function _saveToFile(name,data) {
+    fs.writeFileSync(`./data/${name}.json`, JSON.stringify(data, null, 2))
 }
 
 
-function _loadFromFile() {
-    const data = fs.readFileSync('./data/newsFeeds.json', 'utf8')
+function _loadFromFile(name) {
+    const data = fs.readFileSync(`./data/${name}.json`, 'utf8')
     if(!data) return []
     return JSON.parse(data)
-}
-
-
-function _setSeenIds(data) {
-    const seenIds = new Set()
-
-    data.forEach(item => seenIds.add(item.datetime + item.headline))
-
-    return seenIds
 }
 

@@ -14,4 +14,11 @@ export function getStartOfTodayUTC() {
 	  now.getUTCMonth(),
 	  now.getUTCDate()
 	) / 1000; // convert to seconds
+}
+
+export function cleanJSON(text) {
+	return text
+	  .replace(/```json/g, '')
+	  .replace(/```/g, '')
+	  .trim();
   }
