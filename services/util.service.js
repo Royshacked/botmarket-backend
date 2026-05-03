@@ -1,3 +1,5 @@
+import fs from 'fs'
+
 export function makeId(length = 5) {
 	var txt = ''
 	var possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
@@ -21,4 +23,37 @@ export function cleanJSON(text) {
 	  .replace(/```json/g, '')
 	  .replace(/```/g, '')
 	  .trim();
-  }
+}
+
+export function isCacheFresh(entry) {
+	const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+	if (!entry || !entry.lastFetchedAt) return false;
+  
+	return Date.now() - entry.lastFetchedAt < CACHE_TTL;
+}
+
+export function saveToFile(name,data) {
+    fs.writeFileSync(`./data/${name}.json`, JSON.stringify(data, null, 2))
+}
+
+
+export function loadFromFile(name) {
+    const data = fs.readFileSync(`./data/${name}.json`, 'utf8')
+    if(!data) return []
+    return JSON.parse(data)
+}
+
+export function filterTodaysNewsFeed(data) {
+    const startOfTodayUTC = getStartOfTodayUTC()
+    return data.filter(item => item.datetime >= startOfTodayUTC)
+}
+
+
+export function deduplicateNewsFeed(data, destination) {
+    const news = loadFromFile(destination)
+    const today = filterTodaysNewsFeed(news)
+    if(today.length === 0) return data
+
+    const unique = data.filter(item => !today.some(todayItem => todayItem.datetime === item.datetime && todayItem.headline === item.headline))
+    return unique
+}

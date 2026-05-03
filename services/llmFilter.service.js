@@ -1,12 +1,27 @@
 import { callOpenAI } from '../providers/openai.provider.js'
-import { cleanJSON } from './util.service.js';
+import { cleanJSON, deduplicateNewsFeed, loadFromFile, saveToFile } from './util.service.js';
 
 export const llmService = {
-    filterRelevantNews,
+    getRelevantNews,
 }
 
 
-async function filterRelevantNews(articles) {
+
+async function getRelevantNews(news) {
+    const relevantNews = loadFromFile("relevantNews")
+    try {
+        const relevant = await _llmFilterNewsFeed(news)
+        const unique = deduplicateNewsFeed(relevant, "relevantNews")
+        const llmFilteredNews = [...relevantNews, ...unique]
+        saveToFile("relevantNews",llmFilteredNews)
+        return llmFilteredNews
+    } catch (error) {
+        console.error("Error filtering news", error)
+        return []
+    }
+}
+
+async function _llmFilterNewsFeed(articles) {
     console.log("called llm")
     const model = 'gpt-4o-mini'
 
@@ -63,7 +78,6 @@ async function filterRelevantNews(articles) {
     let response = await callOpenAI(model, prompt)
 
     response = cleanJSON(response)
-    console.log(typeof response)
 
     return JSON.parse(response || '[]')
 }
