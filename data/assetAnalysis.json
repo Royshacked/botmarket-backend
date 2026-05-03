@@ -1,0 +1,44 @@
+{
+  "TSLA": {
+    "lastFetchedAt": 1777839377159,
+    "analysis": {
+      "newsSummary": "Tesla is set to launch a supervised robotaxi pilot in Austin within days, drawing bullish analyst calls about a new growth chapter but also political scrutiny and expectations for a limited initial rollout. Separately, Tesla filed a lawsuit alleging theft of Optimus robot IP, while brand visibility gets a boost at Electrify Expo and some commentary highlights reasons to be cautious.",
+      "sentiment": "mixed",
+      "positiveDrivers": [
+        "Robotaxi pilot in Austin reportedly on track to launch with human safety monitors",
+        "Veteran analyst frames robotaxis as Tesla’s potential next major growth chapter",
+        "Media narrative highlights transformative upside if robotaxi performance meets expectations",
+        "Brand engagement via Unplugged Performance’s Tesla builds at Electrify Expo",
+        "Active protection of Optimus IP through a federal lawsuit signals commitment to robotics roadmap"
+      ],
+      "negativeRisks": [
+        "Political pressure in Texas urging a delay to the robotaxi launch",
+        "Initial service requires human safety monitors, suggesting tech is not yet fully autonomous",
+        "Analyst commentary tempering expectations for widespread availability in the near term",
+        "Lawsuit over alleged theft of Optimus trade secrets raises IP leakage and competitive risks",
+        "Broader market caution toward tech-related names could weigh on sentiment"
+      ],
+      "keyEvents": [
+        "Tesla robotaxi pilot in Austin targeted to launch in roughly two days/Sunday, June 22, with human safety monitors",
+        "Texas Democrats reportedly urged Elon Musk to delay the robotaxi service; launch still appears on track",
+        "Veteran Tesla analyst issues a notably bullish call on the robotaxi opportunity",
+        "Tesla files federal lawsuit (June 11) alleging a former engineer stole Optimus robot trade secrets",
+        "Unplugged Performance to showcase Tesla builds at Electrify Expo, boosting brand exposure"
+      ],
+      "whatToWatchNext": [
+        "Confirmation of the Austin robotaxi launch timing and initial scope (service area, fleet size, hours)",
+        "Early safety and performance metrics (disengagements, incidents) and user feedback from the pilot",
+        "Regulatory and political response in Texas post-launch, including any new requirements or restrictions",
+        "Tesla’s roadmap for scaling robotaxi service beyond Austin and removing safety monitors",
+        "Updates on the Optimus IP lawsuit outcome and any implications for the robotics program",
+        "Further analyst revisions or commentary after the pilot launches"
+      ],
+      "possibleMarketReaction": {
+        "bullishCase": "A timely, incident-free launch with positive user feedback and clear expansion plans could reinforce the narrative that robotaxis are a credible near-term growth driver, improving sentiment.",
+        "bearishCase": "Delays, safety incidents, limited functionality, or heightened regulatory pushback could undercut expectations for autonomy, while IP concerns around Optimus or negative analyst commentary could further pressure sentiment."
+      },
+      "confidence": "medium",
+      "limitation": "This analysis is based only on provided news articles and does not include price action or technical analysis."
+    }
+  }
+}

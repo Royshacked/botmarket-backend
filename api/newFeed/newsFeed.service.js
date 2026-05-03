@@ -11,10 +11,10 @@ export const newsFeedService = {
     query,
 }
 
-const POLL_INTERVAL = 1000 * 60 * 5
+const POLL_INTERVAL = 1000 * 10
 let gIntervalId
 
-// _getNewFeed()
+// _getNewsFeed()
 // _updateNewsFeed()
 
 async function query() {
