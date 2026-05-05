@@ -1,41 +1,80 @@
 {
   "TSLA": {
-    "lastFetchedAt": 1777839377159,
+    "lastFetchedAt": 1777984083326,
     "analysis": {
-      "newsSummary": "Tesla is set to launch a supervised robotaxi pilot in Austin within days, drawing bullish analyst calls about a new growth chapter but also political scrutiny and expectations for a limited initial rollout. Separately, Tesla filed a lawsuit alleging theft of Optimus robot IP, while brand visibility gets a boost at Electrify Expo and some commentary highlights reasons to be cautious.",
+      "newsSummary": "Tesla is set to launch a pilot robotaxi service in Austin on Sunday (June 22) with human safety monitors. Veteran analysts tout robotaxis as Tesla’s next major growth driver, but others caution the rollout will be limited initially. Separately, Tesla filed a lawsuit alleging theft of trade secrets tied to its Optimus humanoid robot. The broader market tone is cautious, and Tesla’s aftermarket ecosystem will be showcased at Electrify Expo.",
       "sentiment": "mixed",
       "positiveDrivers": [
-        "Robotaxi pilot in Austin reportedly on track to launch with human safety monitors",
-        "Veteran analyst frames robotaxis as Tesla’s potential next major growth chapter",
-        "Media narrative highlights transformative upside if robotaxi performance meets expectations",
-        "Brand engagement via Unplugged Performance’s Tesla builds at Electrify Expo",
-        "Active protection of Optimus IP through a federal lawsuit signals commitment to robotics roadmap"
+        "Imminent Austin robotaxi pilot marks a critical milestone for Tesla’s autonomous ambitions",
+        "Veteran analyst expresses strong optimism that robotaxis could be Tesla’s next major growth chapter",
+        "Active aftermarket and enthusiast ecosystem (Electrify Expo showcase) supports brand engagement",
+        "Tesla is defending its robotics IP (Optimus) through legal channels, signaling investment and commitment to robotics"
       ],
       "negativeRisks": [
-        "Political pressure in Texas urging a delay to the robotaxi launch",
-        "Initial service requires human safety monitors, suggesting tech is not yet fully autonomous",
-        "Analyst commentary tempering expectations for widespread availability in the near term",
-        "Lawsuit over alleged theft of Optimus trade secrets raises IP leakage and competitive risks",
-        "Broader market caution toward tech-related names could weigh on sentiment"
+        "Initial robotaxi service will include human safety monitors, underscoring that full autonomy is not yet achieved",
+        "Expectations tempered for a limited early rollout rather than rapid nationwide expansion",
+        "Political pressure in Texas urging a delay to the robotaxi launch highlights regulatory and public scrutiny risks",
+        "Lawsuit over alleged theft of Optimus-related trade secrets points to IP leakage and potential operational distractions",
+        "Cautious market backdrop and recent negative analyst opinions/downgrades create sentiment headwinds"
       ],
       "keyEvents": [
-        "Tesla robotaxi pilot in Austin targeted to launch in roughly two days/Sunday, June 22, with human safety monitors",
-        "Texas Democrats reportedly urged Elon Musk to delay the robotaxi service; launch still appears on track",
-        "Veteran Tesla analyst issues a notably bullish call on the robotaxi opportunity",
-        "Tesla files federal lawsuit (June 11) alleging a former engineer stole Optimus robot trade secrets",
-        "Unplugged Performance to showcase Tesla builds at Electrify Expo, boosting brand exposure"
+        "Robotaxi launch in Austin scheduled for Sunday, June 22, with human safety monitors",
+        "Texas Democrats reportedly pressuring Tesla to delay the robotaxi start",
+        "Tesla files federal lawsuit (June 11) alleging ex-engineer stole Optimus robotic hand system trade secrets",
+        "Analyst commentary diverges: bold bullish robotaxi outlook vs. cautions on near-term scale",
+        "Tesla builds to be showcased at Electrify Expo, highlighting aftermarket engagement"
       ],
       "whatToWatchNext": [
-        "Confirmation of the Austin robotaxi launch timing and initial scope (service area, fleet size, hours)",
-        "Early safety and performance metrics (disengagements, incidents) and user feedback from the pilot",
-        "Regulatory and political response in Texas post-launch, including any new requirements or restrictions",
-        "Tesla’s roadmap for scaling robotaxi service beyond Austin and removing safety monitors",
-        "Updates on the Optimus IP lawsuit outcome and any implications for the robotics program",
-        "Further analyst revisions or commentary after the pilot launches"
+        "Whether the Austin robotaxi pilot begins on time and the scope of the initial service (coverage, hours, rider access)",
+        "Operational metrics: safety performance, human intervention/disengagement rates, rider feedback",
+        "Regulatory and political responses in Texas and any permitting or compliance updates",
+        "Timeline and criteria for expanding beyond Austin and reducing human oversight",
+        "Monetization details for robotaxis: pricing, insurance, partnerships, and unit economics",
+        "Progress updates on Optimus and developments in the IP theft lawsuit (e.g., injunctions or settlements)",
+        "Further analyst revisions or commentary following the pilot’s early results"
       ],
       "possibleMarketReaction": {
-        "bullishCase": "A timely, incident-free launch with positive user feedback and clear expansion plans could reinforce the narrative that robotaxis are a credible near-term growth driver, improving sentiment.",
-        "bearishCase": "Delays, safety incidents, limited functionality, or heightened regulatory pushback could undercut expectations for autonomy, while IP concerns around Optimus or negative analyst commentary could further pressure sentiment."
+        "bullishCase": "On-time launch with smooth operations, low intervention rates, positive user feedback, and constructive regulatory response could reinforce the thesis that robotaxis are a near-term growth driver.",
+        "bearishCase": "Delays, political or regulatory pushback, safety incidents, or evidence of heavy human intervention could undercut autonomy timelines; escalation of IP disputes could add uncertainty."
+      },
+      "confidence": "medium",
+      "limitation": "This analysis is based only on provided news articles and does not include price action or technical analysis."
+    }
+  },
+  "META": {
+    "lastFetchedAt": 1777984142395,
+    "analysis": {
+      "newsSummary": "Meta partnered with Oakley to launch $399 Oakley-branded AI smart glasses aimed at athletes, featuring a new style and technical tweaks. Separately, reports indicate Meta discussed acquiring Perplexity AI before instead making a multibillion-dollar investment in Scale AI. Research coverage highlights Meta’s strong AI momentum, product innovation, and expanding market share.",
+      "sentiment": "bullish",
+      "positiveDrivers": [
+        "Launch of Oakley-branded $399 AI glasses expands Meta’s wearable AI lineup and targets the performance/athlete segment",
+        "Partnership with Oakley adds sports-oriented brand credibility to Meta’s smart glasses push",
+        "New glasses include technical tweaks that could improve user experience versus prior models",
+        "Research reports cite strong AI momentum, product innovation, and expanding market share for Meta",
+        "Strategic focus on AI evidenced by interest in Perplexity and a multibillion-dollar investment in Scale AI"
+      ],
+      "negativeRisks": [
+        "Commercial traction for athlete-focused AI glasses remains unproven and may initially address a niche audience",
+        "Limited detail on performance/features beyond style and tweaks leaves differentiation unclear",
+        "Uncertainty around AI dealmaking strategy after talks with Perplexity did not lead to an acquisition",
+        "Broader tech-sector softness noted in multiple reports could weigh on near-term sentiment"
+      ],
+      "keyEvents": [
+        "Meta and Oakley unveil $399 AI smart glasses targeting athletes with updated styling and technical tweaks",
+        "Bloomberg: Meta discussed buying Perplexity AI before investing in Scale AI",
+        "Top research notes highlight Meta’s AI momentum, product innovation, and market share expansion",
+        "Sector updates indicate tech stocks were softer as broader markets settled mostly lower"
+      ],
+      "whatToWatchNext": [
+        "Early reviews, user feedback, and sales traction for Oakley-branded AI glasses, especially among athletes and creators",
+        "Software updates, feature roadmap, and integration of Meta’s AI services within the new glasses",
+        "Details on the scope and strategic impact of Meta’s investment in Scale AI and any follow-on partnerships",
+        "Further signals on AI search ambitions, including any renewed talks or partnerships after Perplexity discussions",
+        "Broader sector sentiment that could influence reception of new hardware launches"
+      ],
+      "possibleMarketReaction": {
+        "bullishCase": "Positive reviews and strong early demand for the Oakley AI glasses, combined with supportive analyst commentary on AI momentum and clarity on the Scale AI investment, lift sentiment around Meta’s hardware and AI strategy.",
+        "bearishCase": "Muted reception or unclear differentiation for the new glasses, lingering questions about AI strategy after Perplexity talks, and continued tech-sector softness dampen enthusiasm."
       },
       "confidence": "medium",
       "limitation": "This analysis is based only on provided news articles and does not include price action or technical analysis."

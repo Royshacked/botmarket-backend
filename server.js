@@ -4,8 +4,9 @@ import cors from 'cors'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 
-import { newsFeedRoutes } from './api/newFeed/newsFeed.routes.js'
+import { newsFeedRoutes } from './api/newsFeed/newsFeed.routes.js'
 import { assetNewsRoutes } from './api/assetNews/assetNews.routes.js'
+import { logger } from './services/logger.service.js'
 
 const app = express()
 const server = http.createServer(app)
@@ -38,7 +39,6 @@ if (process.env.NODE_ENV === 'production') {
     })
 }
 
-import { logger } from './services/logger.service.js'
 const port = process.env.PORT || 3030
 
 server.listen(port, () => {

@@ -1,4 +1,3 @@
-import fs from 'fs'
 import dotenv from 'dotenv'
 dotenv.config()
 
@@ -18,16 +17,16 @@ let gIntervalId
 // _updateNewsFeed()
 
 async function query() {
-    const relevantNews = loadFromFile("relevantNews")
+    const relevantNews = await loadFromFile("relevantNews")
     return Promise.resolve(relevantNews)
 }
 
 
 async function _getNewsFeed() {
-    const newsFeed = loadFromFile("newsFeed")
+    const newsFeed = await loadFromFile("newsFeed")
     if(newsFeed.length > 0) return newsFeed
     const news = await fetchNews()
-    saveToFile("newsFeed",news)
+    await saveToFile("newsFeed",news)
     return news
 }
 
@@ -52,9 +51,9 @@ async function _newsCycle() {
     
     const filteredNews = [...newsFeed, ...unique]
     console.log("filteredNews:",filteredNews.length)
-    saveToFile("newsFeed",filteredNews)
+    await saveToFile("newsFeed",filteredNews)
 
-    if ("unique:",unique.length === 0) return
+    if (unique.length === 0) return
     
     await llmService.getRelevantNews(unique)
 }

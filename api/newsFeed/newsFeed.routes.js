@@ -9,5 +9,5 @@ const router = express.Router()
 // We can add a middleware for the entire router:
 // router.use(requireAuth)
 
-router.get('/', log, getNewsFeeds)
+router.get('/news/feed', log, getNewsFeeds)
 export const newsFeedRoutes = router

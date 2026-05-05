@@ -7,7 +7,7 @@ export async function getNewsFeeds(req, res) {
 		res.send(newsFeeds)
 	} catch (err) {
 		logger.error('Failed to get newsFeeds', err)
-		res.status(400).send({ err: 'Failed to get newsFeeds' })
+		res.status(500).send({ err: 'Failed to get newsFeeds' })
 	}
 }
 

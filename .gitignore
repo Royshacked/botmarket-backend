@@ -2,3 +2,4 @@ node_modules
 logs
 newsFeeds.json
 .env
+data/*.json

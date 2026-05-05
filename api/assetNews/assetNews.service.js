@@ -9,7 +9,8 @@ export const assetNewsService = {
 
 async function getBySymbol(symbol) {
     const all = await _getAllBySymbol(symbol)
-    const sorted = all.articles.sort((a, b) => b.datetime - a.datetime)
+    let sorted = all
+    sorted = sorted.articles.sort((a, b) => b.datetime - a.datetime)
     const latest = sorted.slice(0, 10)
     const forLLM = latest.map(article => ({
         datetime: article.datetime,
@@ -26,13 +27,13 @@ async function getBySymbol(symbol) {
 
 async function _getAllBySymbol(symbol) {
     const key = symbol.toUpperCase()
-    const all = loadFromFile("assetNews")
+    const all = await loadFromFile("assetNews")
     const entry = all[key]
     if (isCacheFresh(entry, 5 * 60 * 1000)) return entry
     console.log("getAllBySymbol",symbol)
     const articles = await fetchAssetNews(symbol)
     const updated = { ...all, [key]: { lastFetchedAt: Date.now(), articles } }
-    saveToFile("assetNews", updated)
+    await saveToFile("assetNews", updated)
     return updated[key]
 }
 

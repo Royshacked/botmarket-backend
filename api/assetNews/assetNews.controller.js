@@ -9,6 +9,6 @@ export async function getAssetNews(req, res) {
 		res.send(assetNews)
 	} catch (err) {
 		logger.error('Failed to get asset news', err)
-		res.status(400).send({ err: 'Failed to get asset news' })
+		res.status(500).send({ err: 'Failed to get asset news' })
 	}
 }
