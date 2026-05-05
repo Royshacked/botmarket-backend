@@ -1,14 +1,13 @@
-import { fetchAssetNews } from "../../providers/finnhub.provider.js"
 import { llmAnalysisService } from "../../services/llmAnalysis.service.js"
-import { isCacheFresh, loadFromFile, saveToFile } from "../../services/util.service.js"
+import { newsService } from "../news/news.service.js"
 
 
 export const assetAnalysisService = {
-    getBySymbol,
+    getAssetAnalysis,
 }
 
-async function getBySymbol(symbol) {
-    const all = await _getAllBySymbol(symbol)
+async function getAssetAnalysis(symbol) {
+    const all = await newsService.getNewsBySymbol(symbol)
     let sorted = all
     sorted = sorted.articles.sort((a, b) => b.datetime - a.datetime)
     const latest = sorted.slice(0, 10)
@@ -21,20 +20,9 @@ async function getBySymbol(symbol) {
         url: article.url,
     }))
 
-    const assetAnalysisLLM = await llmAnalysisService.getAssetAnalysis(forLLM,symbol)
+    const assetAnalysisLLM = await llmAnalysisService.getLLMNewsAnalysis(forLLM,symbol)
     return assetAnalysisLLM
 }
 
-async function _getAllBySymbol(symbol) {
-    const key = symbol.toUpperCase()
-    const all = await loadFromFile("assetNews")
-    const entry = all[key]
-    if (isCacheFresh(entry, 5 * 60 * 1000)) return entry
-    console.log("getAllBySymbol",symbol)
-    const articles = await fetchAssetNews(symbol)
-    const updated = { ...all, [key]: { lastFetchedAt: Date.now(), articles } }
-    await saveToFile("assetNews", updated)
-    return updated[key]
-}
 
 

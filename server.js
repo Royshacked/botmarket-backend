@@ -29,7 +29,7 @@ if (process.env.NODE_ENV === 'production') {
     app.use(cors(corsOptions))
 }
 
-app.use('/newsfeed', newsFeedRoutes)
+app.use('/news', newsFeedRoutes)
 app.use('/analysis', assetAnalysisRoutes)
 
 // SPA fallback: only in production when static assets live in public/

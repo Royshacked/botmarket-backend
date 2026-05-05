@@ -2,7 +2,7 @@ import { callOpenAI } from "../providers/openai.provider.js"
 import { cleanJSON, isCacheFresh, loadFromFile, saveToFile } from "./util.service.js"
 
 export const llmAnalysisService = {
-    getAssetAnalysis,
+    getLLMNewsAnalysis,
 }
 
 function _extractFirstJsonObject(text) {
@@ -44,7 +44,7 @@ function _isValidAnalysisObject(obj) {
     return true
 }
 
-async function getAssetAnalysis(articles,symbol) {
+async function getLLMNewsAnalysis(articles,symbol) {
     const all = await loadFromFile("assetAnalysis")
     const entry = all[symbol]
     if (isCacheFresh(entry, 120 * 60 * 1000)) return entry

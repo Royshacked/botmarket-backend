@@ -2,12 +2,13 @@ import dotenv from 'dotenv'
 dotenv.config()
 
 
-import { deduplicateNewsFeed, filterTodaysNewsFeed, getStartOfTodayUTC, loadFromFile, saveToFile } from '../../services/util.service.js'
+import { deduplicateNewsFeed, filterTodaysNewsFeed, loadFromFile, saveToFile } from '../../services/util.service.js'
 import { llmService } from '../../services/llmFilter.service.js'
 import { fetchNews } from '../../providers/finnhub.provider.js'
 
-export const newsFeedService = {
+export const newsService = {
     query,
+    getNewsBySymbol
 }
 
 const POLL_INTERVAL = 1000 * 10
@@ -22,6 +23,19 @@ async function query() {
 }
 
 
+async function getNewsBySymbol(symbol) {
+    const key = symbol.toUpperCase()
+    const all = await loadFromFile("assetNews")
+    const entry = all[key]
+    if (isCacheFresh(entry, 5 * 60 * 1000)) return entry
+    console.log("getAllBySymbol",symbol)
+    const articles = await fetchAssetNews(symbol)
+    const updated = { ...all, [key]: { lastFetchedAt: Date.now(), articles } }
+    await saveToFile("assetNews", updated)
+    return updated[key]
+}
+
+
 async function _getNewsFeed() {
     const newsFeed = await loadFromFile("newsFeed")
     if(newsFeed.length > 0) return newsFeed
@@ -33,12 +47,12 @@ async function _getNewsFeed() {
 
 async function _updateNewsFeed() {
     if(gIntervalId) return
-    gIntervalId = setInterval(() => _newsCycle(), POLL_INTERVAL)
+    gIntervalId = setInterval(() => _newsFeedCycle(), POLL_INTERVAL)
     return gIntervalId
 }
 
 
-async function _newsCycle() {
+async function _newsFeedCycle() {
     const newsFeed = loadFromFile("newsFeed")
     const news = await fetchNews()
     console.log("news:",news.length)
