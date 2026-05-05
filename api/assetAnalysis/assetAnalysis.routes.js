@@ -9,5 +9,5 @@ const router = express.Router()
 // We can add a middleware for the entire router:
 // router.use(requireAuth)
 
-router.get('/asset/:symbol', log, getAssetAnalysis)
+router.post('/asset', log, getAssetAnalysis)
 export const assetAnalysisRoutes = router

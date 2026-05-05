@@ -2,9 +2,9 @@ import dotenv from 'dotenv'
 dotenv.config()
 
 
-import { deduplicateNewsFeed, filterTodaysNewsFeed, loadFromFile, saveToFile } from '../../services/util.service.js'
+import { deduplicateNewsFeed, filterTodaysNewsFeed, isCacheFresh, loadFromFile, saveToFile } from '../../services/util.service.js'
 import { llmService } from '../../services/llmFilter.service.js'
-import { fetchNews } from '../../providers/finnhub.provider.js'
+import { fetchAssetNews, fetchNews } from '../../providers/finnhub.provider.js'
 
 export const newsService = {
     query,
@@ -27,7 +27,7 @@ async function getNewsBySymbol(symbol) {
     const key = symbol.toUpperCase()
     const all = await loadFromFile("assetNews")
     const entry = all[key]
-    if (isCacheFresh(entry, 5 * 60 * 1000)) return entry
+    if (isCacheFresh(entry, 60 * 60 * 1000)) return entry
     console.log("getAllBySymbol",symbol)
     const articles = await fetchAssetNews(symbol)
     const updated = { ...all, [key]: { lastFetchedAt: Date.now(), articles } }

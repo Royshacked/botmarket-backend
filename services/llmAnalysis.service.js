@@ -1,53 +1,15 @@
 import { callOpenAI } from "../providers/openai.provider.js"
-import { cleanJSON, isCacheFresh, loadFromFile, saveToFile } from "./util.service.js"
+import { isCacheFresh, isValidAnalysisObject, loadFromFile, safeParseJsonObject, saveToFile } from "./util.service.js"
 
 export const llmAnalysisService = {
     getLLMNewsAnalysis,
 }
 
-function _extractFirstJsonObject(text) {
-    if (!text) return null
-    const start = text.indexOf('{')
-    const end = text.lastIndexOf('}')
-    if (start === -1 || end === -1 || end <= start) return null
-    return text.slice(start, end + 1)
-}
-
-function _safeParseJsonObject(text) {
-    const cleaned = cleanJSON(text || '')
-    try {
-        return JSON.parse(cleaned)
-    } catch {
-        const extracted = _extractFirstJsonObject(cleaned)
-        if (!extracted) return null
-        try {
-            return JSON.parse(extracted)
-        } catch {
-            return null
-        }
-    }
-}
-
-function _isValidAnalysisObject(obj) {
-    if (!obj || typeof obj !== 'object') return false
-    if (typeof obj.newsSummary !== 'string') return false
-    if (typeof obj.sentiment !== 'string') return false
-    if (!Array.isArray(obj.positiveDrivers)) return false
-    if (!Array.isArray(obj.negativeRisks)) return false
-    if (!Array.isArray(obj.keyEvents)) return false
-    if (!Array.isArray(obj.whatToWatchNext)) return false
-    if (!obj.possibleMarketReaction || typeof obj.possibleMarketReaction !== 'object') return false
-    if (typeof obj.possibleMarketReaction.bullishCase !== 'string') return false
-    if (typeof obj.possibleMarketReaction.bearishCase !== 'string') return false
-    if (typeof obj.confidence !== 'string') return false
-    if (typeof obj.limitation !== 'string') return false
-    return true
-}
 
 async function getLLMNewsAnalysis(articles,symbol) {
     const all = await loadFromFile("assetAnalysis")
     const entry = all[symbol]
-    if (isCacheFresh(entry, 120 * 60 * 1000)) return entry
+    if (isCacheFresh(entry, 1000 * 60 * 1000)) return entry
 
     console.log("no data of:",symbol)
     const assetAnalysisLLM = await _analyzeNews(articles,symbol)
@@ -93,7 +55,7 @@ async function _analyzeNews(articles,symbol) {
 
     const response = await callOpenAI(model, userPrompt, systemPrompt)
 
-    const parsed = _safeParseJsonObject(response)
-    if (!parsed || !_isValidAnalysisObject(parsed)) return null
+    const parsed = safeParseJsonObject(response)
+    if (!parsed || !isValidAnalysisObject(parsed)) return null
     return parsed
 }

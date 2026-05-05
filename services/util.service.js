@@ -1,4 +1,5 @@
 import fs from 'fs'
+import path from 'path'
 
 export function makeId(length = 5) {
 	var txt = ''
@@ -27,28 +28,31 @@ export function cleanJSON(text) {
 
 export function isCacheFresh(entry, cacheTimeMs = 5 * 60 * 1000) {
 	if (!entry || !entry.lastFetchedAt) return false;
-	return Date.now() - entry.lastFetchedAt < cacheTime;
+	return Date.now() - entry.lastFetchedAt < cacheTimeMs;
 }
 
 export async function saveToFile(name,data) {
-    fs.writeFile(`./data/${name}.json`, JSON.stringify(data, null, 2), (err) => {
-        if (err) {
-            console.error(`Error saving ${name} to file`, err)
-        }
-    })
+    try {
+        const dir = path.resolve('./data')
+        fs.mkdirSync(dir, { recursive: true })
+        fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(data, null, 2), 'utf8')
+    } catch (err) {
+        console.error(`Error saving ${name} to file`, err)
+    }
 }
 
 
 export async function loadFromFile(name) {
-    const data = fs.readFile(`./data/${name}.json`, 'utf8', (err, data) => {
-        if (err) {
-            console.error(`Error loading ${name} from file`, err)
-            return []
-        }
-        return JSON.parse(data)
-    })
-    if(!data) return []
-    return JSON.parse(data)
+    try {
+        const filePath = path.resolve('./data', `${name}.json`)
+        if (!fs.existsSync(filePath)) return []
+        const raw = fs.readFileSync(filePath, 'utf8')
+        if (!raw) return []
+        return JSON.parse(raw)
+    } catch (err) {
+        console.error(`Error loading ${name} from file`, err)
+        return []
+    }
 }
 
 export function filterTodaysNewsFeed(data) {
@@ -76,4 +80,52 @@ export function oneMonthAgoToTodayRange() {
     const from = new Date(to)
     from.setMonth(from.getMonth() - 1)
     return { from: _formatYyyyMmDd(from), to: _formatYyyyMmDd(to) }
+}
+
+
+function _extractFirstJsonObject(text) {
+    if (!text) return null
+    const start = text.indexOf('{')
+    const end = text.lastIndexOf('}')
+    if (start === -1 || end === -1 || end <= start) return null
+    return text.slice(start, end + 1)
+}
+
+export function safeParseJsonObject(text) {
+    const cleaned = cleanJSON(text || '')
+    try {
+        return JSON.parse(cleaned)
+    } catch {
+        const extracted = _extractFirstJsonObject(cleaned)
+        if (!extracted) return null
+        try {
+            return JSON.parse(extracted)
+        } catch {
+            return null
+        }
+    }
+}
+
+export function isValidUserIntentObject(obj) {
+    if (!obj || typeof obj !== 'object') return false
+    if (obj.analysisType !== 'news') return false
+    if (obj.ticker != null && typeof obj.ticker !== 'string') return false
+    if (obj.assetName != null && typeof obj.assetName !== 'string') return false
+    return true
+}
+
+export function isValidAnalysisObject(obj) {
+    if (!obj || typeof obj !== 'object') return false
+    if (typeof obj.newsSummary !== 'string') return false
+    if (typeof obj.sentiment !== 'string') return false
+    if (!Array.isArray(obj.positiveDrivers)) return false
+    if (!Array.isArray(obj.negativeRisks)) return false
+    if (!Array.isArray(obj.keyEvents)) return false
+    if (!Array.isArray(obj.whatToWatchNext)) return false
+    if (!obj.possibleMarketReaction || typeof obj.possibleMarketReaction !== 'object') return false
+    if (typeof obj.possibleMarketReaction.bullishCase !== 'string') return false
+    if (typeof obj.possibleMarketReaction.bearishCase !== 'string') return false
+    if (typeof obj.confidence !== 'string') return false
+    if (typeof obj.limitation !== 'string') return false
+    return true
 }

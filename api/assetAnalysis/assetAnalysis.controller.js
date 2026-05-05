@@ -1,3 +1,4 @@
+import { llmUserIntentService } from '../../services/llmUserIntent.service.js'
 import { logger } from '../../services/logger.service.js'
 import { assetAnalysisService } from './assetAnalysis.service.js'
 
@@ -17,8 +18,9 @@ export async function getAssetAnalysis(req, res) {
 	try {
 		const { userPrompt } = req.body
 		const userIntent = await llmUserIntentService.getUserIntent(userPrompt)
-		const symbol = userIntent.symbol
-		const assetNews = await assetAnalysisService.getBySymbol(symbol)
+		console.log("userIntent",userIntent)
+		const symbol = userIntent.ticker
+		const assetNews = await assetAnalysisService.getAssetAnalysis(symbol)
 		res.send(assetNews)
 	} catch (err) {
 		logger.error('Failed to get asset news', err)

@@ -8,6 +8,7 @@ export const assetAnalysisService = {
 
 async function getAssetAnalysis(symbol) {
     const all = await newsService.getNewsBySymbol(symbol)
+    console.log("all:",all.articles.length)
     let sorted = all
     sorted = sorted.articles.sort((a, b) => b.datetime - a.datetime)
     const latest = sorted.slice(0, 10)
@@ -21,7 +22,7 @@ async function getAssetAnalysis(symbol) {
     }))
 
     const assetAnalysisLLM = await llmAnalysisService.getLLMNewsAnalysis(forLLM,symbol)
-    return assetAnalysisLLM
+    return Promise.resolve(assetAnalysisLLM)
 }
 
 
