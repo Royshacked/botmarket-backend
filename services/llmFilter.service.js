@@ -55,58 +55,49 @@ async function getRelevantNews(news) {
 async function _llmFilterNewsFeed(articles) {
     console.log("called llm")
     const model = 'gpt-4o-mini'
+    const systemPrompt = `You are filtering news for a trading dashboard.
+            You must return ONLY valid JSON.
+            Do NOT include:
+            - explanations
+            - text
+            - markdown
+            - comments
+            - any other text outside the JSON
+    `
+    const userPrompt = `filter the articles by the summery and the headline only.
+            
+            Return ONLY a valid JSON array of objects with exactly these keys:
+            ["category","datetime","headline","id","image","related","source","summary","url"]
+            
+            Example (valid JSON):
+            [{
+            "category": "business",
+            "datetime": 1714760000,
+            "headline": "Example headline",
+            "id": 123,
+            "image": "https://example.com/image.jpg",
+            "related": "META",
+            "source": "Reuters",
+            "summary": "Example summary",
+            "url": "https://example.com/article"
+            }]
+            
+            
+            Articles:
+            ${JSON.stringify(articles.map(a=> ({
+                category: a.category,
+                datetime: a.datetime,
+                headline: a.headline,
+                id: a.id,
+                image: a.image,
+                related: a.related,
+                source: a.source,
+                summary: a.summary,
+                url: a.url
+            })))} // make .map of articles to JSON.stringify
+            `;
 
-    const prompt = `You are filtering news for a trading dashboard.
-    filter the articles by the summery and the headline only.
-    Keep an article if it is even moderately relevant to:
-    - indices like Nasdaq / S&P
-    - currencies / USD
-    - bonds / yields
-    - Fed / rates / inflation
-    - major companies that can move indices
-    - geopolitics that may affect markets
-
-    Do not require certainty.
-    You must return ONLY valid JSON.
-
-    Do NOT include:
-    - explanations
-    - text
-    - markdown
-    - comments
-    
-    Return ONLY a valid JSON array of objects with exactly these keys:
-    ["category","datetime","headline","id","image","related","source","summary","url"]
-    
-    Example (valid JSON):
-    [{
-      "category": "business",
-      "datetime": 1714760000,
-      "headline": "Example headline",
-      "id": 123,
-      "image": "https://example.com/image.jpg",
-      "related": "META",
-      "source": "Reuters",
-      "summary": "Example summary",
-      "url": "https://example.com/article"
-    }]
-    
-    
-    Articles:
-    ${JSON.stringify(articles.map(a=> ({
-        category: a.category,
-        datetime: a.datetime,
-        headline: a.headline,
-        id: a.id,
-        image: a.image,
-        related: a.related,
-        source: a.source,
-        summary: a.summary,
-        url: a.url
-    })))} // make .map of articles to JSON.stringify
-    `;
-
-    const response = await callOpenAI(model, prompt)
+    const response = await callOpenAI(model, userPrompt, systemPrompt)
 
     const parsed = _safeParseJsonArray(response)
     if (!Array.isArray(parsed)) return []

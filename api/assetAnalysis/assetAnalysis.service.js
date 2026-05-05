@@ -3,7 +3,7 @@ import { llmAnalysisService } from "../../services/llmAnalysis.service.js"
 import { isCacheFresh, loadFromFile, saveToFile } from "../../services/util.service.js"
 
 
-export const assetNewsService = {
+export const assetAnalysisService = {
     getBySymbol,
 }
 

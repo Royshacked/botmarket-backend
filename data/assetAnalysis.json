@@ -1,80 +1,39 @@
 {
-  "TSLA": {
-    "lastFetchedAt": 1777984083326,
+  "META": {
+    "lastFetchedAt": 1777988939889,
     "analysis": {
-      "newsSummary": "Tesla is set to launch a pilot robotaxi service in Austin on Sunday (June 22) with human safety monitors. Veteran analysts tout robotaxis as Tesla’s next major growth driver, but others caution the rollout will be limited initially. Separately, Tesla filed a lawsuit alleging theft of trade secrets tied to its Optimus humanoid robot. The broader market tone is cautious, and Tesla’s aftermarket ecosystem will be showcased at Electrify Expo.",
+      "newsSummary": "Meta is advancing a major AI build-out by seeking about $13B in debt financing for a Texas data center while contesting an EU push to open WhatsApp to rival chatbots; it’s also rolling out broader teen safety measures as commentary debates the clarity and ROI of its AI strategy.",
       "sentiment": "mixed",
       "positiveDrivers": [
-        "Imminent Austin robotaxi pilot marks a critical milestone for Tesla’s autonomous ambitions",
-        "Veteran analyst expresses strong optimism that robotaxis could be Tesla’s next major growth chapter",
-        "Active aftermarket and enthusiast ecosystem (Electrify Expo showcase) supports brand engagement",
-        "Tesla is defending its robotics IP (Optimus) through legal channels, signaling investment and commitment to robotics"
+        "Pursuit of $13B financing for a Texas AI data center signals strong commitment to scaling AI infrastructure",
+        "Top-tier banks (Morgan Stanley, JPMorgan) working on the package underscores access to large-scale capital",
+        "Expanded AI-powered age verification and teen protections could mitigate regulatory and reputational risks with limited growth impact (per coverage)",
+        "Bullish media commentary highlighting Meta’s AI potential and long-term platform opportunity"
       ],
       "negativeRisks": [
-        "Initial robotaxi service will include human safety monitors, underscoring that full autonomy is not yet achieved",
-        "Expectations tempered for a limited early rollout rather than rapid nationwide expansion",
-        "Political pressure in Texas urging a delay to the robotaxi launch highlights regulatory and public scrutiny risks",
-        "Lawsuit over alleged theft of Optimus-related trade secrets points to IP leakage and potential operational distractions",
-        "Cautious market backdrop and recent negative analyst opinions/downgrades create sentiment headwinds"
+        "Debt-heavy financing and rising infrastructure costs could pressure free cash flow and margins",
+        "Skepticism about clarity and ROI of Meta’s AI strategy versus Alphabet",
+        "EU antitrust risk: possible order to allow rival AI chatbots on WhatsApp may dilute platform control and monetization",
+        "Ongoing competition for AI/data center talent (former Meta data center leader advising another firm)"
       ],
       "keyEvents": [
-        "Robotaxi launch in Austin scheduled for Sunday, June 22, with human safety monitors",
-        "Texas Democrats reportedly pressuring Tesla to delay the robotaxi start",
-        "Tesla files federal lawsuit (June 11) alleging ex-engineer stole Optimus robotic hand system trade secrets",
-        "Analyst commentary diverges: bold bullish robotaxi outlook vs. cautions on near-term scale",
-        "Tesla builds to be showcased at Electrify Expo, highlighting aftermarket engagement"
+        "Meta seeks approximately $13B in financing for a Texas AI data center with Morgan Stanley and JPMorgan involved",
+        "Reports emphasize debt-heavy structure and rising infrastructure costs for Meta’s build-out",
+        "Meta argues at an EU hearing to fend off an order to open WhatsApp to rival AI chatbots",
+        "Meta expands AI-powered age verification and teen protections across Instagram and Facebook",
+        "Media pieces contrast Meta’s AI ROI visibility unfavorably against Alphabet while others remain optimistic on Meta’s long-term potential"
       ],
       "whatToWatchNext": [
-        "Whether the Austin robotaxi pilot begins on time and the scope of the initial service (coverage, hours, rider access)",
-        "Operational metrics: safety performance, human intervention/disengagement rates, rider feedback",
-        "Regulatory and political responses in Texas and any permitting or compliance updates",
-        "Timeline and criteria for expanding beyond Austin and reducing human oversight",
-        "Monetization details for robotaxis: pricing, insurance, partnerships, and unit economics",
-        "Progress updates on Optimus and developments in the IP theft lawsuit (e.g., injunctions or settlements)",
-        "Further analyst revisions or commentary following the pilot’s early results"
+        "Outcome and timing of the EU antitrust decision on WhatsApp chatbot access and any required remedies",
+        "Final terms, interest rates, and covenants on the $13B financing and resulting leverage profile",
+        "Texas data center milestones: build timeline, capacity details, and budget adherence",
+        "Clearer disclosures on Meta’s AI product roadmap and monetization pathways across WhatsApp, Instagram, and Facebook",
+        "Early indicators of how teen safety features affect engagement and advertising metrics",
+        "Any updates to capex guidance given rising infrastructure costs"
       ],
       "possibleMarketReaction": {
-        "bullishCase": "On-time launch with smooth operations, low intervention rates, positive user feedback, and constructive regulatory response could reinforce the thesis that robotaxis are a near-term growth driver.",
-        "bearishCase": "Delays, political or regulatory pushback, safety incidents, or evidence of heavy human intervention could undercut autonomy timelines; escalation of IP disputes could add uncertainty."
-      },
-      "confidence": "medium",
-      "limitation": "This analysis is based only on provided news articles and does not include price action or technical analysis."
-    }
-  },
-  "META": {
-    "lastFetchedAt": 1777984142395,
-    "analysis": {
-      "newsSummary": "Meta partnered with Oakley to launch $399 Oakley-branded AI smart glasses aimed at athletes, featuring a new style and technical tweaks. Separately, reports indicate Meta discussed acquiring Perplexity AI before instead making a multibillion-dollar investment in Scale AI. Research coverage highlights Meta’s strong AI momentum, product innovation, and expanding market share.",
-      "sentiment": "bullish",
-      "positiveDrivers": [
-        "Launch of Oakley-branded $399 AI glasses expands Meta’s wearable AI lineup and targets the performance/athlete segment",
-        "Partnership with Oakley adds sports-oriented brand credibility to Meta’s smart glasses push",
-        "New glasses include technical tweaks that could improve user experience versus prior models",
-        "Research reports cite strong AI momentum, product innovation, and expanding market share for Meta",
-        "Strategic focus on AI evidenced by interest in Perplexity and a multibillion-dollar investment in Scale AI"
-      ],
-      "negativeRisks": [
-        "Commercial traction for athlete-focused AI glasses remains unproven and may initially address a niche audience",
-        "Limited detail on performance/features beyond style and tweaks leaves differentiation unclear",
-        "Uncertainty around AI dealmaking strategy after talks with Perplexity did not lead to an acquisition",
-        "Broader tech-sector softness noted in multiple reports could weigh on near-term sentiment"
-      ],
-      "keyEvents": [
-        "Meta and Oakley unveil $399 AI smart glasses targeting athletes with updated styling and technical tweaks",
-        "Bloomberg: Meta discussed buying Perplexity AI before investing in Scale AI",
-        "Top research notes highlight Meta’s AI momentum, product innovation, and market share expansion",
-        "Sector updates indicate tech stocks were softer as broader markets settled mostly lower"
-      ],
-      "whatToWatchNext": [
-        "Early reviews, user feedback, and sales traction for Oakley-branded AI glasses, especially among athletes and creators",
-        "Software updates, feature roadmap, and integration of Meta’s AI services within the new glasses",
-        "Details on the scope and strategic impact of Meta’s investment in Scale AI and any follow-on partnerships",
-        "Further signals on AI search ambitions, including any renewed talks or partnerships after Perplexity discussions",
-        "Broader sector sentiment that could influence reception of new hardware launches"
-      ],
-      "possibleMarketReaction": {
-        "bullishCase": "Positive reviews and strong early demand for the Oakley AI glasses, combined with supportive analyst commentary on AI momentum and clarity on the Scale AI investment, lift sentiment around Meta’s hardware and AI strategy.",
-        "bearishCase": "Muted reception or unclear differentiation for the new glasses, lingering questions about AI strategy after Perplexity talks, and continued tech-sector softness dampen enthusiasm."
+        "bullishCase": "Investors welcome decisive AI infrastructure investment and view secured financing and enhanced safety measures as de-risking steps that support future AI-driven monetization across Meta’s apps.",
+        "bearishCase": "Concerns mount over capex intensity funded by debt, uncertain AI ROI versus peers, and EU regulatory threats to WhatsApp’s moat, raising fears of margin compression and execution risk."
       },
       "confidence": "medium",
       "limitation": "This analysis is based only on provided news articles and does not include price action or technical analysis."

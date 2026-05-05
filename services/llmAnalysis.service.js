@@ -60,19 +60,19 @@ async function getAssetAnalysis(articles,symbol) {
 async function _analyzeNews(articles,symbol) {
     console.log("analyzeNews",symbol)
     const model = 'gpt-5'
-    const prompt = `You are a financial news analyst.
-
-    Analyze the following news articles about ${symbol}.
-    
-    Important rules:
-    - Base your answer ONLY on the articles provided.
-    - Do NOT use price action, charts, technical analysis, support/resistance, volume, RSI, or trend.
-    - Do NOT give direct buy/sell instructions.
-    - Explain whether the news backdrop is bullish, bearish, mixed, or neutral.
-    - Mention what investors/traders should watch next.
-    - Return ONLY valid JSON.
-    
-    Output format:
+    const systemPrompt = `You are a financial news analyst.
+            Analyze the following news articles about ${symbol}.
+            Important rules:
+            - Base your answer ONLY on the articles provided.
+            - Do NOT use price action, charts, technical analysis, support/resistance, volume, RSI, or trend.
+            - Do NOT give direct buy/sell instructions.
+            - Explain whether the news backdrop is bullish, bearish, mixed, or neutral.
+            - Mention what investors/traders should watch next.
+            - Return ONLY valid JSON.
+            - Do NOT include:
+            - any other text outside the JSON
+            `
+    const userPrompt = `Output format:
             {
                 "newsSummary": "short summary of the main story",
                 "sentiment": "bullish | bearish | mixed | neutral",
@@ -91,7 +91,7 @@ async function _analyzeNews(articles,symbol) {
     ${JSON.stringify(articles, null, 2)}
     `
 
-    const response = await callOpenAI(model, prompt)
+    const response = await callOpenAI(model, userPrompt, systemPrompt)
 
     const parsed = _safeParseJsonObject(response)
     if (!parsed || !_isValidAnalysisObject(parsed)) return null
