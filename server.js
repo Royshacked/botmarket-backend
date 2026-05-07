@@ -6,6 +6,8 @@ import cookieParser from 'cookie-parser'
 
 import { newsFeedRoutes } from './api/newsFeed/newsFeed.routes.js'
 import { analysisRoutes } from './api/analysis/analysis.routes.js'
+import { priceFeedRoutes } from './api/priceFeed/priceFeed.routes.js'
+
 import { logger } from './services/logger.service.js'
 
 const app = express()
@@ -31,6 +33,7 @@ if (process.env.NODE_ENV === 'production') {
 
 app.use('/newsFeed', newsFeedRoutes)
 app.use('/analysis', analysisRoutes)
+app.use('/priceFeed', priceFeedRoutes)
 
 // SPA fallback: only in production when static assets live in public/
 if (process.env.NODE_ENV === 'production') {

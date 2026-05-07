@@ -1,7 +1,7 @@
 import { callOpenAI } from '../providers/openai.provider.js'
 import { isValidUserIntentObject, safeParseJsonObject } from './util.service.js'
 
-export const llmUserIntentService = {
+export const orchestratorService = {
     getUserIntent,
 }
 

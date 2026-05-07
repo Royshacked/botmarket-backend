@@ -1,4 +1,4 @@
-import { llmUserIntentService } from '../../services/llmUserIntent.service.js'
+import { orchestratorService } from '../../services/orchestrator.service.js'
 import { logger } from '../../services/logger.service.js'
 import { analysisService } from './analysis.service.js'
 import { responseComposerService } from '../../services/responseComposer.service.js'
@@ -7,7 +7,7 @@ import { responseComposerService } from '../../services/responseComposer.service
 export async function getAnalysis(req, res) {
 	try {
 		const { userPrompt } = req.body
-		const userIntent = await llmUserIntentService.getUserIntent(userPrompt)
+		const userIntent = await orchestratorService.getUserIntent(userPrompt)
 		const ticker = userIntent.ticker
 		const analysisType = userIntent.analysisType
         let newsAnalysis = null
