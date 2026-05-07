@@ -56,13 +56,14 @@ export async function loadFromFile(name) {
 }
 
 export function filterTodaysNewsFeed(data) {
+    console.log("data:",typeof data)
     const startOfTodayUTC = getStartOfTodayUTC()
     return data.filter(item => item.datetime >= startOfTodayUTC)
 }
 
 
-export function deduplicateNewsFeed(data, destination) {
-    const news = loadFromFile(destination)
+export async function deduplicateNewsFeed(data, destination) {
+    const news = await loadFromFile(destination)
     const today = filterTodaysNewsFeed(news)
     if(today.length === 0) return data
 

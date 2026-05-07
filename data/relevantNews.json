@@ -1,57 +1,68 @@
 [
   {
-    "category": "business",
-    "datetime": 1777705404,
-    "headline": "Iran executes two for spying for Israel - Reuters",
-    "id": 7882597,
-    "image": "https://static2.finnhub.io/file/finnhub/logo/reuters_logo.jpeg",
+    "category": "top news",
+    "datetime": 1778172270,
+    "headline": "Arm CEO looks to set the record straight after the stock's post-earnings tumble",
+    "id": 7909199,
+    "image": "https://image.cnbcfm.com/api/v1/image/108282346-1774373773356-gettyimages-2267713643-ARM_EVERYWHERE.jpeg?v=1774373799&w=1920&h=1080",
     "related": "",
-    "source": "Reuters",
-    "summary": "Iran executes two for spying for Israel  Reuters",
-    "url": "https://news.google.com/rss/articles/CBMijgFBVV95cUxQNTZ6MVlYOW9YNzN6OXdzb0Fvbjk1WnY4Z3Z3ejdtRXFSY3NrTHhndHllel9xR0ZJM0k1SkFicnFpQS1wZC1HSXg2aU9yN1RENVRUYlB4M1FRV1Nub1lTUGFFc2R6ZlJZMTQ3Z0JBS0gtSTA5Sk9NWXZYM29SMDhxMVl6Yk1VMWt5dzFvLUxB?oc=5"
+    "source": "CNBC",
+    "summary": "Arm chief Rene Haas said he was \"confident\" the company would be able to secure additional supply of its new CPUs.",
+    "url": "https://www.cnbc.com/2026/05/07/arm-ceo-looks-to-set-record-straight-after-stocks-post-earnings-fall.html"
+  },
+  {
+    "category": "top news",
+    "datetime": 1778169956,
+    "headline": "Jim Cramer: This partnership could be a 'seismic shift' in AI and 2 of our stocks",
+    "id": 7908975,
+    "image": "https://image.cnbcfm.com/api/v1/image/108256652-1769211369805-Contour_wide.jpg?v=1777394877&w=1920&h=1080",
+    "related": "",
+    "source": "CNBC",
+    "summary": "The Investing Club holds its \"Morning Meeting\" every weekday at 10:20 a.m. ET.",
+    "url": "https://www.cnbc.com/2026/05/07/jim-cramer-this-partnership-could-be-a-seismic-shift-in-ai-and-2-of-our-stocks.html"
   },
   {
     "category": "business",
-    "datetime": 1777704480,
-    "headline": "Nobel laureate Mohammadi's life in Iran's hands, Nobel committee chief says - Reuters",
-    "id": 7882998,
+    "datetime": 1778168031,
+    "headline": "US imposes sanctions on Iraq's deputy oil minister, militias over Iran support - Reuters",
+    "id": 7909100,
     "image": "https://static2.finnhub.io/file/finnhub/logo/reuters_logo.jpeg",
     "related": "",
     "source": "Reuters",
-    "summary": "Nobel laureate Mohammadi's life in Iran's hands, Nobel committee chief says  Reuters",
-    "url": "https://news.google.com/rss/articles/CBMiyAFBVV95cUxQS1F2ZWN6cV82RGNKcVFVSlE1YWVST2xLQmZGMU9HU0NwRlg3cFU0RVZPYWs3Qkl3WHJPaTFNSU5CMi1URjgzajBTbGhOYVhKLWxZTFdZWGdwU0phS25fNThqaUZQZzB1MGVRdXZHcGNiTFFtUGxHMlM3RTktdVV1UloyZUJzdHJtMWJFUUpyNFNTSEh0MDF5TGUwakpWa0F3OUowVkJVNlowLTJOTXE2dlBXdE5WOXRuMFNTdWRyVk5fV2ZDeEdxUQ?oc=5"
+    "summary": "US imposes sanctions on Iraq's deputy oil minister, militias over Iran support  Reuters",
+    "url": "https://news.google.com/rss/articles/CBMiuwFBVV95cUxPdlktdk1TSHNxMnpibXJ6ZHR5OE5WMUNoSk5uQ1V1emRjZUppOThfM3J1YTNKMHBjMFNtcW9WREw4ZW5ELXRSUk5GRGpWZFZ5QlhHRFEwRE1PdjVKR3ZBdW02SzFrQ0ZtRV91X2NFZVpzX0JMZmVvV0s2bXZTeVFWNzlUMklCM0w0WnNKMUVlUEVrTVNqRWxtU1o3NElvNlJJeHR6VHZhRmZiRVJpaVB6bDVpV3FEZjBacmVj?oc=5"
   },
   {
     "category": "business",
-    "datetime": 1777698120,
-    "headline": "Iran standoff could leave Trump worse off than before he went to war - Reuters",
-    "id": 7882495,
+    "datetime": 1778166971,
+    "headline": "Chinese-owned oil tanker hit near Hormuz as US pauses ship-protection plan, report says - Reuters",
+    "id": 7908436,
     "image": "https://static2.finnhub.io/file/finnhub/logo/reuters_logo.jpeg",
     "related": "",
     "source": "Reuters",
-    "summary": "Iran standoff could leave Trump worse off than before he went to war  Reuters",
-    "url": "https://news.google.com/rss/articles/CBMiuAFBVV95cUxNU0F5dU0yQWlzdGU4SlE5TVpWQlQ0X2RCMTgtYW5iYk9kZ0F2ekstUEpfYUdnS3FqOGlkbGNLY0RLR0YzTjNYMGUtREY2ZWtuQmF3Z2xWaDJMbkxMWklaOEJtQm80SXJKZGFta1FJTk43Y09sLTExUFVaTFNUdEo5bmdldy1DalR0NmhiNVh6YnJKdW9ZN1JmclRGOUpQLUsxT0ZuQ2xnSTJHWk1qODYwOGRic0RJV3JK?oc=5"
+    "summary": "Chinese-owned oil tanker hit near Hormuz as US pauses ship-protection plan, report says  Reuters",
+    "url": "https://news.google.com/rss/articles/CBMixAFBVV95cUxOa3k1bVJQd0NHeHlYZmNKZmZhVkpQWk9PbV9OcWNSQ2VZcGpNdS1UeXgyTDFHSUtSdllmRHR3WmNOOEo5eDlOYnZCSGc5UkctRW1aS0tpZVdlek5DbTRNeFJWRkNVMEVZcks3SDBkWnRsaEo5amxmUmFNNHo2YXRmemp0YVFZd2F1cDM5LUQzZFVxNlRkYXNLcUY0V0NCVzEwTmcyeGF3YVNFWDgyWEkzYmdLenVlel9zbEJ6YkhGbmxLQ05y?oc=5"
   },
   {
     "category": "business",
-    "datetime": 1777687200,
-    "headline": "Trump says US Navy acting 'like pirates' to carry out naval blockade of Iranian ports - Reuters",
-    "id": 7881592,
+    "datetime": 1778159516,
+    "headline": "Explainer: What's included in talks to end the Iran war and reopen Hormuz? - Reuters",
+    "id": 7909099,
     "image": "https://static2.finnhub.io/file/finnhub/logo/reuters_logo.jpeg",
     "related": "",
     "source": "Reuters",
-    "summary": "Trump says US Navy acting 'like pirates' to carry out naval blockade of Iranian ports  Reuters",
-    "url": "https://news.google.com/rss/articles/CBMivwFBVV95cUxPbVc1ZkgxV3lpblVzQXlQU0oxM2xSbG15WmdYd0NscGg2Yy1xZVA2VFJ3RTJnTXpWQnhjRWdLQnBlSDlYTnBnS0NieGg4bXhYUEVFZGFkaHhfVlhEZ3ptNVk3dEZneTV5MmR0Y1A5dlpIczlxMGJtY3l3a1JRY1RPZGxPSWdfZFlBUVRnc0pPOE12WnN5X2I5MXpBYW5TWUkzWkNnRWJfelMzVGdYcmJkWWRuTnFlMk1UblNpSXFYcw?oc=5"
+    "summary": "Explainer: What's included in talks to end the Iran war and reopen Hormuz?  Reuters",
+    "url": "https://news.google.com/rss/articles/CBMimwFBVV95cUxPVFJsMDV3TnlrXzFTUS1TV282b1ZHWk1DS0dlNDRzR0k1bHNPaVMzRUFLaEs4VnAxZnNCV3lfNENjNGllNTR2b3pHeHJyQUlxb3FzbnEwYm92QUd0VTE1UDdXazh2MkdTRVNEVlA1a0JqdVBjWng5SnJOZHhmXzBaOHhIX0VuRy03V0UyWjhQamhTcUVOdEhmQkwycw?oc=5"
   },
   {
-    "category": "business",
-    "datetime": 1777804543,
-    "headline": "Slovakia's PM Fico to attend Victory Day parade in Moscow, Russian TV says - Reuters",
-    "id": 7888344,
-    "image": "https://static2.finnhub.io/file/finnhub/logo/reuters_logo.jpeg",
+    "category": "top news",
+    "datetime": 1778159070,
+    "headline": "Jim Cramer's top 10 things to watch in the stock market Thursday",
+    "id": 7908309,
+    "image": "https://image.cnbcfm.com/api/v1/image/108013743-1722362210934-gettyimages-2155382583-TAIWAN_COMPUTEX.jpeg?v=1774357705&w=1920&h=1080",
     "related": "",
-    "source": "Reuters",
-    "summary": "Slovakia's PM Fico to attend Victory Day parade in Moscow, Russian TV says  Reuters",
-    "url": "https://news.google.com/rss/articles/CBMirAFBVV95cUxPWm5ZNUN3cmxaNFBmcXk0cFU4SVFfd0FzdWMxZ3hEazl2eEZpamdpSEdlWWNaQjZic0dGMTQwd29OMDlVd2UtR2xmVmV5VkdvNWNUUl9UV2M0ZEpxMHJtLTM5YkhOSDYzX21FRHpDOVA2Ymp0cmRQRjVDdFpJVUpHQ0ltUThDNW91d3F3VEIwQkI5V0U2UVJsQmxSb2ZkR1dDaDNUSzRhUUdfY25t?oc=5"
+    "source": "CNBC",
+    "summary": "Arm shares dropped despite strong CPU demand. And why you shouldn't write off Kraft Heinz.",
+    "url": "https://www.cnbc.com/2026/05/07/jim-cramers-top-10-things-to-watch-in-the-stock-market-thursday.html"
   }
 ]

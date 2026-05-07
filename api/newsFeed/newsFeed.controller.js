@@ -1,9 +1,9 @@
 import { logger } from '../../services/logger.service.js'
-import { newsService } from './news.service.js'
+import { newsFeedService } from './newsFeed.service.js'
 
-export async function getNewsFeeds(req, res) {
+export async function getNewsFeed(req, res) {
 	try {
-		const newsFeeds = await newsService.query()
+		const newsFeeds = await newsFeedService.query()
 		res.send(newsFeeds)
 	} catch (err) {
 		logger.error('Failed to get newsFeeds', err)

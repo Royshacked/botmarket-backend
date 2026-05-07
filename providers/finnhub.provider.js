@@ -19,7 +19,7 @@ export async function fetchNews() {
     }
 }
 
-export async function fetchAssetNews(symbol) {
+export async function fetchTickerNews(symbol) {
     try {
         const { from, to } = oneMonthAgoToTodayRange()
         const response = await axios.get(`https://finnhub.io/api/v1/company-news?symbol=${symbol}&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`)

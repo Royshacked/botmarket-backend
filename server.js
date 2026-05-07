@@ -4,8 +4,8 @@ import cors from 'cors'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 
-import { newsRoutes } from './api/news/news.routes.js'
-import { assetAnalysisRoutes } from './api/assetAnalysis/assetAnalysis.routes.js'
+import { newsFeedRoutes } from './api/newsFeed/newsFeed.routes.js'
+import { analysisRoutes } from './api/analysis/analysis.routes.js'
 import { logger } from './services/logger.service.js'
 
 const app = express()
@@ -29,8 +29,8 @@ if (process.env.NODE_ENV === 'production') {
     app.use(cors(corsOptions))
 }
 
-app.use('/news', newsRoutes)
-app.use('/analysis', assetAnalysisRoutes)
+app.use('/newsFeed', newsFeedRoutes)
+app.use('/analysis', analysisRoutes)
 
 // SPA fallback: only in production when static assets live in public/
 if (process.env.NODE_ENV === 'production') {
