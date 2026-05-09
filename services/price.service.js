@@ -1,7 +1,7 @@
-import { fetchTickerPriceData } from "../providers/finnhub.provider.js"
+import { fetchTickerPriceData } from "../providers/massive.provider.js"
 
 
-export const priceDataService = {
+export const priceService = {
     getPriceData,
 }
 

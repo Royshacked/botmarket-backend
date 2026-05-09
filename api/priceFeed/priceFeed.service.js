@@ -1,4 +1,4 @@
-import { priceDataService } from "../../services/priceData.service.js"
+import { priceService } from "../../services/price.service.js"
 
 
 export const priceFeedService = {
@@ -6,6 +6,6 @@ export const priceFeedService = {
 }
 
 async function query(ticker) {
-    const priceData = await priceDataService.getPriceData(ticker)
+    const priceData = await priceService.getPriceData(ticker)
     return priceData
 }
