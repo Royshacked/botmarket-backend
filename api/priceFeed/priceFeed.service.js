@@ -5,7 +5,7 @@ export const priceFeedService = {
     query,
 }
 
-async function query(ticker) {
-    const priceData = await priceService.getPriceData(ticker)
-    return priceData
+async function query(ticker, options={}) {
+    const candles = await priceService.getPriceData(ticker, options)
+    return candles
 }

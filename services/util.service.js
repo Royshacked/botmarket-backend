@@ -130,3 +130,36 @@ export function isValidAnalysisObject(obj) {
     if (typeof obj.limitation !== 'string') return false
     return true
 }
+
+export async function saveCandlesToFile(candles, ticker , options) {
+    const letter = options.timeSpan.charAt(0).toUpperCase()
+    
+    const dir = path.resolve(`./data/candles/${ticker}/${options.timeSpan}`)
+    if(!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    if(!candles || !Array.isArray(candles.candles)) return
+    try {
+        await fs.promises.writeFile(
+            path.join(dir, `${options.multiplier}${letter}.json`),
+            JSON.stringify(candles, null, 2),
+            'utf8'
+        )
+    } catch (err) {
+        console.error(`Error saving candles to file`, err)
+    }
+}
+
+export async function loadCandlesFromFile(ticker, options) {
+    const { timeSpan, multiplier } = options
+    const filePath = path.resolve(
+        `./data/candles/${ticker}/${timeSpan}/${multiplier}${timeSpan.charAt(0).toUpperCase()}.json`
+    )
+    if (!fs.existsSync(filePath)) return []
+    try{
+        const raw = fs.readFileSync(filePath, 'utf8')
+        if (!raw) return []
+        return JSON.parse(raw)
+    } catch (err) {
+        console.error(`Error loading candles from file`, err)
+        return []
+    }
+}
