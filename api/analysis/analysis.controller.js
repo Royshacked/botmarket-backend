@@ -10,19 +10,20 @@ export async function getAnalysis(req, res) {
 		const userIntent = await orchestratorService.getUserIntent(userPrompt)
 		const ticker = userIntent.ticker
 		const analysisType = userIntent.analysisType
+		const analysisGoal = userIntent.analysisGoal
         let newsAnalysis = null
         let technicalAnalysis = null
 		if (analysisType.includes('news')) {
-			newsAnalysis = await analysisService.getNewsAnalysis(ticker)            
+			newsAnalysis = await analysisService.getNewsAnalysis(ticker, analysisGoal)            
         }
 		if (analysisType.includes('technical')) {
-			technicalAnalysis = await analysisService.getTechnicalAnalysis(ticker)
+			technicalAnalysis = await analysisService.getTechnicalAnalysis(ticker, analysisGoal)
 		}
-        // const analysis = await responseComposerService.composeResponse(newsAnalysis, technicalAnalysis)
-        // if (!analysis) {
-        //     return res.status(400).send({ err: 'No analysis provided' })
-        // }
-		res.send(newsAnalysis)
+        const analysis = await responseComposerService.composeResponse(newsAnalysis, technicalAnalysis)
+        if (!analysis) {
+            return res.status(400).send({ err: 'No analysis provided' })
+        }
+		res.send(analysis)
 	} catch (err) {
 		logger.error('Failed to get asset news', err)
 		res.status(500).send({ err: 'Failed to get asset news' })

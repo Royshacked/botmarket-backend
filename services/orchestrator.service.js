@@ -1,5 +1,5 @@
 import { callOpenAI } from '../providers/openai.provider.js'
-import { isValidUserIntentObject, safeParseJsonObject } from './util.service.js'
+import { safeParseJsonObject } from './util.service.js'
 
 export const orchestratorService = {
     getUserIntent,
@@ -14,13 +14,15 @@ Return ONLY one JSON object with exactly these keys (use null when unknown):
 {
   "ticker": string | null,
   "assetName": string | null,
-  "analysisType": "news"
+  "analysisType": "news" | "technical" | "both" | "unclear"
+  "analysisGoal": string | null
 }
 
 Rules:
 - ticker: uppercase symbol if identifiable (e.g. AAPL), else null
 - assetName: company or asset name if identifiable, else null
-- analysisType: must always be the string "news"
+- analysisType: must be one of the following: "news" | "technical" | "both" | "unclear"
+- analysisGoal: a short description of the goal of the analysis, else null
 - Return ONLY valid JSON, no markdown, no prose
 `
     const messages = [
@@ -28,12 +30,19 @@ Rules:
         { role: 'user', content: userPrompt },
     ]
     const response = await callOpenAI(model, messages)
-
     const parsed = safeParseJsonObject(response)
-    if (!parsed || !isValidUserIntentObject(parsed)) return null
+    console.log('parsed',parsed)
+    if (!parsed || !_isValidUserIntentObject(parsed)) return null
     return parsed
 }
 
+export function _isValidUserIntentObject(obj) {
+    if (!obj || typeof obj !== 'object') return false 
+    if (obj.analysisType != null && typeof obj.analysisType !== 'string') return false
+    if (obj.ticker != null && typeof obj.ticker !== 'string') return false
+    if (obj.assetName != null && typeof obj.assetName !== 'string') return false
+    return true
+}
 
 
 

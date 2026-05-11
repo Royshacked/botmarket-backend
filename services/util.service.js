@@ -26,9 +26,9 @@ export function cleanJSON(text) {
 	  .trim();
 }
 
-export function isCacheFresh(entry, cacheTimeMs = 5 * 60 * 1000) {
-	if (!entry || !entry.lastFetchedAt) return false;
-	return Date.now() - entry.lastFetchedAt < cacheTimeMs;
+export function isCacheFresh(lastFetchedAt, cacheTimeMs = 5 * 60 * 1000) {
+	if (lastFetchedAt) return false;
+	return Date.now() - lastFetchedAt < cacheTimeMs;
 }
 
 export async function saveToFile(name,data) {
@@ -107,29 +107,6 @@ export function safeParseJsonObject(text) {
     }
 }
 
-export function isValidUserIntentObject(obj) {
-    if (!obj || typeof obj !== 'object') return false
-    if (obj.analysisType !== 'news') return false
-    if (obj.ticker != null && typeof obj.ticker !== 'string') return false
-    if (obj.assetName != null && typeof obj.assetName !== 'string') return false
-    return true
-}
-
-export function isValidAnalysisObject(obj) {
-    if (!obj || typeof obj !== 'object') return false
-    if (typeof obj.newsSummary !== 'string') return false
-    if (typeof obj.sentiment !== 'string') return false
-    if (!Array.isArray(obj.positiveDrivers)) return false
-    if (!Array.isArray(obj.negativeRisks)) return false
-    if (!Array.isArray(obj.keyEvents)) return false
-    if (!Array.isArray(obj.whatToWatchNext)) return false
-    if (!obj.possibleMarketReaction || typeof obj.possibleMarketReaction !== 'object') return false
-    if (typeof obj.possibleMarketReaction.bullishCase !== 'string') return false
-    if (typeof obj.possibleMarketReaction.bearishCase !== 'string') return false
-    if (typeof obj.confidence !== 'string') return false
-    if (typeof obj.limitation !== 'string') return false
-    return true
-}
 
 export async function saveCandlesToFile(candles, ticker , options) {
     const letter = options.timeSpan.charAt(0).toUpperCase()

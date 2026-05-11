@@ -19,7 +19,8 @@ async function getPriceData(ticker, options) {
         const stepSec = _barDurationSeconds(options.timeSpan, options.multiplier)
         from = (latestTs + stepSec) * 1000
     }
-
+    console.log("fetching price data for:",ticker, "from:",from, "to:",to)
+    
     const fetchOptions = { ...options, from, to }
     const newCandles = await getTickerAggregates(ticker, fetchOptions)
     const merged = {

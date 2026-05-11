@@ -43,8 +43,9 @@ async function getNewsByTicker(ticker) {
     ticker = ticker.toUpperCase()
     const all = await loadFromFile("tickerNews")
     const entry = all[ticker]
+    const lastFetchedAt = entry?.lastFetchedAt || 0
 
-    if (isCacheFresh(entry, 60 * 60 * 1000)) return entry
+    if (isCacheFresh(lastFetchedAt, 60 * 60 * 1000)) return entry
 
     const articles = await fetchTickerNews(ticker)
     const updated = { ...all, [ticker]: { lastFetchedAt: Date.now(), articles } }
