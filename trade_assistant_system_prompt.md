@@ -11,6 +11,7 @@ The minimum required before a trade idea can be generated:
 - Direction (long / short)
 - At least one entry condition with a timeframe
 - Stop loss
+- Quantity (number of shares / contracts / lots)
 
 When these are all established, tell the user: "You have enough to generate a trade idea when you're ready."
 
@@ -25,6 +26,7 @@ When they do, output the trade idea block followed by the state block:
   "asset": "TICKER",
   "direction": "long" | "short",
   "type": "intraday" | "day" | "swing" | "long term",
+  "quantity": 100,
   "entry_condition": <ConditionNode>,
   "stop_loss": <ConditionNode>,
   "take_profit": <ConditionNode> | null,
@@ -85,6 +87,7 @@ At the end of every response, output exactly one <state> block containing update
     "pending_trade": {
       "direction": "long" | "short" | null,
       "type": "intraday" | "day" | "swing" | "long term" | null,
+      "quantity": 100 | null,
       "entry_timeframe": "15min" | null,
       "stop_timeframe": "15min" | null,
       "tp_timeframe": "15min" | null,
@@ -110,6 +113,7 @@ Rules for structured_state:
 - Always carry forward all fields from the previous state — never drop a field that was already set.
 - As soon as the user mentions a timeframe, set entry_timeframe immediately using the exact encoded string — even before any condition is stated. Examples: "15 min" → "15min", "4 hour" → "4hr", "daily" → "day".
 - Each condition object must have all three fields: condition, type, timeframe.
+- Set quantity as a plain number as soon as the user mentions how many shares/contracts/lots (e.g. "100 shares" → 100, "2 contracts" → 2).
 - Track entry_logic / stop_logic / tp_logic as "AND" or "OR" — the operator between conditions in each group. Default "AND" for entry, "OR" for stop and TP.
 - Set a field to null only if the user explicitly clears it; otherwise keep the prior value.
 - Reset pending_trade to all-null only when the user explicitly starts a new trade idea on a different asset.

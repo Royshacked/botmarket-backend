@@ -27,6 +27,7 @@ async function saveIdea(tradeIdea, userId) {
         asset:           tradeIdea.asset           ?? tradeIdea.ticker ?? '',
         direction:       tradeIdea.direction       ?? null,
         type:            tradeIdea.type            ?? null,
+        quantity:        tradeIdea.quantity        != null ? Number(tradeIdea.quantity) : null,
         entry_timeframe: tradeIdea.entry_timeframe ?? null,
         stop_timeframe:  tradeIdea.stop_timeframe  ?? null,
         tp_timeframe:    tradeIdea.tp_timeframe    ?? null,

@@ -53,14 +53,14 @@ export async function updateTradeIdea(req, res) {
         if (!id) return res.status(400).send({ err: 'Missing id' })
 
         const {
-            status, type, timeframe, chat_state,
+            status, type, quantity, timeframe, chat_state,
             entry_conditions, entry_logic, entry_condition_tree,
             stop_conditions,  stop_logic,  stop_condition_tree,
             tp_conditions,    tp_logic,    tp_condition_tree,
             notes,
         } = req.body ?? {}
 
-        if (!status && type === undefined && timeframe === undefined && chat_state === undefined &&
+        if (!status && type === undefined && quantity === undefined && timeframe === undefined && chat_state === undefined &&
             entry_conditions === undefined && stop_conditions === undefined && tp_conditions === undefined &&
             entry_logic === undefined && stop_logic === undefined && tp_logic === undefined &&
             entry_condition_tree === undefined && stop_condition_tree === undefined && tp_condition_tree === undefined &&
@@ -71,6 +71,7 @@ export async function updateTradeIdea(req, res) {
         const patch = {}
         if (status !== undefined)                patch.status = status
         if (type !== undefined)                  patch.type = type
+        if (quantity !== undefined)              patch.quantity = quantity
         if (timeframe !== undefined)             patch.timeframe = timeframe
         if (chat_state !== undefined)            patch.chat_state = chat_state
         if (entry_conditions !== undefined)      patch.entry_conditions = entry_conditions

@@ -226,6 +226,10 @@ function _parseResponse(raw, priorState, userPrompt) {
             pt.entry_logic = pt.entry_logic || priorPt?.entry_logic || 'AND'
             pt.stop_logic  = pt.stop_logic  || priorPt?.stop_logic  || 'OR'
             pt.tp_logic    = pt.tp_logic    || priorPt?.tp_logic    || 'OR'
+
+            // Carry forward quantity
+            if (pt.quantity == null && priorPt?.quantity != null) pt.quantity = priorPt.quantity
+            if (pt.quantity != null) pt.quantity = Number(pt.quantity) || null
         }
     }
 
@@ -375,7 +379,8 @@ function _emptyState() {
             active_asset: '',
             pending_trade: {
                 direction: null,
-                type: null,
+                type:      null,
+                quantity:  null,
                 entry_timeframe: null,  // set as soon as user mentions a TF, even before conditions
                 stop_timeframe: null,   // null = inherit entry_timeframe
                 tp_timeframe: null,     // null = inherit entry_timeframe
