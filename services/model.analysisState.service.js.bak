@@ -1,0 +1,305 @@
+import { callOpenAI } from '../providers/openai.provider.js'
+
+import { logger } from './logger.service.js'
+import { safeParseJsonObject } from './util.service.js'
+
+export const MAX_RECENT_CHAT_TURNS = 3
+
+export const analysisStateService = {
+    prepareForAgent,
+    updateAfterAgent,
+}
+
+const LOG = '[analysisState]'
+const MODEL = 'gpt-4o-mini'
+
+/** Longest symbols first so GOOGL wins over GOOG. */
+const KNOWN_TICKERS = ['GOOGL', 'GOOG', 'AAPL', 'TSLA', 'META', 'NVDA', 'MSFT', 'AMZN']
+
+const _PREPARE_SP = `You are a conversation state manager for a market analysis assistant.
+You receive the current user prompt, optional prior analysis state, and optional recent messages.
+Decide if the user prompt is a follow-up to the prior conversation or a new topic.
+Different ticker/symbol than prior = new_analysis unless the user asks for correlation or a link between assets.
+When is_followup is false or conversation_mode is new_analysis, active_asset and active_topic MUST describe ONLY the current user_prompt — never copy them from prior_state.
+Output ONLY valid JSON with this shape (no markdown):
+{
+  "user_prompt": "string",
+  "recent_chat_summary": "string",
+  "structured_state": {
+    "active_asset": "string",
+    "active_topic": "string",
+    "is_followup": boolean,
+    "conversation_mode": "string"
+  },
+  "recent_messages": [{ "role": "user"|"assistant", "content": "string" }]
+}
+Keep recent_messages to at most ${MAX_RECENT_CHAT_TURNS} user/assistant pairs (${MAX_RECENT_CHAT_TURNS * 2} messages).
+Always include the current user_prompt as the latest user entry in recent_messages.
+Older context belongs in recent_chat_summary, not in recent_messages.
+conversation_mode examples: new_analysis, followup, clarification, general_chat.`
+
+const _UPDATE_SP = `You are a conversation state manager. After the agent answered, update the state JSON.
+Output ONLY valid JSON with the same shape as the input state package.
+Append the assistant reply to recent_messages. Keep at most ${MAX_RECENT_CHAT_TURNS} user/assistant pairs.
+Refresh recent_chat_summary and structured_state when the topic or asset changes.
+active_asset must match the ticker in user_prompt when a single ticker is named.`
+
+async function prepareForAgent({ userPrompt, messages, priorState }) {
+    const prompt = _resolveUserPrompt(userPrompt, messages)
+    logger.info(LOG, 'prepare start', {
+        userPrompt: prompt,
+        hasPriorState: Boolean(priorState),
+        messageCount: messages?.length ?? 0,
+    })
+
+    const llmUser = JSON.stringify({
+        user_prompt: prompt,
+        prior_state: priorState ?? null,
+        messages: messages ?? [],
+    })
+
+    const raw = await callOpenAI(MODEL, llmUser, _PREPARE_SP)
+    let statePackage = safeParseJsonObject(raw)
+    const usedFallback = !_isValidStatePackage(statePackage)
+
+    if (usedFallback) {
+        logger.warn(LOG, 'prepare fallback', { rawLength: raw?.length ?? 0 })
+        statePackage = _fallbackPrepare(prompt, messages, priorState)
+    } else {
+        statePackage.user_prompt = prompt
+        statePackage.recent_messages = _trimMessages(statePackage.recent_messages)
+    }
+
+    const reconcileNotes = _reconcileStatePackage(statePackage, prompt, priorState, messages)
+    if (reconcileNotes.length) {
+        logger.info(LOG, 'prepare reconcile', { notes: reconcileNotes })
+    }
+
+    logger.info(LOG, 'prepare done', _stateSummary(statePackage, { usedFallback }))
+
+    const agentMessages = [{ role: 'user', content: JSON.stringify(statePackage) }]
+    return { statePackage, agentMessages }
+}
+
+async function updateAfterAgent({ statePackage, agentOutput, userPrompt }) {
+    const prompt = (userPrompt || statePackage?.user_prompt || '').trim()
+    logger.info(LOG, 'update start', {
+        userPrompt: prompt,
+        agentOutputLength: agentOutput?.length ?? 0,
+        priorMessageCount: statePackage?.recent_messages?.length ?? 0,
+    })
+
+    const llmUser = JSON.stringify({
+        state: statePackage,
+        user_prompt: prompt,
+        agent_output: agentOutput ?? '',
+    })
+
+    const raw = await callOpenAI(MODEL, llmUser, _UPDATE_SP)
+    let updated = safeParseJsonObject(raw)
+    const usedFallback = !_isValidStatePackage(updated)
+
+    if (usedFallback) {
+        logger.warn(LOG, 'update fallback', { rawLength: raw?.length ?? 0 })
+        updated = _fallbackUpdate(statePackage, agentOutput, prompt)
+    } else {
+        updated.user_prompt = prompt || updated.user_prompt
+        updated.recent_messages = _trimMessages(updated.recent_messages)
+    }
+
+    const reconcileNotes = _reconcileStatePackage(updated, prompt, statePackage)
+    if (reconcileNotes.length) {
+        logger.info(LOG, 'update reconcile', { notes: reconcileNotes })
+    }
+
+    logger.info(LOG, 'update done', _stateSummary(updated, { usedFallback }))
+    return updated
+}
+
+function _resolveUserPrompt(userPrompt, messages) {
+    const trimmed = typeof userPrompt === 'string' ? userPrompt.trim() : ''
+    if (trimmed) return trimmed
+    if (!Array.isArray(messages)) return ''
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i]?.role === 'user' && messages[i].content?.trim()) {
+            return messages[i].content.trim()
+        }
+    }
+    return ''
+}
+
+function _trimMessages(messages) {
+    if (!Array.isArray(messages)) return []
+    return messages
+        .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .map((m) => ({ role: m.role, content: m.content.trim() }))
+        .slice(-MAX_RECENT_CHAT_TURNS * 2)
+}
+
+function _isValidStatePackage(pkg) {
+    return (
+        pkg &&
+        typeof pkg === 'object' &&
+        typeof pkg.user_prompt === 'string' &&
+        typeof pkg.recent_chat_summary === 'string' &&
+        pkg.structured_state &&
+        typeof pkg.structured_state === 'object' &&
+        Array.isArray(pkg.recent_messages)
+    )
+}
+
+function _fallbackPrepare(prompt, messages, priorState) {
+    const prior = priorState && typeof priorState === 'object' ? priorState : null
+    const promptTicker = _singleTickerFromText(prompt)
+    const priorAsset = _normalizeAsset(prior?.structured_state?.active_asset)
+    const sameAsset = promptTicker && priorAsset && promptTicker === priorAsset
+    const isFollowup = Boolean(
+        prior &&
+            (prior.recent_messages?.length || priorAsset) &&
+            (!promptTicker || sameAsset)
+    )
+    const baseMessages = _trimMessages([
+        ...(sameAsset ? (prior?.recent_messages ?? []) : []),
+        ...(messages ?? []),
+        { role: 'user', content: prompt },
+    ])
+
+    return {
+        user_prompt: prompt,
+        recent_chat_summary: sameAsset ? (prior?.recent_chat_summary ?? '') : '',
+        structured_state: {
+            active_asset: promptTicker || prior?.structured_state?.active_asset || '',
+            active_topic: _topicFromPrompt(prompt),
+            is_followup: isFollowup,
+            conversation_mode: isFollowup ? 'followup' : 'new_analysis',
+        },
+        recent_messages: baseMessages,
+    }
+}
+
+/**
+ * Deterministic fixes after LLM/fallback so active_asset/topic match user_prompt.
+ * @returns {string[]} human-readable change notes for logs
+ */
+function _reconcileStatePackage(statePackage, prompt, priorState, requestMessages = []) {
+    const notes = []
+    if (!statePackage?.structured_state || !prompt?.trim()) return notes
+
+    const ss = statePackage.structured_state
+    const priorAsset = _normalizeAsset(priorState?.structured_state?.active_asset)
+    const priorTopic = (priorState?.structured_state?.active_topic ?? '').trim()
+    const currentAsset = _normalizeAsset(ss.active_asset)
+    const tickers = _extractTickersFromText(prompt)
+    const promptTicker = tickers.length === 1 ? tickers[0] : null
+
+    _ensureRecentUserTurn(statePackage, prompt, requestMessages, notes)
+
+    if (!promptTicker) return notes
+
+    const correlating = tickers.length > 1 || _mentionsCorrelation(prompt)
+    const assetChanged = promptTicker !== currentAsset
+    const priorAssetChanged = Boolean(priorAsset && promptTicker !== priorAsset)
+
+    if (tickers.length > 1 && correlating) return notes
+
+    if (assetChanged && ss.is_followup && correlating) return notes
+
+    if (assetChanged || (priorAssetChanged && !ss.is_followup)) {
+        if (ss.active_asset !== promptTicker) {
+            ss.active_asset = promptTicker
+            notes.push(`active_asset→${promptTicker}`)
+        }
+        const topic = _topicFromPrompt(prompt)
+        if (ss.active_topic !== topic) {
+            ss.active_topic = topic
+            notes.push('active_topic←prompt')
+        }
+        if (priorAssetChanged) {
+            if (statePackage.recent_chat_summary) {
+                statePackage.recent_chat_summary = ''
+                notes.push('cleared_summary')
+            }
+            ss.is_followup = false
+            ss.conversation_mode = 'new_analysis'
+            notes.push('forced_new_analysis')
+        }
+    } else if (
+        !ss.active_topic?.trim() ||
+        (priorTopic && ss.active_topic === priorTopic && ss.conversation_mode === 'new_analysis')
+    ) {
+        ss.active_topic = _topicFromPrompt(prompt)
+        notes.push('active_topic←prompt')
+    }
+
+    if (ss.active_asset === promptTicker && ss.is_followup === false && ss.conversation_mode !== 'new_analysis') {
+        ss.conversation_mode = 'new_analysis'
+        notes.push('conversation_mode→new_analysis')
+    }
+
+    return notes
+}
+
+function _ensureRecentUserTurn(statePackage, prompt, requestMessages, notes) {
+    let msgs = _trimMessages([
+        ...(statePackage.recent_messages ?? []),
+        ..._trimMessages(requestMessages ?? []),
+    ])
+    const last = msgs[msgs.length - 1]
+    if (!last || last.role !== 'user' || last.content !== prompt) {
+        msgs = _trimMessages([...msgs, { role: 'user', content: prompt }])
+        notes.push('appended_user_turn')
+    }
+    statePackage.recent_messages = msgs
+}
+
+function _extractTickersFromText(text) {
+    if (typeof text !== 'string' || !text.trim()) return []
+    const found = []
+    for (const ticker of KNOWN_TICKERS) {
+        if (new RegExp(`\\b${ticker}\\b`, 'i').test(text)) found.push(ticker)
+    }
+    return [...new Set(found)]
+}
+
+function _singleTickerFromText(text) {
+    const tickers = _extractTickersFromText(text)
+    return tickers.length === 1 ? tickers[0] : null
+}
+
+function _mentionsCorrelation(text) {
+    return /\b(correlat|compare|comparison|versus|vs\.?|relationship between|connection between|relative to)\b/i.test(
+        text
+    )
+}
+
+function _normalizeAsset(asset) {
+    return typeof asset === 'string' ? asset.trim().toUpperCase() : ''
+}
+
+function _topicFromPrompt(prompt) {
+    const trimmed = prompt.trim()
+    return trimmed.length > 160 ? `${trimmed.slice(0, 157)}...` : trimmed
+}
+
+function _fallbackUpdate(statePackage, agentOutput, prompt) {
+    const base = statePackage && typeof statePackage === 'object' ? { ...statePackage } : _fallbackPrepare(prompt, [], null)
+    const recent_messages = _trimMessages([
+        ...(base.recent_messages ?? []),
+        ...(agentOutput ? [{ role: 'assistant', content: String(agentOutput) }] : []),
+    ])
+    return {
+        ...base,
+        user_prompt: prompt || base.user_prompt,
+        recent_messages,
+    }
+}
+
+function _stateSummary(statePackage, extra = {}) {
+    return {
+        ...extra,
+        user_prompt: statePackage?.user_prompt,
+        summaryLength: statePackage?.recent_chat_summary?.length ?? 0,
+        structured_state: statePackage?.structured_state,
+        recentMessageCount: statePackage?.recent_messages?.length ?? 0,
+    }
+}

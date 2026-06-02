@@ -1,0 +1,98 @@
+import { ideaService } from './tradeIdeas.service.js'
+import { logger } from '../../services/logger.service.js'
+
+const LOG = '[tradeIdeas:controller]'
+
+export async function createTradeIdea(req, res) {
+    try {
+        const body = req.body ?? {}
+        if (!body.asset && !body.ticker) return res.status(400).send({ err: 'Missing asset' })
+
+        const result = await ideaService.saveIdea(body)
+        if (!result.ok) return res.status(500).send({ err: 'Failed to save idea' })
+
+        res.status(201).send({ idea: result.idea })
+    } catch (err) {
+        logger.error(LOG, 'createTradeIdea failed', err)
+        res.status(500).send({ err: 'Failed to create trade idea' })
+    }
+}
+
+export async function getTradeIdeas(req, res) {
+    try {
+        const ideas = await ideaService.getIdeas()
+        res.send({ ideas })
+    } catch (err) {
+        logger.error(LOG, 'getTradeIdeas failed', err)
+        res.status(500).send({ err: 'Failed to get trade ideas' })
+    }
+}
+
+export async function deleteTradeIdea(req, res) {
+    try {
+        const { id } = req.params
+        if (!id) return res.status(400).send({ err: 'Missing id' })
+
+        const result = await ideaService.deleteIdea(id)
+        if (!result.ok) {
+            if (result.reason === 'not_found') return res.status(404).send({ err: 'Idea not found' })
+            return res.status(500).send({ err: 'Failed to delete idea' })
+        }
+
+        res.send({ ok: true })
+    } catch (err) {
+        logger.error(LOG, 'deleteTradeIdea failed', err)
+        res.status(500).send({ err: 'Failed to delete trade idea' })
+    }
+}
+
+export async function updateTradeIdea(req, res) {
+    try {
+        const { id } = req.params
+        if (!id) return res.status(400).send({ err: 'Missing id' })
+
+        const {
+            status, type, timeframe, chat_state,
+            entry_conditions, entry_logic, entry_condition_tree,
+            stop_conditions,  stop_logic,  stop_condition_tree,
+            tp_conditions,    tp_logic,    tp_condition_tree,
+            notes,
+        } = req.body ?? {}
+
+        if (!status && type === undefined && timeframe === undefined && chat_state === undefined &&
+            entry_conditions === undefined && stop_conditions === undefined && tp_conditions === undefined &&
+            entry_logic === undefined && stop_logic === undefined && tp_logic === undefined &&
+            entry_condition_tree === undefined && stop_condition_tree === undefined && tp_condition_tree === undefined &&
+            notes === undefined) {
+            return res.status(400).send({ err: 'Nothing to update' })
+        }
+
+        const patch = {}
+        if (status !== undefined)                patch.status = status
+        if (type !== undefined)                  patch.type = type
+        if (timeframe !== undefined)             patch.timeframe = timeframe
+        if (chat_state !== undefined)            patch.chat_state = chat_state
+        if (entry_conditions !== undefined)      patch.entry_conditions = entry_conditions
+        if (entry_logic !== undefined)           patch.entry_logic = entry_logic
+        if (entry_condition_tree !== undefined)  patch.entry_condition_tree = entry_condition_tree
+        if (stop_conditions !== undefined)       patch.stop_conditions = stop_conditions
+        if (stop_logic !== undefined)            patch.stop_logic = stop_logic
+        if (stop_condition_tree !== undefined)   patch.stop_condition_tree = stop_condition_tree
+        if (tp_conditions !== undefined)         patch.tp_conditions = tp_conditions
+        if (tp_logic !== undefined)              patch.tp_logic = tp_logic
+        if (tp_condition_tree !== undefined)     patch.tp_condition_tree = tp_condition_tree
+        if (notes !== undefined)                 patch.notes = notes
+
+        const result = await ideaService.updateIdea(id, patch)
+        if (!result.ok) {
+            if (result.reason === 'not_found') return res.status(404).send({ err: 'Idea not found' })
+            if (result.reason === 'invalid_status') return res.status(400).send({ err: 'Invalid status value' })
+            return res.status(500).send({ err: 'Failed to update idea' })
+        }
+
+        res.send({ idea: result.idea })
+    } catch (err) {
+        logger.error(LOG, 'updateTradeIdea failed', err)
+        res.status(500).send({ err: 'Failed to update trade idea' })
+    }
+}

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Bash(Get-ChildItem \"C:\\\\Roy\\\\Coding Academy\\\\Projects\\\\bot-market-new\\\\botmarket-backend\" -Exclude node_modules)",
+      "Bash(Select-Object Name, PSIsContainer)"
+    ]
+  }
+}
