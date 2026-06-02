@@ -230,6 +230,17 @@ function _parseResponse(raw, priorState, userPrompt) {
             // Carry forward quantity
             if (pt.quantity == null && priorPt?.quantity != null) pt.quantity = priorPt.quantity
             if (pt.quantity != null) pt.quantity = Number(pt.quantity) || null
+
+            // Normalise additional entries
+            if (!Array.isArray(pt.additional_entries)) {
+                pt.additional_entries = priorPt?.additional_entries ?? []
+            } else {
+                pt.additional_entries = pt.additional_entries.map(ae => ({
+                    conditions: _normalizeConditions(ae.conditions),
+                    logic:      ae.logic ?? 'AND',
+                    quantity:   ae.quantity != null ? Number(ae.quantity) || null : null,
+                }))
+            }
         }
     }
 
@@ -313,10 +324,12 @@ function _normalizeTreeNode(node, defaultTf) {
 
     // Leaf node
     if (typeof node.condition === 'string') {
-        return {
+        const leaf = {
             ...node,
             timeframe: _normalizeTimeframe(node.timeframe) || defaultTf || null,
         }
+        if (node.quantity != null) leaf.quantity = Number(node.quantity) || null
+        return leaf
     }
 
     // Group node: { operator, children }
@@ -385,11 +398,12 @@ function _emptyState() {
                 stop_timeframe: null,   // null = inherit entry_timeframe
                 tp_timeframe: null,     // null = inherit entry_timeframe
                 entry_logic: 'AND',
-                entry_conditions: [],   // [{ condition, type, timeframe }]
+                entry_conditions: [],       // [{ condition, type, timeframe }]
                 stop_logic: 'OR',
-                stop_conditions: [],    // [{ condition, type, timeframe }]
+                stop_conditions: [],        // [{ condition, type, timeframe }]
                 tp_logic: 'OR',
-                tp_conditions: [],      // [{ condition, type, timeframe }]
+                tp_conditions: [],          // [{ condition, type, timeframe }]
+                additional_entries: [],     // [{ conditions, logic, quantity }]
                 notes: null,
             },
         },

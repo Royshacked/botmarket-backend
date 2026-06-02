@@ -28,6 +28,9 @@ When they do, output the trade idea block followed by the state block:
   "type": "intraday" | "day" | "swing" | "long term",
   "quantity": 100,
   "entry_condition": <ConditionNode>,
+  "additional_entries": [
+    { "condition_tree": <ConditionNode>, "quantity": 50 }
+  ],
   "stop_loss": <ConditionNode>,
   "take_profit": <ConditionNode> | null,
   "notes": "optional string"
@@ -37,11 +40,17 @@ When they do, output the trade idea block followed by the state block:
 CONDITION TREE RULES:
 Each of entry_condition / stop_loss / take_profit is a ConditionNode — either a Leaf or a Group:
 
-  Leaf:  { "condition": "brief plain English", "type": "structured" | "visual" | "news", "timeframe": "15min" }
+  Leaf:  { "condition": "brief plain English", "type": "structured" | "visual" | "news", "timeframe": "15min", "quantity": 50 }
   Group: { "operator": "AND" | "OR", "children": [ <ConditionNode>, ... ] }
 
 The top level MUST always be a Group. Leaves only appear inside children arrays.
 Groups can nest arbitrarily deep.
+
+Exit quantity rule (stop_loss and take_profit leaves only):
+Each leaf gets a "quantity" field — how many shares/contracts to exit at that level.
+Default: divide total quantity equally across all leaves in that tree. Residue goes to the first leaf.
+Example: quantity=100, 3 TP leaves → quantities [34, 33, 33].
+Only assign different quantities if the user explicitly specifies.
 
 Price AND (pattern OR news) — nested OR inside AND:
   { "operator": "AND", "children": [
@@ -103,6 +112,9 @@ At the end of every response, output exactly one <state> block containing update
       "tp_conditions": [
         { "condition": "plain English", "type": "structured" | "visual" | "news", "timeframe": "15min" }
       ],
+      "additional_entries": [
+        { "conditions": [...], "logic": "AND", "quantity": 50 }
+      ],
       "notes": "string or null"
     }
   }
@@ -114,6 +126,7 @@ Rules for structured_state:
 - As soon as the user mentions a timeframe, set entry_timeframe immediately using the exact encoded string — even before any condition is stated. Examples: "15 min" → "15min", "4 hour" → "4hr", "daily" → "day".
 - Each condition object must have all three fields: condition, type, timeframe.
 - Set quantity as a plain number as soon as the user mentions how many shares/contracts/lots (e.g. "100 shares" → 100, "2 contracts" → 2).
+- additional_entries are optional scale-in entries triggered only after the initial entry has already fired (idea is in_position). Each has its own conditions, logic, and quantity. Only add them when the user explicitly mentions adding to the position.
 - Track entry_logic / stop_logic / tp_logic as "AND" or "OR" — the operator between conditions in each group. Default "AND" for entry, "OR" for stop and TP.
 - Set a field to null only if the user explicitly clears it; otherwise keep the prior value.
 - Reset pending_trade to all-null only when the user explicitly starts a new trade idea on a different asset.

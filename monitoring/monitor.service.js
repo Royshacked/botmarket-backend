@@ -246,6 +246,30 @@ async function _checkPosition(db, idea, candles) {
     if (!stopFired && !tpFired) {
         logger.info(LOG, `💤 No exit triggered for idea ${id} (${asset}) — still in position`)
     }
+
+    // ── Additional entries (scale-in) ─────────────────────────────────────────
+    await _checkAdditionalEntries(db, idea, candles)
+}
+
+async function _checkAdditionalEntries(db, idea, candles) {
+    const entries = idea.additional_entries
+    if (!Array.isArray(entries) || entries.length === 0) return
+
+    for (let i = 0; i < entries.length; i++) {
+        const ae = entries[i]
+        if (ae.triggeredAt) continue   // already fired
+
+        if (!ae.condition_tree) continue
+
+        const { triggered } = await evaluateTree(ae.condition_tree, candles, idea.asset)
+        if (triggered) {
+            logger.info(LOG, `📈 Additional entry ${i + 1} triggered for idea ${idea.id} — qty: ${ae.quantity}`)
+            await db.collection(COLLECTION).updateOne(
+                { id: idea.id },
+                { $set: { [`additional_entries.${i}.triggeredAt`]: Date.now() } }
+            )
+        }
+    }
 }
 
 // ─── Timeframe helpers ────────────────────────────────────────────────────────

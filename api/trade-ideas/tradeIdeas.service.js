@@ -20,6 +20,17 @@ async function saveIdea(tradeIdea, userId) {
     const stopTree  = _resolveConditionTree(tradeIdea.stop_loss,        tradeIdea.stop_conditions,  tradeIdea.stop_logic  ?? 'OR')
     const tpTree    = _resolveConditionTree(tradeIdea.take_profit,      tradeIdea.tp_conditions,    tradeIdea.tp_logic    ?? 'OR')
 
+    const additionalEntries = (tradeIdea.additional_entries ?? []).map(ae => {
+        const tree = _resolveConditionTree(ae.condition_tree, ae.conditions, ae.logic ?? 'AND')
+        return {
+            condition_tree: tree ?? null,
+            conditions:     _extractLeaves(tree),
+            logic:          ae.logic ?? 'AND',
+            quantity:       ae.quantity != null ? Number(ae.quantity) : null,
+            triggeredAt:    null,
+        }
+    })
+
     const enriched = {
         id:              String(Date.now()),
         savedAt:         Date.now(),
@@ -45,6 +56,7 @@ async function saveIdea(tradeIdea, userId) {
         tp_conditions:    _extractLeaves(tpTree),
         tp_logic:         _topOperator(tpTree)    ?? 'OR',
 
+        additional_entries: additionalEntries,
         notes:      tradeIdea.notes      ?? null,
         chat_state: tradeIdea.chat_state ?? null,
         userId:     userId               ?? null,
