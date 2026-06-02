@@ -14,7 +14,7 @@ export const ideaService = {
     updateIdea,
 }
 
-async function saveIdea(tradeIdea) {
+async function saveIdea(tradeIdea, userId) {
     // Resolve condition trees from either new tree format or legacy flat arrays
     const entryTree = _resolveConditionTree(tradeIdea.entry_condition,  tradeIdea.entry_conditions, tradeIdea.entry_logic ?? 'AND')
     const stopTree  = _resolveConditionTree(tradeIdea.stop_loss,        tradeIdea.stop_conditions,  tradeIdea.stop_logic  ?? 'OR')
@@ -46,6 +46,7 @@ async function saveIdea(tradeIdea) {
 
         notes:      tradeIdea.notes      ?? null,
         chat_state: tradeIdea.chat_state ?? null,
+        userId:     userId               ?? null,
     }
 
     try {
@@ -59,10 +60,11 @@ async function saveIdea(tradeIdea) {
     }
 }
 
-async function getIdeas() {
+async function getIdeas(userId, isAdmin = false) {
     try {
         const db = await getDb()
-        const items = await db.collection(COLLECTION).find({}).sort({ savedAt: -1 }).toArray()
+        const query = isAdmin ? {} : { userId }
+        const items = await db.collection(COLLECTION).find(query).sort({ savedAt: -1 }).toArray()
         return items.map(_strip)
     } catch (err) {
         logger.error(LOG, 'Failed to get ideas', err)
@@ -70,11 +72,13 @@ async function getIdeas() {
     }
 }
 
-async function deleteIdea(id) {
+async function deleteIdea(id, userId, isAdmin = false) {
     try {
         const db = await getDb()
-        const result = await db.collection(COLLECTION).deleteOne({ id })
-        if (result.deletedCount === 0) return { ok: false, reason: 'not_found' }
+        const idea = await db.collection(COLLECTION).findOne({ id })
+        if (!idea) return { ok: false, reason: 'not_found' }
+        if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+        await db.collection(COLLECTION).deleteOne({ id })
         logger.info(LOG, 'Idea deleted', { id })
         return { ok: true }
     } catch (err) {
@@ -83,9 +87,19 @@ async function deleteIdea(id) {
     }
 }
 
-async function updateIdea(id, patch) {
+async function updateIdea(id, patch, userId, isAdmin = false) {
     if (patch.status !== undefined && !VALID_STATUSES.has(patch.status)) {
         return { ok: false, reason: 'invalid_status' }
+    }
+
+    // Ownership check
+    try {
+        const db   = await getDb()
+        const idea = await db.collection(COLLECTION).findOne({ id })
+        if (!idea) return { ok: false, reason: 'not_found' }
+        if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+    } catch (err) {
+        return { ok: false, error: err }
     }
 
     // Rebuild condition trees when conditions are updated via chat edit

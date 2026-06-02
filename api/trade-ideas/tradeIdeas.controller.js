@@ -8,7 +8,7 @@ export async function createTradeIdea(req, res) {
         const body = req.body ?? {}
         if (!body.asset && !body.ticker) return res.status(400).send({ err: 'Missing asset' })
 
-        const result = await ideaService.saveIdea(body)
+        const result = await ideaService.saveIdea(body, req.user._id)
         if (!result.ok) return res.status(500).send({ err: 'Failed to save idea' })
 
         res.status(201).send({ idea: result.idea })
@@ -20,7 +20,7 @@ export async function createTradeIdea(req, res) {
 
 export async function getTradeIdeas(req, res) {
     try {
-        const ideas = await ideaService.getIdeas()
+        const ideas = await ideaService.getIdeas(req.user._id, req.user.isAdmin)
         res.send({ ideas })
     } catch (err) {
         logger.error(LOG, 'getTradeIdeas failed', err)
@@ -33,9 +33,10 @@ export async function deleteTradeIdea(req, res) {
         const { id } = req.params
         if (!id) return res.status(400).send({ err: 'Missing id' })
 
-        const result = await ideaService.deleteIdea(id)
+        const result = await ideaService.deleteIdea(id, req.user._id, req.user.isAdmin)
         if (!result.ok) {
-            if (result.reason === 'not_found') return res.status(404).send({ err: 'Idea not found' })
+            if (result.reason === 'not_found')   return res.status(404).send({ err: 'Idea not found' })
+            if (result.reason === 'forbidden')   return res.status(403).send({ err: 'Forbidden' })
             return res.status(500).send({ err: 'Failed to delete idea' })
         }
 
@@ -83,9 +84,10 @@ export async function updateTradeIdea(req, res) {
         if (tp_condition_tree !== undefined)     patch.tp_condition_tree = tp_condition_tree
         if (notes !== undefined)                 patch.notes = notes
 
-        const result = await ideaService.updateIdea(id, patch)
+        const result = await ideaService.updateIdea(id, patch, req.user._id, req.user.isAdmin)
         if (!result.ok) {
-            if (result.reason === 'not_found') return res.status(404).send({ err: 'Idea not found' })
+            if (result.reason === 'not_found')      return res.status(404).send({ err: 'Idea not found' })
+            if (result.reason === 'forbidden')      return res.status(403).send({ err: 'Forbidden' })
             if (result.reason === 'invalid_status') return res.status(400).send({ err: 'Invalid status value' })
             return res.status(500).send({ err: 'Failed to update idea' })
         }
