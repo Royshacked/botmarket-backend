@@ -257,11 +257,17 @@ async function _checkAdditionalEntries(db, idea, candles) {
 
     for (let i = 0; i < entries.length; i++) {
         const ae = entries[i]
-        if (ae.triggeredAt) continue   // already fired
+        if (ae.triggeredAt) continue
 
-        if (!ae.condition_tree) continue
+        let triggered = false
+        if (ae.condition_tree) {
+            ;({ triggered } = await evaluateTree(ae.condition_tree, candles, idea.asset))
+        } else if (Array.isArray(ae.conditions) && ae.conditions.length > 0) {
+            ;({ triggered } = await evaluateConditions(ae.conditions, ae.logic ?? 'AND', candles, idea.asset))
+        } else {
+            continue
+        }
 
-        const { triggered } = await evaluateTree(ae.condition_tree, candles, idea.asset)
         if (triggered) {
             logger.info(LOG, `📈 Additional entry ${i + 1} triggered for idea ${idea.id} — qty: ${ae.quantity}`)
             await db.collection(COLLECTION).updateOne(

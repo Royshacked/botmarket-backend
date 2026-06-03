@@ -142,7 +142,6 @@ function _parseResponse(raw, priorState, userPrompt) {
     let tradeIdea = null
     let updatedState = null
 
-    console.log('[parseResponse] tail-500:\n', text.slice(-500))
 
     const tradeMatch = text.match(/<trade_idea>([\s\S]*?)<\/trade_idea>/)
     if (tradeMatch) {
@@ -293,7 +292,7 @@ const _TF_REMAP = [
     [/^weekly$/i,  () => 'week'],
     [/^monthly$/i, () => 'month'],
 ]
-const _VALID_TF = new Set(['5min','15min','30min','1hr','2hr','4hr','day','week','month'])
+const _VALID_TF = new Set(['1min','5min','15min','30min','1hr','2hr','4hr','day','week','month'])
 
 function _normalizeTimeframe(tf) {
     if (!tf || typeof tf !== 'string') return null

@@ -53,14 +53,18 @@ export async function updateTradeIdea(req, res) {
         if (!id) return res.status(400).send({ err: 'Missing id' })
 
         const {
-            status, type, quantity, additional_entries, timeframe, chat_state,
+            status, type, quantity, additional_entries, timeframe,
+            entry_timeframe, stop_timeframe, tp_timeframe,
+            chat_state,
             entry_conditions, entry_logic, entry_condition_tree,
             stop_conditions,  stop_logic,  stop_condition_tree,
             tp_conditions,    tp_logic,    tp_condition_tree,
             notes,
         } = req.body ?? {}
 
-        if (!status && type === undefined && quantity === undefined && timeframe === undefined && chat_state === undefined &&
+        if (!status && type === undefined && quantity === undefined && timeframe === undefined &&
+            entry_timeframe === undefined && stop_timeframe === undefined && tp_timeframe === undefined &&
+            additional_entries === undefined && chat_state === undefined &&
             entry_conditions === undefined && stop_conditions === undefined && tp_conditions === undefined &&
             entry_logic === undefined && stop_logic === undefined && tp_logic === undefined &&
             entry_condition_tree === undefined && stop_condition_tree === undefined && tp_condition_tree === undefined &&
@@ -74,6 +78,9 @@ export async function updateTradeIdea(req, res) {
         if (quantity !== undefined)            patch.quantity = quantity
         if (additional_entries !== undefined)  patch.additional_entries = additional_entries
         if (timeframe !== undefined)             patch.timeframe = timeframe
+        if (entry_timeframe !== undefined)       patch.entry_timeframe = entry_timeframe
+        if (stop_timeframe !== undefined)        patch.stop_timeframe = stop_timeframe
+        if (tp_timeframe !== undefined)          patch.tp_timeframe = tp_timeframe
         if (chat_state !== undefined)            patch.chat_state = chat_state
         if (entry_conditions !== undefined)      patch.entry_conditions = entry_conditions
         if (entry_logic !== undefined)           patch.entry_logic = entry_logic
