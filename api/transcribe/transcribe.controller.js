@@ -11,7 +11,9 @@ export async function transcribeAudio(req, res) {
             return res.status(400).json({ err: 'No audio data received' })
         }
 
-        const file = await toFile(buffer, 'audio.webm', { type: 'audio/webm' })
+        const contentType = req.headers['content-type'] || 'audio/webm'
+        const ext  = contentType.includes('mp4') ? 'mp4' : contentType.includes('ogg') ? 'ogg' : 'webm'
+        const file = await toFile(buffer, `audio.${ext}`, { type: contentType })
         const result = await openai.audio.transcriptions.create({
             file,
             model: 'whisper-1',

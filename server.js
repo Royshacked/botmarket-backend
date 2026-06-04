@@ -32,7 +32,18 @@ const server = http.createServer(app)
 
 // Express App Config
 app.use(cookieParser())
+
+// Transcribe must be registered before express.json() so the raw body parser
+// gets the audio stream before the JSON middleware can touch it
+app.use('/api/transcribe', transcribeRoutes)
+
 app.use(express.json())
+
+// Allow microphone access from the browser on all deployments
+app.use((req, res, next) => {
+    res.setHeader('Permissions-Policy', 'microphone=*')
+    next()
+})
 
 if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve('public')))
@@ -54,7 +65,6 @@ app.use('/trade-ideas', tradeIdeasRoutes)
 app.use('/api/auth',   authRoutes)
 app.use('/api/users',  userRoutes)
 app.use('/api/broker',      brokerRoutes)
-app.use('/api/transcribe', transcribeRoutes)
 
 newsFeedService.start()
 monitorService.start()
