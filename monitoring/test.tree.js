@@ -14,7 +14,7 @@
  */
 
 import 'dotenv/config'
-import { getCandles }    from './providers/ohlcv.provider.js'
+import { getCandles }    from '../providers/ohlcv.provider.js'
 import { evaluateTree, evaluateConditions } from './monitor.orchestrator.js'
 
 const SYMBOL = 'AAPL'

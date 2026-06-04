@@ -217,7 +217,7 @@ async function testSessionClarifyResume() {
 
     const resumed = orchestratorSessionService.resumeSession(sid, 'AAPL news please')
     assert(!('err' in resumed), 'resumeSession succeeds')
-    assert(resumed.session.status === 'active', 'resume sets status active')
+    assert(resumed.session.status === 'looking', 'resume sets status looking')
     assert(
         resumed.session.messages.filter((m) => m.role === 'user').length >= 2,
         'resume appends user follow-up'

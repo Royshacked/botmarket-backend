@@ -9,14 +9,13 @@
  * Legacy format still supported: "minutes" | "hours" | "daily" | "weekly" | "monthly"
  */
 
-import { priceService } from '../../services/price.service.js'
-import { logger }       from '../../services/logger.service.js'
+import { priceService } from '../services/price.service.js'
+import { logger }       from '../services/logger.service.js'
 
 const LOG = '[ohlcv.provider]'
 
 /**
  * Parse a timeframe string into priceService options.
- * Supports both new format ("5min", "4hr", "day") and legacy ("minutes", "hours", "daily").
  *
  * @param {string} tf
  * @returns {{ timeSpan: string, multiplier: number }}
@@ -24,15 +23,12 @@ const LOG = '[ohlcv.provider]'
 export function parseTimeframe(tf) {
     if (!tf) return { timeSpan: 'day', multiplier: 1 }
 
-    // New format: Xmin
     const minMatch = tf.match(/^(\d+)min$/)
     if (minMatch) return { timeSpan: 'minute', multiplier: parseInt(minMatch[1], 10) }
 
-    // New format: Xhr
     const hrMatch = tf.match(/^(\d+)hr$/)
     if (hrMatch) return { timeSpan: 'hour', multiplier: parseInt(hrMatch[1], 10) }
 
-    // New format: day / week / month
     if (tf === 'day')   return { timeSpan: 'day',   multiplier: 1 }
     if (tf === 'week')  return { timeSpan: 'week',  multiplier: 1 }
     if (tf === 'month') return { timeSpan: 'month', multiplier: 1 }
@@ -50,23 +46,21 @@ export function parseTimeframe(tf) {
 
 /**
  * Get the last `count` OHLCV candles for a symbol.
- * Uses priceService cache (file-based, 1-hour TTL) — no Finnhub calls.
  *
  * @param {string} symbol     e.g. 'AAPL'
- * @param {string} timeframe  new: "5min"|"4hr"|"day" etc. — legacy also accepted
+ * @param {string} timeframe  e.g. "5min"|"4hr"|"day"
  * @param {number} count      candles to return (newest last)
  * @returns {Promise<Array<{t,o,h,l,c,v}>>}
  */
 export async function getCandles(symbol, timeframe, count = 50) {
     const opts = parseTimeframe(timeframe)
 
-    // For sub-hour bars always request fresh data — cache is stale within one bar
-    const isIntraday = opts.timeSpan === 'minute' || (opts.timeSpan === 'hour' && opts.multiplier <= 1)
-    const refresh = isIntraday
+    // All intraday bars (minute or any hour multiplier) always request fresh data
+    const isIntraday = opts.timeSpan === 'minute' || opts.timeSpan === 'hour'
 
     let result
     try {
-        result = await priceService.getCandles(symbol, { ...opts, format: 'object', refresh })
+        result = await priceService.getCandles(symbol, { ...opts, format: 'object', refresh: isIntraday })
     } catch (err) {
         logger.error(LOG, `priceService.getCandles failed for ${symbol}/${timeframe}:`, err.message)
         return []
@@ -78,7 +72,6 @@ export async function getCandles(symbol, timeframe, count = 50) {
         return []
     }
 
-    // Normalise from { timestamp, open, high, low, close, volume } → { t, o, h, l, c, v }
     const normalized = candles.map(c => ({
         t: c.timestamp,
         o: c.open,

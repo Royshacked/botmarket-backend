@@ -6,27 +6,28 @@
  *   Group: { operator: "AND"|"OR", children: [node, ...] }
  *
  * AND logic:
- *   Children sorted cheapest first (structured → news → visual).
+ *   Children sorted cheapest first (structured → indicator → news → chart).
  *   Short-circuits on first failure.
  *
  * OR logic:
- *   All children evaluated in parallel.
- *   Short-circuits on first success.
+ *   Children sorted cheapest first — short-circuits on first success.
  *
  * Also exports flat-array evaluateConditions() for backward compatibility
  * with legacy ideas that pre-date the tree format.
  */
 
-import { parseCondition }    from './parsers/condition.parser.js'
-import { evaluate }          from './evaluators/structured.evaluator.js'
-import { evaluateVisual }    from './evaluators/visual.evaluator.js'
-import { evaluateNews }      from './evaluators/news.evaluator.js'
-import { logger }            from '../services/logger.service.js'
+import { parseCondition }      from './parsers/condition.parser.js'
+import { evaluate }            from './evaluators/structured.evaluator.js'
+import { evaluateIndicator }   from './evaluators/indicator.evaluator.js'
+import { evaluateChart }       from './evaluators/chart.evaluator.js'
+import { evaluateNews }        from './evaluators/news.evaluator.js'
+import { logger }              from '../services/logger.service.js'
 
 const LOG = '[monitor.orchestrator]'
 
-// Evaluation cost — determines gate order for AND chains
-const COST = { structured: 0, news: 1, visual: 2 }
+// Evaluation cost — determines gate order for AND/OR chains (cheapest first)
+// 'visual' kept as legacy alias for 'indicator'
+const COST = { structured: 0, indicator: 1, visual: 1, news: 2, chart: 3 }
 
 /**
  * Evaluate a condition tree recursively.
@@ -55,12 +56,14 @@ export async function evaluateTree(node, candles, symbol) {
     if (!Array.isArray(children) || children.length === 0) return { triggered: false }
 
     if (operator === 'OR') {
-        // Parallel — first true wins
-        const results = await Promise.all(children.map(child => evaluateTree(child, candles, symbol)))
-        const first = results.find(r => r.triggered)
-        if (first) {
-            logger.info(LOG, `  ✅ OR group triggered: "${(first.which ?? '').slice(0, 60)}"`)
-            return first
+        // Sort cheapest first so structured/indicator run before chart/news
+        const sortedOR = [...children].sort((a, b) => _nodeCost(a) - _nodeCost(b))
+        for (const child of sortedOR) {
+            const result = await evaluateTree(child, candles, symbol)
+            if (result.triggered) {
+                logger.info(LOG, `  ✅ OR group triggered: "${(result.which ?? '').slice(0, 60)}"`)
+                return result
+            }
         }
         logger.info(LOG, `  💤 OR group: no child triggered (${children.length} checked)`)
         return { triggered: false }
@@ -140,27 +143,18 @@ async function _evalAND(conditions, candles, symbol) {
 // ─── OR: parallel, short-circuit on first true ────────────────────────────────
 
 async function _evalOR(conditions, candles, symbol) {
-    // Run all in parallel; any resolved true wins
-    const results = await Promise.all(
-        conditions.map(cond => _evalOne(cond, candles, symbol))
-    )
-
-    // Log all results
-    for (let i = 0; i < results.length; i++) {
-        const r    = results[i]
-        const cond = conditions[i]
-        const type = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
-        const icon = r.pass ? '✓' : '✗'
-        logger.info(LOG, `  ${icon} [${type}] "${r.condition?.slice(0, 60) ?? '(malformed)'}"`)
+    // Sequential — stop as soon as the first condition passes (avoids wasteful Claude calls)
+    for (const cond of conditions) {
+        const result = await _evalOne(cond, candles, symbol)
+        const type   = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
+        const icon   = result.pass ? '✓' : '✗'
+        logger.info(LOG, `  ${icon} [${type}] "${result.condition?.slice(0, 60) ?? '(malformed)'}"`)
+        if (result.pass) {
+            logger.info(LOG, `  ✅ OR gate triggered: "${result.condition?.slice(0, 60)}"`)
+            return { triggered: true, which: result.condition }
+        }
     }
-
-    const first = results.find(r => r.pass)
-    if (first) {
-        logger.info(LOG, `  ✅ OR gate triggered: "${first.condition?.slice(0, 60)}"`)
-        return { triggered: true, which: first.condition }
-    }
-
-    logger.info(LOG, `  💤 OR gate: none of ${results.length} condition(s) triggered`)
+    logger.info(LOG, `  💤 OR gate: none of ${conditions.length} condition(s) triggered`)
     return { triggered: false }
 }
 
@@ -177,8 +171,14 @@ async function _evalOne(cond, candles, symbol) {
     }
 
     try {
-        if (type === 'visual') {
-            const pass = await evaluateVisual(conditionText, candles)
+        // 'visual' kept as legacy alias for 'indicator'
+        if (type === 'indicator' || type === 'visual') {
+            const pass = await evaluateIndicator(conditionText, candles)
+            return { pass, condition: conditionText }
+        }
+
+        if (type === 'chart') {
+            const pass = await evaluateChart(conditionText, symbol, cond?.timeframe ?? null)
             return { pass, condition: conditionText }
         }
 

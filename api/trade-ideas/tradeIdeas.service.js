@@ -5,7 +5,7 @@ import { monitorService }  from '../../monitoring/monitor.service.js'
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
 
-const VALID_STATUSES = new Set(['pending', 'active', 'triggered', 'in_position', 'closed'])
+const VALID_STATUSES = new Set(['waiting', 'looking', 'hit', 'long', 'short', 'closed'])
 
 export const ideaService = {
     saveIdea,
@@ -28,13 +28,14 @@ async function saveIdea(tradeIdea, userId) {
             logic:          ae.logic ?? 'AND',
             quantity:       ae.quantity != null ? Number(ae.quantity) : null,
             triggeredAt:    null,
+            filledAt:       null,
         }
     })
 
     const enriched = {
         id:              String(Date.now()),
         savedAt:         Date.now(),
-        status:          'pending',
+        status:          'waiting',
         asset:           tradeIdea.asset           ?? tradeIdea.ticker ?? '',
         direction:       tradeIdea.direction       ?? null,
         type:            tradeIdea.type            ?? null,
@@ -128,8 +129,8 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
     // Clear conversation when idea is closed
     if (patch.status === 'closed') patch.chat_state = null
 
-    // Moving back to active always restarts entry monitoring from scratch
-    if (patch.status === 'active') {
+    // Moving back to looking always restarts entry monitoring from scratch
+    if (patch.status === 'looking') {
         patch.monitorPhase     = 'entry'
         patch.entryTriggeredAt = null
         monitorService.resetIdea(id)

@@ -62,10 +62,9 @@ export async function parseCondition(conditionText) {
         logger.info(LOG, `Parsed: "${conditionText.slice(0, 70)}"`, parsed)
         return parsed
     } catch (err) {
+        // Do not cache — transient API errors should be retried on the next tick
         logger.warn(LOG, `Parse failed: "${conditionText.slice(0, 70)}"`, err.message)
-        const fallback = { operator: 'unknown', subject: null, value: null, value2: null, confirmation: 0 }
-        _cache.set(key, fallback)
-        return fallback
+        return { operator: 'unknown', subject: null, value: null, value2: null, confirmation: 0 }
     }
 }
 
