@@ -6,16 +6,21 @@ const DEFAULT_MAX_TOKENS = 8192
 const DEFAULT_MAX_CONTINUATIONS = 10
 
 // ─── Tag suppressor ───────────────────────────────────────────────────────────
-// Buffers streamed text and swallows <state>…</state> and <trade_idea>…</trade_idea>
-// blocks so they never reach the UI.
+// Buffers streamed text and swallows <state>…</state>, <trade_idea>…</trade_idea>,
+// and <asset>…</asset> blocks so they never reach the UI.
+// Tags with an onCapture callback have their inner text captured and forwarded.
 
-function _createTagSuppressor(onToken) {
-    const OPEN_TAGS  = ['<state>', '<trade_idea>']
-    const CLOSE_TAGS = ['</state>', '</trade_idea>']
+function _createTagSuppressor(onToken, onAsset) {
+    const TAGS = [
+        { open: '<state>',      close: '</state>',      onCapture: null    },
+        { open: '<trade_idea>', close: '</trade_idea>', onCapture: null    },
+        { open: '<asset>',      close: '</asset>',      onCapture: onAsset },
+    ]
 
-    let pending  = ''      // pre-tag lookahead buffer
-    let inBlock  = false   // currently inside a suppressed block
-    let closeTag = ''      // tag we're waiting for to end suppression
+    let pending         = ''     // pre-tag lookahead buffer
+    let inBlock         = false  // currently inside a suppressed block
+    let closeTag        = ''     // tag we're waiting for to end suppression
+    let captureCallback = null   // non-null when current block content should be forwarded
 
     function push(text) {
         pending += text
@@ -27,48 +32,45 @@ function _createTagSuppressor(onToken) {
             if (inBlock) {
                 const ci = pending.indexOf(closeTag)
                 if (ci !== -1) {
-                    // Found closing tag — discard everything up to and including it
+                    if (captureCallback) {
+                        const content = pending.slice(0, ci).trim()
+                        if (content) captureCallback(content)
+                        captureCallback = null
+                    }
                     pending  = pending.slice(ci + closeTag.length)
                     inBlock  = false
                     closeTag = ''
-                    continue   // process remaining pending
+                    continue
                 }
-                // Close tag not yet complete — hold the entire buffer
+                // Close tag not yet arrived — hold the entire buffer
                 return
             }
 
-            // Not in a block — look for an opening tag
             const ltIdx = pending.indexOf('<')
             if (ltIdx === -1) {
-                // No '<' at all — safe to forward everything
                 if (pending) { onToken(pending); pending = '' }
                 return
             }
 
-            // Flush everything before the '<'
             if (ltIdx > 0) {
                 onToken(pending.slice(0, ltIdx))
                 pending = pending.slice(ltIdx)
             }
 
-            // pending now starts with '<' — check for a match
             let matched = false
-            for (let i = 0; i < OPEN_TAGS.length; i++) {
-                const tag = OPEN_TAGS[i]
-                if (pending.startsWith(tag)) {
-                    // Full open tag found → enter suppression
-                    pending  = pending.slice(tag.length)
-                    inBlock  = true
-                    closeTag = CLOSE_TAGS[i]
-                    matched  = true
+            for (const tag of TAGS) {
+                if (pending.startsWith(tag.open)) {
+                    pending         = pending.slice(tag.open.length)
+                    inBlock         = true
+                    closeTag        = tag.close
+                    captureCallback = tag.onCapture ?? null
+                    matched         = true
                     break
                 }
-                // Buffer could still be a prefix of this tag → hold
-                if (tag.startsWith(pending)) return
+                if (tag.open.startsWith(pending)) return  // possible prefix — hold
             }
 
             if (!matched) {
-                // Not any suppress tag (and not a prefix) — emit the '<' and carry on
                 onToken('<')
                 pending = pending.slice(1)
             }
@@ -77,9 +79,10 @@ function _createTagSuppressor(onToken) {
 
     function flush() {
         if (!inBlock && pending) onToken(pending)
-        pending  = ''
-        inBlock  = false
-        closeTag = ''
+        pending         = ''
+        inBlock         = false
+        closeTag        = ''
+        captureCallback = null
     }
 
     return { push, flush }
@@ -97,9 +100,10 @@ export async function streamAnthropicWithTools({
     toolHandlers = {},
     maxContinuations = DEFAULT_MAX_CONTINUATIONS,
     onToken,
+    onAsset,
 }) {
     const messages   = _normalizeMessages(promptOrMessages)
-    const suppressor = _createTagSuppressor(onToken)
+    const suppressor = _createTagSuppressor(onToken, onAsset)
 
     for (let i = 0; i < maxContinuations; i++) {
         const stream = client.messages.stream({

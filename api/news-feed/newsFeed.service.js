@@ -6,8 +6,9 @@ import { logger } from '../../services/logger.service.js'
 const LOG = '[newsFeed]'
 const CACHE_TYPE = 'news-feed'
 const CACHE_NAME = 'feed'
-const INTERVAL_MS = 30 * 60 * 1000
-const WINDOW_MS = 24 * 60 * 60 * 1000 // show articles from last 24h
+const INTERVAL_MS    = 30 * 60 * 1000
+const WINDOW_MS      = 24 * 60 * 60 * 1000
+const SYMBOL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const FETCH_QUERY = 'stock market OR earnings OR Fed OR inflation OR economy OR trade'
 const FETCH_MAX = 20
 
@@ -16,30 +17,22 @@ const _clients = new Set()
 
 export const newsFeedService = {
     get,
+    getForSymbol,
     start,
     addClient,
     removeClient,
 }
 
-function addClient(res) {
-    _clients.add(res)
-}
-
-function removeClient(res) {
-    _clients.delete(res)
-}
+function addClient(res) { _clients.add(res) }
+function removeClient(res) { _clients.delete(res) }
 
 function _pushToClients() {
     if (_clients.size === 0) return
     const payload = `data: ${JSON.stringify(_cache)}\n\n`
-    for (const res of _clients) {
-        res.write(payload)
-    }
+    for (const res of _clients) res.write(payload)
 }
 
-function get() {
-    return _cache
-}
+function get() { return _cache }
 
 export async function start() {
     const loaded = await loadItemsFromFile(CACHE_TYPE, CACHE_NAME)
@@ -60,20 +53,16 @@ export async function start() {
 
 async function _refresh() {
     try {
-        const loaded = await loadItemsFromFile(CACHE_TYPE, CACHE_NAME)
+        const loaded   = await loadItemsFromFile(CACHE_TYPE, CACHE_NAME)
         const existing = loaded.ok && Array.isArray(loaded.data?.items) ? loaded.data.items : []
-        const lastFetchedAt = loaded.ok ? (loaded.data?.lastFetchedAt ?? 0) : 0
 
-        // always fetch the full 24h window — dedup below handles skipping already-seen articles
-        const from = new Date(Date.now() - WINDOW_MS).toISOString()
-
-        const raw = await fetchGNews({ query: FETCH_QUERY, from, max: FETCH_MAX })
+        const from     = new Date(Date.now() - WINDOW_MS).toISOString()
+        const raw      = await fetchGNews({ query: FETCH_QUERY, from, max: FETCH_MAX })
         const incoming = Array.isArray(raw?.articles) ? raw.articles.map(_mapArticle).filter(_isValid) : []
 
         const existingKeys = new Set(existing.map(_articleKey))
-        const newArticles = incoming.filter(a => !existingKeys.has(_articleKey(a)))
-
-        const filteredNew = newArticles.length > 0 ? await filterService.filterNews(newArticles) : []
+        const newArticles  = incoming.filter(a => !existingKeys.has(_articleKey(a)))
+        const filteredNew  = newArticles.length > 0 ? await filterService.filterNews(newArticles) : []
 
         const merged = _dedupeByKey([...existing, ...filteredNew])
         const recent = _filterRecent(merged)
@@ -88,9 +77,22 @@ async function _refresh() {
     }
 }
 
-// keep articles from the last 24 hours
+async function getForSymbol(query) {
+    const cleaned  = _cleanCompanyName(query)
+    const from     = new Date(Date.now() - SYMBOL_WINDOW_MS).toISOString()
+    const raw      = await fetchGNews({ query: cleaned, from, max: 10 })
+    const articles = Array.isArray(raw?.articles) ? raw.articles.map(_mapArticle).filter(_isValid) : []
+    return articles.length > 0 ? await filterService.filterNews(articles) : []
+}
+
+function _cleanCompanyName(name) {
+    return name
+        .replace(/,?\s*(Inc\.|Incorporated|Corp\.|Corporation|Ltd\.|Limited|LLC|Co\.|Company|Group|Holdings?|PLC|N\.V\.|S\.A\.)\s*$/i, '')
+        .trim()
+}
+
 function _filterRecent(items) {
-    const cutoff = Math.floor((Date.now() - WINDOW_MS) / 1000) // in unix seconds
+    const cutoff = Math.floor((Date.now() - WINDOW_MS) / 1000)
     return items.filter(item => item.datetime >= cutoff)
 }
 
@@ -99,13 +101,13 @@ function _mapArticle(item) {
     return {
         datetime: Number.isFinite(publishedMs) ? Math.floor(publishedMs / 1000) : NaN,
         headline: typeof item?.title === 'string' ? item.title.trim() : '',
-        summary: typeof item?.description === 'string' ? item.description : '',
-        url: item?.url ?? '',
-        image: item?.image ?? '',
-        source: item?.source?.name ?? '',
-        id: item?.id ?? null,
+        summary:  typeof item?.description === 'string' ? item.description : '',
+        url:      item?.url    ?? '',
+        image:    item?.image  ?? '',
+        source:   item?.source?.name ?? '',
+        id:       item?.id     ?? null,
         category: 'markets',
-        related: '',
+        related:  '',
     }
 }
 

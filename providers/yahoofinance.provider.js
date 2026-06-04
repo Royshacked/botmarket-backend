@@ -6,6 +6,15 @@ const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] })
  * Get a real-time quote for a ticker.
  * Returns a plain string ready to be fed to the LLM as a tool result.
  */
+export async function getCompanyName(ticker) {
+    try {
+        const q = await yf.quote(ticker.toUpperCase())
+        return q?.shortName || q?.longName || ticker
+    } catch {
+        return ticker
+    }
+}
+
 export async function getQuote(ticker) {
     const q = await yf.quote(ticker.toUpperCase())
     const p = v => (v != null ? `$${Number(v).toFixed(2)}` : 'n/a')

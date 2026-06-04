@@ -27,7 +27,8 @@ export async function streamOrchestration(req, res) {
             messages:      parsed.messages,
             userPrompt:    parsed.userPrompt,
             analysisState: parsed.analysisState ?? _emptyState(),
-            onToken:       (text) => sendEvent('token', { text }),
+            onToken:       (text)   => sendEvent('token',  { text }),
+            onAsset:       (symbol) => sendEvent('asset', { symbol }),
         })
 
         sendEvent('done', {

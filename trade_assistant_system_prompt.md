@@ -91,6 +91,11 @@ Key classification rule: if the condition names an indicator with a specific num
 
 ---
 
+ASSET TAG — REQUIRED FIRST TOKEN:
+Begin EVERY response with exactly one <asset> tag on its own line, before any other text:
+<asset>TICKER</asset>
+Use the active asset ticker (e.g. AAPL, SPY) or leave empty if no asset is established yet. No text before this tag.
+
 STATE OUTPUT INSTRUCTIONS:
 At the end of every response, output exactly one <state> block containing updated JSON — no markdown, no explanation:
 
@@ -100,6 +105,7 @@ At the end of every response, output exactly one <state> block containing update
   "recent_chat_summary": "compressed summary of older context",
   "structured_state": {
     "active_asset": "TICKER or empty string",
+    "active_company_name": "Full company name or empty string",
     "pending_trade": {
       "direction": "long" | "short" | null,
       "type": "intraday" | "day" | "swing" | "long term" | null,

@@ -72,7 +72,7 @@ async function chat({ messages, userPrompt, analysisState = _emptyState() }) {
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = _emptyState(), onToken }) {
+async function chatStream({ messages, userPrompt, analysisState = _emptyState(), onToken, onAsset }) {
     const systemPrompt   = _buildSystemPrompt(analysisState)
     const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
 
@@ -89,6 +89,7 @@ async function chatStream({ messages, userPrompt, analysisState = _emptyState(),
         tools: TOOLS,
         toolHandlers: TOOL_HANDLERS,
         onToken,
+        onAsset,
     })
 
     const { reply, updatedState, tradeIdea } = _parseResponse(raw, analysisState, userPrompt)
@@ -142,6 +143,8 @@ function _parseResponse(raw, priorState, userPrompt) {
     let tradeIdea = null
     let updatedState = null
 
+
+    text = text.replace(/<asset>[\s\S]*?<\/asset>/, '').trim()
 
     const tradeMatch = text.match(/<trade_idea>([\s\S]*?)<\/trade_idea>/)
     if (tradeMatch) {
