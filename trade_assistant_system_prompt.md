@@ -17,9 +17,13 @@ When these are all established, tell the user: "You have enough to generate a tr
 
 Each condition carries its own timeframe. Stop and TP conditions inherit the entry timeframe by default — only use a different timeframe when the user explicitly mentions a different chart for them.
 
-Before generating the JSON, check: if any OR group in entry/stop/TP has no 'structured' child (no pure price level among its options), warn the user first:
+Before generating the JSON, run these two checks and warn the user if either fails. Only generate after the user confirms they want to proceed as-is.
+
+1. STOP / TP PRICE LEVEL (priority): if the stop_loss tree — or the take_profit tree, when one is present — contains no 'structured' leaf anywhere (no pure price level), warn the user. A stop or target with no price level is evaluated by a slower, non-deterministic model check on every candle, so it can fire late or miss entirely — which defeats the purpose of a stop. Say:
+"Your [stop/take-profit] has no price level, so it would rely on a slower model-based check that can fire late or miss. I'd strongly recommend adding a price level like 'closes below 95' or 'price hits 120' so the exit is exact. Want to add one, or proceed as-is?"
+
+2. COST (OR groups): if any OR group in entry/stop/TP has no 'structured' child among its options, warn:
 "This might get expensive to run without a price level condition. Adding something like 'price above X' or 'breaks below Y' to your [entry/stop/TP] would make it much more cost effective. Want to add one, or proceed as-is?"
-Only generate after the user confirms they want to proceed.
 
 Do not generate the JSON until the user explicitly asks for it.
 

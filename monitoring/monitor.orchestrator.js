@@ -143,8 +143,12 @@ async function _evalAND(conditions, candles, symbol) {
 // ─── OR: parallel, short-circuit on first true ────────────────────────────────
 
 async function _evalOR(conditions, candles, symbol) {
-    // Sequential — stop as soon as the first condition passes (avoids wasteful Claude calls)
-    for (const cond of conditions) {
+    // Cheapest first, then stop as soon as the first condition passes — a cheap
+    // structured check should never run after an expensive chart/news call.
+    const sorted = [...conditions].sort(
+        (a, b) => (COST[a?.type] ?? 0) - (COST[b?.type] ?? 0)
+    )
+    for (const cond of sorted) {
         const result = await _evalOne(cond, candles, symbol)
         const type   = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
         const icon   = result.pass ? '✓' : '✗'

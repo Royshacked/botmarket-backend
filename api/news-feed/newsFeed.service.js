@@ -1,5 +1,6 @@
 import { fetchGNews } from '../../providers/gnews.provider.js'
 import { filterService } from '../../services/model.filter.service.js'
+import { getCompanyName } from '../../providers/yahoofinance.provider.js'
 import { isCacheFresh, loadItemsFromFile, saveItemsToFile } from '../../services/util.service.js'
 import { logger } from '../../services/logger.service.js'
 
@@ -9,15 +10,27 @@ const CACHE_NAME = 'feed'
 const INTERVAL_MS    = 30 * 60 * 1000
 const WINDOW_MS      = 24 * 60 * 60 * 1000
 const SYMBOL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+const SYMBOL_CACHE_TTL_MS = 15 * 60 * 1000   // per-symbol news is cached for 15 min
 const FETCH_QUERY = 'stock market OR earnings OR Fed OR inflation OR economy OR trade'
 const FETCH_MAX = 20
 
 let _cache = []
 const _clients = new Set()
 
+// Two-phase per-symbol caches (TTL window), so the UI can render articles before
+// the slow LLM step finishes:
+//   raw      — resolved company + GNews, no LLM (phase 1, fast)
+//   enriched — raw passed through the OpenAI relevance filter + sentiment (phase 2)
+const _symbolRawCache    = new Map()   // symbol → { articles, fetchedAt }
+const _symbolCache       = new Map()   // symbol → { articles, fetchedAt }
+// symbol → in-flight Promise — collapses concurrent requests for the same symbol
+const _rawInflight       = new Map()
+const _sentimentInflight = new Map()
+
 export const newsFeedService = {
     get,
-    getForSymbol,
+    getForSymbolRaw,
+    getForSymbolSentiment,
     start,
     addClient,
     removeClient,
@@ -77,12 +90,68 @@ async function _refresh() {
     }
 }
 
-async function getForSymbol(query) {
-    const cleaned  = _cleanCompanyName(query)
-    const from     = new Date(Date.now() - SYMBOL_WINDOW_MS).toISOString()
-    const raw      = await fetchGNews({ query: cleaned, from, max: 10 })
-    const articles = Array.isArray(raw?.articles) ? raw.articles.map(_mapArticle).filter(_isValid) : []
-    return articles.length > 0 ? await filterService.filterNews(articles) : []
+// ─── Phase 1: raw articles (fast, no LLM) ──────────────────────────────────────
+async function getForSymbolRaw(symbol, queryHint = '') {
+    const key = (symbol ?? '').trim().toUpperCase()
+    if (!key) return []
+
+    const cached = _symbolRawCache.get(key)
+    if (cached && Date.now() - cached.fetchedAt < SYMBOL_CACHE_TTL_MS) {
+        logger.info(LOG, 'symbol raw cache hit', { symbol: key, count: cached.articles.length })
+        return cached.articles
+    }
+
+    // Collapse concurrent misses (e.g. rapid re-clicks) into one fetch
+    if (_rawInflight.has(key)) return _rawInflight.get(key)
+
+    const work = _fetchSymbolRaw(key, queryHint)
+        .then(articles => {
+            _symbolRawCache.set(key, { articles, fetchedAt: Date.now() })
+            logger.info(LOG, 'symbol raw cached', { symbol: key, count: articles.length })
+            return articles
+        })
+        .finally(() => _rawInflight.delete(key))
+
+    _rawInflight.set(key, work)
+    return work
+}
+
+async function _fetchSymbolRaw(symbol, queryHint) {
+    // Resolve the company name (prefer the caller's hint unless it's just the raw ticker)
+    let query = queryHint?.trim() ?? ''
+    if (!query || /^[A-Z]{1,6}$/.test(query)) {
+        query = await getCompanyName(symbol).catch(() => symbol)
+    }
+
+    const cleaned = _cleanCompanyName(query)
+    const from    = new Date(Date.now() - SYMBOL_WINDOW_MS).toISOString()
+    const raw     = await fetchGNews({ query: cleaned, from, max: 10 })
+    return Array.isArray(raw?.articles) ? raw.articles.map(_mapArticle).filter(_isValid) : []
+}
+
+// ─── Phase 2: relevance filter + sentiment (LLM) ───────────────────────────────
+async function getForSymbolSentiment(symbol, queryHint = '') {
+    const key = (symbol ?? '').trim().toUpperCase()
+    if (!key) return []
+
+    const cached = _symbolCache.get(key)
+    if (cached && Date.now() - cached.fetchedAt < SYMBOL_CACHE_TTL_MS) {
+        logger.info(LOG, 'symbol sentiment cache hit', { symbol: key, count: cached.articles.length })
+        return cached.articles
+    }
+
+    if (_sentimentInflight.has(key)) return _sentimentInflight.get(key)
+
+    const work = (async () => {
+        const raw      = await getForSymbolRaw(key, queryHint)   // reuses the raw cache
+        const enriched = raw.length > 0 ? await filterService.filterNews(raw) : []
+        _symbolCache.set(key, { articles: enriched, fetchedAt: Date.now() })
+        logger.info(LOG, 'symbol sentiment cached', { symbol: key, count: enriched.length })
+        return enriched
+    })().finally(() => _sentimentInflight.delete(key))
+
+    _sentimentInflight.set(key, work)
+    return work
 }
 
 function _cleanCompanyName(name) {

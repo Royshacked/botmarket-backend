@@ -4,7 +4,27 @@
       "Skill(claude-api)",
       "Skill(claude-api:*)",
       "Bash(Get-ChildItem \"C:\\\\Roy\\\\Coding Academy\\\\Projects\\\\bot-market-new\\\\botmarket-backend\" -Exclude node_modules)",
-      "Bash(Select-Object Name, PSIsContainer)"
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(node monitoring/test.tree.js)",
+      "Bash(timeout 60 node monitoring/test.monitor.js)",
+      "Bash(node --check api/news-feed/newsFeed.service.js)",
+      "Bash(node --check api/news-feed/newsFeed.controller.js)",
+      "Bash(node --check api/news-feed/newsFeed.routes.js)",
+      "Bash(npx vite *)",
+      "Bash(ls .claude/skills)",
+      "Bash(ls \"C:\\\\Roy\\\\Coding Academy\\\\Projects\\\\ar2trade\\\\botmarket-frontend\\\\.claude\\\\skills\")",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts,null,2\\)\\)\")",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('C:/Roy/Coding Academy/Projects/ar2trade/botmarket-frontend/package.json'\\).scripts,null,2\\)\\)\")",
+      "Bash(node -e \"const e=require\\('fs'\\).readFileSync\\('.env','utf8'\\).split\\('\\\\n'\\).map\\(l=>l.split\\('='\\)[0]\\).filter\\(Boolean\\); console.log\\('keys:', e.join\\(', '\\)\\)\")",
+      "Bash(node server.js)",
+      "Bash(echo \"started pid $!\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3030/news-feed/)",
+      "Bash(curl -s \"http://localhost:3030/news-feed/asset/AAPL?q=Apple\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);const a=j.articles||[];console.log\\('count:',a.length\\);console.log\\('first article keys:', a[0]?Object.keys\\(a[0]\\).sort\\(\\).join\\(','\\):'\\(none\\)'\\);console.log\\('has sentiment field:', a[0]?\\('sentiment' in a[0]\\):'n/a'\\)}\\)\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" \"http://localhost:3030/news-feed/asset/AAPL/sentiment?q=Apple\")",
+      "Bash(PORT=3041 node server.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3041/news-feed/)",
+      "Bash(kill 703)"
     ]
   }
 }

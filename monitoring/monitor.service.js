@@ -136,24 +136,33 @@ async function _tick() {
 async function _checkIdea(db, idea) {
     const { id, asset, status } = idea
 
-    const entryTf = _resolveEntryTimeframe(idea)
-    const gap     = getCheckGap(entryTf)
+    const entryTf    = _resolveEntryTimeframe(idea)
+    const isPosition = status === 'long' || status === 'short'
+    const stopTf     = isPosition ? _resolveStopTimeframe(idea) : null
+    const tpTf       = isPosition ? _resolveTpTimeframe(idea)   : null
+
+    // Re-check cadence is driven by the *fastest* timeframe relevant to the
+    // current phase. A 5min stop on a position entered from a daily chart must
+    // still be checked ~every 5min, not every 4h.
+    const gap = isPosition
+        ? Math.min(getCheckGap(stopTf), getCheckGap(tpTf), getCheckGap(entryTf))
+        : getCheckGap(entryTf)
 
     const lastAt = _lastChecked.get(id) ?? 0
     if (Date.now() - lastAt < gap) return
-    _lastChecked.set(id, Date.now())
 
+    // Note: _lastChecked is stamped only after a *successful* fetch+evaluate.
+    // A transient candle-fetch failure leaves the clock untouched so the idea
+    // is retried on the next poll tick rather than going dark for a full `gap`.
     try {
         if (status === 'looking') {
             const candles = await _fetchCandles(id, asset, entryTf)
             if (!candles) return
+            _lastChecked.set(id, Date.now())
             _logCheck(id, asset, status, entryTf, candles)
             await _checkEntry(db, idea, candles)
 
-        } else if (status === 'long' || status === 'short') {
-            const stopTf = _resolveStopTimeframe(idea)
-            const tpTf   = _resolveTpTimeframe(idea)
-
+        } else if (isPosition) {
             const stopCandles = await _fetchCandles(id, asset, stopTf)
             if (!stopCandles) return
 
@@ -168,6 +177,7 @@ async function _checkIdea(db, idea) {
                 : await _fetchCandles(id, asset, entryTf)
             if (!aeCandles) return
 
+            _lastChecked.set(id, Date.now())
             _logCheck(id, asset, status, `stop=${stopTf}/tp=${tpTf}`, stopCandles)
             await _checkPosition(db, idea, stopCandles, tpCandles, aeCandles)
         }

@@ -42,6 +42,13 @@ export async function evaluateIndicator(condition, candles) {
     }
 
     const indicators  = _computeIndicators(condition, candles)
+
+    // Surface insufficient-warmup cases: a null newest value means the series
+    // reads "n/a" and any condition referencing it silently evaluates NO.
+    if (indicators.sma[200]?.[candles.length - 1] == null) {
+        logger.warn(LOG, `SMA(200) not warmed up (${candles.length} candles) — long-period conditions may read n/a`)
+    }
+
     const last20start = Math.max(0, candles.length - 20)
     const last20      = candles.slice(last20start)
     const table       = _buildTable(last20, indicators, last20start)
