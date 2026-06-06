@@ -17,8 +17,9 @@
 import { claudeJSON } from '../monitor.claude.js'
 import { logger }     from '../../services/logger.service.js'
 
-const LOG    = '[condition.parser]'
-const _cache = new Map()   // conditionText (normalised) → ParsedCondition
+const LOG       = '[condition.parser]'
+const _cache    = new Map()   // conditionText (normalised) → ParsedCondition
+const CACHE_MAX = 1_000
 
 const SYSTEM = `You parse natural-language trading conditions into a JSON schema.
 
@@ -58,6 +59,7 @@ export async function parseCondition(conditionText) {
     try {
         const parsed = await claudeJSON(SYSTEM, conditionText)
         _normalise(parsed)
+        if (_cache.size >= CACHE_MAX) _cache.delete(_cache.keys().next().value)
         _cache.set(key, parsed)
         logger.info(LOG, `Parsed: "${conditionText.slice(0, 70)}"`, parsed)
         return parsed

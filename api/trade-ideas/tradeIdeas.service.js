@@ -106,16 +106,6 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         return { ok: false, reason: 'invalid_status' }
     }
 
-    // Ownership check
-    try {
-        const db   = await getDb()
-        const idea = await db.collection(COLLECTION).findOne({ id })
-        if (!idea) return { ok: false, reason: 'not_found' }
-        if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
-    } catch (err) {
-        return { ok: false, error: err }
-    }
-
     // Rebuild condition trees when conditions are updated via chat edit
     if (patch.entry_conditions !== undefined || patch.stop_conditions !== undefined || patch.tp_conditions !== undefined) {
         const entryTree = _resolveConditionTree(patch.entry_condition_tree, patch.entry_conditions, patch.entry_logic ?? 'AND')
@@ -138,8 +128,20 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
 
     try {
         const db = await getDb()
+
+        // Ownership check: read only the userId field (cheap projection)
+        const existing = await db.collection(COLLECTION).findOne({ id }, { projection: { userId: 1 } })
+        if (!existing) return { ok: false, reason: 'not_found' }
+        if (existing.userId && existing.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+
+        // Atomic update — ownership constraint also in the filter eliminates the
+        // TOCTOU window between the check above and the write below.
+        const updateFilter = isAdmin || !existing.userId
+            ? { id }
+            : { id, userId }
+
         const result = await db.collection(COLLECTION).findOneAndUpdate(
-            { id },
+            updateFilter,
             { $set: patch },
             { returnDocument: 'after' }
         )

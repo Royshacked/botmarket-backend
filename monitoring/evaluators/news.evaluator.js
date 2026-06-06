@@ -54,7 +54,7 @@ export async function evaluateNews(condition, symbol) {
 
     try {
         const raw  = await claudeText(SYSTEM, user)
-        const pass = raw.trim().toUpperCase().startsWith('Y')
+        const pass = raw.trim().toUpperCase() === 'YES'
         logger.info(LOG, `News eval "${condition.slice(0, 60)}" for ${symbol} → ${pass ? 'YES' : 'NO'}`)
         return pass
     } catch (err) {

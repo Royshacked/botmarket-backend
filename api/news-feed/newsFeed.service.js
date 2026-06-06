@@ -110,6 +110,12 @@ async function getForSymbolRaw(symbol, queryHint = '') {
             logger.info(LOG, 'symbol raw cached', { symbol: key, count: articles.length })
             return articles
         })
+        .catch(err => {
+            // Cache a short-lived empty result so concurrent/rapid retries back off
+            // instead of hammering GNews again immediately.
+            _symbolRawCache.set(key, { articles: [], fetchedAt: Date.now() - SYMBOL_CACHE_TTL_MS * 0.75 })
+            throw err
+        })
         .finally(() => _rawInflight.delete(key))
 
     _rawInflight.set(key, work)
@@ -123,7 +129,7 @@ async function _fetchSymbolRaw(symbol, queryHint) {
         query = await getCompanyName(symbol).catch(() => symbol)
     }
 
-    const cleaned = _cleanCompanyName(query)
+    const cleaned = _cleanCompanyName(query) || symbol
     const from    = new Date(Date.now() - SYMBOL_WINDOW_MS).toISOString()
     const raw     = await fetchGNews({ query: cleaned, from, max: 10 })
     return Array.isArray(raw?.articles) ? raw.articles.map(_mapArticle).filter(_isValid) : []
@@ -148,7 +154,14 @@ async function getForSymbolSentiment(symbol, queryHint = '') {
         _symbolCache.set(key, { articles: enriched, fetchedAt: Date.now() })
         logger.info(LOG, 'symbol sentiment cached', { symbol: key, count: enriched.length })
         return enriched
-    })().finally(() => _sentimentInflight.delete(key))
+    })()
+        .catch(err => {
+            // Cache a short-lived empty result so a failing LLM call doesn't cause a
+            // retry storm — callers back off for ~25% of the normal TTL before retrying.
+            _symbolCache.set(key, { articles: [], fetchedAt: Date.now() - SYMBOL_CACHE_TTL_MS * 0.75 })
+            throw err
+        })
+        .finally(() => _sentimentInflight.delete(key))
 
     _sentimentInflight.set(key, work)
     return work

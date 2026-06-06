@@ -7,7 +7,6 @@ export const filterService = {
 
 
 async function filterNews(articles) {
-    console.log("called llm")
     const model = 'gpt-4o-mini'
     const systemPrompt = `You are filtering news for a trading dashboard.
             You must return ONLY valid JSON.

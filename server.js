@@ -30,7 +30,26 @@ import { logger }           from './services/logger.service.js'
 const app = express()
 const server = http.createServer(app)
 
-// Express App Config
+// CORS must come first — before every route including /api/transcribe,
+// otherwise the preflight response from the browser is blocked in dev.
+if (process.env.NODE_ENV !== 'production') {
+    app.use(cors({
+        origin: [
+            'http://127.0.0.1:3030',
+            'http://localhost:3030',
+            'http://127.0.0.1:5173',
+            'http://localhost:5173',
+        ],
+        credentials: true,
+    }))
+}
+
+// Allow microphone access from the browser on all deployments
+app.use((req, res, next) => {
+    res.setHeader('Permissions-Policy', 'microphone=*')
+    next()
+})
+
 app.use(cookieParser())
 
 // Transcribe must be registered before express.json() so the raw body parser
@@ -39,24 +58,8 @@ app.use('/api/transcribe', transcribeRoutes)
 
 app.use(express.json())
 
-// Allow microphone access from the browser on all deployments
-app.use((req, res, next) => {
-    res.setHeader('Permissions-Policy', 'microphone=*')
-    next()
-})
-
 if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve('public')))
-} else {
-    const corsOptions = {
-        origin: [   'http://127.0.0.1:3030',
-                    'http://localhost:3030',
-                    'http://127.0.0.1:5173',
-                    'http://localhost:5173'
-                ],
-        credentials: true
-    }
-    app.use(cors(corsOptions))
 }
 
 app.use('/orchestrator', orchestratorRoutes)

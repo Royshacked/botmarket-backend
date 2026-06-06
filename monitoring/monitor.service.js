@@ -380,6 +380,7 @@ function _firstLeaf(node) {
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
 async function _close(db, id, reason) {
+    _lastChecked.delete(id)
     await _patch(db, id, {
         status:       'closed',
         closedReason: reason,

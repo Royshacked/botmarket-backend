@@ -2,7 +2,7 @@ import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { callAnthropicWithTools, streamAnthropicWithTools } from '../providers/anthropic.provider.js'
-import { getQuote } from '../providers/yahoofinance.provider.js'
+import { getQuote, getTickerAggregates } from '../providers/yahoofinance.provider.js'
 import { logger } from './logger.service.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -25,7 +25,40 @@ const TOOLS = [
             required: ['ticker'],
         },
     },
+    {
+        name: 'get_candles',
+        description: 'Fetch recent OHLCV candles for a ticker. Use this whenever the user asks about orderblocks, support/resistance, chart patterns, price levels, or any question that requires seeing recent price action. Never say you cannot see live data — call this tool first.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker: {
+                    type: 'string',
+                    description: 'Stock ticker symbol e.g. AAPL, NVDA',
+                },
+                timeframe: {
+                    type: 'string',
+                    enum: ['1hr', '4hr', 'day', 'week'],
+                    description: 'Candle timeframe. 4hr returns 1hr candles (Yahoo Finance limit) — group 4 consecutive 1hr rows as one 4hr period.',
+                },
+            },
+            required: ['ticker', 'timeframe'],
+        },
+    },
 ]
+
+// candle count and Yahoo interval per requested timeframe
+const _CANDLE_CFG = {
+    '1hr':  { timeSpan: 'hour', multiplier: 1, count: 30, windowDays: 5  },
+    '4hr':  { timeSpan: 'hour', multiplier: 1, count: 60, windowDays: 12 },  // 1hr rows; LLM groups 4→1
+    'day':  { timeSpan: 'day',  multiplier: 1, count: 40, windowDays: 60 },
+    'week': { timeSpan: 'week', multiplier: 1, count: 24, windowDays: 200 },
+}
+
+function _fmtVol(v) {
+    if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M'
+    if (v >= 1_000)     return (v / 1_000).toFixed(0) + 'K'
+    return String(v)
+}
 
 const TOOL_HANDLERS = {
     get_quote: async ({ ticker }) => {
@@ -34,6 +67,27 @@ const TOOL_HANDLERS = {
         } catch (err) {
             logger.warn(LOG, `get_quote failed for ${ticker}:`, err.message)
             return `Could not fetch quote for ${ticker}: ${err.message}`
+        }
+    },
+
+    get_candles: async ({ ticker, timeframe }) => {
+        try {
+            const cfg  = _CANDLE_CFG[timeframe] ?? _CANDLE_CFG['day']
+            const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
+            const raw  = await getTickerAggregates(ticker.toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
+            const rows = raw.slice(-cfg.count)
+            if (rows.length === 0) return `No candle data available for ${ticker}`
+
+            const label = timeframe === '4hr' ? '1hr (group 4 rows = one 4hr candle)' : timeframe
+            const header = `${ticker.toUpperCase()} ${label} — ${rows.length} candles, newest last:\n`
+            const lines  = rows.map(c => {
+                const d = new Date(c.timestamp * 1000).toISOString().slice(0, 16).replace('T', ' ')
+                return `${d}  O:${c.open.toFixed(2)}  H:${c.high.toFixed(2)}  L:${c.low.toFixed(2)}  C:${c.close.toFixed(2)}  V:${_fmtVol(c.volume)}`
+            })
+            return header + lines.join('\n')
+        } catch (err) {
+            logger.warn(LOG, `get_candles failed for ${ticker}:`, err.message)
+            return `Could not fetch candles for ${ticker}: ${err.message}`
         }
     },
 }
@@ -129,7 +183,9 @@ function _buildMessages({ messages, userPrompt, analysisState }) {
         const normalized = messages
             .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && m.content?.trim())
             .map(({ role, content }) => ({ role, content: content.trim() }))
-        return _trimMessages([...prior, ...normalized])
+        // Caller owns the history — don't prepend prior to avoid duplicating messages
+        // that are already present in the messages array.
+        return _trimMessages(normalized)
     }
 
     const current = userPrompt?.trim()
