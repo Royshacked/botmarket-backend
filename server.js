@@ -30,10 +30,10 @@ import { logger }           from './services/logger.service.js'
 const app = express()
 const server = http.createServer(app)
 
-// CORS must come first — before every route including /api/transcribe,
-// otherwise the preflight response from the browser is blocked in dev.
+// CORS — must come before every route.
+// app.options handles the preflight for non-simple requests (e.g. audio/webm Content-Type).
 if (process.env.NODE_ENV !== 'production') {
-    app.use(cors({
+    const corsOptions = {
         origin: [
             'http://127.0.0.1:3030',
             'http://localhost:3030',
@@ -41,7 +41,9 @@ if (process.env.NODE_ENV !== 'production') {
             'http://localhost:5173',
         ],
         credentials: true,
-    }))
+    }
+    app.options('*', cors(corsOptions))
+    app.use(cors(corsOptions))
 }
 
 // Allow microphone access from the browser on all deployments

@@ -26,7 +26,7 @@ const LOG = '[indicator.evaluator]'
 const SYSTEM = `You are a technical analysis engine.
 You receive a table of OHLCV candles with pre-computed indicator values (oldest row first, newest last).
 All indicator values are mathematically accurate — use them directly, do not recompute.
-Evaluate the condition against the most recent candle (last row), or across recent rows if the condition implies a trend or crossover.
+Evaluate against the last row; use multiple rows only for trend or crossover conditions.
 If uncertain, answer NO.
 Respond with a single word only: YES or NO.`
 

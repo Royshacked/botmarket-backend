@@ -21,26 +21,24 @@ const LOG       = '[condition.parser]'
 const _cache    = new Map()   // conditionText (normalised) → ParsedCondition
 const CACHE_MAX = 1_000
 
-const SYSTEM = `You parse natural-language trading conditions into a JSON schema.
+const SYSTEM = `You parse trading condition strings into a JSON schema. Return ONLY valid JSON.
 
-Return ONLY a valid JSON object with exactly these fields:
-- "operator":     one of "gt"|"lt"|"gte"|"lte"|"eq"|"crossAbove"|"crossBelow"|"isBetween"|"unknown"
-- "subject":      price/indicator string — one of: "close","open","high","low","volume",
-                  "rsi(N)","ema(N)","sma(N)","macd_line","macd_signal","macd_hist","atr(N)"
-                  (replace N with the actual period number). Use null if unknown.
-- "value":        a number, or another subject-string when comparing two indicators. Use null if unknown.
-- "value2":       a number (upper bound for "isBetween"), otherwise null.
-- "confirmation": integer — how many consecutive candles must satisfy the condition (0 = current candle only).
+Fields (all required):
+- "operator": "gt"|"lt"|"gte"|"lte"|"eq"|"crossAbove"|"crossBelow"|"isBetween"|"unknown"
+- "subject":  "close"|"open"|"high"|"low"|"volume"|"rsi(N)"|"ema(N)"|"sma(N)"|"macd_line"|"macd_signal"|"macd_hist"|"atr(N)" — or null
+- "value":    number or subject-string (for indicator vs indicator); null if unknown
+- "value2":   number upper bound for isBetween, else null
+- "confirmation": consecutive candles required (0 = current only)
 
 Examples:
-"price breaks above 100"                  → {"operator":"crossAbove","subject":"close","value":100,"value2":null,"confirmation":1}
-"RSI(14) below 30"                        → {"operator":"lt","subject":"rsi(14)","value":30,"value2":null,"confirmation":0}
-"EMA(20) crosses above EMA(50)"           → {"operator":"crossAbove","subject":"ema(20)","value":"ema(50)","value2":null,"confirmation":0}
-"close stays above 100 for 3 candles"     → {"operator":"gt","subject":"close","value":100,"value2":null,"confirmation":3}
-"price between 100 and 110"              → {"operator":"isBetween","subject":"close","value":100,"value2":110,"confirmation":0}
-"volume above 1000000"                   → {"operator":"gt","subject":"volume","value":1000000,"value2":null,"confirmation":0}
+"price breaks above 100"              → {"operator":"crossAbove","subject":"close","value":100,"value2":null,"confirmation":1}
+"RSI(14) below 30"                    → {"operator":"lt","subject":"rsi(14)","value":30,"value2":null,"confirmation":0}
+"EMA(20) crosses above EMA(50)"       → {"operator":"crossAbove","subject":"ema(20)","value":"ema(50)","value2":null,"confirmation":0}
+"close stays above 100 for 3 candles" → {"operator":"gt","subject":"close","value":100,"value2":null,"confirmation":3}
+"price between 100 and 110"           → {"operator":"isBetween","subject":"close","value":100,"value2":110,"confirmation":0}
+"volume above 1000000"                → {"operator":"gt","subject":"volume","value":1000000,"value2":null,"confirmation":0}
 
-If you cannot determine the condition, set operator to "unknown" and subject/value to null.`
+Unknown conditions: set operator "unknown", subject/value null.`
 
 /**
  * Parse a natural-language condition string.
