@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+import OpenAI, { toFile } from 'openai'
 import { logger } from '../../services/logger.service.js'
 
 const LOG = '[transcribe]'
@@ -13,7 +13,7 @@ export async function transcribeAudio(req, res) {
 
         const contentType = req.headers['content-type'] || 'audio/webm'
         const ext  = contentType.includes('mp4') ? 'mp4' : contentType.includes('ogg') ? 'ogg' : 'webm'
-        const file = new File([buffer], `audio.${ext}`, { type: contentType })
+        const file = await toFile(buffer, `audio.${ext}`, { type: contentType })
         const result = await openai.audio.transcriptions.create({
             file,
             model: 'whisper-1',
