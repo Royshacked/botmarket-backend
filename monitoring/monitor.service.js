@@ -75,6 +75,28 @@ function getCheckGap(tf) {
     return 4 * 60 * 60 * 1_000   // unknown → 4h fallback
 }
 
+// ─── Market hours helpers ─────────────────────────────────────────────────────
+
+/** True between 9:30 AM and 4:00 PM ET on a weekday (holidays not excluded). */
+function _isMarketOpen() {
+    const etStr = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })
+    const et    = new Date(etStr)
+    const day   = et.getDay()
+    if (day === 0 || day === 6) return false
+    const mins  = et.getHours() * 60 + et.getMinutes()
+    return mins >= 9 * 60 + 30 && mins < 16 * 60
+}
+
+/** Crypto assets trade 24/7 — no market-hours gate needed. */
+function _isCrypto(symbol) {
+    return /USDT$|USDC$/i.test(symbol ?? '')
+}
+
+/** Intraday timeframes produce no new bars when the exchange is closed. */
+function _isIntraday(tf) {
+    return /min$|hr$/.test(tf ?? '')
+}
+
 // ─── Public interface ─────────────────────────────────────────────────────────
 
 export const monitorService = { start, stop, resetIdea }
@@ -147,6 +169,17 @@ async function _checkIdea(db, idea) {
     const gap = isPosition
         ? Math.min(getCheckGap(stopTf), getCheckGap(tpTf), getCheckGap(entryTf))
         : getCheckGap(entryTf)
+
+    // Skip intraday equity ideas when the market is closed — there are no new
+    // bars and evaluating would waste API calls. Crypto is 24/7 and daily+
+    // timeframes can still be evaluated outside regular hours.
+    const fastestTf = isPosition
+        ? [stopTf, tpTf, entryTf].reduce((a, b) => getCheckGap(a) <= getCheckGap(b) ? a : b)
+        : entryTf
+    if (!_isCrypto(asset) && _isIntraday(fastestTf) && !_isMarketOpen()) {
+        logger.info(LOG, `[${id}] Market closed — skipping intraday check (${asset}/${fastestTf})`)
+        return
+    }
 
     const lastAt = _lastChecked.get(id) ?? 0
     if (Date.now() - lastAt < gap) return

@@ -54,19 +54,22 @@ export async function evaluateChart(condition, symbol, timeframe) {
 
 // ─── Studies builder ──────────────────────────────────────────────────────────
 
+const MAX_STUDIES = 3
+
 function _buildStudies(condition) {
     const studies = []
     const added   = new Set()
 
     const add = (study, key) => {
-        if (!added.has(key)) { studies.push(study); added.add(key) }
+        if (!added.has(key) && studies.length < MAX_STUDIES) {
+            studies.push(study)
+            added.add(key)
+        }
     }
 
-    // Always include EMA(20) and EMA(50) as price context overlays
-    add({ name: 'Moving Average Exponential', input: { in_0: 20 }, forceOverlay: true }, 'ema20')
-    add({ name: 'Moving Average Exponential', input: { in_0: 50 }, forceOverlay: true }, 'ema50')
+    // Condition-specific indicators first (they matter most for the eval)
 
-    // RSI — use period from condition if specified, else 14
+    // RSI
     const rsiMatch = condition.match(/rsi(?:\((\d+)\))?/i)
     if (rsiMatch) {
         add({ name: 'Relative Strength Index', input: { in_0: +(rsiMatch[1] ?? 14) } }, `rsi${rsiMatch[1] ?? 14}`)
@@ -75,16 +78,6 @@ function _buildStudies(condition) {
     // MACD
     if (/macd/i.test(condition)) {
         add({ name: 'MACD', input: { in_0: 12, in_1: 26, in_2: 9 } }, 'macd')
-    }
-
-    // Additional EMA periods explicitly mentioned
-    for (const [, p] of condition.matchAll(/ema\((\d+)\)/gi)) {
-        add({ name: 'Moving Average Exponential', input: { in_0: +p }, forceOverlay: true }, `ema${p}`)
-    }
-
-    // SMA periods explicitly mentioned
-    for (const [, p] of condition.matchAll(/sma\((\d+)\)/gi)) {
-        add({ name: 'Moving Average', input: { in_0: +p }, forceOverlay: true }, `sma${p}`)
     }
 
     // Bollinger Bands
@@ -102,6 +95,20 @@ function _buildStudies(condition) {
     if (/volume/i.test(condition)) {
         add({ name: 'Volume' }, 'volume')
     }
+
+    // Explicit EMA periods
+    for (const [, p] of condition.matchAll(/ema\((\d+)\)/gi)) {
+        add({ name: 'Moving Average Exponential', input: { in_0: +p }, forceOverlay: true }, `ema${p}`)
+    }
+
+    // Explicit SMA periods
+    for (const [, p] of condition.matchAll(/sma\((\d+)\)/gi)) {
+        add({ name: 'Moving Average', input: { in_0: +p }, forceOverlay: true }, `sma${p}`)
+    }
+
+    // Fill remaining slots with EMA(20) / EMA(50) as price context
+    add({ name: 'Moving Average Exponential', input: { in_0: 20 }, forceOverlay: true }, 'ema20')
+    add({ name: 'Moving Average Exponential', input: { in_0: 50 }, forceOverlay: true }, 'ema50')
 
     return studies
 }

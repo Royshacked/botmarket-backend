@@ -10,6 +10,7 @@ const VALID_STATUSES = new Set(['waiting', 'looking', 'hit', 'long', 'short', 'c
 export const ideaService = {
     saveIdea,
     getIdeas,
+    getIdeaById,
     deleteIdea,
     updateIdea,
 }
@@ -70,6 +71,19 @@ async function saveIdea(tradeIdea, userId) {
         return { ok: true, idea: _strip(enriched) }
     } catch (err) {
         logger.error(LOG, 'Failed to save idea', err)
+        return { ok: false, error: err }
+    }
+}
+
+async function getIdeaById(id, userId, isAdmin = false) {
+    try {
+        const db   = await getDb()
+        const idea = await db.collection(COLLECTION).findOne({ id })
+        if (!idea) return { ok: false, reason: 'not_found' }
+        if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+        return { ok: true, idea: _strip(idea) }
+    } catch (err) {
+        logger.error(LOG, 'Failed to get idea by id', err)
         return { ok: false, error: err }
     }
 }

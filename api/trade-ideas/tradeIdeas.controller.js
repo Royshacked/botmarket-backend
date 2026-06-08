@@ -3,6 +3,23 @@ import { logger } from '../../services/logger.service.js'
 
 const LOG = '[tradeIdeas:controller]'
 
+export async function getTradeIdea(req, res) {
+    try {
+        const { id } = req.params
+        if (!id) return res.status(400).send({ err: 'Missing id' })
+        const result = await ideaService.getIdeaById(id, req.user._id, req.user.isAdmin)
+        if (!result.ok) {
+            if (result.reason === 'not_found') return res.status(404).send({ err: 'Idea not found' })
+            if (result.reason === 'forbidden') return res.status(403).send({ err: 'Forbidden' })
+            return res.status(500).send({ err: 'Failed to get idea' })
+        }
+        res.send({ idea: result.idea })
+    } catch (err) {
+        logger.error(LOG, 'getTradeIdea failed', err)
+        res.status(500).send({ err: 'Failed to get trade idea' })
+    }
+}
+
 export async function createTradeIdea(req, res) {
     try {
         const body = req.body ?? {}

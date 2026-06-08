@@ -5,7 +5,10 @@
  * Env var required: CHART_IMG_API_KEY
  */
 
+import YahooFinance from 'yahoo-finance2'
 import { logger } from '../services/logger.service.js'
+
+const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] })
 
 const LOG     = '[chartImg.provider]'
 const API_URL = 'https://api.chart-img.com/v2/tradingview/advanced-chart'
@@ -31,7 +34,7 @@ export async function fetchChartImage(symbol, timeframe, studies = []) {
     const apiKey = process.env.CHART_IMG_API_KEY
     if (!apiKey) throw new Error('CHART_IMG_API_KEY is not set')
 
-    const tvSymbol = toTVSymbol(symbol)
+    const tvSymbol = await toTVSymbol(symbol)
     const interval = TF_MAP[timeframe] ?? '1D'
 
     logger.info(LOG, `Fetching chart: ${tvSymbol} / ${interval} (${studies.length} studies)`)
@@ -63,15 +66,42 @@ export async function fetchChartImage(symbol, timeframe, studies = []) {
     return Buffer.from(buffer).toString('base64')
 }
 
+// Yahoo Finance exchange code → TradingView prefix
+const YAHOO_TO_TV = {
+    NMS: 'NASDAQ',  // NASDAQ Global Select Market
+    NGM: 'NASDAQ',  // NASDAQ Global Market
+    NCM: 'NASDAQ',  // NASDAQ Capital Market
+    NYQ: 'NYSE',    // New York Stock Exchange
+    PCX: 'AMEX',    // NYSE ARCA (chart-img uses AMEX)
+    ASE: 'AMEX',    // American Stock Exchange
+    BTS: 'CBOE',    // BATS/CBOE
+}
+
+const _tvCache = new Map()
+
 /**
  * Convert an internal ticker to TradingView exchange:symbol format.
- * Heuristic: USDT/USDC suffix → BINANCE, everything else → NASDAQ.
+ * Looks up the real exchange via Yahoo Finance and caches the result.
  *
  * @param {string} symbol  e.g. 'AAPL', 'BTCUSDT'
- * @returns {string}       e.g. 'NASDAQ:AAPL', 'BINANCE:BTCUSDT'
+ * @returns {Promise<string>}  e.g. 'NASDAQ:AAPL', 'AMEX:SPY', 'BINANCE:BTCUSDT'
  */
-export function toTVSymbol(symbol) {
+export async function toTVSymbol(symbol) {
     if (!symbol) return 'NASDAQ:SPY'
-    if (/USDT$|USDC$/i.test(symbol)) return `BINANCE:${symbol.toUpperCase()}`
-    return `NASDAQ:${symbol.toUpperCase()}`
+    const upper = symbol.toUpperCase()
+    if (/USDT$|USDC$/i.test(upper)) return `BINANCE:${upper}`
+    if (_tvCache.has(upper)) return _tvCache.get(upper)
+
+    try {
+        const q  = await yf.quote(upper)
+        const tv = YAHOO_TO_TV[q.exchange] ?? 'NASDAQ'
+        const result = `${tv}:${upper}`
+        _tvCache.set(upper, result)
+        logger.info(LOG, `Exchange resolved: ${upper} → ${result} (Yahoo: ${q.exchange})`)
+        return result
+    } catch {
+        const fallback = `NASDAQ:${upper}`
+        _tvCache.set(upper, fallback)
+        return fallback
+    }
 }
