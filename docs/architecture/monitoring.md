@@ -25,7 +25,7 @@ monitorService.start()
     └── setInterval(_tick, 60s)  +  immediate first tick
               │
               ▼
-         getDb().find({ status: 'active' })    ← MongoDB ideas collection
+         getDb().find({ status: { $in: ['looking', 'long', 'short'] } })
               │
               ▼
          for each idea (sequential, not parallel):
@@ -33,18 +33,22 @@ monitorService.start()
               ├── check gap?   (time since last check < timeframe gap)
               │       └── yes → skip
               │
-              ├── getCandles(asset, timeframe, 60)   ← Massive/Polygon
+              ├── market closed + intraday equity?  →  skip
+              │   (crypto USDT/USDC pairs run 24/7 — always evaluated)
               │
-              ├── monitorPhase === 'entry'?
+              ├── getCandles(asset, timeframe, 300)   ← ohlcv.provider → priceService
+              │   (separate timeframes for entry / stop / TP)
+              │
+              ├── status === 'looking' (entry phase):
               │       └── evaluateConditions(entry_conditions, 'AND')
-              │               └── triggered?  →  patch: monitorPhase='position'
+              │               └── triggered?  →  patch: status='hit', entryTriggeredAt=now
               │
-              └── monitorPhase === 'position'?
+              └── status === 'long' | 'short' (position phase):
                       ├── evaluateConditions(stop_conditions, 'OR')
-                      │       └── triggered?  →  patch: status='closed', closedReason='stop'
+                      │       └── triggered?  →  patch: status='closed', closedReason='stop', closedAt=now
                       │
                       └── evaluateConditions(tp_conditions, 'OR')
-                              └── triggered?  →  patch: status='closed', closedReason='tp'
+                              └── triggered?  →  patch: status='closed', closedReason='tp', closedAt=now
 ```
 
 ---
@@ -56,11 +60,14 @@ since its last check. The gap is determined by the idea's `timeframe` field.
 
 | Timeframe | Check gap |
 |---|---|
-| `minutes` | 5 min |
-| `hours` | 60 min |
-| `daily` | 4 h |
-| `weekly` | 24 h |
-| `monthly` | 24 h |
+| `5min` | 5 min |
+| `15min` | 15 min |
+| `30min` | 30 min |
+| `1hr` | 1 hr |
+| `4hr` | 4 hrs |
+| `day` | 4 hrs |
+| `week` | 24 hrs |
+| `month` | 24 hrs |
 
 Gaps are tracked in-memory (`Map<ideaId, lastCheckedTimestamp>`). They reset on server restart —
 acceptable for MVP; a restart just means slightly more eager checks on the next tick.
@@ -69,14 +76,18 @@ acceptable for MVP; a restart just means slightly more eager checks on the next 
 
 ## Idea phases
 
-Each active idea has a `monitorPhase` field (`'entry'` by default):
+The idea `status` field drives which phase is active:
 
 ```
-status: 'active'   monitorPhase: 'entry'
+status: 'looking'                            ← Initial (entry phase)
     │
     │  entry_conditions AND-chain passes
     ▼
-status: 'active'   monitorPhase: 'position'   entryTriggeredAt: <ms>
+status: 'hit'      entryTriggeredAt: <ms>    ← Alert sent; user confirms order
+    │
+    │  user patches status after order fills
+    ▼
+status: 'long' | 'short'                     ← Active position
     │
     │  stop_conditions OR  →  status: 'closed', closedReason: 'stop', closedAt: <ms>
     │  tp_conditions   OR  →  status: 'closed', closedReason: 'tp',   closedAt: <ms>
@@ -86,7 +97,6 @@ Fields added to idea documents (all optional, non-destructive):
 
 | Field | Type | Set when |
 |---|---|---|
-| `monitorPhase` | `'entry' \| 'position'` | Entry conditions trigger |
 | `entryTriggeredAt` | ms timestamp | Entry conditions trigger |
 | `closedReason` | `'stop' \| 'tp'` | Position closes |
 | `closedAt` | ms timestamp | Position closes |
@@ -101,7 +111,7 @@ Fields added to idea documents (all optional, non-destructive):
 
 ```
 conditions sorted by cost:
-  structured (cost 0) → news (cost 1) → visual (cost 2)
+  structured (cost 0) → indicator (cost 1) → news (cost 2) → chart (cost 3)
       │
       ▼
   eval cheapest first; bail immediately on first failure
@@ -111,23 +121,50 @@ conditions sorted by cost:
   any fail? → { triggered: false }  (skip remaining)
 ```
 
-Cost ordering ensures expensive LLM calls (visual, news) are only made when cheap
+Cost ordering ensures expensive LLM calls (indicator, news, chart) are only made when cheap
 structured checks have already passed.
 
-### OR (stop / TP conditions) — Parallel short-circuit
+### OR (stop / TP conditions) — Sequential short-circuit
 
 ```
-all conditions evaluated in parallel (Promise.all)
+conditions sorted by cost; evaluated sequentially
     │
     ▼
-any pass? → { triggered: true, which: conditionText }
-all fail? → { triggered: false }
+first pass? → { triggered: true, which: conditionText }
+all fail?   → { triggered: false }
+```
+
+### Condition tree format
+
+The orchestrator also supports a nested tree format (`entry_condition_tree`, `stop_condition_tree`, etc.)
+that allows AND/OR nesting at arbitrary depth. Both formats work:
+
+```js
+// Flat array (legacy):
+entry_conditions: [
+    { condition: "RSI(14) below 30", type: "structured" },
+    { condition: "volume spike", type: "indicator" },
+]
+
+// Nested tree (new):
+entry_condition_tree: {
+    logic: "AND",
+    children: [
+        { condition: "RSI(14) below 30", type: "structured" },
+        {
+            logic: "OR",
+            children: [
+                { condition: "volume spike", type: "indicator" },
+                { condition: "Fed rate cut announced", type: "news" },
+            ]
+        }
+    ]
+}
 ```
 
 ### Legacy compatibility
 
-Old ideas (saved before the `{ condition, type }` object format) stored plain strings.
-The orchestrator normalises both formats:
+Old ideas stored conditions as plain strings. The orchestrator normalises both:
 
 ```js
 // New format:
@@ -178,13 +215,16 @@ structured.evaluator.js  →  pure math, no I/O
 
 **`confirmation`:** number of consecutive candles that must all satisfy the condition (0 = current bar only).
 
-### 2. Visual (`type: 'visual'`)
+### 2. Indicator (`type: 'indicator'`)
+
+Formerly `type: 'visual'` — `visual.evaluator.js` is now a legacy alias for `indicator.evaluator.js`.
 
 ```
 conditionText  (e.g. "bullish engulfing on last two candles")
     │
     ▼
 Last 20 candles → formatted as OHLCV text table
+Pre-computed indicators included: RSI(14), EMA(20,50), SMA(20,50,200), MACD, ATR(14)
     │
     ▼
 Claude Haiku: "YES or NO — is this condition present in the price action?"
@@ -193,10 +233,24 @@ Claude Haiku: "YES or NO — is this condition present in the price action?"
 pass = response starts with 'Y'
 ```
 
-**Upgrade path:** swap `_candleTable()` for a chart screenshot → feed to a vision model.
-The evaluator interface stays identical.
+### 3. Chart (`type: 'chart'`)
 
-### 3. News (`type: 'news'`)
+```
+conditionText  (e.g. "double top pattern forming")
+    │
+    ▼
+Chart screenshot (future: visual capture of price chart)
+    │
+    ▼
+Claude Sonnet vision model: "YES or NO — does this chart show the pattern?"
+    │
+    ▼
+pass = response starts with 'Y'
+```
+
+Cost: 3 (most expensive — uses a vision-capable model).
+
+### 4. News (`type: 'news'`)
 
 ```
 conditionText  (e.g. "Fed announces rate cut")
@@ -225,7 +279,8 @@ Isolated in `monitor.claude.js` — separate from the trade agent's Anthropic cl
 | Function | Used by | max_tokens | Purpose |
 |---|---|---|---|
 | `claudeJSON()` | condition.parser | 512 | Parse NL condition → JSON schema |
-| `claudeText()` | visual.evaluator, news.evaluator | 64 | YES/NO questions |
+| `claudeText()` | indicator.evaluator, news.evaluator | 64 | YES/NO questions |
+| `claudeVision()` | chart.evaluator | 64 | YES/NO on chart screenshot (claude-sonnet-4-6) |
 
 **Condition parse cache:** `Map<normalizedText, ParsedCondition>` — in-memory, process lifetime.
 Same condition string is only parsed once regardless of how many ideas use it.
@@ -245,13 +300,16 @@ monitoring/
 
   evaluators/
     structured.evaluator.js   Pure math evaluation + all indicator calculations
-    visual.evaluator.js       Candle table → Claude Haiku YES/NO
+    indicator.evaluator.js    Candle table + pre-computed indicators → Claude Haiku YES/NO
+    visual.evaluator.js       Legacy alias for indicator.evaluator.js
     news.evaluator.js         GNews headlines → Claude Haiku YES/NO
+    chart.evaluator.js        Chart screenshot → Claude vision YES/NO
 
   providers/
     ohlcv.provider.js         Thin wrapper around priceService; normalises to {t,o,h,l,c,v}
 
   test.monitor.js             8-section smoke test (run: node monitoring/test.monitor.js)
+  test.tree.js                Condition tree evaluator smoke test
 ```
 
 ---

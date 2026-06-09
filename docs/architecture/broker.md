@@ -95,7 +95,9 @@ The callback route is unauthenticated — user identity comes from `state`.
 | `GET` | `/api/broker/callback` | ❌ | OAuth callback (all brokers) |
 | `GET` | `/api/broker/connections` | ✅ | List user's connections |
 | `DELETE` | `/api/broker/connections/:type` | ✅ | Disconnect a broker |
-| `GET` | `/api/broker/:type/account` | ✅ | Account summary |
+| `GET` | `/api/broker/:type/trading-accounts` | ✅ | List all trading accounts for broker |
+| `PATCH` | `/api/broker/connections/:type/account` | ✅ | Select primary account |
+| `GET` | `/api/broker/:type/account` | ✅ | Account summary (uses cached accountId) |
 | `GET` | `/api/broker/:type/positions` | ✅ | Open positions |
 
 ---
@@ -113,6 +115,7 @@ Every adapter must implement:
 | `isConnected(userId)` | `Promise<boolean>` | Has a valid refresh token |
 | `getAccount(userId)` | `Promise<BrokerAccount>` | Normalised account summary |
 | `getPositions(userId)` | `Promise<BrokerPosition[]>` | Open positions |
+| `getTradingAccounts(userId)` | `Promise<TradingAccount[]>` | All accounts for the broker |
 | `getCandles(symbol, timeframe, count, userId)` | `Promise<OHLCVBar[] \| null>` | `null` = unsupported |
 
 ---
@@ -158,6 +161,19 @@ Every adapter must implement:
 ```js
 { t: number, o: number, h: number, l: number, c: number, v: number }
 // t = unix ms
+```
+
+### TradingAccount
+
+```js
+{
+  id:       string,
+  login:    string | null,
+  currency: string | null,
+  balance:  number | null,
+  broker:   string | null,
+  isLive:   boolean,
+}
 ```
 
 ---
