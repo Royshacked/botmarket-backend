@@ -26,7 +26,8 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3041/news-feed/)",
       "Bash(kill 703)",
       "Skill(code-review)",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(xargs grep -l \"Schema\\\\|model\\\\|collection\")"
     ]
   }
 }

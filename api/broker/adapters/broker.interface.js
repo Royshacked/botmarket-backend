@@ -40,6 +40,14 @@
  * @property {number} l   low
  * @property {number} c   close
  * @property {number} v   volume
+ *
+ * @typedef {Object} TradingAccount
+ * @property {string}      id
+ * @property {string|null} login
+ * @property {string|null} currency
+ * @property {number|null} balance
+ * @property {string|null} broker
+ * @property {boolean}     isLive
  */
 
 export class BrokerAdapter {
@@ -106,5 +114,15 @@ export class BrokerAdapter {
     // eslint-disable-next-line no-unused-vars
     async getCandles(symbol, timeframe, count, userId) {
         return null   // default: unsupported, caller falls back to Massive
+    }
+
+    /**
+     * Return all trading accounts for this user.
+     * @param {string} userId
+     * @returns {Promise<TradingAccount[]>}
+     */
+    // eslint-disable-next-line no-unused-vars
+    async getTradingAccounts(userId) {
+        throw new Error(`${this.constructor.name}: getTradingAccounts() not implemented`)
     }
 }

@@ -54,6 +54,15 @@ export class CTraderAdapter extends BrokerAdapter {
         return list.map(_normalisePosition)
     }
 
+    // ── Trading accounts ───────────────────────────────────────────────────────
+
+    async getTradingAccounts(userId) {
+        const tokens = await this._freshTokens(userId)
+        const raw    = await ctrader.get('/tradingaccounts', tokens)
+        const list   = Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : []
+        return list.map(_normaliseTradingAccount)
+    }
+
     // ── Candles — not supported via REST ──────────────────────────────────────
     // Returns null → caller falls back to Massive/Polygon
     async getCandles() { return null }
@@ -122,6 +131,17 @@ function _normalisePosition(raw) {
         pnlPips:      _num(raw.pnlPips),
         swap:         _num(raw.swap),
         openedAt:     raw.openTimestamp ?? raw.createTimestamp,
+    }
+}
+
+function _normaliseTradingAccount(raw) {
+    return {
+        id:       String(raw.id ?? raw.accountId ?? ''),
+        login:    raw.traderLogin ?? raw.login ?? raw.accountNumber ?? null,
+        currency: raw.depositCurrency ?? raw.currency ?? null,
+        balance:  _num(raw.balance),
+        broker:   raw.brokerName ?? raw.broker ?? null,
+        isLive:   !!(raw.isLive ?? !raw.isDemo),
     }
 }
 

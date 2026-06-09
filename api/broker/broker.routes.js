@@ -98,6 +98,32 @@ brokerRoutes.delete('/connections/:type', requireAuth, async (req, res) => {
 
 // ─── Per-broker account data ──────────────────────────────────────────────────
 
+// ─── Trading accounts ─────────────────────────────────────────────────────────
+
+brokerRoutes.get('/:type/trading-accounts', requireAuth, async (req, res) => {
+    try {
+        const data = await brokerService.getTradingAccounts(req.params.type, req.user._id)
+        res.json(data)
+    } catch (err) {
+        logger.error(LOG, `getTradingAccounts (${req.params.type}):`, err.message)
+        res.status(err.status ?? 500).json({ error: err.message })
+    }
+})
+
+brokerRoutes.patch('/connections/:type/account', requireAuth, async (req, res) => {
+    try {
+        const { accountId } = req.body
+        if (!accountId) return res.status(400).json({ error: 'accountId required' })
+        await brokerService.setSelectedAccount(req.params.type, req.user._id, accountId)
+        res.json({ ok: true })
+    } catch (err) {
+        logger.error(LOG, `setSelectedAccount (${req.params.type}):`, err.message)
+        res.status(err.status ?? 500).json({ error: err.message })
+    }
+})
+
+// ─── Per-broker account data ──────────────────────────────────────────────────
+
 brokerRoutes.get('/:type/account', requireAuth, async (req, res) => {
     try {
         const account = await brokerService.getAccount(req.params.type, req.user._id)

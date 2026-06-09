@@ -23,6 +23,8 @@ export const brokerService = {
     getAccount,
     getPositions,
     getCandles,
+    getTradingAccounts,
+    setSelectedAccount,
     disconnect,
 }
 
@@ -111,6 +113,33 @@ async function getPositions(brokerType, userId) {
  */
 async function getCandles(brokerType, symbol, timeframe, count, userId) {
     return getBrokerAdapter(brokerType).getCandles(symbol, timeframe, count, userId)
+}
+
+// ─── Trading accounts ─────────────────────────────────────────────────────────
+
+/**
+ * Return all trading accounts for the user + which one is currently selected.
+ * @param {string} brokerType
+ * @param {string} userId
+ * @returns {Promise<{ accounts: TradingAccount[], selectedAccountId: string|null }>}
+ */
+async function getTradingAccounts(brokerType, userId) {
+    const [accounts, selectedAccountId] = await Promise.all([
+        getBrokerAdapter(brokerType).getTradingAccounts(userId),
+        brokerConnectionService.getAccountId(userId, brokerType),
+    ])
+    return { accounts, selectedAccountId }
+}
+
+/**
+ * Persist the user's chosen trading account for a broker.
+ * @param {string} brokerType
+ * @param {string} userId
+ * @param {string} accountId
+ */
+async function setSelectedAccount(brokerType, userId, accountId) {
+    await brokerConnectionService.setAccountId(userId, brokerType, accountId)
+    logger.info(LOG, `${brokerType} selected account → ${accountId} for user ${userId}`)
 }
 
 // ─── Disconnect ───────────────────────────────────────────────────────────────

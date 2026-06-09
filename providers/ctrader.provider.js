@@ -8,9 +8,9 @@
  * App registration: https://openapi.ctrader.com/apps
  *
  * Required env vars:
- *   CTRADER_CLIENTID
- *   CTRADER_SECRET
- *   CTRADER_REDIRECT_URI   e.g. http://localhost:3030/api/broker/callback
+ *   CTRADER_CLIENTID      numeric App ID from the portal (e.g. 29413)
+ *   CTRADER_SECRET        Client Secret from the portal
+ *   CTRADER_REDIRECT_URI  e.g. http://localhost:3030/api/broker/callback
  */
 
 import https from 'https'
@@ -18,9 +18,10 @@ import { logger } from '../services/logger.service.js'
 
 const LOG = '[ctrader.provider]'
 
-const BASE_URL   = 'https://api.spotware.com/connect'
-const AUTH_HOST  = 'connect.spotware.com'
-const TOKEN_PATH = '/apps/token'
+const BASE_URL    = 'https://api.spotware.com/connect'
+const TOKEN_HOST  = 'openapi.ctrader.com'
+const TOKEN_PATH  = '/apps/token'
+const AUTH_BASE   = 'https://id.ctrader.com/my/settings/openapi/grantingaccess/'
 
 // ─── OAuth URLs ───────────────────────────────────────────────────────────────
 
@@ -30,13 +31,14 @@ const TOKEN_PATH = '/apps/token'
  * @returns {string}
  */
 export function getAuthUrl(state) {
-    const clientId    = process.env.CTRADER_CLIENTID
+    const clientId    = process.env.CTRADER_CLIENTID ?? ''
     const redirectUri = encodeURIComponent(process.env.CTRADER_REDIRECT_URI ?? '')
     const stateParam  = state ? `&state=${encodeURIComponent(state)}` : ''
     return (
-        `https://${AUTH_HOST}/apps/${clientId}/auth` +
-        `?scope=trading` +
+        `${AUTH_BASE}` +
+        `?client_id=${clientId}` +
         `&redirect_uri=${redirectUri}` +
+        `&scope=trading` +
         stateParam
     )
 }
@@ -48,15 +50,15 @@ export function getAuthUrl(state) {
  * @returns {Promise<{ accessToken: string, refreshToken: string, expiresIn: number }>}
  */
 export async function exchangeCode(code) {
-    const body = new URLSearchParams({
+    const params = new URLSearchParams({
         grant_type:    'authorization_code',
         code,
         redirect_uri:  process.env.CTRADER_REDIRECT_URI ?? '',
-        client_id:     process.env.CTRADER_CLIENTID     ?? '',
-        client_secret: process.env.CTRADER_SECRET       ?? '',
-    }).toString()
+        client_id:     process.env.CTRADER_CLIENTID ?? '',
+        client_secret: process.env.CTRADER_SECRET ?? '',
+    })
 
-    const data = await _postForm(AUTH_HOST, TOKEN_PATH, body)
+    const data = await _getToken(params)
     logger.info(LOG, 'Tokens obtained via code exchange')
     return _normalize(data)
 }
@@ -70,14 +72,14 @@ export async function exchangeCode(code) {
 export async function refreshTokens({ refreshToken }) {
     if (!refreshToken) throw new Error('cTrader: no refresh token provided')
 
-    const body = new URLSearchParams({
+    const params = new URLSearchParams({
         grant_type:    'refresh_token',
         refresh_token: refreshToken,
         client_id:     process.env.CTRADER_CLIENTID ?? '',
-        client_secret: process.env.CTRADER_SECRET   ?? '',
-    }).toString()
+        client_secret: process.env.CTRADER_SECRET ?? '',
+    })
 
-    const data = await _postForm(AUTH_HOST, TOKEN_PATH, body)
+    const data = await _getToken(params)
     logger.info(LOG, 'Access token refreshed')
     return _normalize(data)
 }
@@ -105,9 +107,39 @@ function _normalize(data) {
     }
 }
 
+/** Token endpoint now uses GET with query params (openapi.ctrader.com). */
+function _getToken(params) {
+    return new Promise((resolve, reject) => {
+        const options = {
+            hostname: TOKEN_HOST,
+            path:     `${TOKEN_PATH}?${params.toString()}`,
+            method:   'GET',
+            headers:  { 'Accept': 'application/json' },
+        }
+        https.request(options, (res) => {
+            let raw = ''
+            res.on('data', chunk => { raw += chunk })
+            res.on('end', () => {
+                try {
+                    const data = JSON.parse(raw)
+                    if (res.statusCode >= 400) {
+                        const err = new Error(`cTrader OAuth ${res.statusCode}: ${data?.errorCode ?? data?.error_description ?? raw}`)
+                        err.status = res.statusCode
+                        return reject(err)
+                    }
+                    resolve(data)
+                } catch (e) {
+                    reject(new Error(`OAuth JSON parse error: ${e.message}`))
+                }
+            })
+        }).on('error', reject).end()
+    })
+}
+
 function _request(method, url, token) {
     return new Promise((resolve, reject) => {
-        const parsed  = new URL(url)
+        const parsed = new URL(url)
+        parsed.searchParams.set('oauth_token', token)
         const options = {
             hostname: parsed.hostname,
             path:     parsed.pathname + parsed.search,
@@ -134,39 +166,5 @@ function _request(method, url, token) {
                 }
             })
         }).on('error', reject).end()
-    })
-}
-
-function _postForm(hostname, path, body) {
-    return new Promise((resolve, reject) => {
-        const options = {
-            hostname,
-            path,
-            method: 'POST',
-            headers: {
-                'Content-Type':   'application/x-www-form-urlencoded',
-                'Content-Length': Buffer.byteLength(body),
-            },
-        }
-        const req = https.request(options, (res) => {
-            let raw = ''
-            res.on('data', chunk => { raw += chunk })
-            res.on('end', () => {
-                try {
-                    const data = JSON.parse(raw)
-                    if (res.statusCode >= 400) {
-                        const err = new Error(`cTrader OAuth ${res.statusCode}: ${data?.error_description ?? raw}`)
-                        err.status = res.statusCode
-                        return reject(err)
-                    }
-                    resolve(data)
-                } catch (e) {
-                    reject(new Error(`OAuth JSON parse error: ${e.message}`))
-                }
-            })
-        })
-        req.on('error', reject)
-        req.write(body)
-        req.end()
     })
 }

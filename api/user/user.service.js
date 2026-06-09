@@ -1,4 +1,4 @@
-import bcrypt from 'bcrypt'
+import bcrypt from 'bcryptjs'
 import { getDb } from '../../providers/mongodb.provider.js'
 import { COLLECTION, stripUser } from './user.model.js'
 import { logger } from '../../services/logger.service.js'

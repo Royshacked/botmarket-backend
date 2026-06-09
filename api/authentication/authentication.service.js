@@ -1,4 +1,4 @@
-import bcrypt from 'bcrypt'
+import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { getDb } from '../../providers/mongodb.provider.js'
 import { COLLECTION, stripUser } from '../user/user.model.js'
