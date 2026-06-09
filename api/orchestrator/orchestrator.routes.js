@@ -1,14 +1,11 @@
 import express from 'express'
 
-import { log } from '../../middleware/logger.middleware.js'
-
+import { log }         from '../../middleware/logger.middleware.js'
+import { requireAuth } from '../../middleware/auth.middleware.js'
 import { getOrchestration, streamOrchestration } from './orchestrator.controller.js'
 
 const router = express.Router()
 
-// We can add a middleware for the entire router:
-// router.use(requireAuth)
-
-router.post('/',       log, getOrchestration)
-router.post('/stream', log, streamOrchestration)
+router.post('/',       log, requireAuth, getOrchestration)
+router.post('/stream', log, requireAuth, streamOrchestration)
 export const orchestratorRoutes = router

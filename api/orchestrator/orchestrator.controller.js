@@ -1,5 +1,6 @@
-import { logger } from '../../services/logger.service.js'
+import { logger }           from '../../services/logger.service.js'
 import { tradeAgentService } from '../../services/trade.agent.service.js'
+import { brokerService }     from '../broker/broker.service.js'
 
 const LOG = '[orchestrator:controller]'
 
@@ -23,11 +24,13 @@ export async function streamOrchestration(req, res) {
     }
 
     try {
+        const brokerContext = await _loadBrokerContext(req.user._id)
+
         const result = await tradeAgentService.chatStream({
             messages:      parsed.messages,
             userPrompt:    parsed.userPrompt,
             analysisState: parsed.analysisState ?? _emptyState(),
-            brokerContext: parsed.brokerContext ?? null,
+            brokerContext,
             onToken:       (text)   => sendEvent('token',  { text }),
             onAsset:       (symbol) => sendEvent('asset', { symbol }),
         })
@@ -53,11 +56,13 @@ export async function getOrchestration(req, res) {
             return res.status(400).send({ err: parsed.error })
         }
 
+        const brokerContext = await _loadBrokerContext(req.user._id)
+
         const result = await tradeAgentService.chat({
             messages:      parsed.messages,
             userPrompt:    parsed.userPrompt,
             analysisState: parsed.analysisState ?? _emptyState(),
-            brokerContext: parsed.brokerContext ?? null,
+            brokerContext,
         })
 
         res.send(result)
@@ -66,6 +71,27 @@ export async function getOrchestration(req, res) {
         logger.error('Failed to run orchestration', err)
         res.status(500).send({ err: 'Failed to run orchestration' })
     }
+}
+
+async function _loadBrokerContext(userId) {
+    try {
+        const connections = await brokerService.listConnections(userId)
+        const entries = await Promise.all(
+            Object.entries(connections)
+                .filter(([, connected]) => connected)
+                .map(async ([type]) => {
+                    try {
+                        const account = await brokerService.getAccount(type, userId)
+                        let positions = []
+                        try {
+                            positions = await brokerService.getPositions(type, userId)
+                        } catch { /* positions not available via REST — leave empty */ }
+                        return [type, { account, positions }]
+                    } catch { return null }
+                })
+        )
+        return Object.fromEntries(entries.filter(Boolean))
+    } catch { return {} }
 }
 
 function _emptyState() {
@@ -90,7 +116,7 @@ function _emptyState() {
 }
 
 function parseOrchestratorBody(body) {
-    const { messages, userPrompt, analysisState, brokerContext } = body ?? {}
+    const { messages, userPrompt, analysisState } = body ?? {}
     const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
 
     let priorState = null
@@ -107,7 +133,7 @@ function parseOrchestratorBody(body) {
         }
         if (messages.length === 0) {
             if (trimmedPrompt) {
-                return { userPrompt: trimmedPrompt, analysisState: priorState, brokerContext }
+                return { userPrompt: trimmedPrompt, analysisState: priorState }
             }
             return { error: 'messages must be a non-empty array' }
         }
@@ -133,12 +159,11 @@ function parseOrchestratorBody(body) {
             userPrompt:    trimmedPrompt || undefined,
             messages:      trimmed,
             analysisState: priorState,
-            brokerContext,
         }
     }
 
     if (trimmedPrompt) {
-        return { userPrompt: trimmedPrompt, analysisState: priorState, brokerContext }
+        return { userPrompt: trimmedPrompt, analysisState: priorState }
     }
 
     return { error: 'Request must include messages or userPrompt' }
