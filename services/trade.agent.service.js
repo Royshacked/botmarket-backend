@@ -97,8 +97,8 @@ export const tradeAgentService = {
     chatStream,
 }
 
-async function chat({ messages, userPrompt, analysisState = _emptyState() }) {
-    const systemPrompt = _buildSystemPrompt(analysisState)
+async function chat({ messages, userPrompt, analysisState = _emptyState(), brokerContext = null }) {
+    const systemPrompt = _buildSystemPrompt(analysisState, brokerContext)
     const builtMessages = _buildMessages({ messages, userPrompt, analysisState })
 
     logger.info(LOG, 'chat start', {
@@ -126,8 +126,8 @@ async function chat({ messages, userPrompt, analysisState = _emptyState() }) {
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = _emptyState(), onToken, onAsset }) {
-    const systemPrompt   = _buildSystemPrompt(analysisState)
+async function chatStream({ messages, userPrompt, analysisState = _emptyState(), brokerContext = null, onToken, onAsset }) {
+    const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext)
     const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
 
     logger.info(LOG, 'chatStream start', {
@@ -157,7 +157,7 @@ async function chatStream({ messages, userPrompt, analysisState = _emptyState(),
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-function _buildSystemPrompt(analysisState) {
+function _buildSystemPrompt(analysisState, brokerContext) {
     const asset   = analysisState?.structured_state?.active_asset || 'none'
     const summary = analysisState?.recent_chat_summary || 'No prior context.'
     const pt      = analysisState?.structured_state?.pending_trade
@@ -173,7 +173,33 @@ function _buildSystemPrompt(analysisState) {
 ---
 CONVERSATION CONTEXT:
 ${summary}
-Active asset: ${asset}${stateSection}`
+Active asset: ${asset}${stateSection}${_buildBrokerSection(brokerContext)}`
+}
+
+function _buildBrokerSection(brokerContext) {
+    if (!brokerContext || typeof brokerContext !== 'object') return ''
+    const entries = Object.entries(brokerContext).filter(([, d]) => d?.account)
+    if (entries.length === 0) return ''
+
+    const lines = entries.map(([type, { account, positions }]) => {
+        const cur  = account.currency || ''
+        const fmt  = (v) => v != null ? `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'
+        const pct  = (v) => v != null ? `${Number(v).toFixed(0)}%` : '—'
+        let line = `${type} (${cur}): Balance ${fmt(account.balance)} | Equity ${fmt(account.equity)} | Free margin ${fmt(account.freeMargin)} | Margin level ${pct(account.marginLevel)}`
+
+        if (Array.isArray(positions) && positions.length > 0) {
+            const pos = positions.map(p => {
+                const pnl = p.pnl != null ? ` P&L: ${p.pnl >= 0 ? '+' : ''}${fmt(p.pnl)}` : ''
+                return `  - ${p.symbol} ${p.direction} ${p.volume ?? '?'} @ ${p.entryPrice ?? '?'}${pnl}`
+            }).join('\n')
+            line += `\n  Open positions:\n${pos}`
+        } else {
+            line += '\n  No open positions'
+        }
+        return line
+    })
+
+    return `\n\nBROKER ACCOUNT:\n${lines.join('\n\n')}`
 }
 
 function _buildMessages({ messages, userPrompt, analysisState }) {

@@ -23,6 +23,12 @@ const TOKEN_HOST  = 'openapi.ctrader.com'
 const TOKEN_PATH  = '/apps/token'
 const AUTH_BASE   = 'https://id.ctrader.com/my/settings/openapi/grantingaccess/'
 
+function _redirectUri() {
+    return process.env.NODE_ENV === 'production'
+        ? (process.env.CTRADER_REDIRECT_URL_PROD ?? '')
+        : (process.env.CTRADER_REDIRECT_URI ?? '')
+}
+
 // ─── OAuth URLs ───────────────────────────────────────────────────────────────
 
 /**
@@ -32,7 +38,7 @@ const AUTH_BASE   = 'https://id.ctrader.com/my/settings/openapi/grantingaccess/'
  */
 export function getAuthUrl(state) {
     const clientId    = process.env.CTRADER_CLIENTID ?? ''
-    const redirectUri = encodeURIComponent(process.env.CTRADER_REDIRECT_URI ?? '')
+    const redirectUri = encodeURIComponent(_redirectUri())
     const stateParam  = state ? `&state=${encodeURIComponent(state)}` : ''
     return (
         `${AUTH_BASE}` +
@@ -53,7 +59,7 @@ export async function exchangeCode(code) {
     const params = new URLSearchParams({
         grant_type:    'authorization_code',
         code,
-        redirect_uri:  process.env.CTRADER_REDIRECT_URI ?? '',
+        redirect_uri:  _redirectUri(),
         client_id:     process.env.CTRADER_CLIENTID ?? '',
         client_secret: process.env.CTRADER_SECRET ?? '',
     })

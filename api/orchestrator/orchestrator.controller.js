@@ -27,6 +27,7 @@ export async function streamOrchestration(req, res) {
             messages:      parsed.messages,
             userPrompt:    parsed.userPrompt,
             analysisState: parsed.analysisState ?? _emptyState(),
+            brokerContext: parsed.brokerContext ?? null,
             onToken:       (text)   => sendEvent('token',  { text }),
             onAsset:       (symbol) => sendEvent('asset', { symbol }),
         })
@@ -53,9 +54,10 @@ export async function getOrchestration(req, res) {
         }
 
         const result = await tradeAgentService.chat({
-            messages: parsed.messages,
-            userPrompt: parsed.userPrompt,
+            messages:      parsed.messages,
+            userPrompt:    parsed.userPrompt,
             analysisState: parsed.analysisState ?? _emptyState(),
+            brokerContext: parsed.brokerContext ?? null,
         })
 
         res.send(result)
@@ -88,7 +90,7 @@ function _emptyState() {
 }
 
 function parseOrchestratorBody(body) {
-    const { messages, userPrompt, analysisState } = body ?? {}
+    const { messages, userPrompt, analysisState, brokerContext } = body ?? {}
     const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
 
     let priorState = null
@@ -105,7 +107,7 @@ function parseOrchestratorBody(body) {
         }
         if (messages.length === 0) {
             if (trimmedPrompt) {
-                return { userPrompt: trimmedPrompt, analysisState: priorState }
+                return { userPrompt: trimmedPrompt, analysisState: priorState, brokerContext }
             }
             return { error: 'messages must be a non-empty array' }
         }
@@ -128,14 +130,15 @@ function parseOrchestratorBody(body) {
 
         const trimmed = normalized.slice(-MAX_RECENT_CHAT_TURNS * 2)
         return {
-            userPrompt: trimmedPrompt || undefined,
-            messages: trimmed,
+            userPrompt:    trimmedPrompt || undefined,
+            messages:      trimmed,
             analysisState: priorState,
+            brokerContext,
         }
     }
 
     if (trimmedPrompt) {
-        return { userPrompt: trimmedPrompt, analysisState: priorState }
+        return { userPrompt: trimmedPrompt, analysisState: priorState, brokerContext }
     }
 
     return { error: 'Request must include messages or userPrompt' }
