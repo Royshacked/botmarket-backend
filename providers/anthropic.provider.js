@@ -10,13 +10,14 @@ const DEFAULT_MAX_CONTINUATIONS = 10
 // and <asset>…</asset> blocks so they never reach the UI.
 // Tags with an onCapture callback have their inner text captured and forwarded.
 
-function _createTagSuppressor(onToken, onAsset, onInterval, onTicker) {
+function _createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan) {
     const TAGS = [
-        { open: '<state>',      close: '</state>',      onCapture: null       },
-        { open: '<trade_idea>', close: '</trade_idea>', onCapture: null       },
-        { open: '<asset>',      close: '</asset>',      onCapture: onAsset    },
-        { open: '<interval>',   close: '</interval>',   onCapture: onInterval },
-        ...(onTicker ? [{ open: '<ticker>', close: '</ticker>', onCapture: onTicker }] : []),
+        { open: '<state>',            close: '</state>',            onCapture: null    },
+        { open: '<trade_idea>',       close: '</trade_idea>',       onCapture: null    },
+        { open: '<asset>',            close: '</asset>',            onCapture: onAsset    },
+        { open: '<interval>',         close: '</interval>',         onCapture: onInterval },
+        ...(onTicker ? [{ open: '<ticker>',          close: '</ticker>',          onCapture: onTicker }] : []),
+        ...(onPlan   ? [{ open: '<portfolio_plan>',  close: '</portfolio_plan>',  onCapture: onPlan   }] : []),
     ]
 
     let pending         = ''     // pre-tag lookahead buffer
@@ -105,9 +106,10 @@ export async function streamAnthropicWithTools({
     onAsset,
     onInterval,
     onTicker,
+    onPlan,
 }) {
     const messages   = _normalizeMessages(promptOrMessages)
-    const suppressor = _createTagSuppressor(onToken, onAsset, onInterval, onTicker)
+    const suppressor = _createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan)
 
     for (let i = 0; i < maxContinuations; i++) {
         const stream = client.messages.stream({

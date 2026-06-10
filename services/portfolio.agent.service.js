@@ -42,6 +42,8 @@ async function chatStream({ messages = [], ideaAccounts = [], onToken, onTicker 
 
     logger.info(LOG, 'chatStream start', { messageCount: normalized.length, accountCount: ideaAccounts.length })
 
+    let capturedPlan = null
+
     const raw = await streamAnthropicWithTools({
         model:            MODEL,
         promptOrMessages: normalized,
@@ -50,13 +52,18 @@ async function chatStream({ messages = [], ideaAccounts = [], onToken, onTicker 
         toolHandlers:     TOOL_HANDLERS,
         onToken,
         onTicker,
+        onPlan: (planJson) => {
+            try { capturedPlan = JSON.parse(planJson) } catch { /* malformed JSON — discard */ }
+        },
     })
 
-    // Strip any residual <ticker> tags from text (suppressor should have caught them)
-    const reply = raw.replace(/<ticker>[\s\S]*?<\/ticker>/g, '').trim()
+    const reply = raw
+        .replace(/<ticker>[\s\S]*?<\/ticker>/g, '')
+        .replace(/<portfolio_plan>[\s\S]*?<\/portfolio_plan>/g, '')
+        .trim()
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length })
-    return { reply }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan })
+    return { reply, plan: capturedPlan }
 }
 
 function _buildMessages(messages) {

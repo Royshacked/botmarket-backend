@@ -9,6 +9,7 @@ const VALID_STATUSES = new Set(['waiting', 'looking', 'hit', 'long', 'short', 'c
 
 export const ideaService = {
     saveIdea,
+    saveBatchIdeas,
     getIdeas,
     getIdeaById,
     deleteIdea,
@@ -68,6 +69,9 @@ async function saveIdea(tradeIdea, userId) {
         accounts:      Array.isArray(tradeIdea.accounts) ? tradeIdea.accounts : [],
         mainAccountId: tradeIdea.mainAccountId ?? null,
         userId:        userId               ?? null,
+        portfolioId:     tradeIdea.portfolioId     ?? undefined,
+        portfolioName:   tradeIdea.portfolioName   ?? undefined,
+        allocationRatio: tradeIdea.allocationRatio ?? undefined,
     }
 
     try {
@@ -180,6 +184,30 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         logger.error(LOG, 'Failed to update idea', err)
         return { ok: false, error: err }
     }
+}
+
+async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null) {
+    const portfolioId = `portfolio_${Date.now()}`
+    const saved = []
+
+    for (const idea of plan.ideas) {
+        const result = await saveIdea({
+            asset:           idea.asset,
+            direction:       idea.direction,
+            type:            idea.type,
+            notes:           idea.notes,
+            allocationRatio: idea.allocationRatio,
+            portfolioId,
+            portfolioName:   plan.name,
+            accounts,
+            mainAccountId,
+        }, userId)
+        if (result.ok) saved.push(result.idea)
+        else logger.warn(LOG, 'Batch idea save failed', { asset: idea.asset, error: result.error })
+    }
+
+    logger.info(LOG, 'Batch saved', { portfolioId, total: plan.ideas.length, saved: saved.length })
+    return { ok: true, ideas: saved, portfolioId }
 }
 
 // ─── Condition tree helpers ───────────────────────────────────────────────────

@@ -31,7 +31,7 @@ export async function streamPortfolio(req, res) {
             onTicker: (symbol) => sendEvent('ticker', { symbol }),
         })
 
-        sendEvent('done', { reply: result.reply })
+        sendEvent('done', { reply: result.reply, plan: result.plan ?? null })
         res.end()
     } catch (err) {
         console.error(LOG, err)

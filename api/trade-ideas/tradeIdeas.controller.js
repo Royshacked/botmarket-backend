@@ -64,6 +64,21 @@ export async function deleteTradeIdea(req, res) {
     }
 }
 
+export async function createBatchIdeas(req, res) {
+    try {
+        const { plan, accounts = [], mainAccountId = null } = req.body ?? {}
+        if (!plan?.ideas?.length) return res.status(400).send({ err: 'Missing plan.ideas' })
+
+        const result = await ideaService.saveBatchIdeas(plan, req.user._id, accounts, mainAccountId)
+        if (!result.ok) return res.status(500).send({ err: 'Failed to save batch' })
+
+        res.status(201).send({ ideas: result.ideas, portfolioId: result.portfolioId })
+    } catch (err) {
+        logger.error(LOG, 'createBatchIdeas failed', err)
+        res.status(500).send({ err: 'Failed to create batch ideas' })
+    }
+}
+
 export async function updateTradeIdea(req, res) {
     try {
         const { id } = req.params
