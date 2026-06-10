@@ -100,6 +100,10 @@ Begin EVERY response with exactly one <asset> tag on its own line, before any ot
 <asset>TICKER</asset>
 Use the active asset ticker (e.g. AAPL, SPY) or leave empty if no asset is established yet. No text before this tag.
 
+INTERVAL TAG — optional, emit when the relevant chart timeframe becomes clear:
+<interval>TIMEFRAME</interval>
+Emit this once per response when the conversation establishes a primary chart timeframe — e.g. when the user mentions a specific timeframe, or when the main entry condition has a clear timeframe. Use the same encoded strings as conditions: 1min, 5min, 15min, 30min, 1hr, 2hr, 4hr, day, week, month. Place it on its own line, anywhere after the <asset> tag. Omit it if no timeframe has been established or if the timeframe hasn't changed.
+
 STATE OUTPUT INSTRUCTIONS:
 At the end of every response, output exactly one <state> block containing updated JSON — no markdown, no explanation:
 
