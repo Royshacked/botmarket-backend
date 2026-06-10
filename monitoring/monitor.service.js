@@ -25,6 +25,7 @@
 import { getDb }                                from '../providers/mongodb.provider.js'
 import { getCandles }                           from '../providers/ohlcv.provider.js'
 import { evaluateTree, evaluateConditions }     from './monitor.orchestrator.js'
+import { brokerService }                        from '../api/broker/broker.service.js'
 import { logger }                               from '../services/logger.service.js'
 
 const LOG        = '[monitor.service]'
@@ -262,8 +263,9 @@ async function _checkEntry(db, idea, candles) {
     }
 
     if (triggered) {
-        logger.info(LOG, `✅ Entry triggered for idea ${id} (${asset}) — status → hit, awaiting order`)
+        logger.info(LOG, `✅ Entry triggered for idea ${id} (${asset}) — status → hit`)
         await _patch(db, id, { status: 'hit', entryTriggeredAt: Date.now() })
+        await _placeOrdersForIdea(idea)
     } else {
         logger.info(LOG, `⏳ Entry not triggered yet for idea ${id} (${asset})`)
     }
@@ -357,6 +359,42 @@ async function _checkAdditionalEntries(db, idea, candles) {
             )
         }
         break  // don't evaluate entry i+1 until this one is filled
+    }
+}
+
+// ─── Order placement ─────────────────────────────────────────────────────────
+
+async function _placeOrdersForIdea(idea) {
+    const { id, asset, direction, quantity, type, accounts, mainAccountId, userId } = idea
+
+    if (!Array.isArray(accounts) || accounts.length === 0) {
+        logger.info(LOG, `[${id}] No accounts on idea — skipping order placement`)
+        return
+    }
+
+    const mainAccount = accounts.find(a => a.id === mainAccountId)
+    if (!mainAccount) {
+        logger.warn(LOG, `[${id}] No main account set — skipping order placement`)
+        return
+    }
+
+    for (const account of accounts) {
+        const ratio      = (mainAccount.balance && account.balance)
+            ? account.balance / mainAccount.balance
+            : 1
+        const scaledQty  = Math.round(quantity * ratio * 10000) / 10000
+
+        try {
+            const result = await brokerService.placeOrder(account.broker, userId, account.id, {
+                symbol:    asset,
+                direction,
+                quantity:  scaledQty,
+                type:      type ?? 'market',
+            })
+            logger.info(LOG, `[${id}] Order placed on ${account.broker}/${account.id}: ${direction} ${scaledQty} ${asset} (ratio ${ratio.toFixed(4)}) → orderId ${result?.orderId}`)
+        } catch (err) {
+            logger.error(LOG, `[${id}] Order failed on ${account.broker}/${account.id}: ${err.message}`)
+        }
     }
 }
 

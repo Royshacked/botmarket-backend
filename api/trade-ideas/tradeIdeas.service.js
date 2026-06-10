@@ -61,8 +61,9 @@ async function saveIdea(tradeIdea, userId) {
         additional_entries: additionalEntries,
         notes:      tradeIdea.notes      ?? null,
         chat_state: tradeIdea.chat_state ?? null,
-        accounts:   Array.isArray(tradeIdea.accounts) ? tradeIdea.accounts : [],
-        userId:     userId               ?? null,
+        accounts:      Array.isArray(tradeIdea.accounts) ? tradeIdea.accounts : [],
+        mainAccountId: tradeIdea.mainAccountId ?? null,
+        userId:        userId               ?? null,
     }
 
     try {

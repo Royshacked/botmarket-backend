@@ -25,6 +25,7 @@ export const brokerService = {
     getCandles,
     getTradingAccounts,
     setSelectedAccount,
+    placeOrder,
     disconnect,
 }
 
@@ -143,6 +144,18 @@ async function setSelectedAccount(brokerType, userId, accountId) {
 }
 
 // ─── Disconnect ───────────────────────────────────────────────────────────────
+
+/**
+ * Place an order on a specific trading account.
+ * @param {string} brokerType
+ * @param {string} userId
+ * @param {string} accountId
+ * @param {{ symbol: string, direction: 'long'|'short', quantity: number, type: 'market'|'limit', limitPrice?: number }} order
+ * @returns {Promise<{ orderId: string }>}
+ */
+async function placeOrder(brokerType, userId, accountId, order) {
+    return getBrokerAdapter(brokerType).placeOrder(userId, accountId, order)
+}
 
 async function disconnect(brokerType, userId) {
     // Validate broker type first

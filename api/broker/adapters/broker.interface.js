@@ -125,4 +125,16 @@ export class BrokerAdapter {
     async getTradingAccounts(userId) {
         throw new Error(`${this.constructor.name}: getTradingAccounts() not implemented`)
     }
+
+    /**
+     * Place a market or limit order on a specific trading account.
+     * @param {string} userId
+     * @param {string} accountId   the trading account to place the order on
+     * @param {{ symbol: string, direction: 'long'|'short', quantity: number, type: 'market'|'limit', limitPrice?: number }} order
+     * @returns {Promise<{ orderId: string }>}
+     */
+    // eslint-disable-next-line no-unused-vars
+    async placeOrder(userId, accountId, order) {
+        throw new Error(`${this.constructor.name}: placeOrder() not implemented`)
+    }
 }
