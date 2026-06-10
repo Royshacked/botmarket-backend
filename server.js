@@ -23,6 +23,7 @@ import { authRoutes }   from './api/authentication/authentication.routes.js'
 import { userRoutes }   from './api/user/user.routes.js'
 import { brokerRoutes }      from './api/broker/broker.routes.js'
 import { transcribeRoutes }  from './api/transcribe/transcribe.routes.js'
+import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
 import { newsFeedService }  from './api/news-feed/newsFeed.service.js'
 import { monitorService }   from './monitoring/monitor.service.js'
 import { logger }           from './services/logger.service.js'
@@ -70,6 +71,7 @@ app.use('/trade-ideas', tradeIdeasRoutes)
 app.use('/api/auth',   authRoutes)
 app.use('/api/users',  userRoutes)
 app.use('/api/broker',      brokerRoutes)
+app.use('/portfolio',       portfolioRoutes)
 
 newsFeedService.start()
 monitorService.start()
