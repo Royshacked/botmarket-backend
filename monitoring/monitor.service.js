@@ -100,7 +100,7 @@ function _isIntraday(tf) {
 
 // ─── Public interface ─────────────────────────────────────────────────────────
 
-export const monitorService = { start, stop, resetIdea }
+export const monitorService = { start, stop, resetIdea, placeOrdersForIdea: _placeOrdersForIdea }
 
 // Called when an idea is moved back to 'looking' so the next tick checks it immediately
 function resetIdea(id) {

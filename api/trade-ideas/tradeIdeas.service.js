@@ -33,10 +33,14 @@ async function saveIdea(tradeIdea, userId) {
         }
     })
 
+    const isImmediate = tradeIdea.immediate === true
+
     const enriched = {
         id:              String(Date.now()),
         savedAt:         Date.now(),
-        status:          'waiting',
+        status:          isImmediate ? 'hit' : 'waiting',
+        entryTriggeredAt: isImmediate ? Date.now() : undefined,
+        immediate:       isImmediate || undefined,
         asset:           tradeIdea.asset           ?? tradeIdea.ticker ?? '',
         direction:       tradeIdea.direction       ?? null,
         type:            tradeIdea.type            ?? null,
@@ -69,7 +73,14 @@ async function saveIdea(tradeIdea, userId) {
     try {
         const db = await getDb()
         await db.collection(COLLECTION).insertOne(enriched)
-        logger.info(LOG, 'Idea saved', { id: enriched.id, asset: enriched.asset })
+        logger.info(LOG, 'Idea saved', { id: enriched.id, asset: enriched.asset, immediate: isImmediate })
+
+        if (isImmediate) {
+            monitorService.placeOrdersForIdea(enriched).catch(err =>
+                logger.error(LOG, 'Immediate order placement failed', err)
+            )
+        }
+
         return { ok: true, idea: _strip(enriched) }
     } catch (err) {
         logger.error(LOG, 'Failed to save idea', err)
