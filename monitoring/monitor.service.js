@@ -241,22 +241,62 @@ function _logCheck(id, asset, status, tf, candles) {
     logger.info(LOG, `──── Check ${id} | ${asset} | status=${status} | tf=${tf} | close=${close}`)
 }
 
+// ─── Cross-asset symbol helpers ───────────────────────────────────────────────
+
+/** Walk a condition tree and collect every distinct symbol that is not the default. */
+function _walkTreeSymbols(node, symbols) {
+    if (!node) return
+    if (typeof node.condition === 'string') { if (node.symbol) symbols.add(node.symbol); return }
+    if (Array.isArray(node.children)) node.children.forEach(c => _walkTreeSymbols(c, symbols))
+}
+
+/** Collect cross-asset symbols from both tree and legacy flat-array formats. */
+function _crossSymbols(tree, flatConditions) {
+    const symbols = new Set()
+    if (tree) _walkTreeSymbols(tree, symbols)
+    if (Array.isArray(flatConditions)) flatConditions.forEach(c => { if (c?.symbol) symbols.add(c.symbol) })
+    return symbols
+}
+
+/**
+ * Build a symbolMap for an evaluation phase.
+ * Fetches candles for every cross-asset symbol referenced in the conditions.
+ * The default asset's candles are passed in and never re-fetched.
+ */
+async function _buildSymbolMap(id, defaultSymbol, defaultCandles, timeframe, crossSymbols) {
+    const map = { [defaultSymbol]: defaultCandles }
+    for (const sym of crossSymbols) {
+        if (sym === defaultSymbol) continue
+        const c = await _fetchCandles(id, sym, timeframe)
+        if (c) {
+            map[sym] = c
+        } else {
+            logger.warn(LOG, `[${id}] Cross-asset candles unavailable for ${sym}/${timeframe}`)
+        }
+    }
+    return map
+}
+
 // ─── Entry phase ──────────────────────────────────────────────────────────────
 
 async function _checkEntry(db, idea, candles) {
     const { id, asset } = idea
+    const entryTf = _resolveEntryTimeframe(idea)
+
+    const crossSyms = _crossSymbols(idea.entry_condition_tree, idea.entry_conditions)
+    const symbolMap = await _buildSymbolMap(id, asset, candles, entryTf, crossSyms)
 
     let triggered = false
 
     if (idea.entry_condition_tree) {
         // New tree format
         logger.info(LOG, `[${id}] Evaluating entry condition tree`)
-        ;({ triggered } = await evaluateTree(idea.entry_condition_tree, candles, asset, idea.activatedAt ?? null))
+        ;({ triggered } = await evaluateTree(idea.entry_condition_tree, symbolMap, asset, idea.activatedAt ?? null))
     } else if (Array.isArray(idea.entry_conditions) && idea.entry_conditions.length > 0) {
         // Legacy flat-array format
         logger.info(LOG, `[${id}] Evaluating entry conditions (legacy flat format)`)
         const entryLogic = idea.entry_logic ?? 'AND'
-        ;({ triggered } = await evaluateConditions(idea.entry_conditions, entryLogic, candles, asset, idea.activatedAt ?? null))
+        ;({ triggered } = await evaluateConditions(idea.entry_conditions, entryLogic, symbolMap, asset, idea.activatedAt ?? null))
     } else {
         logger.warn(LOG, `Idea ${id} has no entry conditions — skipping`)
         return
@@ -275,52 +315,65 @@ async function _checkEntry(db, idea, candles) {
 
 async function _checkPosition(db, idea, stopCandles, tpCandles, aeCandles) {
     const { id, asset } = idea
+    const stopTf  = _resolveStopTimeframe(idea)
+    const tpTf    = _resolveTpTimeframe(idea)
+    const entryTf = _resolveEntryTimeframe(idea)
 
     let stopFired = false
     let tpFired   = false
 
     // ── Stop conditions ───────────────────────────────────────────────────────
-    if (idea.stop_condition_tree) {
-        logger.info(LOG, `[${id}] Evaluating stop condition tree`)
-        const { triggered, which } = await evaluateTree(idea.stop_condition_tree, stopCandles, asset, idea.activatedAt ?? null)
-        if (triggered) {
-            logger.info(LOG, `🛑 Stop triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
-            await _close(db, id, 'stop')
-            stopFired = true
+    {
+        const crossSyms = _crossSymbols(idea.stop_condition_tree, idea.stop_conditions)
+        const symbolMap = await _buildSymbolMap(id, asset, stopCandles, stopTf, crossSyms)
+
+        if (idea.stop_condition_tree) {
+            logger.info(LOG, `[${id}] Evaluating stop condition tree`)
+            const { triggered, which } = await evaluateTree(idea.stop_condition_tree, symbolMap, asset, idea.activatedAt ?? null)
+            if (triggered) {
+                logger.info(LOG, `🛑 Stop triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
+                await _close(db, id, 'stop')
+                stopFired = true
+            }
+        } else if (Array.isArray(idea.stop_conditions) && idea.stop_conditions.length > 0) {
+            const stopLogic = idea.stop_logic ?? 'OR'
+            const { triggered, which } = await evaluateConditions(idea.stop_conditions, stopLogic, symbolMap, asset, idea.activatedAt ?? null)
+            if (triggered) {
+                logger.info(LOG, `🛑 Stop triggered for idea ${id}: "${which?.slice(0, 60)}"`)
+                await _close(db, id, 'stop')
+                stopFired = true
+            }
+        } else {
+            logger.info(LOG, `[${id}] No stop conditions defined — skipping stop check`)
         }
-    } else if (Array.isArray(idea.stop_conditions) && idea.stop_conditions.length > 0) {
-        const stopLogic = idea.stop_logic ?? 'OR'
-        const { triggered, which } = await evaluateConditions(idea.stop_conditions, stopLogic, stopCandles, asset, idea.activatedAt ?? null)
-        if (triggered) {
-            logger.info(LOG, `🛑 Stop triggered for idea ${id}: "${which?.slice(0, 60)}"`)
-            await _close(db, id, 'stop')
-            stopFired = true
-        }
-    } else {
-        logger.info(LOG, `[${id}] No stop conditions defined — skipping stop check`)
     }
 
     if (stopFired) return
 
     // ── TP conditions ─────────────────────────────────────────────────────────
-    if (idea.tp_condition_tree) {
-        logger.info(LOG, `[${id}] Evaluating TP condition tree`)
-        const { triggered, which } = await evaluateTree(idea.tp_condition_tree, tpCandles, asset, idea.activatedAt ?? null)
-        if (triggered) {
-            logger.info(LOG, `🎯 TP triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
-            await _close(db, id, 'tp')
-            tpFired = true
+    {
+        const crossSyms = _crossSymbols(idea.tp_condition_tree, idea.tp_conditions)
+        const symbolMap = await _buildSymbolMap(id, asset, tpCandles, tpTf, crossSyms)
+
+        if (idea.tp_condition_tree) {
+            logger.info(LOG, `[${id}] Evaluating TP condition tree`)
+            const { triggered, which } = await evaluateTree(idea.tp_condition_tree, symbolMap, asset, idea.activatedAt ?? null)
+            if (triggered) {
+                logger.info(LOG, `🎯 TP triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
+                await _close(db, id, 'tp')
+                tpFired = true
+            }
+        } else if (Array.isArray(idea.tp_conditions) && idea.tp_conditions.length > 0) {
+            const tpLogic = idea.tp_logic ?? 'OR'
+            const { triggered, which } = await evaluateConditions(idea.tp_conditions, tpLogic, symbolMap, asset, idea.activatedAt ?? null)
+            if (triggered) {
+                logger.info(LOG, `🎯 TP triggered for idea ${id}: "${which?.slice(0, 60)}"`)
+                await _close(db, id, 'tp')
+                tpFired = true
+            }
+        } else {
+            logger.info(LOG, `[${id}] No TP conditions defined — skipping TP check`)
         }
-    } else if (Array.isArray(idea.tp_conditions) && idea.tp_conditions.length > 0) {
-        const tpLogic = idea.tp_logic ?? 'OR'
-        const { triggered, which } = await evaluateConditions(idea.tp_conditions, tpLogic, tpCandles, asset, idea.activatedAt ?? null)
-        if (triggered) {
-            logger.info(LOG, `🎯 TP triggered for idea ${id}: "${which?.slice(0, 60)}"`)
-            await _close(db, id, 'tp')
-            tpFired = true
-        }
-    } else {
-        logger.info(LOG, `[${id}] No TP conditions defined — skipping TP check`)
     }
 
     if (tpFired) return
@@ -328,10 +381,10 @@ async function _checkPosition(db, idea, stopCandles, tpCandles, aeCandles) {
     logger.info(LOG, `💤 No exit triggered for idea ${id} (${asset}) — still in position`)
 
     // ── Additional entries (scale-in) ─────────────────────────────────────────
-    await _checkAdditionalEntries(db, idea, aeCandles)
+    await _checkAdditionalEntries(db, idea, aeCandles, entryTf)
 }
 
-async function _checkAdditionalEntries(db, idea, candles) {
+async function _checkAdditionalEntries(db, idea, candles, entryTf) {
     const entries = idea.additional_entries
     if (!Array.isArray(entries) || entries.length === 0) return
 
@@ -342,11 +395,14 @@ async function _checkAdditionalEntries(db, idea, candles) {
         if (ae.triggeredAt) break     // order queued but not yet filled — wait
 
         // first un-triggered entry: its predecessor (if any) is confirmed filled
+        const crossSyms = _crossSymbols(ae.condition_tree, ae.conditions)
+        const symbolMap = await _buildSymbolMap(idea.id, idea.asset, candles, entryTf, crossSyms)
+
         let triggered = false
         if (ae.condition_tree) {
-            ;({ triggered } = await evaluateTree(ae.condition_tree, candles, idea.asset, idea.activatedAt ?? null))
+            ;({ triggered } = await evaluateTree(ae.condition_tree, symbolMap, idea.asset, idea.activatedAt ?? null))
         } else if (Array.isArray(ae.conditions) && ae.conditions.length > 0) {
-            ;({ triggered } = await evaluateConditions(ae.conditions, ae.logic ?? 'AND', candles, idea.asset, idea.activatedAt ?? null))
+            ;({ triggered } = await evaluateConditions(ae.conditions, ae.logic ?? 'AND', symbolMap, idea.asset, idea.activatedAt ?? null))
         } else {
             break
         }

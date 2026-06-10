@@ -36,20 +36,20 @@ const COST = { structured: 0, indicator: 1, visual: 1, news: 2, chart: 3 }
  *   Leaf:  { condition: string, type: string, timeframe?: string }
  *   Group: { operator: "AND"|"OR", children: node[] }
  *
- * @param {object}   node           Root node of the condition tree
- * @param {Candle[]} candles        OHLCV array, newest-last
- * @param {string}   symbol         Asset symbol (for news evaluator)
- * @param {number|null} activatedAt ms timestamp when idea switched to looking
- * @param {string[]} priorFindings  structured conditions that passed earlier in the same AND gate
+ * @param {object}        node           Root node of the condition tree
+ * @param {object}        symbolMap      Map of symbol → Candle[] (newest-last)
+ * @param {string}        defaultSymbol  The traded asset — used when a leaf has no explicit symbol
+ * @param {number|null}   activatedAt    ms timestamp when idea switched to looking
+ * @param {string[]}      priorFindings  structured conditions that passed earlier in the same AND gate
  * @returns {Promise<{ triggered: boolean, which?: string, finding?: string }>}
  */
-export async function evaluateTree(node, candles, symbol, activatedAt = null, priorFindings = []) {
+export async function evaluateTree(node, symbolMap, defaultSymbol, activatedAt = null, priorFindings = []) {
     if (!node || typeof node !== 'object') return { triggered: false }
 
     // ── Leaf node ────────────────────────────────────────────────────────────
     if (typeof node.condition === 'string') {
-        const result = await _evalOne(node, candles, symbol, activatedAt, priorFindings)
-        logger.info(LOG, `  ${result.pass ? '✓' : '✗'} [${node.type ?? 'structured'}] "${node.condition?.slice(0, 60)}"`)
+        const result = await _evalOne(node, symbolMap, defaultSymbol, activatedAt, priorFindings)
+        logger.info(LOG, `  ${result.pass ? '✓' : '✗'} [${node.type ?? 'structured'}] "${node.condition?.slice(0, 60)}"${node.symbol ? ` (${node.symbol})` : ''}`)
         const isStructured = !node.type || node.type === 'structured'
         return {
             triggered: result.pass,
@@ -68,7 +68,7 @@ export async function evaluateTree(node, candles, symbol, activatedAt = null, pr
         // (OR branches are independent — no structured condition "caused" the chart).
         const sortedOR = [...children].sort((a, b) => _nodeCost(a) - _nodeCost(b))
         for (const child of sortedOR) {
-            const result = await evaluateTree(child, candles, symbol, activatedAt, [])
+            const result = await evaluateTree(child, symbolMap, defaultSymbol, activatedAt, [])
             if (result.triggered) {
                 logger.info(LOG, `  ✅ OR group triggered: "${(result.which ?? '').slice(0, 60)}"`)
                 return result
@@ -84,7 +84,7 @@ export async function evaluateTree(node, candles, symbol, activatedAt = null, pr
     const sorted = [...children].sort((a, b) => _nodeCost(a) - _nodeCost(b))
     const accumulated = [...priorFindings]
     for (let i = 0; i < sorted.length; i++) {
-        const result = await evaluateTree(sorted[i], candles, symbol, activatedAt, accumulated)
+        const result = await evaluateTree(sorted[i], symbolMap, defaultSymbol, activatedAt, accumulated)
         if (!result.triggered) {
             logger.info(LOG, `  ✗ AND group failed at child ${i + 1}/${sorted.length}`)
             return { triggered: false }
@@ -112,24 +112,24 @@ function _nodeCost(node) {
  *
  * @param {Array<{condition: string, type: string}>} conditions
  * @param {'AND'|'OR'}  logic
- * @param {Candle[]}    candles      newest-last
- * @param {string}      symbol       asset symbol (for news evaluator)
- * @param {number|null} activatedAt  ms timestamp when idea switched to looking
+ * @param {object}      symbolMap     Map of symbol → Candle[]
+ * @param {string}      defaultSymbol The traded asset
+ * @param {number|null} activatedAt   ms timestamp when idea switched to looking
  * @returns {Promise<{ triggered: boolean, which?: string }>}
  */
-export async function evaluateConditions(conditions, logic, candles, symbol, activatedAt = null) {
+export async function evaluateConditions(conditions, logic, symbolMap, defaultSymbol, activatedAt = null) {
     if (!Array.isArray(conditions) || conditions.length === 0) {
         return { triggered: false }
     }
 
     return logic === 'OR'
-        ? _evalOR(conditions, candles, symbol, activatedAt)
-        : _evalAND(conditions, candles, symbol, activatedAt)
+        ? _evalOR(conditions, symbolMap, defaultSymbol, activatedAt)
+        : _evalAND(conditions, symbolMap, defaultSymbol, activatedAt)
 }
 
 // ─── AND: sequential gate-then-verify ─────────────────────────────────────────
 
-async function _evalAND(conditions, candles, symbol, activatedAt) {
+async function _evalAND(conditions, symbolMap, defaultSymbol, activatedAt) {
     const sorted = [...conditions].sort(
         (a, b) => (COST[a.type] ?? 0) - (COST[b.type] ?? 0)
     )
@@ -137,7 +137,7 @@ async function _evalAND(conditions, candles, symbol, activatedAt) {
     let passed = 0
     const priorFindings = []
     for (const cond of sorted) {
-        const result = await _evalOne(cond, candles, symbol, activatedAt, priorFindings)
+        const result = await _evalOne(cond, symbolMap, defaultSymbol, activatedAt, priorFindings)
         const label  = result.condition?.slice(0, 60) ?? '(malformed)'
         const type   = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
 
@@ -157,13 +157,13 @@ async function _evalAND(conditions, candles, symbol, activatedAt) {
 
 // ─── OR: sequential, short-circuit on first true ─────────────────────────────
 
-async function _evalOR(conditions, candles, symbol, activatedAt) {
+async function _evalOR(conditions, symbolMap, defaultSymbol, activatedAt) {
     const sorted = [...conditions].sort(
         (a, b) => (COST[a?.type] ?? 0) - (COST[b?.type] ?? 0)
     )
     for (const cond of sorted) {
         // OR branches are independent — chart gets activatedAt but no prior findings
-        const result = await _evalOne(cond, candles, symbol, activatedAt, [])
+        const result = await _evalOne(cond, symbolMap, defaultSymbol, activatedAt, [])
         const type   = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
         const icon   = result.pass ? '✓' : '✗'
         logger.info(LOG, `  ${icon} [${type}] "${result.condition?.slice(0, 60) ?? '(malformed)'}"`)
@@ -178,12 +178,22 @@ async function _evalOR(conditions, candles, symbol, activatedAt) {
 
 // ─── Single condition evaluation ──────────────────────────────────────────────
 
-async function _evalOne(cond, candles, symbol, activatedAt = null, priorFindings = []) {
+async function _evalOne(cond, symbolMap, defaultSymbol, activatedAt = null, priorFindings = []) {
     const conditionText = typeof cond === 'string' ? cond : cond?.condition
     const type          = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'structured')
 
     if (!conditionText || typeof conditionText !== 'string' || !conditionText.trim()) {
         logger.warn(LOG, 'Skipping malformed condition (empty or missing text):', JSON.stringify(cond))
+        return { pass: false, condition: conditionText }
+    }
+
+    // Resolve the symbol and candles for this leaf.
+    // A leaf with no .symbol uses the traded asset; a cross-asset leaf names its own symbol.
+    const leafSymbol = cond?.symbol ?? defaultSymbol
+    const candles    = symbolMap[leafSymbol] ?? symbolMap[defaultSymbol] ?? []
+
+    if (cond?.symbol && cond.symbol !== defaultSymbol && candles.length === 0) {
+        logger.warn(LOG, `[cross-asset] No candles for "${leafSymbol}" — treating condition as false: "${conditionText.slice(0, 60)}"`)
         return { pass: false, condition: conditionText }
     }
 
@@ -194,12 +204,12 @@ async function _evalOne(cond, candles, symbol, activatedAt = null, priorFindings
         }
 
         if (type === 'chart') {
-            const pass = await evaluateChart(conditionText, symbol, cond?.timeframe ?? null, activatedAt, priorFindings)
+            const pass = await evaluateChart(conditionText, leafSymbol, cond?.timeframe ?? null, activatedAt, priorFindings)
             return { pass, condition: conditionText }
         }
 
         if (type === 'news') {
-            const pass = await evaluateNews(conditionText, symbol)
+            const pass = await evaluateNews(conditionText, leafSymbol)
             return { pass, condition: conditionText }
         }
 

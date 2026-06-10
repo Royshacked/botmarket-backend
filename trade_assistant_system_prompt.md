@@ -48,8 +48,10 @@ When they do, output the trade idea block followed by the state block:
 CONDITION TREE RULES:
 Each of entry_condition / stop_loss / take_profit is a ConditionNode — either a Leaf or a Group:
 
-  Leaf:  { "condition": "brief plain English", "type": "structured" | "visual" | "news", "timeframe": "15min", "quantity": 50 }
+  Leaf:  { "condition": "brief plain English", "type": "structured" | "visual" | "news", "timeframe": "15min", "quantity": 50, "symbol": "NVDA" }
   Group: { "operator": "AND" | "OR", "children": [ <ConditionNode>, ... ] }
+
+The "symbol" field is optional — omit it when the condition is about the traded asset. Only include it when the condition explicitly references a *different* asset (e.g. "NVDA trending up" in an AAPL idea). When present it tells the monitor to fetch that asset's candles for this leaf instead of the main asset's candles.
 
 The top level MUST always be a Group. Leaves only appear inside children arrays.
 Groups can nest arbitrarily deep.
@@ -123,15 +125,15 @@ At the end of every response, output exactly one <state> block containing update
       "tp_timeframe": "15min" | null,
       "entry_logic": "AND" | "OR",
       "entry_conditions": [
-        { "condition": "plain English", "type": "structured" | "visual" | "news", "timeframe": "15min" }
+        { "condition": "plain English", "type": "structured" | "visual" | "news", "timeframe": "15min", "symbol": "NVDA (optional)" }
       ],
       "stop_logic": "AND" | "OR",
       "stop_conditions": [
-        { "condition": "plain English", "type": "structured" | "visual" | "news", "timeframe": "15min" }
+        { "condition": "plain English", "type": "structured" | "visual" | "news", "timeframe": "15min", "symbol": "NVDA (optional)" }
       ],
       "tp_logic": "AND" | "OR",
       "tp_conditions": [
-        { "condition": "plain English", "type": "structured" | "visual" | "news", "timeframe": "15min" }
+        { "condition": "plain English", "type": "structured" | "visual" | "news", "timeframe": "15min", "symbol": "NVDA (optional)" }
       ],
       "additional_entries": [
         { "conditions": [...], "logic": "AND", "quantity": 50 }

@@ -51,7 +51,7 @@ try {
 h('A1. Leaf node — trivially TRUE')
 if (candles.length) {
     try {
-        const { triggered } = await evaluateTree(TRUE_LEAF, candles, SYMBOL)
+        const { triggered } = await evaluateTree(TRUE_LEAF, { [SYMBOL]: candles }, SYMBOL)
         triggered ? ok('leaf true → triggered') : err('leaf true → NOT triggered (unexpected)')
     } catch (e) { err('leaf true', e) }
 } else skip('no candles')
@@ -59,7 +59,7 @@ if (candles.length) {
 h('A2. Leaf node — trivially FALSE')
 if (candles.length) {
     try {
-        const { triggered } = await evaluateTree(FALSE_LEAF, candles, SYMBOL)
+        const { triggered } = await evaluateTree(FALSE_LEAF, { [SYMBOL]: candles }, SYMBOL)
         !triggered ? ok('leaf false → not triggered') : err('leaf false → TRIGGERED (unexpected)')
     } catch (e) { err('leaf false', e) }
 } else skip('no candles')
@@ -68,7 +68,7 @@ h('A3. AND group — both pass (T AND T) → triggered')
 if (candles.length) {
     try {
         const node = { operator: 'AND', children: [TRUE_LEAF, TRUE_LEAF] }
-        const { triggered } = await evaluateTree(node, candles, SYMBOL)
+        const { triggered } = await evaluateTree(node, { [SYMBOL]: candles }, SYMBOL)
         triggered ? ok('AND(T,T) → triggered') : err('AND(T,T) → NOT triggered (unexpected)')
     } catch (e) { err('AND(T,T)', e) }
 } else skip('no candles')
@@ -77,7 +77,7 @@ h('A4. AND group — second fails (T AND F) → not triggered')
 if (candles.length) {
     try {
         const node = { operator: 'AND', children: [TRUE_LEAF, FALSE_LEAF] }
-        const { triggered } = await evaluateTree(node, candles, SYMBOL)
+        const { triggered } = await evaluateTree(node, { [SYMBOL]: candles }, SYMBOL)
         !triggered ? ok('AND(T,F) → not triggered') : err('AND(T,F) → TRIGGERED (unexpected)')
     } catch (e) { err('AND(T,F)', e) }
 } else skip('no candles')
@@ -86,7 +86,7 @@ h('A5. AND group — first fails (F AND T) → not triggered (short-circuit)')
 if (candles.length) {
     try {
         const node = { operator: 'AND', children: [FALSE_LEAF, TRUE_LEAF] }
-        const { triggered } = await evaluateTree(node, candles, SYMBOL)
+        const { triggered } = await evaluateTree(node, { [SYMBOL]: candles }, SYMBOL)
         !triggered ? ok('AND(F,T) → not triggered') : err('AND(F,T) → TRIGGERED (unexpected)')
     } catch (e) { err('AND(F,T)', e) }
 } else skip('no candles')
@@ -95,7 +95,7 @@ h('A6. OR group — both fail (F OR F) → not triggered')
 if (candles.length) {
     try {
         const node = { operator: 'OR', children: [FALSE_LEAF, FALSE_LEAF] }
-        const { triggered } = await evaluateTree(node, candles, SYMBOL)
+        const { triggered } = await evaluateTree(node, { [SYMBOL]: candles }, SYMBOL)
         !triggered ? ok('OR(F,F) → not triggered') : err('OR(F,F) → TRIGGERED (unexpected)')
     } catch (e) { err('OR(F,F)', e) }
 } else skip('no candles')
@@ -104,7 +104,7 @@ h('A7. OR group — second passes (F OR T) → triggered')
 if (candles.length) {
     try {
         const node = { operator: 'OR', children: [FALSE_LEAF, TRUE_LEAF] }
-        const { triggered } = await evaluateTree(node, candles, SYMBOL)
+        const { triggered } = await evaluateTree(node, { [SYMBOL]: candles }, SYMBOL)
         triggered ? ok('OR(F,T) → triggered') : err('OR(F,T) → NOT triggered (unexpected)')
     } catch (e) { err('OR(F,T)', e) }
 } else skip('no candles')
@@ -113,7 +113,7 @@ h('A8. OR group — first passes (T OR F) → triggered')
 if (candles.length) {
     try {
         const node = { operator: 'OR', children: [TRUE_LEAF, FALSE_LEAF] }
-        const { triggered } = await evaluateTree(node, candles, SYMBOL)
+        const { triggered } = await evaluateTree(node, { [SYMBOL]: candles }, SYMBOL)
         triggered ? ok('OR(T,F) → triggered') : err('OR(T,F) → NOT triggered (unexpected)')
     } catch (e) { err('OR(T,F)', e) }
 } else skip('no candles')
@@ -128,7 +128,7 @@ if (candles.length) {
                 { operator: 'OR', children: [FALSE_LEAF, TRUE_LEAF] },
             ],
         }
-        const { triggered } = await evaluateTree(node, candles, SYMBOL)
+        const { triggered } = await evaluateTree(node, { [SYMBOL]: candles }, SYMBOL)
         triggered ? ok('AND(T, OR(F,T)) → triggered') : err('AND(T, OR(F,T)) → NOT triggered (unexpected)')
     } catch (e) { err('AND(T, OR(F,T))', e) }
 } else skip('no candles')
@@ -142,7 +142,7 @@ if (candles.length) {
                 { operator: 'OR', children: [FALSE_LEAF, FALSE_LEAF] },
             ],
         }
-        const { triggered } = await evaluateTree(node, candles, SYMBOL)
+        const { triggered } = await evaluateTree(node, { [SYMBOL]: candles }, SYMBOL)
         !triggered ? ok('AND(T, OR(F,F)) → not triggered') : err('AND(T, OR(F,F)) → TRIGGERED (unexpected)')
     } catch (e) { err('AND(T, OR(F,F))', e) }
 } else skip('no candles')
@@ -156,7 +156,7 @@ if (candles.length) {
                 TRUE_LEAF,
             ],
         }
-        const { triggered } = await evaluateTree(node, candles, SYMBOL)
+        const { triggered } = await evaluateTree(node, { [SYMBOL]: candles }, SYMBOL)
         triggered ? ok('OR(AND(T,F), T) → triggered') : err('OR(AND(T,F), T) → NOT triggered (unexpected)')
     } catch (e) { err('OR(AND(T,F), T)', e) }
 } else skip('no candles')
@@ -170,7 +170,7 @@ if (candles.length) {
                 FALSE_LEAF,
             ],
         }
-        const { triggered } = await evaluateTree(node, candles, SYMBOL)
+        const { triggered } = await evaluateTree(node, { [SYMBOL]: candles }, SYMBOL)
         !triggered ? ok('OR(AND(T,F), F) → not triggered') : err('OR(AND(T,F), F) → TRIGGERED (unexpected)')
     } catch (e) { err('OR(AND(T,F), F)', e) }
 } else skip('no candles')
@@ -187,7 +187,7 @@ if (candles.length) {
                 ]},
             ],
         }
-        const { triggered } = await evaluateTree(node, candles, SYMBOL)
+        const { triggered } = await evaluateTree(node, { [SYMBOL]: candles }, SYMBOL)
         triggered ? ok('deep nested → triggered') : err('deep nested → NOT triggered (unexpected)')
     } catch (e) { err('deep nested', e) }
 } else skip('no candles')
@@ -195,22 +195,22 @@ if (candles.length) {
 // Edge cases
 h('A14. Edge cases — null / undefined / empty group')
 try {
-    const r1 = await evaluateTree(null, candles, SYMBOL)
+    const r1 = await evaluateTree(null, { [SYMBOL]: candles }, SYMBOL)
     !r1.triggered ? ok('null → not triggered') : err('null → TRIGGERED (unexpected)')
 } catch (e) { err('null input', e) }
 
 try {
-    const r2 = await evaluateTree(undefined, candles, SYMBOL)
+    const r2 = await evaluateTree(undefined, { [SYMBOL]: candles }, SYMBOL)
     !r2.triggered ? ok('undefined → not triggered') : err('undefined → TRIGGERED (unexpected)')
 } catch (e) { err('undefined input', e) }
 
 try {
-    const r3 = await evaluateTree({ operator: 'AND', children: [] }, candles, SYMBOL)
+    const r3 = await evaluateTree({ operator: 'AND', children: [] }, { [SYMBOL]: candles }, SYMBOL)
     !r3.triggered ? ok('empty AND group → not triggered') : err('empty AND group → TRIGGERED (unexpected)')
 } catch (e) { err('empty group', e) }
 
 try {
-    const r4 = await evaluateTree({ operator: 'OR', children: [] }, candles, SYMBOL)
+    const r4 = await evaluateTree({ operator: 'OR', children: [] }, { [SYMBOL]: candles }, SYMBOL)
     !r4.triggered ? ok('empty OR group → not triggered') : err('empty OR group → TRIGGERED (unexpected)')
 } catch (e) { err('empty group', e) }
 
@@ -223,7 +223,7 @@ if (candles.length) {
             { condition: 'close > 0', type: 'structured' },
             { condition: 'close > 0', type: 'structured' },
         ]
-        const { triggered } = await evaluateConditions(conds, 'AND', candles, SYMBOL)
+        const { triggered } = await evaluateConditions(conds, 'AND', { [SYMBOL]: candles }, SYMBOL)
         triggered ? ok('AND [close>0, close>0] → triggered') : err('legacy AND', 'unexpectedly false')
     } catch (e) { err('legacy AND', e) }
 
@@ -232,7 +232,7 @@ if (candles.length) {
             { condition: 'close < 0', type: 'structured' },
             { condition: 'close > 0', type: 'structured' },
         ]
-        const { triggered } = await evaluateConditions(conds, 'OR', candles, SYMBOL)
+        const { triggered } = await evaluateConditions(conds, 'OR', { [SYMBOL]: candles }, SYMBOL)
         triggered ? ok('OR [false, true] → triggered') : err('legacy OR', 'unexpectedly false')
     } catch (e) { err('legacy OR', e) }
 } else skip('no candles')

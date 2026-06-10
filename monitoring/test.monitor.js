@@ -119,7 +119,7 @@ if (candles.length > 0) {
             { condition: 'close > 0',    type: 'structured' },
             { condition: 'volume > 0',   type: 'structured' },
         ]
-        const { triggered } = await evaluateConditions(conditions, 'AND', candles, SYMBOL)
+        const { triggered } = await evaluateConditions(conditions, 'AND', { [SYMBOL]: candles }, SYMBOL)
         triggered ? ok('AND [close>0, volume>0] → triggered') : err('AND chain', 'unexpectedly false')
     } catch (e) {
         err('AND orchestrator', e)
@@ -135,7 +135,7 @@ if (candles.length > 0) {
             { condition: 'close < 0',    type: 'structured' },  // always false
             { condition: 'volume > 0',   type: 'structured' },  // would pass, but gated
         ]
-        const { triggered } = await evaluateConditions(conditions, 'AND', candles, SYMBOL)
+        const { triggered } = await evaluateConditions(conditions, 'AND', { [SYMBOL]: candles }, SYMBOL)
         !triggered ? ok('AND gate blocked correctly → not triggered') : err('AND gate', 'gate did not block')
     } catch (e) {
         err('AND gate', e)
@@ -151,7 +151,7 @@ if (candles.length > 0) {
             { condition: 'close < 0',   type: 'structured' },  // false
             { condition: 'close > 0',   type: 'structured' },  // true
         ]
-        const { triggered, which } = await evaluateConditions(conditions, 'OR', candles, SYMBOL)
+        const { triggered, which } = await evaluateConditions(conditions, 'OR', { [SYMBOL]: candles }, SYMBOL)
         triggered ? ok(`OR triggered on: "${which}"`) : err('OR chain', 'unexpectedly false')
     } catch (e) {
         err('OR orchestrator', e)
