@@ -250,12 +250,12 @@ async function _checkEntry(db, idea, candles) {
     if (idea.entry_condition_tree) {
         // New tree format
         logger.info(LOG, `[${id}] Evaluating entry condition tree`)
-        ;({ triggered } = await evaluateTree(idea.entry_condition_tree, candles, asset))
+        ;({ triggered } = await evaluateTree(idea.entry_condition_tree, candles, asset, idea.activatedAt ?? null))
     } else if (Array.isArray(idea.entry_conditions) && idea.entry_conditions.length > 0) {
         // Legacy flat-array format
         logger.info(LOG, `[${id}] Evaluating entry conditions (legacy flat format)`)
         const entryLogic = idea.entry_logic ?? 'AND'
-        ;({ triggered } = await evaluateConditions(idea.entry_conditions, entryLogic, candles, asset))
+        ;({ triggered } = await evaluateConditions(idea.entry_conditions, entryLogic, candles, asset, idea.activatedAt ?? null))
     } else {
         logger.warn(LOG, `Idea ${id} has no entry conditions — skipping`)
         return
@@ -280,7 +280,7 @@ async function _checkPosition(db, idea, stopCandles, tpCandles, aeCandles) {
     // ── Stop conditions ───────────────────────────────────────────────────────
     if (idea.stop_condition_tree) {
         logger.info(LOG, `[${id}] Evaluating stop condition tree`)
-        const { triggered, which } = await evaluateTree(idea.stop_condition_tree, stopCandles, asset)
+        const { triggered, which } = await evaluateTree(idea.stop_condition_tree, stopCandles, asset, idea.activatedAt ?? null)
         if (triggered) {
             logger.info(LOG, `🛑 Stop triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
             await _close(db, id, 'stop')
@@ -288,7 +288,7 @@ async function _checkPosition(db, idea, stopCandles, tpCandles, aeCandles) {
         }
     } else if (Array.isArray(idea.stop_conditions) && idea.stop_conditions.length > 0) {
         const stopLogic = idea.stop_logic ?? 'OR'
-        const { triggered, which } = await evaluateConditions(idea.stop_conditions, stopLogic, stopCandles, asset)
+        const { triggered, which } = await evaluateConditions(idea.stop_conditions, stopLogic, stopCandles, asset, idea.activatedAt ?? null)
         if (triggered) {
             logger.info(LOG, `🛑 Stop triggered for idea ${id}: "${which?.slice(0, 60)}"`)
             await _close(db, id, 'stop')
@@ -303,7 +303,7 @@ async function _checkPosition(db, idea, stopCandles, tpCandles, aeCandles) {
     // ── TP conditions ─────────────────────────────────────────────────────────
     if (idea.tp_condition_tree) {
         logger.info(LOG, `[${id}] Evaluating TP condition tree`)
-        const { triggered, which } = await evaluateTree(idea.tp_condition_tree, tpCandles, asset)
+        const { triggered, which } = await evaluateTree(idea.tp_condition_tree, tpCandles, asset, idea.activatedAt ?? null)
         if (triggered) {
             logger.info(LOG, `🎯 TP triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
             await _close(db, id, 'tp')
@@ -311,7 +311,7 @@ async function _checkPosition(db, idea, stopCandles, tpCandles, aeCandles) {
         }
     } else if (Array.isArray(idea.tp_conditions) && idea.tp_conditions.length > 0) {
         const tpLogic = idea.tp_logic ?? 'OR'
-        const { triggered, which } = await evaluateConditions(idea.tp_conditions, tpLogic, tpCandles, asset)
+        const { triggered, which } = await evaluateConditions(idea.tp_conditions, tpLogic, tpCandles, asset, idea.activatedAt ?? null)
         if (triggered) {
             logger.info(LOG, `🎯 TP triggered for idea ${id}: "${which?.slice(0, 60)}"`)
             await _close(db, id, 'tp')
@@ -342,9 +342,9 @@ async function _checkAdditionalEntries(db, idea, candles) {
         // first un-triggered entry: its predecessor (if any) is confirmed filled
         let triggered = false
         if (ae.condition_tree) {
-            ;({ triggered } = await evaluateTree(ae.condition_tree, candles, idea.asset))
+            ;({ triggered } = await evaluateTree(ae.condition_tree, candles, idea.asset, idea.activatedAt ?? null))
         } else if (Array.isArray(ae.conditions) && ae.conditions.length > 0) {
-            ;({ triggered } = await evaluateConditions(ae.conditions, ae.logic ?? 'AND', candles, idea.asset))
+            ;({ triggered } = await evaluateConditions(ae.conditions, ae.logic ?? 'AND', candles, idea.asset, idea.activatedAt ?? null))
         } else {
             break
         }

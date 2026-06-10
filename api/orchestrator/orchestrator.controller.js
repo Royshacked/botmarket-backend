@@ -31,6 +31,7 @@ export async function streamOrchestration(req, res) {
             userPrompt:    parsed.userPrompt,
             analysisState: parsed.analysisState ?? _emptyState(),
             brokerContext,
+            ideaAccounts:  parsed.ideaAccounts ?? [],
             onToken:       (text)   => sendEvent('token',  { text }),
             onAsset:       (symbol) => sendEvent('asset', { symbol }),
         })
@@ -116,7 +117,7 @@ function _emptyState() {
 }
 
 function parseOrchestratorBody(body) {
-    const { messages, userPrompt, analysisState } = body ?? {}
+    const { messages, userPrompt, analysisState, ideaAccounts } = body ?? {}
     const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
 
     let priorState = null
@@ -133,7 +134,7 @@ function parseOrchestratorBody(body) {
         }
         if (messages.length === 0) {
             if (trimmedPrompt) {
-                return { userPrompt: trimmedPrompt, analysisState: priorState }
+                return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: _parseIdeaAccounts(ideaAccounts) }
             }
             return { error: 'messages must be a non-empty array' }
         }
@@ -159,12 +160,18 @@ function parseOrchestratorBody(body) {
             userPrompt:    trimmedPrompt || undefined,
             messages:      trimmed,
             analysisState: priorState,
+            ideaAccounts:  _parseIdeaAccounts(ideaAccounts),
         }
     }
 
     if (trimmedPrompt) {
-        return { userPrompt: trimmedPrompt, analysisState: priorState }
+        return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: _parseIdeaAccounts(ideaAccounts) }
     }
 
     return { error: 'Request must include messages or userPrompt' }
+}
+
+function _parseIdeaAccounts(raw) {
+    if (!Array.isArray(raw)) return []
+    return raw.filter(a => a && typeof a === 'object' && a.id)
 }

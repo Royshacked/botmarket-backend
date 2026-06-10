@@ -40,15 +40,15 @@ monitorService.start()
               │   (separate timeframes for entry / stop / TP)
               │
               ├── status === 'looking' (entry phase):
-              │       └── evaluateConditions(entry_conditions, 'AND')
+              │       └── evaluateTree / evaluateConditions(entry, activatedAt)
               │               └── triggered?  →  patch: status='hit', entryTriggeredAt=now
               │
               └── status === 'long' | 'short' (position phase):
-                      ├── evaluateConditions(stop_conditions, 'OR')
-                      │       └── triggered?  →  patch: status='closed', closedReason='stop', closedAt=now
+                      ├── evaluateTree / evaluateConditions(stop, activatedAt)
+                      │       └── triggered?  →  patch: status='closed', closedReason='stop'
                       │
-                      └── evaluateConditions(tp_conditions, 'OR')
-                              └── triggered?  →  patch: status='closed', closedReason='tp', closedAt=now
+                      └── evaluateTree / evaluateConditions(tp, activatedAt)
+                              └── triggered?  →  patch: status='closed', closedReason='tp'
 ```
 
 ---
@@ -74,16 +74,22 @@ acceptable for MVP; a restart just means slightly more eager checks on the next 
 
 ---
 
-## Idea phases
+## Idea phases & activation
 
 The idea `status` field drives which phase is active:
 
 ```
-status: 'looking'                            ← Initial (entry phase)
-    │
-    │  entry_conditions AND-chain passes
+status: 'waiting'                            ← Created, not yet active
+
+    │  user flips to 'looking'
+    │  → activatedAt = Date.now()  (saved to DB)
     ▼
-status: 'hit'      entryTriggeredAt: <ms>    ← Alert sent; user confirms order
+
+status: 'looking'   activatedAt: <ms>        ← Entry phase — monitoring active
+    │
+    │  entry_conditions AND/OR chain passes
+    ▼
+status: 'hit'       entryTriggeredAt: <ms>   ← Alert sent; user confirms order
     │
     │  user patches status after order fills
     ▼
@@ -97,17 +103,26 @@ Fields added to idea documents (all optional, non-destructive):
 
 | Field | Type | Set when |
 |---|---|---|
+| `activatedAt` | ms timestamp | Status transitions to `looking` |
 | `entryTriggeredAt` | ms timestamp | Entry conditions trigger |
 | `closedReason` | `'stop' \| 'tp'` | Position closes |
 | `closedAt` | ms timestamp | Position closes |
+
+Moving an idea back to `looking` resets `activatedAt` to the current time, restarting
+the chart pattern time window.
 
 ---
 
 ## Condition orchestrator
 
-`monitor.orchestrator.js` — takes a condition array + AND/OR logic and returns `{ triggered, which? }`.
+`monitor.orchestrator.js` — takes a condition tree (or legacy flat array) and returns `{ triggered, which? }`.
 
-### AND (entry conditions) — Gate-then-verify
+The two key pieces of context threaded through all evaluations:
+
+- **`activatedAt`** — ms timestamp when the idea was last moved to `looking`. Used by the chart evaluator to constrain pattern recognition to candles formed after activation.
+- **`priorFindings`** — accumulated list of structured condition texts that already passed earlier in the same AND gate. Passed to chart evaluations as causal context.
+
+### AND (entry conditions) — Gate-then-verify with context injection
 
 ```
 conditions sorted by cost:
@@ -117,12 +132,22 @@ conditions sorted by cost:
   eval cheapest first; bail immediately on first failure
       │
       ▼
+  each passing structured condition → appended to priorFindings[]
+      │
+      ▼
+  chart condition receives:
+    - activatedAt  (time window constraint)
+    - priorFindings  ("look for the pattern that caused these")
+      │
+      ▼
   all pass? → { triggered: true }
   any fail? → { triggered: false }  (skip remaining)
 ```
 
-Cost ordering ensures expensive LLM calls (indicator, news, chart) are only made when cheap
-structured checks have already passed.
+**Example:** condition set `[price > 100 (structured), cup and handle (chart)]`
+
+1. Structured `price > 100` passes → priorFindings = `["price > 100"]`
+2. Chart prompt becomes: *"Condition: cup and handle. Context: 'price > 100' just triggered — look for the pattern that SET UP or LED TO this condition."*
 
 ### OR (stop / TP conditions) — Sequential short-circuit
 
@@ -134,9 +159,13 @@ first pass? → { triggered: true, which: conditionText }
 all fail?   → { triggered: false }
 ```
 
+OR branches are **independent** — no prior findings are passed between them. The chart evaluator
+still receives `activatedAt` (time constraint applies), but no causal context hint, since no
+structured condition "caused" the chart pattern in an OR group.
+
 ### Condition tree format
 
-The orchestrator also supports a nested tree format (`entry_condition_tree`, `stop_condition_tree`, etc.)
+The orchestrator supports a nested tree format (`entry_condition_tree`, `stop_condition_tree`, etc.)
 that allows AND/OR nesting at arbitrary depth. Both formats work:
 
 ```js
@@ -148,14 +177,14 @@ entry_conditions: [
 
 // Nested tree (new):
 entry_condition_tree: {
-    logic: "AND",
+    operator: "AND",
     children: [
-        { condition: "RSI(14) below 30", type: "structured" },
+        { condition: "price > 100", type: "structured", timeframe: "day" },
         {
-            logic: "OR",
+            operator: "OR",
             children: [
                 { condition: "volume spike", type: "indicator" },
-                { condition: "Fed rate cut announced", type: "news" },
+                { condition: "cup and handle pattern", type: "chart", timeframe: "day" },
             ]
         }
     ]
@@ -215,6 +244,9 @@ structured.evaluator.js  →  pure math, no I/O
 
 **`confirmation`:** number of consecutive candles that must all satisfy the condition (0 = current bar only).
 
+When a structured condition passes in an AND gate, its condition text is added to `priorFindings`
+and forwarded to any subsequent chart condition in the same gate.
+
 ### 2. Indicator (`type: 'indicator'`)
 
 Formerly `type: 'visual'` — `visual.evaluator.js` is now a legacy alias for `indicator.evaluator.js`.
@@ -236,17 +268,37 @@ pass = response starts with 'Y'
 ### 3. Chart (`type: 'chart'`)
 
 ```
-conditionText  (e.g. "double top pattern forming")
+conditionText  (e.g. "cup and handle pattern")
+activatedAt    (ms timestamp)
+priorFindings  (structured conditions that passed before this in AND gate)
     │
     ▼
-Chart screenshot (future: visual capture of price chart)
+Chart screenshot via chart-img.com (symbol + timeframe + auto-selected studies)
     │
     ▼
-Claude Sonnet vision model: "YES or NO — does this chart show the pattern?"
+Time constraint injected into prompt:
+  "Only consider patterns that completed within the last N candles."
+  (N = ceil((now - activatedAt) / timeframe_ms))
+    │
+    ▼
+Causal context injected (AND gate only, when priorFindings non-empty):
+  "Context: 'price > 100' just triggered — look for the pattern that SET UP this condition."
+    │
+    ▼
+Claude Sonnet vision: "YES or NO — does this chart show the pattern?"
     │
     ▼
 pass = response starts with 'Y'
 ```
+
+**Time window logic:**
+- `activatedAt` is stored when the idea moves to `looking` status.
+- Candle count = `ceil((now − activatedAt) / timeframe_in_ms)`, minimum 1.
+- If `activatedAt` is null (old ideas), the time constraint is skipped.
+
+**OR vs AND behaviour:**
+- **AND gate:** chart receives both `activatedAt` constraint AND `priorFindings` context.
+- **OR gate:** chart receives only `activatedAt` constraint (no causal context — OR branches are independent).
 
 Cost: 3 (most expensive — uses a vision-capable model).
 
@@ -292,8 +344,8 @@ Same condition string is only parsed once regardless of how many ideas use it.
 ```
 monitoring/
   monitor.service.js          public API: start() / stop(), poll loop, per-idea dispatch
-  monitor.orchestrator.js     AND/OR logic, condition routing, legacy normalisation
-  monitor.claude.js           Claude Haiku client (claudeJSON, claudeText)
+  monitor.orchestrator.js     AND/OR logic, condition routing, context injection, legacy normalisation
+  monitor.claude.js           Claude Haiku client (claudeJSON, claudeText, claudeVision)
 
   parsers/
     condition.parser.js       NL → ParsedCondition via Claude; in-memory cache
@@ -303,7 +355,7 @@ monitoring/
     indicator.evaluator.js    Candle table + pre-computed indicators → Claude Haiku YES/NO
     visual.evaluator.js       Legacy alias for indicator.evaluator.js
     news.evaluator.js         GNews headlines → Claude Haiku YES/NO
-    chart.evaluator.js        Chart screenshot → Claude vision YES/NO
+    chart.evaluator.js        Chart screenshot + time/causal context → Claude vision YES/NO
 
   providers/
     ohlcv.provider.js         Thin wrapper around priceService; normalises to {t,o,h,l,c,v}
@@ -324,3 +376,5 @@ monitoring/
   it survives server restarts.
 - **Per-user monitoring:** currently all active ideas are monitored globally.
   Future: scope monitoring to ideas owned by users with active broker connections.
+- **Indicator context injection:** similar to Option A for structured→chart, pass indicator
+  findings into subsequent chart prompts when they share an AND gate.

@@ -36,19 +36,26 @@ const COST = { structured: 0, indicator: 1, visual: 1, news: 2, chart: 3 }
  *   Leaf:  { condition: string, type: string, timeframe?: string }
  *   Group: { operator: "AND"|"OR", children: node[] }
  *
- * @param {object}   node     Root node of the condition tree
- * @param {Candle[]} candles  OHLCV array, newest-last
- * @param {string}   symbol   Asset symbol (for news evaluator)
- * @returns {Promise<{ triggered: boolean, which?: string }>}
+ * @param {object}   node           Root node of the condition tree
+ * @param {Candle[]} candles        OHLCV array, newest-last
+ * @param {string}   symbol         Asset symbol (for news evaluator)
+ * @param {number|null} activatedAt ms timestamp when idea switched to looking
+ * @param {string[]} priorFindings  structured conditions that passed earlier in the same AND gate
+ * @returns {Promise<{ triggered: boolean, which?: string, finding?: string }>}
  */
-export async function evaluateTree(node, candles, symbol) {
+export async function evaluateTree(node, candles, symbol, activatedAt = null, priorFindings = []) {
     if (!node || typeof node !== 'object') return { triggered: false }
 
     // ── Leaf node ────────────────────────────────────────────────────────────
     if (typeof node.condition === 'string') {
-        const result = await _evalOne(node, candles, symbol)
+        const result = await _evalOne(node, candles, symbol, activatedAt, priorFindings)
         logger.info(LOG, `  ${result.pass ? '✓' : '✗'} [${node.type ?? 'structured'}] "${node.condition?.slice(0, 60)}"`)
-        return { triggered: result.pass, which: node.condition }
+        const isStructured = !node.type || node.type === 'structured'
+        return {
+            triggered: result.pass,
+            which:     node.condition,
+            finding:   isStructured && result.pass ? node.condition : null,
+        }
     }
 
     // ── Group node ────────────────────────────────────────────────────────────
@@ -56,10 +63,12 @@ export async function evaluateTree(node, candles, symbol) {
     if (!Array.isArray(children) || children.length === 0) return { triggered: false }
 
     if (operator === 'OR') {
-        // Sort cheapest first so structured/indicator run before chart/news
+        // Sort cheapest first so structured/indicator run before chart/news.
+        // In OR branches the chart gets activatedAt constraint but no prior findings
+        // (OR branches are independent — no structured condition "caused" the chart).
         const sortedOR = [...children].sort((a, b) => _nodeCost(a) - _nodeCost(b))
         for (const child of sortedOR) {
-            const result = await evaluateTree(child, candles, symbol)
+            const result = await evaluateTree(child, candles, symbol, activatedAt, [])
             if (result.triggered) {
                 logger.info(LOG, `  ✅ OR group triggered: "${(result.which ?? '').slice(0, 60)}"`)
                 return result
@@ -69,14 +78,18 @@ export async function evaluateTree(node, candles, symbol) {
         return { triggered: false }
     }
 
-    // AND — sequential, sort children cheapest first
+    // AND — sequential, sort children cheapest first.
+    // Accumulate findings from passing structured nodes and pass them forward
+    // so chart nodes see what triggered before them.
     const sorted = [...children].sort((a, b) => _nodeCost(a) - _nodeCost(b))
+    const accumulated = [...priorFindings]
     for (let i = 0; i < sorted.length; i++) {
-        const result = await evaluateTree(sorted[i], candles, symbol)
+        const result = await evaluateTree(sorted[i], candles, symbol, activatedAt, accumulated)
         if (!result.triggered) {
             logger.info(LOG, `  ✗ AND group failed at child ${i + 1}/${sorted.length}`)
             return { triggered: false }
         }
+        if (result.finding) accumulated.push(result.finding)
     }
     logger.info(LOG, `  ✅ AND group: all ${sorted.length} child(ren) passed`)
     return { triggered: true }
@@ -99,37 +112,39 @@ function _nodeCost(node) {
  *
  * @param {Array<{condition: string, type: string}>} conditions
  * @param {'AND'|'OR'}  logic
- * @param {Candle[]}    candles   newest-last
- * @param {string}      symbol    asset symbol (for news evaluator)
+ * @param {Candle[]}    candles      newest-last
+ * @param {string}      symbol       asset symbol (for news evaluator)
+ * @param {number|null} activatedAt  ms timestamp when idea switched to looking
  * @returns {Promise<{ triggered: boolean, which?: string }>}
  */
-export async function evaluateConditions(conditions, logic, candles, symbol) {
+export async function evaluateConditions(conditions, logic, candles, symbol, activatedAt = null) {
     if (!Array.isArray(conditions) || conditions.length === 0) {
         return { triggered: false }
     }
 
     return logic === 'OR'
-        ? _evalOR(conditions, candles, symbol)
-        : _evalAND(conditions, candles, symbol)
+        ? _evalOR(conditions, candles, symbol, activatedAt)
+        : _evalAND(conditions, candles, symbol, activatedAt)
 }
 
 // ─── AND: sequential gate-then-verify ─────────────────────────────────────────
 
-async function _evalAND(conditions, candles, symbol) {
-    // Sort cheapest first so expensive evaluators are only reached when needed
+async function _evalAND(conditions, candles, symbol, activatedAt) {
     const sorted = [...conditions].sort(
         (a, b) => (COST[a.type] ?? 0) - (COST[b.type] ?? 0)
     )
 
     let passed = 0
+    const priorFindings = []
     for (const cond of sorted) {
-        const result = await _evalOne(cond, candles, symbol)
+        const result = await _evalOne(cond, candles, symbol, activatedAt, priorFindings)
         const label  = result.condition?.slice(0, 60) ?? '(malformed)'
         const type   = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
 
         if (result.pass) {
             passed++
             logger.info(LOG, `  ✓ [${type}] "${label}"`)
+            if (type === 'structured' && result.condition) priorFindings.push(result.condition)
         } else {
             logger.info(LOG, `  ✗ [${type}] "${label}" — AND gate failed (${passed}/${sorted.length} passed)`)
             return { triggered: false }
@@ -140,16 +155,15 @@ async function _evalAND(conditions, candles, symbol) {
     return { triggered: true }
 }
 
-// ─── OR: parallel, short-circuit on first true ────────────────────────────────
+// ─── OR: sequential, short-circuit on first true ─────────────────────────────
 
-async function _evalOR(conditions, candles, symbol) {
-    // Cheapest first, then stop as soon as the first condition passes — a cheap
-    // structured check should never run after an expensive chart/news call.
+async function _evalOR(conditions, candles, symbol, activatedAt) {
     const sorted = [...conditions].sort(
         (a, b) => (COST[a?.type] ?? 0) - (COST[b?.type] ?? 0)
     )
     for (const cond of sorted) {
-        const result = await _evalOne(cond, candles, symbol)
+        // OR branches are independent — chart gets activatedAt but no prior findings
+        const result = await _evalOne(cond, candles, symbol, activatedAt, [])
         const type   = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
         const icon   = result.pass ? '✓' : '✗'
         logger.info(LOG, `  ${icon} [${type}] "${result.condition?.slice(0, 60) ?? '(malformed)'}"`)
@@ -164,8 +178,7 @@ async function _evalOR(conditions, candles, symbol) {
 
 // ─── Single condition evaluation ──────────────────────────────────────────────
 
-async function _evalOne(cond, candles, symbol) {
-    // Normalise: handle both legacy plain strings and { condition, type } objects
+async function _evalOne(cond, candles, symbol, activatedAt = null, priorFindings = []) {
     const conditionText = typeof cond === 'string' ? cond : cond?.condition
     const type          = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'structured')
 
@@ -175,14 +188,13 @@ async function _evalOne(cond, candles, symbol) {
     }
 
     try {
-        // 'visual' kept as legacy alias for 'indicator'
         if (type === 'indicator' || type === 'visual') {
             const pass = await evaluateIndicator(conditionText, candles)
             return { pass, condition: conditionText }
         }
 
         if (type === 'chart') {
-            const pass = await evaluateChart(conditionText, symbol, cond?.timeframe ?? null)
+            const pass = await evaluateChart(conditionText, symbol, cond?.timeframe ?? null, activatedAt, priorFindings)
             return { pass, condition: conditionText }
         }
 

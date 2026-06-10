@@ -61,6 +61,7 @@ async function saveIdea(tradeIdea, userId) {
         additional_entries: additionalEntries,
         notes:      tradeIdea.notes      ?? null,
         chat_state: tradeIdea.chat_state ?? null,
+        accounts:   Array.isArray(tradeIdea.accounts) ? tradeIdea.accounts : [],
         userId:     userId               ?? null,
     }
 
@@ -137,6 +138,7 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
     if (patch.status === 'looking') {
         patch.monitorPhase     = 'entry'
         patch.entryTriggeredAt = null
+        patch.activatedAt      = Date.now()
         monitorService.resetIdea(id)
     }
 

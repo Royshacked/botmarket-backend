@@ -126,8 +126,8 @@ async function chat({ messages, userPrompt, analysisState = _emptyState(), broke
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = _emptyState(), brokerContext = null, onToken, onAsset }) {
-    const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext)
+async function chatStream({ messages, userPrompt, analysisState = _emptyState(), brokerContext = null, ideaAccounts = [], onToken, onAsset }) {
+    const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts)
     const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
 
     logger.info(LOG, 'chatStream start', {
@@ -157,7 +157,7 @@ async function chatStream({ messages, userPrompt, analysisState = _emptyState(),
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-function _buildSystemPrompt(analysisState, brokerContext) {
+function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = []) {
     const asset   = analysisState?.structured_state?.active_asset || 'none'
     const summary = analysisState?.recent_chat_summary || 'No prior context.'
     const pt      = analysisState?.structured_state?.pending_trade
@@ -173,7 +173,7 @@ function _buildSystemPrompt(analysisState, brokerContext) {
 ---
 CONVERSATION CONTEXT:
 ${summary}
-Active asset: ${asset}${stateSection}${_buildBrokerSection(brokerContext)}`
+Active asset: ${asset}${stateSection}${_buildBrokerSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts)}`
 }
 
 function _buildBrokerSection(brokerContext) {
@@ -200,6 +200,19 @@ function _buildBrokerSection(brokerContext) {
     })
 
     return `\n\nBROKER ACCOUNT:\n${lines.join('\n\n')}`
+}
+
+function _buildIdeaAccountsSection(accounts) {
+    if (!Array.isArray(accounts) || accounts.length === 0) return ''
+    const fmt = (v) => v != null ? `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'
+    const lines = accounts.map(a => {
+        const type = a.isLive ? 'LIVE' : 'DEMO'
+        const parts = [`${(a.broker || '').toUpperCase()} ${type} — login: ${a.login || '—'}, currency: ${a.currency || '—'}`]
+        if (a.balance != null) parts.push(`balance: ${fmt(a.balance)}`)
+        if (a.equity  != null) parts.push(`equity: ${fmt(a.equity)}`)
+        return `  - ${parts.join(', ')}`
+    })
+    return `\n\nIDEA ACCOUNTS (the user plans to execute this trade on):\n${lines.join('\n')}`
 }
 
 function _buildMessages({ messages, userPrompt, analysisState }) {
