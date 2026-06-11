@@ -34,15 +34,17 @@ const TOOL_HANDLERS = {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], onToken, onTicker }) {
+async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], onToken, onTicker }) {
     const normalized   = _buildMessages(messages)
-    const systemPrompt = ideaAccounts.length > 0
-        ? `${SYSTEM_PROMPT}\n\n${_buildAccountsSection(ideaAccounts)}`
-        : SYSTEM_PROMPT
 
-    logger.info(LOG, 'chatStream start', { messageCount: normalized.length, accountCount: ideaAccounts.length })
+    let systemPrompt = SYSTEM_PROMPT
+    if (ideaAccounts.length > 0)       systemPrompt += `\n\n${_buildAccountsSection(ideaAccounts)}`
+    if (portfolioId && portfolioIdeas.length > 0) systemPrompt += `\n\n${_buildPortfolioContext(portfolioId, portfolioIdeas)}`
 
-    let capturedPlan = null
+    logger.info(LOG, 'chatStream start', { messageCount: normalized.length, accountCount: ideaAccounts.length, editMode: !!portfolioId })
+
+    let capturedPlan   = null
+    let capturedUpdate = null
 
     const raw = await streamAnthropicWithTools({
         model:            MODEL,
@@ -52,18 +54,22 @@ async function chatStream({ messages = [], ideaAccounts = [], onToken, onTicker 
         toolHandlers:     TOOL_HANDLERS,
         onToken,
         onTicker,
-        onPlan: (planJson) => {
-            try { capturedPlan = JSON.parse(planJson) } catch { /* malformed JSON — discard */ }
+        onPlan: (json) => {
+            try { capturedPlan = JSON.parse(json) } catch { /* malformed */ }
+        },
+        onUpdate: (json) => {
+            try { capturedUpdate = JSON.parse(json) } catch { /* malformed */ }
         },
     })
 
     const reply = raw
         .replace(/<ticker>[\s\S]*?<\/ticker>/g, '')
         .replace(/<portfolio_plan>[\s\S]*?<\/portfolio_plan>/g, '')
+        .replace(/<portfolio_update>[\s\S]*?<\/portfolio_update>/g, '')
         .trim()
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan })
-    return { reply, plan: capturedPlan }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate })
+    return { reply, plan: capturedPlan, update: capturedUpdate }
 }
 
 function _buildMessages(messages) {
@@ -71,6 +77,24 @@ function _buildMessages(messages) {
         .filter(m => m && (m.role === 'user' || m.role === 'assistant') && m.content?.trim())
         .map(({ role, content }) => ({ role, content: content.trim() }))
         .slice(-MAX_MESSAGES)
+}
+
+function _buildPortfolioContext(portfolioId, ideas) {
+    const name    = ideas[0]?.portfolioName || 'Portfolio'
+    const header  = `EDIT MODE — CURRENT PORTFOLIO: "${name}" (portfolioId: ${portfolioId})\nThe user wants to modify this portfolio. Here are the current ideas:\n`
+    const ideaLines = ideas.map(idea => {
+        const alloc  = idea.allocationRatio != null ? `${Math.round(idea.allocationRatio * 100)}%` : '—'
+        const qty    = idea.quantity != null ? String(idea.quantity) : 'not set'
+        const entry  = Array.isArray(idea.entry_conditions) && idea.entry_conditions.length
+            ? idea.entry_conditions.map(c => `"${c.condition}"`).join(', ')
+            : 'no entry conditions yet'
+        const stop   = Array.isArray(idea.stop_conditions) && idea.stop_conditions.length
+            ? idea.stop_conditions.map(c => `"${c.condition}"`).join(', ')
+            : 'no stop yet'
+        const accs   = Array.isArray(idea.accounts) && idea.accounts.length ? idea.accounts.join(', ') : 'none'
+        return `  ideaId: ${idea.id}\n  asset: ${idea.asset} | direction: ${idea.direction ?? '?'} | type: ${idea.type ?? '?'} | allocation: ${alloc} | qty: ${qty}\n  entry: ${entry}\n  stop: ${stop}\n  accounts: ${accs}\n  notes: ${idea.notes || '—'}`
+    }).join('\n\n')
+    return `${header}\n${ideaLines}`
 }
 
 function _buildAccountsSection(accounts) {
