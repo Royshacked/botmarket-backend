@@ -2,6 +2,8 @@ import { getDb }           from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { monitorService }  from '../../monitoring/monitor.service.js'
 import { brokerService }   from '../broker/broker.service.js'
+import { buildOrderPlanForIdea } from '../../services/orderPlan.service.js'
+import { isMarketOpen, isCrypto } from '../../services/market.service.js'
 
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
@@ -77,12 +79,21 @@ async function saveIdea(tradeIdea, userId) {
     }
 
     try {
+        // Immediate ideas are born 'hit' — build the order plan now (server-side)
+        // and park it for confirmation. Orders are NOT placed automatically in
+        // manual mode; the user confirms via POST /trade-ideas/:id/orders.
+        if (isImmediate) {
+            const plan = await buildOrderPlanForIdea(enriched)
+            if (plan.length > 0) {
+                const open = isCrypto(enriched.asset) || isMarketOpen()
+                enriched.pendingOrder = { plan, builtAt: Date.now() }
+                enriched.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
+            }
+        }
+
         const db = await getDb()
         await db.collection(COLLECTION).insertOne(enriched)
-        logger.info(LOG, 'Idea saved', { id: enriched.id, asset: enriched.asset, immediate: isImmediate })
-
-        // Note: immediate ideas are born as 'hit' but orders are NOT placed
-        // automatically — the user confirms via POST /trade-ideas/:id/orders.
+        logger.info(LOG, 'Idea saved', { id: enriched.id, asset: enriched.asset, immediate: isImmediate, orderState: enriched.orderState })
 
         return { ok: true, idea: _strip(enriched) }
     } catch (err) {
@@ -195,10 +206,6 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
  * so stop/TP monitoring begins.
  */
 async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
-    if (!Array.isArray(orders) || orders.length === 0) {
-        return { ok: false, reason: 'no_orders' }
-    }
-
     try {
         const db   = await getDb()
         const idea = await db.collection(COLLECTION).findOne({ id })
@@ -207,8 +214,13 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
         if (idea.status !== 'hit')  return { ok: false, reason: 'not_hit' }
         if (idea.ordersPlacedAt)    return { ok: false, reason: 'already_placed' }
 
+        // Prefer the server-built plan stored on the idea; fall back to the
+        // client-sent orders for ideas saved before plans were persisted.
+        const plan = (idea.pendingOrder?.plan?.length) ? idea.pendingOrder.plan : orders
+        if (!Array.isArray(plan) || plan.length === 0) return { ok: false, reason: 'no_orders' }
+
         const results = []
-        for (const order of orders) {
+        for (const order of plan) {
             try {
                 const result = await brokerService.placeOrder(order.broker, userId, order.accountId, {
                     symbol:    idea.asset,
@@ -231,7 +243,7 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
         const status = idea.direction === 'short' ? 'short' : 'long'
         const updated = await db.collection(COLLECTION).findOneAndUpdate(
             { id },
-            { $set: { status, ordersPlacedAt: now, activatedAt: now } },
+            { $set: { status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed' } },
             { returnDocument: 'after' }
         )
         logger.info(LOG, 'Orders confirmed & placed', { id, status, placed: results.filter(r => r.ok).length })

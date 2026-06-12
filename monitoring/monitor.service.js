@@ -27,6 +27,7 @@ import { getCandles }                           from '../providers/ohlcv.provide
 import { evaluateTree, evaluateConditions }     from './monitor.orchestrator.js'
 import { logger }                               from '../services/logger.service.js'
 import { isMarketOpen, isCrypto }               from '../services/market.service.js'
+import { buildOrderPlanForIdea }                from '../services/orderPlan.service.js'
 
 const LOG        = '[monitor.service]'
 const COLLECTION = 'ideas'
@@ -127,6 +128,9 @@ async function _tick() {
             return
         }
 
+        // Surface any orders that were deferred while the market was closed.
+        await _marketSweep(db)
+
         if (!ideas || ideas.length === 0) return
         logger.info(LOG, `Checking ${ideas.length} idea(s) (looking + long + short)`)
 
@@ -136,6 +140,35 @@ async function _tick() {
         }
     } finally {
         _running = false
+    }
+}
+
+// ─── Deferred-order market sweep ───────────────────────────────────────────────
+
+/**
+ * Ideas that hit while the (equity) market was closed are parked in
+ * orderState='awaiting_market'. Once the market is open, surface them.
+ *
+ * Phase 1 (manual mode): flip to 'awaiting_confirm' so the confirmation dialog
+ * appears. Phase 2 will branch here on the user's orderMode to auto-place.
+ * Crypto hits are never deferred (always born 'awaiting_confirm'), so gating on
+ * the equity session is correct.
+ */
+async function _marketSweep(db) {
+    if (!isMarketOpen()) return
+
+    let deferred
+    try {
+        deferred = await db.collection(COLLECTION).find({ orderState: 'awaiting_market' }).toArray()
+    } catch (err) {
+        logger.error(LOG, 'Market sweep read error:', err.message)
+        return
+    }
+    if (!deferred || deferred.length === 0) return
+
+    logger.info(LOG, `Market open — surfacing ${deferred.length} deferred order(s)`)
+    for (const idea of deferred) {
+        await _patch(db, idea.id, { orderState: 'awaiting_confirm' })
     }
 }
 
@@ -288,10 +321,24 @@ async function _checkEntry(db, idea, candles) {
     }
 
     if (triggered) {
-        logger.info(LOG, `✅ Entry triggered for idea ${id} (${asset}) — status → hit (awaiting user confirmation)`)
-        await _patch(db, id, { status: 'hit', entryTriggeredAt: Date.now() })
-        // Orders are NOT placed automatically. The user confirms via the order
-        // confirmation dialog, which calls POST /trade-ideas/:id/orders.
+        const patch = { status: 'hit', entryTriggeredAt: Date.now() }
+
+        // Build the order plan server-side so it no longer depends on the browser.
+        // Manual mode (phase 1): surface the confirm dialog when the market is open,
+        // otherwise defer the decision until the next market open.
+        const plan = await buildOrderPlanForIdea(idea)
+        if (plan.length > 0) {
+            const open = isCrypto(asset) || isMarketOpen()
+            patch.pendingOrder = { plan, builtAt: Date.now() }
+            patch.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
+            logger.info(LOG, `✅ Entry triggered for idea ${id} (${asset}) — status → hit, orderState → ${patch.orderState}`)
+        } else {
+            logger.info(LOG, `✅ Entry triggered for idea ${id} (${asset}) — status → hit (no accounts; alert only)`)
+        }
+
+        await _patch(db, id, patch)
+        // Orders are NOT placed automatically in manual mode. The user confirms via
+        // the order confirmation dialog, which calls POST /trade-ideas/:id/orders.
     } else {
         logger.info(LOG, `⏳ Entry not triggered yet for idea ${id} (${asset})`)
     }
