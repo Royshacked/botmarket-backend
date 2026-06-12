@@ -1,6 +1,7 @@
 import { getDb }           from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { monitorService }  from '../../monitoring/monitor.service.js'
+import { brokerService }   from '../broker/broker.service.js'
 
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
@@ -14,6 +15,7 @@ export const ideaService = {
     getIdeaById,
     deleteIdea,
     updateIdea,
+    placeOrdersForIdea,
 }
 
 async function saveIdea(tradeIdea, userId) {
@@ -79,11 +81,8 @@ async function saveIdea(tradeIdea, userId) {
         await db.collection(COLLECTION).insertOne(enriched)
         logger.info(LOG, 'Idea saved', { id: enriched.id, asset: enriched.asset, immediate: isImmediate })
 
-        if (isImmediate) {
-            monitorService.placeOrdersForIdea(enriched).catch(err =>
-                logger.error(LOG, 'Immediate order placement failed', err)
-            )
-        }
+        // Note: immediate ideas are born as 'hit' but orders are NOT placed
+        // automatically — the user confirms via POST /trade-ideas/:id/orders.
 
         return { ok: true, idea: _strip(enriched) }
     } catch (err) {
@@ -182,6 +181,63 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         return { ok: true, idea: _strip(result) }
     } catch (err) {
         logger.error(LOG, 'Failed to update idea', err)
+        return { ok: false, error: err }
+    }
+}
+
+/**
+ * Place broker orders for a triggered ('hit') idea after the user confirms.
+ *
+ * `orders` is the explicit list the user confirmed in the dialog — each
+ * { broker, accountId, quantity, type? }. We place exactly these (every call
+ * runs through the user's own broker session, so accounts that aren't theirs
+ * fail at the broker). On at least one success the idea advances to long/short
+ * so stop/TP monitoring begins.
+ */
+async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
+    if (!Array.isArray(orders) || orders.length === 0) {
+        return { ok: false, reason: 'no_orders' }
+    }
+
+    try {
+        const db   = await getDb()
+        const idea = await db.collection(COLLECTION).findOne({ id })
+        if (!idea) return { ok: false, reason: 'not_found' }
+        if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+        if (idea.status !== 'hit')  return { ok: false, reason: 'not_hit' }
+        if (idea.ordersPlacedAt)    return { ok: false, reason: 'already_placed' }
+
+        const results = []
+        for (const order of orders) {
+            try {
+                const result = await brokerService.placeOrder(order.broker, userId, order.accountId, {
+                    symbol:    idea.asset,
+                    direction: idea.direction,
+                    quantity:  order.quantity,
+                    type:      order.type ?? idea.type ?? 'market',
+                })
+                logger.info(LOG, 'Order placed', { id, broker: order.broker, accountId: order.accountId, direction: idea.direction, quantity: order.quantity, orderId: result?.orderId })
+                results.push({ accountId: order.accountId, ok: true, orderId: result?.orderId ?? null })
+            } catch (err) {
+                logger.error(LOG, 'Order failed', { id, broker: order.broker, accountId: order.accountId, error: err.message })
+                results.push({ accountId: order.accountId, ok: false, error: err.message })
+            }
+        }
+
+        const anyPlaced = results.some(r => r.ok)
+        if (!anyPlaced) return { ok: false, reason: 'all_failed', results }
+
+        const now    = Date.now()
+        const status = idea.direction === 'short' ? 'short' : 'long'
+        const updated = await db.collection(COLLECTION).findOneAndUpdate(
+            { id },
+            { $set: { status, ordersPlacedAt: now, activatedAt: now } },
+            { returnDocument: 'after' }
+        )
+        logger.info(LOG, 'Orders confirmed & placed', { id, status, placed: results.filter(r => r.ok).length })
+        return { ok: true, idea: _strip(updated), results }
+    } catch (err) {
+        logger.error(LOG, 'Failed to place orders for idea', err)
         return { ok: false, error: err }
     }
 }

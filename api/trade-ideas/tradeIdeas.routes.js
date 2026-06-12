@@ -1,7 +1,7 @@
 import express from 'express'
 import { log } from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
-import { createTradeIdea, createBatchIdeas, getTradeIdeas, getTradeIdea, deleteTradeIdea, updateTradeIdea } from './tradeIdeas.controller.js'
+import { createTradeIdea, createBatchIdeas, getTradeIdeas, getTradeIdea, deleteTradeIdea, updateTradeIdea, placeTradeIdeaOrders } from './tradeIdeas.controller.js'
 
 const router = express.Router()
 
@@ -12,6 +12,7 @@ router.post('/',      log, createTradeIdea)
 router.get('/',       log, getTradeIdeas)
 router.get('/:id',    log, getTradeIdea)
 router.patch('/:id',  log, updateTradeIdea)
+router.post('/:id/orders', log, placeTradeIdeaOrders)
 router.delete('/:id', log, deleteTradeIdea)
 
 export const tradeIdeasRoutes = router

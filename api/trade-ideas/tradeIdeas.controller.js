@@ -79,6 +79,30 @@ export async function createBatchIdeas(req, res) {
     }
 }
 
+export async function placeTradeIdeaOrders(req, res) {
+    try {
+        const { id } = req.params
+        if (!id) return res.status(400).send({ err: 'Missing id' })
+
+        const { orders } = req.body ?? {}
+        const result = await ideaService.placeOrdersForIdea(id, orders, req.user._id, req.user.isAdmin)
+        if (!result.ok) {
+            if (result.reason === 'not_found')      return res.status(404).send({ err: 'Idea not found' })
+            if (result.reason === 'forbidden')      return res.status(403).send({ err: 'Forbidden' })
+            if (result.reason === 'no_orders')      return res.status(400).send({ err: 'No orders provided' })
+            if (result.reason === 'not_hit')        return res.status(400).send({ err: 'Idea is not awaiting confirmation' })
+            if (result.reason === 'already_placed') return res.status(409).send({ err: 'Orders already placed' })
+            if (result.reason === 'all_failed')     return res.status(502).send({ err: 'All broker orders failed', results: result.results })
+            return res.status(500).send({ err: 'Failed to place orders' })
+        }
+
+        res.send({ idea: result.idea, results: result.results })
+    } catch (err) {
+        logger.error(LOG, 'placeTradeIdeaOrders failed', err)
+        res.status(500).send({ err: 'Failed to place orders' })
+    }
+}
+
 export async function updateTradeIdea(req, res) {
     try {
         const { id } = req.params

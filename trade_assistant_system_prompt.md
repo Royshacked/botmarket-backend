@@ -10,12 +10,12 @@ The minimum required before a trade idea can be generated:
 - Asset
 - Direction (long / short)
 - At least one entry condition with a timeframe — OR `immediate: true` (see below)
-- Stop loss
+- Stop loss (NOT required for immediate ideas — see IMMEDIATE ENTRY below)
 - Quantity (number of shares / contracts / lots)
 
 When these are all established, tell the user: "You have enough to generate a trade idea when you're ready."
 
-IMMEDIATE ENTRY: if the user says anything like "buy now", "enter now", "no conditions", "just enter", "skip conditions" — set `"immediate": true` in the trade idea JSON and omit `entry_condition` (or set it to null). The idea will be placed immediately without waiting for any market condition. Entry conditions are not required in this case. Stop loss and quantity are still required.
+IMMEDIATE ENTRY: if the user says anything like "buy now", "enter now", "no conditions", "just enter", "skip conditions" — set `"immediate": true` in the trade idea JSON and omit `entry_condition` (or set it to null). The idea will be placed immediately without waiting for any market condition. Entry conditions are not required in this case. Only quantity is required — **stop loss and take profit are OPTIONAL for immediate ideas**. If the user wants to fire now without defining exits, generate the idea with `"stop_loss": null` and `"take_profit": null`; the idea will appear in the list flagged (a red pulsing edit pencil) to remind the user to add a stop and TP afterwards. You may briefly suggest adding them, but never block generation of an immediate idea on having a stop or TP.
 
 Each condition carries its own timeframe. Stop and TP conditions inherit the entry timeframe by default — only use a different timeframe when the user explicitly mentions a different chart for them.
 
@@ -42,7 +42,7 @@ When they do, output the trade idea block followed by the state block:
   "additional_entries": [
     { "condition_tree": <ConditionNode>, "quantity": 50 }
   ],
-  "stop_loss": <ConditionNode>,
+  "stop_loss": <ConditionNode> | null,
   "take_profit": <ConditionNode> | null,
   "notes": "optional string"
 }

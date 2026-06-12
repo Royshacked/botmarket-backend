@@ -25,8 +25,8 @@
 import { getDb }                                from '../providers/mongodb.provider.js'
 import { getCandles }                           from '../providers/ohlcv.provider.js'
 import { evaluateTree, evaluateConditions }     from './monitor.orchestrator.js'
-import { brokerService }                        from '../api/broker/broker.service.js'
 import { logger }                               from '../services/logger.service.js'
+import { isMarketOpen, isCrypto }               from '../services/market.service.js'
 
 const LOG        = '[monitor.service]'
 const COLLECTION = 'ideas'
@@ -78,21 +78,6 @@ function getCheckGap(tf) {
 
 // ─── Market hours helpers ─────────────────────────────────────────────────────
 
-/** True between 9:30 AM and 4:00 PM ET on a weekday (holidays not excluded). */
-function _isMarketOpen() {
-    const etStr = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })
-    const et    = new Date(etStr)
-    const day   = et.getDay()
-    if (day === 0 || day === 6) return false
-    const mins  = et.getHours() * 60 + et.getMinutes()
-    return mins >= 9 * 60 + 30 && mins < 16 * 60
-}
-
-/** Crypto assets trade 24/7 — no market-hours gate needed. */
-function _isCrypto(symbol) {
-    return /USDT$|USDC$/i.test(symbol ?? '')
-}
-
 /** Intraday timeframes produce no new bars when the exchange is closed. */
 function _isIntraday(tf) {
     return /min$|hr$/.test(tf ?? '')
@@ -100,7 +85,7 @@ function _isIntraday(tf) {
 
 // ─── Public interface ─────────────────────────────────────────────────────────
 
-export const monitorService = { start, stop, resetIdea, placeOrdersForIdea: _placeOrdersForIdea }
+export const monitorService = { start, stop, resetIdea }
 
 // Called when an idea is moved back to 'looking' so the next tick checks it immediately
 function resetIdea(id) {
@@ -177,7 +162,7 @@ async function _checkIdea(db, idea) {
     const fastestTf = isPosition
         ? [stopTf, tpTf, entryTf].reduce((a, b) => getCheckGap(a) <= getCheckGap(b) ? a : b)
         : entryTf
-    if (!_isCrypto(asset) && _isIntraday(fastestTf) && !_isMarketOpen()) {
+    if (!isCrypto(asset) && _isIntraday(fastestTf) && !isMarketOpen()) {
         logger.info(LOG, `[${id}] Market closed — skipping intraday check (${asset}/${fastestTf})`)
         return
     }
@@ -303,9 +288,10 @@ async function _checkEntry(db, idea, candles) {
     }
 
     if (triggered) {
-        logger.info(LOG, `✅ Entry triggered for idea ${id} (${asset}) — status → hit`)
+        logger.info(LOG, `✅ Entry triggered for idea ${id} (${asset}) — status → hit (awaiting user confirmation)`)
         await _patch(db, id, { status: 'hit', entryTriggeredAt: Date.now() })
-        await _placeOrdersForIdea(idea)
+        // Orders are NOT placed automatically. The user confirms via the order
+        // confirmation dialog, which calls POST /trade-ideas/:id/orders.
     } else {
         logger.info(LOG, `⏳ Entry not triggered yet for idea ${id} (${asset})`)
     }
@@ -415,42 +401,6 @@ async function _checkAdditionalEntries(db, idea, candles, entryTf) {
             )
         }
         break  // don't evaluate entry i+1 until this one is filled
-    }
-}
-
-// ─── Order placement ─────────────────────────────────────────────────────────
-
-async function _placeOrdersForIdea(idea) {
-    const { id, asset, direction, quantity, type, accounts, mainAccountId, userId } = idea
-
-    if (!Array.isArray(accounts) || accounts.length === 0) {
-        logger.info(LOG, `[${id}] No accounts on idea — skipping order placement`)
-        return
-    }
-
-    const mainAccount = accounts.find(a => a.id === mainAccountId)
-    if (!mainAccount) {
-        logger.warn(LOG, `[${id}] No main account set — skipping order placement`)
-        return
-    }
-
-    for (const account of accounts) {
-        const ratio      = (mainAccount.balance && account.balance)
-            ? account.balance / mainAccount.balance
-            : 1
-        const scaledQty  = Math.round(quantity * ratio * 10000) / 10000
-
-        try {
-            const result = await brokerService.placeOrder(account.broker, userId, account.id, {
-                symbol:    asset,
-                direction,
-                quantity:  scaledQty,
-                type:      type ?? 'market',
-            })
-            logger.info(LOG, `[${id}] Order placed on ${account.broker}/${account.id}: ${direction} ${scaledQty} ${asset} (ratio ${ratio.toFixed(4)}) → orderId ${result?.orderId}`)
-        } catch (err) {
-            logger.error(LOG, `[${id}] Order failed on ${account.broker}/${account.id}: ${err.message}`)
-        }
     }
 }
 
