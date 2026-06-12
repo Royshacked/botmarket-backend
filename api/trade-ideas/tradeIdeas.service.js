@@ -168,6 +168,12 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         monitorService.resetIdea(id)
     }
 
+    // Activating a no-condition idea straight to 'hit' (e.g. portfolio activation)
+    // — stamp the trigger time so the confirmation dialog shows when it fired.
+    if (patch.status === 'hit') {
+        patch.entryTriggeredAt = Date.now()
+    }
+
     try {
         const db = await getDb()
 
