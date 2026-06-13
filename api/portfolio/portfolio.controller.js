@@ -69,3 +69,15 @@ export async function getPortfolioChatState(req, res) {
         res.status(500).json({ err: 'Failed to get chat state' })
     }
 }
+
+export async function deletePortfolioChatState(req, res) {
+    try {
+        const { portfolioId } = req.params
+        if (!portfolioId) return res.status(400).json({ err: 'Missing portfolioId' })
+        await portfolioChatService.deleteChatState(portfolioId, req.user._id)
+        res.json({ ok: true })
+    } catch (err) {
+        logger.error(LOG, 'deletePortfolioChatState failed', err)
+        res.status(500).json({ err: 'Failed to delete chat state' })
+    }
+}

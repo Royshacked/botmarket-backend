@@ -4,7 +4,7 @@ import { logger }  from '../../services/logger.service.js'
 const LOG        = '[portfolioChat]'
 const COLLECTION = 'portfolio_chats'
 
-export const portfolioChatService = { saveChatState, getChatState }
+export const portfolioChatService = { saveChatState, getChatState, deleteChatState }
 
 async function saveChatState(portfolioId, messages, userId) {
     try {
@@ -18,6 +18,18 @@ async function saveChatState(portfolioId, messages, userId) {
         return { ok: true }
     } catch (err) {
         logger.error(LOG, 'Failed to save chat state', err)
+        return { ok: false }
+    }
+}
+
+async function deleteChatState(portfolioId, userId) {
+    try {
+        const db = await getDb()
+        await db.collection(COLLECTION).deleteOne({ portfolioId, userId })
+        logger.info(LOG, 'Chat state deleted', { portfolioId })
+        return { ok: true }
+    } catch (err) {
+        logger.error(LOG, 'Failed to delete chat state', err)
         return { ok: false }
     }
 }

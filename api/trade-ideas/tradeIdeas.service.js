@@ -260,8 +260,9 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
     }
 }
 
-async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null) {
-    const portfolioId = `portfolio_${Date.now()}`
+async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null, portfolioId = null) {
+    // Reuse the given portfolioId when updating an existing plan; otherwise mint one.
+    const pid   = portfolioId || `portfolio_${Date.now()}`
     const saved = []
 
     for (const idea of plan.ideas) {
@@ -269,9 +270,12 @@ async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null)
             asset:           idea.asset,
             direction:       idea.direction,
             type:            idea.type,
+            quantity:        idea.quantity,
             notes:           idea.notes,
             allocationRatio: idea.allocationRatio,
-            portfolioId,
+            // Portfolio ideas carry no conditions for now — they start as 'waiting'
+            // and are activated (→ 'hit') via the plan row's status toggle.
+            portfolioId:     pid,
             portfolioName:   plan.name,
             accounts,
             mainAccountId,
@@ -280,8 +284,8 @@ async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null)
         else logger.warn(LOG, 'Batch idea save failed', { asset: idea.asset, error: result.error })
     }
 
-    logger.info(LOG, 'Batch saved', { portfolioId, total: plan.ideas.length, saved: saved.length })
-    return { ok: true, ideas: saved, portfolioId }
+    logger.info(LOG, 'Batch saved', { portfolioId: pid, total: plan.ideas.length, saved: saved.length })
+    return { ok: true, ideas: saved, portfolioId: pid }
 }
 
 // ─── Condition tree helpers ───────────────────────────────────────────────────
