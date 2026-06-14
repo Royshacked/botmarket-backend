@@ -16,7 +16,7 @@ function _createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, on
         { open: '<trade_idea>',          close: '</trade_idea>',          onCapture: null       },
         { open: '<asset>',               close: '</asset>',               onCapture: onAsset    },
         { open: '<interval>',            close: '</interval>',            onCapture: onInterval },
-        ...(onTicker ? [{ open: '<ticker>',            close: '</ticker>',            onCapture: onTicker }] : []),
+        ...(onTicker ? [{ open: '<ticker>',            close: '</ticker>',            onCapture: onTicker, keepText: true }] : []),
         ...(onPlan   ? [{ open: '<portfolio_plan>',    close: '</portfolio_plan>',    onCapture: onPlan   }] : []),
         ...(onUpdate ? [{ open: '<portfolio_update>',  close: '</portfolio_update>',  onCapture: onUpdate }] : []),
     ]
@@ -25,6 +25,7 @@ function _createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, on
     let inBlock         = false  // currently inside a suppressed block
     let closeTag        = ''     // tag we're waiting for to end suppression
     let captureCallback = null   // non-null when current block content should be forwarded
+    let keepText        = false  // true when the block's inner text should still reach the UI (e.g. <ticker>)
 
     function push(text) {
         pending += text
@@ -36,14 +37,17 @@ function _createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, on
             if (inBlock) {
                 const ci = pending.indexOf(closeTag)
                 if (ci !== -1) {
+                    const content = pending.slice(0, ci)
                     if (captureCallback) {
-                        const content = pending.slice(0, ci).trim()
-                        if (content) captureCallback(content)
+                        const trimmed = content.trim()
+                        if (trimmed) captureCallback(trimmed)
                         captureCallback = null
                     }
+                    if (keepText && content) onToken(content)
                     pending  = pending.slice(ci + closeTag.length)
                     inBlock  = false
                     closeTag = ''
+                    keepText = false
                     continue
                 }
                 // Close tag not yet arrived — hold the entire buffer
@@ -68,6 +72,7 @@ function _createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, on
                     inBlock         = true
                     closeTag        = tag.close
                     captureCallback = tag.onCapture ?? null
+                    keepText        = tag.keepText ?? false
                     matched         = true
                     break
                 }
@@ -87,6 +92,7 @@ function _createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, on
         inBlock         = false
         closeTag        = ''
         captureCallback = null
+        keepText        = false
     }
 
     return { push, flush }

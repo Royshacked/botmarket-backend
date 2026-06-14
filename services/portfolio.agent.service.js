@@ -63,7 +63,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     })
 
     const reply = raw
-        .replace(/<ticker>[\s\S]*?<\/ticker>/g, '')
+        .replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1')
         .replace(/<portfolio_plan>[\s\S]*?<\/portfolio_plan>/g, '')
         .replace(/<portfolio_update>[\s\S]*?<\/portfolio_update>/g, '')
         .trim()
