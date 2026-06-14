@@ -37,7 +37,11 @@
       "Bash(grep -rn \"'orchestrator'\" src)",
       "Bash(echo \"EXIT=$?\")",
       "Read(//tmp/**)",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(npm install *)",
+      "Bash(ls services/*.js)",
+      "Bash(ls utils*)",
+      "Bash(ls services/util*)"
     ]
   }
 }
