@@ -27,7 +27,12 @@
       "Bash(kill 703)",
       "Skill(code-review)",
       "Bash(node *)",
-      "Bash(xargs grep -l \"Schema\\\\|model\\\\|collection\")"
+      "Bash(xargs grep -l \"Schema\\\\|model\\\\|collection\")",
+      "Bash(xargs wc -l)",
+      "Bash(npm uninstall *)",
+      "Read(//c/Roy/Coding Academy/Projects/ar2trade/**)",
+      "Bash(grep -rnE \"\\\\.\\(send|json\\)\\\\\\(\\\\s*\\\\{[^}]*\\\\berr\\\\b\\\\s*:\" botmarket-backend/api botmarket-backend/middleware botmarket-backend/server.js)",
+      "Bash(grep -rnE \"\\\\b\\(j|data|res|response\\)\\\\.\\(err\\)\\\\b\" botmarket-frontend/src)"
     ]
   }
 }

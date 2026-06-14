@@ -1,4 +1,5 @@
 import dotenv from 'dotenv'
+import { logger } from '../services/logger.service.js'
 
 dotenv.config()
 
@@ -96,7 +97,7 @@ export async function fetchGNews({ query, from, to, max = 20, lang = 'en' } = {}
 
         return data
     } catch (error) {
-        console.error('Error getting GNews', error)
+        logger.error('Error getting GNews', error)
         throw error
     }
 }

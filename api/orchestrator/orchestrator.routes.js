@@ -6,6 +6,8 @@ import { getOrchestration, streamOrchestration } from './orchestrator.controller
 
 const router = express.Router()
 
-router.post('/',       log, requireAuth, getOrchestration)
-router.post('/stream', log, requireAuth, streamOrchestration)
+router.use(requireAuth)
+
+router.post('/',       log, getOrchestration)
+router.post('/stream', log, streamOrchestration)
 export const orchestratorRoutes = router

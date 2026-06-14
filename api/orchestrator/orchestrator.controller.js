@@ -1,5 +1,5 @@
 import { logger }           from '../../services/logger.service.js'
-import { tradeAgentService } from '../../services/trade.agent.service.js'
+import { tradeAgentService, emptyAnalysisState } from '../../services/trade.agent.service.js'
 import { brokerService }     from '../broker/broker.service.js'
 
 const LOG = '[orchestrator:controller]'
@@ -10,7 +10,7 @@ const MAX_RECENT_CHAT_TURNS = 3
 export async function streamOrchestration(req, res) {
     const parsed = parseOrchestratorBody(req.body)
     if (parsed.error) {
-        return res.status(400).json({ err: parsed.error })
+        return res.status(400).json({ error: parsed.error })
     }
 
     // SSE headers
@@ -29,7 +29,7 @@ export async function streamOrchestration(req, res) {
         const result = await tradeAgentService.chatStream({
             messages:      parsed.messages,
             userPrompt:    parsed.userPrompt,
-            analysisState: parsed.analysisState ?? _emptyState(),
+            analysisState: parsed.analysisState ?? emptyAnalysisState(),
             brokerContext,
             ideaAccounts:  parsed.ideaAccounts ?? [],
             onToken:       (text)     => sendEvent('token',    { text }),
@@ -44,8 +44,7 @@ export async function streamOrchestration(req, res) {
         })
         res.end()
     } catch (err) {
-        console.log(LOG, 'streamOrchestration error', err)
-        logger.error('Failed to stream orchestration', err)
+        logger.error(LOG, 'Failed to stream orchestration', err)
         sendEvent('error', { message: 'Streaming failed' })
         res.end()
     }
@@ -55,7 +54,7 @@ export async function getOrchestration(req, res) {
     try {
         const parsed = parseOrchestratorBody(req.body)
         if (parsed.error) {
-            return res.status(400).send({ err: parsed.error })
+            return res.status(400).send({ error: parsed.error })
         }
 
         const brokerContext = await _loadBrokerContext(req.user._id)
@@ -63,15 +62,14 @@ export async function getOrchestration(req, res) {
         const result = await tradeAgentService.chat({
             messages:      parsed.messages,
             userPrompt:    parsed.userPrompt,
-            analysisState: parsed.analysisState ?? _emptyState(),
+            analysisState: parsed.analysisState ?? emptyAnalysisState(),
             brokerContext,
         })
 
         res.send(result)
     } catch (err) {
-        console.log(LOG, 'error', err)
-        logger.error('Failed to run orchestration', err)
-        res.status(500).send({ err: 'Failed to run orchestration' })
+        logger.error(LOG, 'Failed to run orchestration', err)
+        res.status(500).send({ error: 'Failed to run orchestration' })
     }
 }
 
@@ -94,27 +92,6 @@ async function _loadBrokerContext(userId) {
         )
         return Object.fromEntries(entries.filter(Boolean))
     } catch { return {} }
-}
-
-function _emptyState() {
-    return {
-        recent_messages: [],
-        recent_chat_summary: '',
-        structured_state: {
-            active_asset: '',
-            pending_trade: {
-                direction: null,
-                type: null,
-                entry_timeframe: null,
-                stop_timeframe: null,
-                tp_timeframe: null,
-                entry_conditions: [],
-                stop_conditions: [],
-                tp_conditions: [],
-                notes: null,
-            },
-        },
-    }
 }
 
 function parseOrchestratorBody(body) {

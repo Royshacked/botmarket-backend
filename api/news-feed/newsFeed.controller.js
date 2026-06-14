@@ -1,4 +1,5 @@
 import { newsFeedService } from './newsFeed.service.js'
+import { logger } from '../../services/logger.service.js'
 
 export function getNewsFeed(req, res) {
     res.send({ articles: newsFeedService.get() })
@@ -8,7 +9,7 @@ export function getNewsFeed(req, res) {
 export async function getAssetNews(req, res) {
     const symbol = (req.params.symbol ?? '').trim().toUpperCase()
     const query  = (req.query.q ?? '').trim()
-    if (!symbol) return res.status(400).json({ err: 'symbol required' })
+    if (!symbol) return res.status(400).json({ error: 'symbol required' })
 
     try {
         // Company-name resolution now happens inside the service so a cache hit
@@ -16,8 +17,8 @@ export async function getAssetNews(req, res) {
         const articles = await newsFeedService.getForSymbolRaw(symbol, query)
         res.send({ articles })
     } catch (err) {
-        console.error('[assetNews] error:', err)
-        res.status(500).json({ err: 'Failed to fetch asset news' })
+        logger.error('[assetNews] error:', err)
+        res.status(500).json({ error: 'Failed to fetch asset news' })
     }
 }
 
@@ -25,14 +26,14 @@ export async function getAssetNews(req, res) {
 export async function getAssetNewsSentiment(req, res) {
     const symbol = (req.params.symbol ?? '').trim().toUpperCase()
     const query  = (req.query.q ?? '').trim()
-    if (!symbol) return res.status(400).json({ err: 'symbol required' })
+    if (!symbol) return res.status(400).json({ error: 'symbol required' })
 
     try {
         const articles = await newsFeedService.getForSymbolSentiment(symbol, query)
         res.send({ articles })
     } catch (err) {
-        console.error('[assetNews:sentiment] error:', err)
-        res.status(500).json({ err: 'Failed to fetch asset news sentiment' })
+        logger.error('[assetNews:sentiment] error:', err)
+        res.status(500).json({ error: 'Failed to fetch asset news sentiment' })
     }
 }
 

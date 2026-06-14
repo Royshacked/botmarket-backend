@@ -11,38 +11,9 @@
 
 import { priceService } from '../services/price.service.js'
 import { logger }       from '../services/logger.service.js'
+import { parseTimeframe, isIntradaySpan } from '../services/timeframe.service.js'
 
 const LOG = '[ohlcv.provider]'
-
-/**
- * Parse a timeframe string into priceService options.
- *
- * @param {string} tf
- * @returns {{ timeSpan: string, multiplier: number }}
- */
-export function parseTimeframe(tf) {
-    if (!tf) return { timeSpan: 'day', multiplier: 1 }
-
-    const minMatch = tf.match(/^(\d+)min$/)
-    if (minMatch) return { timeSpan: 'minute', multiplier: parseInt(minMatch[1], 10) }
-
-    const hrMatch = tf.match(/^(\d+)hr$/)
-    if (hrMatch) return { timeSpan: 'hour', multiplier: parseInt(hrMatch[1], 10) }
-
-    if (tf === 'day')   return { timeSpan: 'day',   multiplier: 1 }
-    if (tf === 'week')  return { timeSpan: 'week',  multiplier: 1 }
-    if (tf === 'month') return { timeSpan: 'month', multiplier: 1 }
-
-    // Legacy format support
-    if (tf === 'minutes') return { timeSpan: 'minute', multiplier: 5 }
-    if (tf === 'hours')   return { timeSpan: 'hour',   multiplier: 1 }
-    if (tf === 'daily')   return { timeSpan: 'day',    multiplier: 1 }
-    if (tf === 'weekly')  return { timeSpan: 'week',   multiplier: 1 }
-    if (tf === 'monthly') return { timeSpan: 'month',  multiplier: 1 }
-
-    logger.warn(LOG, `Unknown timeframe "${tf}" — falling back to daily`)
-    return { timeSpan: 'day', multiplier: 1 }
-}
 
 /**
  * Get the last `count` OHLCV candles for a symbol.
@@ -53,10 +24,14 @@ export function parseTimeframe(tf) {
  * @returns {Promise<Array<{t,o,h,l,c,v}>>}
  */
 export async function getCandles(symbol, timeframe, count = 50) {
-    const opts = parseTimeframe(timeframe)
+    let opts = parseTimeframe(timeframe)
+    if (!opts) {
+        logger.warn(LOG, `Unknown timeframe "${timeframe}" — falling back to daily`)
+        opts = { timeSpan: 'day', multiplier: 1 }
+    }
 
     // All intraday bars (minute or any hour multiplier) always request fresh data
-    const isIntraday = opts.timeSpan === 'minute' || opts.timeSpan === 'hour'
+    const isIntraday = isIntradaySpan(opts.timeSpan)
 
     let result
     try {

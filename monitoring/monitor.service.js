@@ -28,6 +28,8 @@ import { evaluateTree, evaluateConditions }     from './monitor.orchestrator.js'
 import { logger }                               from '../services/logger.service.js'
 import { isMarketOpen, isCrypto }               from '../services/market.service.js'
 import { buildOrderPlanForIdea }                from '../services/orderPlan.service.js'
+import { getCheckGap, isIntradayTimeframe }     from '../services/timeframe.service.js'
+import { collectSymbols, firstLeaf }            from '../services/conditionTree.service.js'
 
 const LOG        = '[monitor.service]'
 const COLLECTION = 'ideas'
@@ -43,46 +45,6 @@ const _lastChecked = new Map()
 
 let _timer   = null
 let _running = false   // prevents concurrent overlapping ticks
-
-// ─── Timeframe → minimum gap between checks ───────────────────────────────────
-
-/**
- * Compute the minimum re-check gap for a given timeframe string.
- * For sub-hour bars: gap = bar width.
- * For day/week/month: gap = 4h / 24h / 24h (check a few times per bar).
- *
- * @param {string} tf  e.g. "5min", "4hr", "day", "week" — legacy also accepted
- * @returns {number}  milliseconds
- */
-function getCheckGap(tf) {
-    if (!tf) return 4 * 60 * 60 * 1_000   // default: 4h
-
-    const minMatch = tf.match(/^(\d+)min$/)
-    if (minMatch) return parseInt(minMatch[1], 10) * 60 * 1_000
-
-    const hrMatch = tf.match(/^(\d+)hr$/)
-    if (hrMatch) return parseInt(hrMatch[1], 10) * 60 * 60 * 1_000
-
-    if (tf === 'day')   return  4 * 60 * 60 * 1_000  // 4h
-    if (tf === 'week')  return 24 * 60 * 60 * 1_000  // 24h
-    if (tf === 'month') return 24 * 60 * 60 * 1_000  // 24h
-
-    // Legacy format support
-    if (tf === 'minutes') return  5 * 60 * 1_000
-    if (tf === 'hours')   return 60 * 60 * 1_000
-    if (tf === 'daily')   return  4 * 60 * 60 * 1_000
-    if (tf === 'weekly')  return 24 * 60 * 60 * 1_000
-    if (tf === 'monthly') return 24 * 60 * 60 * 1_000
-
-    return 4 * 60 * 60 * 1_000   // unknown → 4h fallback
-}
-
-// ─── Market hours helpers ─────────────────────────────────────────────────────
-
-/** Intraday timeframes produce no new bars when the exchange is closed. */
-function _isIntraday(tf) {
-    return /min$|hr$/.test(tf ?? '')
-}
 
 // ─── Public interface ─────────────────────────────────────────────────────────
 
@@ -195,7 +157,7 @@ async function _checkIdea(db, idea) {
     const fastestTf = isPosition
         ? [stopTf, tpTf, entryTf].reduce((a, b) => getCheckGap(a) <= getCheckGap(b) ? a : b)
         : entryTf
-    if (!isCrypto(asset) && _isIntraday(fastestTf) && !isMarketOpen()) {
+    if (!isCrypto(asset) && isIntradayTimeframe(fastestTf) && !isMarketOpen()) {
         logger.info(LOG, `[${id}] Market closed — skipping intraday check (${asset}/${fastestTf})`)
         return
     }
@@ -261,21 +223,6 @@ function _logCheck(id, asset, status, tf, candles) {
 
 // ─── Cross-asset symbol helpers ───────────────────────────────────────────────
 
-/** Walk a condition tree and collect every distinct symbol that is not the default. */
-function _walkTreeSymbols(node, symbols) {
-    if (!node) return
-    if (typeof node.condition === 'string') { if (node.symbol) symbols.add(node.symbol); return }
-    if (Array.isArray(node.children)) node.children.forEach(c => _walkTreeSymbols(c, symbols))
-}
-
-/** Collect cross-asset symbols from both tree and legacy flat-array formats. */
-function _crossSymbols(tree, flatConditions) {
-    const symbols = new Set()
-    if (tree) _walkTreeSymbols(tree, symbols)
-    if (Array.isArray(flatConditions)) flatConditions.forEach(c => { if (c?.symbol) symbols.add(c.symbol) })
-    return symbols
-}
-
 /**
  * Build a symbolMap for an evaluation phase.
  * Fetches candles for every cross-asset symbol referenced in the conditions.
@@ -301,7 +248,7 @@ async function _checkEntry(db, idea, candles) {
     const { id, asset } = idea
     const entryTf = _resolveEntryTimeframe(idea)
 
-    const crossSyms = _crossSymbols(idea.entry_condition_tree, idea.entry_conditions)
+    const crossSyms = collectSymbols(idea.entry_condition_tree, idea.entry_conditions)
     const symbolMap = await _buildSymbolMap(id, asset, candles, entryTf, crossSyms)
 
     let triggered = false
@@ -357,7 +304,7 @@ async function _checkPosition(db, idea, stopCandles, tpCandles, aeCandles) {
 
     // ── Stop conditions ───────────────────────────────────────────────────────
     {
-        const crossSyms = _crossSymbols(idea.stop_condition_tree, idea.stop_conditions)
+        const crossSyms = collectSymbols(idea.stop_condition_tree, idea.stop_conditions)
         const symbolMap = await _buildSymbolMap(id, asset, stopCandles, stopTf, crossSyms)
 
         if (idea.stop_condition_tree) {
@@ -385,7 +332,7 @@ async function _checkPosition(db, idea, stopCandles, tpCandles, aeCandles) {
 
     // ── TP conditions ─────────────────────────────────────────────────────────
     {
-        const crossSyms = _crossSymbols(idea.tp_condition_tree, idea.tp_conditions)
+        const crossSyms = collectSymbols(idea.tp_condition_tree, idea.tp_conditions)
         const symbolMap = await _buildSymbolMap(id, asset, tpCandles, tpTf, crossSyms)
 
         if (idea.tp_condition_tree) {
@@ -428,7 +375,7 @@ async function _checkAdditionalEntries(db, idea, candles, entryTf) {
         if (ae.triggeredAt) break     // order queued but not yet filled — wait
 
         // first un-triggered entry: its predecessor (if any) is confirmed filled
-        const crossSyms = _crossSymbols(ae.condition_tree, ae.conditions)
+        const crossSyms = collectSymbols(ae.condition_tree, ae.conditions)
         const symbolMap = await _buildSymbolMap(idea.id, idea.asset, candles, entryTf, crossSyms)
 
         let triggered = false
@@ -459,7 +406,7 @@ async function _checkAdditionalEntries(db, idea, candles, entryTf) {
  */
 function _resolveEntryTimeframe(idea) {
     if (idea.entry_condition_tree) {
-        const leaf = _firstLeaf(idea.entry_condition_tree)
+        const leaf = firstLeaf(idea.entry_condition_tree)
         if (leaf?.timeframe) return leaf.timeframe
     }
     return idea.entry_conditions?.[0]?.timeframe
@@ -470,7 +417,7 @@ function _resolveEntryTimeframe(idea) {
 
 function _resolveStopTimeframe(idea) {
     if (idea.stop_condition_tree) {
-        const leaf = _firstLeaf(idea.stop_condition_tree)
+        const leaf = firstLeaf(idea.stop_condition_tree)
         if (leaf?.timeframe) return leaf.timeframe
     }
     return idea.stop_conditions?.[0]?.timeframe
@@ -480,25 +427,12 @@ function _resolveStopTimeframe(idea) {
 
 function _resolveTpTimeframe(idea) {
     if (idea.tp_condition_tree) {
-        const leaf = _firstLeaf(idea.tp_condition_tree)
+        const leaf = firstLeaf(idea.tp_condition_tree)
         if (leaf?.timeframe) return leaf.timeframe
     }
     return idea.tp_conditions?.[0]?.timeframe
         ?? idea.tp_timeframe
         ?? _resolveEntryTimeframe(idea)
-}
-
-/** Return the first leaf node found in a condition tree (depth-first). */
-function _firstLeaf(node) {
-    if (!node) return null
-    if (typeof node.condition === 'string') return node
-    if (Array.isArray(node.children)) {
-        for (const child of node.children) {
-            const found = _firstLeaf(child)
-            if (found) return found
-        }
-    }
-    return null
 }
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────

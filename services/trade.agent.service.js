@@ -4,6 +4,8 @@ import { dirname, join } from 'path'
 import { callAnthropicWithTools, streamAnthropicWithTools } from '../providers/anthropic.provider.js'
 import { getQuote, getTickerAggregates } from '../providers/yahoofinance.provider.js'
 import { logger } from './logger.service.js'
+import { normalizeTimeframe } from './timeframe.service.js'
+import { normalizeTreeNode, firstLeafTimeframe } from './conditionTree.service.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const BASE_SYSTEM_PROMPT = readFileSync(join(__dirname, '../trade_assistant_system_prompt.md'), 'utf-8')
@@ -97,7 +99,7 @@ export const tradeAgentService = {
     chatStream,
 }
 
-async function chat({ messages, userPrompt, analysisState = _emptyState(), brokerContext = null }) {
+async function chat({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null }) {
     const systemPrompt = _buildSystemPrompt(analysisState, brokerContext)
     const builtMessages = _buildMessages({ messages, userPrompt, analysisState })
 
@@ -126,7 +128,7 @@ async function chat({ messages, userPrompt, analysisState = _emptyState(), broke
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = _emptyState(), brokerContext = null, ideaAccounts = [], onToken, onAsset, onInterval }) {
+async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], onToken, onAsset, onInterval }) {
     const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts)
     const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
 
@@ -248,10 +250,10 @@ function _parseResponse(raw, priorState, userPrompt) {
             tradeIdea = JSON.parse(tradeMatch[1].trim())
             // Normalise timeframes in all condition tree nodes
             if (tradeIdea) {
-                const entryTf = _firstLeafTf(tradeIdea.entry_condition) ?? null
-                tradeIdea.entry_condition = _normalizeTreeNode(tradeIdea.entry_condition, entryTf)
-                tradeIdea.stop_loss       = _normalizeTreeNode(tradeIdea.stop_loss,       entryTf)
-                tradeIdea.take_profit     = _normalizeTreeNode(tradeIdea.take_profit,     entryTf)
+                const entryTf = firstLeafTimeframe(tradeIdea.entry_condition) ?? null
+                tradeIdea.entry_condition = normalizeTreeNode(tradeIdea.entry_condition, entryTf)
+                tradeIdea.stop_loss       = normalizeTreeNode(tradeIdea.stop_loss,       entryTf)
+                tradeIdea.take_profit     = normalizeTreeNode(tradeIdea.take_profit,     entryTf)
             }
         } catch {
             logger.warn(LOG, 'trade_idea parse failed', { raw: tradeMatch[1] })
@@ -290,14 +292,14 @@ function _parseResponse(raw, priorState, userPrompt) {
         } else if (pt) {
             // ── Migrate old flat 'timeframe' field → entry_timeframe ──────────────
             if (pt.timeframe && !pt.entry_timeframe) {
-                pt.entry_timeframe = _normalizeTimeframe(pt.timeframe)
+                pt.entry_timeframe = normalizeTimeframe(pt.timeframe)
             }
             delete pt.timeframe   // always remove — never send old field back to LLM
 
             // Normalise group-level TF fields
-            pt.entry_timeframe = _normalizeTimeframe(pt.entry_timeframe) || _normalizeTimeframe(priorPt?.entry_timeframe) || null
-            pt.stop_timeframe  = _normalizeTimeframe(pt.stop_timeframe)  || null
-            pt.tp_timeframe    = _normalizeTimeframe(pt.tp_timeframe)    || null
+            pt.entry_timeframe = normalizeTimeframe(pt.entry_timeframe) || normalizeTimeframe(priorPt?.entry_timeframe) || null
+            pt.stop_timeframe  = normalizeTimeframe(pt.stop_timeframe)  || null
+            pt.tp_timeframe    = normalizeTimeframe(pt.tp_timeframe)    || null
 
             // Normalise per-condition timeframe strings (LLM often writes "15m", "4 hours", etc.)
             pt.entry_conditions = _normalizeConditions(pt.entry_conditions)
@@ -309,7 +311,7 @@ function _parseResponse(raw, priorState, userPrompt) {
                 || pt.entry_timeframe
                 || priorPt?.entry_timeframe
                 || priorPt?.entry_conditions?.[0]?.timeframe
-                || _normalizeTimeframe(priorPt?.timeframe)   // migrate prior old-format too
+                || normalizeTimeframe(priorPt?.timeframe)   // migrate prior old-format too
                 || null
 
             // Backfill group-level TF if LLM omitted it
@@ -357,7 +359,7 @@ function _isValidState(state) {
 }
 
 function _fallbackState(priorState, userPrompt, replyText) {
-    const prior = priorState && typeof priorState === 'object' ? priorState : _emptyState()
+    const prior = priorState && typeof priorState === 'object' ? priorState : emptyAnalysisState()
     const recent_messages = _trimMessages([
         ...(prior.recent_messages ?? []),
         ...(userPrompt?.trim() ? [{ role: 'user', content: userPrompt.trim() }] : []),
@@ -367,7 +369,7 @@ function _fallbackState(priorState, userPrompt, replyText) {
         recent_messages,
         recent_chat_summary: prior.recent_chat_summary ?? '',
         // preserve the full prior structured_state — never wipe trade params on fallback
-        structured_state: prior.structured_state ?? _emptyState().structured_state,
+        structured_state: prior.structured_state ?? emptyAnalysisState().structured_state,
     }
 }
 
@@ -379,93 +381,14 @@ function _trimMessages(messages) {
         .slice(-MAX_RECENT_MESSAGES)
 }
 
-// ─── Timeframe normalisation ──────────────────────────────────────────────────
-
-const _TF_REMAP = [
-    // minute variants
-    [/^(\d+)\s*[-\s]?m(?:in(?:utes?)?)?$/i, (_, n) => `${n}min`],
-    // hour variants
-    [/^(\d+)\s*[-\s]?h(?:r|rs|our|ours)?$/i, (_, n) => `${n}hr`],
-    // named
-    [/^daily$/i,   () => 'day'],
-    [/^weekly$/i,  () => 'week'],
-    [/^monthly$/i, () => 'month'],
-]
-const _VALID_TF = new Set(['1min','5min','15min','30min','1hr','2hr','4hr','day','week','month'])
-
-function _normalizeTimeframe(tf) {
-    if (!tf || typeof tf !== 'string') return null
-    const s = tf.trim()
-    if (_VALID_TF.has(s)) return s
-    for (const [re, fn] of _TF_REMAP) {
-        const m = s.match(re)
-        if (m) return fn(...m)
-    }
-    return s  // keep as-is; better than losing it
-}
+// ─── Condition normalisation ──────────────────────────────────────────────────
 
 function _normalizeConditions(arr) {
     if (!Array.isArray(arr)) return []
     return arr.map(c => {
         if (typeof c === 'string') return { condition: c, type: 'structured', timeframe: null }
-        return { ...c, timeframe: _normalizeTimeframe(c.timeframe) }
+        return { ...c, timeframe: normalizeTimeframe(c.timeframe) }
     })
-}
-
-/**
- * Recursively normalise timeframe strings in a condition tree node.
- * Leaf nodes get their timeframe normalised; missing timeframes fall back to defaultTf.
- * Group nodes with old { logic, conditions } shape are migrated to { operator, children }.
- */
-function _normalizeTreeNode(node, defaultTf) {
-    if (!node || typeof node !== 'object') return node
-
-    // Leaf node
-    if (typeof node.condition === 'string') {
-        const leaf = {
-            ...node,
-            timeframe: _normalizeTimeframe(node.timeframe) || defaultTf || null,
-        }
-        if (node.quantity != null) leaf.quantity = Number(node.quantity) || null
-        return leaf
-    }
-
-    // Group node: { operator, children }
-    if (node.operator && Array.isArray(node.children)) {
-        return {
-            operator: node.operator,
-            children: node.children.map(child => _normalizeTreeNode(child, defaultTf)),
-        }
-    }
-
-    // Old format migration: { logic, conditions }
-    if (Array.isArray(node.conditions)) {
-        return {
-            operator: node.logic ?? 'AND',
-            children: node.conditions.map(child => _normalizeTreeNode(child, defaultTf)),
-        }
-    }
-
-    return node
-}
-
-/** Find the timeframe of the first leaf in a condition tree (for defaultTf propagation). */
-function _firstLeafTf(node) {
-    if (!node || typeof node !== 'object') return null
-    if (typeof node.condition === 'string') return _normalizeTimeframe(node.timeframe) || null
-    if (Array.isArray(node.children)) {
-        for (const child of node.children) {
-            const tf = _firstLeafTf(child)
-            if (tf) return tf
-        }
-    }
-    if (Array.isArray(node.conditions)) {
-        for (const child of node.conditions) {
-            const tf = _firstLeafTf(child)
-            if (tf) return tf
-        }
-    }
-    return null
 }
 
 /**
@@ -482,7 +405,7 @@ function _fillMissingTimeframes(conditions, priorConditions, defaultTf) {
     })
 }
 
-function _emptyState() {
+export function emptyAnalysisState() {
     return {
         recent_messages: [],
         recent_chat_summary: '',

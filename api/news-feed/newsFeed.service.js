@@ -3,6 +3,7 @@ import { filterService } from '../../services/model.filter.service.js'
 import { getCompanyName } from '../../providers/yahoofinance.provider.js'
 import { isCacheFresh, loadItemsFromFile, saveItemsToFile } from '../../services/util.service.js'
 import { logger } from '../../services/logger.service.js'
+import { mapGNewsArticle, isValidArticle, articleKey, dedupeArticles } from '../../services/newsArticle.service.js'
 
 const LOG = '[newsFeed]'
 const CACHE_TYPE = 'news-feed'
@@ -71,13 +72,13 @@ async function _refresh() {
 
         const from     = new Date(Date.now() - WINDOW_MS).toISOString()
         const raw      = await fetchGNews({ query: FETCH_QUERY, from, max: FETCH_MAX })
-        const incoming = Array.isArray(raw?.articles) ? raw.articles.map(_mapArticle).filter(_isValid) : []
+        const incoming = Array.isArray(raw?.articles) ? raw.articles.map(_mapArticle).filter(isValidArticle) : []
 
-        const existingKeys = new Set(existing.map(_articleKey))
-        const newArticles  = incoming.filter(a => !existingKeys.has(_articleKey(a)))
+        const existingKeys = new Set(existing.map(articleKey))
+        const newArticles  = incoming.filter(a => !existingKeys.has(articleKey(a)))
         const filteredNew  = newArticles.length > 0 ? await filterService.filterNews(newArticles) : []
 
-        const merged = _dedupeByKey([...existing, ...filteredNew])
+        const merged = dedupeArticles([...existing, ...filteredNew])
         const recent = _filterRecent(merged)
 
         await saveItemsToFile(CACHE_TYPE, CACHE_NAME, { items: recent, lastFetchedAt: Date.now() })
@@ -132,7 +133,7 @@ async function _fetchSymbolRaw(symbol, queryHint) {
     const cleaned = _cleanCompanyName(query) || symbol
     const from    = new Date(Date.now() - SYMBOL_WINDOW_MS).toISOString()
     const raw     = await fetchGNews({ query: cleaned, from, max: 10 })
-    return Array.isArray(raw?.articles) ? raw.articles.map(_mapArticle).filter(_isValid) : []
+    return Array.isArray(raw?.articles) ? raw.articles.map(_mapArticle).filter(isValidArticle) : []
 }
 
 // ─── Phase 2: relevance filter + sentiment (LLM) ───────────────────────────────
@@ -178,40 +179,7 @@ function _filterRecent(items) {
     return items.filter(item => item.datetime >= cutoff)
 }
 
+// Feed articles carry two extra fields on top of the shared base shape.
 function _mapArticle(item) {
-    const publishedMs = Date.parse(item?.publishedAt ?? '')
-    return {
-        datetime: Number.isFinite(publishedMs) ? Math.floor(publishedMs / 1000) : NaN,
-        headline: typeof item?.title === 'string' ? item.title.trim() : '',
-        summary:  typeof item?.description === 'string' ? item.description : '',
-        url:      item?.url    ?? '',
-        image:    item?.image  ?? '',
-        source:   item?.source?.name ?? '',
-        id:       item?.id     ?? null,
-        category: 'markets',
-        related:  '',
-    }
-}
-
-function _isValid(item) {
-    return (
-        item &&
-        Number.isFinite(item.datetime) &&
-        typeof item.headline === 'string' &&
-        item.headline.length > 0
-    )
-}
-
-function _articleKey(item) {
-    return item?.url || `${item?.datetime}:${item?.headline}`
-}
-
-function _dedupeByKey(articles) {
-    const seen = new Set()
-    return articles.filter(a => {
-        const key = _articleKey(a)
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
-    })
+    return { ...mapGNewsArticle(item), category: 'markets', related: '' }
 }

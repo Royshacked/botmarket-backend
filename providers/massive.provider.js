@@ -1,6 +1,7 @@
 import dotenv from 'dotenv'
 import { restClient } from '@massive.com/client-js'
 import { getTickerAggregates as getYahooAggregates } from './yahoofinance.provider.js'
+import { logger } from '../services/logger.service.js'
 
 dotenv.config()
 const MASSIVE_API_KEY = process.env.MASSIVE_API_KEY
@@ -44,7 +45,7 @@ export async function getTickerAggregates(ticker, options = {}) {
         }))
 
   } catch (e) {
-    console.error(`couldn't get stocks aggregates for ${ticker}`, e);
+    logger.error(`couldn't get stocks aggregates for ${ticker}`, e);
     throw e
   }
 }

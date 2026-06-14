@@ -5,9 +5,11 @@ import { streamPortfolio, savePortfolioChatState, getPortfolioChatState, deleteP
 
 const router = express.Router()
 
-router.post('/stream',                   log, requireAuth, streamPortfolio)
-router.post('/chat-state',               log, requireAuth, savePortfolioChatState)
-router.get('/chat-state/:portfolioId',   log, requireAuth, getPortfolioChatState)
-router.delete('/chat-state/:portfolioId', log, requireAuth, deletePortfolioChatState)
+router.use(requireAuth)
+
+router.post('/stream',                   log, streamPortfolio)
+router.post('/chat-state',               log, savePortfolioChatState)
+router.get('/chat-state/:portfolioId',   log, getPortfolioChatState)
+router.delete('/chat-state/:portfolioId', log, deletePortfolioChatState)
 
 export const portfolioRoutes = router

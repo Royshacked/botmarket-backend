@@ -14,7 +14,7 @@ export async function transcribeAudio(req, res) {
     try {
         const buffer = req.body
         if (!buffer || !buffer.length) {
-            return res.status(400).json({ err: 'No audio data received' })
+            return res.status(400).json({ error: 'No audio data received' })
         }
 
         const contentType = req.headers['content-type'] || 'audio/webm'
@@ -32,7 +32,7 @@ export async function transcribeAudio(req, res) {
         res.json({ text: result.text ?? '' })
     } catch (err) {
         logger.error(LOG, 'Transcription failed:', err.message, err.status ?? '', err.error ?? '')
-        res.status(500).json({ err: 'Transcription failed' })
+        res.status(500).json({ error: 'Transcription failed' })
     } finally {
         if (tmpPath) unlink(tmpPath).catch(() => {})
     }

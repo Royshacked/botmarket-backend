@@ -1,6 +1,7 @@
 import dotenv from 'dotenv'
 import axios from 'axios'
 import { oneMonthAgoToTodayRange } from '../services/util.service.js'
+import { logger } from '../services/logger.service.js'
 import finnhub from 'finnhub'
 
 dotenv.config()
@@ -32,7 +33,7 @@ export async function fetchMarketNews() {
     try {
         return await finnhubRequest(callback => finnhubClient.marketNews('general', {}, callback))
     } catch (error) {
-        console.error('Error getting market news', error)
+        logger.error('Error getting market news', error)
         throw error
     }
 }
@@ -46,7 +47,7 @@ export async function fetchCompanyNews(ticker,from=0,to=0) {
         to = toFinnhubDate(to)
         return await finnhubRequest(callback => finnhubClient.companyNews(ticker, from, to, callback))
     } catch (error) {
-        console.error('Error getting company news', error)
+        logger.error('Error getting company news', error)
         throw error
     }
 }
@@ -56,7 +57,7 @@ export async function fetchCompanyProfile2(ticker) {
         return await finnhubRequest(callback => finnhubClient.companyProfile({ symbol: ticker }, callback))
     }
     catch (error) {
-        console.error('Error getting company profile', error)
+        logger.error('Error getting company profile', error)
         throw error
     }
 }
@@ -75,7 +76,7 @@ export async function fetchEarningsCalendar(ticker,from=0,to=0) {
         }, callback))
     }
     catch (error) {
-        console.error('Error getting earnings calendar', error)
+        logger.error('Error getting earnings calendar', error)
         throw error
     }
 }

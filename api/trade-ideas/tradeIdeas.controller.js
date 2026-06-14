@@ -6,32 +6,32 @@ const LOG = '[tradeIdeas:controller]'
 export async function getTradeIdea(req, res) {
     try {
         const { id } = req.params
-        if (!id) return res.status(400).send({ err: 'Missing id' })
+        if (!id) return res.status(400).send({ error: 'Missing id' })
         const result = await ideaService.getIdeaById(id, req.user._id, req.user.isAdmin)
         if (!result.ok) {
-            if (result.reason === 'not_found') return res.status(404).send({ err: 'Idea not found' })
-            if (result.reason === 'forbidden') return res.status(403).send({ err: 'Forbidden' })
-            return res.status(500).send({ err: 'Failed to get idea' })
+            if (result.reason === 'not_found') return res.status(404).send({ error: 'Idea not found' })
+            if (result.reason === 'forbidden') return res.status(403).send({ error: 'Forbidden' })
+            return res.status(500).send({ error: 'Failed to get idea' })
         }
         res.send({ idea: result.idea })
     } catch (err) {
         logger.error(LOG, 'getTradeIdea failed', err)
-        res.status(500).send({ err: 'Failed to get trade idea' })
+        res.status(500).send({ error: 'Failed to get trade idea' })
     }
 }
 
 export async function createTradeIdea(req, res) {
     try {
         const body = req.body ?? {}
-        if (!body.asset && !body.ticker) return res.status(400).send({ err: 'Missing asset' })
+        if (!body.asset && !body.ticker) return res.status(400).send({ error: 'Missing asset' })
 
         const result = await ideaService.saveIdea(body, req.user._id)
-        if (!result.ok) return res.status(500).send({ err: 'Failed to save idea' })
+        if (!result.ok) return res.status(500).send({ error: 'Failed to save idea' })
 
         res.status(201).send({ idea: result.idea })
     } catch (err) {
         logger.error(LOG, 'createTradeIdea failed', err)
-        res.status(500).send({ err: 'Failed to create trade idea' })
+        res.status(500).send({ error: 'Failed to create trade idea' })
     }
 }
 
@@ -41,72 +41,72 @@ export async function getTradeIdeas(req, res) {
         res.send({ ideas })
     } catch (err) {
         logger.error(LOG, 'getTradeIdeas failed', err)
-        res.status(500).send({ err: 'Failed to get trade ideas' })
+        res.status(500).send({ error: 'Failed to get trade ideas' })
     }
 }
 
 export async function deleteTradeIdea(req, res) {
     try {
         const { id } = req.params
-        if (!id) return res.status(400).send({ err: 'Missing id' })
+        if (!id) return res.status(400).send({ error: 'Missing id' })
 
         const result = await ideaService.deleteIdea(id, req.user._id, req.user.isAdmin)
         if (!result.ok) {
-            if (result.reason === 'not_found')   return res.status(404).send({ err: 'Idea not found' })
-            if (result.reason === 'forbidden')   return res.status(403).send({ err: 'Forbidden' })
-            return res.status(500).send({ err: 'Failed to delete idea' })
+            if (result.reason === 'not_found')   return res.status(404).send({ error: 'Idea not found' })
+            if (result.reason === 'forbidden')   return res.status(403).send({ error: 'Forbidden' })
+            return res.status(500).send({ error: 'Failed to delete idea' })
         }
 
         res.send({ ok: true })
     } catch (err) {
         logger.error(LOG, 'deleteTradeIdea failed', err)
-        res.status(500).send({ err: 'Failed to delete trade idea' })
+        res.status(500).send({ error: 'Failed to delete trade idea' })
     }
 }
 
 export async function createBatchIdeas(req, res) {
     try {
         const { plan, accounts = [], mainAccountId = null, portfolioId = null } = req.body ?? {}
-        if (!plan?.ideas?.length) return res.status(400).send({ err: 'Missing plan.ideas' })
+        if (!plan?.ideas?.length) return res.status(400).send({ error: 'Missing plan.ideas' })
 
         const result = await ideaService.saveBatchIdeas(plan, req.user._id, accounts, mainAccountId, portfolioId)
-        if (!result.ok) return res.status(500).send({ err: 'Failed to save batch' })
+        if (!result.ok) return res.status(500).send({ error: 'Failed to save batch' })
 
         res.status(201).send({ ideas: result.ideas, portfolioId: result.portfolioId })
     } catch (err) {
         logger.error(LOG, 'createBatchIdeas failed', err)
-        res.status(500).send({ err: 'Failed to create batch ideas' })
+        res.status(500).send({ error: 'Failed to create batch ideas' })
     }
 }
 
 export async function placeTradeIdeaOrders(req, res) {
     try {
         const { id } = req.params
-        if (!id) return res.status(400).send({ err: 'Missing id' })
+        if (!id) return res.status(400).send({ error: 'Missing id' })
 
         const { orders } = req.body ?? {}
         const result = await ideaService.placeOrdersForIdea(id, orders, req.user._id, req.user.isAdmin)
         if (!result.ok) {
-            if (result.reason === 'not_found')      return res.status(404).send({ err: 'Idea not found' })
-            if (result.reason === 'forbidden')      return res.status(403).send({ err: 'Forbidden' })
-            if (result.reason === 'no_orders')      return res.status(400).send({ err: 'No orders provided' })
-            if (result.reason === 'not_hit')        return res.status(400).send({ err: 'Idea is not awaiting confirmation' })
-            if (result.reason === 'already_placed') return res.status(409).send({ err: 'Orders already placed' })
-            if (result.reason === 'all_failed')     return res.status(502).send({ err: 'All broker orders failed', results: result.results })
-            return res.status(500).send({ err: 'Failed to place orders' })
+            if (result.reason === 'not_found')      return res.status(404).send({ error: 'Idea not found' })
+            if (result.reason === 'forbidden')      return res.status(403).send({ error: 'Forbidden' })
+            if (result.reason === 'no_orders')      return res.status(400).send({ error: 'No orders provided' })
+            if (result.reason === 'not_hit')        return res.status(400).send({ error: 'Idea is not awaiting confirmation' })
+            if (result.reason === 'already_placed') return res.status(409).send({ error: 'Orders already placed' })
+            if (result.reason === 'all_failed')     return res.status(502).send({ error: 'All broker orders failed', results: result.results })
+            return res.status(500).send({ error: 'Failed to place orders' })
         }
 
         res.send({ idea: result.idea, results: result.results })
     } catch (err) {
         logger.error(LOG, 'placeTradeIdeaOrders failed', err)
-        res.status(500).send({ err: 'Failed to place orders' })
+        res.status(500).send({ error: 'Failed to place orders' })
     }
 }
 
 export async function updateTradeIdea(req, res) {
     try {
         const { id } = req.params
-        if (!id) return res.status(400).send({ err: 'Missing id' })
+        if (!id) return res.status(400).send({ error: 'Missing id' })
 
         const {
             status, type, quantity, additional_entries, timeframe,
@@ -125,7 +125,7 @@ export async function updateTradeIdea(req, res) {
             entry_logic === undefined && stop_logic === undefined && tp_logic === undefined &&
             entry_condition_tree === undefined && stop_condition_tree === undefined && tp_condition_tree === undefined &&
             notes === undefined) {
-            return res.status(400).send({ err: 'Nothing to update' })
+            return res.status(400).send({ error: 'Nothing to update' })
         }
 
         const patch = {}
@@ -151,15 +151,15 @@ export async function updateTradeIdea(req, res) {
 
         const result = await ideaService.updateIdea(id, patch, req.user._id, req.user.isAdmin)
         if (!result.ok) {
-            if (result.reason === 'not_found')      return res.status(404).send({ err: 'Idea not found' })
-            if (result.reason === 'forbidden')      return res.status(403).send({ err: 'Forbidden' })
-            if (result.reason === 'invalid_status') return res.status(400).send({ err: 'Invalid status value' })
-            return res.status(500).send({ err: 'Failed to update idea' })
+            if (result.reason === 'not_found')      return res.status(404).send({ error: 'Idea not found' })
+            if (result.reason === 'forbidden')      return res.status(403).send({ error: 'Forbidden' })
+            if (result.reason === 'invalid_status') return res.status(400).send({ error: 'Invalid status value' })
+            return res.status(500).send({ error: 'Failed to update idea' })
         }
 
         res.send({ idea: result.idea })
     } catch (err) {
         logger.error(LOG, 'updateTradeIdea failed', err)
-        res.status(500).send({ err: 'Failed to update trade idea' })
+        res.status(500).send({ error: 'Failed to update trade idea' })
     }
 }

@@ -9,6 +9,6 @@ export async function getStatus(req, res) {
         res.send(getMarketStatus(symbol))
     } catch (err) {
         logger.error(LOG, 'getStatus failed', err)
-        res.status(500).send({ err: 'Failed to get market status' })
+        res.status(500).send({ error: 'Failed to get market status' })
     }
 }

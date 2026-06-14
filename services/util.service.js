@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { logger } from './logger.service.js'
 
 
 export function getStartOfTodayUTC() {
@@ -81,7 +82,7 @@ export async function saveCandlesToFile(ticker, options, data) {
         return { ok: true }
     } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
-        console.error(`Error saving candles for ${ticker}`, error)
+        logger.error(`Error saving candles for ${ticker}`, error)
         return { ok: false, error }
     }
 }
@@ -108,7 +109,7 @@ export async function loadCandlesFromFile(ticker, options) {
     } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
         const reason = error instanceof SyntaxError ? 'parse_error' : 'io_error'
-        console.error(`Error loading candles for ${ticker}`, error)
+        logger.error(`Error loading candles for ${ticker}`, error)
         return { ok: false, reason, data: null, error }
     }
 }
@@ -135,7 +136,7 @@ export async function saveItemsToFile(type, name, data) {
         return { ok: true }
     } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
-        console.error(`Error saving ${name} to file`, error)
+        logger.error(`Error saving ${name} to file`, error)
         return { ok: false, error }
     }
 }
@@ -162,7 +163,7 @@ export async function loadItemsFromFile(type = '', name) {
     } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
         const reason = error instanceof SyntaxError ? 'parse_error' : 'io_error'
-        console.error(`Error loading ${name} from file`, error)
+        logger.error(`Error loading ${name} from file`, error)
         return { ok: false, reason, data: null, error }
     }
 }

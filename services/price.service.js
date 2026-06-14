@@ -1,5 +1,6 @@
 import { getTickerAggregates } from '../providers/massive.provider.js'
 import { isCacheFresh, loadCandlesFromFile, saveCandlesToFile } from './util.service.js'
+import { barDurationSeconds } from './timeframe.service.js'
 
 const DEFAULT_RANGE_DAYS = 30
 const CANDLE_CACHE_TTL_MS = 60 * 60 * 1000
@@ -37,62 +38,6 @@ export const priceService = {
 export const CANDLE_ROW_SCHEMA = CANDLE_SCHEMA
 export { OHLCV }
 
-export const PRICE_TOOLS = {
-    syncCandles: {
-        id: 'price.sync_candles',
-        handler: (input) => syncCandles(input.ticker, input),
-        description: 'Fetch incremental OHLCV candles, merge into cache, return newly added bars.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                ticker: { type: 'string' },
-                timeSpan: { type: 'string' },
-                multiplier: { type: 'number' },
-                from: { type: 'number', description: 'Unix ms for provider fetch window start' },
-                to: { type: 'number', description: 'Unix ms for provider fetch window end' },
-                format: { type: 'string', enum: ['compact', 'object'] },
-            },
-            required: ['ticker'],
-        },
-    },
-    queryCandles: {
-        id: 'price.query_candles',
-        handler: (input) => queryCandles(input.ticker, input),
-        description: 'Read cached candles for a ticker (optional unix-second range filter).',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                ticker: { type: 'string' },
-                timeSpan: { type: 'string' },
-                multiplier: { type: 'number' },
-                fromSec: { type: 'number' },
-                toSec: { type: 'number' },
-                format: { type: 'string', enum: ['compact', 'object'] },
-            },
-            required: ['ticker'],
-        },
-    },
-    getCandles: {
-        id: 'price.get_candles',
-        handler: (input) => getCandles(input.ticker, input),
-        description:
-            'Load cached OHLCV for a ticker or sync from provider when cache is empty, stale, or refresh is true. Use fromSec/toSec/timeSpan/multiplier from price.resolve_candle_opts.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                ticker: { type: 'string' },
-                timeSpan: { type: 'string' },
-                multiplier: { type: 'number' },
-                fromSec: { type: 'number', description: 'Unix seconds (inclusive window start)' },
-                toSec: { type: 'number', description: 'Unix seconds (inclusive window end)' },
-                refresh: { type: 'boolean' },
-                format: { type: 'string', enum: ['compact', 'object'] },
-            },
-            required: ['ticker'],
-        },
-    },
-}
-
 async function syncCandles(ticker, options = {}) {
     const symbol = _normalizeTicker(ticker)
     const barOpts = _normalizeOptions(options)
@@ -104,7 +49,7 @@ async function syncCandles(ticker, options = {}) {
 
     const latestTs = _maxCandleTimestamp(existingCandles)
     if (latestTs != null && fromMs == null) {
-        const stepSec = _barDurationSeconds(barOpts.timeSpan, barOpts.multiplier)
+        const stepSec = barDurationSeconds(barOpts.timeSpan, barOpts.multiplier)
         fromMs = (latestTs + stepSec) * 1000
     }
     if (fromMs == null) {
@@ -303,28 +248,6 @@ function _mergeDeduped(existing = [], incoming = []) {
         .filter((r) => r && !existingKeys.has(r[OHLCV.T]))
 
     return { merged, added }
-}
-
-function _barDurationSeconds(timeSpan, multiplier) {
-    const m = Math.max(1, Math.trunc(Number(multiplier) || 1))
-    switch (timeSpan) {
-        case 'minute':
-            return m * 60
-        case 'hour':
-            return m * 3600
-        case 'day':
-            return m * 86400
-        case 'week':
-            return m * 7 * 86400
-        case 'month':
-            return m * 30 * 86400
-        case 'quarter':
-            return m * 91 * 86400
-        case 'year':
-            return m * 365 * 86400
-        default:
-            return m * 60
-    }
 }
 
 function _maxCandleTimestamp(candles) {

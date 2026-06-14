@@ -4,20 +4,21 @@
  * call resolvePriceCandleOpts before price.get_candles.
  */
 
+import {
+    VALID_TIME_SPANS,
+    barDurationSeconds,
+    barSpecCacheKey,
+    isIntradaySpan,
+} from './timeframe.service.js'
+
 const SEC_PER_DAY = 86400
 const DEFAULT_LLM_BAR_LIMIT = 60
 /** Intraday explicit toSec older than this is treated as a bad LLM date and ignored. */
 const INTRADAY_STALE_SEC = 7 * SEC_PER_DAY
 const FUTURE_SLACK_SEC = 3600
 
-export const VALID_TIME_SPANS = ['minute', 'hour', 'day', 'week']
-
-const TIME_SPAN_SUFFIX = {
-    minute: 'm',
-    hour: 'h',
-    day: 'd',
-    week: 'w',
-}
+// Re-exported for callers that import these from the candle-spec module.
+export { VALID_TIME_SPANS, barSpecCacheKey }
 
 /**
  * @typedef {{
@@ -85,7 +86,7 @@ export function resolvePriceCandleOpts(spec, opts = {}) {
         multiplier = 15
     }
 
-    if (hints.lastFriday && (hints.intraday || _isIntraday(timeSpan))) {
+    if (hints.lastFriday && (hints.intraday || isIntradaySpan(timeSpan))) {
         timeSpan = 'minute'
         multiplier = hints.explicit15m ? 15 : hints.explicit5m ? 5 : 15
         const session = lastFridayUsRthRange()
@@ -93,7 +94,7 @@ export function resolvePriceCandleOpts(spec, opts = {}) {
         toSecInput = session.toSec
     }
 
-    if (_isIntraday(timeSpan) && toSecInput != null && toSecInput < nowSec - INTRADAY_STALE_SEC) {
+    if (isIntradaySpan(timeSpan) && toSecInput != null && toSecInput < nowSec - INTRADAY_STALE_SEC) {
         fromSecInput = null
         toSecInput = null
     }
@@ -134,46 +135,6 @@ export function lastFridayUsRthRange(now = new Date()) {
     }
 }
 
-/**
- * Cache key segment for per-bar analysis stores (e.g. 15m, 1d, 1w).
- * @param {{ timeSpan: string, multiplier: number }} barSpec
- * @returns {string}
- */
-export function barSpecCacheKey({ timeSpan, multiplier }) {
-    const span = VALID_TIME_SPANS.includes(timeSpan) ? timeSpan : 'day'
-    const m = _coercePositiveInt(multiplier, 1)
-    const suffix = TIME_SPAN_SUFFIX[span] ?? 'd'
-    return `${m}${suffix}`
-}
-
-/**
- * Future MCP registry: resolve candle fetch window before price.get_candles.
- */
-export const PRICE_CANDLE_SPEC_TOOLS = {
-    resolvePriceCandleOpts: {
-        id: 'price.resolve_candle_opts',
-        handler: (input) => resolvePriceCandleOpts(input),
-        description:
-            'Normalize bar type and time window into fromSec/toSec/barLimit for candle fetch and LLM analysis.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                timeSpan: { type: 'string', enum: VALID_TIME_SPANS },
-                multiplier: { type: 'number' },
-                fromSec: { type: 'number', description: 'Unix seconds (inclusive window start)' },
-                toSec: { type: 'number', description: 'Unix seconds (inclusive window end)' },
-                lookbackDays: {
-                    type: 'number',
-                    description: 'Calendar days before toSec when fromSec is omitted',
-                },
-            },
-        },
-    },
-}
-
-function _isIntraday(timeSpan) {
-    return timeSpan === 'minute' || timeSpan === 'hour'
-}
 
 /** @param {string | undefined} userPrompt */
 function _parsePromptHints(userPrompt) {
@@ -267,26 +228,10 @@ function _presetLookbackDays(timeSpan, multiplier) {
 }
 
 function _deriveBarLimit({ timeSpan, multiplier, fromSec, toSec }) {
-    const stepSec = _barDurationSeconds(timeSpan, multiplier)
+    const stepSec = barDurationSeconds(timeSpan, multiplier)
     const spanSec = Math.max(0, toSec - fromSec)
     const implied = Math.max(1, Math.floor(spanSec / stepSec) + 1)
     return Math.min(DEFAULT_LLM_BAR_LIMIT, implied)
-}
-
-function _barDurationSeconds(timeSpan, multiplier) {
-    const m = _coercePositiveInt(multiplier, 1)
-    switch (timeSpan) {
-        case 'minute':
-            return m * 60
-        case 'hour':
-            return m * 3600
-        case 'day':
-            return m * 86400
-        case 'week':
-            return m * 7 * 86400
-        default:
-            return m * 86400
-    }
 }
 
 function _coercePositiveInt(value, fallback) {

@@ -4,6 +4,7 @@ import { monitorService }  from '../../monitoring/monitor.service.js'
 import { brokerService }   from '../broker/broker.service.js'
 import { buildOrderPlanForIdea } from '../../services/orderPlan.service.js'
 import { isMarketOpen, isCrypto } from '../../services/market.service.js'
+import { resolveConditionTree, extractLeaves, topOperator } from '../../services/conditionTree.service.js'
 
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
@@ -22,15 +23,15 @@ export const ideaService = {
 
 async function saveIdea(tradeIdea, userId) {
     // Resolve condition trees from either new tree format or legacy flat arrays
-    const entryTree = _resolveConditionTree(tradeIdea.entry_condition,  tradeIdea.entry_conditions, tradeIdea.entry_logic ?? 'AND')
-    const stopTree  = _resolveConditionTree(tradeIdea.stop_loss,        tradeIdea.stop_conditions,  tradeIdea.stop_logic  ?? 'OR')
-    const tpTree    = _resolveConditionTree(tradeIdea.take_profit,      tradeIdea.tp_conditions,    tradeIdea.tp_logic    ?? 'OR')
+    const entryTree = resolveConditionTree(tradeIdea.entry_condition,  tradeIdea.entry_conditions, tradeIdea.entry_logic ?? 'AND')
+    const stopTree  = resolveConditionTree(tradeIdea.stop_loss,        tradeIdea.stop_conditions,  tradeIdea.stop_logic  ?? 'OR')
+    const tpTree    = resolveConditionTree(tradeIdea.take_profit,      tradeIdea.tp_conditions,    tradeIdea.tp_logic    ?? 'OR')
 
     const additionalEntries = (tradeIdea.additional_entries ?? []).map(ae => {
-        const tree = _resolveConditionTree(ae.condition_tree, ae.conditions, ae.logic ?? 'AND')
+        const tree = resolveConditionTree(ae.condition_tree, ae.conditions, ae.logic ?? 'AND')
         return {
             condition_tree: tree ?? null,
-            conditions:     _extractLeaves(tree),
+            conditions:     extractLeaves(tree),
             logic:          ae.logic ?? 'AND',
             quantity:       ae.quantity != null ? Number(ae.quantity) : null,
             triggeredAt:    null,
@@ -60,12 +61,12 @@ async function saveIdea(tradeIdea, userId) {
         tp_condition_tree:    tpTree     ?? null,
 
         // Flat format — backward compat and display
-        entry_conditions: _extractLeaves(entryTree),
-        entry_logic:      _topOperator(entryTree) ?? 'AND',
-        stop_conditions:  _extractLeaves(stopTree),
-        stop_logic:       _topOperator(stopTree)  ?? 'OR',
-        tp_conditions:    _extractLeaves(tpTree),
-        tp_logic:         _topOperator(tpTree)    ?? 'OR',
+        entry_conditions: extractLeaves(entryTree),
+        entry_logic:      topOperator(entryTree) ?? 'AND',
+        stop_conditions:  extractLeaves(stopTree),
+        stop_logic:       topOperator(stopTree)  ?? 'OR',
+        tp_conditions:    extractLeaves(tpTree),
+        tp_logic:         topOperator(tpTree)    ?? 'OR',
 
         additional_entries: additionalEntries,
         notes:      tradeIdea.notes      ?? null,
@@ -149,12 +150,12 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
 
     // Rebuild condition trees when conditions are updated via chat edit
     if (patch.entry_conditions !== undefined || patch.stop_conditions !== undefined || patch.tp_conditions !== undefined) {
-        const entryTree = _resolveConditionTree(patch.entry_condition_tree, patch.entry_conditions, patch.entry_logic ?? 'AND')
-        const stopTree  = _resolveConditionTree(patch.stop_condition_tree,  patch.stop_conditions,  patch.stop_logic  ?? 'OR')
-        const tpTree    = _resolveConditionTree(patch.tp_condition_tree,    patch.tp_conditions,    patch.tp_logic    ?? 'OR')
-        if (entryTree) { patch.entry_condition_tree = entryTree; patch.entry_conditions = _extractLeaves(entryTree) }
-        if (stopTree)  { patch.stop_condition_tree  = stopTree;  patch.stop_conditions  = _extractLeaves(stopTree)  }
-        if (tpTree)    { patch.tp_condition_tree    = tpTree;    patch.tp_conditions    = _extractLeaves(tpTree)    }
+        const entryTree = resolveConditionTree(patch.entry_condition_tree, patch.entry_conditions, patch.entry_logic ?? 'AND')
+        const stopTree  = resolveConditionTree(patch.stop_condition_tree,  patch.stop_conditions,  patch.stop_logic  ?? 'OR')
+        const tpTree    = resolveConditionTree(patch.tp_condition_tree,    patch.tp_conditions,    patch.tp_logic    ?? 'OR')
+        if (entryTree) { patch.entry_condition_tree = entryTree; patch.entry_conditions = extractLeaves(entryTree) }
+        if (stopTree)  { patch.stop_condition_tree  = stopTree;  patch.stop_conditions  = extractLeaves(stopTree)  }
+        if (tpTree)    { patch.tp_condition_tree    = tpTree;    patch.tp_conditions    = extractLeaves(tpTree)    }
     }
 
     // Clear conversation when idea is closed
@@ -286,51 +287,6 @@ async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null,
 
     logger.info(LOG, 'Batch saved', { portfolioId: pid, total: plan.ideas.length, saved: saved.length })
     return { ok: true, ideas: saved, portfolioId: pid }
-}
-
-// ─── Condition tree helpers ───────────────────────────────────────────────────
-
-/**
- * Normalise a condition input into a canonical group tree node.
- * Handles:
- *   - New tree format:  { operator, children }  (pass through)
- *   - Wrapped leaf:     { condition, type, timeframe }  (wrap in group)
- *   - Old format:       { logic, conditions }   (rename fields)
- *   - Legacy flat arr:  array of leaf objects   (wrap in group)
- */
-function _resolveConditionTree(treeNode, flatArray, defaultOperator = 'AND') {
-    // New tree group node: { operator, children }
-    if (treeNode && typeof treeNode === 'object' && !Array.isArray(treeNode)) {
-        if (treeNode.operator && Array.isArray(treeNode.children) && treeNode.children.length > 0) {
-            return treeNode
-        }
-        // Bare leaf node — wrap in a single-child group
-        if (typeof treeNode.condition === 'string') {
-            return { operator: defaultOperator, children: [treeNode] }
-        }
-        // Old format: { logic, conditions }
-        if (Array.isArray(treeNode.conditions) && treeNode.conditions.length > 0) {
-            return { operator: treeNode.logic ?? defaultOperator, children: treeNode.conditions }
-        }
-    }
-    // Legacy flat array
-    if (Array.isArray(flatArray) && flatArray.length > 0) {
-        return { operator: defaultOperator, children: flatArray }
-    }
-    return null
-}
-
-/** Recursively extract all leaf condition objects from a tree. */
-function _extractLeaves(node) {
-    if (!node) return []
-    if (typeof node.condition === 'string') return [node]
-    if (Array.isArray(node.children)) return node.children.flatMap(_extractLeaves)
-    return []
-}
-
-/** Return the top-level operator of a group node, or null. */
-function _topOperator(node) {
-    return node?.operator ?? null
 }
 
 // ─── Mongo helper ─────────────────────────────────────────────────────────────

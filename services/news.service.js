@@ -1,5 +1,6 @@
 import { fetchGNews } from '../providers/gnews.provider.js'
 import { isCacheFresh, loadItemsFromFile, saveItemsToFile } from './util.service.js'
+import { mapGNewsArticle, isValidArticle, mergeDedupedArticles } from './newsArticle.service.js'
 
 const CACHE_TTL_MS = 3_600_000
 const FETCH_LIMIT = 20
@@ -7,28 +8,6 @@ const CATEGORIES = new Set(['global', 'markets', 'sectors', 'companies'])
 
 export const newsService = {
     getOrFetch,
-}
-
-export const NEWS_TOOLS = {
-    getOrFetch: {
-        id: 'news.get_or_fetch',
-        handler: (input) => getOrFetch(input),
-        description:
-            'Load cached articles for a category/subject or fetch from GNews when stale.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                category: {
-                    type: 'string',
-                    enum: ['global', 'markets', 'sectors', 'companies'],
-                },
-                subject: { type: 'string' },
-                query: { type: 'string' },
-                refresh: { type: 'boolean' },
-            },
-            required: ['category', 'subject', 'query'],
-        },
-    },
 }
 
 /**
@@ -80,7 +59,7 @@ async function getOrFetch({ category, subject, query, refresh = false }) {
         limit: FETCH_LIMIT,
     })
 
-    const { merged } = _mergeDeduped(cache.items, incoming)
+    const { merged } = mergeDedupedArticles(cache.items, incoming)
     const envelope = {
         category: cat,
         subject: subj,
@@ -114,7 +93,7 @@ async function fetchFromGNews({ query, from, to, limit = FETCH_LIMIT }) {
         max: limit,
     })
     const rawArticles = Array.isArray(raw?.articles) ? raw.articles : []
-    const articles = rawArticles.map(_mapGNewsArticle).filter(_isValidArticle)
+    const articles = rawArticles.map(mapGNewsArticle).filter(isValidArticle)
 
     return _result(articles, {
         query: searchQuery,
@@ -138,7 +117,7 @@ async function _saveEnvelope(store, envelope) {
     const payload = {
         ...envelope,
         items: (Array.isArray(envelope.items) ? envelope.items : []).filter(
-            _isValidArticle
+            isValidArticle
         ),
         lastFetchedAt: envelope.lastFetchedAt ?? Date.now(),
     }
@@ -173,60 +152,14 @@ function _normalizeEnvelope(raw) {
             subject: typeof raw.subject === 'string' ? raw.subject : '',
             query: typeof raw.query === 'string' ? raw.query : '',
             lastFetchedAt: Number(raw.lastFetchedAt) || 0,
-            items: raw.items.filter(_isValidArticle),
+            items: raw.items.filter(isValidArticle),
         }
     }
     return empty
 }
 
-function _mergeDeduped(existing = [], incoming = []) {
-    const map = new Map()
-    for (const item of [...existing, ...incoming]) {
-        if (!_isValidArticle(item)) continue
-        map.set(_articleKey(item), item)
-    }
-    const merged = [...map.values()].sort((a, b) => b.datetime - a.datetime)
-
-    const existingKeys = new Set(existing.map(_articleKey))
-    const added = incoming.filter(
-        (item) => _isValidArticle(item) && !existingKeys.has(_articleKey(item))
-    )
-
-    return { merged, added }
-}
-
-function _articleKey(item) {
-    if (item.id != null) return `id:${item.id}`
-    return `dt:${item.datetime}|h:${item.headline}`
-}
-
 function _sortByDatetimeDesc(items) {
     return [...items].sort((a, b) => b.datetime - a.datetime)
-}
-
-/** @param {object} item */
-function _mapGNewsArticle(item) {
-    const publishedMs = Date.parse(item?.publishedAt ?? '')
-    return {
-        datetime: Number.isFinite(publishedMs) ? Math.floor(publishedMs / 1000) : NaN,
-        headline: typeof item?.title === 'string' ? item.title.trim() : '',
-        summary: typeof item?.description === 'string' ? item.description : '',
-        url: item?.url,
-        image: item?.image,
-        source: item?.source?.name ?? '',
-        id: item?.id,
-    }
-}
-
-/** @param {unknown} item */
-function _isValidArticle(item) {
-    return (
-        item &&
-        typeof item === 'object' &&
-        Number.isFinite(item.datetime) &&
-        typeof item.headline === 'string' &&
-        item.headline.length > 0
-    )
 }
 
 function _oneMonthAgoISO() {

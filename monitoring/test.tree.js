@@ -6,8 +6,8 @@
  *
  * Tests:
  *   A.  evaluateTree — leaf, AND, OR, nested structures, edge cases
- *   B.  tradeIdeas.service — _resolveConditionTree logic (inline)
- *   C.  trade.agent.service — _normalizeTreeNode logic (inline)
+ *   C.  conditionTree.service — resolveConditionTree / extractLeaves
+ *   D.  conditionTree.service — normalizeTreeNode
  *
  * Requires: dotenv-compatible env, Massive (OHLCV) API key (or warm cache),
  *           Anthropic key (condition parser — 2 calls, cached within process).
@@ -16,6 +16,11 @@
 import 'dotenv/config'
 import { getCandles }    from '../providers/ohlcv.provider.js'
 import { evaluateTree, evaluateConditions } from './monitor.orchestrator.js'
+import {
+    resolveConditionTree as _resolveConditionTree,
+    extractLeaves as _extractLeaves,
+    normalizeTreeNode as _normalizeTreeNode,
+} from '../services/conditionTree.service.js'
 
 const SYMBOL = 'AAPL'
 const TF     = 'day'
@@ -237,32 +242,11 @@ if (candles.length) {
     } catch (e) { err('legacy OR', e) }
 } else skip('no candles')
 
-// ─── C. _resolveConditionTree logic (inline, no DB needed) ────────────────────
+// ─── C. resolveConditionTree logic ────────────────────────────────────────────
 //
-// Mirrors the logic in tradeIdeas.service.js — test it without importing private fn.
+// Exercises the shared conditionTree.service helpers (imported at top).
 
-h('C. _resolveConditionTree logic (inline)')
-
-function _resolveConditionTree(treeNode, flatArray, defaultOperator = 'AND') {
-    if (treeNode && typeof treeNode === 'object' && !Array.isArray(treeNode)) {
-        if (treeNode.operator && Array.isArray(treeNode.children) && treeNode.children.length > 0)
-            return treeNode
-        if (typeof treeNode.condition === 'string')
-            return { operator: defaultOperator, children: [treeNode] }
-        if (Array.isArray(treeNode.conditions) && treeNode.conditions.length > 0)
-            return { operator: treeNode.logic ?? defaultOperator, children: treeNode.conditions }
-    }
-    if (Array.isArray(flatArray) && flatArray.length > 0)
-        return { operator: defaultOperator, children: flatArray }
-    return null
-}
-
-function _extractLeaves(node) {
-    if (!node) return []
-    if (typeof node.condition === 'string') return [node]
-    if (Array.isArray(node.children)) return node.children.flatMap(_extractLeaves)
-    return []
-}
+h('C. resolveConditionTree logic')
 
 // C1: new tree group → pass through
 {
@@ -313,39 +297,9 @@ function _extractLeaves(node) {
     leaves.length === 3 ? ok(`_extractLeaves: ${leaves.length} leaves from nested tree`) : err('_extractLeaves', `expected 3, got ${leaves.length}`)
 }
 
-// ─── D. _normalizeTreeNode logic (inline) ─────────────────────────────────────
+// ─── D. normalizeTreeNode logic ───────────────────────────────────────────────
 
-h('D. _normalizeTreeNode logic (inline)')
-
-const _VALID_TF = new Set(['5min','15min','30min','1hr','2hr','4hr','day','week','month'])
-const _TF_REMAP = [
-    [/^(\d+)\s*m(?:in)?$/i,           (_, n) => `${n}min`],
-    [/^(\d+)\s*h(?:r|ours?)?$/i,      (_, n) => `${n}hr`],
-    [/^daily$/i,   () => 'day'],
-    [/^weekly$/i,  () => 'week'],
-    [/^monthly$/i, () => 'month'],
-]
-function _normalizeTf(tf) {
-    if (!tf || typeof tf !== 'string') return null
-    const s = tf.trim()
-    if (_VALID_TF.has(s)) return s
-    for (const [re, fn] of _TF_REMAP) {
-        const m = s.match(re)
-        if (m) return fn(...m)
-    }
-    return s
-}
-
-function _normalizeTreeNode(node, defaultTf) {
-    if (!node || typeof node !== 'object') return node
-    if (typeof node.condition === 'string')
-        return { ...node, timeframe: _normalizeTf(node.timeframe) || defaultTf || null }
-    if (node.operator && Array.isArray(node.children))
-        return { operator: node.operator, children: node.children.map(c => _normalizeTreeNode(c, defaultTf)) }
-    if (Array.isArray(node.conditions))
-        return { operator: node.logic ?? 'AND', children: node.conditions.map(c => _normalizeTreeNode(c, defaultTf)) }
-    return node
-}
+h('D. normalizeTreeNode logic')
 
 // D1: leaf timeframe normalisation ("4h" → "4hr")
 {
