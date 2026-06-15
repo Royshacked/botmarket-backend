@@ -48,6 +48,50 @@
  * @property {number|null} balance
  * @property {string|null} broker
  * @property {boolean}     isLive
+ *
+ * @typedef {Object} BrokerCapabilities
+ * @property {boolean} trading           can place orders at all
+ * @property {boolean} nativeProtection  can attach SL/TP to an order/position natively
+ * @property {boolean} modifyProtection  can amend SL/TP on an open position
+ * @property {boolean} closePosition     can close a position programmatically
+ * @property {boolean} ohlcv             can serve candles via getCandles()
+ *
+ * @typedef {Object} BrokerOrder
+ * @property {string}                   symbol
+ * @property {'long'|'short'}           direction
+ * @property {number}                   quantity
+ * @property {'market'|'limit'|'stop'}  type
+ * @property {number} [limitPrice]      required for limit orders
+ * @property {number} [stopPrice]       required for stop orders
+ * @property {number} [stopLoss]        absolute protective stop price (native SL)
+ * @property {number} [takeProfit]      absolute protective take-profit price (native TP)
+ * @property {number} [referencePrice]  expected entry price; required to attach native SL/TP
+ *                                      to a market order (brokers that take a relative SL/TP
+ *                                      distance derive it from here). Ignored for limit/stop
+ *                                      orders, where the limit/stop price is the reference.
+ * @property {string} [clientOrderId]   caller-supplied id for idempotency / correlation
+ *
+ * @typedef {Object} BrokerProtection
+ * @property {number} [stopLoss]    absolute stop-loss price   (omit to leave unchanged)
+ * @property {number} [takeProfit]  absolute take-profit price (omit to leave unchanged)
+ *
+ * Normalised execution push event — the shape every broker translates its native
+ * fills/updates into, so the unified backend→frontend channel is broker-agnostic.
+ * @typedef {Object} BrokerExecution
+ * @property {'order.accepted'|'order.filled'|'order.cancelled'|'order.rejected'|'position.opened'|'position.closed'|'position.updated'} type
+ * @property {string}            broker
+ * @property {string}            accountId
+ * @property {string} [orderId]
+ * @property {string} [positionId]
+ * @property {string} [symbol]
+ * @property {'long'|'short'} [direction]
+ * @property {number} [quantity]
+ * @property {number} [price]       fill / close price
+ * @property {number} [stopLoss]
+ * @property {number} [takeProfit]
+ * @property {number} [pnl]         realised pnl on close
+ * @property {'stop'|'tp'|'manual'|null} [reason]  why a position closed
+ * @property {number}            at  unix ms
  */
 
 export class BrokerAdapter {
@@ -127,14 +171,74 @@ export class BrokerAdapter {
     }
 
     /**
-     * Place a market or limit order on a specific trading account.
+     * Place an order (market/limit/stop), optionally with native SL/TP attached.
      * @param {string} userId
      * @param {string} accountId   the trading account to place the order on
-     * @param {{ symbol: string, direction: 'long'|'short', quantity: number, type: 'market'|'limit', limitPrice?: number }} order
-     * @returns {Promise<{ orderId: string }>}
+     * @param {BrokerOrder} order
+     * @returns {Promise<{ orderId: string, positionId?: string, accountId: string }>}
+     *          accountId is the broker-CANONICAL account id (the one execution events
+     *          carry), so callers persist it for reconciliation rather than the id
+     *          they passed in.
      */
     // eslint-disable-next-line no-unused-vars
     async placeOrder(userId, accountId, order) {
         throw new Error(`${this.constructor.name}: placeOrder() not implemented`)
+    }
+
+    /**
+     * Begin streaming this account's execution events onto the shared executionBus
+     * as normalized BrokerExecution objects. Idempotent — calling twice for the same
+     * account is a no-op. Brokers that don't push execution events leave the default,
+     * which reports no feed so the reconciler simply skips them.
+     * @param {string} userId
+     * @param {string} accountId   broker-canonical account id
+     * @returns {Promise<boolean>} true if a feed is active for this account
+     */
+    // eslint-disable-next-line no-unused-vars
+    async startExecutionFeed(userId, accountId) {
+        return false   // default: unsupported
+    }
+
+    /**
+     * Describe what this broker can do. Consumers (order planner, frontend) branch on
+     * these flags, never on the broker name. Override per adapter; the conservative
+     * default reports nothing supported, so a new adapter degrades safely until wired.
+     * @returns {BrokerCapabilities}
+     */
+    capabilities() {
+        return {
+            trading:          false,
+            nativeProtection: false,
+            modifyProtection: false,
+            closePosition:    false,
+            ohlcv:            false,
+        }
+    }
+
+    /**
+     * Set or amend protective stop-loss / take-profit on an open position.
+     * Omitted fields are left unchanged. Requires `capabilities().modifyProtection`.
+     * @param {string} userId
+     * @param {string} accountId
+     * @param {string} positionId
+     * @param {BrokerProtection} protection
+     * @returns {Promise<void>}
+     */
+    // eslint-disable-next-line no-unused-vars
+    async setProtection(userId, accountId, positionId, protection) {
+        throw new Error(`${this.constructor.name}: setProtection() not implemented`)
+    }
+
+    /**
+     * Close (or partially close) an open position. Requires `capabilities().closePosition`.
+     * @param {string} userId
+     * @param {string} accountId
+     * @param {string} positionId
+     * @param {{ quantity?: number }} [opts]   omit quantity to close in full
+     * @returns {Promise<void>}
+     */
+    // eslint-disable-next-line no-unused-vars
+    async closePosition(userId, accountId, positionId, opts) {
+        throw new Error(`${this.constructor.name}: closePosition() not implemented`)
     }
 }

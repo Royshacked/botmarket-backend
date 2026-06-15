@@ -10,6 +10,7 @@
  *   GET  /api/broker/callback              OAuth callback (all brokers)
  *   GET  /api/broker/connections           list user's connected brokers
  *   DEL  /api/broker/connections/:type     disconnect a broker
+ *   GET  /api/broker/:type/capabilities    what the broker can do (trading, native SL/TP, …)
  *   GET  /api/broker/:type/account         account summary
  *   GET  /api/broker/:type/positions       open positions
  */
@@ -118,6 +119,20 @@ brokerRoutes.patch('/connections/:type/account', requireAuth, async (req, res) =
         res.json({ ok: true })
     } catch (err) {
         logger.error(LOG, `setSelectedAccount (${req.params.type}):`, err.message)
+        res.status(err.status ?? 500).json({ error: err.message })
+    }
+})
+
+// ─── Per-broker capabilities ────────────────────────────────────────────────
+// Static per broker — lets the frontend render generically (show SL/TP inputs only
+// when nativeProtection, etc.) instead of branching on the broker name.
+
+brokerRoutes.get('/:type/capabilities', requireAuth, (req, res) => {
+    try {
+        const capabilities = brokerService.capabilities(req.params.type)
+        res.json({ capabilities })
+    } catch (err) {
+        logger.error(LOG, `capabilities (${req.params.type}):`, err.message)
         res.status(err.status ?? 500).json({ error: err.message })
     }
 })

@@ -25,7 +25,11 @@ export const brokerService = {
     getCandles,
     getTradingAccounts,
     setSelectedAccount,
+    capabilities,
     placeOrder,
+    setProtection,
+    closePosition,
+    startExecutionFeed,
     disconnect,
 }
 
@@ -143,19 +147,69 @@ async function setSelectedAccount(brokerType, userId, accountId) {
     logger.info(LOG, `${brokerType} selected account → ${accountId} for user ${userId}`)
 }
 
-// ─── Disconnect ───────────────────────────────────────────────────────────────
+// ─── Trading ──────────────────────────────────────────────────────────────────
+
+/**
+ * Report what a broker can do. Static per broker — no userId needed.
+ * Consumers branch on these flags, never on the broker name.
+ * @param {string} brokerType
+ * @returns {import('./adapters/broker.interface.js').BrokerCapabilities}
+ */
+function capabilities(brokerType) {
+    return getBrokerAdapter(brokerType).capabilities()
+}
 
 /**
  * Place an order on a specific trading account.
  * @param {string} brokerType
  * @param {string} userId
  * @param {string} accountId
- * @param {{ symbol: string, direction: 'long'|'short', quantity: number, type: 'market'|'limit', limitPrice?: number }} order
- * @returns {Promise<{ orderId: string }>}
+ * @param {import('./adapters/broker.interface.js').BrokerOrder} order
+ * @returns {Promise<{ orderId: string, positionId?: string }>}
  */
 async function placeOrder(brokerType, userId, accountId, order) {
     return getBrokerAdapter(brokerType).placeOrder(userId, accountId, order)
 }
+
+/**
+ * Set / amend protective SL/TP on an open position.
+ * @param {string} brokerType
+ * @param {string} userId
+ * @param {string} accountId
+ * @param {string} positionId
+ * @param {import('./adapters/broker.interface.js').BrokerProtection} protection
+ * @returns {Promise<void>}
+ */
+async function setProtection(brokerType, userId, accountId, positionId, protection) {
+    return getBrokerAdapter(brokerType).setProtection(userId, accountId, positionId, protection)
+}
+
+/**
+ * Close (or partially close) an open position.
+ * @param {string} brokerType
+ * @param {string} userId
+ * @param {string} accountId
+ * @param {string} positionId
+ * @param {{ quantity?: number }} [opts]
+ * @returns {Promise<void>}
+ */
+async function closePosition(brokerType, userId, accountId, positionId, opts) {
+    return getBrokerAdapter(brokerType).closePosition(userId, accountId, positionId, opts)
+}
+
+/**
+ * Start streaming an account's execution events onto the executionBus (idempotent).
+ * Returns false for brokers that don't push executions, so the reconciler can skip.
+ * @param {string} brokerType
+ * @param {string} userId
+ * @param {string} accountId
+ * @returns {Promise<boolean>}
+ */
+async function startExecutionFeed(brokerType, userId, accountId) {
+    return getBrokerAdapter(brokerType).startExecutionFeed(userId, accountId)
+}
+
+// ─── Disconnect ───────────────────────────────────────────────────────────────
 
 async function disconnect(brokerType, userId) {
     // Validate broker type first

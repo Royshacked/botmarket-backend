@@ -27,6 +27,7 @@ import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
 import { newsFeedService }  from './api/news-feed/newsFeed.service.js'
 import { monitorService }   from './monitoring/monitor.service.js'
+import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { logger }           from './services/logger.service.js'
 
 const app = express()
@@ -77,6 +78,7 @@ app.use('/market',          marketRoutes)
 
 newsFeedService.start()
 monitorService.start()
+executionReconciler.start()
 
 // SPA fallback: only in production when static assets live in public/
 if (process.env.NODE_ENV === 'production') {

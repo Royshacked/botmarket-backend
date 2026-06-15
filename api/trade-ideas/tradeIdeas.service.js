@@ -226,7 +226,8 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
         const plan = (idea.pendingOrder?.plan?.length) ? idea.pendingOrder.plan : orders
         if (!Array.isArray(plan) || plan.length === 0) return { ok: false, reason: 'no_orders' }
 
-        const results = []
+        const results     = []
+        const brokerOrders = []   // linkage the execution reconciler matches closes against
         for (const order of plan) {
             try {
                 const result = await brokerService.placeOrder(order.broker, userId, order.accountId, {
@@ -237,6 +238,14 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
                 })
                 logger.info(LOG, 'Order placed', { id, broker: order.broker, accountId: order.accountId, direction: idea.direction, quantity: order.quantity, orderId: result?.orderId })
                 results.push({ accountId: order.accountId, ok: true, orderId: result?.orderId ?? null })
+                brokerOrders.push({
+                    broker:     order.broker,
+                    // Prefer the broker-canonical id (what execution events carry); fall
+                    // back to the requested id for adapters that don't return one yet.
+                    accountId:  result?.accountId ?? order.accountId,
+                    orderId:    result?.orderId    ?? null,
+                    positionId: result?.positionId ?? null,   // backfilled on the fill event
+                })
             } catch (err) {
                 logger.error(LOG, 'Order failed', { id, broker: order.broker, accountId: order.accountId, error: err.message })
                 results.push({ accountId: order.accountId, ok: false, error: err.message })
@@ -250,9 +259,17 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
         const status = idea.direction === 'short' ? 'short' : 'long'
         const updated = await db.collection(COLLECTION).findOneAndUpdate(
             { id },
-            { $set: { status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed' } },
+            { $set: { status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed', brokerOrders } },
             { returnDocument: 'after' }
         )
+
+        // Keep each placed account's execution feed live so native stop/TP closes
+        // reconcile back to this idea. Best-effort — a feed failure must not fail the
+        // user's confirmed order.
+        for (const { broker, accountId } of brokerOrders) {
+            brokerService.startExecutionFeed(broker, userId, accountId)
+                .catch(err => logger.warn(LOG, `startExecutionFeed failed (${broker}/${accountId}):`, err.message))
+        }
         logger.info(LOG, 'Orders confirmed & placed', { id, status, placed: results.filter(r => r.ok).length })
         return { ok: true, idea: _strip(updated), results }
     } catch (err) {
