@@ -104,6 +104,7 @@ export class CTraderSession extends EventEmitter {
         this._authed = null                 // Promise once account-auth is in flight/done
         this._symbolsByName = null          // Promise<Map<name, symbolId>> (light list)
         this._namesById     = new Map()     // symbolId → name (populated with the light list)
+        this._normToId      = new Map()     // normalized name (BTCUSD) → symbolId, for fuzzy lookup
         this._specsById     = new Map()     // symbolId → Promise<specs>
 
         // After every (re)connect the app re-authenticates; our account-auth is gone,
@@ -165,6 +166,10 @@ export class CTraderSession extends EventEmitter {
             for (const s of res?.symbol ?? []) {
                 map.set(s.symbolName, s.symbolId)
                 this._namesById.set(s.symbolId, s.symbolName)
+                // Index a separator-stripped form too, so an app asset like 'BTC-USD'
+                // resolves to the broker's 'BTCUSD'. First writer wins on collision.
+                const norm = _normSymbol(s.symbolName)
+                if (norm && !this._normToId.has(norm)) this._normToId.set(norm, s.symbolId)
             }
             logger.info(LOG, `[${this.env}:${this.ctid}] symbol list loaded (${map.size} symbols)`)
             return map
@@ -175,7 +180,8 @@ export class CTraderSession extends EventEmitter {
 
     async _symbolId(symbolName) {
         const map = await this._loadSymbols()
-        return map.get(symbolName) ?? null
+        // Exact broker name first; then a separator/case-insensitive fallback.
+        return map.get(symbolName) ?? this._normToId.get(_normSymbol(symbolName)) ?? null
     }
 
     /**
@@ -295,4 +301,9 @@ export function priceToRelative(priceDistance) {
 function _int(v, fallback) {
     const n = Number(v)
     return Number.isInteger(n) ? n : (Number.isFinite(n) ? Math.round(n) : fallback)
+}
+
+/** Separator/case-insensitive symbol key: 'BTC-USD' / 'btc/usd' → 'BTCUSD'. */
+function _normSymbol(name) {
+    return String(name ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
 }

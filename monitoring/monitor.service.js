@@ -109,15 +109,17 @@ async function _tick() {
 
 /**
  * Ideas that hit while the (equity) market was closed are parked in
- * orderState='awaiting_market'. Once the market is open, surface them.
+ * orderState='awaiting_market'. Surface a deferred order once it can trade:
+ * an equity idea when the regular session opens, a crypto idea immediately
+ * (24/7). Crypto normally is born 'awaiting_confirm', but a crypto asset that
+ * wasn't recognised at save time can land here — so we recover it regardless of
+ * the equity session rather than leaving it stuck until the market opens.
  *
  * Phase 1 (manual mode): flip to 'awaiting_confirm' so the confirmation dialog
  * appears. Phase 2 will branch here on the user's orderMode to auto-place.
- * Crypto hits are never deferred (always born 'awaiting_confirm'), so gating on
- * the equity session is correct.
  */
 async function _marketSweep(db) {
-    if (!isMarketOpen()) return
+    const equityOpen = isMarketOpen()
 
     let deferred
     try {
@@ -128,8 +130,11 @@ async function _marketSweep(db) {
     }
     if (!deferred || deferred.length === 0) return
 
-    logger.info(LOG, `Market open — surfacing ${deferred.length} deferred order(s)`)
-    for (const idea of deferred) {
+    const surface = deferred.filter(idea => equityOpen || isCrypto(idea.asset))
+    if (surface.length === 0) return
+
+    logger.info(LOG, `Surfacing ${surface.length} deferred order(s) (equityOpen=${equityOpen})`)
+    for (const idea of surface) {
         await _patch(db, idea.id, { orderState: 'awaiting_confirm' })
     }
 }

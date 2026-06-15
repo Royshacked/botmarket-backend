@@ -16,9 +16,25 @@ function _etWall(date = new Date()) {
     return new Date(date.toLocaleString('en-US', { timeZone: ET }))
 }
 
+// Crypto base tickers whose fiat-quoted pairs (e.g. BTCUSD) are 24/7. A pair like
+// BTCUSD is otherwise indistinguishable from a forex pair (EURUSD) by shape alone,
+// so we recognise it by a known crypto base. Extend as brokers add instruments.
+const CRYPTO_BASES = [
+    'BTC', 'XBT', 'ETH', 'LTC', 'XRP', 'BCH', 'ADA', 'SOL', 'DOT', 'DOGE',
+    'LINK', 'XLM', 'EOS', 'TRX', 'BNB', 'UNI', 'AVAX', 'MATIC', 'ATOM', 'ALGO',
+    'XMR', 'ETC', 'NEO', 'FIL', 'AAVE', 'SHIB', 'APE', 'NEAR', 'FTM', 'ICP',
+]
+const CRYPTO_BASE_SET = new Set(CRYPTO_BASES)
+// <crypto base><fiat quote>, e.g. BTCUSD / ETHEUR (separators already stripped).
+const CRYPTO_FIAT_PAIR = new RegExp(`^(${CRYPTO_BASES.join('|')})(USD|EUR|GBP|JPY|AUD)$`)
+
 /** Crypto assets trade 24/7 — no market-hours gate. */
 export function isCrypto(symbol) {
-    return /USDT$|USDC$/i.test(symbol ?? '')
+    const s = String(symbol ?? '').toUpperCase().replace(/[/\-_]/g, '')
+    if (!s) return false
+    if (/(USDT|USDC)$/.test(s)) return true   // stablecoin quote → always crypto
+    if (CRYPTO_FIAT_PAIR.test(s)) return true  // known crypto base + fiat quote (BTCUSD…)
+    return CRYPTO_BASE_SET.has(s)              // bare base symbol (e.g. "BTC")
 }
 
 /** True between 9:30 and 16:00 ET on a weekday. */
