@@ -1,3 +1,6 @@
+import { brokerConnectionService } from '../brokerConnection.service.js'
+import { logger }                  from '../../../services/logger.service.js'
+
 /**
  * Broker Adapter Interface
  *
@@ -97,6 +100,55 @@
  */
 
 export class BrokerAdapter {
+    /**
+     * Broker type id used for DB lookups (e.g. 'ctrader'). Subclasses MUST set this
+     * for the shared token helpers below to work.
+     * @type {string}
+     */
+    brokerType = ''
+
+    /**
+     * Human-facing broker name used in error messages (e.g. 'cTrader').
+     * Falls back to brokerType when a subclass doesn't override it.
+     * @type {string}
+     */
+    brokerLabel = ''
+
+    /**
+     * Provider module (the broker's REST/OAuth client). Subclasses MUST set this
+     * so the shared token helpers can call `provider.refreshTokens(conn)`.
+     * @type {{ refreshTokens: (conn: object) => Promise<object> }}
+     */
+    provider = null
+
+    /**
+     * Return valid tokens for this user, refreshing if within 60s of expiry.
+     * Shared across adapters — relies on `this.brokerType` and `this.provider`.
+     * @param {string} userId
+     * @returns {Promise<object>} a connection/tokens object
+     */
+    async _freshTokens(userId) {
+        const label = this.brokerLabel || this.brokerType
+        const conn  = await brokerConnectionService.getConnection(userId, this.brokerType)
+        if (!conn) {
+            throw Object.assign(new Error(`${label} not connected`), { status: 401 })
+        }
+
+        const bufferMs = 60_000
+        if (Date.now() + bufferMs >= conn.expiresAt) {
+            logger.info(`[${this.brokerType}.adapter]`, `Refreshing tokens for user ${userId}`)
+            try {
+                const fresh = await this.provider.refreshTokens(conn)
+                await brokerConnectionService.updateTokens(userId, this.brokerType, fresh)
+                return fresh
+            } catch (err) {
+                logger.error(`[${this.brokerType}.adapter]`, `Token refresh failed for user ${userId}:`, err.message)
+                throw Object.assign(new Error(`${label} session expired — please reconnect`), { status: 401 })
+            }
+        }
+        return conn
+    }
+
     /**
      * Return the URL to redirect the user to for OAuth consent.
      * @param {string} state  JWT-signed context token (userId + brokerType)

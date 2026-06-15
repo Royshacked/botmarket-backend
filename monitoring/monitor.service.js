@@ -304,76 +304,68 @@ async function _checkPosition(db, idea, stopCandles, tpCandles, aeCandles) {
     const tpTf    = _resolveTpTimeframe(idea)
     const entryTf = _resolveEntryTimeframe(idea)
 
-    let stopFired = false
-    let tpFired   = false
-
     // ── Stop conditions ───────────────────────────────────────────────────────
-    // Skip exits the broker now protects natively (monitorStop === false). The
-    // execution reconciler flips the idea closed when the native SL fills.
-    if (idea.monitorStop === false) {
-        logger.info(LOG, `[${id}] Stop handled natively by broker — skipping monitor stop check`)
-    } else {
-        const crossSyms = collectSymbols(idea.stop_condition_tree, idea.stop_conditions)
-        const symbolMap = await _buildSymbolMap(id, asset, stopCandles, stopTf, crossSyms)
-
-        if (idea.stop_condition_tree) {
-            logger.info(LOG, `[${id}] Evaluating stop condition tree`)
-            const { triggered, which } = await evaluateTree(idea.stop_condition_tree, symbolMap, asset, idea.activatedAt ?? null)
-            if (triggered) {
-                logger.info(LOG, `🛑 Stop triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
-                await _close(db, id, 'stop')
-                stopFired = true
-            }
-        } else if (Array.isArray(idea.stop_conditions) && idea.stop_conditions.length > 0) {
-            const stopLogic = idea.stop_logic ?? 'OR'
-            const { triggered, which } = await evaluateConditions(idea.stop_conditions, stopLogic, symbolMap, asset, idea.activatedAt ?? null)
-            if (triggered) {
-                logger.info(LOG, `🛑 Stop triggered for idea ${id}: "${which?.slice(0, 60)}"`)
-                await _close(db, id, 'stop')
-                stopFired = true
-            }
-        } else {
-            logger.info(LOG, `[${id}] No stop conditions defined — skipping stop check`)
-        }
-    }
-
+    // The execution reconciler flips the idea closed when a native SL fills, so
+    // exits the broker protects natively (monitor* === false) are skipped here.
+    const stopFired = await _evaluateExit(db, idea, {
+        phase: 'stop', candles: stopCandles, timeframe: stopTf,
+        reason: 'stop', label: 'Stop', emoji: '🛑', native: idea.monitorStop,
+    })
     if (stopFired) return
 
     // ── TP conditions ─────────────────────────────────────────────────────────
-    // Skip exits the broker now protects natively (monitorTp === false).
-    if (idea.monitorTp === false) {
-        logger.info(LOG, `[${id}] TP handled natively by broker — skipping monitor TP check`)
-    } else {
-        const crossSyms = collectSymbols(idea.tp_condition_tree, idea.tp_conditions)
-        const symbolMap = await _buildSymbolMap(id, asset, tpCandles, tpTf, crossSyms)
-
-        if (idea.tp_condition_tree) {
-            logger.info(LOG, `[${id}] Evaluating TP condition tree`)
-            const { triggered, which } = await evaluateTree(idea.tp_condition_tree, symbolMap, asset, idea.activatedAt ?? null)
-            if (triggered) {
-                logger.info(LOG, `🎯 TP triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
-                await _close(db, id, 'tp')
-                tpFired = true
-            }
-        } else if (Array.isArray(idea.tp_conditions) && idea.tp_conditions.length > 0) {
-            const tpLogic = idea.tp_logic ?? 'OR'
-            const { triggered, which } = await evaluateConditions(idea.tp_conditions, tpLogic, symbolMap, asset, idea.activatedAt ?? null)
-            if (triggered) {
-                logger.info(LOG, `🎯 TP triggered for idea ${id}: "${which?.slice(0, 60)}"`)
-                await _close(db, id, 'tp')
-                tpFired = true
-            }
-        } else {
-            logger.info(LOG, `[${id}] No TP conditions defined — skipping TP check`)
-        }
-    }
-
+    const tpFired = await _evaluateExit(db, idea, {
+        phase: 'tp', candles: tpCandles, timeframe: tpTf,
+        reason: 'tp', label: 'TP', emoji: '🎯', native: idea.monitorTp,
+    })
     if (tpFired) return
 
     logger.info(LOG, `💤 No exit triggered for idea ${id} (${asset}) — still in position`)
 
     // ── Additional entries (scale-in) ─────────────────────────────────────────
     await _checkAdditionalEntries(db, idea, aeCandles, entryTf)
+}
+
+/**
+ * Evaluate one exit leg (stop or TP) for a position. Closes the idea and returns
+ * true if it fired; returns false otherwise. Stop and TP share this — they differ
+ * only in which fields/candles/timeframe they read and how they label their logs.
+ * @param {{ phase:'stop'|'tp', candles:object[], timeframe:string,
+ *           reason:'stop'|'tp', label:string, emoji:string, native:boolean|undefined }} opts
+ */
+async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, label, emoji, native }) {
+    const { id, asset } = idea
+
+    // monitor* === false means the broker now protects this leg natively — skip it.
+    if (native === false) {
+        logger.info(LOG, `[${id}] ${label} handled natively by broker — skipping monitor ${reason} check`)
+        return false
+    }
+
+    const tree       = idea[`${phase}_condition_tree`]
+    const conditions = idea[`${phase}_conditions`]
+    const crossSyms  = collectSymbols(tree, conditions)
+    const symbolMap  = await _buildSymbolMap(id, asset, candles, timeframe, crossSyms)
+
+    let triggered = false
+    let which
+    if (tree) {
+        logger.info(LOG, `[${id}] Evaluating ${reason} condition tree`)
+        ;({ triggered, which } = await evaluateTree(tree, symbolMap, asset, idea.activatedAt ?? null))
+    } else if (Array.isArray(conditions) && conditions.length > 0) {
+        const logic = idea[`${phase}_logic`] ?? 'OR'
+        ;({ triggered, which } = await evaluateConditions(conditions, logic, symbolMap, asset, idea.activatedAt ?? null))
+    } else {
+        logger.info(LOG, `[${id}] No ${reason} conditions defined — skipping ${reason} check`)
+        return false
+    }
+
+    if (triggered) {
+        logger.info(LOG, `${emoji} ${label} triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
+        await _close(db, id, reason)
+        return true
+    }
+    return false
 }
 
 async function _checkAdditionalEntries(db, idea, candles, entryTf) {
@@ -413,39 +405,27 @@ async function _checkAdditionalEntries(db, idea, candles, entryTf) {
 // ─── Timeframe helpers ────────────────────────────────────────────────────────
 
 /**
- * Find the effective entry timeframe for an idea.
- * Checks tree leaves first, then legacy flat fields.
+ * Find the effective timeframe for one phase of an idea.
+ * Checks the condition-tree's first leaf, then the legacy flat fields, then
+ * a phase-specific fallback (lazy, so entry's resolution isn't computed unless needed).
+ * @param {object} idea
+ * @param {'entry'|'stop'|'tp'} phase
+ * @param {() => string} fallback
  */
-function _resolveEntryTimeframe(idea) {
-    if (idea.entry_condition_tree) {
-        const leaf = firstLeaf(idea.entry_condition_tree)
+function _resolvePhaseTimeframe(idea, phase, fallback) {
+    const tree = idea[`${phase}_condition_tree`]
+    if (tree) {
+        const leaf = firstLeaf(tree)
         if (leaf?.timeframe) return leaf.timeframe
     }
-    return idea.entry_conditions?.[0]?.timeframe
-        ?? idea.entry_timeframe
-        ?? idea.timeframe
-        ?? 'day'
+    return idea[`${phase}_conditions`]?.[0]?.timeframe
+        ?? idea[`${phase}_timeframe`]
+        ?? fallback()
 }
 
-function _resolveStopTimeframe(idea) {
-    if (idea.stop_condition_tree) {
-        const leaf = firstLeaf(idea.stop_condition_tree)
-        if (leaf?.timeframe) return leaf.timeframe
-    }
-    return idea.stop_conditions?.[0]?.timeframe
-        ?? idea.stop_timeframe
-        ?? _resolveEntryTimeframe(idea)
-}
-
-function _resolveTpTimeframe(idea) {
-    if (idea.tp_condition_tree) {
-        const leaf = firstLeaf(idea.tp_condition_tree)
-        if (leaf?.timeframe) return leaf.timeframe
-    }
-    return idea.tp_conditions?.[0]?.timeframe
-        ?? idea.tp_timeframe
-        ?? _resolveEntryTimeframe(idea)
-}
+const _resolveEntryTimeframe = idea => _resolvePhaseTimeframe(idea, 'entry', () => idea.timeframe ?? 'day')
+const _resolveStopTimeframe  = idea => _resolvePhaseTimeframe(idea, 'stop',  () => _resolveEntryTimeframe(idea))
+const _resolveTpTimeframe    = idea => _resolvePhaseTimeframe(idea, 'tp',    () => _resolveEntryTimeframe(idea))
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 

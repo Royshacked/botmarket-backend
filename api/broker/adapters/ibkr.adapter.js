@@ -12,6 +12,7 @@
  */
 
 import { BrokerAdapter }           from './broker.interface.js'
+import { asList, num }             from './normalize.js'
 import * as ibkr                   from '../../../providers/ibkr.provider.js'
 import { brokerConnectionService } from '../brokerConnection.service.js'
 import { logger }                  from '../../../services/logger.service.js'
@@ -28,6 +29,10 @@ const TIMEFRAME_MAP = {
 }
 
 export class IBKRAdapter extends BrokerAdapter {
+
+    brokerType  = 'ibkr'
+    brokerLabel = 'IBKR'
+    provider    = ibkr
 
     // ── OAuth ──────────────────────────────────────────────────────────────────
 
@@ -67,7 +72,7 @@ export class IBKRAdapter extends BrokerAdapter {
 
         // Positions are paginated — page 0 is usually enough for most accounts
         const raw  = await ibkr.get(`/portfolio/${accountId}/positions/0`, tokens)
-        const list = Array.isArray(raw) ? raw : []
+        const list = asList(raw)
         return list.map(_normalisePosition)
     }
 
@@ -86,28 +91,14 @@ export class IBKRAdapter extends BrokerAdapter {
 
     // ── Private ────────────────────────────────────────────────────────────────
 
-    async _freshTokens(userId) {
-        const conn = await brokerConnectionService.getConnection(userId, 'ibkr')
-        if (!conn) {
-            throw Object.assign(new Error('IBKR not connected'), { status: 401 })
-        }
-
-        const bufferMs = 60_000
-        if (Date.now() + bufferMs >= conn.expiresAt) {
-            logger.info(LOG, `Refreshing tokens for user ${userId}`)
-            const fresh = await ibkr.refreshTokens(conn)
-            await brokerConnectionService.updateTokens(userId, 'ibkr', fresh)
-            return fresh
-        }
-        return conn
-    }
+    // _freshTokens() is inherited from BrokerAdapter (uses brokerType/brokerLabel/provider).
 
     async _resolveAccountId(userId, tokens) {
         const cached = await brokerConnectionService.getAccountId(userId, 'ibkr')
         if (cached) return cached
 
         const accounts = await ibkr.get('/portfolio/accounts', tokens)
-        const list     = Array.isArray(accounts) ? accounts : []
+        const list     = asList(accounts)
         if (list.length === 0) throw new Error('No IBKR accounts found')
 
         const accountId = String(list[0].accountId ?? list[0].id)
@@ -121,7 +112,7 @@ export class IBKRAdapter extends BrokerAdapter {
 
 function _normaliseAccount(accountId, raw) {
     // Client Portal summary returns { fieldName: { amount, currency, ... }, ... }
-    const get = key => _num(raw[key]?.amount ?? raw[key])
+    const get = key => num(raw[key]?.amount ?? raw[key])
     return {
         id:          accountId,
         login:       accountId,
@@ -141,17 +132,12 @@ function _normalisePosition(raw) {
         id:           String(raw.conid ?? raw.position),
         symbol:       raw.contractDesc ?? raw.ticker ?? raw.symbol,
         direction:    Number(raw.position) >= 0 ? 'long' : 'short',
-        volume:       Math.abs(_num(raw.position)),
-        entryPrice:   _num(raw.avgCost ?? raw.avgPrice),
-        currentPrice: _num(raw.mktPrice),
-        pnl:          _num(raw.unrealizedPnl),
+        volume:       Math.abs(num(raw.position)),
+        entryPrice:   num(raw.avgCost ?? raw.avgPrice),
+        currentPrice: num(raw.mktPrice),
+        pnl:          num(raw.unrealizedPnl),
         pnlPips:      null,
         swap:         null,
         openedAt:     null,
     }
-}
-
-function _num(v) {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
 }

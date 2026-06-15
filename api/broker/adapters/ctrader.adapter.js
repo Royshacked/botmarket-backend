@@ -13,6 +13,7 @@
  */
 
 import { BrokerAdapter }           from './broker.interface.js'
+import { asList, num, money }      from './normalize.js'
 import * as ctrader                from '../../../providers/ctrader.provider.js'
 import { brokerConnectionService } from '../brokerConnection.service.js'
 import { logger }                  from '../../../services/logger.service.js'
@@ -57,6 +58,10 @@ const _loginByRestId = new Map()   // `${userId}:${restAccountId}` → traderLog
 
 export class CTraderAdapter extends BrokerAdapter {
 
+    brokerType  = 'ctrader'
+    brokerLabel = 'cTrader'
+    provider    = ctrader
+
     // ── OAuth ──────────────────────────────────────────────────────────────────
 
     getAuthUrl(state) {
@@ -82,7 +87,7 @@ export class CTraderAdapter extends BrokerAdapter {
         const tokens    = await this._freshTokens(userId)
         const accountId = await this._resolveAccountId(userId, tokens)
         const raw  = await ctrader.get('/tradingaccounts', tokens)
-        const list = Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : []
+        const list = asList(raw)
         const account = list.find(a => String(a.id ?? a.accountId) === String(accountId))
         if (!account) throw new Error(`cTrader account ${accountId} not found in accounts list`)
         return _normaliseAccount(account)
@@ -95,7 +100,7 @@ export class CTraderAdapter extends BrokerAdapter {
         const accountId = await this._resolveAccountId(userId, tokens)
         try {
             const raw  = await ctrader.get(`/tradingaccounts/${accountId}/openpositions`, tokens)
-            const list = Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : []
+            const list = asList(raw)
             return list.map(_normalisePosition)
         } catch {
             // cTrader open positions may not be accessible via REST (WebSocket only)
@@ -108,7 +113,7 @@ export class CTraderAdapter extends BrokerAdapter {
     async getTradingAccounts(userId) {
         const tokens = await this._freshTokens(userId)
         const raw    = await ctrader.get('/tradingaccounts', tokens)
-        const list   = Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : []
+        const list   = asList(raw)
         return list.map(_normaliseTradingAccount)
     }
 
@@ -354,7 +359,7 @@ export class CTraderAdapter extends BrokerAdapter {
         if (_loginByRestId.has(key)) return _loginByRestId.get(key)
         try {
             const raw  = await ctrader.get('/tradingaccounts', tokens)
-            const list = Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : []
+            const list = asList(raw)
             for (const a of list) {
                 const id    = String(a.id ?? a.accountId ?? '')
                 const login = a.traderLogin ?? a.login ?? a.accountNumber ?? null
@@ -377,27 +382,7 @@ export class CTraderAdapter extends BrokerAdapter {
         return volume
     }
 
-    /** Return valid tokens for this user, refreshing if within 60s of expiry. */
-    async _freshTokens(userId) {
-        const conn = await brokerConnectionService.getConnection(userId, 'ctrader')
-        if (!conn) {
-            throw Object.assign(new Error('cTrader not connected'), { status: 401 })
-        }
-
-        const bufferMs = 60_000
-        if (Date.now() + bufferMs >= conn.expiresAt) {
-            logger.info(LOG, `Refreshing tokens for user ${userId}`)
-            try {
-                const fresh = await ctrader.refreshTokens(conn)
-                await brokerConnectionService.updateTokens(userId, 'ctrader', fresh)
-                return fresh
-            } catch (err) {
-                logger.error(LOG, `Token refresh failed for user ${userId}:`, err.message)
-                throw Object.assign(new Error('cTrader session expired — please reconnect'), { status: 401 })
-            }
-        }
-        return conn
-    }
+    // _freshTokens() is inherited from BrokerAdapter (uses brokerType/brokerLabel/provider).
 
     /** Resolve the user's primary trading account ID, caching in DB. */
     async _resolveAccountId(userId, tokens) {
@@ -405,7 +390,7 @@ export class CTraderAdapter extends BrokerAdapter {
         if (cached) return cached
 
         const raw  = await ctrader.get('/tradingaccounts', tokens)
-        const list = Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : []
+        const list = asList(raw)
         if (list.length === 0) throw new Error('No cTrader trading accounts found')
 
         const accountId = String(list[0].id ?? list[0].accountId)
@@ -432,11 +417,11 @@ function _normaliseAccount(raw) {
         login:       raw.traderLogin     ?? raw.login ?? raw.accountNumber,
         broker:      raw.brokerName      ?? raw.broker,
         currency:    raw.depositCurrency ?? raw.currency,
-        balance:     _money(raw.balance  ?? raw.totalBalance),
-        equity:      _money(raw.equity),
-        margin:      _money(raw.margin   ?? raw.usedMargin),
-        freeMargin:  _money(raw.freeMargin),
-        marginLevel: _num(raw.marginLevel),
+        balance:     money(raw.balance  ?? raw.totalBalance),
+        equity:      money(raw.equity),
+        margin:      money(raw.margin   ?? raw.usedMargin),
+        freeMargin:  money(raw.freeMargin),
+        marginLevel: num(raw.marginLevel),
         leverage:    raw.leverage != null ? Number(raw.leverage) : null,
     }
 }
@@ -446,12 +431,12 @@ function _normalisePosition(raw) {
         id:           raw.id ?? raw.positionId,
         symbol:       raw.symbolName ?? raw.symbol,
         direction:    (raw.tradeSide ?? raw.side)?.toLowerCase() === 'sell' ? 'short' : 'long',
-        volume:       _num(raw.volume),
-        entryPrice:   _num(raw.entryPrice ?? raw.openPrice),
-        currentPrice: _num(raw.currentPrice),
-        pnl:          _money(raw.pnl ?? raw.grossProfit),
-        pnlPips:      _num(raw.pnlPips),
-        swap:         _money(raw.swap),
+        volume:       num(raw.volume),
+        entryPrice:   num(raw.entryPrice ?? raw.openPrice),
+        currentPrice: num(raw.currentPrice),
+        pnl:          money(raw.pnl ?? raw.grossProfit),
+        pnlPips:      num(raw.pnlPips),
+        swap:         money(raw.swap),
         openedAt:     raw.openTimestamp ?? raw.createTimestamp,
     }
 }
@@ -461,19 +446,8 @@ function _normaliseTradingAccount(raw) {
         id:       String(raw.id ?? raw.accountId ?? ''),
         login:    raw.traderLogin ?? raw.login ?? raw.accountNumber ?? null,
         currency: raw.depositCurrency ?? raw.currency ?? null,
-        balance:  _money(raw.balance),
+        balance:  money(raw.balance),
         broker:   raw.brokerName ?? raw.broker ?? null,
         isLive:   !!(raw.isLive ?? !raw.isDemo),
     }
-}
-
-// cTrader REST API returns monetary values in cents (divide by 100 to get account currency)
-function _money(v) {
-    const n = Number(v)
-    return Number.isFinite(n) ? n / 100 : null
-}
-
-function _num(v) {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
 }
