@@ -41,7 +41,10 @@
       "Bash(npm install *)",
       "Bash(ls services/*.js)",
       "Bash(ls utils*)",
-      "Bash(ls services/util*)"
+      "Bash(ls services/util*)",
+      "WebFetch(domain:help.ctrader.com)",
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

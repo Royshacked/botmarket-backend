@@ -253,6 +253,24 @@ export function normalizeVolume(specs, volume) {
 }
 
 /**
+ * Convert a trade size expressed in LOTS into cTrader native volume units.
+ * cTrader's `lotSize` is one lot measured in those same volume units, so
+ * `volume = lots × lotSize` (e.g. BTCUSD lotSize=100 → 1 lot = volume 100 = 1 BTC).
+ * When the symbol advertises no lotSize the value is assumed to already be in
+ * native volume units and passed through unchanged.
+ * @param {SymbolSpecs} specs
+ * @param {number}      lots
+ * @returns {number} desired volume in cTrader units (still un-aligned; pass to normalizeVolume)
+ */
+export function lotsToVolume(specs, lots) {
+    const n = Number(lots)
+    if (!Number.isFinite(n)) throw new Error('lotsToVolume: lots must be a finite number')
+    const lotSize = Number(specs?.lotSize)
+    if (!Number.isFinite(lotSize) || lotSize <= 0) return n
+    return n * lotSize
+}
+
+/**
  * Round a price to the symbol's tradable precision (digits).
  * @param {SymbolSpecs} specs
  * @param {number}      price

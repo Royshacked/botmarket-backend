@@ -21,6 +21,7 @@ import {
     listCTraderAccounts,
     getCTraderSession,
     normalizeVolume,
+    lotsToVolume,
     roundPrice,
     priceToRelative,
 } from '../../../providers/ctrader.session.provider.js'
@@ -49,6 +50,10 @@ const MONEY_SCALE      = 100   // ProtoOA money fields are integer cents (moneyD
 // Module-level so the idempotency guard survives the factory minting a fresh
 // adapter per call — the listener lives on the cached (singleton) session.
 const _wiredFeeds = new Set()  // `${env}:${ctid}`
+
+// REST trading-account id → traderLogin. The id↔login mapping is stable, so cache
+// it to avoid a REST round-trip every time an order is placed by REST account id.
+const _loginByRestId = new Map()   // `${userId}:${restAccountId}` → traderLogin
 
 export class CTraderAdapter extends BrokerAdapter {
 
@@ -138,7 +143,9 @@ export class CTraderAdapter extends BrokerAdapter {
         if (!orderType) throw new Error(`cTrader: unsupported order type '${order.type}'`)
         if (!tradeSide) throw new Error(`cTrader: unsupported direction '${order.direction}'`)
 
-        const volume = normalizeVolume(specs, order.quantity)
+        // order.quantity is in LOTS — convert to cTrader native volume units, then
+        // align to the symbol's step and clamp to [min, max].
+        const volume = normalizeVolume(specs, lotsToVolume(specs, order.quantity))
         if (volume <= 0) throw new Error(`cTrader: volume ${order.quantity} normalises to 0 for ${order.symbol}`)
 
         const payload = {
@@ -308,21 +315,56 @@ export class CTraderAdapter extends BrokerAdapter {
         const accounts = await listCTraderAccounts(tokens.accessToken)
         if (accounts.length === 0) throw new Error('cTrader: no trading accounts on this connection')
 
-        let acct
-        if (accountId != null) {
-            acct = accounts.find(a => String(a.ctid) === String(accountId))
-            if (!acct) throw new Error(`cTrader: account ${accountId} not found on this connection`)
-        } else if (accounts.length === 1) {
-            acct = accounts[0]
-        } else {
-            throw new Error('cTrader: multiple trading accounts — accountId is required')
-        }
-
+        const acct = await this._matchAccount(userId, accountId, accounts, tokens)
         return getCTraderSession({
             ctid:           acct.ctid,
             isLive:         acct.isLive,
             getAccessToken: async () => (await this._freshTokens(userId)).accessToken,
         })
+    }
+
+    /**
+     * Resolve the caller's accountId to a ProtoOA account ({ ctid, isLive, traderLogin }).
+     * The id can arrive in two shapes:
+     *   • the ctidTraderAccountId itself — what placeOrder() returns and the execution
+     *     feed / reconciler pass back (fast path: direct ctid match);
+     *   • a REST `/tradingaccounts` id — what ideas persist; this is NOT the ctid, so
+     *     map it REST id → traderLogin → ctid (the login is the shared join key).
+     */
+    async _matchAccount(userId, accountId, protoAccounts, tokens) {
+        if (accountId == null) {
+            if (protoAccounts.length === 1) return protoAccounts[0]
+            throw new Error('cTrader: multiple trading accounts — accountId is required')
+        }
+
+        const byCtid = protoAccounts.find(a => String(a.ctid) === String(accountId))
+        if (byCtid) return byCtid
+
+        const login = await this._loginForRestAccountId(userId, accountId, tokens)
+        if (login != null) {
+            const byLogin = protoAccounts.find(a => String(a.traderLogin) === String(login))
+            if (byLogin) return byLogin
+        }
+        throw new Error(`cTrader: account ${accountId} not found on this connection`)
+    }
+
+    /** Look up a REST trading-account id's traderLogin (cached; stable mapping). */
+    async _loginForRestAccountId(userId, accountId, tokens) {
+        const key = `${userId}:${accountId}`
+        if (_loginByRestId.has(key)) return _loginByRestId.get(key)
+        try {
+            const raw  = await ctrader.get('/tradingaccounts', tokens)
+            const list = Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : []
+            for (const a of list) {
+                const id    = String(a.id ?? a.accountId ?? '')
+                const login = a.traderLogin ?? a.login ?? a.accountNumber ?? null
+                if (id && login != null) _loginByRestId.set(`${userId}:${id}`, login)
+            }
+            return _loginByRestId.get(key) ?? null
+        } catch (err) {
+            logger.warn(LOG, `REST account lookup failed for ${accountId}: ${err.message}`)
+            return null
+        }
     }
 
     /** Look up an open position's current volume (for a full close). */

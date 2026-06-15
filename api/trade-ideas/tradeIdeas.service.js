@@ -3,8 +3,9 @@ import { logger }          from '../../services/logger.service.js'
 import { monitorService }  from '../../monitoring/monitor.service.js'
 import { brokerService }   from '../broker/broker.service.js'
 import { buildOrderPlanForIdea } from '../../services/orderPlan.service.js'
+import { detectNativeLevels, currentReferencePrice } from '../../services/protectionPlan.service.js'
 import { isMarketOpen, isCrypto } from '../../services/market.service.js'
-import { resolveConditionTree, extractLeaves, topOperator } from '../../services/conditionTree.service.js'
+import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } from '../../services/conditionTree.service.js'
 
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
@@ -226,17 +227,40 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
         const plan = (idea.pendingOrder?.plan?.length) ? idea.pendingOrder.plan : orders
         if (!Array.isArray(plan) || plan.length === 0) return { ok: false, reason: 'no_orders' }
 
-        const results     = []
+        // Decide which exits can ride on the broker's native SL/TP (bare price
+        // levels) vs stay on the software monitor. The price levels are
+        // broker-agnostic; we attach them only to brokers that can protect
+        // natively, and remember per placed order whether it covered stop / TP.
+        const levels = await detectNativeLevels(idea)
+        let refPrice = null
+        if (levels.stopLevel != null || levels.tpLevel != null) {
+            const anyMarket = plan.some(o => (o.type ?? idea.type ?? 'market') === 'market')
+            if (anyMarket) refPrice = await currentReferencePrice(idea.asset, _refTimeframe(idea))
+        }
+
+        const results      = []
         const brokerOrders = []   // linkage the execution reconciler matches closes against
+        const protections  = []   // { stopNative, tpNative } per successfully placed order
         for (const order of plan) {
+            const type = order.type ?? idea.type ?? 'market'
+            const brokerOrder = { symbol: idea.asset, direction: idea.direction, quantity: order.quantity, type }
+            let stopNative = false, tpNative = false
+
             try {
-                const result = await brokerService.placeOrder(order.broker, userId, order.accountId, {
-                    symbol:    idea.asset,
-                    direction: idea.direction,
-                    quantity:  order.quantity,
-                    type:      order.type ?? idea.type ?? 'market',
-                })
-                logger.info(LOG, 'Order placed', { id, broker: order.broker, accountId: order.accountId, direction: idea.direction, quantity: order.quantity, orderId: result?.orderId })
+                // Attach native SL/TP only when the broker supports it. A native SL/TP on
+                // a MARKET order also needs a reference price; skip (leave to the monitor)
+                // if we couldn't fetch one rather than risk a malformed order. Inside the
+                // try so an unknown broker fails only its own order, as before.
+                const isMarket  = type === 'market'
+                const canAttach = !!brokerService.capabilities(order.broker)?.nativeProtection && (!isMarket || refPrice != null)
+                if (canAttach) {
+                    if (levels.stopLevel != null) { brokerOrder.stopLoss   = levels.stopLevel; stopNative = true }
+                    if (levels.tpLevel   != null) { brokerOrder.takeProfit = levels.tpLevel;   tpNative   = true }
+                    if ((stopNative || tpNative) && isMarket) brokerOrder.referencePrice = refPrice
+                }
+
+                const result = await brokerService.placeOrder(order.broker, userId, order.accountId, brokerOrder)
+                logger.info(LOG, 'Order placed', { id, broker: order.broker, accountId: order.accountId, direction: idea.direction, quantity: order.quantity, orderId: result?.orderId, stopNative, tpNative })
                 results.push({ accountId: order.accountId, ok: true, orderId: result?.orderId ?? null })
                 brokerOrders.push({
                     broker:     order.broker,
@@ -246,6 +270,7 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
                     orderId:    result?.orderId    ?? null,
                     positionId: result?.positionId ?? null,   // backfilled on the fill event
                 })
+                protections.push({ stopNative, tpNative })
             } catch (err) {
                 logger.error(LOG, 'Order failed', { id, broker: order.broker, accountId: order.accountId, error: err.message })
                 results.push({ accountId: order.accountId, ok: false, error: err.message })
@@ -255,11 +280,21 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
         const anyPlaced = results.some(r => r.ok)
         if (!anyPlaced) return { ok: false, reason: 'all_failed', results }
 
+        // Keep monitoring an exit unless EVERY placed order offloaded it natively —
+        // a mixed idea (one native account, one not) must still watch for the
+        // non-native account. The execution reconciler handles native closes.
+        const monitorStop = levels.hasStop && protections.some(p => !p.stopNative)
+        const monitorTp   = levels.hasTp   && protections.some(p => !p.tpNative)
+
         const now    = Date.now()
         const status = idea.direction === 'short' ? 'short' : 'long'
+        const set    = { status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed', brokerOrders, monitorStop, monitorTp }
+        if (levels.stopLevel != null || levels.tpLevel != null) {
+            set.nativeProtection = { stop: levels.stopLevel, tp: levels.tpLevel }
+        }
         const updated = await db.collection(COLLECTION).findOneAndUpdate(
             { id },
-            { $set: { status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed', brokerOrders } },
+            { $set: set },
             { returnDocument: 'after' }
         )
 
@@ -306,7 +341,16 @@ async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null,
     return { ok: true, ideas: saved, portfolioId: pid }
 }
 
-// ─── Mongo helper ─────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Timeframe to price a native-protection reference off — the entry timeframe,
+// falling back to daily. Only used to fetch a current price near entry.
+function _refTimeframe(idea) {
+    return firstLeafTimeframe(idea.entry_condition_tree)
+        ?? idea.entry_timeframe
+        ?? idea.timeframe
+        ?? 'day'
+}
 
 // strip MongoDB's internal _id before sending to client
 function _strip(doc) {

@@ -59,7 +59,9 @@
  * @typedef {Object} BrokerOrder
  * @property {string}                   symbol
  * @property {'long'|'short'}           direction
- * @property {number}                   quantity
+ * @property {number}                   quantity   trade size in LOTS / contracts; the
+ *                                                 adapter converts to the broker's native
+ *                                                 units (e.g. cTrader volume = lots × lotSize)
  * @property {'market'|'limit'|'stop'}  type
  * @property {number} [limitPrice]      required for limit orders
  * @property {number} [stopPrice]       required for stop orders

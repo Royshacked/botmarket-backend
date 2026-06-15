@@ -303,7 +303,11 @@ async function _checkPosition(db, idea, stopCandles, tpCandles, aeCandles) {
     let tpFired   = false
 
     // ── Stop conditions ───────────────────────────────────────────────────────
-    {
+    // Skip exits the broker now protects natively (monitorStop === false). The
+    // execution reconciler flips the idea closed when the native SL fills.
+    if (idea.monitorStop === false) {
+        logger.info(LOG, `[${id}] Stop handled natively by broker — skipping monitor stop check`)
+    } else {
         const crossSyms = collectSymbols(idea.stop_condition_tree, idea.stop_conditions)
         const symbolMap = await _buildSymbolMap(id, asset, stopCandles, stopTf, crossSyms)
 
@@ -331,7 +335,10 @@ async function _checkPosition(db, idea, stopCandles, tpCandles, aeCandles) {
     if (stopFired) return
 
     // ── TP conditions ─────────────────────────────────────────────────────────
-    {
+    // Skip exits the broker now protects natively (monitorTp === false).
+    if (idea.monitorTp === false) {
+        logger.info(LOG, `[${id}] TP handled natively by broker — skipping monitor TP check`)
+    } else {
         const crossSyms = collectSymbols(idea.tp_condition_tree, idea.tp_conditions)
         const symbolMap = await _buildSymbolMap(id, asset, tpCandles, tpTf, crossSyms)
 
