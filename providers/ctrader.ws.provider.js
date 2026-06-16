@@ -36,6 +36,7 @@ const PT = {
     HEARTBEAT:         51,
     APP_AUTH_REQ:      2100,
     EXECUTION_EVENT:   2126,
+    SPOT_EVENT:        2131,
     ORDER_ERROR_EVENT: 2132,
     ERROR_RES:         2142,
 }
@@ -67,6 +68,7 @@ export function getCTraderSocket(isLive = false) {
  *   'authenticated' — emitted after every successful (re)connect + app-auth.
  *                     The session layer listens to re-account-auth + resubscribe.
  *   'execution'     — ProtoOAExecutionEvent (2126) push payload (fills, SL/TP, etc.)
+ *   'spot'          — ProtoOASpotEvent (2131) push payload (bid/ask, scaled ×1e5)
  *   'push'          — any other unsolicited server message (full envelope)
  */
 class CTraderSocket extends EventEmitter {
@@ -174,8 +176,10 @@ class CTraderSocket extends EventEmitter {
             return
         }
 
-        // Unsolicited push — execution events (fills, server-side SL/TP) and anything else.
-        if (msg.payloadType === PT.EXECUTION_EVENT) this.emit('execution', msg.payload ?? {})
+        // Unsolicited push — execution events (fills, server-side SL/TP), spot ticks,
+        // and anything else.
+        if (msg.payloadType === PT.EXECUTION_EVENT)  this.emit('execution', msg.payload ?? {})
+        else if (msg.payloadType === PT.SPOT_EVENT)  this.emit('spot',      msg.payload ?? {})
         else this.emit('push', msg)
     }
 

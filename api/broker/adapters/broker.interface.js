@@ -75,11 +75,19 @@ import { logger }                  from '../../../services/logger.service.js'
  *                                      to a market order (brokers that take a relative SL/TP
  *                                      distance derive it from here). Ignored for limit/stop
  *                                      orders, where the limit/stop price is the reference.
+ * @property {number} [referenceQuote]  the CANONICAL (app/Massive-feed) live price of the
+ *                                      instrument at order time. Present only when the broker
+ *                                      lists the instrument under an aliased symbol whose price
+ *                                      basis differs (e.g. NQ future vs cTrader's US100 cash):
+ *                                      the adapter shifts absolute prices (limit/stop entry) onto
+ *                                      the broker's book by offset = brokerSpotMid − referenceQuote.
  * @property {string} [clientOrderId]   caller-supplied id for idempotency / correlation
  *
  * @typedef {Object} BrokerProtection
  * @property {number} [stopLoss]    absolute stop-loss price   (omit to leave unchanged)
  * @property {number} [takeProfit]  absolute take-profit price (omit to leave unchanged)
+ * @property {number} [referenceQuote]  canonical live price at amend time; see BrokerOrder —
+ *                                      the adapter shifts absolute SL/TP onto the broker's book.
  *
  * Normalised execution push event — the shape every broker translates its native
  * fills/updates into, so the unified backend→frontend channel is broker-agnostic.

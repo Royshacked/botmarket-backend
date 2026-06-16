@@ -28,7 +28,9 @@ export async function createTradeIdea(req, res) {
         const result = await ideaService.saveIdea(body, req.user._id)
         if (!result.ok) return res.status(500).send({ error: 'Failed to save idea' })
 
-        res.status(201).send({ idea: result.idea })
+        // `idea` = primary child (back-compat); `ideas` = all children when a
+        // multi-broker idea was forked into independent single-broker children.
+        res.status(201).send({ idea: result.idea, ideas: result.ideas ?? [result.idea] })
     } catch (err) {
         logger.error(LOG, 'createTradeIdea failed', err)
         res.status(500).send({ error: 'Failed to create trade idea' })

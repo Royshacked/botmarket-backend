@@ -18,6 +18,7 @@ import * as ctrader                from '../../../providers/ctrader.provider.js'
 import { brokerConnectionService } from '../brokerConnection.service.js'
 import { logger }                  from '../../../services/logger.service.js'
 import { executionBus }            from '../../../services/executionBus.js'
+import { toAppAsset }              from '../../../services/brokerSymbol.service.js'
 import {
     listCTraderAccounts,
     getCTraderSession,
@@ -155,6 +156,12 @@ export class CTraderAdapter extends BrokerAdapter {
         const volume = normalizeVolume(specs, lotsToVolume(specs, order.quantity))
         if (volume <= 0) throw new Error(`cTrader: volume ${order.quantity} normalises to 0 for ${order.symbol}`)
 
+        // Boundary price conversion: when the caller passes a canonical reference quote
+        // (an aliased symbol whose price basis differs from the app feed — NQ vs US100),
+        // shift ABSOLUTE entry prices onto the broker's book. Native SL/TP are sent as
+        // RELATIVE distances below, so they stay scale-immune and are NOT shifted.
+        const offset = await this._priceOffset(session, order.symbol, order.referenceQuote)
+
         const payload = {
             symbolId:  specs.symbolId,
             orderType,
@@ -162,11 +169,13 @@ export class CTraderAdapter extends BrokerAdapter {
             volume,
             comment:   'ar2trade',
         }
-        if (order.type === 'limit') payload.limitPrice = roundPrice(specs, order.limitPrice)
-        if (order.type === 'stop')  payload.stopPrice  = roundPrice(specs, order.stopPrice)
+        if (order.type === 'limit') payload.limitPrice = roundPrice(specs, order.limitPrice + offset)
+        if (order.type === 'stop')  payload.stopPrice  = roundPrice(specs, order.stopPrice  + offset)
         if (order.clientOrderId)    payload.label      = String(order.clientOrderId)
 
-        // Native SL/TP → relative distance from the order's reference price.
+        // Native SL/TP → relative distance from the order's reference price. The ref is
+        // the CANONICAL limit/stop price (not the shifted one): a canonical-minus-canonical
+        // distance is basis-immune and applies correctly to the real fill.
         if (order.stopLoss != null || order.takeProfit != null) {
             const refPrice = order.type === 'limit' ? order.limitPrice
                 : order.type === 'stop'              ? order.stopPrice
@@ -199,9 +208,19 @@ export class CTraderAdapter extends BrokerAdapter {
      */
     async setProtection(userId, accountId, positionId, protection = {}) {
         const session = await this._session(userId, accountId)
+
+        // Same boundary shift as placeOrder, for ABSOLUTE amended SL/TP. Only when the
+        // caller passes a canonical reference quote (aliased symbol); we resolve the
+        // position's symbol to snapshot the broker spot. Dormant until a caller opts in.
+        let offset = 0
+        if (protection.referenceQuote != null) {
+            const symbol = await this._positionSymbol(session, positionId)
+            offset = symbol ? await this._priceOffset(session, symbol, protection.referenceQuote) : 0
+        }
+
         const payload = { positionId: Number(positionId) }
-        if (protection.stopLoss   != null) payload.stopLoss   = protection.stopLoss
-        if (protection.takeProfit != null) payload.takeProfit = protection.takeProfit
+        if (protection.stopLoss   != null) payload.stopLoss   = protection.stopLoss   + offset
+        if (protection.takeProfit != null) payload.takeProfit = protection.takeProfit + offset
         if (payload.stopLoss == null && payload.takeProfit == null) {
             throw new Error('cTrader: setProtection requires at least one of stopLoss / takeProfit')
         }
@@ -232,6 +251,17 @@ export class CTraderAdapter extends BrokerAdapter {
         const session = await this._session(userId, accountId)
         await session.send(PT.CANCEL_ORDER, { orderId: Number(orderId) })
         logger.info(LOG, `Cancel requested for order ${orderId}`)
+    }
+
+    /**
+     * Snapshot the broker's current spot quote for a symbol — the live cTrader price
+     * used to shift an absolute order price onto cTrader's book (the basis offset vs
+     * the canonical Massive feed). `symbol` is the broker's tradable name (brokerSymbol).
+     * @returns {Promise<{ symbolId:number, bid:number|null, ask:number|null, mid:number, digits:number, at:number }>}
+     */
+    async getSpot(userId, accountId, symbol) {
+        const session = await this._session(userId, accountId)
+        return session.getSpotPrice(symbol)
     }
 
     // ── Execution feed ─────────────────────────────────────────────────────────
@@ -276,13 +306,18 @@ export class CTraderAdapter extends BrokerAdapter {
         const symbolId   = order.tradeData?.symbolId ?? position.tradeData?.symbolId
         const tradeSide  = position.tradeData?.tradeSide ?? order.tradeData?.tradeSide
 
+        // Reverse the broker symbol back to the app's canonical asset (e.g. US100 →
+        // NQ) so the reconciler can match `exec.symbol` to the idea's stored `asset`.
+        const brokerName = symbolId != null ? session.symbolNameById(symbolId) : null
+        const appAsset   = brokerName ? toAppAsset('ctrader', brokerName) : null
+
         const base = {
             broker:    'ctrader',
             accountId: String(p?.ctidTraderAccountId ?? session.ctid),
             at:        Number(deal.executionTimestamp ?? p?.timestamp ?? Date.now()),
             ...(order.orderId   != null && { orderId:    String(order.orderId) }),
             ...(positionId      != null && { positionId: String(positionId) }),
-            ...(symbolId        != null && { symbol: session.symbolNameById(symbolId) ?? undefined }),
+            ...(appAsset        != null && { symbol: appAsset }),
             ...(tradeSide       != null && { direction: tradeSide === TRADE_SIDE.short ? 'short' : 'long' }),
         }
 
@@ -383,6 +418,35 @@ export class CTraderAdapter extends BrokerAdapter {
             logger.warn(LOG, `REST account lookup failed for ${accountId}: ${err.message}`)
             return null
         }
+    }
+
+    /**
+     * Basis offset to shift an absolute canonical price onto the broker's book:
+     * `offset = brokerSpotMid − referenceQuote`. Returns 0 when no reference quote was
+     * supplied (non-aliased symbol) or the broker spot is unavailable (place at the
+     * authored price rather than fail). cTraderPrice = canonicalPrice + offset.
+     */
+    async _priceOffset(session, symbol, referenceQuote) {
+        if (referenceQuote == null) return 0
+        let mid = null
+        try { mid = (await session.getSpotPrice(symbol))?.mid ?? null } catch (err) {
+            logger.warn(LOG, `spot snapshot failed for ${symbol}: ${err.message}`)
+        }
+        if (mid == null) {
+            logger.warn(LOG, `no broker spot for ${symbol} — placing at canonical price (no basis shift)`)
+            return 0
+        }
+        const offset = mid - Number(referenceQuote)
+        logger.info(LOG, `basis offset ${symbol}: brokerMid=${mid} − canonical=${referenceQuote} = ${offset}`)
+        return offset
+    }
+
+    /** Look up an open position's symbol name via reconcile (for the basis shift). */
+    async _positionSymbol(session, positionId) {
+        const rec = await session.send(PT.RECONCILE, {})
+        const pos = (rec?.position ?? []).find(p => Number(p.positionId) === Number(positionId))
+        const symbolId = pos?.tradeData?.symbolId
+        return symbolId != null ? session.symbolNameById(symbolId) : null
     }
 
     /** Look up an open position's current volume (for a full close). */

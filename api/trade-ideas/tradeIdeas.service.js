@@ -2,9 +2,10 @@ import { getDb }           from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { monitorService }  from '../../monitoring/monitor.service.js'
 import { brokerService }   from '../broker/broker.service.js'
-import { buildOrderPlanForIdea } from '../../services/orderPlan.service.js'
+import { buildOrderPlanForIdea, resolveUserAccounts } from '../../services/orderPlan.service.js'
 import { detectNativeLevels, currentReferencePrice, detectNativeEntryLevel } from '../../services/protectionPlan.service.js'
 import { isMarketOpen, isCrypto } from '../../services/market.service.js'
+import { toBrokerSymbol, normSymbol } from '../../services/brokerSymbol.service.js'
 import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } from '../../services/conditionTree.service.js'
 
 const LOG = '[idea]'
@@ -92,6 +93,7 @@ async function saveIdea(tradeIdea, userId) {
         // Resting entry: resolve the trigger price from the bare price-level entry
         // condition. If the entry isn't a single price touch we can't rest it at the
         // broker, so fall back to the monitored path rather than persist a broken flag.
+        // Asset-level (independent of accounts) — shared by every forked child.
         if (enriched.entryOrderType === 'stop') {
             const level = await detectNativeEntryLevel(enriched)
             if (level != null) {
@@ -102,26 +104,57 @@ async function saveIdea(tradeIdea, userId) {
             }
         }
 
-        // Immediate ideas are born 'hit' — build the order plan now (server-side)
-        // and park it for confirmation. Orders are NOT placed automatically in
-        // manual mode; the user confirms via POST /trade-ideas/:id/orders.
-        if (isImmediate) {
-            const plan = await buildOrderPlanForIdea(enriched)
-            if (plan.length > 0) {
-                const open = isCrypto(enriched.asset) || isMarketOpen()
-                enriched.pendingOrder = { plan, builtAt: Date.now() }
-                enriched.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
+        // Fork a multi-broker idea into independent single-broker children — one per
+        // distinct broker (accounts on the same broker stay together so balance-ratio
+        // scaling still works). A single-broker / no-account idea yields exactly one
+        // child with the original id. Children are linked only by groupId (display).
+        const partitions = await _partitionByBroker(enriched, userId)
+        const forked  = partitions.length > 1
+        const groupId = forked ? `grp_${enriched.id}` : null
+
+        const children = []
+        for (let i = 0; i < partitions.length; i++) {
+            const part  = partitions[i]
+            const child = {
+                ...enriched,
+                id:            forked ? `${enriched.id}-${i + 1}` : enriched.id,
+                accounts:      part.accountIds,
+                mainAccountId: part.mainAccountId,
+                groupId,
+                // The broker this child trades on (known at fork time) — self-describing
+                // for the UI (group labels) and any later per-broker logic.
+                broker:        part.broker ?? null,
+                // Resolve + persist the broker's tradable symbol once (no per-order
+                // lookup). `asset` stays the canonical app name the monitor/Massive
+                // feed use; brokerSymbol is what we send to the broker (NQ → US100).
+                brokerSymbol:  part.broker ? toBrokerSymbol(part.broker, enriched.asset) : null,
             }
+
+            // Immediate ideas are born 'hit' — build each child's order plan now
+            // (server-side, its own accounts only) and park it for confirmation.
+            // Orders are NOT placed automatically; the user confirms via POST.
+            if (isImmediate) await _attachImmediatePlan(child)
+            children.push(child)
         }
 
         const db = await getDb()
-        await db.collection(COLLECTION).insertOne(enriched)
-        logger.info(LOG, 'Idea saved', { id: enriched.id, asset: enriched.asset, immediate: isImmediate, orderState: enriched.orderState })
+        await db.collection(COLLECTION).insertMany(children)
+        logger.info(LOG, 'Idea saved', { id: enriched.id, asset: enriched.asset, immediate: isImmediate, forked, children: children.length })
 
-        return { ok: true, idea: _strip(enriched) }
+        return { ok: true, idea: _strip(children[0]), ideas: children.map(_strip) }
     } catch (err) {
         logger.error(LOG, 'Failed to save idea', err)
         return { ok: false, error: err }
+    }
+}
+
+/** Build + park an immediate idea's server-side order plan (mutates `idea`). */
+async function _attachImmediatePlan(idea) {
+    const plan = await buildOrderPlanForIdea(idea)
+    if (plan.length > 0) {
+        const open = isCrypto(idea.asset) || isMarketOpen()
+        idea.pendingOrder = { plan, builtAt: Date.now() }
+        idea.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
     }
 }
 
@@ -302,7 +335,9 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
         const protections  = []   // { stopNative, tpNative } per successfully placed order
         for (const order of plan) {
             const type = order.type ?? idea.type ?? 'market'
-            const brokerOrder = { symbol: idea.asset, direction: idea.direction, quantity: order.quantity, type }
+            // brokerSymbol is the broker's tradable name (resolved at fork time); fall
+            // back to the canonical asset for pre-fork ideas / non-aliased instruments.
+            const brokerOrder = { symbol: idea.brokerSymbol ?? idea.asset, direction: idea.direction, quantity: order.quantity, type }
             let stopNative = false, tpNative = false
 
             try {
@@ -398,16 +433,22 @@ async function placeRestingEntryForIdea(id, userId, isAdmin = false) {
         // attach without a current-price lookup — the adapter derives the distance.
         const levels = await detectNativeLevels(idea)
 
+        // The stop entry price is ABSOLUTE and rests on the broker's book. For an aliased
+        // symbol whose price basis differs (NQ authored vs cTrader US100), hand the adapter
+        // the canonical live quote so it shifts the trigger onto the broker's book.
+        const referenceQuote = await _basisReferenceQuote(idea)
+
         const results      = []
         const brokerOrders = []   // linkage the reconciler matches the fill against (by orderId)
         const protections  = []
         for (const order of plan) {
             const brokerOrder = {
-                symbol:    idea.asset,
+                symbol:    idea.brokerSymbol ?? idea.asset,
                 direction: idea.direction,
                 quantity:  order.quantity,
                 type:      'stop',
                 stopPrice: triggerPrice,
+                ...(referenceQuote != null && { referenceQuote }),
             }
             let stopNative = false, tpNative = false
             try {
@@ -486,7 +527,7 @@ async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null,
             accounts,
             mainAccountId,
         }, userId)
-        if (result.ok) saved.push(result.idea)
+        if (result.ok) saved.push(...(result.ideas ?? [result.idea]))
         else logger.warn(LOG, 'Batch idea save failed', { asset: idea.asset, error: result.error })
     }
 
@@ -495,6 +536,68 @@ async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null,
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Partition an idea's accounts by broker, for forking a multi-broker idea into
+ * independent single-broker children. Resolves each account id → broker, then
+ * groups. Returns one partition per distinct broker; a single broker (or an
+ * unresolvable/empty account set) yields exactly one partition with all the ids,
+ * so the common case never forks. Each partition keeps the global main account
+ * when it owns it, else lets the order planner pick its own main (ratio base).
+ *
+ * @returns {Promise<Array<{ broker: string|null, accountIds: string[], mainAccountId: string|null }>>}
+ */
+async function _partitionByBroker(idea, userId) {
+    const accountIds = (idea.accounts ?? []).map(a => String(typeof a === 'object' ? a.id : a))
+    const globalMain = idea.mainAccountId != null ? String(idea.mainAccountId) : null
+    if (accountIds.length === 0) return [{ broker: null, accountIds: [], mainAccountId: globalMain }]
+
+    const brokerById = new Map()
+    try {
+        const resolved = await resolveUserAccounts(userId, accountIds)
+        for (const [id, acct] of resolved) brokerById.set(id, acct.broker)
+    } catch (err) {
+        // Can't reach the broker(s) — don't fork; the idea keeps all its accounts.
+        logger.warn(LOG, `fork: account→broker resolve failed, not forking: ${err.message}`)
+        return [{ broker: null, accountIds, mainAccountId: globalMain }]
+    }
+
+    const { partitions, unresolved } = _groupByBroker(accountIds, brokerById, globalMain)
+    if (unresolved.length) logger.warn(LOG, 'fork: dropping accounts with no resolved broker', { ids: unresolved })
+    return partitions
+}
+
+/**
+ * Pure grouping of account ids by broker (testable; no I/O).
+ * @param {string[]} accountIds
+ * @param {Map<string,string>} brokerById  id → broker (missing = unresolved)
+ * @param {string|null} globalMain
+ * @returns {{ partitions: Array<{broker,accountIds,mainAccountId}>, unresolved: string[] }}
+ */
+export function _groupByBroker(accountIds, brokerById, globalMain) {
+    const byBroker = new Map()
+    for (const id of accountIds) {
+        const broker = brokerById.get(id) ?? null
+        if (!byBroker.has(broker)) byBroker.set(broker, [])
+        byBroker.get(broker).push(id)
+    }
+
+    const known = [...byBroker.keys()].filter(b => b != null)
+    // 0 or 1 distinct broker → don't fork; keep every account (incl. any unresolved).
+    if (known.length <= 1) {
+        return {
+            partitions: [{ broker: known[0] ?? null, accountIds, mainAccountId: globalMain }],
+            unresolved: [],
+        }
+    }
+
+    // ≥2 brokers → one child each. Unresolved accounts can't be placed, so drop them.
+    const partitions = known.map(broker => {
+        const ids = byBroker.get(broker)
+        return { broker, accountIds: ids, mainAccountId: ids.includes(globalMain) ? globalMain : null }
+    })
+    return { partitions, unresolved: byBroker.get(null) ?? [] }
+}
 
 /**
  * Best-effort cancel of a resting idea's working (unfilled) entry orders. Orders that
@@ -513,6 +616,21 @@ async function _cancelRestingOrders(idea, userId) {
             logger.warn(LOG, 'Resting order cancel failed', { id: idea.id, orderId: link.orderId, error: err.message })
         }
     }
+}
+
+/**
+ * Canonical (Massive-feed) live quote for the cTrader boundary price shift, or null.
+ * Only returned when the idea's broker symbol is aliased to a different price basis
+ * (e.g. NQ→US100); for an identity symbol the broker and app prices match, so no
+ * shift is needed and we skip the quote fetch entirely. A missing quote returns null
+ * (the adapter then places at the authored price — logged, no basis shift).
+ */
+async function _basisReferenceQuote(idea) {
+    const aliased = idea.brokerSymbol && normSymbol(idea.brokerSymbol) !== normSymbol(idea.asset)
+    if (!aliased) return null
+    const quote = await currentReferencePrice(idea.asset, _refTimeframe(idea))
+    if (quote == null) logger.warn(LOG, 'basis shift: no canonical quote — placing at authored price', { asset: idea.asset, brokerSymbol: idea.brokerSymbol })
+    return quote
 }
 
 // Timeframe to price a native-protection reference off — the entry timeframe,
