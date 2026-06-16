@@ -3,14 +3,14 @@ import { logger }          from '../../services/logger.service.js'
 import { monitorService }  from '../../monitoring/monitor.service.js'
 import { brokerService }   from '../broker/broker.service.js'
 import { buildOrderPlanForIdea } from '../../services/orderPlan.service.js'
-import { detectNativeLevels, currentReferencePrice } from '../../services/protectionPlan.service.js'
+import { detectNativeLevels, currentReferencePrice, detectNativeEntryLevel } from '../../services/protectionPlan.service.js'
 import { isMarketOpen, isCrypto } from '../../services/market.service.js'
 import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } from '../../services/conditionTree.service.js'
 
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
 
-const VALID_STATUSES = new Set(['waiting', 'looking', 'hit', 'long', 'short', 'closed'])
+const VALID_STATUSES = new Set(['waiting', 'looking', 'resting', 'hit', 'long', 'short', 'closed'])
 
 export const ideaService = {
     saveIdea,
@@ -52,6 +52,14 @@ async function saveIdea(tradeIdea, userId) {
         direction:       tradeIdea.direction       ?? null,
         type:            tradeIdea.type            ?? null,
         quantity:        tradeIdea.quantity        != null ? Number(tradeIdea.quantity) : null,
+
+        // Resting broker-native entry: a pure price-touch entry the broker holds as a
+        // working STOP order (no software monitoring). entryTriggerPrice is resolved
+        // from the bare price-level entry condition below; null entryOrderType = the
+        // normal monitored/market path.
+        entryOrderType:    tradeIdea.entry_order_type === 'stop' ? 'stop' : null,
+        entryTriggerPrice: null,
+
         entry_timeframe: tradeIdea.entry_timeframe ?? null,
         stop_timeframe:  tradeIdea.stop_timeframe  ?? null,
         tp_timeframe:    tradeIdea.tp_timeframe    ?? null,
@@ -81,6 +89,19 @@ async function saveIdea(tradeIdea, userId) {
     }
 
     try {
+        // Resting entry: resolve the trigger price from the bare price-level entry
+        // condition. If the entry isn't a single price touch we can't rest it at the
+        // broker, so fall back to the monitored path rather than persist a broken flag.
+        if (enriched.entryOrderType === 'stop') {
+            const level = await detectNativeEntryLevel(enriched)
+            if (level != null) {
+                enriched.entryTriggerPrice = level
+            } else {
+                logger.warn(LOG, 'entry_order_type=stop but entry is not a bare price level — falling back to monitored', { asset: enriched.asset })
+                enriched.entryOrderType = null
+            }
+        }
+
         // Immediate ideas are born 'hit' — build the order plan now (server-side)
         // and park it for confirmation. Orders are NOT placed automatically in
         // manual mode; the user confirms via POST /trade-ideas/:id/orders.
@@ -135,6 +156,12 @@ async function deleteIdea(id, userId, isAdmin = false) {
         const idea = await db.collection(COLLECTION).findOne({ id })
         if (!idea) return { ok: false, reason: 'not_found' }
         if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+
+        // Pull any working resting entry off the broker before removing the idea, so
+        // a deleted idea never leaves an order in the air. Best-effort; uses the
+        // owner's broker session.
+        await _cancelRestingOrders(idea, idea.userId ?? userId)
+
         await db.collection(COLLECTION).deleteOne({ id })
         logger.info(LOG, 'Idea deleted', { id })
         return { ok: true }
@@ -147,6 +174,12 @@ async function deleteIdea(id, userId, isAdmin = false) {
 async function updateIdea(id, patch, userId, isAdmin = false) {
     if (patch.status !== undefined && !VALID_STATUSES.has(patch.status)) {
         return { ok: false, reason: 'invalid_status' }
+    }
+
+    // Activating a resting (broker-native stop-market) entry isn't a plain status
+    // write — it places the working order at the broker. Delegate to that flow.
+    if (patch.status === 'resting') {
+        return placeRestingEntryForIdea(id, userId, isAdmin)
     }
 
     // Rebuild condition trees when conditions are updated via chat edit
@@ -179,10 +212,36 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
     try {
         const db = await getDb()
 
-        // Ownership check: read only the userId field (cheap projection)
-        const existing = await db.collection(COLLECTION).findOne({ id }, { projection: { userId: 1 } })
+        // Ownership check + current status/orders (drive the dismiss & resting-cancel
+        // transitions below)
+        const existing = await db.collection(COLLECTION).findOne({ id }, { projection: { userId: 1, status: 1, brokerOrders: 1 } })
         if (!existing) return { ok: false, reason: 'not_found' }
         if (existing.userId && existing.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+
+        // Deactivating a resting idea (resting → waiting): cancel the working order(s)
+        // at the broker and clear the resting linkage, parking it back in waiting.
+        if (existing.status === 'resting' && patch.status === 'waiting') {
+            await _cancelRestingOrders({ id, status: 'resting', brokerOrders: existing.brokerOrders }, existing.userId ?? userId)
+            patch.orderState      = null
+            patch.brokerOrders    = null
+            patch.restingPlacedAt = null
+            monitorService.resetIdea(id)
+        }
+
+        // Dismiss: a triggered idea (hit) is sent back to waiting. Park it and push
+        // the entry floor forward to now so the just-dismissed event can't immediately
+        // re-fire when the user re-activates (which would loop hit→dismiss forever).
+        // Clear the pending order + trigger flags. Re-activation (waiting→looking) then
+        // looks forward from here while still flagging any *new* while-waiting events.
+        if (existing.status === 'hit' && patch.status === 'waiting') {
+            patch.entryFloorAt          = Date.now()
+            patch.entryTriggeredAt      = null
+            patch.triggeredWhileWaiting = false
+            patch.triggerEventAt        = null
+            patch.pendingOrder          = null
+            patch.orderState            = null
+            monitorService.resetIdea(id)
+        }
 
         // Atomic update — ownership constraint also in the filter eliminates the
         // TOCTOU window between the check above and the write below.
@@ -313,6 +372,100 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
     }
 }
 
+/**
+ * Activate a resting (broker-native stop-market) entry: place a working STOP order
+ * at the trigger price on each account, with native SL/TP attached where supported.
+ * The idea moves to 'resting' — the broker holds the order, no software monitoring.
+ * When it fills, the execution reconciler flips it to long/short and stop/TP
+ * monitoring begins (for any exit the broker isn't protecting natively).
+ */
+async function placeRestingEntryForIdea(id, userId, isAdmin = false) {
+    try {
+        const db   = await getDb()
+        const idea = await db.collection(COLLECTION).findOne({ id })
+        if (!idea) return { ok: false, reason: 'not_found' }
+        if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+        if (idea.entryOrderType !== 'stop')              return { ok: false, reason: 'not_resting' }
+        if (idea.ordersPlacedAt || idea.restingPlacedAt) return { ok: false, reason: 'already_placed' }
+
+        const triggerPrice = idea.entryTriggerPrice ?? await detectNativeEntryLevel(idea)
+        if (triggerPrice == null) return { ok: false, reason: 'no_trigger_price' }
+
+        const plan = await buildOrderPlanForIdea(idea)
+        if (!Array.isArray(plan) || plan.length === 0) return { ok: false, reason: 'no_accounts' }
+
+        // A stop order carries its own reference (the stop price), so native SL/TP can
+        // attach without a current-price lookup — the adapter derives the distance.
+        const levels = await detectNativeLevels(idea)
+
+        const results      = []
+        const brokerOrders = []   // linkage the reconciler matches the fill against (by orderId)
+        const protections  = []
+        for (const order of plan) {
+            const brokerOrder = {
+                symbol:    idea.asset,
+                direction: idea.direction,
+                quantity:  order.quantity,
+                type:      'stop',
+                stopPrice: triggerPrice,
+            }
+            let stopNative = false, tpNative = false
+            try {
+                const canAttach = !!brokerService.capabilities(order.broker)?.nativeProtection
+                if (canAttach) {
+                    if (levels.stopLevel != null) { brokerOrder.stopLoss   = levels.stopLevel; stopNative = true }
+                    if (levels.tpLevel   != null) { brokerOrder.takeProfit = levels.tpLevel;   tpNative   = true }
+                }
+                const result = await brokerService.placeOrder(order.broker, userId, order.accountId, brokerOrder)
+                logger.info(LOG, 'Resting entry placed', { id, broker: order.broker, accountId: order.accountId, stopPrice: triggerPrice, orderId: result?.orderId, stopNative, tpNative })
+                results.push({ accountId: order.accountId, ok: true, orderId: result?.orderId ?? null })
+                brokerOrders.push({
+                    broker:     order.broker,
+                    accountId:  result?.accountId ?? order.accountId,
+                    orderId:    result?.orderId    ?? null,
+                    positionId: null,   // backfilled when the stop fills
+                })
+                protections.push({ stopNative, tpNative })
+            } catch (err) {
+                logger.error(LOG, 'Resting entry failed', { id, broker: order.broker, accountId: order.accountId, error: err.message })
+                results.push({ accountId: order.accountId, ok: false, error: err.message })
+            }
+        }
+
+        if (!results.some(r => r.ok)) return { ok: false, reason: 'all_failed', results }
+
+        const monitorStop = levels.hasStop && protections.some(p => !p.stopNative)
+        const monitorTp   = levels.hasTp   && protections.some(p => !p.tpNative)
+
+        const now = Date.now()
+        const set = {
+            status:            'resting',
+            orderState:        'resting',
+            restingPlacedAt:   now,
+            entryTriggerPrice: triggerPrice,
+            brokerOrders,
+            monitorStop,
+            monitorTp,
+        }
+        if (levels.stopLevel != null || levels.tpLevel != null) {
+            set.nativeProtection = { stop: levels.stopLevel, tp: levels.tpLevel }
+        }
+        const updated = await db.collection(COLLECTION).findOneAndUpdate({ id }, { $set: set }, { returnDocument: 'after' })
+
+        // Keep each account's execution feed live so the stop fill reconciles back
+        // (resting → long/short). Best-effort — a feed failure must not fail placement.
+        for (const { broker, accountId } of brokerOrders) {
+            brokerService.startExecutionFeed(broker, userId, accountId)
+                .catch(err => logger.warn(LOG, `startExecutionFeed failed (${broker}/${accountId}):`, err.message))
+        }
+        logger.info(LOG, 'Resting entry order(s) working at broker', { id, placed: results.filter(r => r.ok).length })
+        return { ok: true, idea: _strip(updated), results }
+    } catch (err) {
+        logger.error(LOG, 'Failed to place resting entry', err)
+        return { ok: false, error: err }
+    }
+}
+
 async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null, portfolioId = null) {
     // Reuse the given portfolioId when updating an existing plan; otherwise mint one.
     const pid   = portfolioId || `portfolio_${Date.now()}`
@@ -342,6 +495,25 @@ async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null,
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Best-effort cancel of a resting idea's working (unfilled) entry orders. Orders that
+ * already filled carry a positionId (the reconciler stamped it) and are left alone —
+ * those are real positions, not orders in the air. Failures are logged, not thrown,
+ * so a delete/deactivate isn't blocked by a broker hiccup.
+ */
+async function _cancelRestingOrders(idea, userId) {
+    if (idea?.status !== 'resting' || !Array.isArray(idea.brokerOrders)) return
+    for (const link of idea.brokerOrders) {
+        if (!link?.orderId || link.positionId != null) continue
+        try {
+            await brokerService.cancelOrder(link.broker, userId, link.accountId, link.orderId)
+            logger.info(LOG, 'Resting order cancelled', { id: idea.id, broker: link.broker, accountId: link.accountId, orderId: link.orderId })
+        } catch (err) {
+            logger.warn(LOG, 'Resting order cancel failed', { id: idea.id, orderId: link.orderId, error: err.message })
+        }
+    }
+}
 
 // Timeframe to price a native-protection reference off — the entry timeframe,
 // falling back to daily. Only used to fetch a current price near entry.

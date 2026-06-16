@@ -57,6 +57,7 @@ import { logger }                  from '../../../services/logger.service.js'
  * @property {boolean} nativeProtection  can attach SL/TP to an order/position natively
  * @property {boolean} modifyProtection  can amend SL/TP on an open position
  * @property {boolean} closePosition     can close a position programmatically
+ * @property {boolean} cancelOrder       can cancel a working (unfilled) order
  * @property {boolean} ohlcv             can serve candles via getCandles()
  *
  * @typedef {Object} BrokerOrder
@@ -265,8 +266,22 @@ export class BrokerAdapter {
             nativeProtection: false,
             modifyProtection: false,
             closePosition:    false,
+            cancelOrder:      false,
             ohlcv:            false,
         }
+    }
+
+    /**
+     * Cancel a working (not-yet-filled) order, e.g. a resting stop-market entry.
+     * Requires `capabilities().cancelOrder`.
+     * @param {string} userId
+     * @param {string} accountId
+     * @param {string} orderId
+     * @returns {Promise<void>}
+     */
+    // eslint-disable-next-line no-unused-vars
+    async cancelOrder(userId, accountId, orderId) {
+        throw new Error(`${this.constructor.name}: cancelOrder() not implemented`)
     }
 
     /**

@@ -27,6 +27,7 @@ export const brokerService = {
     setSelectedAccount,
     capabilities,
     placeOrder,
+    cancelOrder,
     setProtection,
     closePosition,
     startExecutionFeed,
@@ -169,6 +170,19 @@ function capabilities(brokerType) {
  */
 async function placeOrder(brokerType, userId, accountId, order) {
     return getBrokerAdapter(brokerType).placeOrder(userId, accountId, order)
+}
+
+/**
+ * Cancel a working (not-yet-filled) order — e.g. a resting stop-market entry.
+ * Requires `capabilities().cancelOrder`.
+ * @param {string} brokerType
+ * @param {string} userId
+ * @param {string} accountId
+ * @param {string} orderId
+ * @returns {Promise<void>}
+ */
+async function cancelOrder(brokerType, userId, accountId, orderId) {
+    return getBrokerAdapter(brokerType).cancelOrder(userId, accountId, orderId)
 }
 
 /**

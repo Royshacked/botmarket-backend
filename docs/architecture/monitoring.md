@@ -104,12 +104,31 @@ Fields added to idea documents (all optional, non-destructive):
 | Field | Type | Set when |
 |---|---|---|
 | `activatedAt` | ms timestamp | Status transitions to `looking` |
+| `entryFloorAt` | ms timestamp | User chooses "reset window" (else absent → floor falls back to `savedAt`) |
 | `entryTriggeredAt` | ms timestamp | Entry conditions trigger |
+| `triggeredWhileWaiting` | boolean | Entry fired on an event that predates `activatedAt` |
+| `triggerEventAt` | ms timestamp | The triggering event's candle time (when `triggeredWhileWaiting`) |
 | `closedReason` | `'stop' \| 'tp'` | Position closes |
 | `closedAt` | ms timestamp | Position closes |
 
-Moving an idea back to `looking` resets `activatedAt` to the current time, restarting
-the chart pattern time window.
+### Entry detection floor
+
+Entry conditions are evaluated against a **floor** = `entryFloorAt ?? savedAt`. Only
+events that occur **at or after** the idea's creation count — a condition already met
+before the idea existed never triggers an entry. Because the floor is `savedAt` (not
+`activatedAt`), an event that happens while the idea is still `waiting` is caught on
+the first tick after the user flips it to `looking`.
+
+When the triggering event predates `activatedAt` (i.e. it happened during the
+`waiting` window), the idea is flagged `triggeredWhileWaiting`. The confirm dialog then
+offers three choices: **confirm** the entry, **reset window** (push `entryFloorAt` to
+now and keep looking for the next event), or **dismiss & delete**. The floor only ever
+moves forward via an explicit "reset window" — re-activation does not silently reset it.
+
+Structured conditions report a precise trigger candle (rising-edge detection: the bar
+where the condition *transitions* into true after the floor). LLM evaluators
+(indicator / chart / news) read current state and timestamp a pass as "now", so the
+`triggeredWhileWaiting` flag is precise only for structured-driven entries.
 
 ---
 
@@ -119,7 +138,7 @@ the chart pattern time window.
 
 The two key pieces of context threaded through all evaluations:
 
-- **`activatedAt`** — ms timestamp when the idea was last moved to `looking`. Used by the chart evaluator to constrain pattern recognition to candles formed after activation.
+- **`floorAt`** — the detection floor (`entryFloorAt ?? savedAt` for entry; `activatedAt` for exits). Structured conditions use it for windowed rising-edge detection and to report a trigger candle timestamp; the chart evaluator uses it to constrain pattern recognition to candles formed at/after the floor.
 - **`priorFindings`** — accumulated list of structured condition texts that already passed earlier in the same AND gate. Passed to chart evaluations as causal context.
 
 ### AND (entry conditions) — Gate-then-verify with context injection

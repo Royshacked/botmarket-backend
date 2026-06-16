@@ -86,6 +86,37 @@ async function _onOpened(exec) {
     if (exec.positionId == null) return
     const db = await getDb()
 
+    // Resting entry filled: a broker-native stop-market entry the idea was holding
+    // as a working order (status 'resting', orderId linked, positionId not yet set).
+    // The fill opens the position — flip the idea live and stamp the positionId so a
+    // later close reconciles. Matched on accountId + orderId (the resting linkage).
+    if (exec.orderId != null) {
+        const direction = exec.direction === 'short' ? 'short' : 'long'
+        const resting = await db.collection(COLLECTION).findOneAndUpdate(
+            {
+                status: 'resting',
+                brokerOrders: { $elemMatch: { accountId: String(exec.accountId), orderId: String(exec.orderId) } },
+            },
+            {
+                $set: {
+                    status:         direction,
+                    orderState:     'placed',
+                    ordersPlacedAt: exec.at ?? Date.now(),
+                    activatedAt:    exec.at ?? Date.now(),
+                    'brokerOrders.$[slot].positionId': String(exec.positionId),
+                },
+            },
+            {
+                arrayFilters:   [{ 'slot.accountId': String(exec.accountId), 'slot.orderId': String(exec.orderId) }],
+                returnDocument: 'after',
+            },
+        )
+        if (resting) {
+            logger.info(LOG, `Resting entry filled → idea ${resting.id} now ${direction} (position ${exec.positionId})`)
+            return
+        }
+    }
+
     // Already linked? Then this is just a duplicate/again — nothing to backfill.
     const linked = await db.collection(COLLECTION).findOne(
         { brokerOrders: { $elemMatch: { accountId: String(exec.accountId), positionId: String(exec.positionId) } } },
@@ -118,7 +149,9 @@ async function _resumeFeeds() {
     const db = await getDb()
     const ideas = await db.collection(COLLECTION)
         .find(
-            { status: { $in: ACTIVE }, brokerOrders: { $exists: true, $ne: [] } },
+            // 'resting' included: a working stop entry must keep its feed so the fill
+            // (resting → long/short) reconciles even if it happens across a restart.
+            { status: { $in: [...ACTIVE, 'resting'] }, brokerOrders: { $exists: true, $ne: [] } },
             { projection: { userId: 1, brokerOrders: 1 } },
         )
         .toArray()

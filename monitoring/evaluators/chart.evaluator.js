@@ -23,11 +23,11 @@ Respond with a single word only: YES or NO.`
  * @param {string}      condition      e.g. "bull flag on 4h", "cup and handle"
  * @param {string}      symbol         asset ticker e.g. 'AAPL', 'BTCUSDT'
  * @param {string|null} timeframe      e.g. '4hr', 'day'
- * @param {number|null} activatedAt    ms timestamp when idea switched to looking
+ * @param {number|null} floorAt        ms timestamp; only patterns formed at/after this count (entry: entryFloorAt ?? savedAt)
  * @param {string[]}    priorFindings  structured conditions that already passed in the same AND gate
  * @returns {Promise<boolean>}
  */
-export async function evaluateChart(condition, symbol, timeframe, activatedAt = null, priorFindings = []) {
+export async function evaluateChart(condition, symbol, timeframe, floorAt = null, priorFindings = []) {
     const studies = _buildStudies(condition)
 
     let imageBase64
@@ -38,12 +38,12 @@ export async function evaluateChart(condition, symbol, timeframe, activatedAt = 
         return false
     }
 
-    // Time constraint: only patterns that formed after monitoring was activated
+    // Time constraint: only patterns that formed at/after the detection floor
     let timeConstraint = ''
-    if (activatedAt && timeframe) {
+    if (floorAt && timeframe) {
         const tfMs = _timeframeMs(timeframe)
         if (tfMs) {
-            const candlesSince = Math.max(1, Math.ceil((Date.now() - activatedAt) / tfMs))
+            const candlesSince = Math.max(1, Math.ceil((Date.now() - floorAt) / tfMs))
             timeConstraint = `\nTime constraint: Only consider patterns that completed within the last ${candlesSince} candle(s). Ignore any patterns that completed before this window.`
         }
     }

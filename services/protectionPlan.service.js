@@ -54,6 +54,20 @@ export async function detectNativeLevels(idea) {
 }
 
 /**
+ * Detect the native-offloadable price level for an idea's ENTRY — the trigger
+ * price for a broker-native stop-market entry. Same bare-price-level rule as the
+ * exits: a single structured price-vs-constant touch. Returns the numeric level,
+ * or null when the entry is too rich to rest at the broker (must stay monitored).
+ *
+ * @param {object} idea
+ * @returns {Promise<number|null>}
+ */
+export async function detectNativeEntryLevel(idea) {
+    if (!_hasConditions(idea.entry_condition_tree, idea.entry_conditions)) return null
+    return _barePriceLevel(idea.entry_condition_tree, idea.entry_conditions)
+}
+
+/**
  * Best-effort current price for a symbol — the reference a native SL/TP attached
  * to a MARKET order is measured from. Returns null on any failure, so callers
  * leave that exit on the monitor rather than risk a malformed order.

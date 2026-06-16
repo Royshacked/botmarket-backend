@@ -154,10 +154,16 @@ export async function updateTradeIdea(req, res) {
             if (result.reason === 'not_found')      return res.status(404).send({ error: 'Idea not found' })
             if (result.reason === 'forbidden')      return res.status(403).send({ error: 'Forbidden' })
             if (result.reason === 'invalid_status') return res.status(400).send({ error: 'Invalid status value' })
+            // Resting (broker-native stop-market) entry activation failures
+            if (result.reason === 'not_resting')      return res.status(400).send({ error: 'Idea is not a resting entry' })
+            if (result.reason === 'already_placed')   return res.status(409).send({ error: 'Order already placed' })
+            if (result.reason === 'no_trigger_price') return res.status(400).send({ error: 'Entry is not a single price level' })
+            if (result.reason === 'no_accounts')      return res.status(400).send({ error: 'No broker accounts on this idea' })
+            if (result.reason === 'all_failed')       return res.status(502).send({ error: 'Broker rejected the resting order', results: result.results })
             return res.status(500).send({ error: 'Failed to update idea' })
         }
 
-        res.send({ idea: result.idea })
+        res.send({ idea: result.idea, ...(result.results && { results: result.results }) })
     } catch (err) {
         logger.error(LOG, 'updateTradeIdea failed', err)
         res.status(500).send({ error: 'Failed to update trade idea' })

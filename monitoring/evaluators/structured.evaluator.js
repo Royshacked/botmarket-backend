@@ -11,18 +11,36 @@
 /**
  * Evaluate a parsed condition against a candle series.
  *
+ * Two modes:
+ *   • floorAt == null  → legacy snapshot: is the condition met on the latest bar(s)?
+ *   • floorAt is ms    → windowed rising-edge: did the condition *transition* into
+ *                        true on a candle whose timestamp is ≥ floorAt? Honours the
+ *                        "only events after createdAt count" rule and reports the
+ *                        triggering candle's timestamp so the caller can tell whether
+ *                        it fired before or after the idea was activated.
+ *
  * @param {ParsedCondition} parsed
  * @param {Candle[]}        candles  newest-last
- * @returns {{ pass: boolean, reason?: string }}
+ * @param {number|null}     floorAt  ms timestamp; only events at/after this count
+ * @returns {{ pass: boolean, triggerAt?: number, reason?: string }}
  */
-export function evaluate(parsed, candles) {
+export function evaluate(parsed, candles, floorAt = null) {
     if (!candles || candles.length < 2) return { pass: false, reason: 'insufficient_data' }
 
-    const { operator, subject, value, value2, confirmation } = parsed
-
+    const { operator, subject } = parsed
     if (operator === 'unknown' || subject === null) {
         return { pass: false, reason: 'unparseable' }
     }
+
+    return floorAt == null
+        ? _evaluateLatest(parsed, candles)
+        : _evaluateWindow(parsed, candles, floorAt)
+}
+
+// ─── Legacy snapshot evaluation (latest bar / confirmation window) ──────────────
+
+function _evaluateLatest(parsed, candles) {
+    const { operator, subject, value, value2, confirmation } = parsed
 
     const subSeries = getSubjectSeries(subject, candles)
     if (!subSeries || subSeries.length < 2) return { pass: false, reason: 'series_too_short' }
@@ -76,6 +94,82 @@ export function evaluate(parsed, candles) {
     }
 
     return { pass }
+}
+
+// ─── Windowed rising-edge evaluation (events at/after a floor) ──────────────────
+
+/**
+ * Find the first candle at/after `floorAt` where the condition *becomes* true.
+ *
+ * A condition already satisfied before the floor (and continuously since) does NOT
+ * fire — only a fresh transition into true after the floor does. Cross operators are
+ * inherently edges; threshold/range operators use a rising edge (prev bar not yet
+ * satisfied) so a level that was already breached before createdAt is ignored.
+ *
+ * @returns {{ pass: boolean, triggerAt?: number }}
+ */
+function _evaluateWindow(parsed, candles, floorAt) {
+    const { operator, subject, value, value2, confirmation } = parsed
+
+    const subSeries = getSubjectSeries(subject, candles)
+    if (!subSeries || subSeries.length < 2) return { pass: false }
+    const valSeries = typeof value === 'string' ? getSubjectSeries(value, candles) : null
+
+    const n        = candles.length
+    const isCross  = operator === 'crossAbove' || operator === 'crossBelow'
+    const need     = Math.max(1, confirmation ?? 0)   // consecutive bars that must hold
+
+    // satisfied[i] — does the condition hold *as completed at* bar i?
+    const satisfied = new Array(n).fill(false)
+
+    if (isCross) {
+        for (let i = 1; i < n; i++) {
+            const prev = subSeries[i - 1], curr = subSeries[i]
+            const prevVal = valSeries ? valSeries[i - 1] : Number(value)
+            const currVal = valSeries ? valSeries[i]     : Number(value)
+            if (prev == null || curr == null || prevVal == null || currVal == null) continue
+            satisfied[i] = operator === 'crossAbove'
+                ? (prev <= prevVal && curr >  currVal)
+                : (prev >= prevVal && curr <  currVal)
+        }
+    } else {
+        // Per-bar truth of the comparison, then fold in the confirmation window.
+        const raw = new Array(n).fill(false)
+        for (let i = 0; i < n; i++) {
+            const v = subSeries[i]
+            if (v == null) continue
+            if (operator === 'isBetween') {
+                raw[i] = v > Number(value) && v < Number(value2)
+            } else {
+                const cmp = valSeries ? valSeries[i] : Number(value)
+                raw[i] = cmp != null && _compare(operator, v, cmp)
+            }
+        }
+        for (let i = need - 1; i < n; i++) {
+            let all = true
+            for (let j = i - need + 1; j <= i; j++) if (!raw[j]) { all = false; break }
+            satisfied[i] = all
+        }
+    }
+
+    // First rising edge at/after the floor wins. For cross operators every satisfied
+    // bar is already an edge; for the rest require the prior bar to be unsatisfied so
+    // a level breached before the floor (and still held) doesn't re-fire.
+    // triggerAt is normalised to ms so callers can compare it to ms epochs.
+    for (let i = 0; i < n; i++) {
+        if (!satisfied[i]) continue
+        const tMs = _candleMs(candles[i].t)
+        if (tMs < floorAt) continue
+        if (!isCross && i > 0 && satisfied[i - 1]) continue
+        return { pass: true, triggerAt: tMs }
+    }
+    return { pass: false }
+}
+
+// Candle timestamps arrive in seconds (Massive/Yahoo divide by 1000); floors are ms
+// epochs. Normalise to ms, tolerating either unit in case a source changes.
+function _candleMs(t) {
+    return t < 1e12 ? t * 1000 : t
 }
 
 // ─── Subject series resolution ─────────────────────────────────────────────────

@@ -34,6 +34,7 @@ const ORDER_TYPE   = { market: 1, limit: 2, stop: 3 }
 const TRADE_SIDE   = { long: 1, short: 2 }
 const PT = {
     NEW_ORDER:      2106,   // ProtoOANewOrderReq
+    CANCEL_ORDER:   2107,   // ProtoOACancelOrderReq (working order, by orderId)
     AMEND_SLTP:     2110,   // ProtoOAAmendPositionSLTPReq (absolute prices)
     CLOSE_POSITION: 2111,   // ProtoOAClosePositionReq (requires volume)
     RECONCILE:      2124,   // ProtoOAReconcileReq → open positions/orders
@@ -129,6 +130,7 @@ export class CTraderAdapter extends BrokerAdapter {
             nativeProtection: true,
             modifyProtection: true,
             closePosition:    true,
+            cancelOrder:      true,
             ohlcv:            false,
         }
     }
@@ -219,6 +221,17 @@ export class CTraderAdapter extends BrokerAdapter {
             : await this._positionVolume(session, positionId)
         await session.send(PT.CLOSE_POSITION, { positionId: Number(positionId), volume })
         logger.info(LOG, `Close requested on position ${positionId} (volume=${volume})`)
+    }
+
+    /**
+     * Cancel a working (not-yet-filled) order by its orderId (2107) — used to pull a
+     * resting stop-market entry off the book. The broker echoes an ORDER_CANCELLED
+     * execution event, which the reconciler ignores (the idea was already parked).
+     */
+    async cancelOrder(userId, accountId, orderId) {
+        const session = await this._session(userId, accountId)
+        await session.send(PT.CANCEL_ORDER, { orderId: Number(orderId) })
+        logger.info(LOG, `Cancel requested for order ${orderId}`)
     }
 
     // ── Execution feed ─────────────────────────────────────────────────────────

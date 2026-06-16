@@ -256,24 +256,43 @@ async function _checkEntry(db, idea, candles) {
     const crossSyms = collectSymbols(idea.entry_condition_tree, idea.entry_conditions)
     const symbolMap = await _buildSymbolMap(id, asset, candles, entryTf, crossSyms)
 
+    // Entry detection floor: only events at/after the idea's creation count
+    // (entryFloorAt is set forward by the user's "reset window" action; otherwise
+    // it's the idea's savedAt). This is what makes events that happened during the
+    // 'waiting' window — before the user activated — still surface on activation.
+    const floorAt = idea.entryFloorAt ?? idea.savedAt ?? null
+
     let triggered = false
+    let triggerAt = null
 
     if (idea.entry_condition_tree) {
         // New tree format
         logger.info(LOG, `[${id}] Evaluating entry condition tree`)
-        ;({ triggered } = await evaluateTree(idea.entry_condition_tree, symbolMap, asset, idea.activatedAt ?? null))
+        ;({ triggered, triggerAt } = await evaluateTree(idea.entry_condition_tree, symbolMap, asset, floorAt))
     } else if (Array.isArray(idea.entry_conditions) && idea.entry_conditions.length > 0) {
         // Legacy flat-array format
         logger.info(LOG, `[${id}] Evaluating entry conditions (legacy flat format)`)
         const entryLogic = idea.entry_logic ?? 'AND'
-        ;({ triggered } = await evaluateConditions(idea.entry_conditions, entryLogic, symbolMap, asset, idea.activatedAt ?? null))
+        ;({ triggered, triggerAt } = await evaluateConditions(idea.entry_conditions, entryLogic, symbolMap, asset, floorAt))
     } else {
         logger.warn(LOG, `Idea ${id} has no entry conditions — skipping`)
         return
     }
 
     if (triggered) {
+        // Fired on an event that occurred before the user activated monitoring
+        // (after creation, while still 'waiting'). The confirm dialog offers the
+        // 3-choice path (confirm / reset window / dismiss) for these.
+        const triggeredWhileWaiting = triggerAt != null && idea.activatedAt != null && triggerAt < idea.activatedAt
+        if (triggeredWhileWaiting) {
+            logger.info(LOG, `[${id}] Entry event predates activation (triggerAt=${triggerAt} < activatedAt=${idea.activatedAt}) — flagging triggeredWhileWaiting`)
+        }
+
         const patch = { status: 'hit', entryTriggeredAt: Date.now() }
+        if (triggeredWhileWaiting) {
+            patch.triggeredWhileWaiting = true
+            patch.triggerEventAt        = triggerAt
+        }
 
         // Build the order plan server-side so it no longer depends on the browser.
         // Manual mode (phase 1): surface the confirm dialog when the market is open,
