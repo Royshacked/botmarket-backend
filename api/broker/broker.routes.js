@@ -13,6 +13,7 @@
  *   GET  /api/broker/:type/capabilities    what the broker can do (trading, native SL/TP, …)
  *   GET  /api/broker/:type/account         account summary
  *   GET  /api/broker/:type/positions       open positions
+ *   DEL  /api/broker/:type/positions/:id   close an open position (full close)
  */
 
 import { Router }         from 'express'
@@ -155,6 +156,20 @@ brokerRoutes.get('/:type/positions', requireAuth, async (req, res) => {
         res.json({ positions })
     } catch (err) {
         logger.error(LOG, `getPositions (${req.params.type}):`, err.message)
+        res.status(err.status ?? 500).json({ error: err.message })
+    }
+})
+
+// Close an open position in full. The position lives on the user's currently
+// selected trading account, so we resolve that account and hand it to the adapter
+// (which maps it to the broker-native account id and looks up the live volume).
+brokerRoutes.delete('/:type/positions/:positionId', requireAuth, async (req, res) => {
+    try {
+        const { selectedAccountId } = await brokerService.getTradingAccounts(req.params.type, req.user._id)
+        await brokerService.closePosition(req.params.type, req.user._id, selectedAccountId, req.params.positionId)
+        res.json({ ok: true })
+    } catch (err) {
+        logger.error(LOG, `closePosition (${req.params.type}):`, err.message)
         res.status(err.status ?? 500).json({ error: err.message })
     }
 })

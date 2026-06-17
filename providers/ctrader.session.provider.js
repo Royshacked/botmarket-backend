@@ -35,10 +35,15 @@ const PT = {
     ACCOUNT_AUTH_REQ:      2102,
     SYMBOLS_LIST_REQ:      2114,
     SYMBOL_BY_ID_REQ:      2116,
+    RECONCILE_REQ:         2124,   // ProtoOAReconcileReq → open positions/orders
     SUBSCRIBE_SPOTS_REQ:   2127,   // ProtoOASubscribeSpotsReq   (→ 2128 ack)
     UNSUBSCRIBE_SPOTS_REQ: 2129,   // ProtoOAUnsubscribeSpotsReq (→ 2130 ack)
     GET_ACCOUNTS_REQ:      2149,
+    POSITION_PNL_REQ:      2187,   // ProtoOAGetPositionUnrealizedPnLReq (→ 2188)
 }
+
+// ProtoOAPosition.tradeData.tradeSide enum.
+const TRADE_SIDE_SELL = 2
 
 // ProtoOASpotEvent (2131) bid/ask are integers in 1/100000 of a price unit.
 const SPOT_PRICE_SCALE = 1e5
@@ -278,6 +283,74 @@ export class CTraderSession extends EventEmitter {
         const round = v => (v == null ? null : roundPrice({ digits }, v))
         return { symbolId, bid: round(bid), ask: round(ask), mid: round(mid), digits, at: Date.now() }
     }
+
+    // ── Open positions ─────────────────────────────────────────────────────────
+
+    /**
+     * Snapshot the account's open positions over the ProtoOA socket (cTrader exposes
+     * these only on the WebSocket, not via REST). Reconcile (2124) gives the static
+     * position data; a best-effort unrealized-P&L request (2187) supplies live money
+     * P&L (omitted if that call fails). Volume is converted to lots via each symbol's
+     * specs; money fields are scaled by their moneyDigits.
+     *
+     * @returns {Promise<Array<import('../api/broker/adapters/broker.interface.js').BrokerPosition>>}
+     */
+    async getOpenPositions() {
+        await this._loadSymbols()   // so symbolNameById() resolves
+        const rec = await this.send(PT.RECONCILE_REQ, {})
+        const rawPositions = rec?.position ?? []
+        if (rawPositions.length === 0) return []
+
+        const pnlById = await this._unrealizedPnL().catch(err => {
+            logger.warn(LOG, `[${this.env}:${this.ctid}] unrealized P&L unavailable: ${err.message}`)
+            return new Map()
+        })
+
+        return Promise.all(rawPositions.map(async p => {
+            const td       = p.tradeData ?? {}
+            const symbolId = td.symbolId
+            const name     = symbolId != null ? this.symbolNameById(symbolId) : null
+
+            // tradeData.volume is in cTrader native units; lotSize (same units) → lots.
+            let volume = _num(td.volume)
+            if (symbolId != null) {
+                try {
+                    const specs = await this._symbolSpecs(symbolId, name)
+                    if (specs?.lotSize > 0 && volume != null) volume = volume / specs.lotSize
+                } catch { /* keep native volume if specs unavailable */ }
+            }
+
+            const scale = 10 ** _int(p.moneyDigits, 2)
+            return {
+                id:           String(p.positionId),
+                symbol:       name,
+                direction:    Number(td.tradeSide) === TRADE_SIDE_SELL ? 'short' : 'long',
+                volume,
+                entryPrice:   _num(p.price),
+                currentPrice: null,
+                pnl:          pnlById.get(String(p.positionId)) ?? null,
+                pnlPips:      null,
+                swap:         p.swap != null ? Number(p.swap) / scale : null,
+                openedAt:     td.openTimestamp != null ? Number(td.openTimestamp) : null,
+            }
+        }))
+    }
+
+    /**
+     * Live net unrealized P&L per open position (ProtoOA 2187), keyed by positionId.
+     * Money fields are scaled by the response's moneyDigits.
+     * @returns {Promise<Map<string, number>>}
+     */
+    async _unrealizedPnL() {
+        const res   = await this.send(PT.POSITION_PNL_REQ, {})
+        const scale = 10 ** _int(res?.moneyDigits, 2)
+        const map   = new Map()
+        for (const u of res?.positionUnrealizedPnL ?? []) {
+            const net = u.netUnrealizedPnL ?? u.grossUnrealizedPnL
+            if (net != null) map.set(String(u.positionId), Number(net) / scale)
+        }
+        return map
+    }
 }
 
 // ─── Normalization primitives ───────────────────────────────────────────────────
@@ -371,4 +444,9 @@ export function priceToRelative(priceDistance) {
 function _int(v, fallback) {
     const n = Number(v)
     return Number.isInteger(n) ? n : (Number.isFinite(n) ? Math.round(n) : fallback)
+}
+
+function _num(v) {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
 }

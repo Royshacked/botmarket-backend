@@ -98,14 +98,15 @@ export class CTraderAdapter extends BrokerAdapter {
     // ── Positions ──────────────────────────────────────────────────────────────
 
     async getPositions(userId) {
-        const tokens    = await this._freshTokens(userId)
-        const accountId = await this._resolveAccountId(userId, tokens)
+        // cTrader exposes open positions only on the ProtoOA WebSocket (not REST),
+        // so we reconcile over the account session.
         try {
-            const raw  = await ctrader.get(`/tradingaccounts/${accountId}/openpositions`, tokens)
-            const list = asList(raw)
-            return list.map(_normalisePosition)
-        } catch {
-            // cTrader open positions may not be accessible via REST (WebSocket only)
+            const tokens    = await this._freshTokens(userId)
+            const accountId = await this._resolveAccountId(userId, tokens)
+            const session   = await this._session(userId, accountId)
+            return await session.getOpenPositions()
+        } catch (err) {
+            logger.warn(LOG, `getPositions (ctrader): ${err.message}`)
             return []
         }
     }
@@ -500,21 +501,6 @@ function _normaliseAccount(raw) {
         freeMargin:  money(raw.freeMargin),
         marginLevel: num(raw.marginLevel),
         leverage:    raw.leverage != null ? Number(raw.leverage) : null,
-    }
-}
-
-function _normalisePosition(raw) {
-    return {
-        id:           raw.id ?? raw.positionId,
-        symbol:       raw.symbolName ?? raw.symbol,
-        direction:    (raw.tradeSide ?? raw.side)?.toLowerCase() === 'sell' ? 'short' : 'long',
-        volume:       num(raw.volume),
-        entryPrice:   num(raw.entryPrice ?? raw.openPrice),
-        currentPrice: num(raw.currentPrice),
-        pnl:          money(raw.pnl ?? raw.grossProfit),
-        pnlPips:      num(raw.pnlPips),
-        swap:         money(raw.swap),
-        openedAt:     raw.openTimestamp ?? raw.createTimestamp,
     }
 }
 
