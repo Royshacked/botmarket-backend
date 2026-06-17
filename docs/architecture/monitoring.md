@@ -121,9 +121,23 @@ the first tick after the user flips it to `looking`.
 
 When the triggering event predates `activatedAt` (i.e. it happened during the
 `waiting` window), the idea is flagged `triggeredWhileWaiting`. The confirm dialog then
-offers three choices: **confirm** the entry, **reset window** (push `entryFloorAt` to
-now and keep looking for the next event), or **dismiss & delete**. The floor only ever
-moves forward via an explicit "reset window" — re-activation does not silently reset it.
+offers three choices:
+
+- **Confirm** — place the entry order.
+- **Dismiss** — park the idea back to `waiting` with the entry floor **untouched** (and
+  `triggeredWhileWaiting` preserved). If the user changes their mind and re-activates,
+  the still-true event re-fires to `hit` and shows the dialog again.
+- **Reset window** — park back to `waiting` and push `entryFloorAt` to now (sent via the
+  `resetWindow` flag on the PATCH), so the dismissed event can't re-fire; only *new*
+  events after now count. Clears the while-waiting flags.
+
+The floor only ever moves forward via an explicit **Reset window** — neither a plain
+Dismiss nor a re-activation silently resets it.
+
+> Caveat (Dismiss → changed mind → re-fire): this is reliable for current-state evaluators
+> (indicator / chart / news). For **structured** conditions, the re-hit only happens while
+> the original rising-edge bar is still inside the `CANDLE_COUNT × timeframe` fetch window;
+> after it scrolls out there is no false→true transition to re-detect. Left as-is for now.
 
 Structured conditions report a precise trigger candle (rising-edge detection: the bar
 where the condition *transitions* into true after the floor). LLM evaluators

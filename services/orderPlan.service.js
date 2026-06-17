@@ -39,11 +39,13 @@ export async function resolveUserAccounts(userId, wantedIds) {
 }
 
 /**
- * @param {object} idea  must carry accounts[], mainAccountId, quantity, type, userId
+ * @param {object} idea  must carry accounts[], mainAccountId, quantity, userId
  * @returns {Promise<Array<{ broker, accountId, accountNo, quantity, type }>>}
+ *          `type` is the broker execution type — always 'market' for a confirmed
+ *          entry (NOT idea.type, which is the trade STYLE: intraday/swing/scalp).
  */
 export async function buildOrderPlanForIdea(idea) {
-    const { accounts, mainAccountId, quantity, type, userId } = idea
+    const { accounts, mainAccountId, quantity, userId } = idea
     if (!Array.isArray(accounts) || accounts.length === 0) return []
 
     const wantedIds = new Set(accounts.map(a => String(typeof a === 'object' ? a.id : a)))
@@ -74,7 +76,7 @@ export async function buildOrderPlanForIdea(idea) {
             accountId: id,
             accountNo: acct.login ?? id,
             quantity:  Math.round(baseQty * ratio * 10000) / 10000,
-            type:      type ?? 'market',
+            type:      'market',
         })
     }
     return plan

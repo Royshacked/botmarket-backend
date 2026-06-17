@@ -118,6 +118,8 @@ export async function updateTradeIdea(req, res) {
             stop_conditions,  stop_logic,  stop_condition_tree,
             tp_conditions,    tp_logic,    tp_condition_tree,
             notes,
+            accounts, mainAccountId,
+            resetWindow,
         } = req.body ?? {}
 
         if (!status && type === undefined && quantity === undefined && timeframe === undefined &&
@@ -126,6 +128,7 @@ export async function updateTradeIdea(req, res) {
             entry_conditions === undefined && stop_conditions === undefined && tp_conditions === undefined &&
             entry_logic === undefined && stop_logic === undefined && tp_logic === undefined &&
             entry_condition_tree === undefined && stop_condition_tree === undefined && tp_condition_tree === undefined &&
+            accounts === undefined && mainAccountId === undefined &&
             notes === undefined) {
             return res.status(400).send({ error: 'Nothing to update' })
         }
@@ -150,6 +153,14 @@ export async function updateTradeIdea(req, res) {
         if (tp_logic !== undefined)              patch.tp_logic = tp_logic
         if (tp_condition_tree !== undefined)     patch.tp_condition_tree = tp_condition_tree
         if (notes !== undefined)                 patch.notes = notes
+        // Broker accounts attached to the idea (e.g. attaching an account after the
+        // fact so a re-activated idea can actually place orders). Without these the
+        // monitor flips the idea to 'hit' but builds no order plan (alert-only).
+        if (accounts !== undefined)              patch.accounts = accounts
+        if (mainAccountId !== undefined)         patch.mainAccountId = mainAccountId
+        // Control flag (not persisted): distinguishes "reset window" from a plain
+        // dismiss on a hit→waiting transition. Stripped in the service before write.
+        if (resetWindow !== undefined)           patch.resetWindow = resetWindow
 
         const result = await ideaService.updateIdea(id, patch, req.user._id, req.user.isAdmin)
         if (!result.ok) {

@@ -13,6 +13,14 @@ const COLLECTION = 'ideas'
 
 const VALID_STATUSES = new Set(['waiting', 'looking', 'resting', 'hit', 'long', 'short', 'closed'])
 
+// Broker *execution* order types — distinct from idea.type (the trade STYLE:
+// intraday/swing/scalp/position). A confirmed entry is always placed at market;
+// resting stop-market entries take their own path. Anything outside this set
+// (incl. a trade-style leaking in, or a legacy plan that stored idea.type here)
+// is coerced to 'market' before hitting the broker.
+const ORDER_EXEC_TYPES = new Set(['market', 'limit', 'stop'])
+const toExecType = t => (ORDER_EXEC_TYPES.has(t) ? t : 'market')
+
 export const ideaService = {
     saveIdea,
     saveBatchIdeas,
@@ -261,20 +269,29 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
             monitorService.resetIdea(id)
         }
 
-        // Dismiss: a triggered idea (hit) is sent back to waiting. Park it and push
-        // the entry floor forward to now so the just-dismissed event can't immediately
-        // re-fire when the user re-activates (which would loop hit→dismiss forever).
-        // Clear the pending order + trigger flags. Re-activation (waiting→looking) then
-        // looks forward from here while still flagging any *new* while-waiting events.
+        // A triggered idea (hit) sent back to waiting. Two flavours, both clearing the
+        // now-stale pending order:
+        //   • Dismiss (default) — park it but leave the entry floor UNTOUCHED. If the user
+        //     changes their mind and re-activates (waiting→looking), the still-true event
+        //     re-fires to hit. The while-waiting flags are preserved so the re-hit shows
+        //     the same 3-choice dialog.
+        //   • Reset window (patch.resetWindow) — push the entry floor forward to now so the
+        //     dismissed event can't re-fire; only *new* events after this count. Clears the
+        //     while-waiting flags.
         if (existing.status === 'hit' && patch.status === 'waiting') {
-            patch.entryFloorAt          = Date.now()
-            patch.entryTriggeredAt      = null
-            patch.triggeredWhileWaiting = false
-            patch.triggerEventAt        = null
-            patch.pendingOrder          = null
-            patch.orderState            = null
+            patch.entryTriggeredAt = null
+            patch.pendingOrder     = null
+            patch.orderState       = null
+            if (patch.resetWindow === true) {
+                patch.entryFloorAt          = Date.now()
+                patch.triggeredWhileWaiting = false
+                patch.triggerEventAt        = null
+            }
             monitorService.resetIdea(id)
         }
+
+        // Strip the control flag — it drives the branch above but is never persisted.
+        delete patch.resetWindow
 
         // Atomic update — ownership constraint also in the filter eliminates the
         // TOCTOU window between the check above and the write below.
@@ -334,7 +351,7 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
         const brokerOrders = []   // linkage the execution reconciler matches closes against
         const protections  = []   // { stopNative, tpNative } per successfully placed order
         for (const order of plan) {
-            const type = order.type ?? idea.type ?? 'market'
+            const type = toExecType(order.type)
             // brokerSymbol is the broker's tradable name (resolved at fork time); fall
             // back to the canonical asset for pre-fork ideas / non-aliased instruments.
             const brokerOrder = { symbol: idea.brokerSymbol ?? idea.asset, direction: idea.direction, quantity: order.quantity, type }
