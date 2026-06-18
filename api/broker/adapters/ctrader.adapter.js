@@ -35,7 +35,9 @@ const ORDER_TYPE   = { market: 1, limit: 2, stop: 3 }
 const TRADE_SIDE   = { long: 1, short: 2 }
 const PT = {
     NEW_ORDER:      2106,   // ProtoOANewOrderReq
-    CANCEL_ORDER:   2107,   // ProtoOACancelOrderReq (working order, by orderId)
+    // NOTE: 2107 is ProtoOATrailingSLChangedEvent — CancelOrder/AmendOrder are 2108/2109.
+    CANCEL_ORDER:   2108,   // ProtoOACancelOrderReq (working order, by orderId)
+    AMEND_ORDER:    2109,   // ProtoOAAmendOrderReq (working order limit/stop price)
     AMEND_SLTP:     2110,   // ProtoOAAmendPositionSLTPReq (absolute prices)
     CLOSE_POSITION: 2111,   // ProtoOAClosePositionReq (requires volume)
     RECONCILE:      2124,   // ProtoOAReconcileReq → open positions/orders
@@ -150,8 +152,61 @@ export class CTraderAdapter extends BrokerAdapter {
             modifyProtection: true,
             closePosition:    true,
             cancelOrder:      true,
+            listOrders:       true,
+            amendOrder:       true,
             ohlcv:            false,
         }
+    }
+
+    /**
+     * List the account's working (pending) LIMIT/STOP orders — the orders "in the air"
+     * the user can edit or cancel. Each is tagged with the broker-canonical accountId.
+     * @returns {Promise<Array<{ orderId, symbol, side, type, price, quantity, positionId, accountId }>>}
+     */
+    async listOrders(userId, accountId) {
+        const session = await this._session(userId, accountId)
+        const orders  = await session.getWorkingOrders()
+        return orders.map(o => ({ ...o, accountId: String(session.ctid) }))
+    }
+
+    /**
+     * Change a working order's price (ProtoOAAmendOrderReq, 2108), keeping its id.
+     * Pass exactly one of limitPrice / stopPrice (matching the order's kind).
+     */
+    async amendOrder(userId, accountId, orderId, { limitPrice, stopPrice } = {}) {
+        if (limitPrice == null && stopPrice == null) {
+            throw new Error('cTrader: amendOrder requires a new limitPrice or stopPrice')
+        }
+        const session = await this._session(userId, accountId)
+
+        const rec  = await session.send(PT.RECONCILE, {})
+        const live = (rec?.order ?? []).find(o => String(o.orderId) === String(orderId))
+        if (!live) throw new Error(`cTrader: order ${orderId} not found`)
+        const td = live.tradeData ?? {}
+
+        // Change the price by CANCEL-then-PLACE: cancel the old order first (surfacing any
+        // error so a failed cancel can't leave a duplicate), then place an equivalent
+        // closing order at the new price. Net result: one order at the new price.
+        const specs    = await session.resolveSymbol(session.symbolNameById(td.symbolId))
+        const newPrice = roundPrice(specs, Number(limitPrice ?? stopPrice))
+
+        await session.send(PT.CANCEL_ORDER, { orderId: Number(orderId) })
+
+        const payload = {
+            symbolId:  td.symbolId,
+            orderType: live.orderType,
+            tradeSide: td.tradeSide,
+            volume:    td.volume,
+            comment:   'ar2trade',
+            ...(live.positionId != null && { positionId: Number(live.positionId) }),
+        }
+        if (live.orderType === PROTO_ORDER_TYPE.LIMIT) payload.limitPrice = newPrice
+        else                                          payload.stopPrice  = newPrice
+
+        const res   = await session.send(PT.NEW_ORDER, payload)
+        const newId = res?.order?.orderId
+        logger.info(LOG, `Order ${orderId} replaced → ${newId ?? '?'} at ${newPrice}`)
+        return { orderId: newId != null ? String(newId) : null }
     }
 
     /**
@@ -190,6 +245,12 @@ export class CTraderAdapter extends BrokerAdapter {
         if (order.type === 'limit') payload.limitPrice = roundPrice(specs, order.limitPrice + offset)
         if (order.type === 'stop')  payload.stopPrice  = roundPrice(specs, order.stopPrice  + offset)
         if (order.clientOrderId)    payload.label      = String(order.clientOrderId)
+
+        // A positionId turns this into a CLOSING order for that position: it reduces/
+        // closes the position (never opens an opposite one — essential on a hedging
+        // account), is capped at the position size, and is auto-cancelled when the
+        // position closes. Used for all exit orders (TP/stop levels, monitor closes).
+        if (order.positionId != null) payload.positionId = Number(order.positionId)
 
         // Native SL/TP → relative distance from the order's reference price. The ref is
         // the CANONICAL limit/stop price (not the shifted one): a canonical-minus-canonical
@@ -248,16 +309,56 @@ export class CTraderAdapter extends BrokerAdapter {
 
     /**
      * Close (or partially close) an open position (2111). cTrader requires a volume,
-     * so a full close looks up the position's current volume via reconcile first.
+     * so a full close looks up the position's current volume via reconcile first. On a
+     * full close it FIRST cancels that position's resting closing orders (matched by
+     * positionId, from the same snapshot) so none is left behind — doing it before the
+     * close avoids a post-close eventual-consistency race, and matching on positionId
+     * leaves a sibling position's orders (same symbol, hedging) untouched.
      * @param {{ quantity?: number }} [opts]  omit quantity to close in full
      */
     async closePosition(userId, accountId, positionId, opts = {}) {
         const session = await this._session(userId, accountId)
-        const volume  = opts.quantity != null
-            ? opts.quantity
-            : await this._positionVolume(session, positionId)
+
+        if (opts.quantity != null) {
+            await session.send(PT.CLOSE_POSITION, { positionId: Number(positionId), volume: opts.quantity })
+            logger.info(LOG, `Partial close on position ${positionId} (volume=${opts.quantity})`)
+            return
+        }
+
+        const rec = await session.send(PT.RECONCILE, {})
+        const pos = (rec?.position ?? []).find(p => Number(p.positionId) === Number(positionId))
+        if (!pos) throw new Error(`cTrader: position ${positionId} not found`)
+        const volume = pos.tradeData?.volume
+        if (volume == null) throw new Error(`cTrader: no volume for position ${positionId}`)
+
+        const resting = (rec?.order ?? []).filter(o =>
+            Number(o.positionId) === Number(positionId) &&
+            (o.orderType === PROTO_ORDER_TYPE.LIMIT || o.orderType === PROTO_ORDER_TYPE.STOP))
+        for (const o of resting) {
+            try { await session.send(PT.CANCEL_ORDER, { orderId: Number(o.orderId) }) }
+            catch (err) { logger.warn(LOG, `pre-close cancel failed (order ${o.orderId}): ${err.message}`) }
+        }
+        if (resting.length) logger.info(LOG, `Cancelled ${resting.length} resting order(s) before closing position ${positionId}`)
+
+        // Hear the broker's own close (and any follow-on) events for this account.
+        this._wireExecutionFeed(session)
+
         await session.send(PT.CLOSE_POSITION, { positionId: Number(positionId), volume })
         logger.info(LOG, `Close requested on position ${positionId} (volume=${volume})`)
+
+        // Emit a normalized close ourselves so the reconciler flips the idea to closed
+        // deterministically — independent of execution-feed timing/state. The broker's
+        // own position.closed (if it also arrives) is idempotent: _onClosed only acts on
+        // an idea that is still active. Reason 'manual' is overridden by a monitor-set
+        // pendingCloseReason when this close came from a stop/tp.
+        executionBus.emit('execution', {
+            broker:     'ctrader',
+            type:       'position.closed',
+            accountId:  String(session.ctid),
+            positionId: String(positionId),
+            reason:     'manual',
+            at:         Date.now(),
+        })
     }
 
     /**
@@ -347,12 +448,16 @@ export class CTraderAdapter extends BrokerAdapter {
                 return { ...base, type: 'order.cancelled' }
             case EXEC_TYPE.ORDER_FILLED:
             case EXEC_TYPE.ORDER_PARTIAL_FILL: {
-                const closing = position.positionStatus === POSITION_STATUS.CLOSED
-                    || order.closingOrder === true || closeDetail != null
+                const fullyClosed = position.positionStatus === POSITION_STATUS.CLOSED
+                const closing = fullyClosed || order.closingOrder === true || closeDetail != null
                 if (closing) {
+                    // A partial close (position still OPEN) must NOT close the idea — it's
+                    // one slice of a multi-level exit. Report it as position.reduced so the
+                    // reconciler records the slice and re-syncs the remaining exit orders;
+                    // only a full close (positionStatus CLOSED) flips the idea to closed.
                     return {
                         ...base,
-                        type:   'position.closed',
+                        type:   fullyClosed ? 'position.closed' : 'position.reduced',
                         reason: _closeReason(order),
                         ...(deal.executionPrice != null && { price: deal.executionPrice }),
                         ...(deal.filledVolume   != null && { quantity: deal.filledVolume }),
@@ -467,16 +572,6 @@ export class CTraderAdapter extends BrokerAdapter {
         return symbolId != null ? session.symbolNameById(symbolId) : null
     }
 
-    /** Look up an open position's current volume (for a full close). */
-    async _positionVolume(session, positionId) {
-        const rec = await session.send(PT.RECONCILE, {})
-        const pos = (rec?.position ?? []).find(p => Number(p.positionId) === Number(positionId))
-        if (!pos) throw new Error(`cTrader: position ${positionId} not found`)
-        const volume = pos.tradeData?.volume
-        if (volume == null) throw new Error(`cTrader: position ${positionId} has no volume`)
-        return volume
-    }
-
     // _freshTokens() is inherited from BrokerAdapter (uses brokerType/brokerLabel/provider).
 
     /** Resolve the user's primary trading account ID, caching in DB. */
@@ -503,6 +598,7 @@ function _closeReason(order) {
     if (order?.orderType === PROTO_ORDER_TYPE.STOP)  return 'stop'
     return 'manual'
 }
+
 
 // ─── Normalisers ──────────────────────────────────────────────────────────────
 

@@ -6,13 +6,16 @@
  * market next opens). Holidays are NOT excluded — same approximation the monitor
  * has always used.
  *
- * Three session classes, picked by symbol:
+ * The session is chosen from the idea's explicit `asset_class` (set by the chat
+ * assistant) when available, falling back to a symbol heuristic for ideas that
+ * predate the class field. Four session classes:
  *   • crypto  — 24/7 (no gate).
+ *   • forex   — 24/5: Sun 17:00 ET → Fri 17:00 ET, continuous (no daily break).
  *   • futures — CME equity-index hours: near-24/5. Sun 18:00 ET → Fri 17:00 ET,
  *               with a daily 17:00–18:00 ET maintenance break. Covers the index
  *               futures (NQ/ES/YM/RTY) and their cTrader cash-CFD aliases
  *               (US100/US500/US30/US2000) — they fill outside the equity session.
- *   • equity  — US regular session, 9:30 AM – 4:00 PM ET, weekdays (the default).
+ *   • equity  — US regular session, 9:30 AM – 4:00 PM ET, weekdays (stocks + ETFs).
  */
 
 import { normSymbol, baseSymbol } from './brokerSymbol.service.js'
@@ -24,6 +27,9 @@ const CLOSE = 16 * 60       // 16:00 in minutes  (equity RTH close)
 // Futures session boundaries (ET, in minutes from midnight).
 const FUT_DAY_CLOSE = 17 * 60   // 17:00 — daily close / start of maintenance break
 const FUT_EVE_OPEN  = 18 * 60   // 18:00 — daily reopen after the break (and Sunday open)
+
+// Forex session boundary (ET, minutes from midnight): Sun 17:00 open, Fri 17:00 close.
+const FX_OPEN_CLOSE = 17 * 60
 
 /** Wall-clock ET as a Date whose get*() fields read as ET (parsed in local tz). */
 function _etWall(date = new Date()) {
@@ -100,6 +106,38 @@ export function nextFuturesOpenMs(date = new Date()) {
     return date.getTime() + (minutesToMidnight + fullDaysToSunday * 24 * 60 + FUT_EVE_OPEN) * 60_000
 }
 
+/**
+ * True during the forex week: Sun 17:00 ET → Fri 17:00 ET, continuous (no daily
+ * maintenance break). Holidays not excluded.
+ */
+export function isForexOpen(date = new Date()) {
+    const et   = _etWall(date)
+    const day  = et.getDay()
+    const mins = et.getHours() * 60 + et.getMinutes()
+
+    if (day === 6) return false                    // Saturday: closed all day
+    if (day === 0) return mins >= FX_OPEN_CLOSE     // Sunday: opens 17:00 ET
+    if (day === 5) return mins < FX_OPEN_CLOSE      // Friday: closes 17:00 ET into the weekend
+    return true                                     // Mon–Thu: open all day
+}
+
+/** Epoch ms of the next forex-session open (Sun 17:00 ET). Returns now if open. */
+export function nextForexOpenMs(date = new Date()) {
+    if (isForexOpen(date)) return date.getTime()
+
+    const et   = _etWall(date)
+    const day  = et.getDay()
+    const mins = et.getHours() * 60 + et.getMinutes()
+
+    // Sunday before the open → reopens later today at 17:00 ET.
+    if (day === 0 && mins < FX_OPEN_CLOSE) return date.getTime() + (FX_OPEN_CLOSE - mins) * 60_000
+
+    // Weekend close (Fri ≥17:00 / Sat) → walk forward to Sunday 17:00 ET.
+    const minutesToMidnight = 24 * 60 - mins
+    const fullDaysToSunday  = day === 5 ? 1 : 0   // Fri→Sun spans Sat; Sat→Sun spans none
+    return date.getTime() + (minutesToMidnight + fullDaysToSunday * 24 * 60 + FX_OPEN_CLOSE) * 60_000
+}
+
 /** True between 9:30 and 16:00 ET on a weekday. */
 export function isMarketOpen(date = new Date()) {
     const et  = _etWall(date)
@@ -140,31 +178,71 @@ export function nextMarketOpenMs(date = new Date()) {
 }
 
 /**
- * Whether `symbol`'s market is tradeable right now. Single gate used by the
- * monitor and order-state logic so every call site classifies the same way:
- * crypto 24/7, index futures near-24/5, everything else equity RTH.
+ * Resolve an explicit asset class (set by the chat assistant) to a session, or null
+ * when missing/unrecognised so the caller falls back to the symbol heuristic.
+ * @param {string} [assetClass] 'stock'|'etf'|'futures'|'forex'|'crypto' (synonyms ok)
+ * @returns {'crypto'|'forex'|'futures'|'equity'|null}
  */
-export function isAssetOpen(symbol) {
-    if (isCrypto(symbol))  return true
-    if (isFutures(symbol)) return isFuturesOpen()
-    return isMarketOpen()
+function _sessionForClass(assetClass) {
+    if (!assetClass) return null
+    switch (String(assetClass).toLowerCase().trim()) {
+        case 'crypto': case 'cryptocurrency':                       return 'crypto'
+        case 'forex':  case 'fx': case 'currency': case 'currencies': return 'forex'
+        case 'future': case 'futures':                              return 'futures'
+        case 'stock':  case 'stocks': case 'equity': case 'equities': case 'etf': return 'equity'
+        default:                                                    return null
+    }
+}
+
+/** Heuristic session from the symbol alone (back-compat for ideas with no class). */
+function _sessionForSymbol(symbol) {
+    if (isCrypto(symbol))  return 'crypto'
+    if (isFutures(symbol)) return 'futures'
+    return 'equity'
 }
 
 /**
- * Market status for a symbol.
+ * Whether an asset's market is tradeable right now. Single gate used by the monitor
+ * and order-state logic. Prefers the explicit `assetClass` (assistant-set); falls
+ * back to a symbol heuristic for ideas saved before the class field existed.
+ * @param {string} symbol
+ * @param {string} [assetClass]
+ */
+export function isAssetOpen(symbol, assetClass) {
+    switch (_sessionForClass(assetClass) ?? _sessionForSymbol(symbol)) {
+        case 'crypto':  return true
+        case 'forex':   return isForexOpen()
+        case 'futures': return isFuturesOpen()
+        default:        return isMarketOpen()
+    }
+}
+
+/**
+ * Market status for an asset (class-aware, symbol fallback).
+ * @param {string} symbol
+ * @param {string} [assetClass]
  * @returns {{ open: boolean, isCrypto: boolean, nextOpenMs: number|null }}
  */
-export function getMarketStatus(symbol) {
-    if (isCrypto(symbol)) return { open: true, isCrypto: true, nextOpenMs: null }
-    if (isFutures(symbol)) {
-        const open = isFuturesOpen()
-        return { open, isCrypto: false, nextOpenMs: open ? null : nextFuturesOpenMs() }
+export function getMarketStatus(symbol, assetClass) {
+    switch (_sessionForClass(assetClass) ?? _sessionForSymbol(symbol)) {
+        case 'crypto':
+            return { open: true, isCrypto: true, nextOpenMs: null }
+        case 'forex': {
+            const open = isForexOpen()
+            return { open, isCrypto: false, nextOpenMs: open ? null : nextForexOpenMs() }
+        }
+        case 'futures': {
+            const open = isFuturesOpen()
+            return { open, isCrypto: false, nextOpenMs: open ? null : nextFuturesOpenMs() }
+        }
+        default: {
+            const open = isMarketOpen()
+            return { open, isCrypto: false, nextOpenMs: open ? null : nextMarketOpenMs() }
+        }
     }
-    const open = isMarketOpen()
-    return { open, isCrypto: false, nextOpenMs: open ? null : nextMarketOpenMs() }
 }
 
 export const marketService = {
-    isCrypto, isFutures, isMarketOpen, isFuturesOpen, isAssetOpen,
-    nextMarketOpenMs, nextFuturesOpenMs, getMarketStatus,
+    isCrypto, isFutures, isMarketOpen, isFuturesOpen, isForexOpen, isAssetOpen,
+    nextMarketOpenMs, nextFuturesOpenMs, nextForexOpenMs, getMarketStatus,
 }

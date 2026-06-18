@@ -414,6 +414,7 @@ export function emptyAnalysisState() {
             pending_trade: {
                 direction: null,
                 type:      null,
+                asset_class: null,   // 'stock'|'etf'|'futures'|'forex'|'crypto' — set by the LLM from context
                 quantity:  null,
                 entry_timeframe: null,  // set as soon as user mentions a TF, even before conditions
                 stop_timeframe: null,   // null = inherit entry_timeframe

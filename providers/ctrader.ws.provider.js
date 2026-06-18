@@ -46,6 +46,8 @@ const REQUEST_TIMEOUT_MS = 15_000
 const RECONNECT_BASE_MS  = 1_000
 const RECONNECT_MAX_MS   = 30_000
 
+const _sleep = ms => new Promise(r => setTimeout(r, ms))
+
 // One socket per environment, created lazily.
 const _clients = new Map()  // 'demo' | 'live' → CTraderSocket
 
@@ -97,7 +99,17 @@ class CTraderSocket extends EventEmitter {
     start() {
         if (this._ws) return
         this._stopped = false
+        if (!this._ready) this._armReady()
         this._connect()
+    }
+
+    /** (Re)create the pending `ready` gate so callers block until the next open+auth. */
+    _armReady() {
+        this._ready = new Promise((resolve, reject) => {
+            this._resolveReady = resolve
+            this._rejectReady  = reject
+        })
+        this._ready.catch(() => {})   // no unobserved-rejection crash during reconnects
     }
 
     /** Graceful shutdown — closes the socket and fails any in-flight requests. */
@@ -114,20 +126,25 @@ class CTraderSocket extends EventEmitter {
      * @returns {Promise<object>} the response payload (rejects on 2132/2142/timeout)
      */
     async send(payloadType, payload = {}, opts = {}) {
-        await this.ready
-        return this._send(payloadType, payload, opts)
+        // Wait for the connection, then send. If the socket dropped between the gate and
+        // the write (surfaces as "socket not open"), wait for the reconnect and retry —
+        // the close handler re-arms `ready`, so the next `await this.ready` blocks until
+        // the socket is back up rather than racing a dead one.
+        for (let attempt = 0; ; attempt++) {
+            await this.ready
+            try {
+                return await this._send(payloadType, payload, opts)
+            } catch (err) {
+                if (this._stopped || attempt >= 2 || !/socket not open/.test(err.message)) throw err
+                await _sleep(250)   // let _onClose fire + re-arm ready, then await it again
+            }
+        }
     }
 
     // ── internals ───────────────────────────────────────────────────────────────
 
     _connect() {
-        this._ready = new Promise((resolve, reject) => {
-            this._resolveReady = resolve
-            this._rejectReady  = reject
-        })
-        // Don't let an unobserved rejection crash the process during reconnects.
-        this._ready.catch(() => {})
-
+        if (!this._ready) this._armReady()   // ready is normally armed by start()/_onClose
         logger.info(LOG, `[${this.env}] connecting ${this.url}`)
         const ws = new WebSocket(this.url)
         this._ws = ws
@@ -189,6 +206,10 @@ class CTraderSocket extends EventEmitter {
         this._ws = null
         this._failAllPending(new Error(`[${this.env}] socket closed`))
         if (this._stopped) return
+
+        // Re-arm the ready gate NOW (before the backoff delay) so any send() blocks until
+        // the reconnect completes instead of racing a stale-resolved promise.
+        this._armReady()
 
         const delay = Math.min(RECONNECT_BASE_MS * 2 ** this._attempts++, RECONNECT_MAX_MS)
         logger.info(LOG, `[${this.env}] reconnecting in ${delay}ms (attempt ${this._attempts})`)

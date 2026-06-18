@@ -99,9 +99,14 @@ export function toAppAsset(broker, brokerSymbol) {
         ?? brokerSymbol
 }
 
-/** Separator/case-insensitive symbol key: 'BTC-USD' / 'us100' → 'BTCUSD' / 'US100'. */
+/**
+ * Separator/case-insensitive symbol key: 'BTC-USD' / 'us100' → 'BTCUSD' / 'US100'.
+ * Also drops the Yahoo futures suffix ('NQ=F' → 'NQ') so a data-feed futures ticker
+ * matches the app-canonical alias keys (which carry no '=F') — fixing both the
+ * market-hours classification and the broker-symbol lookup for '=F' assets.
+ */
 export function normSymbol(name) {
-    return String(name ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+    return String(name ?? '').toUpperCase().replace(/=F$/, '').replace(/[^A-Z0-9]/g, '')
 }
 
 /** Pre-suffix symbol key: drops a broker suffix segment. 'US100.cash' → 'US100'. */

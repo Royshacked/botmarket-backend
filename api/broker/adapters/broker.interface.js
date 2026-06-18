@@ -63,6 +63,8 @@ import { logger }                  from '../../../services/logger.service.js'
  * @property {boolean} modifyProtection  can amend SL/TP on an open position
  * @property {boolean} closePosition     can close a position programmatically
  * @property {boolean} cancelOrder       can cancel a working (unfilled) order
+ * @property {boolean} listOrders        can list working (pending) orders
+ * @property {boolean} amendOrder        can change a working order's price
  * @property {boolean} ohlcv             can serve candles via getCandles()
  *
  * @typedef {Object} BrokerOrder
@@ -87,6 +89,13 @@ import { logger }                  from '../../../services/logger.service.js'
  *                                      the adapter shifts absolute prices (limit/stop entry) onto
  *                                      the broker's book by offset = brokerSpotMid − referenceQuote.
  * @property {string} [clientOrderId]   caller-supplied id for idempotency / correlation
+ * @property {string} [positionId]      mark this order a CLOSING order for that position:
+ *                                      it must only reduce/close the position, never open an
+ *                                      opposite one. Required on hedging brokers (cTrader/MT5),
+ *                                      where a plain opposite order would open a new position;
+ *                                      netting brokers may ignore it (an opposite order nets the
+ *                                      position anyway). Used for every exit order (TP/stop
+ *                                      levels, monitor closes).
  *
  * @typedef {Object} BrokerProtection
  * @property {number} [stopLoss]    absolute stop-loss price   (omit to leave unchanged)
@@ -97,7 +106,10 @@ import { logger }                  from '../../../services/logger.service.js'
  * Normalised execution push event — the shape every broker translates its native
  * fills/updates into, so the unified backend→frontend channel is broker-agnostic.
  * @typedef {Object} BrokerExecution
- * @property {'order.accepted'|'order.filled'|'order.cancelled'|'order.rejected'|'position.opened'|'position.closed'|'position.updated'} type
+ * `position.reduced` is a PARTIAL close (the position is still open) — one slice of
+ * a multi-level exit; the reconciler records it and re-syncs the remaining exit
+ * orders, but does NOT close the idea. `position.closed` is a full close.
+ * @property {'order.accepted'|'order.filled'|'order.cancelled'|'order.rejected'|'position.opened'|'position.closed'|'position.reduced'|'position.updated'} type
  * @property {string}            broker
  * @property {string}            accountId
  * @property {string} [orderId]
@@ -280,6 +292,8 @@ export class BrokerAdapter {
             modifyProtection: false,
             closePosition:    false,
             cancelOrder:      false,
+            listOrders:       false,
+            amendOrder:       false,
             ohlcv:            false,
         }
     }
@@ -295,6 +309,30 @@ export class BrokerAdapter {
     // eslint-disable-next-line no-unused-vars
     async cancelOrder(userId, accountId, orderId) {
         throw new Error(`${this.constructor.name}: cancelOrder() not implemented`)
+    }
+
+    /**
+     * List the account's working (pending) orders. Requires `capabilities().listOrders`.
+     * @param {string} userId
+     * @param {string} accountId
+     * @returns {Promise<Array<{ orderId, symbol, side, type, price, quantity, positionId, accountId }>>}
+     */
+    // eslint-disable-next-line no-unused-vars
+    async listOrders(userId, accountId) {
+        throw new Error(`${this.constructor.name}: listOrders() not implemented`)
+    }
+
+    /**
+     * Change a working order's price (keeps its id). Requires `capabilities().amendOrder`.
+     * @param {string} userId
+     * @param {string} accountId
+     * @param {string} orderId
+     * @param {{ limitPrice?: number, stopPrice?: number }} fields
+     * @returns {Promise<void>}
+     */
+    // eslint-disable-next-line no-unused-vars
+    async amendOrder(userId, accountId, orderId, fields) {
+        throw new Error(`${this.constructor.name}: amendOrder() not implemented`)
     }
 
     /**

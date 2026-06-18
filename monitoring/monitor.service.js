@@ -30,6 +30,7 @@ import { isAssetOpen }                          from '../services/market.service
 import { buildOrderPlanForIdea }                from '../services/orderPlan.service.js'
 import { getCheckGap, isIntradayTimeframe }     from '../services/timeframe.service.js'
 import { collectSymbols, firstLeaf }            from '../services/conditionTree.service.js'
+import { brokerService }                        from '../api/broker/broker.service.js'
 
 const LOG        = '[monitor.service]'
 const COLLECTION = 'ideas'
@@ -130,7 +131,7 @@ async function _marketSweep(db) {
 
     // Surface each deferred order once its own market opens (crypto 24/7, futures
     // near-24/5, equities at the RTH bell) — not just the equity session.
-    const surface = deferred.filter(idea => isAssetOpen(idea.asset))
+    const surface = deferred.filter(idea => isAssetOpen(idea.asset, idea.asset_class))
     if (surface.length === 0) return
 
     logger.info(LOG, `Surfacing ${surface.length} deferred order(s)`)
@@ -162,7 +163,7 @@ async function _checkIdea(db, idea) {
     const fastestTf = isPosition
         ? [stopTf, tpTf, entryTf].reduce((a, b) => getCheckGap(a) <= getCheckGap(b) ? a : b)
         : entryTf
-    if (isIntradayTimeframe(fastestTf) && !isAssetOpen(asset)) {
+    if (isIntradayTimeframe(fastestTf) && !isAssetOpen(asset, idea.asset_class)) {
         logger.info(LOG, `[${id}] Market closed — skipping intraday check (${asset}/${fastestTf})`)
         return
     }
@@ -299,7 +300,7 @@ async function _checkEntry(db, idea, candles) {
         // otherwise defer the decision until the next market open.
         const plan = await buildOrderPlanForIdea(idea)
         if (plan.length > 0) {
-            const open = isAssetOpen(asset)
+            const open = isAssetOpen(asset, idea.asset_class)
             patch.pendingOrder = { plan, builtAt: Date.now() }
             patch.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
             logger.info(LOG, `✅ Entry triggered for idea ${id} (${asset}) — status → hit, orderState → ${patch.orderState}`)
@@ -346,9 +347,16 @@ async function _checkPosition(db, idea, stopCandles, tpCandles, aeCandles) {
 }
 
 /**
- * Evaluate one exit leg (stop or TP) for a position. Closes the idea and returns
- * true if it fired; returns false otherwise. Stop and TP share this — they differ
- * only in which fields/candles/timeframe they read and how they label their logs.
+ * Evaluate one exit leg (stop or TP) for a position. When a condition fires it SENDS
+ * the close order(s) to the broker (and lets the reconciler flip the idea closed on
+ * the resulting fill); for an alert-only idea with no live position it falls back to
+ * marking the idea closed. Returns true if anything fired this tick.
+ *
+ * A routed multi-level leg evaluates its RESIDUAL tree (only the non-price leaves —
+ * the bare price touches are resting natively at the broker) child-by-child, so each
+ * fires and closes just its own slice. A legacy / single monitored leg evaluates the
+ * full tree and closes the whole remaining position.
+ *
  * @param {{ phase:'stop'|'tp', candles:object[], timeframe:string,
  *           reason:'stop'|'tp', label:string, emoji:string, native:boolean|undefined }} opts
  */
@@ -361,19 +369,27 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
         return false
     }
 
-    const tree       = idea[`${phase}_condition_tree`]
+    // Prefer the residual monitor tree (routed multi-level leg: only the non-price
+    // leaves live here); fall back to the full leg tree (legacy / single monitored).
+    const residual   = idea[`${phase}MonitorTree`] ?? null
+    const tree       = residual ?? idea[`${phase}_condition_tree`]
     const conditions = idea[`${phase}_conditions`]
     const crossSyms  = collectSymbols(tree, conditions)
     const symbolMap  = await _buildSymbolMap(id, asset, candles, timeframe, crossSyms)
+    const floorAt    = idea.activatedAt ?? null
+
+    if (residual) {
+        return _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji })
+    }
 
     let triggered = false
     let which
     if (tree) {
         logger.info(LOG, `[${id}] Evaluating ${reason} condition tree`)
-        ;({ triggered, which } = await evaluateTree(tree, symbolMap, asset, idea.activatedAt ?? null))
+        ;({ triggered, which } = await evaluateTree(tree, symbolMap, asset, floorAt))
     } else if (Array.isArray(conditions) && conditions.length > 0) {
         const logic = idea[`${phase}_logic`] ?? 'OR'
-        ;({ triggered, which } = await evaluateConditions(conditions, logic, symbolMap, asset, idea.activatedAt ?? null))
+        ;({ triggered, which } = await evaluateConditions(conditions, logic, symbolMap, asset, floorAt))
     } else {
         logger.info(LOG, `[${id}] No ${reason} conditions defined — skipping ${reason} check`)
         return false
@@ -381,11 +397,128 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
 
     if (triggered) {
         logger.info(LOG, `${emoji} ${label} triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
-        await _close(db, id, reason)
+        await _exitNow(db, idea, { leg: phase, reason, quantity: null })   // null ⇒ close full remaining
         return true
     }
     return false
 }
+
+/**
+ * Evaluate a routed leg's residual tree child-by-child. The residual is an OR of the
+ * leg's non-price leaves; each child carries its own quantity, so a fired child
+ * closes just that slice. Fired children are remembered (firedExits) so a slice is
+ * never closed twice across ticks.
+ */
+async function _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji }) {
+    const children = Array.isArray(residual.children) ? residual.children : []
+    const fired    = new Set(idea.firedExits ?? [])
+    let any = false
+
+    for (let i = 0; i < children.length; i++) {
+        const tag = `${phase}:${i}`
+        if (fired.has(tag)) continue
+
+        const child = children[i]
+        const { triggered, which } = await evaluateTree(child, symbolMap, asset, floorAt)
+        if (!triggered) continue
+
+        const qty = Number(child.quantity) || null
+        logger.info(LOG, `${emoji} ${label} slice ${i} triggered for idea ${idea.id}: "${(which ?? child.condition ?? '').slice(0, 60)}" (qty ${qty ?? 'full'})`)
+        await _exitNow(db, idea, { leg: phase, reason, quantity: qty, tag })
+        any = true
+    }
+    return any
+}
+
+/**
+ * Send the close order(s) for a fired monitored exit. Places an opposite-side MARKET
+ * order per linked account (scaled to that account, clamped to its remaining size so
+ * a netting position can never flip), records each as a working exit order so the
+ * reconciler matches the fill, and remembers the fired child tag. An alert-only idea
+ * (no live position) just gets marked closed, as before.
+ * @param {{ leg:'stop'|'tp', reason:string, quantity:number|null, tag?:string }} opts
+ */
+async function _exitNow(db, idea, { leg, reason, quantity, tag }) {
+    const links = (idea.brokerOrders ?? []).filter(b => b.positionId != null)
+
+    if (links.length === 0) {
+        await _close(db, idea.id, reason)   // alert-only idea — legacy DB-only close
+        return
+    }
+
+    // A full close (quantity == null) closes the whole position directly: the broker
+    // sizes it, so it works even for legacy ideas that never stored a per-account
+    // entry quantity, and the reconciler flips the idea closed on the resulting fill.
+    if (quantity == null) {
+        for (const link of links) {
+            try {
+                await brokerService.closePosition(link.broker, idea.userId, link.accountId, link.positionId)
+                logger.info(LOG, `[${idea.id}] Monitor close sent — ${leg} full position (acct ${link.accountId})`)
+            } catch (err) {
+                logger.error(LOG, `[${idea.id}] Monitor full close failed (acct ${link.accountId}): ${err.message}`)
+            }
+        }
+        // Stamp the reason so the reconciler attributes the broker close (a market
+        // close reports as 'manual') to this stop/tp instead.
+        const update = { $set: { pendingCloseReason: reason } }
+        if (tag) update.$addToSet = { firedExits: tag }
+        await db.collection(COLLECTION).updateOne({ id: idea.id }, update)
+        return
+    }
+
+    // A partial slice closes a sized opposite-side MARKET order per account (scaled,
+    // clamped to remaining so a netting position can't flip), recorded so the
+    // reconciler matches the fill.
+    const totalQty  = Number(idea.quantity) || 0
+    const newOrders = []
+    for (const link of links) {
+        const entryQty  = Number(link.quantity) || 0
+        const factor    = (entryQty > 0 && totalQty > 0) ? entryQty / totalQty : 1
+        const remaining = _remainingForAccount(idea, link.accountId)
+        let qty = _round(quantity * factor)
+        if (qty > remaining) qty = remaining
+        if (!(qty > 0)) continue
+        try {
+            const res = await brokerService.placeOrder(link.broker, idea.userId, link.accountId, {
+                symbol:    idea.brokerSymbol ?? idea.asset,
+                direction: idea.direction === 'long' ? 'short' : 'long',
+                quantity:  qty,
+                type:      'market',
+                ...(link.positionId != null && { positionId: link.positionId }),   // closing order
+            })
+            newOrders.push({
+                accountId: String(link.accountId), broker: link.broker, leg,
+                type: 'market', price: null, quantity: qty, positionId: link.positionId ?? null,
+                orderId: res?.orderId != null ? String(res.orderId) : null,
+                status: 'working', placedAt: Date.now(),
+            })
+            logger.info(LOG, `[${idea.id}] Monitor close sent — ${leg} ${qty} market (acct ${link.accountId})`)
+        } catch (err) {
+            logger.error(LOG, `[${idea.id}] Monitor close failed (acct ${link.accountId}): ${err.message}`)
+        }
+    }
+
+    const update = {}
+    if (newOrders.length) update.$push     = { exitOrders: { $each: newOrders } }
+    if (tag)              update.$addToSet = { firedExits: tag }
+    if (Object.keys(update).length) await db.collection(COLLECTION).updateOne({ id: idea.id }, update)
+}
+
+/**
+ * Remaining open quantity (idea units) for an account: entry qty − filled exit
+ * slices. Mirrors the reconciler's accounting (the reconciler marks slices filled).
+ */
+function _remainingForAccount(idea, accountId) {
+    const acct     = String(accountId)
+    const slot     = (idea.brokerOrders ?? []).find(b => String(b.accountId) === acct)
+    const entryQty = Number(slot?.quantity) || 0
+    const closed   = (idea.exitOrders ?? [])
+        .filter(o => o.status === 'filled' && String(o.accountId) === acct)
+        .reduce((s, o) => s + (Number(o.quantity) || 0), 0)
+    return Math.max(0, _round(entryQty - closed))
+}
+
+const _round = n => Math.round((Number(n) || 0) * 10000) / 10000
 
 async function _checkAdditionalEntries(db, idea, candles, entryTf) {
     const entries = idea.additional_entries

@@ -108,6 +108,15 @@ Begin EVERY response with exactly one <asset> tag on its own line, before any ot
 <asset>TICKER</asset>
 Use the active asset ticker (e.g. AAPL, SPY) or leave empty if no asset is established yet. No text before this tag.
 
+ASSET CLASS — classify the instrument, never ask the user:
+Set pending_trade.asset_class from context as soon as the asset is known. This drives the market-hours gate (when orders can be placed), so get it right:
+- "stock"   — individual company shares (AAPL, TSLA, NVDA). Trades US regular hours.
+- "etf"     — exchange-traded funds (SPY, QQQ, IWM, sector/leveraged ETFs). US regular hours.
+- "futures" — index/commodity futures incl. data-feed "=F" tickers and cTrader cash aliases (NQ/NQ=F/US100, ES/ES=F/US500, YM/US30, RTY/US2000, CL=F, GC=F). Near-24/5.
+- "forex"   — currency pairs (EURUSD, GBPJPY, USDCAD). ~24/5.
+- "crypto"  — cryptocurrencies (BTC, ETH, BTC-USD). 24/7.
+When genuinely unsure, leave it null — the backend falls back to a symbol heuristic.
+
 INTERVAL TAG — optional, emit when the relevant chart timeframe becomes clear:
 <interval>TIMEFRAME</interval>
 Emit this once per response when the conversation establishes a primary chart timeframe — e.g. when the user mentions a specific timeframe, or when the main entry condition has a clear timeframe. Use the same encoded strings as conditions: 1min, 5min, 15min, 30min, 1hr, 2hr, 4hr, day, week, month. Place it on its own line, anywhere after the <asset> tag. Omit it if no timeframe has been established or if the timeframe hasn't changed.
@@ -125,6 +134,7 @@ At the end of every response, output exactly one <state> block containing update
     "pending_trade": {
       "direction": "long" | "short" | null,
       "type": "intraday" | "day" | "swing" | "long term" | null,
+      "asset_class": "stock" | "etf" | "futures" | "forex" | "crypto" | null,
       "quantity": 100 | null,
       "immediate": true | false,
       "entry_order_type": "stop" | null,

@@ -45,6 +45,10 @@ const PT = {
 // ProtoOAPosition.tradeData.tradeSide enum.
 const TRADE_SIDE_SELL = 2
 
+// ProtoOAOrderType enum (the working-order kinds we surface).
+const ORDER_TYPE_LIMIT = 2
+const ORDER_TYPE_STOP  = 3
+
 // ProtoOASpotEvent (2131) bid/ask are integers in 1/100000 of a price unit.
 const SPOT_PRICE_SCALE = 1e5
 const SPOT_TIMEOUT_MS  = 5_000
@@ -332,6 +336,50 @@ export class CTraderSession extends EventEmitter {
                 pnlPips:      null,
                 swap:         p.swap != null ? Number(p.swap) / scale : null,
                 openedAt:     td.openTimestamp != null ? Number(td.openTimestamp) : null,
+            }
+        }))
+    }
+
+    // ── Working orders ───────────────────────────────────────────────────────────
+
+    /**
+     * Snapshot the account's working (pending, not-yet-filled) LIMIT/STOP orders via
+     * reconcile (2124). Volume is converted to lots like getOpenPositions; the price is
+     * the order's limit or stop price (broker terms). Market orders and other kinds are
+     * skipped — only the resting orders a user can see/edit are returned.
+     *
+     * @returns {Promise<Array<{ orderId:string, symbol:string|null, side:'long'|'short',
+     *   type:'limit'|'stop', price:number|null, quantity:number|null, positionId:string|null }>>}
+     */
+    async getWorkingOrders() {
+        await this._loadSymbols()   // so symbolNameById() resolves
+        const rec = await this.send(PT.RECONCILE_REQ, {})
+        const rawOrders = (rec?.order ?? []).filter(o =>
+            o.orderType === ORDER_TYPE_LIMIT || o.orderType === ORDER_TYPE_STOP)
+        if (rawOrders.length === 0) return []
+
+        return Promise.all(rawOrders.map(async o => {
+            const td       = o.tradeData ?? {}
+            const symbolId = td.symbolId
+            const name     = symbolId != null ? this.symbolNameById(symbolId) : null
+
+            let volume = _num(td.volume)
+            if (symbolId != null) {
+                try {
+                    const specs = await this._symbolSpecs(symbolId, name)
+                    if (specs?.lotSize > 0 && volume != null) volume = volume / specs.lotSize
+                } catch { /* keep native volume if specs unavailable */ }
+            }
+
+            const isLimit = o.orderType === ORDER_TYPE_LIMIT
+            return {
+                orderId:    String(o.orderId),
+                symbol:     name,
+                side:       Number(td.tradeSide) === TRADE_SIDE_SELL ? 'short' : 'long',
+                type:       isLimit ? 'limit' : 'stop',
+                price:      _num(isLimit ? o.limitPrice : o.stopPrice),
+                quantity:   volume,
+                positionId: o.positionId != null ? String(o.positionId) : null,
             }
         }))
     }

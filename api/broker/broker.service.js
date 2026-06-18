@@ -28,6 +28,8 @@ export const brokerService = {
     capabilities,
     placeOrder,
     cancelOrder,
+    listOrders,
+    amendOrder,
     setProtection,
     closePosition,
     startExecutionFeed,
@@ -183,6 +185,31 @@ async function placeOrder(brokerType, userId, accountId, order) {
  */
 async function cancelOrder(brokerType, userId, accountId, orderId) {
     return getBrokerAdapter(brokerType).cancelOrder(userId, accountId, orderId)
+}
+
+/**
+ * List the account's working (pending) LIMIT/STOP orders. Requires
+ * `capabilities().listOrders`.
+ * @param {string} brokerType
+ * @param {string} userId
+ * @param {string} accountId
+ * @returns {Promise<object[]>}
+ */
+async function listOrders(brokerType, userId, accountId) {
+    return getBrokerAdapter(brokerType).listOrders(userId, accountId)
+}
+
+/**
+ * Change a working order's price. Requires `capabilities().amendOrder`.
+ * @param {string} brokerType
+ * @param {string} userId
+ * @param {string} accountId
+ * @param {string} orderId
+ * @param {{ limitPrice?: number, stopPrice?: number }} fields
+ * @returns {Promise<void>}
+ */
+async function amendOrder(brokerType, userId, accountId, orderId, fields) {
+    return getBrokerAdapter(brokerType).amendOrder(userId, accountId, orderId, fields)
 }
 
 /**

@@ -14,10 +14,10 @@
  * (`capabilities().nativeProtection`); callers gate on that flag.
  */
 
-import { parseCondition }    from '../monitoring/parsers/condition.parser.js'
-import { extractLeaves }     from './conditionTree.service.js'
-import { getCandles }        from '../providers/ohlcv.provider.js'
-import { logger }            from './logger.service.js'
+import { parseCondition }                       from '../monitoring/parsers/condition.parser.js'
+import { extractLeaves, resolveConditionTree }   from './conditionTree.service.js'
+import { getCandles }                            from '../providers/ohlcv.provider.js'
+import { logger }                                from './logger.service.js'
 
 const LOG = '[protectionPlan]'
 
@@ -87,11 +87,105 @@ export async function currentReferencePrice(asset, timeframe = 'day') {
     }
 }
 
+/**
+ * Route an idea's stop and TP exits into three buckets per leg:
+ *   • single      a lone bare price-touch leg → keep it on the entry order's native
+ *                 SL/TP (the existing, live-verified path). `number | null`.
+ *   • nativeOrders[{level, quantity}]  the bare price-touch levels of a MULTI-leaf
+ *                 leg → each becomes its own broker order (LIMIT for tp, STOP for
+ *                 stop) placed when the position opens. Quantities are in the idea's
+ *                 own units (main-account scale); callers scale them per account.
+ *   • monitorTree the residual OR-group of leaves that AREN'T bare price touches
+ *                 (indicator/chart/news, ranges, multi-candle holds, cross-asset,
+ *                 or nested groups) → stay on the software monitor, which now sends
+ *                 the close order itself when one of them triggers. `object | null`.
+ *
+ * Order type is forced by geometry, not by leg: a TP rests as a LIMIT (profit side),
+ * a stop as a STOP-market (loss side). Routing here is symmetric for stop and TP.
+ *
+ * @param {object} idea
+ * @returns {Promise<{ stop: LegRouting, tp: LegRouting }>}
+ *   LegRouting = { single:number|null, nativeOrders:{level:number,quantity:number}[],
+ *                  monitorTree:object|null, hasAny:boolean }
+ */
+export async function routeExits(idea) {
+    const totalQty = Number(idea.quantity) || 0
+    const [stop, tp] = await Promise.all([
+        _routeLeg(idea.stop_condition_tree, idea.stop_conditions, totalQty),
+        _routeLeg(idea.tp_condition_tree,   idea.tp_conditions,   totalQty),
+    ])
+    return { stop, tp }
+}
+
 // ─── internals ──────────────────────────────────────────────────────────────
 
 function _hasConditions(tree, flat) {
     if (extractLeaves(tree).length > 0) return true
     return Array.isArray(flat) && flat.length > 0
+}
+
+function _isLeaf(node) {
+    return !!node && typeof node === 'object' && typeof node.condition === 'string'
+}
+
+/** Route one exit leg (stop or tp). See routeExits() for the bucket semantics. */
+async function _routeLeg(tree, flat, totalQty) {
+    const group = resolveConditionTree(tree, flat, 'OR')
+    if (!group) return { single: null, nativeOrders: [], monitorTree: null, hasAny: false }
+
+    const children = group.children
+
+    // Single-leaf leg → preserve the attached-SL/TP path (a lone bare price level)
+    // or leave a lone non-price leaf entirely on the monitor.
+    if (children.length === 1) {
+        const lvl = _isLeaf(children[0]) ? await _leafBareLevel(children[0]) : null
+        if (lvl != null) return { single: lvl, nativeOrders: [], monitorTree: null, hasAny: true }
+        return { single: null, nativeOrders: [], monitorTree: group, hasAny: true }
+    }
+
+    // Multi-leaf leg → route each top-level child independently. Each child gets a
+    // quantity (its own, or an equal split of the total) so native + monitored
+    // slices together exit the full position.
+    const quantities   = _assignSlotQuantities(children, totalQty)
+    const nativeOrders = []
+    const monitored    = []
+    for (let i = 0; i < children.length; i++) {
+        const child = children[i]
+        const lvl   = _isLeaf(child) ? await _leafBareLevel(child) : null
+        if (lvl != null) {
+            nativeOrders.push({ level: lvl, quantity: quantities[i] })
+        } else {
+            // Annotate the residual leaf/group with its resolved quantity so the
+            // monitor knows how much to close when it fires.
+            monitored.push({ ...child, quantity: quantities[i] })
+        }
+    }
+    const monitorTree = monitored.length ? { operator: group.operator, children: monitored } : null
+    return { single: null, nativeOrders, monitorTree, hasAny: true }
+}
+
+/**
+ * Resolve a quantity for each top-level child of an exit leg. A child's explicit
+ * `quantity` wins; the remaining children share the leftover equally, with any
+ * residue going to the first defaulted slot — mirroring the assistant's
+ * "divide total equally, residue to the first leaf" rule.
+ */
+function _assignSlotQuantities(children, totalQty) {
+    const explicit    = children.map(c => Number(c?.quantity) || null)
+    const assignedSum = explicit.reduce((s, q) => s + (q ?? 0), 0)
+    const defaultIdx  = explicit.map((q, i) => (q == null ? i : -1)).filter(i => i >= 0)
+    const out         = explicit.slice()
+
+    if (defaultIdx.length > 0) {
+        const remaining = Math.max(0, totalQty - assignedSum)
+        const base      = Math.floor((remaining / defaultIdx.length) * 10000) / 10000
+        let residue     = Math.round((remaining - base * defaultIdx.length) * 10000) / 10000
+        for (const i of defaultIdx) {
+            out[i] = Math.round((base + residue) * 10000) / 10000
+            residue = 0
+        }
+    }
+    return out.map(q => q ?? 0)
 }
 
 /**
@@ -103,8 +197,16 @@ async function _barePriceLevel(tree, flat) {
     const leaves = extractLeaves(tree)
     const conds  = leaves.length ? leaves : (Array.isArray(flat) ? flat : [])
     if (conds.length !== 1) return null                 // must be a single condition
+    return _leafBareLevel(conds[0])
+}
 
-    const leaf = conds[0]
+/**
+ * The price level of a single leaf when it is a *bare price touch* — a structured
+ * close-vs-constant test (gt/gte/lt/lte/eq/cross) with confirmation ≤1, no
+ * cross-asset symbol, no range, and a numeric level. Otherwise null: the leaf is
+ * too rich for a touch trigger and must stay on the monitor.
+ */
+async function _leafBareLevel(leaf) {
     const type = typeof leaf === 'string' ? 'structured' : (leaf?.type ?? 'structured')
     if (type !== 'structured') return null              // indicator/chart/news stay monitored
     if (leaf?.symbol) return null                       // cross-asset reference stays monitored

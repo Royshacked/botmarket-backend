@@ -27,6 +27,12 @@ const FRONTEND_URL = process.env.CLIENT_URL ?? 'http://localhost:5173'
 
 export const brokerRoutes = Router()
 
+// Fall back to the broker's selected trading account when a caller omits accountId.
+async function _selectedAccountId(type, userId) {
+    const { selectedAccountId } = await brokerService.getTradingAccounts(type, userId)
+    return selectedAccountId
+}
+
 // ─── OAuth start ──────────────────────────────────────────────────────────────
 // Redirect the browser to the broker's consent page.
 // requireAuth reads the JWT cookie — works because this is a browser navigation,
@@ -156,6 +162,71 @@ brokerRoutes.get('/:type/positions', requireAuth, async (req, res) => {
         res.json({ positions })
     } catch (err) {
         logger.error(LOG, `getPositions (${req.params.type}):`, err.message)
+        res.status(err.status ?? 500).json({ error: err.message })
+    }
+})
+
+// ─── Working orders (the "orders in the air") ──────────────────────────────────
+
+// List an account's working (pending) LIMIT/STOP orders. accountId via query;
+// falls back to the broker's selected account.
+brokerRoutes.get('/:type/orders', requireAuth, async (req, res) => {
+    try {
+        const accountId = req.query.accountId ?? await _selectedAccountId(req.params.type, req.user._id)
+        const orders = await brokerService.listOrders(req.params.type, req.user._id, accountId)
+        res.json({ orders })
+    } catch (err) {
+        logger.error(LOG, `listOrders (${req.params.type}):`, err.message)
+        res.status(err.status ?? 500).json({ error: err.message })
+    }
+})
+
+// Place a new working order (e.g. add a TP limit / stop level to a position).
+brokerRoutes.post('/:type/orders', requireAuth, async (req, res) => {
+    try {
+        const { accountId, symbol, direction, type, quantity, limitPrice, stopPrice, positionId } = req.body ?? {}
+        if (!symbol || !direction || !type || quantity == null) {
+            return res.status(400).json({ error: 'symbol, direction, type and quantity are required' })
+        }
+        const acct = accountId ?? await _selectedAccountId(req.params.type, req.user._id)
+        const order = {
+            symbol, direction, type, quantity,
+            ...(limitPrice != null && { limitPrice }),
+            ...(stopPrice  != null && { stopPrice }),
+            ...(positionId != null && { positionId }),   // closing order for that position
+        }
+        const result = await brokerService.placeOrder(req.params.type, req.user._id, acct, order)
+        res.status(201).json({ ok: true, order: result })
+    } catch (err) {
+        logger.error(LOG, `placeOrder (${req.params.type}):`, err.message)
+        res.status(err.status ?? 500).json({ error: err.message })
+    }
+})
+
+// Change a working order's price (keeps its id). accountId + limitPrice/stopPrice in body.
+brokerRoutes.patch('/:type/orders/:orderId', requireAuth, async (req, res) => {
+    try {
+        const { accountId, limitPrice, stopPrice } = req.body ?? {}
+        if (limitPrice == null && stopPrice == null) {
+            return res.status(400).json({ error: 'limitPrice or stopPrice required' })
+        }
+        const acct = accountId ?? await _selectedAccountId(req.params.type, req.user._id)
+        await brokerService.amendOrder(req.params.type, req.user._id, acct, req.params.orderId, { limitPrice, stopPrice })
+        res.json({ ok: true })
+    } catch (err) {
+        logger.error(LOG, `amendOrder (${req.params.type}):`, err.message)
+        res.status(err.status ?? 500).json({ error: err.message })
+    }
+})
+
+// Cancel a working order. accountId via query; falls back to the selected account.
+brokerRoutes.delete('/:type/orders/:orderId', requireAuth, async (req, res) => {
+    try {
+        const accountId = req.query.accountId ?? await _selectedAccountId(req.params.type, req.user._id)
+        await brokerService.cancelOrder(req.params.type, req.user._id, accountId, req.params.orderId)
+        res.json({ ok: true })
+    } catch (err) {
+        logger.error(LOG, `cancelOrder (${req.params.type}):`, err.message)
         res.status(err.status ?? 500).json({ error: err.message })
     }
 })
