@@ -98,13 +98,30 @@ export class CTraderAdapter extends BrokerAdapter {
     // ── Positions ──────────────────────────────────────────────────────────────
 
     async getPositions(userId) {
-        // cTrader exposes open positions only on the ProtoOA WebSocket (not REST),
-        // so we reconcile over the account session.
+        // Positions can live across several trading accounts on the same connection
+        // (one idea may be placed on multiple accounts of the same broker), so we
+        // reconcile EVERY account's session — not just the selected one — and tag each
+        // position with the account it lives on. That lets the UI list them all and a
+        // close route back to the right account.
+        // cTrader exposes open positions only on the ProtoOA WebSocket (not REST).
         try {
-            const tokens    = await this._freshTokens(userId)
-            const accountId = await this._resolveAccountId(userId, tokens)
-            const session   = await this._session(userId, accountId)
-            return await session.getOpenPositions()
+            const accounts = await this.getTradingAccounts(userId)
+            const lists = await Promise.all(accounts.map(async acct => {
+                try {
+                    const session = await this._session(userId, acct.id)
+                    const rows    = await session.getOpenPositions()
+                    return rows.map(p => ({
+                        ...p,
+                        accountId: acct.id,
+                        accountNo: acct.login ?? null,
+                        currency:  acct.currency ?? null,
+                    }))
+                } catch (err) {
+                    logger.warn(LOG, `getPositions account ${acct.id}: ${err.message}`)
+                    return []
+                }
+            }))
+            return lists.flat()
         } catch (err) {
             logger.warn(LOG, `getPositions (ctrader): ${err.message}`)
             return []

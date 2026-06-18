@@ -160,13 +160,19 @@ brokerRoutes.get('/:type/positions', requireAuth, async (req, res) => {
     }
 })
 
-// Close an open position in full. The position lives on the user's currently
-// selected trading account, so we resolve that account and hand it to the adapter
-// (which maps it to the broker-native account id and looks up the live volume).
+// Close an open position in full. A position can live on any of the user's trading
+// accounts (an idea may be placed across several accounts of one broker), so the
+// caller passes the position's own accountId; we hand it to the adapter (which maps
+// it to the broker-native account id and looks up the live volume). Falls back to the
+// selected account when no accountId is supplied (single-account / legacy callers).
 brokerRoutes.delete('/:type/positions/:positionId', requireAuth, async (req, res) => {
     try {
-        const { selectedAccountId } = await brokerService.getTradingAccounts(req.params.type, req.user._id)
-        await brokerService.closePosition(req.params.type, req.user._id, selectedAccountId, req.params.positionId)
+        let accountId = req.query.accountId
+        if (!accountId) {
+            const { selectedAccountId } = await brokerService.getTradingAccounts(req.params.type, req.user._id)
+            accountId = selectedAccountId
+        }
+        await brokerService.closePosition(req.params.type, req.user._id, accountId, req.params.positionId)
         res.json({ ok: true })
     } catch (err) {
         logger.error(LOG, `closePosition (${req.params.type}):`, err.message)

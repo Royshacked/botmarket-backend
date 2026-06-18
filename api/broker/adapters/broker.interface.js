@@ -35,6 +35,11 @@ import { logger }                  from '../../../services/logger.service.js'
  * @property {number|null}    pnlPips
  * @property {number|null}    swap
  * @property {number|null}    openedAt    unix ms
+ * @property {string}  [accountId]  trading account this position lives on (set when an
+ *                                  adapter reports positions across multiple accounts);
+ *                                  pass it back to closePosition() to close on the right one
+ * @property {string|null} [accountNo]  human account number / login for that account
+ * @property {string|null} [currency]   that account's deposit currency (for P&L display)
  *
  * @typedef {Object} OHLCVBar
  * @property {number} t   timestamp ms
