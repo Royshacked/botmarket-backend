@@ -26,7 +26,7 @@ import { getDb }                                from '../providers/mongodb.provi
 import { getCandles }                           from '../providers/ohlcv.provider.js'
 import { evaluateTree, evaluateConditions }     from './monitor.orchestrator.js'
 import { logger }                               from '../services/logger.service.js'
-import { isMarketOpen, isCrypto }               from '../services/market.service.js'
+import { isAssetOpen }                          from '../services/market.service.js'
 import { buildOrderPlanForIdea }                from '../services/orderPlan.service.js'
 import { getCheckGap, isIntradayTimeframe }     from '../services/timeframe.service.js'
 import { collectSymbols, firstLeaf }            from '../services/conditionTree.service.js'
@@ -119,8 +119,6 @@ async function _tick() {
  * appears. Phase 2 will branch here on the user's orderMode to auto-place.
  */
 async function _marketSweep(db) {
-    const equityOpen = isMarketOpen()
-
     let deferred
     try {
         deferred = await db.collection(COLLECTION).find({ orderState: 'awaiting_market' }).toArray()
@@ -130,10 +128,12 @@ async function _marketSweep(db) {
     }
     if (!deferred || deferred.length === 0) return
 
-    const surface = deferred.filter(idea => equityOpen || isCrypto(idea.asset))
+    // Surface each deferred order once its own market opens (crypto 24/7, futures
+    // near-24/5, equities at the RTH bell) — not just the equity session.
+    const surface = deferred.filter(idea => isAssetOpen(idea.asset))
     if (surface.length === 0) return
 
-    logger.info(LOG, `Surfacing ${surface.length} deferred order(s) (equityOpen=${equityOpen})`)
+    logger.info(LOG, `Surfacing ${surface.length} deferred order(s)`)
     for (const idea of surface) {
         await _patch(db, idea.id, { orderState: 'awaiting_confirm' })
     }
@@ -156,13 +156,13 @@ async function _checkIdea(db, idea) {
         ? Math.min(getCheckGap(stopTf), getCheckGap(tpTf), getCheckGap(entryTf))
         : getCheckGap(entryTf)
 
-    // Skip intraday equity ideas when the market is closed — there are no new
-    // bars and evaluating would waste API calls. Crypto is 24/7 and daily+
-    // timeframes can still be evaluated outside regular hours.
+    // Skip intraday ideas when their market is closed — there are no new bars and
+    // evaluating would waste API calls. isAssetOpen handles each class: crypto is
+    // 24/7, futures near-24/5, equities only in RTH. Daily+ timeframes still run.
     const fastestTf = isPosition
         ? [stopTf, tpTf, entryTf].reduce((a, b) => getCheckGap(a) <= getCheckGap(b) ? a : b)
         : entryTf
-    if (!isCrypto(asset) && isIntradayTimeframe(fastestTf) && !isMarketOpen()) {
+    if (isIntradayTimeframe(fastestTf) && !isAssetOpen(asset)) {
         logger.info(LOG, `[${id}] Market closed — skipping intraday check (${asset}/${fastestTf})`)
         return
     }
@@ -299,7 +299,7 @@ async function _checkEntry(db, idea, candles) {
         // otherwise defer the decision until the next market open.
         const plan = await buildOrderPlanForIdea(idea)
         if (plan.length > 0) {
-            const open = isCrypto(asset) || isMarketOpen()
+            const open = isAssetOpen(asset)
             patch.pendingOrder = { plan, builtAt: Date.now() }
             patch.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
             logger.info(LOG, `✅ Entry triggered for idea ${id} (${asset}) — status → hit, orderState → ${patch.orderState}`)

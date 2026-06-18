@@ -4,7 +4,7 @@ import { monitorService }  from '../../monitoring/monitor.service.js'
 import { brokerService }   from '../broker/broker.service.js'
 import { buildOrderPlanForIdea, resolveUserAccounts } from '../../services/orderPlan.service.js'
 import { detectNativeLevels, currentReferencePrice, detectNativeEntryLevel } from '../../services/protectionPlan.service.js'
-import { isMarketOpen, isCrypto } from '../../services/market.service.js'
+import { isAssetOpen } from '../../services/market.service.js'
 import { toBrokerSymbol, normSymbol } from '../../services/brokerSymbol.service.js'
 import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } from '../../services/conditionTree.service.js'
 
@@ -160,7 +160,7 @@ async function saveIdea(tradeIdea, userId) {
 async function _attachImmediatePlan(idea) {
     const plan = await buildOrderPlanForIdea(idea)
     if (plan.length > 0) {
-        const open = isCrypto(idea.asset) || isMarketOpen()
+        const open = isAssetOpen(idea.asset)
         idea.pendingOrder = { plan, builtAt: Date.now() }
         idea.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
     }
