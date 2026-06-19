@@ -1,4 +1,5 @@
 import OpenAI from 'openai'
+import { createTagSuppressor } from '../services/llmStream.util.js'
 
 const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -83,6 +84,118 @@ export async function callOpenAIWithTools({
     }
 
     throw new Error(`OpenAI tool loop exceeded maxTurns (${maxTurns})`)
+}
+
+// ─── Streaming tool loop ──────────────────────────────────────────────────────
+// Mirrors streamAnthropicWithTools' signature exactly so the agent services can
+// route to either provider with no other changes. Calls onToken(text) for each
+// streamed chunk (with <state>/<trade_idea>/… blocks suppressed via the shared
+// tag suppressor) and returns the full accumulated reply text of the final turn.
+//
+// `tools` are authored in the Anthropic shape used by the agents; _toOpenAITools
+// converts them to the OpenAI Responses format (and swaps the web_search server
+// tool for OpenAI's native one). `toolHandlers` is the same name→async-fn map the
+// agents already pass (each handler returns a string).
+
+export async function streamOpenAIWithTools({
+    model,
+    promptOrMessages,
+    systemPrompt = DEFAULT_SYSTEM_PROMPT,
+    tools = [],
+    toolHandlers = {},
+    maxContinuations = DEFAULT_MAX_TOOL_TURNS,
+    onToken,
+    onAsset,
+    onInterval,
+    onTicker,
+    onPlan,
+    onUpdate,
+}) {
+    let input          = normalizeInput(promptOrMessages, systemPrompt)
+    const openAITools  = _toOpenAITools(tools)
+    const suppressor   = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate)
+
+    for (let i = 0; i < maxContinuations; i++) {
+        const stream = client.responses.stream({
+            model,
+            input,
+            ...(openAITools.length ? { tools: openAITools } : {}),
+        })
+
+        // Accumulate this turn's text from the deltas — finalResponse().output_text
+        // is not reliably populated for streamed responses, and the agents parse
+        // <state>/<trade_idea> out of the returned text, so we must capture it here.
+        let turnText = ''
+        for await (const event of stream) {
+            if (event.type === 'response.output_text.delta' && event.delta) {
+                turnText += event.delta
+                suppressor.push(event.delta)
+            }
+        }
+
+        const final         = await stream.finalResponse()
+        const functionCalls  = (final.output ?? []).filter((item) => item?.type === 'function_call')
+
+        if (functionCalls.length === 0) {
+            suppressor.flush()
+            return turnText || (final.output_text ?? '')
+        }
+
+        // Preserve the model's output items (function_call + any reasoning) in the
+        // conversation, then append a result for each call. The SDK enriches
+        // function_call items with a client-side `parsed_arguments` field that the
+        // API rejects when echoed back, so rebuild those to their minimal shape.
+        const outputItems = (final.output ?? []).map((item) => {
+            if (item?.type !== 'function_call') return item
+            return {
+                type:      'function_call',
+                call_id:   item.call_id,
+                name:      item.name,
+                arguments: item.arguments,
+                ...(item.id ? { id: item.id } : {}),
+            }
+        })
+        input = [...input, ...outputItems]
+
+        await Promise.all(functionCalls.map(async (call) => {
+            let args = {}
+            try { args = call.arguments ? JSON.parse(call.arguments) : {} }
+            catch {
+                input.push({ type: 'function_call_output', call_id: call.call_id, output: `Invalid JSON arguments for ${call.name}` })
+                return
+            }
+            const handler = toolHandlers[call.name]
+            let output = ''
+            try { output = handler ? String(await handler(args)) : '' }
+            catch (err) { output = `Tool ${call.name} failed: ${err instanceof Error ? err.message : String(err)}` }
+            input.push({ type: 'function_call_output', call_id: call.call_id, output })
+        }))
+    }
+
+    throw new Error(`OpenAI stream tool loop exceeded maxContinuations (${maxContinuations})`)
+}
+
+/**
+ * Convert the agents' Anthropic-shaped tool defs to the OpenAI Responses format.
+ * - { name, description, input_schema }      → { type:'function', name, description, parameters }
+ * - { type:'web_search_20250305', ... }       → OpenAI's native { type:'web_search' }
+ * - anything already in OpenAI shape passes through unchanged.
+ */
+function _toOpenAITools(tools = []) {
+    return tools.map((t) => {
+        if (typeof t?.type === 'string' && t.type.startsWith('web_search')) {
+            return { type: 'web_search' }
+        }
+        if (t?.input_schema) {
+            return {
+                type:        'function',
+                name:        t.name,
+                description: t.description,
+                parameters:  t.input_schema,
+            }
+        }
+        return t
+    })
 }
 
 /**

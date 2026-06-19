@@ -5,7 +5,7 @@ import { logger }                from '../../services/logger.service.js'
 const LOG = '[portfolio:controller]'
 
 export async function streamPortfolio(req, res) {
-    const { messages, ideaAccounts, portfolioId, portfolioIdeas } = req.body ?? {}
+    const { messages, ideaAccounts, portfolioId, portfolioIdeas, model } = req.body ?? {}
 
     if (!Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ error: 'messages must be a non-empty array' })
@@ -30,6 +30,7 @@ export async function streamPortfolio(req, res) {
             ideaAccounts: validatedAccounts,
             portfolioId:   portfolioId   ?? null,
             portfolioIdeas: Array.isArray(portfolioIdeas) ? portfolioIdeas : [],
+            model,
             onToken:  (text)   => sendEvent('token',  { text }),
             onTicker: (symbol) => sendEvent('ticker', { symbol }),
         })

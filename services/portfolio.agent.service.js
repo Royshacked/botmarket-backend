@@ -1,7 +1,7 @@
 import { readFileSync }   from 'fs'
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
-import { streamAnthropicWithTools } from '../providers/anthropic.provider.js'
+import { resolveStreamFn } from './llmModels.js'
 import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote } from '../providers/yahoofinance.provider.js'
 import { logger }         from './logger.service.js'
 
@@ -9,7 +9,6 @@ const __dirname    = dirname(fileURLToPath(import.meta.url))
 const SYSTEM_PROMPT = readFileSync(join(__dirname, '../trade_portfolio_system_prompt.md'), 'utf-8')
 
 const LOG   = '[portfolioAgent]'
-const MODEL = 'claude-sonnet-4-6'
 const MAX_MESSAGES = 20
 
 const TOOLS = [
@@ -73,20 +72,21 @@ const TOOL_HANDLERS = {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], onToken, onTicker }) {
+async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], model: requestedModel, onToken, onTicker }) {
     const normalized   = _buildMessages(messages)
+    const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
     let systemPrompt = SYSTEM_PROMPT
     if (ideaAccounts.length > 0)       systemPrompt += `\n\n${_buildAccountsSection(ideaAccounts)}`
     if (portfolioId && portfolioIdeas.length > 0) systemPrompt += `\n\n${_buildPortfolioContext(portfolioId, portfolioIdeas)}`
 
-    logger.info(LOG, 'chatStream start', { messageCount: normalized.length, accountCount: ideaAccounts.length, editMode: !!portfolioId })
+    logger.info(LOG, 'chatStream start', { messageCount: normalized.length, accountCount: ideaAccounts.length, editMode: !!portfolioId, model, provider })
 
     let capturedPlan   = null
     let capturedUpdate = null
 
-    const raw = await streamAnthropicWithTools({
-        model:            MODEL,
+    const raw = await streamFn({
+        model,
         promptOrMessages: normalized,
         systemPrompt,
         tools:            TOOLS,
