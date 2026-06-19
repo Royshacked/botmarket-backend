@@ -2,13 +2,30 @@ import YahooFinance from 'yahoo-finance2'
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] })
 
+// Short-TTL quote cache. A single agent turn can price the same ticker several
+// times (get_quote, get_quotes, get_risk_metrics, and server-side sizing all
+// hit yf.quote); within ~30s a price is effectively unchanged, so dedupe.
+const _quoteCache = new Map() // SYMBOL -> { at: epochMs, data }
+const QUOTE_TTL_MS  = 30_000
+const QUOTE_CACHE_MAX = 500
+
+async function _quote(ticker) {
+    const symbol = String(ticker).toUpperCase()
+    const hit = _quoteCache.get(symbol)
+    if (hit && Date.now() - hit.at < QUOTE_TTL_MS) return hit.data
+    const data = await yf.quote(symbol)
+    if (_quoteCache.size >= QUOTE_CACHE_MAX) _quoteCache.clear()
+    _quoteCache.set(symbol, { at: Date.now(), data })
+    return data
+}
+
 /**
  * Get a real-time quote for a ticker.
  * Returns a plain string ready to be fed to the LLM as a tool result.
  */
 export async function getCompanyName(ticker) {
     try {
-        const q = await yf.quote(ticker.toUpperCase())
+        const q = await _quote(ticker)
         return q?.shortName || q?.longName || ticker
     } catch {
         return ticker
@@ -16,7 +33,7 @@ export async function getCompanyName(ticker) {
 }
 
 export async function getQuote(ticker) {
-    const q = await yf.quote(ticker.toUpperCase())
+    const q = await _quote(ticker)
     const p = v => (v != null ? `$${Number(v).toFixed(2)}` : 'n/a')
     return [
         `${q.symbol}${q.shortName ? ` (${q.shortName})` : ''}`,
@@ -35,7 +52,7 @@ export async function getQuote(ticker) {
  * Returns { symbol, price } or throws.
  */
 export async function getNumericQuote(ticker) {
-    const q = await yf.quote(ticker.toUpperCase())
+    const q = await _quote(ticker)
     return { symbol: q.symbol, price: q.regularMarketPrice ?? null }
 }
 
@@ -46,7 +63,7 @@ export async function getNumericQuote(ticker) {
 export async function getQuotes(tickers = []) {
     const symbols = [...new Set(tickers.map(t => String(t).toUpperCase()))].filter(Boolean)
     if (!symbols.length) return 'No tickers provided.'
-    const results = await Promise.allSettled(symbols.map(s => yf.quote(s)))
+    const results = await Promise.allSettled(symbols.map(s => _quote(s)))
     const p = v => (v != null ? `$${Number(v).toFixed(2)}` : 'n/a')
     const lines = results.map((r, i) => {
         if (r.status !== 'fulfilled' || !r.value) return `${symbols[i]}: quote unavailable`
