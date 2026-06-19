@@ -1,7 +1,8 @@
 import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { callAnthropicWithTools, streamAnthropicWithTools } from '../providers/anthropic.provider.js'
+import { callAnthropicWithTools } from '../providers/anthropic.provider.js'
+import { resolveStreamFn } from './llmModels.js'
 import { getQuote, getTickerAggregates } from '../providers/yahoofinance.provider.js'
 import { logger } from './logger.service.js'
 import { normalizeTimeframe } from './timeframe.service.js'
@@ -11,7 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const BASE_SYSTEM_PROMPT = readFileSync(join(__dirname, '../trade_assistant_system_prompt.md'), 'utf-8')
 
 const LOG = '[tradeAgent]'
-const MODEL = 'claude-sonnet-4-6'
+const MODEL = 'claude-sonnet-4-6'   // non-streaming chat() path only
 const MAX_RECENT_MESSAGES = 6
 
 const TOOLS = [
@@ -128,18 +129,21 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], onToken, onAsset, onInterval }) {
+async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, onToken, onAsset, onInterval }) {
     const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts)
     const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
+    const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
     logger.info(LOG, 'chatStream start', {
         userPrompt,
         messageCount:  builtMessages.length,
         activeAsset:   analysisState?.structured_state?.active_asset ?? '',
+        model,
+        provider,
     })
 
-    const raw = await streamAnthropicWithTools({
-        model: MODEL,
+    const raw = await streamFn({
+        model,
         promptOrMessages: builtMessages,
         systemPrompt,
         tools: TOOLS,

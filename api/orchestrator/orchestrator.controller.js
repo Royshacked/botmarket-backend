@@ -32,6 +32,7 @@ export async function streamOrchestration(req, res) {
             analysisState: parsed.analysisState ?? emptyAnalysisState(),
             brokerContext,
             ideaAccounts:  parsed.ideaAccounts ?? [],
+            model:         req.body?.model,
             onToken:       (text)     => sendEvent('token',    { text }),
             onAsset:       (symbol)   => sendEvent('asset',    { symbol }),
             onInterval:    (interval) => sendEvent('interval', { interval }),
