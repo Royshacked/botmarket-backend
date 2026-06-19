@@ -2,7 +2,7 @@ import { readFileSync }   from 'fs'
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { streamAnthropicWithTools } from '../providers/anthropic.provider.js'
-import { getQuote, getQuotes, getRiskMetrics, getCorrelations } from '../providers/yahoofinance.provider.js'
+import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote } from '../providers/yahoofinance.provider.js'
 import { logger }         from './logger.service.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
@@ -107,8 +107,51 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
         .replace(/<portfolio_update>[\s\S]*?<\/portfolio_update>/g, '')
         .trim()
 
+    if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
+
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate })
     return { reply, plan: capturedPlan, update: capturedUpdate }
+}
+
+/**
+ * Deterministically finalize a captured plan's allocations and quantities so
+ * the LLM never has to do the arithmetic:
+ *  - allocationRatio across ideas is normalized to sum to exactly 1.0
+ *  - if the plan carries a positionSize (total capital), every quantity is
+ *    recomputed as floor(positionSize × ratio / livePrice) using live quotes;
+ *    a price that can't be fetched leaves that idea's quantity null
+ *  - with no positionSize, any explicit per-asset quantity the user gave is
+ *    preserved as-is
+ */
+async function _sizePlan(plan) {
+    const ideas = Array.isArray(plan?.ideas) ? plan.ideas : []
+    if (!ideas.length) return plan
+
+    // Normalize allocation ratios → sum to 1.0 (equal-weight fallback).
+    const ratios = ideas.map(i => (Number.isFinite(i.allocationRatio) && i.allocationRatio > 0 ? i.allocationRatio : 0))
+    const total  = ratios.reduce((a, b) => a + b, 0)
+    const norm   = total > 0 ? ratios.map(r => r / total) : ideas.map(() => 1 / ideas.length)
+    ideas.forEach((idea, i) => { idea.allocationRatio = Number(norm[i].toFixed(4)) })
+
+    const positionSize = Number(plan.positionSize)
+    if (!Number.isFinite(positionSize) || positionSize <= 0) {
+        logger.info(LOG, 'sizePlan: no positionSize, quantities left as provided')
+        return plan
+    }
+
+    // Fetch live prices for all assets in parallel, then size by dollar weight.
+    const prices = await Promise.all(ideas.map(async (idea) => {
+        try { return (await getNumericQuote(idea.asset)).price }
+        catch (err) { logger.warn(LOG, `sizePlan: price fetch failed for ${idea.asset}`, err.message); return null }
+    }))
+    ideas.forEach((idea, i) => {
+        const price = prices[i]
+        idea.quantity = (price > 0)
+            ? Math.floor((positionSize * idea.allocationRatio) / price)
+            : null
+    })
+    logger.info(LOG, 'sizePlan: quantities computed', { positionSize, ideas: ideas.length })
+    return plan
 }
 
 function _buildMessages(messages) {
