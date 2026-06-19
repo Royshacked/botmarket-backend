@@ -2,7 +2,7 @@ import { readFileSync }   from 'fs'
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { streamAnthropicWithTools } from '../providers/anthropic.provider.js'
-import { getQuote }       from '../providers/yahoofinance.provider.js'
+import { getQuote, getQuotes, getRiskMetrics, getCorrelations } from '../providers/yahoofinance.provider.js'
 import { logger }         from './logger.service.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
@@ -16,11 +16,38 @@ const TOOLS = [
     { type: 'web_search_20250305', name: 'web_search' },
     {
         name: 'get_quote',
-        description: 'Get current price quote for a ticker symbol.',
+        description: 'Get current price quote for a single ticker symbol.',
         input_schema: {
             type: 'object',
             properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
             required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_quotes',
+        description: 'Get current prices for several tickers at once. Prefer this over calling get_quote repeatedly when sizing a multi-position portfolio.',
+        input_schema: {
+            type: 'object',
+            properties: { tickers: { type: 'array', items: { type: 'string' }, description: 'e.g. ["AAPL","NVDA","GLD"]' } },
+            required: ['tickers'],
+        },
+    },
+    {
+        name: 'get_risk_metrics',
+        description: 'Get annualized volatility and ATR (from 1y of daily prices) for a ticker. Use this to size positions by risk and to set sensible stop distances.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_correlations',
+        description: 'Get the pairwise correlation matrix (1y daily returns) for a set of tickers. Use this to verify a portfolio is actually diversified before recommending it.',
+        input_schema: {
+            type: 'object',
+            properties: { tickers: { type: 'array', items: { type: 'string' }, description: 'two or more tickers, e.g. ["NVDA","AAPL","GLD"]' } },
+            required: ['tickers'],
         },
     },
 ]
@@ -29,6 +56,18 @@ const TOOL_HANDLERS = {
     get_quote: async ({ ticker }) => {
         try { return await getQuote(ticker) }
         catch (err) { return `Could not fetch quote for ${ticker}: ${err.message}` }
+    },
+    get_quotes: async ({ tickers }) => {
+        try { return await getQuotes(tickers) }
+        catch (err) { return `Could not fetch quotes: ${err.message}` }
+    },
+    get_risk_metrics: async ({ ticker }) => {
+        try { return await getRiskMetrics(ticker) }
+        catch (err) { return `Could not fetch risk metrics for ${ticker}: ${err.message}` }
+    },
+    get_correlations: async ({ tickers }) => {
+        try { return await getCorrelations(tickers) }
+        catch (err) { return `Could not compute correlations: ${err.message}` }
     },
 }
 
