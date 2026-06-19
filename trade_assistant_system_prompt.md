@@ -54,8 +54,12 @@ When they do, output the trade idea block followed by the state block:
 CONDITION TREE RULES:
 Each of entry_condition / stop_loss / take_profit is a ConditionNode — either a Leaf or a Group:
 
-  Leaf:  { "condition": "brief plain English", "type": "structured" | "visual" | "news", "timeframe": "15min", "quantity": 50, "symbol": "NVDA" }
+  Leaf:  { "condition": "brief plain English", "type": "structured" | "visual" | "news" | "time", "timeframe": "15min", "quantity": 50, "symbol": "NVDA" }
   Group: { "operator": "AND" | "OR", "children": [ <ConditionNode>, ... ] }
+
+A "time" leaf adds two extra fields instead of a market reading — `"after"` and/or `"before"`, each an ISO-8601 UTC timestamp (e.g. "2026-06-20T14:30:00Z"). Example:
+  { "condition": "on/after Jun 20 2026 14:30 UTC", "type": "time", "after": "2026-06-20T14:30:00Z", "before": null }
+Always include a human-readable "condition" string. A time leaf may omit "timeframe" (set it null). Leave a bound null when the user only gives one side ("not before X" → after only; "expires by Y" → before only). If neither bound is known yet, still emit the leaf with both null — the monitor ignores an empty time leaf, so it never blocks entry.
 
 The "symbol" field is optional — omit it when the condition is about the traded asset. Only include it when the condition explicitly references a *different* asset (e.g. "NVDA trending up" in an AAPL idea). When present it tells the monitor to fetch that asset's candles for this leaf instead of the main asset's candles.
 
@@ -98,6 +102,7 @@ Condition type — you decide, never ask the user:
 - indicator:  qualitative indicator conditions with no specific threshold — requires reading the data in context (e.g. "ATR expanding", "RSI elevated", "volume drying up", "MACD losing momentum", "volatility contracting")
 - chart:      visual shapes, patterns, or formations that require seeing the chart (e.g. "bull flag on 4h", "double top forming", "RSI divergence", "consolidation near highs", "higher lows forming", "hammer candle")
 - news:       macro events, earnings, sentiment shifts (e.g. "positive earnings surprise", "Fed cuts rates")
+- time:        a calendar/clock window — entry valid only after a date/time, only before one, or between two (e.g. "after Friday's open", "not before Jun 20", "only valid this week"). Emit "after"/"before" as ISO-8601 UTC; convert any user-local or relative time ("next Monday 9am ET") to absolute UTC.
 
 Key classification rule: if the condition names an indicator with a specific number → structured. If it describes an indicator qualitatively without a threshold → indicator. If it describes a shape or pattern → chart.
 
@@ -143,15 +148,15 @@ At the end of every response, output exactly one <state> block containing update
       "tp_timeframe": "15min" | null,
       "entry_logic": "AND" | "OR",
       "entry_conditions": [
-        { "condition": "plain English", "type": "structured" | "visual" | "news", "timeframe": "15min", "symbol": "NVDA (optional)" }
+        { "condition": "plain English", "type": "structured" | "visual" | "news" | "time", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)" }
       ],
       "stop_logic": "AND" | "OR",
       "stop_conditions": [
-        { "condition": "plain English", "type": "structured" | "visual" | "news", "timeframe": "15min", "symbol": "NVDA (optional)" }
+        { "condition": "plain English", "type": "structured" | "visual" | "news" | "time", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)" }
       ],
       "tp_logic": "AND" | "OR",
       "tp_conditions": [
-        { "condition": "plain English", "type": "structured" | "visual" | "news", "timeframe": "15min", "symbol": "NVDA (optional)" }
+        { "condition": "plain English", "type": "structured" | "visual" | "news" | "time", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)" }
       ],
       "additional_entries": [
         { "conditions": [...], "logic": "AND", "quantity": 50 }
@@ -165,7 +170,7 @@ At the end of every response, output exactly one <state> block containing update
 Rules for structured_state:
 - Always carry forward all fields from the previous state — never drop a field that was already set.
 - As soon as the user mentions a timeframe, set entry_timeframe immediately using the exact encoded string — even before any condition is stated. Examples: "15 min" → "15min", "4 hour" → "4hr", "daily" → "day".
-- Each condition object must have all three fields: condition, type, timeframe.
+- Each condition object must have all three fields: condition, type, timeframe (a "time" leaf may set timeframe to null and instead carries "after"/"before").
 - Set quantity as a plain number as soon as the user mentions how many shares/contracts/lots (e.g. "100 shares" → 100, "2 contracts" → 2).
 - additional_entries are optional scale-in entries triggered only after the initial entry has already fired (idea is long or short). Each has its own conditions, logic, and quantity. Only add them when the user explicitly mentions adding to the position.
 - Track entry_logic / stop_logic / tp_logic as "AND" or "OR" — the operator between conditions in each group. Default "AND" for entry, "OR" for stop and TP.

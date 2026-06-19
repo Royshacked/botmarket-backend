@@ -21,13 +21,14 @@ import { evaluate }            from './evaluators/structured.evaluator.js'
 import { evaluateIndicator }   from './evaluators/indicator.evaluator.js'
 import { evaluateChart }       from './evaluators/chart.evaluator.js'
 import { evaluateNews }        from './evaluators/news.evaluator.js'
+import { evaluateTime }        from './evaluators/time.evaluator.js'
 import { logger }              from '../services/logger.service.js'
 
 const LOG = '[monitor.orchestrator]'
 
 // Evaluation cost — determines gate order for AND/OR chains (cheapest first)
-// 'visual' kept as legacy alias for 'indicator'
-const COST = { structured: 0, indicator: 1, visual: 1, news: 2, chart: 3 }
+// 'visual' kept as legacy alias for 'indicator'; 'time' is a pure wall-clock check
+const COST = { structured: 0, time: 0, indicator: 1, visual: 1, news: 2, chart: 3 }
 
 /**
  * Evaluate a condition tree recursively.
@@ -219,6 +220,12 @@ async function _evalOne(cond, symbolMap, defaultSymbol, floorAt = null, priorFin
     // candle an event formed on, so a pass is timestamped "now" (always ≥ floor).
     // Only structured conditions report a precise trigger candle.
     try {
+        if (type === 'time') {
+            // Wall-clock gate — empty bounds pass (ignored). No candles needed.
+            const pass = evaluateTime(cond)
+            return { pass, condition: conditionText, triggerAt: pass ? Date.now() : null }
+        }
+
         if (type === 'indicator' || type === 'visual') {
             const pass = await evaluateIndicator(conditionText, candles)
             return { pass, condition: conditionText, triggerAt: pass ? Date.now() : null }
