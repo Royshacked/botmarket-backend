@@ -265,11 +265,12 @@ async function _checkEntry(db, idea, candles) {
 
     let triggered = false
     let triggerAt = null
+    const entryStates = []   // per-leaf evaluated state → UI met marks
 
     if (idea.entry_condition_tree) {
         // New tree format
         logger.info(LOG, `[${id}] Evaluating entry condition tree`)
-        ;({ triggered, triggerAt } = await evaluateTree(idea.entry_condition_tree, symbolMap, asset, floorAt))
+        ;({ triggered, triggerAt } = await evaluateTree(idea.entry_condition_tree, symbolMap, asset, floorAt, [], entryStates))
     } else if (Array.isArray(idea.entry_conditions) && idea.entry_conditions.length > 0) {
         // Legacy flat-array format
         logger.info(LOG, `[${id}] Evaluating entry conditions (legacy flat format)`)
@@ -279,6 +280,8 @@ async function _checkEntry(db, idea, candles) {
         logger.warn(LOG, `Idea ${id} has no entry conditions — skipping`)
         return
     }
+
+    await _persistConditionStates(db, idea, 'entry', entryStates)
 
     if (triggered) {
         // Fired on an event that occurred before the user activated monitoring
@@ -384,9 +387,10 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
 
     let triggered = false
     let which
+    const states = []   // per-leaf evaluated state → UI met marks
     if (tree) {
         logger.info(LOG, `[${id}] Evaluating ${reason} condition tree`)
-        ;({ triggered, which } = await evaluateTree(tree, symbolMap, asset, floorAt))
+        ;({ triggered, which } = await evaluateTree(tree, symbolMap, asset, floorAt, [], states))
     } else if (Array.isArray(conditions) && conditions.length > 0) {
         const logic = idea[`${phase}_logic`] ?? 'OR'
         ;({ triggered, which } = await evaluateConditions(conditions, logic, symbolMap, asset, floorAt))
@@ -394,6 +398,8 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
         logger.info(LOG, `[${id}] No ${reason} conditions defined — skipping ${reason} check`)
         return false
     }
+
+    await _persistConditionStates(db, idea, phase, states)
 
     if (triggered) {
         logger.info(LOG, `${emoji} ${label} triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
@@ -593,4 +599,25 @@ async function _close(db, id, reason) {
 async function _patch(db, id, fields) {
     await db.collection(COLLECTION).updateOne({ id }, { $set: fields })
     logger.info(LOG, `Patched idea ${id}:`, fields)
+}
+
+/**
+ * Persist per-leaf met state for one phase ('entry' | 'stop' | 'tp') so the UI can
+ * mark conditions that have evaluated true. Merges with prior state: leaves not
+ * reached this cycle (short-circuited) keep their previous mark, reached leaves
+ * reflect the current pass/fail. Writes only when something changed (and mutates
+ * the in-memory idea so a later phase in the same tick sees the update).
+ */
+async function _persistConditionStates(db, idea, phase, results) {
+    if (!Array.isArray(results) || results.length === 0) return
+    const prev = idea.conditionStates?.[phase] ?? {}
+    const next = { ...prev }
+    for (const r of results) {
+        if (!r?.key) continue
+        if (r.pass) next[r.key] = r.at ?? Date.now()
+        else delete next[r.key]
+    }
+    if (JSON.stringify(next) === JSON.stringify(prev)) return
+    await db.collection(COLLECTION).updateOne({ id: idea.id }, { $set: { [`conditionStates.${phase}`]: next } })
+    idea.conditionStates = { ...(idea.conditionStates ?? {}), [phase]: next }
 }

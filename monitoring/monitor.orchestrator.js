@@ -43,13 +43,16 @@ const COST = { structured: 0, indicator: 1, visual: 1, news: 2, chart: 3 }
  * @param {string[]}      priorFindings  structured conditions that passed earlier in the same AND gate
  * @returns {Promise<{ triggered: boolean, which?: string, finding?: string, triggerAt?: number|null }>}
  */
-export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = null, priorFindings = []) {
+export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = null, priorFindings = [], out = null) {
     if (!node || typeof node !== 'object') return { triggered: false }
 
     // ── Leaf node ────────────────────────────────────────────────────────────
     if (typeof node.condition === 'string') {
         const result = await _evalOne(node, symbolMap, defaultSymbol, floorAt, priorFindings)
         logger.info(LOG, `  ${result.pass ? '✓' : '✗'} [${node.type ?? 'structured'}] "${node.condition?.slice(0, 60)}"${node.symbol ? ` (${node.symbol})` : ''}`)
+        // Record this leaf's evaluated state so the UI can mark met conditions. Only
+        // leaves actually reached are recorded (short-circuited siblings are not).
+        if (out) out.push({ key: leafStateKey(node), pass: !!result.pass, at: result.pass ? (result.triggerAt ?? Date.now()) : null })
         const isStructured = !node.type || node.type === 'structured'
         return {
             triggered: result.pass,
@@ -69,7 +72,7 @@ export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = nul
         // (OR branches are independent — no structured condition "caused" the chart).
         const sortedOR = [...children].sort((a, b) => _nodeCost(a) - _nodeCost(b))
         for (const child of sortedOR) {
-            const result = await evaluateTree(child, symbolMap, defaultSymbol, floorAt, [])
+            const result = await evaluateTree(child, symbolMap, defaultSymbol, floorAt, [], out)
             if (result.triggered) {
                 logger.info(LOG, `  ✅ OR group triggered: "${(result.which ?? '').slice(0, 60)}"`)
                 return result
@@ -87,7 +90,7 @@ export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = nul
     const accumulated = [...priorFindings]
     let triggerAt = null
     for (let i = 0; i < sorted.length; i++) {
-        const result = await evaluateTree(sorted[i], symbolMap, defaultSymbol, floorAt, accumulated)
+        const result = await evaluateTree(sorted[i], symbolMap, defaultSymbol, floorAt, accumulated, out)
         if (!result.triggered) {
             logger.info(LOG, `  ✗ AND group failed at child ${i + 1}/${sorted.length}`)
             return { triggered: false }
@@ -97,6 +100,15 @@ export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = nul
     }
     logger.info(LOG, `  ✅ AND group: all ${sorted.length} child(ren) passed`)
     return { triggered: true, triggerAt }
+}
+
+/**
+ * Stable identity for a condition leaf, shared with the frontend (ConditionTree.jsx
+ * mirrors this) so a persisted met-state keys back to the right chip. Keyed by
+ * type + timeframe + condition text — enough to disambiguate sibling leaves.
+ */
+export function leafStateKey(leaf) {
+    return `${leaf?.type ?? 'structured'}|${leaf?.timeframe ?? ''}|${leaf?.condition ?? ''}`
 }
 
 /** Estimate evaluation cost for a tree node (used for AND gate ordering). */
