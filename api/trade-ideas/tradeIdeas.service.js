@@ -11,6 +11,12 @@ import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } 
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
 
+// Statuses where the idea is live on the broker — deleting it would orphan a real
+// position ('long'/'short') or a fired order awaiting confirmation ('hit'). Delete is
+// rejected for these; the user must close the position first. Mirrors the client's
+// isDeleteLocked() so the UI affordance and the API agree.
+const LOCKED_DELETE_STATUSES = new Set(['hit', 'long', 'short'])
+
 const VALID_STATUSES = new Set(['waiting', 'looking', 'resting', 'hit', 'long', 'short', 'closed'])
 
 // Broker *execution* order types — distinct from idea.type (the trade STYLE:
@@ -25,6 +31,7 @@ export const ideaService = {
     saveIdea,
     saveBatchIdeas,
     getIdeas,
+    getAssetClassMap,
     getIdeaById,
     deleteIdea,
     updateIdea,
@@ -195,12 +202,43 @@ async function getIdeas(userId, isAdmin = false) {
     }
 }
 
+/**
+ * Map of canonical asset → asset_class for the user's ideas. asset_class is a
+ * property of the *instrument*, not the individual idea, so one map keyed by asset
+ * is enough (two ideas on the same asset carry the same class). Live broker
+ * positions arrive with only a symbol, so this lets a caller stamp each position
+ * with the class that drives the market-hours gate — falling back to the symbol
+ * heuristic in market.service for assets with no idea (e.g. manually opened).
+ * Keyed by normSymbol so an idea's 'US-100' matches a position's 'US100'.
+ * @param {string} userId
+ * @returns {Promise<Record<string, string>>}  e.g. { NQ: 'futures', AAPL: 'stock' }
+ */
+async function getAssetClassMap(userId) {
+    try {
+        const db = await getDb()
+        const rows = await db.collection(COLLECTION)
+            .find({ userId, asset_class: { $ne: null } }, { projection: { asset: 1, asset_class: 1 } })
+            .toArray()
+        const map = {}
+        for (const r of rows) if (r.asset) map[normSymbol(r.asset)] = r.asset_class
+        return map
+    } catch (err) {
+        logger.warn(LOG, 'getAssetClassMap failed', err.message)
+        return {}
+    }
+}
+
 async function deleteIdea(id, userId, isAdmin = false) {
     try {
         const db = await getDb()
         const idea = await db.collection(COLLECTION).findOne({ id })
         if (!idea) return { ok: false, reason: 'not_found' }
         if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+
+        // Live on the broker (in position 'long'/'short', or fired and awaiting
+        // confirmation 'hit') — deleting would orphan a real position/order. Close it
+        // first. A 'resting' working order is fine to delete (we cancel it below).
+        if (LOCKED_DELETE_STATUSES.has(idea.status)) return { ok: false, reason: 'in_position' }
 
         // Pull any working resting entry off the broker before removing the idea, so
         // a deleted idea never leaves an order in the air. Best-effort; uses the

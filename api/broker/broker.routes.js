@@ -19,6 +19,8 @@
 import { Router }         from 'express'
 import jwt                from 'jsonwebtoken'
 import { brokerService }  from './broker.service.js'
+import { ideaService }    from '../trade-ideas/tradeIdeas.service.js'
+import { normSymbol }     from '../../services/brokerSymbol.service.js'
 import { requireAuth }    from '../../middleware/auth.middleware.js'
 import { logger }         from '../../services/logger.service.js'
 
@@ -158,8 +160,19 @@ brokerRoutes.get('/:type/account', requireAuth, async (req, res) => {
 
 brokerRoutes.get('/:type/positions', requireAuth, async (req, res) => {
     try {
-        const positions = await brokerService.getPositions(req.params.type, req.user._id)
-        res.json({ positions })
+        // Stamp each position with the idea-authored asset_class (when one exists for
+        // that symbol) so the client's market-hours gate is exact rather than relying
+        // on the symbol heuristic — which can't tell a forex pair from a stock. Falls
+        // back to null (→ heuristic) for positions with no matching idea.
+        const [positions, classMap] = await Promise.all([
+            brokerService.getPositions(req.params.type, req.user._id),
+            ideaService.getAssetClassMap(req.user._id),
+        ])
+        const enriched = positions.map(p => ({
+            ...p,
+            assetClass: p.assetClass ?? (p.symbol ? classMap[normSymbol(p.symbol)] ?? null : null),
+        }))
+        res.json({ positions: enriched })
     } catch (err) {
         logger.error(LOG, `getPositions (${req.params.type}):`, err.message)
         res.status(err.status ?? 500).json({ error: err.message })

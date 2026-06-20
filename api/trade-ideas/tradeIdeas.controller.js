@@ -56,6 +56,7 @@ export async function deleteTradeIdea(req, res) {
         if (!result.ok) {
             if (result.reason === 'not_found')   return res.status(404).send({ error: 'Idea not found' })
             if (result.reason === 'forbidden')   return res.status(403).send({ error: 'Forbidden' })
+            if (result.reason === 'in_position') return res.status(409).send({ error: 'Idea is live on the broker — close the position first', reason: 'in_position' })
             return res.status(500).send({ error: 'Failed to delete idea' })
         }
 
