@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs'
+import { readFileSync, statSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { callAnthropicWithTools } from '../providers/anthropic.provider.js'
@@ -9,9 +9,27 @@ import { normalizeTimeframe } from './timeframe.service.js'
 import { normalizeTreeNode, firstLeafTimeframe } from './conditionTree.service.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const BASE_SYSTEM_PROMPT = readFileSync(join(__dirname, '../trade_assistant_system_prompt.md'), 'utf-8')
+const PROMPT_PATH = join(__dirname, '../trade_assistant_system_prompt.md')
 
 const LOG = '[tradeAgent]'
+
+// Load the system prompt fresh when the file changes (mtime-gated), so prompt
+// edits take effect on the next request without a server restart. The read is
+// skipped when the file is unchanged, so the steady-state cost is one statSync.
+let _promptCache = { mtimeMs: 0, text: '' }
+function _baseSystemPrompt() {
+    try {
+        const { mtimeMs } = statSync(PROMPT_PATH)
+        if (mtimeMs !== _promptCache.mtimeMs) {
+            _promptCache = { mtimeMs, text: readFileSync(PROMPT_PATH, 'utf-8') }
+            logger.info(LOG, 'System prompt (re)loaded')
+        }
+    } catch (err) {
+        if (!_promptCache.text) throw err   // first load must succeed — surface it
+        logger.warn(LOG, `prompt reload failed, using cached copy: ${err.message}`)
+    }
+    return _promptCache.text
+}
 const MODEL = 'claude-sonnet-4-6'   // non-streaming chat() path only
 const MAX_RECENT_MESSAGES = 6
 
@@ -175,7 +193,7 @@ function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = []) {
         ? `\nCurrent pending trade (carry all set fields forward — only update what changed):\n${JSON.stringify(pt, null, 2)}`
         : ''
 
-    return `${BASE_SYSTEM_PROMPT}
+    return `${_baseSystemPrompt()}
 
 ---
 CONVERSATION CONTEXT:
