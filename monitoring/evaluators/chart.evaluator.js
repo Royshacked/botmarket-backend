@@ -140,3 +140,7 @@ function _buildStudies(condition) {
 
     return studies
 }
+
+// Exposed so the idea agent's get_chart tool can build the same indicator overlays
+// from a free-text indicator list. Pure function — no behaviour change here.
+export { _buildStudies as buildStudies }

@@ -82,7 +82,7 @@ export async function streamAnthropicWithTools({
             messages.push({ role: 'assistant', content: validBlocks })
             const results = await Promise.all(toolUseBlocks.map(async b => {
                 const handler = toolHandlers[b.name]
-                const content = handler ? String(await handler(b.input)) : ''
+                const content = handler ? _toToolResultContent(await handler(b.input)) : ''
                 return { type: 'tool_result', tool_use_id: b.id, content }
             }))
             messages.push({ role: 'user', content: results })
@@ -140,7 +140,7 @@ export async function callAnthropicWithTools({
             messages.push({ role: 'assistant', content: response.content })
             const results = await Promise.all(toolUseBlocks.map(async b => {
                 const handler = toolHandlers[b.name]
-                const content = handler ? String(await handler(b.input)) : ''
+                const content = handler ? _toToolResultContent(await handler(b.input)) : ''
                 return { type: 'tool_result', tool_use_id: b.id, content }
             }))
             messages.push({ role: 'user', content: results })
@@ -151,6 +151,17 @@ export async function callAnthropicWithTools({
     }
 
     throw new Error(`Anthropic tool loop exceeded maxContinuations (${maxContinuations})`)
+}
+
+// Allow tool handlers to return either a plain string or rich content blocks
+// (e.g. an image). Strings stay strings; arrays/objects pass through as-is so
+// the Anthropic API renders them as tool_result content blocks.
+function _toToolResultContent(ret) {
+    if (ret == null) return ''
+    if (typeof ret === 'string') return ret
+    if (Array.isArray(ret)) return ret          // already a list of content blocks
+    if (ret.type) return [ret]                  // single content block → wrap
+    return String(ret)
 }
 
 function _normalizeMessages(promptOrMessages) {

@@ -3,6 +3,7 @@ import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { resolveStreamFn } from './llmModels.js'
 import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote } from '../providers/yahoofinance.provider.js'
+import { getFundamentals } from '../providers/fmp.provider.js'
 import { logger }         from './logger.service.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
@@ -49,6 +50,15 @@ const TOOLS = [
             required: ['tickers'],
         },
     },
+    {
+        name: 'get_fundamentals',
+        description: 'Get company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B), quality (margins, ROE, debt/equity), and growth. Use this to qualify a candidate before including it — especially for multi-month/multi-year holds where fundamentals matter more than price action. ETFs return exposure/profile only (no company statements).',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
+            required: ['ticker'],
+        },
+    },
 ]
 
 const TOOL_HANDLERS = {
@@ -68,6 +78,10 @@ const TOOL_HANDLERS = {
         try { return await getCorrelations(tickers) }
         catch (err) { return `Could not compute correlations: ${err.message}` }
     },
+    get_fundamentals: async ({ ticker }) => {
+        try { return await getFundamentals(ticker) }
+        catch (err) { return `Could not fetch fundamentals for ${ticker}: ${err.message}` }
+    },
 }
 
 export const portfolioAgentService = { chatStream }
@@ -76,9 +90,18 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     const normalized   = _buildMessages(messages)
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
-    let systemPrompt = SYSTEM_PROMPT
-    if (ideaAccounts.length > 0)       systemPrompt += `\n\n${_buildAccountsSection(ideaAccounts)}`
-    if (portfolioId && portfolioIdeas.length > 0) systemPrompt += `\n\n${_buildPortfolioContext(portfolioId, portfolioIdeas)}`
+    // Stable base (cached) + volatile per-request sections (accounts, edit
+    // context). cache_control on the base lets Anthropic cache the
+    // tools+instructions prefix across turns; only the short tail varies. The
+    // OpenAI provider flattens this block array back to a plain string.
+    const dynamicSections = []
+    if (ideaAccounts.length > 0) dynamicSections.push(_buildAccountsSection(ideaAccounts))
+    if (portfolioId && portfolioIdeas.length > 0) dynamicSections.push(_buildPortfolioContext(portfolioId, portfolioIdeas))
+
+    const systemPrompt = [
+        { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+        ...(dynamicSections.length ? [{ type: 'text', text: dynamicSections.join('\n\n') }] : []),
+    ]
 
     logger.info(LOG, 'chatStream start', { messageCount: normalized.length, accountCount: ideaAccounts.length, editMode: !!portfolioId, model, provider })
 

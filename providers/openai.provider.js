@@ -202,8 +202,16 @@ function _toOpenAITools(tools = []) {
  * String prompt → [system, user]. Array → typed messages; inject system if missing.
  */
 
+// The agents may pass systemPrompt as Anthropic-style content blocks (used to
+// mark a cache_control breakpoint for prompt caching). OpenAI wants a plain
+// string, so flatten a block array to its concatenated text.
+function _systemPromptToText(sp) {
+    if (Array.isArray(sp)) return sp.map(b => (typeof b === 'string' ? b : b?.text || '')).join('\n\n')
+    return sp
+}
+
 function normalizeInput(promptOrMessages, systemPrompt) {
-    const resolvedSystemPrompt = systemPrompt ?? DEFAULT_SYSTEM_PROMPT
+    const resolvedSystemPrompt = _systemPromptToText(systemPrompt) ?? DEFAULT_SYSTEM_PROMPT
 
     const toTypedContent = (content, role) => {
         if (Array.isArray(content)) return content

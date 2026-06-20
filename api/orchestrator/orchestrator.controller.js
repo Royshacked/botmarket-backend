@@ -36,6 +36,7 @@ export async function streamOrchestration(req, res) {
             onToken:       (text)     => sendEvent('token',    { text }),
             onAsset:       (symbol)   => sendEvent('asset',    { symbol }),
             onInterval:    (interval) => sendEvent('interval', { interval }),
+            onChart:       (chart)    => sendEvent('chart',    chart),   // { symbol, timeframe, imageBase64 }
         })
 
         sendEvent('done', {

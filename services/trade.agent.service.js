@@ -4,6 +4,8 @@ import { dirname, join } from 'path'
 import { callAnthropicWithTools } from '../providers/anthropic.provider.js'
 import { resolveStreamFn } from './llmModels.js'
 import { getQuote, getTickerAggregates } from '../providers/yahoofinance.provider.js'
+import { fetchChartImage } from '../providers/chartImg.provider.js'
+import { buildStudies } from '../monitoring/evaluators/chart.evaluator.js'
 import { logger } from './logger.service.js'
 import { normalizeTimeframe } from './timeframe.service.js'
 import { normalizeTreeNode, firstLeafTimeframe } from './conditionTree.service.js'
@@ -65,6 +67,33 @@ const TOOLS = [
             required: ['ticker', 'timeframe'],
         },
     },
+    {
+        name: 'get_chart',
+        description: 'Render an actual TradingView candlestick chart IMAGE (with indicator overlays) and look at it directly, for VISUAL / structural analysis — chart patterns, trendlines, support/resistance, orderblocks, where price sits relative to moving averages. Renders native 4hr candles (unlike get_candles, which approximates 4hr from 1hr rows). For EXACT numeric levels (precise entry/stop/TP prices) prefer get_candles. ONLY call this once the conversation is about building or refining a concrete trade setup on a SINGLE asset — i.e. you are defining or validating an entry, stop, or take-profit, or confirming the market structure behind that setup. Do NOT call it while scanning / screening for stocks, comparing multiple tickers, or answering general questions about a stock; use get_quote / get_candles / web_search for that. One asset, setup stage only.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker: {
+                    type: 'string',
+                    description: 'Ticker symbol e.g. AAPL, NVDA, BTCUSDT',
+                },
+                timeframe: {
+                    type: 'string',
+                    enum: ['1hr', '4hr', 'day', 'week'],
+                    description: 'Chart timeframe. Native 4hr is supported here (unlike get_candles).',
+                },
+                indicators: {
+                    type: 'string',
+                    description: 'Optional free-text indicators to overlay, e.g. "rsi(14), ema(50), volume". Leave empty for sensible defaults (EMA 20/50).',
+                },
+                show_to_user: {
+                    type: 'boolean',
+                    description: 'Set true ONLY when the user would want to SEE this chart in the conversation — they asked to see it, or it directly illustrates the setup you are presenting. Leave false / omit for your own internal visual verification; an internal check must NOT appear in the chat.',
+                },
+            },
+            required: ['ticker', 'timeframe'],
+        },
+    },
 ]
 
 // candle count and Yahoo interval per requested timeframe
@@ -113,6 +142,57 @@ const TOOL_HANDLERS = {
     },
 }
 
+// ─── Chart image (vision) ─────────────────────────────────────────────────────
+// get_chart renders an actual TradingView chart and hands it to the LLM as an
+// image so the agent can do true visual TA (patterns, structure, indicator
+// geometry) instead of eyeballing OHLCV rows. Renders are cached briefly by
+// symbol+timeframe+studies — chart-img is paid / rate-limited and the agent may
+// request the same view repeatedly (e.g. internal check, then again to show it).
+const _chartCache  = new Map()   // key -> { at, png }
+const CHART_TTL_MS = 60 * 1000   // intraday views go stale fast; 60s is plenty within a chat
+
+async function _cachedChartImage(symbol, timeframe, studies) {
+    const key = `${symbol}|${timeframe}|${studies.map(s => s.name).join(',')}`
+    const hit = _chartCache.get(key)
+    if (hit && Date.now() - hit.at < CHART_TTL_MS) return hit.png
+    const png = await fetchChartImage(symbol, timeframe, studies)
+    if (_chartCache.size > 100) _chartCache.clear()
+    _chartCache.set(key, { at: Date.now(), png })
+    return png
+}
+
+// Build the per-request tool handler map. The static handlers (get_quote /
+// get_candles) are shared; get_chart closes over onChart so it can surface the
+// rendered chart to the user's chat when the agent flags show_to_user. Pass
+// onChart = null (non-stream path or non-Anthropic provider) to keep get_chart
+// model-only — the image still reaches the LLM, it just isn't shown to the user.
+function _buildToolHandlers(onChart) {
+    return {
+        ...TOOL_HANDLERS,
+        get_chart: async ({ ticker, timeframe, indicators = '', show_to_user = false }) => {
+            try {
+                const symbol  = String(ticker || '').toUpperCase()
+                const studies = buildStudies(indicators || '')
+                const png     = await _cachedChartImage(symbol, timeframe, studies)
+
+                if (show_to_user && typeof onChart === 'function') {
+                    try { onChart({ symbol, timeframe, imageBase64: png }) }
+                    catch (err) { logger.warn(LOG, 'onChart emit failed:', err.message) }
+                }
+
+                const studyNames = studies.map(s => s.name).join(', ') || 'EMA20/50'
+                return [
+                    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
+                    { type: 'text',  text: `${symbol} ${timeframe} TradingView chart (studies: ${studyNames}). Analyze the price structure visually.` },
+                ]
+            } catch (err) {
+                logger.warn(LOG, `get_chart failed for ${ticker}/${timeframe}:`, err.message)
+                return `Could not render chart for ${ticker}: ${err.message}. Use get_candles instead.`
+            }
+        },
+    }
+}
+
 export const tradeAgentService = {
     chat,
     chatStream,
@@ -133,7 +213,7 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
         promptOrMessages: builtMessages,
         systemPrompt,
         tools: TOOLS,
-        toolHandlers: TOOL_HANDLERS,
+        toolHandlers: _buildToolHandlers(null),   // non-stream: chart goes to the LLM only, not the UI
     })
 
     const { reply, updatedState, tradeIdea } = _parseResponse(raw, analysisState, userPrompt)
@@ -147,10 +227,17 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, onToken, onAsset, onInterval }) {
+async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, onToken, onAsset, onInterval, onChart }) {
     const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts)
     const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
+
+    // get_chart returns an image tool_result, which only the Anthropic provider
+    // renders — gate the tool (and its UI emit) to Anthropic so other providers
+    // never receive an image block they can't handle.
+    const isAnthropic = provider === 'anthropic'
+    const tools        = isAnthropic ? TOOLS : TOOLS.filter(t => t.name !== 'get_chart')
+    const toolHandlers = _buildToolHandlers(isAnthropic ? onChart : null)
 
     logger.info(LOG, 'chatStream start', {
         userPrompt,
@@ -164,8 +251,8 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
         model,
         promptOrMessages: builtMessages,
         systemPrompt,
-        tools: TOOLS,
-        toolHandlers: TOOL_HANDLERS,
+        tools,
+        toolHandlers,
         onToken,
         onAsset,
         onInterval,
@@ -193,12 +280,20 @@ function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = []) {
         ? `\nCurrent pending trade (carry all set fields forward — only update what changed):\n${JSON.stringify(pt, null, 2)}`
         : ''
 
-    return `${_baseSystemPrompt()}
-
----
+    // Split into a stable base (the instructions — byte-identical every request)
+    // and a volatile context tail. cache_control on the base lets Anthropic cache
+    // the tools+instructions prefix across turns (and across users), so only the
+    // short tail is reprocessed each request. Returned as system content blocks;
+    // the OpenAI provider flattens this array back to a plain string.
+    const dynamicContext = `---
 CONVERSATION CONTEXT:
 ${summary}
 Active asset: ${asset}${stateSection}${_buildBrokerSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts)}`
+
+    return [
+        { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: dynamicContext },
+    ]
 }
 
 function _buildBrokerSection(brokerContext) {
