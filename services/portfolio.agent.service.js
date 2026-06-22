@@ -3,7 +3,8 @@ import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { resolveStreamFn } from './llmModels.js'
 import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote } from '../providers/yahoofinance.provider.js'
-import { getFundamentals } from '../providers/fmp.provider.js'
+import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
+import { getSecFilings } from '../providers/sec.provider.js'
 import { logger }         from './logger.service.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
@@ -59,6 +60,28 @@ const TOOLS = [
             required: ['ticker'],
         },
     },
+    {
+        name: 'get_sec_filings',
+        description: "Primary-source due diligence: a company's latest SEC filings — 10-K (annual) and 10-Q (quarterly) statements, plus 8-K material events (item 2.02 = the earnings release) — with dates and links. Use it to verify the fundamentals story and check for material events before committing to a multi-month/multi-year hold. US filers only; most ETFs and foreign tickers aren't in EDGAR.",
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, FDX' } },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_earnings_calendar',
+        description: 'Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                from:    { type: 'string', description: 'start date YYYY-MM-DD' },
+                to:      { type: 'string', description: 'end date YYYY-MM-DD' },
+                symbols: { type: 'array', items: { type: 'string' }, description: 'optional — narrow to these tickers' },
+            },
+            required: ['from', 'to'],
+        },
+    },
 ]
 
 const TOOL_HANDLERS = {
@@ -82,6 +105,14 @@ const TOOL_HANDLERS = {
         try { return await getFundamentals(ticker) }
         catch (err) { return `Could not fetch fundamentals for ${ticker}: ${err.message}` }
     },
+    get_sec_filings: async ({ ticker }) => {
+        try { return await getSecFilings(ticker) }
+        catch (err) { return `Could not fetch SEC filings for ${ticker}: ${err.message}` }
+    },
+    get_earnings_calendar: async ({ from, to, symbols }) => {
+        try { return await getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []) }
+        catch (err) { return `Could not fetch earnings calendar: ${err.message}` }
+    },
 }
 
 export const portfolioAgentService = { chatStream }
@@ -94,7 +125,8 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     // context). cache_control on the base lets Anthropic cache the
     // tools+instructions prefix across turns; only the short tail varies. The
     // OpenAI provider flattens this block array back to a plain string.
-    const dynamicSections = []
+    const today = new Date().toISOString().slice(0, 10)
+    const dynamicSections = [`CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.`]
     if (ideaAccounts.length > 0) dynamicSections.push(_buildAccountsSection(ideaAccounts))
     if (portfolioId && portfolioIdeas.length > 0) dynamicSections.push(_buildPortfolioContext(portfolioId, portfolioIdeas))
 
