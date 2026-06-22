@@ -36,6 +36,13 @@ function _etWall(date = new Date()) {
     return new Date(date.toLocaleString('en-US', { timeZone: ET }))
 }
 
+/** Offset (ms) of a timezone from UTC at a given instant — negative west of UTC. */
+function _tzOffsetMs(date, tz) {
+    const asTz  = new Date(date.toLocaleString('en-US', { timeZone: tz }))
+    const asUtc = new Date(date.toLocaleString('en-US', { timeZone: 'UTC' }))
+    return asTz.getTime() - asUtc.getTime()
+}
+
 // Crypto base tickers whose fiat-quoted pairs (e.g. BTCUSD) are 24/7. A pair like
 // BTCUSD is otherwise indistinguishable from a forex pair (EURUSD) by shape alone,
 // so we recognise it by a known crypto base. Extend as brokers add instruments.
@@ -242,7 +249,31 @@ export function getMarketStatus(symbol, assetClass) {
     }
 }
 
+/**
+ * Epoch ms of the start of the current trading "day" for an asset — the boundary a
+ * cumulative-volume condition sums from (see [[project_intrabar_cumulative_volume]]).
+ *   • equity → today's RTH open, 09:30 ET (pre/post-market ignored for now).
+ *   • crypto / futures / forex → UTC midnight of the current UTC date.
+ * Futures use calendar midnight by design — this intentionally differs from the
+ * exchange's ~18:00 ET session reset.
+ * @param {string} symbol
+ * @param {string} [assetClass]
+ * @param {Date}   [date]
+ * @returns {number} epoch ms
+ */
+export function sessionStartMs(symbol, assetClass, date = new Date()) {
+    const session = _sessionForClass(assetClass) ?? _sessionForSymbol(symbol)
+    if (session === 'equity') {
+        const et  = _etWall(date)
+        const off = _tzOffsetMs(date, ET)   // ET→UTC offset (negative)
+        // 09:30 on the ET calendar date, expressed in UTC ms.
+        return Date.UTC(et.getFullYear(), et.getMonth(), et.getDate(), 9, 30) - off
+    }
+    // crypto / futures / forex → UTC midnight of the current UTC date.
+    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+}
+
 export const marketService = {
     isCrypto, isFutures, isMarketOpen, isFuturesOpen, isForexOpen, isAssetOpen,
-    nextMarketOpenMs, nextFuturesOpenMs, nextForexOpenMs, getMarketStatus,
+    nextMarketOpenMs, nextFuturesOpenMs, nextForexOpenMs, getMarketStatus, sessionStartMs,
 }

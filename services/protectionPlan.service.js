@@ -186,6 +186,10 @@ async function _leafBareLevel(leaf) {
     // value (indicator-vs-indicator) can't be a price level, so it can't be a touch.
     const parsed = await parseCondition(text)
     if (typeof parsed.value === 'string') return null
+    // Defense-in-depth: only a PRICE subject can rest at the broker as a price level.
+    // A non-price subject (volume, an indicator) parses to a finite number too, so
+    // guard against a mis-typed leaf turning e.g. "volume > 2000000" into a $2M order.
+    if (parsed.subject && !['close', 'open', 'high', 'low'].includes(parsed.subject)) return null
     const level = Number(parsed.value)
     return Number.isFinite(level) ? level : null
 }

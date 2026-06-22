@@ -23,13 +23,14 @@ import { evaluateIndicator }   from './evaluators/indicator.evaluator.js'
 import { evaluateChart }       from './evaluators/chart.evaluator.js'
 import { evaluateNews }        from './evaluators/news.evaluator.js'
 import { evaluateTime }        from './evaluators/time.evaluator.js'
+import { evaluateVolume }      from './evaluators/volume.evaluator.js'
 import { logger }              from '../services/logger.service.js'
 
 const LOG = '[monitor.orchestrator]'
 
 // Evaluation cost — determines gate order for AND/OR chains (cheapest first).
-// touch/structured/time are cheap local math; indicator/news/chart need model reads.
-const COST = { touch: 0, structured: 0, time: 0, indicator: 1, news: 2, chart: 3 }
+// touch/structured/time/volume are cheap local math; indicator/news/chart need model reads.
+const COST = { touch: 0, structured: 0, time: 0, volume: 0, indicator: 1, news: 2, chart: 3 }
 
 /**
  * Evaluate a condition tree recursively.
@@ -43,14 +44,15 @@ const COST = { touch: 0, structured: 0, time: 0, indicator: 1, news: 2, chart: 3
  * @param {string}        defaultSymbol  The traded asset — used when a leaf has no explicit symbol
  * @param {number|null}   floorAt        ms timestamp; only events at/after this count (entry: entryFloorAt ?? savedAt)
  * @param {string[]}      priorFindings  structured conditions that passed earlier in the same AND gate
+ * @param {object|null}   ctx            cumulative-volume context { sessionStartMs, minuteCandles } (see volume.evaluator)
  * @returns {Promise<{ triggered: boolean, which?: string, finding?: string, triggerAt?: number|null }>}
  */
-export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = null, priorFindings = [], out = null) {
+export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = null, priorFindings = [], out = null, ctx = null) {
     if (!node || typeof node !== 'object') return { triggered: false }
 
     // ── Leaf node ────────────────────────────────────────────────────────────
     if (typeof node.condition === 'string') {
-        const result = await _evalOne(node, symbolMap, defaultSymbol, floorAt, priorFindings)
+        const result = await _evalOne(node, symbolMap, defaultSymbol, floorAt, priorFindings, ctx)
         logger.info(LOG, `  ${result.pass ? '✓' : '✗'} [${node.type ?? 'structured'}] "${node.condition?.slice(0, 60)}"${node.symbol ? ` (${node.symbol})` : ''}`)
         // Record this leaf's evaluated state so the UI can mark met conditions. Only
         // leaves actually reached are recorded (short-circuited siblings are not).
@@ -76,7 +78,7 @@ export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = nul
         // (OR branches are independent — no structured condition "caused" the chart).
         const sortedOR = [...children].sort((a, b) => _nodeCost(a) - _nodeCost(b))
         for (const child of sortedOR) {
-            const result = await evaluateTree(child, symbolMap, defaultSymbol, floorAt, [], out)
+            const result = await evaluateTree(child, symbolMap, defaultSymbol, floorAt, [], out, ctx)
             if (result.triggered) {
                 logger.info(LOG, `  ✅ OR group triggered: "${(result.which ?? '').slice(0, 60)}"`)
                 return result
@@ -94,7 +96,7 @@ export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = nul
     const accumulated = [...priorFindings]
     let triggerAt = null
     for (let i = 0; i < sorted.length; i++) {
-        const result = await evaluateTree(sorted[i], symbolMap, defaultSymbol, floorAt, accumulated, out)
+        const result = await evaluateTree(sorted[i], symbolMap, defaultSymbol, floorAt, accumulated, out, ctx)
         if (!result.triggered) {
             logger.info(LOG, `  ✗ AND group failed at child ${i + 1}/${sorted.length}`)
             return { triggered: false }
@@ -200,7 +202,7 @@ async function _evalOR(conditions, symbolMap, defaultSymbol, floorAt) {
 
 // ─── Single condition evaluation ──────────────────────────────────────────────
 
-async function _evalOne(cond, symbolMap, defaultSymbol, floorAt = null, priorFindings = []) {
+async function _evalOne(cond, symbolMap, defaultSymbol, floorAt = null, priorFindings = [], ctx = null) {
     const conditionText = typeof cond === 'string' ? cond : cond?.condition
     const type          = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'structured')
 
@@ -249,6 +251,17 @@ async function _evalOne(cond, symbolMap, defaultSymbol, floorAt = null, priorFin
         if (type === 'news') {
             const pass = await evaluateNews(conditionText, leafSymbol)
             return { pass, condition: conditionText, triggerAt: pass ? Date.now() : null }
+        }
+
+        if (type === 'volume') {
+            // bar mode uses the phase candles; cumulative mode needs 1-min bars +
+            // a session start, both carried on ctx (supplied by the monitor).
+            const cumulative = cond?.mode === 'cumulative'
+            const volCandles = cumulative
+                ? (ctx?.minuteCandles?.[leafSymbol] ?? ctx?.minuteCandles?.[defaultSymbol] ?? candles)
+                : candles
+            const { pass, triggerAt } = await evaluateVolume(cond, volCandles, ctx ?? {}, floorAt)
+            return { pass, condition: conditionText, triggerAt: triggerAt ?? null }
         }
 
         // structured (default) — precise rising-edge timestamp since the floor

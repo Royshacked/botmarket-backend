@@ -26,10 +26,10 @@ import { getDb }                                from '../providers/mongodb.provi
 import { getCandles }                           from '../providers/ohlcv.provider.js'
 import { evaluateTree, evaluateConditions }     from './monitor.orchestrator.js'
 import { logger }                               from '../services/logger.service.js'
-import { isAssetOpen }                          from '../services/market.service.js'
+import { isAssetOpen, sessionStartMs }          from '../services/market.service.js'
 import { buildOrderPlanForIdea }                from '../services/orderPlan.service.js'
 import { getCheckGap, isIntradayTimeframe }     from '../services/timeframe.service.js'
-import { collectSymbols, firstLeaf }            from '../services/conditionTree.service.js'
+import { collectSymbols, firstLeaf, extractLeaves } from '../services/conditionTree.service.js'
 import { brokerService }                        from '../api/broker/broker.service.js'
 
 const LOG        = '[monitor.service]'
@@ -153,18 +153,29 @@ async function _checkIdea(db, idea) {
     // Re-check cadence is driven by the *fastest* timeframe relevant to the
     // current phase. A 5min stop on a position entered from a daily chart must
     // still be checked ~every 5min, not every 4h.
-    const gap = isPosition
+    let gap = isPosition
         ? Math.min(getCheckGap(stopTf), getCheckGap(tpTf), getCheckGap(entryTf))
         : getCheckGap(entryTf)
+
+    // A cumulative-volume leaf is evaluated intrabar — poll ~1-min regardless of the
+    // phase timeframe so the running session total is caught near-live.
+    const volPhases = isPosition
+        ? [[idea.stop_condition_tree, idea.stop_conditions], [idea.tp_condition_tree, idea.tp_conditions]]
+        : [[idea.entry_condition_tree, idea.entry_conditions]]
+    const hasCumulativeVolume = volPhases.some(([t, f]) => _hasCumulativeVolume(t, f))
+    if (hasCumulativeVolume) gap = Math.min(gap, 60_000)
 
     // Skip intraday ideas when their market is closed — there are no new bars and
     // evaluating would waste API calls. isAssetOpen handles each class: crypto is
     // 24/7, futures near-24/5, equities only in RTH. Daily+ timeframes still run.
+    // A cumulative-volume leaf counts as intraday for this gate even on a daily
+    // timeframe: the session total only accumulates while the market is open, so we
+    // must NOT keep summing (or fire on the completed day's total) after the bell.
     const fastestTf = isPosition
         ? [stopTf, tpTf, entryTf].reduce((a, b) => getCheckGap(a) <= getCheckGap(b) ? a : b)
         : entryTf
-    if (isIntradayTimeframe(fastestTf) && !isAssetOpen(asset, idea.asset_class)) {
-        logger.info(LOG, `[${id}] Market closed — skipping intraday check (${asset}/${fastestTf})`)
+    if ((isIntradayTimeframe(fastestTf) || hasCumulativeVolume) && !isAssetOpen(asset, idea.asset_class)) {
+        logger.info(LOG, `[${id}] Market closed — skipping ${hasCumulativeVolume ? 'cumulative-volume' : 'intraday'} check (${asset}/${fastestTf})`)
         return
     }
 
@@ -206,10 +217,10 @@ async function _checkIdea(db, idea) {
     }
 }
 
-async function _fetchCandles(id, asset, tf) {
+async function _fetchCandles(id, asset, tf, count = CANDLE_COUNT) {
     let candles
     try {
-        candles = await getCandles(asset, tf, CANDLE_COUNT)
+        candles = await getCandles(asset, tf, count)
     } catch (err) {
         logger.error(LOG, `Candle fetch error for ${asset}/${tf}:`, err.message)
         return null
@@ -219,6 +230,38 @@ async function _fetchCandles(id, asset, tf) {
         return null
     }
     return candles
+}
+
+// ─── Cumulative-volume context ─────────────────────────────────────────────────
+
+/**
+ * Does a phase's conditions contain a `volume` leaf in cumulative mode? Such a leaf
+ * is evaluated intrabar against 1-min bars summed from the session start, so it
+ * drives both a faster check cadence and a separate 1-min fetch.
+ */
+function _hasCumulativeVolume(tree, flat) {
+    const leaves = extractLeaves(tree)
+    const all    = leaves.length ? leaves : (Array.isArray(flat) ? flat : [])
+    return all.some(l => l && typeof l === 'object' && l.type === 'volume' && l.mode === 'cumulative')
+}
+
+/**
+ * Build the ctx a cumulative-volume leaf needs: the session-start boundary and a
+ * 1-min candle series long enough to cover from that boundary to now (crypto can run
+ * ~1440 bars/day, so we size the fetch to the elapsed session, capped). Returns null
+ * when the phase has no cumulative-volume leaf (the common case — no extra fetch).
+ */
+async function _buildVolumeCtx(id, asset, assetClass, tree, flat) {
+    if (!_hasCumulativeVolume(tree, flat)) return null
+    const start        = sessionStartMs(asset, assetClass)
+    const minutesSince = Math.ceil((Date.now() - start) / 60_000)
+    const count        = Math.min(1500, Math.max(5, minutesSince + 5))
+    const minute       = await _fetchCandles(id, asset, '1min', count)
+    if (!minute) {
+        logger.warn(LOG, `[${id}] cumulative-volume: no 1-min candles for ${asset} — leaf will read false this tick`)
+        return { sessionStartMs: start, minuteCandles: {} }
+    }
+    return { sessionStartMs: start, minuteCandles: { [asset]: minute } }
 }
 
 function _logCheck(id, asset, status, tf, candles) {
@@ -256,6 +299,7 @@ async function _checkEntry(db, idea, candles) {
 
     const crossSyms = collectSymbols(idea.entry_condition_tree, idea.entry_conditions)
     const symbolMap = await _buildSymbolMap(id, asset, candles, entryTf, crossSyms)
+    const volCtx    = await _buildVolumeCtx(id, asset, idea.asset_class, idea.entry_condition_tree, idea.entry_conditions)
 
     // Entry detection floor: only events at/after the idea's creation count
     // (entryFloorAt is set forward by the user's "reset window" action; otherwise
@@ -270,7 +314,7 @@ async function _checkEntry(db, idea, candles) {
     if (idea.entry_condition_tree) {
         // New tree format
         logger.info(LOG, `[${id}] Evaluating entry condition tree`)
-        ;({ triggered, triggerAt } = await evaluateTree(idea.entry_condition_tree, symbolMap, asset, floorAt, [], entryStates))
+        ;({ triggered, triggerAt } = await evaluateTree(idea.entry_condition_tree, symbolMap, asset, floorAt, [], entryStates, volCtx))
     } else if (Array.isArray(idea.entry_conditions) && idea.entry_conditions.length > 0) {
         // Legacy flat-array format
         logger.info(LOG, `[${id}] Evaluating entry conditions (legacy flat format)`)
@@ -380,9 +424,10 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
     const crossSyms  = collectSymbols(tree, conditions)
     const symbolMap  = await _buildSymbolMap(id, asset, candles, timeframe, crossSyms)
     const floorAt    = idea.activatedAt ?? null
+    const volCtx     = await _buildVolumeCtx(id, asset, idea.asset_class, tree, conditions)
 
     if (residual) {
-        return _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji })
+        return _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji, volCtx })
     }
 
     let triggered = false
@@ -390,7 +435,7 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
     const states = []   // per-leaf evaluated state → UI met marks
     if (tree) {
         logger.info(LOG, `[${id}] Evaluating ${reason} condition tree`)
-        ;({ triggered, which } = await evaluateTree(tree, symbolMap, asset, floorAt, [], states))
+        ;({ triggered, which } = await evaluateTree(tree, symbolMap, asset, floorAt, [], states, volCtx))
     } else if (Array.isArray(conditions) && conditions.length > 0) {
         const logic = idea[`${phase}_logic`] ?? 'OR'
         ;({ triggered, which } = await evaluateConditions(conditions, logic, symbolMap, asset, floorAt))
@@ -415,7 +460,7 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
  * closes just that slice. Fired children are remembered (firedExits) so a slice is
  * never closed twice across ticks.
  */
-async function _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji }) {
+async function _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji, volCtx }) {
     const children = Array.isArray(residual.children) ? residual.children : []
     const fired    = new Set(idea.firedExits ?? [])
     let any = false
@@ -425,7 +470,7 @@ async function _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, 
         if (fired.has(tag)) continue
 
         const child = children[i]
-        const { triggered, which } = await evaluateTree(child, symbolMap, asset, floorAt)
+        const { triggered, which } = await evaluateTree(child, symbolMap, asset, floorAt, [], null, volCtx)
         if (!triggered) continue
 
         const qty = Number(child.quantity) || null

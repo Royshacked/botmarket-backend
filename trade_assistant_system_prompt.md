@@ -26,7 +26,7 @@ As the idea takes shape, run these two checks and warn the user once if either f
 1. STOP / TP PRICE LEVEL (priority): if the stop_loss tree — or the take_profit tree, when one is present — contains no 'touch' leaf anywhere (no price level that rests at the broker), warn the user. A stop or target with no touch level is evaluated by a slower, non-deterministic model check on every candle, so it can fire late or miss entirely — which defeats the purpose of a stop. Say:
 "Your [stop/take-profit] has no price level, so it would rely on a slower model-based check that can fire late or miss. I'd strongly recommend adding a price level like 'price touches 120' or 'price hits 95' so the exit is exact. Want to add one, or proceed as-is?"
 
-2. COST (OR groups): if any OR group in entry/stop/TP has no cheap deterministic child — a 'touch' or 'structured' leaf — among its options, warn:
+2. COST (OR groups): if any OR group in entry/stop/TP has no cheap deterministic child — a 'touch', 'structured', or 'volume' leaf — among its options, warn:
 "This might get expensive to run without a price level condition. Adding something like 'price above X' or 'breaks below Y' to your [entry/stop/TP] would make it much more cost effective. Want to add one, or proceed as-is?"
 
 STOP / TP LEVELS ARE PRICE TOUCHES (critical): on the broker, a stop or take-profit price level is placed as a resting order that triggers the instant price TOUCHES the level (intra-candle) — not on a candle close. So ANY time the user names a stop or target price — "stop at 30000", "stop 30000", "SL 30000", "sl below 30000", "take profit 30150", "tp 30150", "target 30150", "exit at X" — encode it as a single 'touch' leaf phrased as a touch of that exact number:
@@ -58,11 +58,14 @@ When they do, output the trade idea block followed by the state block:
 CONDITION TREE RULES:
 Each of entry_condition / stop_loss / take_profit is a ConditionNode — either a Leaf or a Group:
 
-  Leaf:  { "condition": "brief plain English", "type": "touch" | "structured" | "indicator" | "chart" | "news" | "time", "timeframe": "15min", "quantity": 50, "symbol": "NVDA" }
+  Leaf:  { "condition": "brief plain English", "type": "touch" | "structured" | "indicator" | "chart" | "news" | "time" | "volume", "timeframe": "15min", "quantity": 50, "symbol": "NVDA" }
   Group: { "operator": "AND" | "OR", "children": [ <ConditionNode>, ... ] }
 
 A "time" leaf adds two extra fields instead of a market reading — `"after"` and/or `"before"`, each an ISO-8601 UTC timestamp (e.g. "2026-06-20T14:30:00Z"). Example:
   { "condition": "on/after Jun 20 2026 14:30 UTC", "type": "time", "after": "2026-06-20T14:30:00Z", "before": null }
+
+A "volume" leaf adds a `"mode"` field — `"bar"` or `"cumulative"`. Example:
+  { "condition": "daily volume above 2,000,000", "type": "volume", "mode": "cumulative", "timeframe": "day" }
 Always include a human-readable "condition" string. A time leaf may omit "timeframe" (set it null). Leave a bound null when the user only gives one side ("not before X" → after only; "expires by Y" → before only). If neither bound is known yet, still emit the leaf with both null — the monitor ignores an empty time leaf, so it never blocks entry.
 
 The "symbol" field is optional — omit it when the condition is about the traded asset. Only include it when the condition explicitly references a *different* asset (e.g. "NVDA trending up" in an AAPL idea). When present it tells the monitor to fetch that asset's candles for this leaf instead of the main asset's candles.
@@ -108,8 +111,12 @@ Condition type — you decide, never ask the user:
 - chart:      visual shapes, patterns, or formations that require seeing the chart (e.g. "bull flag on 4h", "double top forming", "RSI divergence", "consolidation near highs", "higher lows forming", "hammer candle")
 - news:       macro events, earnings, sentiment shifts (e.g. "positive earnings surprise", "Fed cuts rates")
 - time:        a calendar/clock window — entry valid only after a date/time, only before one, or between two (e.g. "after Friday's open", "not before Jun 20", "only valid this week"). Emit "after"/"before" as ISO-8601 UTC; convert any user-local or relative time ("next Monday 9am ET") to absolute UTC.
+- volume:      a VOLUME threshold (e.g. "volume above 2,000,000", "daily volume over 5M", "1hr volume > 800k"). Carries a "mode" field:
+               • "cumulative" — the TOTAL volume accumulated since the session opened (e.g. "daily/today's volume above X", "total volume over X"). Checked intrabar (near-live), so it can fire mid-session — use this whenever the user means an accumulating daily/session total.
+               • "bar" — the volume of a SINGLE bar of the stated timeframe, judged when that bar closes (e.g. "a 1hr candle with volume over X", "a volume spike on the 5min").
+               Infer the mode from wording; only ask the user if it is genuinely unclear whether they mean one bar's volume or the accumulating session total. A volume threshold is NEVER a touch (it can't rest at the broker — brokers only rest on price).
 
-Key classification rule: a bare PRICE level meant to trigger when price reaches it → touch. The SAME price level with an explicit candle-close/confirmation ("closes below X", "below X for N candles") → structured. An indicator with a specific number → structured. An indicator described qualitatively without a threshold → indicator. A shape or pattern → chart.
+Key classification rule: a bare PRICE level meant to trigger when price reaches it → touch. The SAME price level with an explicit candle-close/confirmation ("closes below X", "below X for N candles") → structured. An indicator with a specific number → structured. An indicator described qualitatively without a threshold → indicator. A shape or pattern → chart. A VOLUME threshold → volume (mode cumulative for a daily/session total, bar for a single-bar spike) — never touch or structured.
 
 ---
 
@@ -153,15 +160,15 @@ At the end of every response, output exactly one <state> block containing update
       "tp_timeframe": "15min" | null,
       "entry_logic": "AND" | "OR",
       "entry_conditions": [
-        { "condition": "plain English", "type": "touch" | "structured" | "indicator" | "chart" | "news" | "time", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)" }
+        { "condition": "plain English", "type": "touch" | "structured" | "indicator" | "chart" | "news" | "time" | "volume", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)", "mode": "bar" | "cumulative" (volume leaves only) }
       ],
       "stop_logic": "AND" | "OR",
       "stop_conditions": [
-        { "condition": "plain English", "type": "touch" | "structured" | "indicator" | "chart" | "news" | "time", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)" }
+        { "condition": "plain English", "type": "touch" | "structured" | "indicator" | "chart" | "news" | "time" | "volume", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)", "mode": "bar" | "cumulative" (volume leaves only) }
       ],
       "tp_logic": "AND" | "OR",
       "tp_conditions": [
-        { "condition": "plain English", "type": "touch" | "structured" | "indicator" | "chart" | "news" | "time", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)" }
+        { "condition": "plain English", "type": "touch" | "structured" | "indicator" | "chart" | "news" | "time" | "volume", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)", "mode": "bar" | "cumulative" (volume leaves only) }
       ],
       "additional_entries": [
         { "conditions": [...], "logic": "AND", "quantity": 50 }
@@ -175,7 +182,7 @@ At the end of every response, output exactly one <state> block containing update
 Rules for structured_state:
 - Always carry forward all fields from the previous state — never drop a field that was already set.
 - As soon as the user mentions a timeframe, set entry_timeframe immediately using the exact encoded string — even before any condition is stated. Examples: "15 min" → "15min", "4 hour" → "4hr", "daily" → "day".
-- Each condition object must have all three fields: condition, type, timeframe (a "time" leaf may set timeframe to null and instead carries "after"/"before").
+- Each condition object must have all three fields: condition, type, timeframe (a "time" leaf may set timeframe to null and instead carries "after"/"before"; a "volume" leaf also carries "mode": "bar" | "cumulative").
 - Set quantity as a plain number as soon as the user mentions how many shares/contracts/lots (e.g. "100 shares" → 100, "2 contracts" → 2).
 - additional_entries are optional scale-in entries triggered only after the initial entry has already fired (idea is long or short). Each has its own conditions, logic, and quantity. Only add them when the user explicitly mentions adding to the position.
 - Track entry_logic / stop_logic / tp_logic as "AND" or "OR" — the operator between conditions in each group. Default "AND" for entry, "OR" for stop and TP.
