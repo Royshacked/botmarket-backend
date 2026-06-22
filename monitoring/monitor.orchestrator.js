@@ -18,6 +18,7 @@
 
 import { parseCondition }      from './parsers/condition.parser.js'
 import { evaluate }            from './evaluators/structured.evaluator.js'
+import { evaluateTouch }       from './evaluators/touch.evaluator.js'
 import { evaluateIndicator }   from './evaluators/indicator.evaluator.js'
 import { evaluateChart }       from './evaluators/chart.evaluator.js'
 import { evaluateNews }        from './evaluators/news.evaluator.js'
@@ -26,9 +27,9 @@ import { logger }              from '../services/logger.service.js'
 
 const LOG = '[monitor.orchestrator]'
 
-// Evaluation cost — determines gate order for AND/OR chains (cheapest first)
-// 'visual' kept as legacy alias for 'indicator'; 'time' is a pure wall-clock check
-const COST = { structured: 0, time: 0, indicator: 1, visual: 1, news: 2, chart: 3 }
+// Evaluation cost — determines gate order for AND/OR chains (cheapest first).
+// touch/structured/time are cheap local math; indicator/news/chart need model reads.
+const COST = { touch: 0, structured: 0, time: 0, indicator: 1, news: 2, chart: 3 }
 
 /**
  * Evaluate a condition tree recursively.
@@ -54,11 +55,13 @@ export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = nul
         // Record this leaf's evaluated state so the UI can mark met conditions. Only
         // leaves actually reached are recorded (short-circuited siblings are not).
         if (out) out.push({ key: leafStateKey(node), pass: !!result.pass, at: result.pass ? (result.triggerAt ?? Date.now()) : null })
-        const isStructured = !node.type || node.type === 'structured'
+        // Price findings (structured comparisons + touches) feed an AND group's chart
+        // node as context for what already happened before it.
+        const isPriceLeaf = !node.type || node.type === 'structured' || node.type === 'touch'
         return {
             triggered: result.pass,
             which:     node.condition,
-            finding:   isStructured && result.pass ? node.condition : null,
+            finding:   isPriceLeaf && result.pass ? node.condition : null,
             triggerAt: result.triggerAt ?? null,
         }
     }
@@ -226,7 +229,14 @@ async function _evalOne(cond, symbolMap, defaultSymbol, floorAt = null, priorFin
             return { pass, condition: conditionText, triggerAt: pass ? Date.now() : null }
         }
 
-        if (type === 'indicator' || type === 'visual') {
+        if (type === 'touch') {
+            // Intra-candle price level — precise trigger candle, like structured.
+            const parsed = await parseCondition(conditionText)
+            const { pass, triggerAt } = evaluateTouch(parsed, candles, floorAt)
+            return { pass, condition: conditionText, triggerAt: triggerAt ?? null }
+        }
+
+        if (type === 'indicator') {
             const pass = await evaluateIndicator(conditionText, candles)
             return { pass, condition: conditionText, triggerAt: pass ? Date.now() : null }
         }

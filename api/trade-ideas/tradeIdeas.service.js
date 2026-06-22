@@ -1,6 +1,7 @@
 import { getDb }           from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { monitorService }  from '../../monitoring/monitor.service.js'
+import { executionReconciler } from '../../monitoring/execution.reconciler.js'
 import { brokerService }   from '../broker/broker.service.js'
 import { buildOrderPlanForIdea, resolveUserAccounts } from '../../services/orderPlan.service.js'
 import { routeExits, currentReferencePrice, detectNativeEntryLevel } from '../../services/protectionPlan.service.js'
@@ -11,11 +12,12 @@ import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } 
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
 
-// Statuses where the idea is live on the broker — deleting it would orphan a real
-// position ('long'/'short') or a fired order awaiting confirmation ('hit'). Delete is
-// rejected for these; the user must close the position first. Mirrors the client's
-// isDeleteLocked() so the UI affordance and the API agree.
-const LOCKED_DELETE_STATUSES = new Set(['hit', 'long', 'short'])
+// Statuses where the idea holds a real broker POSITION — deleting it would orphan
+// that position, so delete is rejected; the user must close it first. A 'hit' idea
+// has only a parked order plan (nothing placed at the broker until it's confirmed →
+// long/short, or rested → resting), so it IS deletable — the client gates that on a
+// confirmation. Mirrors the client's isDeleteLocked() so UI affordance and API agree.
+const LOCKED_DELETE_STATUSES = new Set(['long', 'short'])
 
 const VALID_STATUSES = new Set(['waiting', 'looking', 'resting', 'hit', 'long', 'short', 'closed'])
 
@@ -235,9 +237,10 @@ async function deleteIdea(id, userId, isAdmin = false) {
         if (!idea) return { ok: false, reason: 'not_found' }
         if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
 
-        // Live on the broker (in position 'long'/'short', or fired and awaiting
-        // confirmation 'hit') — deleting would orphan a real position/order. Close it
-        // first. A 'resting' working order is fine to delete (we cancel it below).
+        // Holds a real broker position ('long'/'short') — deleting would orphan it, so
+        // refuse; the user must close it first. A 'resting' working order is fine to
+        // delete (we cancel it below); a 'hit' idea has only a parked plan, nothing at
+        // the broker (the client confirms intent before sending the delete).
         if (LOCKED_DELETE_STATUSES.has(idea.status)) return { ok: false, reason: 'in_position' }
 
         // Pull any working resting entry off the broker before removing the idea, so
@@ -329,16 +332,15 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
 
                 const route = await routeExits(merged)
                 const { exitOrders, referenceQuote } = await _armExitsInPosition(merged, route)
-                const totalQty = Number(merged.quantity) || 0
 
                 patch.exitOrders = exitOrders
                 patch.nativeExit = {
-                    stop: route.stop.single != null ? [{ level: route.stop.single, quantity: totalQty }] : route.stop.nativeOrders,
-                    tp:   route.tp.single   != null ? [{ level: route.tp.single,   quantity: totalQty }] : route.tp.nativeOrders,
+                    stop: route.stop.nativeOrders,
+                    tp:   route.tp.nativeOrders,
                     referenceQuote: referenceQuote ?? null,
                 }
-                // Bare-price legs now rest as CLOSING orders at the broker → not monitored.
-                // Only residual (non-price) leaves stay on the monitor.
+                // Touch levels now rest as CLOSING orders at the broker → not monitored.
+                // Only residual (non-touch) leaves stay on the monitor.
                 patch.monitorStop     = route.stop.monitorTree != null
                 patch.monitorTp       = route.tp.monitorTree   != null
                 patch.stopMonitorTree = route.stop.monitorTree
@@ -430,45 +432,23 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
         // so re-resolve and persist it rather than trust the stored value.
         if (plan[0]?.broker) idea.brokerSymbol = toBrokerSymbol(plan[0].broker, idea.asset)
 
-        // Decide which exits can ride on the broker's native SL/TP (bare price
-        // levels) vs stay on the software monitor. The price levels are
-        // broker-agnostic; we attach them only to brokers that can protect
-        // natively, and remember per placed order whether it covered stop / TP.
-        // Route each exit leg: a lone bare price level → attached SL/TP (here);
-        // a multi-level leg's price touches → native orders placed on position-open;
-        // its non-price leaves → the software monitor. See routeExits().
+        // Route each exit leg: `touch` levels become positionId closing orders placed
+        // right after the entry opens (see below); the residual non-touch leaves stay
+        // on the software monitor. No SL/TP is attached to the entry order — touches
+        // rest as their own broker orders (reliable on a hedging account). See routeExits().
         const route = await routeExits(idea)
-        let refPrice = null
-        if (route.stop.single != null || route.tp.single != null) {
-            const anyMarket = plan.some(o => (o.type ?? idea.type ?? 'market') === 'market')
-            if (anyMarket) refPrice = await currentReferencePrice(idea.asset, _refTimeframe(idea))
-        }
 
         const results      = []
         const brokerOrders = []   // linkage the execution reconciler matches closes against
-        const protections  = []   // { stopNative, tpNative } per successfully placed order
         for (const order of plan) {
             const type = toExecType(order.type)
             // brokerSymbol is the broker's tradable name (resolved at fork time); fall
             // back to the canonical asset for pre-fork ideas / non-aliased instruments.
             const brokerOrder = { symbol: idea.brokerSymbol ?? idea.asset, direction: idea.direction, quantity: order.quantity, type }
-            let stopNative = false, tpNative = false
 
             try {
-                // Attach a lone bare-price SL/TP only when the broker supports it. A native
-                // SL/TP on a MARKET order also needs a reference price; skip (leave to the
-                // monitor) if we couldn't fetch one rather than risk a malformed order.
-                // Multi-level exits don't attach here — they're placed on open as orders.
-                const isMarket  = type === 'market'
-                const canAttach = !!brokerService.capabilities(order.broker)?.nativeProtection && (!isMarket || refPrice != null)
-                if (canAttach) {
-                    if (route.stop.single != null) { brokerOrder.stopLoss   = route.stop.single; stopNative = true }
-                    if (route.tp.single   != null) { brokerOrder.takeProfit = route.tp.single;   tpNative   = true }
-                    if ((stopNative || tpNative) && isMarket) brokerOrder.referencePrice = refPrice
-                }
-
                 const result = await brokerService.placeOrder(order.broker, userId, order.accountId, brokerOrder)
-                logger.info(LOG, 'Order placed', { id, broker: order.broker, accountId: order.accountId, direction: idea.direction, quantity: order.quantity, orderId: result?.orderId, stopNative, tpNative })
+                logger.info(LOG, 'Order placed', { id, broker: order.broker, accountId: order.accountId, direction: idea.direction, quantity: order.quantity, orderId: result?.orderId })
                 results.push({ accountId: order.accountId, ok: true, orderId: result?.orderId ?? null })
                 brokerOrders.push({
                     broker:     order.broker,
@@ -479,7 +459,6 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
                     positionId: result?.positionId ?? null,   // backfilled on the fill event
                     quantity:   order.quantity,               // per-account entry qty (idea units) for exit scaling
                 })
-                protections.push({ stopNative, tpNative })
             } catch (err) {
                 logger.error(LOG, 'Order failed', { id, broker: order.broker, accountId: order.accountId, error: err.message })
                 results.push({ accountId: order.accountId, ok: false, error: err.message })
@@ -494,16 +473,27 @@ async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
         const set    = {
             status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed', brokerOrders,
             brokerSymbol: idea.brokerSymbol,   // persist the self-healed symbol for exits/feed/display
-            ...(await _exitFields(idea, route, protections)),
+            ...(await _exitFields(idea, route)),
         }
-        if (route.stop.single != null || route.tp.single != null) {
-            set.nativeProtection = { stop: route.stop.single, tp: route.tp.single }
-        }
-        const updated = await db.collection(COLLECTION).findOneAndUpdate(
+        let updated = await db.collection(COLLECTION).findOneAndUpdate(
             { id },
             { $set: set },
             { returnDocument: 'after' }
         )
+
+        // Place the touch exit levels as positionId CLOSING orders now. cTrader returns
+        // the positionId synchronously at placement, so the position is already open and
+        // linked — the reconciler's open/fill handler would short-circuit on the pre-
+        // stamped positionId and never place them. placeExits is idempotent
+        // (exitPlacedAccounts), so a later execution event can't double-place. Skip
+        // accounts still pending a fill (positionId null) — the reconciler places those.
+        if (updated?.nativeExit) {
+            const exitAccts = [...new Set(brokerOrders.filter(b => b.positionId != null).map(b => String(b.accountId)))]
+            for (const acct of exitAccts) {
+                await executionReconciler.placeExits(db, updated, acct)
+            }
+            if (exitAccts.length) updated = await db.collection(COLLECTION).findOne({ id })
+        }
 
         // Keep each placed account's execution feed live so native stop/TP closes
         // reconcile back to this idea. Best-effort — a feed failure must not fail the
@@ -545,8 +535,10 @@ async function placeRestingEntryForIdea(id, userId, isAdmin = false) {
         // Self-heal a stale/missing broker symbol from the canonical asset (NQ=F → US100).
         if (plan[0]?.broker) idea.brokerSymbol = toBrokerSymbol(plan[0].broker, idea.asset)
 
-        // A stop order carries its own reference (the stop price), so a lone bare-price
-        // SL/TP can attach without a current-price lookup — the adapter derives the distance.
+        // Route exits: touch levels are stored in nativeExit and placed as positionId
+        // closing orders by the reconciler when this stop entry FILLS (positionId is
+        // unknown until then); non-touch leaves stay on the monitor. No SL/TP attaches
+        // to the entry order. See routeExits() / execution.reconciler placeExits().
         const route = await routeExits(idea)
 
         // The stop entry price is ABSOLUTE and rests on the broker's book. For an aliased
@@ -556,7 +548,6 @@ async function placeRestingEntryForIdea(id, userId, isAdmin = false) {
 
         const results      = []
         const brokerOrders = []   // linkage the reconciler matches the fill against (by orderId)
-        const protections  = []
         for (const order of plan) {
             const brokerOrder = {
                 symbol:    idea.brokerSymbol ?? idea.asset,
@@ -566,15 +557,9 @@ async function placeRestingEntryForIdea(id, userId, isAdmin = false) {
                 stopPrice: triggerPrice,
                 ...(referenceQuote != null && { referenceQuote }),
             }
-            let stopNative = false, tpNative = false
             try {
-                const canAttach = !!brokerService.capabilities(order.broker)?.nativeProtection
-                if (canAttach) {
-                    if (route.stop.single != null) { brokerOrder.stopLoss   = route.stop.single; stopNative = true }
-                    if (route.tp.single   != null) { brokerOrder.takeProfit = route.tp.single;   tpNative   = true }
-                }
                 const result = await brokerService.placeOrder(order.broker, userId, order.accountId, brokerOrder)
-                logger.info(LOG, 'Resting entry placed', { id, broker: order.broker, accountId: order.accountId, stopPrice: triggerPrice, orderId: result?.orderId, stopNative, tpNative })
+                logger.info(LOG, 'Resting entry placed', { id, broker: order.broker, accountId: order.accountId, stopPrice: triggerPrice, orderId: result?.orderId })
                 results.push({ accountId: order.accountId, ok: true, orderId: result?.orderId ?? null })
                 brokerOrders.push({
                     broker:     order.broker,
@@ -583,7 +568,6 @@ async function placeRestingEntryForIdea(id, userId, isAdmin = false) {
                     positionId: null,            // backfilled when the stop fills
                     quantity:   order.quantity,  // per-account entry qty (idea units) for exit scaling
                 })
-                protections.push({ stopNative, tpNative })
             } catch (err) {
                 logger.error(LOG, 'Resting entry failed', { id, broker: order.broker, accountId: order.accountId, error: err.message })
                 results.push({ accountId: order.accountId, ok: false, error: err.message })
@@ -600,10 +584,7 @@ async function placeRestingEntryForIdea(id, userId, isAdmin = false) {
             entryTriggerPrice: triggerPrice,
             brokerOrders,
             brokerSymbol:      idea.brokerSymbol,   // persist the self-healed symbol
-            ...(await _exitFields(idea, route, protections, referenceQuote)),
-        }
-        if (route.stop.single != null || route.tp.single != null) {
-            set.nativeProtection = { stop: route.stop.single, tp: route.tp.single }
+            ...(await _exitFields(idea, route, referenceQuote)),
         }
         const updated = await db.collection(COLLECTION).findOneAndUpdate({ id }, { $set: set }, { returnDocument: 'after' })
 
@@ -682,8 +663,8 @@ async function _armExitsInPosition(idea, route) {
     }
 
     const legSpecs = [
-        { leg: 'stop', type: 'stop',  single: route.stop.single, multi: route.stop.nativeOrders },
-        { leg: 'tp',   type: 'limit', single: route.tp.single,   multi: route.tp.nativeOrders },
+        { leg: 'stop', type: 'stop',  levels: route.stop.nativeOrders },
+        { leg: 'tp',   type: 'limit', levels: route.tp.nativeOrders },
     ]
     // One set of exits per DISTINCT open position (dedupe duplicate slots).
     const seen = new Set()
@@ -700,9 +681,8 @@ async function _armExitsInPosition(idea, route) {
         const entryQty = Number(link.quantity) || totalQty   // legacy slots: assume full position
         const factor   = (entryQty > 0 && totalQty > 0) ? entryQty / totalQty : 1
         for (const spec of legSpecs) {
-            const rawLevels = spec.single != null
-                ? [{ level: spec.single, quantity: entryQty }]                          // single → full position
-                : (spec.multi ?? []).map(l => ({ level: l.level, quantity: Math.round((Number(l.quantity) || 0) * factor * 10000) / 10000 }))
+            // Each touch level becomes its own closing order, scaled to this account's fill.
+            const rawLevels = (spec.levels ?? []).map(l => ({ level: l.level, quantity: Math.round((Number(l.quantity) || 0) * factor * 10000) / 10000 }))
             // Dedupe by price so a repeated leaf can't place two identical orders.
             const levels = [...new Map(rawLevels.map(l => [l.level, l])).values()]
             for (const lvl of levels) {
@@ -737,47 +717,35 @@ async function _armExitsInPosition(idea, route) {
 
 /**
  * Build the exit-handling fields ($set) for an idea whose entry order(s) were just
- * placed, from the three routing buckets of routeExits():
- *   • single attached SL/TP  → monitor the leg only if some account couldn't attach
- *     natively (mixed broker support); the monitor then watches the full leg tree.
- *   • multi-level native orders → stored in `nativeExit`; the execution reconciler
- *     places them (LIMIT for tp, STOP for stop) when the position opens.
+ * placed, from the routing buckets of routeExits():
+ *   • touch levels (nativeOrders) → stored in `nativeExit`; placed as positionId
+ *     closing orders (LIMIT for tp, STOP for stop) when the position opens.
  *   • residual monitor tree  → stored as {leg}MonitorTree so the monitor watches
- *     only the non-price leaves (and never re-fires a level resting natively).
+ *     only the non-touch leaves (and never re-fires a level resting at the broker).
  *
  * monitorStop / monitorTp keep their meaning: true ⇒ the software monitor must still
  * watch that leg.
  *
  * @param {object} idea
  * @param {{stop:object, tp:object}} route          routeExits(idea) result
- * @param {{stopNative:boolean, tpNative:boolean}[]} protections  per placed entry order
  * @param {number|null} [referenceQuote]            basis shift for aliased native-exit
  *                                                  prices; computed lazily when omitted
  */
-async function _exitFields(idea, route, protections, referenceQuote) {
+async function _exitFields(idea, route, referenceQuote) {
     const out = {}
 
     for (const leg of ['stop', 'tp']) {
-        const r        = route[leg]
-        const flagKey  = leg === 'stop' ? 'monitorStop'     : 'monitorTp'
-        const treeKey  = leg === 'stop' ? 'stopMonitorTree' : 'tpMonitorTree'
-        const nativeOK = leg === 'stop' ? 'stopNative'      : 'tpNative'
+        const r       = route[leg]
+        const flagKey = leg === 'stop' ? 'monitorStop'     : 'monitorTp'
+        const treeKey = leg === 'stop' ? 'stopMonitorTree' : 'tpMonitorTree'
 
-        if (r.single != null) {
-            // Lone bare-price level rides the attached SL/TP — monitor only the
-            // accounts that couldn't attach it (mixed broker support).
-            out[flagKey] = r.hasAny && protections.some(p => !p[nativeOK])
-        } else {
-            // Multi-level / non-price leg — the monitor watches just the residual.
-            out[flagKey] = r.monitorTree != null
-            if (r.monitorTree) out[treeKey] = r.monitorTree
-        }
+        // Touch levels rest at the broker; the monitor watches only the residual
+        // non-touch leaves of the leg.
+        out[flagKey] = r.monitorTree != null
+        if (r.monitorTree) out[treeKey] = r.monitorTree
     }
 
-    const nativeExit = {
-        stop: route.stop.single == null ? route.stop.nativeOrders : [],
-        tp:   route.tp.single   == null ? route.tp.nativeOrders   : [],
-    }
+    const nativeExit = { stop: route.stop.nativeOrders, tp: route.tp.nativeOrders }
     if (nativeExit.stop.length || nativeExit.tp.length) {
         const refQuote = referenceQuote !== undefined ? referenceQuote : await _basisReferenceQuote(idea)
         out.nativeExit = { ...nativeExit, referenceQuote: refQuote ?? null }

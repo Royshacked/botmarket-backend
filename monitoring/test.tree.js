@@ -348,7 +348,7 @@ h('D. normalizeTreeNode logic')
         operator: 'AND', children: [
             { condition: 'price above 100', type: 'structured', timeframe: null },
             { operator: 'OR', children: [
-                { condition: 'bull flag', type: 'visual',      timeframe: null },
+                { condition: 'bull flag', type: 'chart',       timeframe: null },
                 { condition: 'good news', type: 'news',        timeframe: '15m' },
             ]},
         ]

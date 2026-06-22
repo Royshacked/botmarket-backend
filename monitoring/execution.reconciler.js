@@ -42,7 +42,7 @@ const EPS        = 1e-6   // quantity comparison slack
 
 let _started = false
 
-export const executionReconciler = { start, handleExecution }
+export const executionReconciler = { start, handleExecution, placeExits }
 
 function start() {
     if (_started) return
@@ -173,7 +173,7 @@ async function _onOpened(exec) {
         )
         if (resting) {
             logger.info(LOG, `Resting entry filled → idea ${resting.id} now ${direction} (position ${exec.positionId})`)
-            await _withLock(exec.accountId, exec.positionId, () => _placeExits(db, resting, exec.accountId))
+            await _withLock(exec.accountId, exec.positionId, () => placeExits(db, resting, exec.accountId))
             return
         }
     }
@@ -205,7 +205,7 @@ async function _onOpened(exec) {
     logger.info(LOG, `Backfilled positionId ${exec.positionId} onto idea ${result.id}`)
 
     // Position is open — place this account's native exit orders (once).
-    await _withLock(exec.accountId, exec.positionId, () => _placeExits(db, result, exec.accountId))
+    await _withLock(exec.accountId, exec.positionId, () => placeExits(db, result, exec.accountId))
 }
 
 // ─── Native exit orders ───────────────────────────────────────────────────────
@@ -216,7 +216,7 @@ async function _onOpened(exec) {
  * scaled from the idea-unit plan to this account's filled quantity. Idempotent per
  * account via `exitPlacedAccounts`.
  */
-async function _placeExits(db, idea, accountId) {
+async function placeExits(db, idea, accountId) {
     try {
         const acct = String(accountId)
         if ((idea.exitPlacedAccounts ?? []).map(String).includes(acct)) return   // already placed
@@ -262,7 +262,7 @@ async function _placeExits(db, idea, accountId) {
             },
         )
     } catch (err) {
-        logger.error(LOG, `Idea ${idea.id}: _placeExits error: ${err.message}`)
+        logger.error(LOG, `Idea ${idea.id}: placeExits error: ${err.message}`)
     }
 }
 

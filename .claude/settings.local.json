@@ -46,7 +46,8 @@
       "WebSearch",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(ls -la logs/)",
-      "Bash(find . -maxdepth 2 -name \"*.log\" -not -path \"./node_modules/*\")"
+      "Bash(find . -maxdepth 2 -name \"*.log\" -not -path \"./node_modules/*\")",
+      "Bash(npm run *)"
     ]
   }
 }

@@ -51,7 +51,10 @@ export function streamNewsFeed(req, res) {
     // keep-alive ping every 30s so Render doesn't cut the idle connection
     const heartbeat = setInterval(() => res.write(': ping\n\n'), 30000)
 
-    req.on('close', () => {
+    // Listen on res, not req — req's 'close' fires as soon as the request is fully
+    // received (Node ≥ ~18), which would drop the client immediately. res 'close'
+    // fires only when the response connection actually closes (client navigates away).
+    res.on('close', () => {
         clearInterval(heartbeat)
         newsFeedService.removeClient(res)
     })

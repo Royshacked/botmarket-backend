@@ -25,9 +25,12 @@ export async function streamOrchestration(req, res) {
 
     // User hit Stop → the browser aborts the fetch and the connection closes.
     // Abort the agent loop so it stops generating instead of finishing silently.
+    // NOTE: listen on res, not req — req's 'close' fires as soon as the request
+    // body is fully received (Node ≥ ~18), which would abort every stream instantly.
+    // res 'close' fires only when the response connection actually closes.
     const ac = new AbortController()
     let finished = false
-    req.on('close', () => { if (!finished) ac.abort() })
+    res.on('close', () => { if (!finished) ac.abort() })
 
     try {
         const brokerContext = await _loadBrokerContext(req.user._id)

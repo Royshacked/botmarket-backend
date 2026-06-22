@@ -12,7 +12,7 @@ import 'dotenv/config'
 import { getCandles }         from '../providers/ohlcv.provider.js'
 import { parseCondition }     from './parsers/condition.parser.js'
 import { evaluate }           from './evaluators/structured.evaluator.js'
-import { evaluateVisual }     from './evaluators/visual.evaluator.js'
+import { evaluateIndicator }  from './evaluators/indicator.evaluator.js'
 import { evaluateNews }       from './evaluators/news.evaluator.js'
 import { evaluateConditions } from './monitor.orchestrator.js'
 
@@ -84,19 +84,19 @@ if (candles.length > 0) {
     err('structured evaluator', 'skipped — no candles')
 }
 
-// ─── 4. Visual evaluator (Claude) ────────────────────────────────────────────
+// ─── 4. Indicator evaluator (Claude) ─────────────────────────────────────────
 
-h('4. Visual evaluator')
+h('4. Indicator evaluator')
 if (candles.length > 0) {
     try {
         // Ask something that's always true of any candle series
-        const pass = await evaluateVisual('the chart shows a series of price bars', candles)
-        ok(`Trivial visual condition → ${pass ? 'YES' : 'NO'}  (should be YES)`)
+        const pass = await evaluateIndicator('the chart shows a series of price bars', candles)
+        ok(`Trivial indicator condition → ${pass ? 'YES' : 'NO'}  (should be YES)`)
     } catch (e) {
-        err('visual evaluator', e)
+        err('indicator evaluator', e)
     }
 } else {
-    err('visual evaluator', 'skipped — no candles')
+    err('indicator evaluator', 'skipped — no candles')
 }
 
 // ─── 5. News evaluator (Claude + GNews) ──────────────────────────────────────
