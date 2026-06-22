@@ -174,6 +174,40 @@ export async function getCorrelations(tickers = []) {
     return ['Correlation matrix (1y daily returns):', header, ...rows].join('\n')
 }
 
+/**
+ * Recent price-action summary for a ticker, as an LLM-ready string: latest
+ * close, % moves over 1d/5d/1m/3m, position within the 1y range, and recent
+ * volume vs its average. Grounds momentum/trend reads for the scanner without
+ * the agent having to crunch raw candles.
+ */
+export async function getPriceAction(ticker) {
+    const sym = String(ticker).toUpperCase()
+    const candles = await _dailyCandles(sym, 365)
+    if (candles.length < 10) return `${sym}: not enough price history for a trend read.`
+
+    const closes = candles.map(c => c.close)
+    const last   = closes[closes.length - 1]
+    const ago    = n => closes.length > n ? closes[closes.length - 1 - n] : null
+    const chg    = prev => (prev != null && prev > 0) ? `${(((last - prev) / prev) * 100).toFixed(1)}%` : 'n/a'
+
+    const hi52 = Math.max(...closes)
+    const lo52 = Math.min(...closes)
+    const rangePos = hi52 > lo52 ? ((last - lo52) / (hi52 - lo52)) * 100 : null
+
+    const vols    = candles.map(c => c.volume).filter(v => v > 0)
+    const avgVol  = vols.length ? vols.reduce((a, b) => a + b, 0) / vols.length : null
+    const lastVol = candles[candles.length - 1].volume
+    const volRel  = (avgVol && lastVol) ? `${(lastVol / avgVol).toFixed(1)}× avg` : 'n/a'
+
+    return [
+        `${sym} — price action (1y daily):`,
+        `Last close: $${last.toFixed(2)}`,
+        `Change: 1d ${chg(ago(1))} | 5d ${chg(ago(5))} | 1m ${chg(ago(21))} | 3m ${chg(ago(63))}`,
+        `1y range: $${lo52.toFixed(2)} – $${hi52.toFixed(2)}${rangePos != null ? ` (at ${rangePos.toFixed(0)}% of range)` : ''}`,
+        `Last volume: ${volRel}`,
+    ].join('\n')
+}
+
 // Map timeSpan/multiplier → Yahoo Finance interval string
 function _toInterval(timeSpan, multiplier) {
     if (timeSpan === 'minute') {

@@ -86,7 +86,7 @@ const TOOL_HANDLERS = {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], model: requestedModel, onToken, onTicker }) {
+async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], model: requestedModel, onToken, onTicker, signal }) {
     const normalized   = _buildMessages(messages)
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
@@ -114,6 +114,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
         systemPrompt,
         tools:            TOOLS,
         toolHandlers:     TOOL_HANDLERS,
+        signal,
         onToken,
         onTicker,
         onPlan: (json) => {

@@ -24,6 +24,12 @@ export async function streamPortfolio(req, res) {
         res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     }
 
+    // User hit Stop → the browser aborts the fetch and the connection closes.
+    // Abort the agent loop so it stops generating instead of finishing silently.
+    const ac = new AbortController()
+    let finished = false
+    req.on('close', () => { if (!finished) ac.abort() })
+
     try {
         const result = await portfolioAgentService.chatStream({
             messages,
@@ -31,13 +37,19 @@ export async function streamPortfolio(req, res) {
             portfolioId:   portfolioId   ?? null,
             portfolioIdeas: Array.isArray(portfolioIdeas) ? portfolioIdeas : [],
             model,
+            signal:   ac.signal,
             onToken:  (text)   => sendEvent('token',  { text }),
             onTicker: (symbol) => sendEvent('ticker', { symbol }),
         })
 
-        sendEvent('done', { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null })
-        res.end()
+        finished = true
+        if (!ac.signal.aborted) {
+            sendEvent('done', { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null })
+            res.end()
+        }
     } catch (err) {
+        finished = true
+        if (ac.signal.aborted) return   // client gone — nothing to send
         logger.error(LOG, 'Portfolio stream failed', err)
         sendEvent('error', { message: 'Streaming failed' })
         res.end()

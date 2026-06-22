@@ -130,6 +130,58 @@ function _formatStock(symbol, p, ratios = {}, growth = {}) {
     ].filter(Boolean).join('\n')
 }
 
+// ─── Earnings calendar (forward-looking) ────────────────────────────────────
+// Short-TTL cache keyed by the date window; the calendar shifts daily as
+// estimates/actuals land. Free plan exposes this (verified): each row carries
+// symbol, date, epsEstimated and revenueEstimated.
+const _calCache = new Map() // "from|to" -> { at, rows }
+const CAL_TTL_MS = 6 * 60 * 60 * 1000
+
+/**
+ * Upcoming earnings between `from` and `to` (YYYY-MM-DD, max ~3-month window),
+ * as an LLM-ready string. Optionally narrow to a set of symbols the agent is
+ * already considering. Returns the soonest-first list, capped so the tool
+ * result stays small.
+ */
+export async function getEarningsCalendar(from, to, symbols = []) {
+    const today = new Date().toISOString().slice(0, 10)
+    const f = /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : today
+    const t = /^\d{4}-\d{2}-\d{2}$/.test(to)   ? to   : new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10)
+    const key = `${f}|${t}`
+
+    let rows
+    const hit = _calCache.get(key)
+    if (hit && Date.now() - hit.at < CAL_TTL_MS) {
+        rows = hit.rows
+    } else {
+        const arr = await _fmpGet(`/earnings-calendar?from=${f}&to=${t}`)
+        rows = Array.isArray(arr) ? arr : []
+        if (_calCache.size > 50) _calCache.clear()
+        _calCache.set(key, { at: Date.now(), rows })
+    }
+
+    const wanted = new Set(symbols.map(s => String(s).toUpperCase()))
+    let filtered = wanted.size ? rows.filter(r => wanted.has(String(r.symbol).toUpperCase())) : rows
+    filtered = filtered
+        .filter(r => r.date)
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .slice(0, wanted.size ? 50 : 40)
+
+    if (!filtered.length) {
+        return wanted.size
+            ? `No scheduled earnings for ${[...wanted].join(', ')} between ${f} and ${t}.`
+            : `No earnings found between ${f} and ${t}.`
+    }
+
+    const lines = filtered.map(r => {
+        const eps = r.epsEstimated != null ? `est EPS ${num(r.epsEstimated)}` : null
+        const rev = r.revenueEstimated != null ? `est rev ${money(r.revenueEstimated)}` : null
+        const extra = [eps, rev].filter(Boolean).join(', ')
+        return `  ${r.date}  ${r.symbol}${extra ? ` — ${extra}` : ''}`
+    })
+    return [`Earnings calendar ${f} → ${t}${wanted.size ? ` (filtered to ${wanted.size} symbols)` : ''}:`, ...lines].join('\n')
+}
+
 /**
  * Fundamentals for a ticker as an LLM-ready string. Profile is fetched first and
  * its `isEtf`/`isFund` flag decides the shape: stocks get valuation/quality/

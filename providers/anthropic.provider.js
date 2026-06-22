@@ -23,37 +23,53 @@ export async function streamAnthropicWithTools({
     onTicker,
     onPlan,
     onUpdate,
+    onScan,
+    signal,
 }) {
     const messages   = _normalizeMessages(promptOrMessages)
-    const suppressor = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate)
+    const suppressor = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan)
 
     for (let i = 0; i < maxContinuations; i++) {
+        // Client disconnected (user hit Stop) — end the loop instead of burning
+        // another model call / tool round.
+        if (signal?.aborted) { suppressor.flush(); return '' }
+
         const stream = client.messages.stream({
             model:      model ?? DEFAULT_MODEL,
             system:     systemPrompt,
             messages,
             tools,
             max_tokens: DEFAULT_MAX_TOKENS,
-        })
+        }, signal ? { signal } : undefined)
 
         const contentBlocks = []
         let stopReason = null
 
-        for await (const event of stream) {
-            if (event.type === 'content_block_start') {
-                contentBlocks[event.index] = { ...event.content_block }
-            } else if (event.type === 'content_block_delta') {
-                const block = contentBlocks[event.index]
-                if (!block) continue
-                if (event.delta.type === 'text_delta') {
-                    block.text = (block.text || '') + event.delta.text
-                    suppressor.push(event.delta.text)
-                } else if (event.delta.type === 'input_json_delta') {
-                    block._json = (block._json || '') + event.delta.partial_json
+        try {
+            for await (const event of stream) {
+                if (event.type === 'content_block_start') {
+                    contentBlocks[event.index] = { ...event.content_block }
+                } else if (event.type === 'content_block_delta') {
+                    const block = contentBlocks[event.index]
+                    if (!block) continue
+                    if (event.delta.type === 'text_delta') {
+                        block.text = (block.text || '') + event.delta.text
+                        suppressor.push(event.delta.text)
+                    } else if (event.delta.type === 'input_json_delta') {
+                        block._json = (block._json || '') + event.delta.partial_json
+                    }
+                } else if (event.type === 'message_delta') {
+                    stopReason = event.delta.stop_reason
                 }
-            } else if (event.type === 'message_delta') {
-                stopReason = event.delta.stop_reason
             }
+        } catch (err) {
+            // A user-initiated stop aborts the underlying request — return the
+            // partial text cleanly rather than throwing.
+            if (signal?.aborted || err?.name === 'AbortError') {
+                suppressor.flush()
+                return contentBlocks.filter(Boolean).filter(b => b.type === 'text').map(b => b.text || '').join('')
+            }
+            throw err
         }
 
         // Finalise tool blocks (merge partial JSON) — covers both tool_use and server_tool_use

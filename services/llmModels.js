@@ -9,6 +9,7 @@ import { streamOpenAIWithTools }    from '../providers/openai.provider.js'
 export const DEFAULT_MODEL = 'claude-sonnet-4-6'
 
 const MODELS = {
+    'claude-opus-4-8':   { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Opus 4.8' },
     'claude-sonnet-4-6': { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Sonnet 4.6' },
     'gpt-5':             { provider: 'openai',    streamFn: streamOpenAIWithTools,    label: 'GPT-5' },
 }

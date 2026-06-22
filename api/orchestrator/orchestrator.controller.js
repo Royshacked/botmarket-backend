@@ -23,6 +23,12 @@ export async function streamOrchestration(req, res) {
         res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     }
 
+    // User hit Stop → the browser aborts the fetch and the connection closes.
+    // Abort the agent loop so it stops generating instead of finishing silently.
+    const ac = new AbortController()
+    let finished = false
+    req.on('close', () => { if (!finished) ac.abort() })
+
     try {
         const brokerContext = await _loadBrokerContext(req.user._id)
 
@@ -33,19 +39,25 @@ export async function streamOrchestration(req, res) {
             brokerContext,
             ideaAccounts:  parsed.ideaAccounts ?? [],
             model:         req.body?.model,
+            signal:        ac.signal,
             onToken:       (text)     => sendEvent('token',    { text }),
             onAsset:       (symbol)   => sendEvent('asset',    { symbol }),
             onInterval:    (interval) => sendEvent('interval', { interval }),
             onChart:       (chart)    => sendEvent('chart',    chart),   // { symbol, timeframe, imageBase64 }
         })
 
-        sendEvent('done', {
-            reply:         result.reply,
-            analysisState: result.analysisState,
-            ...(result.tradeIdea ? { tradeIdea: result.tradeIdea } : {}),
-        })
-        res.end()
+        finished = true
+        if (!ac.signal.aborted) {
+            sendEvent('done', {
+                reply:         result.reply,
+                analysisState: result.analysisState,
+                ...(result.tradeIdea ? { tradeIdea: result.tradeIdea } : {}),
+            })
+            res.end()
+        }
     } catch (err) {
+        finished = true
+        if (ac.signal.aborted) return   // client gone — nothing to send
         logger.error(LOG, 'Failed to stream orchestration', err)
         sendEvent('error', { message: 'Streaming failed' })
         res.end()

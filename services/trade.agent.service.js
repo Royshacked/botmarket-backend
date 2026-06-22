@@ -227,7 +227,7 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, onToken, onAsset, onInterval, onChart }) {
+async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, onToken, onAsset, onInterval, onChart, signal }) {
     const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts)
     const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
@@ -253,6 +253,7 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
         systemPrompt,
         tools,
         toolHandlers,
+        signal,
         onToken,
         onAsset,
         onInterval,

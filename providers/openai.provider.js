@@ -110,27 +110,39 @@ export async function streamOpenAIWithTools({
     onTicker,
     onPlan,
     onUpdate,
+    onScan,
+    signal,
 }) {
     let input          = normalizeInput(promptOrMessages, systemPrompt)
     const openAITools  = _toOpenAITools(tools)
-    const suppressor   = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate)
+    const suppressor   = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan)
 
     for (let i = 0; i < maxContinuations; i++) {
+        // Client disconnected (user hit Stop) — end the loop instead of burning
+        // another model call / tool round.
+        if (signal?.aborted) { suppressor.flush(); return '' }
+
         const stream = client.responses.stream({
             model,
             input,
             ...(openAITools.length ? { tools: openAITools } : {}),
-        })
+        }, signal ? { signal } : undefined)
 
         // Accumulate this turn's text from the deltas — finalResponse().output_text
         // is not reliably populated for streamed responses, and the agents parse
         // <state>/<trade_idea> out of the returned text, so we must capture it here.
         let turnText = ''
-        for await (const event of stream) {
-            if (event.type === 'response.output_text.delta' && event.delta) {
-                turnText += event.delta
-                suppressor.push(event.delta)
+        try {
+            for await (const event of stream) {
+                if (event.type === 'response.output_text.delta' && event.delta) {
+                    turnText += event.delta
+                    suppressor.push(event.delta)
+                }
             }
+        } catch (err) {
+            // User-initiated stop — return partial text cleanly rather than throwing.
+            if (signal?.aborted || err?.name === 'AbortError') { suppressor.flush(); return turnText }
+            throw err
         }
 
         const final         = await stream.finalResponse()
