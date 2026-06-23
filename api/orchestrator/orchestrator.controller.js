@@ -42,11 +42,13 @@ export async function streamOrchestration(req, res) {
             brokerContext,
             ideaAccounts:  parsed.ideaAccounts ?? [],
             model:         req.body?.model,
+            reasoningEffort: req.body?.reasoningEffort,
             signal:        ac.signal,
             onToken:       (text)     => sendEvent('token',    { text }),
             onAsset:       (symbol)   => sendEvent('asset',    { symbol }),
             onInterval:    (interval) => sendEvent('interval', { interval }),
             onChart:       (chart)    => sendEvent('chart',    chart),   // { symbol, timeframe, imageBase64 }
+            onToolStart:   (tool)     => sendEvent('status',   { tool }),
         })
 
         finished = true

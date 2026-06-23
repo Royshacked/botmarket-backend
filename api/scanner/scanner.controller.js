@@ -6,7 +6,7 @@ import { logger }              from '../../services/logger.service.js'
 const LOG = '[scanner:controller]'
 
 export async function streamScanner(req, res) {
-    const { messages, model, editList } = req.body ?? {}
+    const { messages, model, editList, reasoningEffort } = req.body ?? {}
 
     if (!Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ error: 'messages must be a non-empty array' })
@@ -35,9 +35,11 @@ export async function streamScanner(req, res) {
             messages,
             model,
             editList: editList && typeof editList === 'object' ? editList : null,
+            reasoningEffort,
             signal:   ac.signal,
             onToken:  (text)   => sendEvent('token',  { text }),
             onTicker: (symbol) => sendEvent('ticker', { symbol }),
+            onToolStart: (tool) => sendEvent('status', { tool }),
         })
 
         finished = true

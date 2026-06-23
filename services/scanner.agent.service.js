@@ -105,7 +105,7 @@ const TOOL_HANDLERS = {
 
 export const scannerAgentService = { chatStream }
 
-async function chatStream({ messages = [], model: requestedModel, editList = null, onToken, onTicker, signal }) {
+async function chatStream({ messages = [], model: requestedModel, editList = null, reasoningEffort, onToken, onTicker, onToolStart, signal }) {
     const normalized = _buildMessages(messages)
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
@@ -132,9 +132,11 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         systemPrompt,
         tools:        TOOLS,
         toolHandlers: TOOL_HANDLERS,
+        reasoningEffort,
         signal,
         onToken,
         onTicker,
+        onToolStart,
         onScan: (json) => {
             try { capturedScan = JSON.parse(json) } catch { /* malformed — ignore */ }
         },

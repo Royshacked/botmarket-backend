@@ -13,6 +13,15 @@ const DEFAULT_MAX_TOOL_TURNS = 12
 
 const ALLOWED_ROLES = new Set(['user', 'assistant', 'system'])
 
+// Map the abstract reasoning-effort knob to GPT-5's reasoning.effort. A reasoning
+// model can't truly be turned off, so 'off' maps to the lowest setting it allows.
+// Undefined → leave reasoning unset so the provider default applies.
+const REASONING_EFFORTS = { off: 'minimal', low: 'low', high: 'high' }
+function _reasoningParam(reasoningEffort) {
+    const effort = REASONING_EFFORTS[reasoningEffort]
+    return effort ? { reasoning: { effort } } : {}
+}
+
 
 
 export async function callOpenAI(model, promptOrMessages, systemPrompt = DEFAULT_SYSTEM_PROMPT) {
@@ -112,11 +121,14 @@ export async function streamOpenAIWithTools({
     onPlan,
     onUpdate,
     onScan,
+    onToolStart,
+    reasoningEffort,
     signal,
 }) {
     let input          = normalizeInput(promptOrMessages, systemPrompt)
     const openAITools  = _toOpenAITools(tools)
     const suppressor   = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan)
+    const reasoning    = _reasoningParam(reasoningEffort)
 
     for (let i = 0; i < maxContinuations; i++) {
         // Client disconnected (user hit Stop) — end the loop instead of burning
@@ -127,6 +139,7 @@ export async function streamOpenAIWithTools({
             model,
             input,
             ...(openAITools.length ? { tools: openAITools } : {}),
+            ...reasoning,
         }, signal ? { signal } : undefined)
 
         // Accumulate this turn's text from the deltas — finalResponse().output_text
@@ -148,6 +161,10 @@ export async function streamOpenAIWithTools({
 
         const final         = await stream.finalResponse()
         const functionCalls  = (final.output ?? []).filter((item) => item?.type === 'function_call')
+
+        // Surface each tool call so the UI can show a status chip (parity with the
+        // Anthropic provider). Fired before the handlers run.
+        for (const call of functionCalls) onToolStart?.(call.name)
 
         if (functionCalls.length === 0) {
             suppressor.flush()

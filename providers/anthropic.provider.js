@@ -7,6 +7,16 @@ const DEFAULT_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_MAX_TOKENS = 8192
 const DEFAULT_MAX_CONTINUATIONS = 10
 
+// Map the abstract reasoning-effort knob to an extended-thinking budget. 'off'
+// (or undefined) → no thinking block at all, so we pay for zero reasoning
+// tokens. The budget is added on top of DEFAULT_MAX_TOKENS so the visible reply
+// keeps its full length allowance.
+const THINKING_BUDGETS = { low: 2048, high: 6000 }
+function _thinkingConfig(reasoningEffort) {
+    const budget = THINKING_BUDGETS[reasoningEffort]
+    return budget ? { type: 'enabled', budget_tokens: budget } : null
+}
+
 // ─── Streaming tool loop ──────────────────────────────────────────────────────
 // Like callAnthropicWithTools but calls onToken(text) for each streamed chunk,
 // suppressing <state>/<trade_idea> blocks.  Returns the full accumulated text.
@@ -25,10 +35,13 @@ export async function streamAnthropicWithTools({
     onPlan,
     onUpdate,
     onScan,
+    onToolStart,
+    reasoningEffort,
     signal,
 }) {
     const messages   = _normalizeMessages(promptOrMessages)
     const suppressor = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan)
+    const thinking   = _thinkingConfig(reasoningEffort)
 
     for (let i = 0; i < maxContinuations; i++) {
         // Client disconnected (user hit Stop) — end the loop instead of burning
@@ -40,7 +53,8 @@ export async function streamAnthropicWithTools({
             system:     systemPrompt,
             messages,
             tools,
-            max_tokens: DEFAULT_MAX_TOKENS,
+            max_tokens: thinking ? DEFAULT_MAX_TOKENS + thinking.budget_tokens : DEFAULT_MAX_TOKENS,
+            ...(thinking ? { thinking } : {}),
         }, signal ? { signal } : undefined)
 
         const contentBlocks = []
@@ -50,6 +64,14 @@ export async function streamAnthropicWithTools({
             for await (const event of stream) {
                 if (event.type === 'content_block_start') {
                     contentBlocks[event.index] = { ...event.content_block }
+                    // Surface a tool call as soon as its block opens so the UI can
+                    // show a "Analyzing…" status chip without the model spending
+                    // output tokens narrating it. Covers client tools (tool_use)
+                    // and server tools like web_search (server_tool_use).
+                    const cb = event.content_block
+                    if (cb && (cb.type === 'tool_use' || cb.type === 'server_tool_use') && cb.name) {
+                        onToolStart?.(cb.name)
+                    }
                 } else if (event.type === 'content_block_delta') {
                     const block = contentBlocks[event.index]
                     if (!block) continue
@@ -58,6 +80,14 @@ export async function streamAnthropicWithTools({
                         suppressor.push(event.delta.text)
                     } else if (event.delta.type === 'input_json_delta') {
                         block._json = (block._json || '') + event.delta.partial_json
+                    } else if (event.delta.type === 'thinking_delta') {
+                        // Accumulate the model's reasoning but never push it to onToken
+                        // — it stays hidden from the UI. We keep it (with its signature
+                        // below) so the thinking block can be echoed back intact on the
+                        // next tool turn, which the API requires.
+                        block.thinking = (block.thinking || '') + event.delta.thinking
+                    } else if (event.delta.type === 'signature_delta') {
+                        block.signature = (block.signature || '') + event.delta.signature
                     }
                 } else if (event.type === 'message_delta') {
                     stopReason = event.delta.stop_reason
