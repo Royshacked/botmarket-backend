@@ -7,6 +7,7 @@ import { getQuote, getTickerAggregates } from '../providers/yahoofinance.provide
 import { fetchChartImage } from '../providers/chartImg.provider.js'
 import { buildStudies } from '../monitoring/evaluators/chart.evaluator.js'
 import { logger } from './logger.service.js'
+import { toolError } from './toolResult.util.js'
 import { normalizeTimeframe } from './timeframe.service.js'
 import { normalizeTreeNode, firstLeafTimeframe } from './conditionTree.service.js'
 
@@ -60,8 +61,8 @@ const TOOLS = [
                 },
                 timeframe: {
                     type: 'string',
-                    enum: ['1hr', '4hr', 'day', 'week'],
-                    description: 'Candle timeframe. 4hr returns 1hr candles (Yahoo Finance limit) — group 4 consecutive 1hr rows as one 4hr period.',
+                    enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'],
+                    description: 'Candle timeframe. 2hr and 4hr are aggregated server-side from native 1hr bars into true 2hr/4hr OHLCV (Yahoo has no native 2hr/4hr); every other resolution is a native interval. Sub-hour history is limited (1min ~5 days, 5/15/30min ~weeks) — match the timeframe to the setup.',
                 },
             },
             required: ['ticker', 'timeframe'],
@@ -69,7 +70,7 @@ const TOOLS = [
     },
     {
         name: 'get_chart',
-        description: 'Render an actual TradingView candlestick chart IMAGE (with indicator overlays) and look at it directly, for VISUAL / structural analysis — chart patterns, trendlines, support/resistance, orderblocks, where price sits relative to moving averages. Renders native 4hr candles (unlike get_candles, which approximates 4hr from 1hr rows). For EXACT numeric levels (precise entry/stop/TP prices) prefer get_candles. ONLY call this once the conversation is about building or refining a concrete trade setup on a SINGLE asset — i.e. you are defining or validating an entry, stop, or take-profit, or confirming the market structure behind that setup. Do NOT call it while scanning / screening for stocks, comparing multiple tickers, or answering general questions about a stock; use get_quote / get_candles / web_search for that. One asset, setup stage only.',
+        description: 'Render an actual TradingView candlestick chart IMAGE (with indicator overlays) and look at it directly, for VISUAL / structural analysis — chart patterns, trendlines, support/resistance, orderblocks, where price sits relative to moving averages. Renders native 4hr candles. For EXACT numeric levels (precise entry/stop/TP prices) prefer get_candles. ONLY call this once the conversation is about building or refining a concrete trade setup on a SINGLE asset — i.e. you are defining or validating an entry, stop, or take-profit, or confirming the market structure behind that setup. Do NOT call it while scanning / screening for stocks, comparing multiple tickers, or answering general questions about a stock; use get_quote / get_candles / web_search for that. One asset, setup stage only.',
         input_schema: {
             type: 'object',
             properties: {
@@ -79,8 +80,8 @@ const TOOLS = [
                 },
                 timeframe: {
                     type: 'string',
-                    enum: ['1hr', '4hr', 'day', 'week'],
-                    description: 'Chart timeframe. Native 4hr is supported here (unlike get_candles).',
+                    enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'],
+                    description: 'Chart timeframe. All resolutions render natively via TradingView.',
                 },
                 indicators: {
                     type: 'string',
@@ -96,12 +97,22 @@ const TOOLS = [
     },
 ]
 
-// candle count and Yahoo interval per requested timeframe
+// Per timeframe: Yahoo bar spec + how many candles to return + lookback window.
+// `aggregate` (2hr/4hr) means fetch native 1hr bars and combine N→1 server-side,
+// since Yahoo has no native 2hr/4hr. windowDays respects Yahoo's intraday history
+// limits (1min ≤ 7d, 5/15/30min ≤ 60d, 1hr ≤ 730d); extra lookback is just sliced
+// off, so it only needs to be a safe upper bound that captures `count` bars.
 const _CANDLE_CFG = {
-    '1hr':  { timeSpan: 'hour', multiplier: 1, count: 30, windowDays: 5  },
-    '4hr':  { timeSpan: 'hour', multiplier: 1, count: 60, windowDays: 12 },  // 1hr rows; LLM groups 4→1
-    'day':  { timeSpan: 'day',  multiplier: 1, count: 40, windowDays: 60 },
-    'week': { timeSpan: 'week', multiplier: 1, count: 24, windowDays: 200 },
+    '1min':  { timeSpan: 'minute', multiplier: 1,  count: 60, windowDays: 5   },
+    '5min':  { timeSpan: 'minute', multiplier: 5,  count: 60, windowDays: 10  },
+    '15min': { timeSpan: 'minute', multiplier: 15, count: 50, windowDays: 20  },
+    '30min': { timeSpan: 'minute', multiplier: 30, count: 40, windowDays: 40  },
+    '1hr':   { timeSpan: 'hour',   multiplier: 1,  count: 30, windowDays: 5   },
+    '2hr':   { timeSpan: 'hour',   multiplier: 1,  count: 30, windowDays: 16, aggregate: 2 },
+    '4hr':   { timeSpan: 'hour',   multiplier: 1,  count: 24, windowDays: 24, aggregate: 4 },
+    'day':   { timeSpan: 'day',    multiplier: 1,  count: 40, windowDays: 60  },
+    'week':  { timeSpan: 'week',   multiplier: 1,  count: 24, windowDays: 200 },
+    'month': { timeSpan: 'month',  multiplier: 1,  count: 24, windowDays: 800 },
 }
 
 function _fmtVol(v) {
@@ -110,13 +121,36 @@ function _fmtVol(v) {
     return String(v)
 }
 
+// Yahoo offers no native 2hr/4hr interval, so get_candles fetches 1hr bars and
+// aggregates them into true 2hr/4hr OHLCV here — deterministic and exact, rather
+// than asking the model to mentally group 1hr rows. Groups are aligned to end
+// on the newest bar (any oldest partial group is dropped).
+function _aggregateCandles(rows, groupSize) {
+    if (!Array.isArray(rows) || rows.length === 0) return []
+    const rem     = rows.length % groupSize
+    const aligned = rem ? rows.slice(rem) : rows
+    const out = []
+    for (let i = 0; i < aligned.length; i += groupSize) {
+        const grp = aligned.slice(i, i + groupSize)
+        out.push({
+            timestamp: grp[0].timestamp,
+            open:      grp[0].open,
+            high:      Math.max(...grp.map(c => c.high)),
+            low:       Math.min(...grp.map(c => c.low)),
+            close:     grp[grp.length - 1].close,
+            volume:    grp.reduce((s, c) => s + (c.volume || 0), 0),
+        })
+    }
+    return out
+}
+
 const TOOL_HANDLERS = {
     get_quote: async ({ ticker }) => {
         try {
             return await getQuote(ticker)
         } catch (err) {
             logger.warn(LOG, `get_quote failed for ${ticker}:`, err.message)
-            return `Could not fetch quote for ${ticker}: ${err.message}`
+            return toolError(`Could not fetch quote for ${ticker}: ${err.message}`)
         }
     },
 
@@ -125,11 +159,13 @@ const TOOL_HANDLERS = {
             const cfg  = _CANDLE_CFG[timeframe] ?? _CANDLE_CFG['day']
             const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
             const raw  = await getTickerAggregates(ticker.toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
-            const rows = raw.slice(-cfg.count)
-            if (rows.length === 0) return `No candle data available for ${ticker}`
+            // Yahoo has no native 2hr/4hr — fetch 1hr bars and aggregate N→1 here
+            // so the LLM reads real OHLCV, not hand-grouped rows.
+            const bars = cfg.aggregate ? _aggregateCandles(raw, cfg.aggregate) : raw
+            const rows = bars.slice(-cfg.count)
+            if (rows.length === 0) return toolError(`No candle data available for ${ticker}`)
 
-            const label = timeframe === '4hr' ? '1hr (group 4 rows = one 4hr candle)' : timeframe
-            const header = `${ticker.toUpperCase()} ${label} — ${rows.length} candles, newest last:\n`
+            const header = `${ticker.toUpperCase()} ${timeframe} — ${rows.length} candles, newest last:\n`
             const lines  = rows.map(c => {
                 const d = new Date(c.timestamp * 1000).toISOString().slice(0, 16).replace('T', ' ')
                 return `${d}  O:${c.open.toFixed(2)}  H:${c.high.toFixed(2)}  L:${c.low.toFixed(2)}  C:${c.close.toFixed(2)}  V:${_fmtVol(c.volume)}`
@@ -137,7 +173,7 @@ const TOOL_HANDLERS = {
             return header + lines.join('\n')
         } catch (err) {
             logger.warn(LOG, `get_candles failed for ${ticker}:`, err.message)
-            return `Could not fetch candles for ${ticker}: ${err.message}`
+            return toolError(`Could not fetch candles for ${ticker}: ${err.message}`)
         }
     },
 }
@@ -187,7 +223,7 @@ function _buildToolHandlers(onChart) {
                 ]
             } catch (err) {
                 logger.warn(LOG, `get_chart failed for ${ticker}/${timeframe}:`, err.message)
-                return `Could not render chart for ${ticker}: ${err.message}. Use get_candles instead.`
+                return toolError(`Could not render chart for ${ticker}: ${err.message}. Use get_candles instead.`)
             }
         },
     }
@@ -228,16 +264,18 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
 }
 
 async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, onToken, onAsset, onInterval, onChart, signal }) {
-    const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts)
-    const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
     // get_chart returns an image tool_result, which only the Anthropic provider
     // renders — gate the tool (and its UI emit) to Anthropic so other providers
-    // never receive an image block they can't handle.
+    // never receive an image block they can't handle. The prompt is told the
+    // tool is absent (hasChartTool) so it doesn't instruct the model to call it.
     const isAnthropic = provider === 'anthropic'
     const tools        = isAnthropic ? TOOLS : TOOLS.filter(t => t.name !== 'get_chart')
     const toolHandlers = _buildToolHandlers(isAnthropic ? onChart : null)
+
+    const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts, { hasChartTool: isAnthropic })
+    const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
 
     logger.info(LOG, 'chatStream start', {
         userPrompt,
@@ -270,7 +308,7 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = []) {
+function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = [], { hasChartTool = true } = {}) {
     const asset   = analysisState?.structured_state?.active_asset || 'none'
     const summary = analysisState?.recent_chat_summary || 'No prior context.'
     const pt      = analysisState?.structured_state?.pending_trade
@@ -281,6 +319,13 @@ function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = []) {
         ? `\nCurrent pending trade (carry all set fields forward — only update what changed):\n${JSON.stringify(pt, null, 2)}`
         : ''
 
+    // get_chart is only wired on the Anthropic provider; on others it's stripped
+    // from the tool list. Neutralize the base prompt's get_chart instructions
+    // here (volatile tail) so the model isn't told to call a tool it lacks.
+    const chartNote = hasChartTool
+        ? ''
+        : '\n\nNOTE: get_chart is NOT available in this session — ignore every instruction above about rendering or looking at a chart image. Do your visual/structural read from get_candles and web_search instead, and never claim to see a chart.'
+
     // Split into a stable base (the instructions — byte-identical every request)
     // and a volatile context tail. cache_control on the base lets Anthropic cache
     // the tools+instructions prefix across turns (and across users), so only the
@@ -289,7 +334,7 @@ function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = []) {
     const dynamicContext = `---
 CONVERSATION CONTEXT:
 ${summary}
-Active asset: ${asset}${stateSection}${_buildBrokerSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts)}`
+Active asset: ${asset}${stateSection}${_buildBrokerSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts)}${chartNote}`
 
     return [
         { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },

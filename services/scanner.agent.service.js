@@ -5,6 +5,7 @@ import { resolveStreamFn } from './llmModels.js'
 import { getQuotes, getRiskMetrics, getPriceAction } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
+import { toolError }     from './toolResult.util.js'
 import { logger }        from './logger.service.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
@@ -78,27 +79,27 @@ const TOOLS = [
 const TOOL_HANDLERS = {
     get_price_action: async ({ ticker }) => {
         try { return await getPriceAction(ticker) }
-        catch (err) { return `Could not fetch price action for ${ticker}: ${err.message}` }
+        catch (err) { return toolError(`Could not fetch price action for ${ticker}: ${err.message}`) }
     },
     get_quotes: async ({ tickers }) => {
         try { return await getQuotes(tickers) }
-        catch (err) { return `Could not fetch quotes: ${err.message}` }
+        catch (err) { return toolError(`Could not fetch quotes: ${err.message}`) }
     },
     get_risk_metrics: async ({ ticker }) => {
         try { return await getRiskMetrics(ticker) }
-        catch (err) { return `Could not fetch risk metrics for ${ticker}: ${err.message}` }
+        catch (err) { return toolError(`Could not fetch risk metrics for ${ticker}: ${err.message}`) }
     },
     get_fundamentals: async ({ ticker }) => {
         try { return await getFundamentals(ticker) }
-        catch (err) { return `Could not fetch fundamentals for ${ticker}: ${err.message}` }
+        catch (err) { return toolError(`Could not fetch fundamentals for ${ticker}: ${err.message}`) }
     },
     get_earnings_calendar: async ({ from, to, symbols }) => {
         try { return await getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []) }
-        catch (err) { return `Could not fetch earnings calendar: ${err.message}` }
+        catch (err) { return toolError(`Could not fetch earnings calendar: ${err.message}`) }
     },
     get_sec_filings: async ({ ticker }) => {
         try { return await getSecFilings(ticker) }
-        catch (err) { return `Could not fetch SEC filings for ${ticker}: ${err.message}` }
+        catch (err) { return toolError(`Could not fetch SEC filings for ${ticker}: ${err.message}`) }
     },
 }
 

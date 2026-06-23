@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import { createTagSuppressor } from '../services/llmStream.util.js'
+import { isToolError, toolErrorText } from '../services/toolResult.util.js'
 
 const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -173,13 +174,20 @@ export async function streamOpenAIWithTools({
             let args = {}
             try { args = call.arguments ? JSON.parse(call.arguments) : {} }
             catch {
-                input.push({ type: 'function_call_output', call_id: call.call_id, output: `Invalid JSON arguments for ${call.name}` })
+                input.push({ type: 'function_call_output', call_id: call.call_id, output: `ERROR: invalid JSON arguments for ${call.name}` })
                 return
             }
             const handler = toolHandlers[call.name]
+            // The Responses API has no is_error flag on function_call_output, so a
+            // failed call (toolError marker or a throw) is marked with an ERROR:
+            // prefix — enough for the model to tell a failure from real data.
             let output = ''
-            try { output = handler ? String(await handler(args)) : '' }
-            catch (err) { output = `Tool ${call.name} failed: ${err instanceof Error ? err.message : String(err)}` }
+            try {
+                const ret = handler ? await handler(args) : ''
+                output = isToolError(ret) ? `ERROR: ${toolErrorText(ret)}` : _toOutputText(ret)
+            } catch (err) {
+                output = `ERROR: ${err instanceof Error ? err.message : String(err)}`
+            }
             input.push({ type: 'function_call_output', call_id: call.call_id, output })
         }))
     }
@@ -220,6 +228,15 @@ function _toOpenAITools(tools = []) {
 function _systemPromptToText(sp) {
     if (Array.isArray(sp)) return sp.map(b => (typeof b === 'string' ? b : b?.text || '')).join('\n\n')
     return sp
+}
+
+// function_call_output.output must be a string. Handlers usually return a
+// formatted string already; JSON-serialize structured returns so an object
+// reaches the model as readable JSON instead of "[object Object]".
+function _toOutputText(ret) {
+    if (ret == null) return ''
+    if (typeof ret === 'string') return ret
+    try { return JSON.stringify(ret) } catch { return String(ret) }
 }
 
 function normalizeInput(promptOrMessages, systemPrompt) {

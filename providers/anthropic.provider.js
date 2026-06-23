@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createTagSuppressor } from '../services/llmStream.util.js'
+import { isToolError, toolErrorText } from '../services/toolResult.util.js'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
@@ -96,11 +97,7 @@ export async function streamAnthropicWithTools({
         if (stopReason === 'tool_use') {
             const toolUseBlocks = validBlocks.filter(b => b.type === 'tool_use')
             messages.push({ role: 'assistant', content: validBlocks })
-            const results = await Promise.all(toolUseBlocks.map(async b => {
-                const handler = toolHandlers[b.name]
-                const content = handler ? _toToolResultContent(await handler(b.input)) : ''
-                return { type: 'tool_result', tool_use_id: b.id, content }
-            }))
+            const results = await Promise.all(toolUseBlocks.map(b => _runTool(toolHandlers, b)))
             messages.push({ role: 'user', content: results })
             continue
         }
@@ -154,11 +151,7 @@ export async function callAnthropicWithTools({
         if (response.stop_reason === 'tool_use') {
             const toolUseBlocks = response.content.filter((b) => b.type === 'tool_use')
             messages.push({ role: 'assistant', content: response.content })
-            const results = await Promise.all(toolUseBlocks.map(async b => {
-                const handler = toolHandlers[b.name]
-                const content = handler ? _toToolResultContent(await handler(b.input)) : ''
-                return { type: 'tool_result', tool_use_id: b.id, content }
-            }))
+            const results = await Promise.all(toolUseBlocks.map(b => _runTool(toolHandlers, b)))
             messages.push({ role: 'user', content: results })
             continue
         }
@@ -178,6 +171,25 @@ function _toToolResultContent(ret) {
     if (Array.isArray(ret)) return ret          // already a list of content blocks
     if (ret.type) return [ret]                  // single content block → wrap
     return String(ret)
+}
+
+// Run one tool and build its tool_result block. A toolError() return — or a
+// thrown error — becomes an is_error result so the model treats it as a failed
+// call, not as data.
+async function _runTool(toolHandlers, block) {
+    const handler = toolHandlers[block.name]
+    if (!handler) return _errorResult(block.id, `no handler for tool ${block.name}`)
+    try {
+        const ret = await handler(block.input)
+        if (isToolError(ret)) return _errorResult(block.id, toolErrorText(ret))
+        return { type: 'tool_result', tool_use_id: block.id, content: _toToolResultContent(ret) }
+    } catch (err) {
+        return _errorResult(block.id, err?.message ?? 'tool failed')
+    }
+}
+
+function _errorResult(toolUseId, message) {
+    return { type: 'tool_result', tool_use_id: toolUseId, content: `ERROR: ${message}`, is_error: true }
 }
 
 function _normalizeMessages(promptOrMessages) {
