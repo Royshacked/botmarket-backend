@@ -30,7 +30,7 @@ const LOG = '[monitor.orchestrator]'
 
 // Evaluation cost — determines gate order for AND/OR chains (cheapest first).
 // touch/structured/time/volume are cheap local math; indicator/news/chart need model reads.
-const COST = { touch: 0, structured: 0, time: 0, volume: 0, indicator: 1, news: 2, chart: 3 }
+const COST = { time: -1, touch: 0, structured: 0, volume: 0, indicator: 1, news: 2, chart: 3 }
 
 /**
  * Evaluate a condition tree recursively.
@@ -106,6 +106,37 @@ export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = nul
     }
     logger.info(LOG, `  ✅ AND group: all ${sorted.length} child(ren) passed`)
     return { triggered: true, triggerAt }
+}
+
+/**
+ * True when a phase's time leaves make it impossible to trigger *right now*,
+ * regardless of price/indicator/news data — so the caller can skip fetching
+ * candles this tick. Evaluates the tree optimistically: every non-time leaf is
+ * assumed to pass, time leaves use their real wall-clock value. If the tree is
+ * still false under that best case, only the clock is to blame → blocked.
+ *
+ * Cheap and side-effect free. A tree with no time leaves can never be blocked
+ * (every leaf is optimistically true), so this is a no-op for those ideas.
+ *
+ * @param {object|null} node  A normalized condition tree (group or leaf node),
+ *                            e.g. from resolveConditionTree().
+ */
+export function isTimeBlocked(node) {
+    if (!node || typeof node !== 'object') return false
+    return !_canPassOnTime(node)
+}
+
+function _canPassOnTime(node) {
+    if (!node || typeof node !== 'object') return true
+    if (typeof node.condition === 'string') {
+        return node.type === 'time' ? evaluateTime(node) : true
+    }
+    const children = Array.isArray(node.children) ? node.children
+        : Array.isArray(node.conditions) ? node.conditions
+        : []
+    if (children.length === 0) return true
+    const op = node.operator ?? node.logic ?? 'AND'
+    return op === 'OR' ? children.some(_canPassOnTime) : children.every(_canPassOnTime)
 }
 
 /**

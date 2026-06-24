@@ -24,12 +24,12 @@
 
 import { getDb }                                from '../providers/mongodb.provider.js'
 import { getCandles }                           from '../providers/ohlcv.provider.js'
-import { evaluateTree, evaluateConditions }     from './monitor.orchestrator.js'
+import { evaluateTree, evaluateConditions, isTimeBlocked } from './monitor.orchestrator.js'
 import { logger }                               from '../services/logger.service.js'
 import { isAssetOpen, sessionStartMs }          from '../services/market.service.js'
 import { buildOrderPlanForIdea }                from '../services/orderPlan.service.js'
 import { getCheckGap, isIntradayTimeframe }     from '../services/timeframe.service.js'
-import { collectSymbols, firstLeaf, extractLeaves } from '../services/conditionTree.service.js'
+import { collectSymbols, firstLeaf, extractLeaves, resolveConditionTree } from '../services/conditionTree.service.js'
 import { brokerService }                        from '../api/broker/broker.service.js'
 
 const LOG        = '[monitor.service]'
@@ -177,6 +177,20 @@ async function _checkIdea(db, idea) {
     if ((isIntradayTimeframe(fastestTf) || hasCumulativeVolume) && !isAssetOpen(asset, idea.asset_class)) {
         logger.info(LOG, `[${id}] Market closed — skipping ${hasCumulativeVolume ? 'cumulative-volume' : 'intraday'} check (${asset}/${fastestTf})`)
         return
+    }
+
+    // Time-window pre-gate (entry only): if the entry tree's time leaves make a
+    // trigger impossible right now — e.g. a `time` leaf in an AND whose window is
+    // closed — skip the candle fetch + evaluation entirely. Resolved optimistically
+    // (all non-time leaves assumed true), so we only skip when the clock alone blocks
+    // entry, never when price/indicator data could still fire it. Never applied to an
+    // open position: a stop/TP must keep monitoring around the clock.
+    if (!isPosition) {
+        const entryRoot = resolveConditionTree(idea.entry_condition_tree, idea.entry_conditions, idea.entry_logic ?? 'AND')
+        if (isTimeBlocked(entryRoot)) {
+            logger.info(LOG, `[${id}] Outside time window — skipping entry check (${asset})`)
+            return
+        }
     }
 
     const lastAt = _lastChecked.get(id) ?? 0
