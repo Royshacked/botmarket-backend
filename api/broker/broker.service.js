@@ -22,6 +22,7 @@ export const brokerService = {
     isConnected,
     getAccount,
     getPositions,
+    findOpenPosition,
     getCandles,
     getTradingAccounts,
     setSelectedAccount,
@@ -105,6 +106,19 @@ async function getAccount(brokerType, userId) {
 /** @returns {Promise<import('./adapters/broker.interface.js').BrokerPosition[]>} */
 async function getPositions(brokerType, userId) {
     return getBrokerAdapter(brokerType).getPositions(userId)
+}
+
+/**
+ * Authoritative single-position lookup: the open position, `null` when it's gone, or
+ * `undefined` when the broker doesn't support the check (caller treats as "unknown" —
+ * never close on it). Adapters that implement it THROW on a transport error so the
+ * caller can distinguish "gone" from "unreachable".
+ * @returns {Promise<object|null|undefined>}
+ */
+async function findOpenPosition(brokerType, userId, accountId, positionId) {
+    const adapter = getBrokerAdapter(brokerType)
+    if (typeof adapter.findOpenPosition !== 'function') return undefined
+    return adapter.findOpenPosition(userId, accountId, positionId)
 }
 
 // ─── Market data ──────────────────────────────────────────────────────────────

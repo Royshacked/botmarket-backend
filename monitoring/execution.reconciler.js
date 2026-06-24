@@ -9,12 +9,17 @@
  *                                  brokerOrders linkage, then PLACE that account's
  *                                  native exit orders (multi-level bare-price stops/
  *                                  TPs: LIMIT for tp, STOP for stop), once per account.
- *   • position.reduced (partial) → a single exit slice filled. Mark it filled and
- *                                  re-sync the remaining working exit orders so none
- *                                  exceeds the shrunken position (netting safety).
+ *   • position.reduced (partial) → an exit fill. Mark a matched slice filled, then ask
+ *                                  the broker whether the position survived: if it's
+ *                                  GONE (a single event reported as a reduce, or an
+ *                                  untracked panel exit, can still fully close), finalise
+ *                                  the close; otherwise re-sync the remaining working
+ *                                  exits to the broker's live size (netting safety).
  *   • position.closed (full)     → idea status → 'closed' (+ reason / pnl / closedAt),
- *                                  then cancel any leftover working exit orders so a
- *                                  resting opposite order can't open a new position.
+ *                                  then cancel EVERY working broker order bound to the
+ *                                  position — tracked exits AND ones added/dragged via
+ *                                  the edit-orders panel — so a resting opposite order
+ *                                  can't open a new position on a netting/hedging account.
  *
  * Linkage lives on the idea as `brokerOrders: [{ broker, accountId, orderId,
  * positionId, quantity }]` (entry orders) and `exitOrders: [{ accountId, broker,
@@ -79,10 +84,7 @@ async function _onClosed(exec) {
     if (exec.positionId == null) return
     await _withLock(exec.accountId, exec.positionId, async () => {
         const db   = await getDb()
-        const idea = await db.collection(COLLECTION).findOne({
-            status: { $in: ACTIVE },
-            brokerOrders: { $elemMatch: { accountId: String(exec.accountId), positionId: String(exec.positionId) } },
-        })
+        const idea = await _findActiveByPosition(db, exec.accountId, exec.positionId)
         if (!idea) {
             logger.info(LOG, `No active idea matched closed position ${exec.accountId}/${exec.positionId}`)
             return
@@ -94,20 +96,9 @@ async function _onClosed(exec) {
         const matched = (idea.exitOrders ?? []).find(o => exec.orderId != null && String(o.orderId) === String(exec.orderId))
         const reason  = matched?.leg ?? idea.pendingCloseReason ?? exec.reason ?? 'broker'
 
-        const patch = { status: 'closed', closedReason: reason, closedAt: exec.at ?? Date.now() }
-        if (exec.pnl != null) patch.realizedPnl = exec.pnl
-
-        const result = await db.collection(COLLECTION).findOneAndUpdate(
-            { id: idea.id, status: { $in: ACTIVE } },
-            { $set: patch },
-            { returnDocument: 'after' },
-        )
-        if (!result) return   // someone else closed it first
-        logger.info(LOG, `Idea ${result.id} closed by broker (reason=${reason}, pnl=${patch.realizedPnl ?? '·'})`)
-
-        // Cancel any leftover working exit orders for this account: on a netting
-        // account a resting opposite-side order would otherwise OPEN a new position.
-        await _cancelWorkingExits(db, result, exec.accountId)
+        await _finalizeClose(db, idea, {
+            reason, pnl: exec.pnl, at: exec.at, accountId: exec.accountId, positionId: exec.positionId,
+        })
     })
 }
 
@@ -115,30 +106,63 @@ async function _onReduced(exec) {
     if (exec.positionId == null) return
     await _withLock(exec.accountId, exec.positionId, async () => {
         const db   = await getDb()
-        const idea = await db.collection(COLLECTION).findOne({
-            status: { $in: ACTIVE },
-            brokerOrders: { $elemMatch: { accountId: String(exec.accountId), positionId: String(exec.positionId) } },
-        })
+        const idea = await _findActiveByPosition(db, exec.accountId, exec.positionId)
         if (!idea) return
 
-        // Match the closing order to one of our tracked exit orders (a native resting
-        // order, or a market close the monitor placed). An unmatched reduction can't
-        // be sized in idea units — log and skip rather than mis-resync.
+        // Record the slice if it matches one of our tracked exit orders (a native resting
+        // order, or a market close the monitor placed). An UNMATCHED closing fill — e.g. a
+        // stop/TP added or dragged through the edit-orders panel, which the panel places
+        // straight at the broker without touching exitOrders — can't be sized from our
+        // records, so we don't mark a slice; the broker check below is then authoritative.
         const orders = idea.exitOrders ?? []
         const idx = orders.findIndex(o =>
             o.status === 'working' &&
             String(o.accountId) === String(exec.accountId) &&
             exec.orderId != null && String(o.orderId) === String(exec.orderId))
-        if (idx < 0) {
-            logger.info(LOG, `Idea ${idea.id}: partial close on ${exec.accountId}/${exec.positionId} didn't match a tracked exit order — skipping resync`)
+
+        let matched = null
+        if (idx >= 0) {
+            orders[idx] = { ...orders[idx], status: 'filled', filledAt: exec.at ?? Date.now() }
+            matched = orders[idx]
+            await db.collection(COLLECTION).updateOne({ id: idea.id }, { $set: { exitOrders: orders } })
+            logger.info(LOG, `Idea ${idea.id}: exit slice filled — ${matched.leg} ${matched.quantity} @ ${matched.price ?? 'mkt'}`)
+        } else {
+            logger.info(LOG, `Idea ${idea.id}: closing fill on ${exec.accountId}/${exec.positionId} (order ${exec.orderId}) not tracked — asking broker if the position survived`)
+        }
+
+        // The broker is the only authority on whether the position survived this fill: a
+        // single event it reports as a "reduce", or an untracked panel exit, can still
+        // have FULLY closed the position. findOpenPosition throws on a transport error
+        // (we defer, never false-close) and returns null only when the position is gone.
+        const broker   = _brokerFor(idea, exec.accountId)
+        let position
+        try {
+            position = broker
+                ? await brokerService.findOpenPosition(broker, idea.userId, exec.accountId, exec.positionId)
+                : undefined   // unknown broker linkage — fall back to tracked-size resync
+        } catch (err) {
+            logger.warn(LOG, `Idea ${idea.id}: position check failed (${err.message}) — deferring to next event`)
             return
         }
 
-        orders[idx] = { ...orders[idx], status: 'filled', filledAt: exec.at ?? Date.now() }
-        await db.collection(COLLECTION).updateOne({ id: idea.id }, { $set: { exitOrders: orders } })
-        logger.info(LOG, `Idea ${idea.id}: exit slice filled — ${orders[idx].leg} ${orders[idx].quantity} @ ${orders[idx].price ?? 'mkt'}`)
+        if (position === null) {
+            // Position is gone → finalize the close and cancel any leftover exits (incl.
+            // an untracked panel order that wasn't the one that filled — the orphan case).
+            const reason = matched?.leg ?? exec.reason ?? 'broker'
+            await _finalizeClose(db, { ...idea, exitOrders: orders }, {
+                reason, pnl: exec.pnl, at: exec.at, accountId: exec.accountId, positionId: exec.positionId,
+            })
+            return
+        }
 
-        await _resyncExits(db, { ...idea, exitOrders: orders }, exec.accountId)
+        // Still open → shrink/cancel any tracked working exit that now exceeds the
+        // position's live remaining size (netting safety). Prefer the broker's volume as
+        // the source of truth (handles panel-managed fills our records never saw); fall
+        // back to deriving it from tracked slices when the broker is unreachable.
+        const remaining = position != null ? _round(Number(position.volume)) : undefined
+        if (position != null || matched) {
+            await _resyncExits(db, { ...idea, exitOrders: orders }, exec.accountId, remaining)
+        }
     })
 }
 
@@ -272,9 +296,11 @@ async function placeExits(db, idea, accountId) {
  * smaller) or cancelled if nothing remains — so it can never over-close and flip the
  * netting position. Market orders fill instantly and are never resized.
  */
-async function _resyncExits(db, idea, accountId) {
+async function _resyncExits(db, idea, accountId, remainingOverride) {
     const acct      = String(accountId)
-    const remaining = _remainingForAccount(idea, acct)
+    // Prefer the broker's live position size when the caller has it (authoritative even
+    // for panel-managed fills); otherwise derive it from our tracked filled slices.
+    const remaining = remainingOverride != null ? Math.max(0, remainingOverride) : _remainingForAccount(idea, acct)
     const orders    = idea.exitOrders ?? []
     let changed     = false
 
@@ -309,7 +335,94 @@ async function _resyncExits(db, idea, accountId) {
     if (changed) await db.collection(COLLECTION).updateOne({ id: idea.id }, { $set: { exitOrders: orders } })
 }
 
-/** Cancel every still-working exit order for an account (called on a full close). */
+// ─── Close finalisation ───────────────────────────────────────────────────────
+
+/** The active idea (long/short) holding this account+position in its entry linkage. */
+function _findActiveByPosition(db, accountId, positionId) {
+    return db.collection(COLLECTION).findOne({
+        status: { $in: ACTIVE },
+        brokerOrders: { $elemMatch: { accountId: String(accountId), positionId: String(positionId) } },
+    })
+}
+
+/** The broker that holds this account's orders for an idea (entry linkage, then exits). */
+function _brokerFor(idea, accountId) {
+    const acct = String(accountId)
+    return (idea.brokerOrders ?? []).find(b => String(b.accountId) === acct)?.broker
+        ?? (idea.exitOrders ?? []).find(o => String(o.accountId) === acct)?.broker
+        ?? null
+}
+
+/**
+ * Flip the idea to 'closed' (guarded so a concurrent close wins once) and, on success,
+ * cancel EVERY working broker order still bound to the closed position. Shared by the
+ * full-close event path and the broker-confirmed full close detected from a reduce.
+ */
+async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId }) {
+    const patch = { status: 'closed', closedReason: reason, closedAt: at ?? Date.now() }
+    if (pnl != null) patch.realizedPnl = pnl
+
+    const result = await db.collection(COLLECTION).findOneAndUpdate(
+        { id: idea.id, status: { $in: ACTIVE } },
+        { $set: patch },
+        { returnDocument: 'after' },
+    )
+    if (!result) return false   // someone else closed it first
+    logger.info(LOG, `Idea ${result.id} closed by broker (reason=${reason}, pnl=${patch.realizedPnl ?? '·'})`)
+
+    await _cancelExitsForPosition(db, result, accountId, positionId)
+    return true
+}
+
+/**
+ * Cancel every still-working broker order bound to a closed position — not just the
+ * exits we tracked. A stop/TP added or dragged through the edit-orders panel rests at
+ * the broker untracked; on a netting/hedging account it would otherwise OPEN a fresh
+ * position after the close, so we list the account's working orders and cancel each one
+ * whose positionId matches (leaving other ideas' orders untouched). Falls back to the
+ * tracked-only cancel when the broker can't be reached or doesn't list orders.
+ */
+async function _cancelExitsForPosition(db, idea, accountId, positionId) {
+    const acct   = String(accountId)
+    const broker = _brokerFor(idea, acct)
+
+    let brokerCancelled = false
+    if (broker && positionId != null) {
+        try {
+            const working = await brokerService.listOrders(broker, idea.userId, acct)
+            const mine    = (working ?? []).filter(o => String(o.positionId) === String(positionId))
+            for (const o of mine) {
+                try {
+                    await brokerService.cancelOrder(broker, idea.userId, acct, o.orderId)
+                    logger.info(LOG, `Idea ${idea.id}: broker exit cancelled (order ${o.orderId}, pos ${positionId})`)
+                } catch (err) {
+                    logger.warn(LOG, `Idea ${idea.id}: broker exit cancel failed (order ${o.orderId}): ${err.message}`)
+                }
+            }
+            brokerCancelled = true
+        } catch (err) {
+            logger.warn(LOG, `Idea ${idea.id}: listOrders for cancel-all failed (${err.message}) — falling back to tracked exits`)
+        }
+    }
+
+    if (!brokerCancelled) {
+        await _cancelWorkingExits(db, idea, acct)   // best-effort: cancel only what we tracked
+        return
+    }
+
+    // Mirror the broker state onto our tracked exits so the idea reflects the cancel.
+    const orders = idea.exitOrders ?? []
+    let changed  = false
+    for (let i = 0; i < orders.length; i++) {
+        const o = orders[i]
+        if (o.status !== 'working' || String(o.accountId) !== acct) continue
+        orders[i] = { ...o, status: 'cancelled', cancelledAt: Date.now() }
+        changed = true
+    }
+    if (changed) await db.collection(COLLECTION).updateOne({ id: idea.id }, { $set: { exitOrders: orders } })
+}
+
+/** Cancel every still-working exit order for an account (tracked-only fallback). */
 async function _cancelWorkingExits(db, idea, accountId) {
     const acct   = String(accountId)
     const orders = idea.exitOrders ?? []

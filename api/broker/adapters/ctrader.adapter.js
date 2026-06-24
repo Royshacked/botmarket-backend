@@ -130,6 +130,20 @@ export class CTraderAdapter extends BrokerAdapter {
         }
     }
 
+    /**
+     * Authoritative single-position lookup on the account the position lives on.
+     * Returns the open position (getOpenPositions shape) or `null` when it no longer
+     * exists. THROWS on a transport/session error so the caller can tell "gone" (null)
+     * apart from "couldn't reach the broker" (throw) — the reconciler relies on that
+     * distinction to never close an idea on a transient failure.
+     * @returns {Promise<object|null>}
+     */
+    async findOpenPosition(userId, accountId, positionId) {
+        const session   = await this._session(userId, accountId)
+        const positions = await session.getOpenPositions()
+        return positions.find(p => String(p.id) === String(positionId)) ?? null
+    }
+
     // ── Trading accounts ───────────────────────────────────────────────────────
 
     async getTradingAccounts(userId) {
