@@ -62,7 +62,10 @@ app.use(cookieParser())
 // gets the audio stream before the JSON middleware can touch it
 app.use('/api/transcribe', transcribeRoutes)
 
-app.use(express.json())
+// 10mb (vs the 100kb default): trade ideas persist their full chat transcript in
+// `chat_state` (messages + analysisState), which overflows the default limit on
+// longer conversations and 413s the save/update.
+app.use(express.json({ limit: '10mb' }))
 
 if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve('public')))

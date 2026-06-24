@@ -41,6 +41,20 @@ export const ideaService = {
     placeOrdersForIdea,
 }
 
+// chat_state.messages is a display-only transcript, re-shown when the idea is
+// reopened for editing; the model restores its context from chat_state.analysisState,
+// never from this array. So we cap it to the most recent N messages to keep the
+// persisted doc — and the save/update payload that 413'd on long chats — bounded.
+// Chart bubbles are already capped client-side and sit near the end of the
+// transcript, so they survive the slice.
+const MAX_PERSISTED_MESSAGES = 40
+function _trimChatState(chatState) {
+    if (!chatState || typeof chatState !== 'object') return chatState ?? null
+    const msgs = chatState.messages
+    if (!Array.isArray(msgs) || msgs.length <= MAX_PERSISTED_MESSAGES) return chatState
+    return { ...chatState, messages: msgs.slice(-MAX_PERSISTED_MESSAGES) }
+}
+
 async function saveIdea(tradeIdea, userId) {
     // Resolve condition trees from either new tree format or legacy flat arrays
     const entryTree = resolveConditionTree(tradeIdea.entry_condition,  tradeIdea.entry_conditions, tradeIdea.entry_logic ?? 'AND')
@@ -102,7 +116,7 @@ async function saveIdea(tradeIdea, userId) {
 
         additional_entries: additionalEntries,
         notes:      tradeIdea.notes      ?? null,
-        chat_state: tradeIdea.chat_state ?? null,
+        chat_state: _trimChatState(tradeIdea.chat_state),
         accounts:      Array.isArray(tradeIdea.accounts) ? tradeIdea.accounts : [],
         mainAccountId: tradeIdea.mainAccountId ?? null,
         userId:        userId               ?? null,
@@ -282,6 +296,8 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
 
     // Clear conversation when idea is closed
     if (patch.status === 'closed') patch.chat_state = null
+    // Otherwise, if the patch carries a transcript, trim it before persisting.
+    else if (patch.chat_state) patch.chat_state = _trimChatState(patch.chat_state)
 
     // Moving back to looking always restarts entry monitoring from scratch
     if (patch.status === 'looking') {
