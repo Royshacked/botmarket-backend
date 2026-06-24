@@ -7,6 +7,7 @@ import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.
 import { getSecFilings } from '../providers/sec.provider.js'
 import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError }      from './toolResult.util.js'
+import { cleanConviction } from './conviction.util.js'
 import { logger }         from './logger.service.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
@@ -230,7 +231,10 @@ async function _sizePlan(plan) {
     const ratios = ideas.map(i => (Number.isFinite(i.allocationRatio) && i.allocationRatio > 0 ? i.allocationRatio : 0))
     const total  = ratios.reduce((a, b) => a + b, 0)
     const norm   = total > 0 ? ratios.map(r => r / total) : ideas.map(() => 1 / ideas.length)
-    ideas.forEach((idea, i) => { idea.allocationRatio = Number(norm[i].toFixed(4)) })
+    ideas.forEach((idea, i) => {
+        idea.allocationRatio = Number(norm[i].toFixed(4))
+        idea.conviction = cleanConviction(idea.conviction)
+    })
 
     const positionSize = Number(plan.positionSize)
     if (!Number.isFinite(positionSize) || positionSize <= 0) {

@@ -8,6 +8,7 @@ import { routeExits, currentReferencePrice, detectNativeEntryLevel } from '../..
 import { isAssetOpen } from '../../services/market.service.js'
 import { toBrokerSymbol, normSymbol } from '../../services/brokerSymbol.service.js'
 import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } from '../../services/conditionTree.service.js'
+import { cleanConviction } from '../../services/conviction.util.js'
 
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
@@ -108,6 +109,7 @@ async function saveIdea(tradeIdea, userId) {
         portfolioId:     tradeIdea.portfolioId     ?? undefined,
         portfolioName:   tradeIdea.portfolioName   ?? undefined,
         allocationRatio: tradeIdea.allocationRatio ?? undefined,
+        conviction:      cleanConviction(tradeIdea.conviction),
     }
 
     try {

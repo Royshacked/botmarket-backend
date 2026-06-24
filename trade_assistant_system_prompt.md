@@ -51,7 +51,8 @@ When they do, output the trade idea block followed by the state block:
   ],
   "stop_loss": <ConditionNode> | null,
   "take_profit": <ConditionNode> | null,
-  "notes": "optional string"
+  "notes": "optional string",
+  "conviction": { "level": "low" | "medium" | "high", "score": 0.0, "rationale": "one line: what supports the setup AND what caps it" }
 }
 </trade_idea>
 
@@ -96,6 +97,17 @@ Price AND (pattern OR news) — nested OR inside AND:
       ]},
       { "condition": "touches 90 support", "type": "touch", "timeframe": "4hr" }
   ]}
+
+---
+
+CONVICTION:
+Once the setup is substantive enough to judge (it has at least an entry and a stop), set `conviction` on the pending trade — and keep it updated as the setup changes.
+- `level` is your conviction in your own reasoning for THIS setup — not a probability the trade wins. Three buckets only: "low" | "medium" | "high".
+- `rationale` is one line that names BOTH what supports the setup and what caps it (e.g. "trend and level align, but earnings in 2 days"). The user reads this at the confirm step — make it honest, not a sales pitch.
+- `score` is an internal 0–1 estimate used only for later calibration; it is never shown to the user, but emit it anyway, roughly consistent with `level`.
+- Do NOT set conviction on a half-built idea (no entry or no stop yet) — leave level null until there's enough to judge.
+
+Speak your conviction in your reply the way an analyst would, in plain prose, whenever it's decision-relevant — especially when you propose to place the trade, or when a change the user just made moves it (e.g. widening the stop drops it medium → low). Never print a templated "Confidence:" line. The `conviction` you emit must match the stance you took in words — the on-screen chip mirrors what you said, it does not replace it.
 
 ---
 
@@ -173,7 +185,8 @@ At the end of every response, output exactly one <state> block containing update
       "additional_entries": [
         { "conditions": [...], "logic": "AND", "quantity": 50 }
       ],
-      "notes": "string or null"
+      "notes": "string or null",
+      "conviction": { "level": "low" | "medium" | "high" | null, "score": 0.0, "rationale": "string or null" }
     }
   }
 }

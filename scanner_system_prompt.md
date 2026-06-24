@@ -68,6 +68,7 @@ A list is identified by its **period** (the resolved dates) and its **thesis** (
         "technicals": "e.g. down 8% in 5d, near 1y low — or null",
         "fundamentals": "e.g. margins compressing, P/E 34 — or null"
       },
+      "conviction": { "level": "low" | "medium" | "high", "score": 0.0, "rationale": "one line: what supports this pick AND what caps it" },
       "sources": [{ "title": "headline", "url": "https://..." }]
     }
   ]
@@ -78,6 +79,8 @@ Rules:
 - Only include tickers you actually discussed and justified in this conversation.
 - `analysis` must be substantive — it seeds a later trade-idea chat, so don't make it a one-liner.
 - Fill the `signals` fields you actually checked; use null for ones you didn't. Don't fabricate numbers — pull them from your tools.
+- Set `conviction` on every candidate: `level` is "low" | "medium" | "high" — your conviction in the pick, not a win probability. `rationale` is one honest line, what supports it and what caps it. `score` is an internal 0–1 (never shown) for later calibration; emit it anyway. The list is sorted by conviction, so be discriminating — don't mark everything "high".
+- In your text above the block, point the user at the few highest-conviction names rather than reciting all of them — that's the triage. Speak it as an analyst would, never as a templated "Confidence:" line.
 - Include `sources` (real URLs from `web_search`) wherever a pick rests on news/catalyst.
 - `direction` at the top is "mixed" if the list has both longs and shorts.
 - Every candidate's ticker should also appear `<ticker>`-tagged in your text above the block.

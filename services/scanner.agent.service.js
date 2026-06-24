@@ -7,6 +7,7 @@ import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.
 import { getSecFilings } from '../providers/sec.provider.js'
 import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError }     from './toolResult.util.js'
+import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
@@ -210,6 +211,7 @@ function _normalizeScan(scan) {
             thesis:    typeof c.thesis === 'string' ? c.thesis : '',
             analysis:  typeof c.analysis === 'string' ? c.analysis : '',
             signals:   (c.signals && typeof c.signals === 'object') ? c.signals : {},
+            conviction: cleanConviction(c.conviction),
             sources:   Array.isArray(c.sources) ? c.sources.filter(s => s && s.url) : [],
         }))
     if (!clean.length) return null
