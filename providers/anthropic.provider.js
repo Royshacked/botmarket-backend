@@ -5,16 +5,25 @@ import { isToolError, toolErrorText } from '../services/toolResult.util.js'
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_MAX_TOKENS = 8192
+// When thinking is on, reasoning tokens count toward max_tokens, so give the
+// model headroom for both the hidden reasoning and the full visible reply.
+const THINKING_MAX_TOKENS = 16000
 const DEFAULT_MAX_CONTINUATIONS = 10
 
-// Map the abstract reasoning-effort knob to an extended-thinking budget. 'off'
+// Map the abstract reasoning-effort knob onto adaptive extended thinking. 'off'
 // (or undefined) → no thinking block at all, so we pay for zero reasoning
-// tokens. The budget is added on top of DEFAULT_MAX_TOKENS so the visible reply
-// keeps its full length allowance.
-const THINKING_BUDGETS = { low: 2048, high: 6000 }
+// tokens. low/high → adaptive thinking with the matching effort level.
+//
+// We use adaptive thinking (not a fixed budget_tokens) because budget_tokens is
+// removed on the Opus 4.7/4.8 family — sending it 400s the request (that was the
+// "streaming failed" bug in Opus deep-think mode). Adaptive + effort is the
+// supported path across both Opus 4.8 and Sonnet 4.6.
+const EFFORT_LEVELS = { low: 'low', high: 'high' }
 function _thinkingConfig(reasoningEffort) {
-    const budget = THINKING_BUDGETS[reasoningEffort]
-    return budget ? { type: 'enabled', budget_tokens: budget } : null
+    const effort = EFFORT_LEVELS[reasoningEffort]
+    return effort
+        ? { thinking: { type: 'adaptive' }, output_config: { effort } }
+        : null
 }
 
 // ─── Streaming tool loop ──────────────────────────────────────────────────────
@@ -41,7 +50,7 @@ export async function streamAnthropicWithTools({
 }) {
     const messages   = _normalizeMessages(promptOrMessages)
     const suppressor = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan)
-    const thinking   = _thinkingConfig(reasoningEffort)
+    const reasoning  = _thinkingConfig(reasoningEffort)
 
     for (let i = 0; i < maxContinuations; i++) {
         // Client disconnected (user hit Stop) — end the loop instead of burning
@@ -53,8 +62,8 @@ export async function streamAnthropicWithTools({
             system:     systemPrompt,
             messages,
             tools,
-            max_tokens: thinking ? DEFAULT_MAX_TOKENS + thinking.budget_tokens : DEFAULT_MAX_TOKENS,
-            ...(thinking ? { thinking } : {}),
+            max_tokens: reasoning ? THINKING_MAX_TOKENS : DEFAULT_MAX_TOKENS,
+            ...(reasoning ?? {}),
         }, signal ? { signal } : undefined)
 
         const contentBlocks = []

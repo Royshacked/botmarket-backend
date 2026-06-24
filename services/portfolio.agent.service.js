@@ -2,9 +2,10 @@ import { readFileSync }   from 'fs'
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { resolveStreamFn } from './llmModels.js'
-import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote } from '../providers/yahoofinance.provider.js'
+import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getShortInterest, getOptionsContext } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
+import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError }      from './toolResult.util.js'
 import { logger }         from './logger.service.js'
 
@@ -71,6 +72,33 @@ const TOOLS = [
         },
     },
     {
+        name: 'get_short_interest',
+        description: 'Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it as crowding/sentiment context (a heavily-shorted name carries squeeze risk in either direction), not as a live read. No data for ETFs, crypto, FX or futures.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. TSLA, GME, AAPL' } },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_options_context',
+        description: 'Options positioning for a US equity/ETF: put/call ratio (by open interest and by volume) and at-the-money implied volatility for the nearest expiry. Use elevated IV as a flag that the market expects a large move (often around a catalyst) when sizing or timing an entry. Quotes ~15-min delayed. No data for crypto, FX or futures.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. NVDA, SPY, AAPL' } },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_derivatives_context',
+        description: 'Crypto-perp positioning from Binance: funding rate (crowding), open interest (committed leverage), and global long/short account ratio (retail skew). The crypto analog to short-interest/options sentiment — use it when a holding/candidate is a crypto perp. Crypto perps only (BTC, ETH, SOL…), not equities/FX/futures.',
+        input_schema: {
+            type: 'object',
+            properties: { symbol: { type: 'string', description: 'e.g. BTC, ETH, SOL (or BTC-USD / BTCUSDT)' } },
+            required: ['symbol'],
+        },
+    },
+    {
         name: 'get_earnings_calendar',
         description: 'Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it.',
         input_schema: {
@@ -113,6 +141,18 @@ const TOOL_HANDLERS = {
     get_earnings_calendar: async ({ from, to, symbols }) => {
         try { return await getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []) }
         catch (err) { return toolError(`Could not fetch earnings calendar: ${err.message}`) }
+    },
+    get_short_interest: async ({ ticker }) => {
+        try { return await getShortInterest(ticker) }
+        catch (err) { return toolError(`Could not fetch short interest for ${ticker}: ${err.message}`) }
+    },
+    get_options_context: async ({ ticker }) => {
+        try { return await getOptionsContext(ticker) }
+        catch (err) { return toolError(`Could not fetch options context for ${ticker}: ${err.message}`) }
+    },
+    get_derivatives_context: async ({ symbol }) => {
+        try { return await getDerivativesContext(symbol) }
+        catch (err) { return toolError(`Could not fetch derivatives context for ${symbol}: ${err.message}`) }
     },
 }
 

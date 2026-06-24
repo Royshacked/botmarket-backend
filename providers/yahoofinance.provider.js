@@ -208,6 +208,131 @@ export async function getPriceAction(ticker) {
     ].join('\n')
 }
 
+// --- Short interest -----------------------------------------------------------
+// Short interest is FINRA data: reported bi-monthly with a ~2-week lag, so it is
+// inherently stale. We surface the `dateShortInterest` as-of prominently so the
+// agent never treats it as a live read. Equities/ADRs only — ETFs, crypto, FX
+// and futures have no short-interest figure.
+const _siCache = new Map() // SYMBOL -> { at, text }
+const SI_TTL_MS = 12 * 60 * 60 * 1000
+
+export async function getShortInterest(ticker) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    if (!sym) return 'No ticker provided.'
+
+    const hit = _siCache.get(sym)
+    if (hit && Date.now() - hit.at < SI_TTL_MS) return hit.text
+
+    let stats, price
+    try {
+        const s = await yf.quoteSummary(sym, { modules: ['defaultKeyStatistics', 'price'] })
+        stats = s?.defaultKeyStatistics || {}
+        price = s?.price || {}
+    } catch (err) {
+        return `No short-interest data for ${sym} (${err.message}). This figure exists only for US-listed single stocks/ADRs — not ETFs, crypto, FX or futures.`
+    }
+
+    const sharesShort = stats.sharesShort
+    if (sharesShort == null && stats.shortPercentOfFloat == null && stats.shortRatio == null) {
+        return `No short-interest reported for ${sym}. This figure exists only for US-listed single stocks/ADRs — not ETFs, crypto, FX or futures.`
+    }
+
+    const pctFloat = stats.shortPercentOfFloat != null ? `${(stats.shortPercentOfFloat * 100).toFixed(2)}%` : null
+    const daysCover = stats.shortRatio != null ? `${Number(stats.shortRatio).toFixed(1)} days` : null
+    const prior = stats.sharesShortPriorMonth
+    const moM = (sharesShort != null && prior != null && prior > 0)
+        ? `${(((sharesShort - prior) / prior) * 100).toFixed(1)}% vs prior month`
+        : null
+    const fmtShares = v => {
+        const n = Number(v)
+        if (!Number.isFinite(n)) return null
+        if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`
+        if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`
+        return `${n.toFixed(0)}`
+    }
+    const asOf = stats.dateShortInterest
+        ? (stats.dateShortInterest instanceof Date ? stats.dateShortInterest : new Date(stats.dateShortInterest)).toISOString().slice(0, 10)
+        : 'unknown'
+
+    const text = [
+        `${sym}${price.shortName ? ` (${price.shortName})` : ''} — short interest`,
+        pctFloat   ? `Short % of float: ${pctFloat}` : null,
+        daysCover  ? `Days to cover (short ratio): ${daysCover}` : null,
+        sharesShort != null ? `Shares short: ${fmtShares(sharesShort)}` : null,
+        moM ? `Change: ${moM}` : null,
+        `As of: ${asOf} (FINRA settlement date — reported bi-monthly with a ~2-week lag; treat as background, not a live read).`,
+    ].filter(Boolean).join('\n')
+
+    if (_siCache.size > 500) _siCache.clear()
+    _siCache.set(sym, { at: Date.now(), text })
+    return text
+}
+
+// --- Options context ----------------------------------------------------------
+// Nearest-expiry options snapshot: put/call ratio (by open interest AND volume),
+// at-the-money implied volatility, and the available expiries. Quotes are
+// 15-min delayed on the free feed. Equities/ETFs with listed options only.
+const _optCache = new Map() // SYMBOL -> { at, text }
+const OPT_TTL_MS = 60 * 60 * 1000
+
+export async function getOptionsContext(ticker) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    if (!sym) return 'No ticker provided.'
+
+    const hit = _optCache.get(sym)
+    if (hit && Date.now() - hit.at < OPT_TTL_MS) return hit.text
+
+    let chain
+    try {
+        chain = await yf.options(sym)
+    } catch (err) {
+        return `No options data for ${sym} (${err.message}). Listed options exist for most US equities/ETFs — not for crypto, FX or futures here.`
+    }
+
+    const board = Array.isArray(chain?.options) ? chain.options[0] : null
+    const calls = board?.calls || []
+    const puts  = board?.puts  || []
+    if (!calls.length && !puts.length) {
+        return `No options chain found for ${sym}. Listed options exist for most US equities/ETFs — not for crypto, FX or futures here.`
+    }
+
+    const spot = chain?.quote?.regularMarketPrice ?? null
+    const sum = (arr, k) => arr.reduce((a, c) => a + (Number(c[k]) || 0), 0)
+    const oiCalls = sum(calls, 'openInterest'), oiPuts = sum(puts, 'openInterest')
+    const volCalls = sum(calls, 'volume'),     volPuts = sum(puts, 'volume')
+    const pcOI  = oiCalls  > 0 ? (oiPuts  / oiCalls ).toFixed(2) : 'n/a'
+    const pcVol = volCalls > 0 ? (volPuts / volCalls).toFixed(2) : 'n/a'
+
+    // ATM IV: contract whose strike is closest to spot, averaged across call+put.
+    let atmIv = null
+    if (spot != null) {
+        const nearest = list => list.reduce((best, c) =>
+            (best == null || Math.abs(c.strike - spot) < Math.abs(best.strike - spot)) ? c : best, null)
+        const c = nearest(calls), p = nearest(puts)
+        const ivs = [c?.impliedVolatility, p?.impliedVolatility].map(Number).filter(Number.isFinite)
+        if (ivs.length) atmIv = `${((ivs.reduce((a, b) => a + b, 0) / ivs.length) * 100).toFixed(1)}%`
+    }
+
+    const expiries = (chain?.expirationDates || [])
+        .slice(0, 6)
+        .map(d => (d instanceof Date ? d : new Date(d)).toISOString().slice(0, 10))
+    const nearExp = board?.expirationDate
+        ? (board.expirationDate instanceof Date ? board.expirationDate : new Date(board.expirationDate)).toISOString().slice(0, 10)
+        : (expiries[0] || 'n/a')
+
+    const text = [
+        `${sym} — options context (nearest expiry ${nearExp}; quotes ~15-min delayed)`,
+        spot != null ? `Spot: $${Number(spot).toFixed(2)}` : null,
+        `Put/Call ratio — open interest: ${pcOI} | volume: ${pcVol}  (>1 = more puts/bearish-hedged, <1 = more calls/bullish)`,
+        atmIv ? `ATM implied volatility: ${atmIv}` : null,
+        expiries.length ? `Available expiries: ${expiries.join(', ')}` : null,
+    ].filter(Boolean).join('\n')
+
+    if (_optCache.size > 500) _optCache.clear()
+    _optCache.set(sym, { at: Date.now(), text })
+    return text
+}
+
 // Map timeSpan/multiplier → Yahoo Finance interval string
 function _toInterval(timeSpan, multiplier) {
     if (timeSpan === 'minute') {

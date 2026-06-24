@@ -2,9 +2,10 @@ import { readFileSync }   from 'fs'
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { resolveStreamFn } from './llmModels.js'
-import { getQuotes, getRiskMetrics, getPriceAction } from '../providers/yahoofinance.provider.js'
+import { getQuotes, getRiskMetrics, getPriceAction, getShortInterest, getOptionsContext } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
+import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError }     from './toolResult.util.js'
 import { logger }        from './logger.service.js'
 
@@ -74,6 +75,33 @@ const TOOLS = [
             required: ['ticker'],
         },
     },
+    {
+        name: 'get_short_interest',
+        description: 'Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it for squeeze potential and crowded-bearish-positioning context on a scan candidate, not as a live read. No data for ETFs, crypto, FX or futures.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. GME, TSLA, AAPL' } },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_options_context',
+        description: 'Options positioning for a US equity/ETF: put/call ratio (by open interest and by volume) and at-the-money implied volatility for the nearest expiry. Use it to gauge directional skew and how big a move the market is pricing (elevated IV = expensive options / large expected move, often around a catalyst). Quotes ~15-min delayed. No data for crypto, FX or futures.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. NVDA, SPY, AAPL' } },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_derivatives_context',
+        description: 'Crypto-perp positioning from Binance: funding rate (who pays to hold the trade — a crowding signal), open interest (committed leverage), and the global long/short account ratio (retail skew). This is the crypto analog to short-interest/options sentiment. Crypto perps only (BTC, ETH, SOL…) — not equities, FX or traditional futures.',
+        input_schema: {
+            type: 'object',
+            properties: { symbol: { type: 'string', description: 'e.g. BTC, ETH, SOL (or BTC-USD / BTCUSDT)' } },
+            required: ['symbol'],
+        },
+    },
 ]
 
 const TOOL_HANDLERS = {
@@ -100,6 +128,18 @@ const TOOL_HANDLERS = {
     get_sec_filings: async ({ ticker }) => {
         try { return await getSecFilings(ticker) }
         catch (err) { return toolError(`Could not fetch SEC filings for ${ticker}: ${err.message}`) }
+    },
+    get_short_interest: async ({ ticker }) => {
+        try { return await getShortInterest(ticker) }
+        catch (err) { return toolError(`Could not fetch short interest for ${ticker}: ${err.message}`) }
+    },
+    get_options_context: async ({ ticker }) => {
+        try { return await getOptionsContext(ticker) }
+        catch (err) { return toolError(`Could not fetch options context for ${ticker}: ${err.message}`) }
+    },
+    get_derivatives_context: async ({ symbol }) => {
+        try { return await getDerivativesContext(symbol) }
+        catch (err) { return toolError(`Could not fetch derivatives context for ${symbol}: ${err.message}`) }
     },
 }
 
