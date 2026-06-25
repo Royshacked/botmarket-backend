@@ -19,6 +19,7 @@ import {
     calcSMASeries,
     calcMACDSeries,
     calcATRSeries,
+    calcVWAPSeries,
 } from './structured.evaluator.js'
 
 const LOG = '[indicator.evaluator]'
@@ -31,17 +32,18 @@ If uncertain, answer NO.
 Respond with a single word only: YES or NO.`
 
 /**
- * @param {string}   condition  e.g. "RSI(14) below 30", "ATR expanding", "MACD turns positive"
- * @param {Candle[]} candles    full history, newest-last (300 bars for warmup accuracy)
+ * @param {string}      condition  e.g. "RSI(14) below 30", "ATR expanding", "below VWAP"
+ * @param {Candle[]}    candles    full history, newest-last (300 bars for warmup accuracy)
+ * @param {number|null} anchorMs   session-start ms — anchors the VWAP column (session-relative)
  * @returns {Promise<boolean>}
  */
-export async function evaluateIndicator(condition, candles) {
+export async function evaluateIndicator(condition, candles, anchorMs = null) {
     if (!candles || candles.length < 5) {
         logger.warn(LOG, 'Not enough candles for indicator evaluation')
         return false
     }
 
-    const indicators  = _computeIndicators(condition, candles)
+    const indicators  = _computeIndicators(condition, candles, anchorMs)
 
     // Surface insufficient-warmup cases: a null newest value means the series
     // reads "n/a" and any condition referencing it silently evaluates NO.
@@ -71,7 +73,7 @@ export async function evaluateIndicator(condition, candles) {
 
 // ─── Indicator computation ────────────────────────────────────────────────────
 
-function _computeIndicators(condition, candles) {
+function _computeIndicators(condition, candles, anchorMs = null) {
     const closes         = candles.map(c => c.c)
     const { line, signal, hist } = calcMACDSeries(closes)
 
@@ -81,6 +83,8 @@ function _computeIndicators(condition, candles) {
         sma:  { 20: calcSMASeries(closes, 20), 50: calcSMASeries(closes, 50), 200: calcSMASeries(closes, 200) },
         macd: { line, signal, hist },
         atr:  { 14: calcATRSeries(candles, 14) },
+        // Session-anchored, so only computed when the condition actually references it.
+        vwap: /vwap/i.test(condition) ? calcVWAPSeries(candles, anchorMs) : null,
     }
 
     // Add any custom periods explicitly mentioned in the condition text
@@ -121,6 +125,7 @@ function _buildTable(candles, ind, offset) {
         'MACD',
         'MACD_hist',
         ...atrPeriods.map(p => `ATR(${p})`),
+        ...(ind.vwap ? ['VWAP'] : []),
     ]
 
     const headerRow = headers.join(' | ')
@@ -137,6 +142,7 @@ function _buildTable(candles, ind, offset) {
             _n(ind.macd.line[idx]),
             _n(ind.macd.hist[idx]),
             ...atrPeriods.map(p => _n(ind.atr[p][idx])),
+            ...(ind.vwap ? [_n(ind.vwap[idx])] : []),
         ].join(' | ')
     })
 

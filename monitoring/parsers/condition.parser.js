@@ -4,7 +4,7 @@
  * Parsed schema shape:
  * {
  *   operator:     'gt'|'lt'|'gte'|'lte'|'eq'|'crossAbove'|'crossBelow'|'isBetween'|'unknown'
- *   subject:      'close'|'open'|'high'|'low'|'volume'|'rsi(N)'|'ema(N)'|'sma(N)'|
+ *   subject:      'close'|'open'|'high'|'low'|'volume'|'vwap'|'rsi(N)'|'ema(N)'|'sma(N)'|
  *                 'macd_line'|'macd_signal'|'macd_hist'|'atr(N)'  (or null)
  *   value:        number | subject-string (compare two indicators) | null
  *   value2:       number | null   (upper bound for 'isBetween')
@@ -25,7 +25,8 @@ const SYSTEM = `You parse trading condition strings into a JSON schema. Return O
 
 Fields (all required):
 - "operator": "gt"|"lt"|"gte"|"lte"|"eq"|"crossAbove"|"crossBelow"|"isBetween"|"unknown"
-- "subject":  "close"|"open"|"high"|"low"|"volume"|"rsi(N)"|"ema(N)"|"sma(N)"|"macd_line"|"macd_signal"|"macd_hist"|"atr(N)" — or null
+- "subject":  "close"|"open"|"high"|"low"|"volume"|"vwap"|"rsi(N)"|"ema(N)"|"sma(N)"|"macd_line"|"macd_signal"|"macd_hist"|"atr(N)" — or null
+              ("vwap" = session-anchored VWAP, no period; intraday only)
 - "value":    number or subject-string (for indicator vs indicator); null if unknown
 - "value2":   number upper bound for isBetween, else null
 - "confirmation": consecutive candles required (0 = current only)
@@ -34,6 +35,8 @@ Examples:
 "price breaks above 100"              → {"operator":"crossAbove","subject":"close","value":100,"value2":null,"confirmation":1}
 "RSI(14) below 30"                    → {"operator":"lt","subject":"rsi(14)","value":30,"value2":null,"confirmation":0}
 "EMA(20) crosses above EMA(50)"       → {"operator":"crossAbove","subject":"ema(20)","value":"ema(50)","value2":null,"confirmation":0}
+"price reclaims VWAP"                  → {"operator":"crossAbove","subject":"close","value":"vwap","value2":null,"confirmation":0}
+"closes below VWAP"                    → {"operator":"lt","subject":"close","value":"vwap","value2":null,"confirmation":0}
 "close stays above 100 for 3 candles" → {"operator":"gt","subject":"close","value":100,"value2":null,"confirmation":3}
 "price between 100 and 110"           → {"operator":"isBetween","subject":"close","value":100,"value2":110,"confirmation":0}
 "volume above 1000000"                → {"operator":"gt","subject":"volume","value":1000000,"value2":null,"confirmation":0}

@@ -22,9 +22,11 @@
  * @param {ParsedCondition} parsed
  * @param {Candle[]}        candles  newest-last
  * @param {number|null}     floorAt  ms timestamp; only events at/after this count
+ * @param {number|null}     anchorMs session-start ms — anchors session-relative
+ *                                   subjects (vwap). null falls back to UTC-day open.
  * @returns {{ pass: boolean, triggerAt?: number, reason?: string }}
  */
-export function evaluate(parsed, candles, floorAt = null) {
+export function evaluate(parsed, candles, floorAt = null, anchorMs = null) {
     if (!candles || candles.length < 2) return { pass: false, reason: 'insufficient_data' }
 
     const { operator, subject } = parsed
@@ -33,20 +35,20 @@ export function evaluate(parsed, candles, floorAt = null) {
     }
 
     return floorAt == null
-        ? _evaluateLatest(parsed, candles)
-        : _evaluateWindow(parsed, candles, floorAt)
+        ? _evaluateLatest(parsed, candles, anchorMs)
+        : _evaluateWindow(parsed, candles, floorAt, anchorMs)
 }
 
 // ─── Legacy snapshot evaluation (latest bar / confirmation window) ──────────────
 
-function _evaluateLatest(parsed, candles) {
+function _evaluateLatest(parsed, candles, anchorMs = null) {
     const { operator, subject, value, value2, confirmation } = parsed
 
-    const subSeries = getSubjectSeries(subject, candles)
+    const subSeries = getSubjectSeries(subject, candles, anchorMs)
     if (!subSeries || subSeries.length < 2) return { pass: false, reason: 'series_too_short' }
 
     // For comparisons against another indicator
-    const valSeries = typeof value === 'string' ? getSubjectSeries(value, candles) : null
+    const valSeries = typeof value === 'string' ? getSubjectSeries(value, candles, anchorMs) : null
 
     const confs     = Math.max(0, confirmation ?? 0)
     const checkLen  = confs === 0 ? 1 : confs
@@ -108,12 +110,12 @@ function _evaluateLatest(parsed, candles) {
  *
  * @returns {{ pass: boolean, triggerAt?: number }}
  */
-function _evaluateWindow(parsed, candles, floorAt) {
+function _evaluateWindow(parsed, candles, floorAt, anchorMs = null) {
     const { operator, subject, value, value2, confirmation } = parsed
 
-    const subSeries = getSubjectSeries(subject, candles)
+    const subSeries = getSubjectSeries(subject, candles, anchorMs)
     if (!subSeries || subSeries.length < 2) return { pass: false }
-    const valSeries = typeof value === 'string' ? getSubjectSeries(value, candles) : null
+    const valSeries = typeof value === 'string' ? getSubjectSeries(value, candles, anchorMs) : null
 
     const n        = candles.length
     const isCross  = operator === 'crossAbove' || operator === 'crossBelow'
@@ -177,11 +179,12 @@ function _candleMs(t) {
 /**
  * Build a value-series for a subject string across the candle array.
  *
- * @param {string}   subject  e.g. 'close', 'rsi(14)', 'ema(20)'
- * @param {Candle[]} candles  newest-last
+ * @param {string}        subject  e.g. 'close', 'rsi(14)', 'ema(20)', 'vwap'
+ * @param {Candle[]}      candles  newest-last
+ * @param {number|null}   anchorMs session-start ms for session-relative subjects (vwap)
  * @returns {(number|null)[] | null}
  */
-export function getSubjectSeries(subject, candles) {
+export function getSubjectSeries(subject, candles, anchorMs = null) {
     if (!subject || !candles.length) return null
     const s = subject.toLowerCase()
 
@@ -190,6 +193,7 @@ export function getSubjectSeries(subject, candles) {
     if (s === 'high')   return candles.map(c => c.h)
     if (s === 'low')    return candles.map(c => c.l)
     if (s === 'volume') return candles.map(c => c.v)
+    if (s === 'vwap')   return calcVWAPSeries(candles, anchorMs)
 
     const rsiM = s.match(/^rsi\((\d+)\)$/)
     if (rsiM) return calcRSISeries(candles.map(c => c.c), +rsiM[1])
@@ -315,6 +319,47 @@ export function calcATRSeries(candles, period = 14) {
     for (let i = period; i < candles.length; i++) {
         atr    = (atr * (period - 1) + trs[i]) / period
         out[i] = atr
+    }
+    return out
+}
+
+/**
+ * Session-anchored VWAP series.
+ *
+ * VWAP = Σ(typicalPrice·volume) / Σ(volume), accumulated from the session open and
+ * RESET each session — that intraday reset is the whole point of VWAP, so it's a
+ * meaningful subject only on intraday timeframes. Bars before the anchor read null
+ * (no VWAP defined for them in the current session); a zero-volume bar contributes
+ * nothing and carries the prior running value forward (typical price if it's first).
+ *
+ * @param {Candle[]}    candles   newest-last
+ * @param {number|null} anchorMs  session-start ms. When absent (e.g. the legacy flat
+ *                                eval path), fall back to UTC-midnight of the newest
+ *                                bar so VWAP still computes — correct for 24h assets,
+ *                                approximate for equities (includes pre-market).
+ * @returns {(number|null)[]}
+ */
+export function calcVWAPSeries(candles, anchorMs = null) {
+    const out = new Array(candles.length).fill(null)
+    if (!candles.length) return out
+
+    // Guard null/undefined explicitly — Number(null) is 0 (finite), which would
+    // anchor at the epoch and accumulate across the whole window instead of a session.
+    let anchor = anchorMs == null ? NaN : Number(anchorMs)
+    if (!Number.isFinite(anchor)) {
+        const lastMs = _candleMs(candles[candles.length - 1].t)
+        anchor = lastMs - (lastMs % 86_400_000)   // start of the newest bar's UTC day
+    }
+
+    let cumPV = 0, cumV = 0
+    for (let i = 0; i < candles.length; i++) {
+        const c = candles[i]
+        if (_candleMs(c.t) < anchor) continue          // pre-session bar — no VWAP
+        const tp  = (c.h + c.l + c.c) / 3
+        const vol = Number(c.v) || 0
+        cumPV += tp * vol
+        cumV  += vol
+        out[i] = cumV > 0 ? cumPV / cumV : tp          // all-zero-volume → typical price
     }
     return out
 }

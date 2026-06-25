@@ -124,6 +124,11 @@ function _buildStudies(condition) {
         add({ name: 'Volume' }, 'volume')
     }
 
+    // VWAP (session-anchored price overlay)
+    if (/vwap/i.test(condition)) {
+        add({ name: 'VWAP', forceOverlay: true }, 'vwap')
+    }
+
     // Explicit EMA periods
     for (const [, p] of condition.matchAll(/ema\((\d+)\)/gi)) {
         add({ name: 'Moving Average Exponential', input: { in_0: +p }, forceOverlay: true }, `ema${p}`)

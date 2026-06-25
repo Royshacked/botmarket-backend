@@ -270,7 +270,9 @@ async function _evalOne(cond, symbolMap, defaultSymbol, floorAt = null, priorFin
         }
 
         if (type === 'indicator') {
-            const pass = await evaluateIndicator(conditionText, candles)
+            // Pass the session anchor so a VWAP column in the indicator table is
+            // session-correct (ctx carries sessionStartMs when a vwap/cumulative leaf exists).
+            const pass = await evaluateIndicator(conditionText, candles, ctx?.sessionStartMs ?? null)
             return { pass, condition: conditionText, triggerAt: pass ? Date.now() : null }
         }
 
@@ -295,9 +297,10 @@ async function _evalOne(cond, symbolMap, defaultSymbol, floorAt = null, priorFin
             return { pass, condition: conditionText, triggerAt: triggerAt ?? null }
         }
 
-        // structured (default) — precise rising-edge timestamp since the floor
+        // structured (default) — precise rising-edge timestamp since the floor.
+        // ctx?.sessionStartMs anchors session-relative subjects like VWAP.
         const parsed = await parseCondition(conditionText)
-        const { pass, triggerAt } = evaluate(parsed, candles, floorAt)
+        const { pass, triggerAt } = evaluate(parsed, candles, floorAt, ctx?.sessionStartMs ?? null)
         return { pass, condition: conditionText, triggerAt: triggerAt ?? null }
 
     } catch (err) {

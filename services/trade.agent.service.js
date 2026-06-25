@@ -87,7 +87,7 @@ const TOOLS = [
                 },
                 indicators: {
                     type: 'string',
-                    description: 'Optional free-text indicators to overlay, e.g. "rsi(14), ema(50), volume". Leave empty for sensible defaults (EMA 20/50).',
+                    description: 'Optional free-text indicators to overlay, e.g. "rsi(14), ema(50), volume, vwap". Leave empty for sensible defaults (EMA 20/50).',
                 },
                 show_to_user: {
                     type: 'boolean',

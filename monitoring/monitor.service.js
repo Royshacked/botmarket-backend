@@ -246,7 +246,7 @@ async function _fetchCandles(id, asset, tf, count = CANDLE_COUNT) {
     return candles
 }
 
-// ─── Cumulative-volume context ─────────────────────────────────────────────────
+// ─── Session context (cumulative volume + VWAP) ────────────────────────────────
 
 /**
  * Does a phase's conditions contain a `volume` leaf in cumulative mode? Such a leaf
@@ -260,14 +260,40 @@ function _hasCumulativeVolume(tree, flat) {
 }
 
 /**
- * Build the ctx a cumulative-volume leaf needs: the session-start boundary and a
- * 1-min candle series long enough to cover from that boundary to now (crypto can run
- * ~1440 bars/day, so we size the fetch to the elapsed session, capped). Returns null
- * when the phase has no cumulative-volume leaf (the common case — no extra fetch).
+ * Does a phase reference VWAP in any structured/indicator leaf? VWAP is session-
+ * anchored, so it needs the session-start boundary — but it's computed off the
+ * phase candles already in symbolMap, so (unlike cumulative volume) it needs no
+ * extra 1-min fetch.
+ */
+function _hasVwap(tree, flat) {
+    const leaves = extractLeaves(tree)
+    const all    = leaves.length ? leaves : (Array.isArray(flat) ? flat : [])
+    return all.some(l => {
+        const text = typeof l === 'string' ? l : l?.condition
+        return typeof text === 'string' && /vwap/i.test(text)
+    })
+}
+
+/**
+ * Build the session ctx the evaluators need. Two consumers share one session-start
+ * boundary:
+ *   • VWAP (structured/indicator) — just needs sessionStartMs; computed off the phase
+ *     candles already fetched, so no extra request.
+ *   • cumulative volume — additionally needs a 1-min series long enough to cover from
+ *     the session open to now (crypto can run ~1440 bars/day, so size to the elapsed
+ *     session, capped).
+ * Returns null when the phase needs neither (the common case — no extra work).
  */
 async function _buildVolumeCtx(id, asset, assetClass, tree, flat) {
-    if (!_hasCumulativeVolume(tree, flat)) return null
-    const start        = sessionStartMs(asset, assetClass)
+    const needsCumulative = _hasCumulativeVolume(tree, flat)
+    const needsVwap       = _hasVwap(tree, flat)
+    if (!needsCumulative && !needsVwap) return null
+
+    const start = sessionStartMs(asset, assetClass)
+
+    // VWAP-only: hand back just the anchor — no 1-min fetch.
+    if (!needsCumulative) return { sessionStartMs: start, minuteCandles: {} }
+
     const minutesSince = Math.ceil((Date.now() - start) / 60_000)
     const count        = Math.min(1500, Math.max(5, minutesSince + 5))
     const minute       = await _fetchCandles(id, asset, '1min', count)
