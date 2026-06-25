@@ -11,6 +11,7 @@ import { logger } from './logger.service.js'
 import { toolError } from './toolResult.util.js'
 import { normalizeTimeframe } from './timeframe.service.js'
 import { normalizeTreeNode, firstLeafTimeframe } from './conditionTree.service.js'
+import { cleanConviction } from './conviction.util.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PROMPT_PATH = join(__dirname, '../trade_assistant_system_prompt.md')
@@ -90,7 +91,7 @@ const TOOLS = [
                 },
                 show_to_user: {
                     type: 'boolean',
-                    description: 'Set true ONLY when the user would want to SEE this chart in the conversation — they asked to see it, or it directly illustrates the setup you are presenting. Leave false / omit for your own internal visual verification; an internal check must NOT appear in the chat.',
+                    description: 'Set true whenever this chart relates to the user\'s ACTUAL setup — you are defining, validating, or refining their entry / stop / take-profit or reading the market structure behind it, or they asked to see it. In those cases the user wants to see what you are looking at, so show it. Leave false / omit ONLY for a quick throwaway internal peek that does not inform the setup under discussion; such a check must NOT appear in the chat.',
                 },
             },
             required: ['ticker', 'timeframe'],
@@ -547,6 +548,12 @@ function _parseResponse(raw, priorState, userPrompt) {
             // Carry forward quantity
             if (pt.quantity == null && priorPt?.quantity != null) pt.quantity = priorPt.quantity
             if (pt.quantity != null) pt.quantity = Number(pt.quantity) || null
+
+            // Carry forward conviction — once the model has judged the setup, keep
+            // that assessment on later turns where it re-emits pending_trade without
+            // re-stating it (very common). cleanConviction nulls a malformed block;
+            // fall back to the prior good one so the chip/rationale don't flicker out.
+            pt.conviction = cleanConviction(pt.conviction) || cleanConviction(priorPt?.conviction) || null
 
             // Normalise additional entries
             if (!Array.isArray(pt.additional_entries)) {
