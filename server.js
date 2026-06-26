@@ -16,6 +16,9 @@ import cors from 'cors'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 
+import { chatRoutes }         from './api/chat/chat.routes.js'
+import { attach as attachChatWs } from './api/chat/chatWs.js'
+import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { orchestratorRoutes } from './api/orchestrator/orchestrator.routes.js'
 import { newsFeedRoutes } from './api/news-feed/newsFeed.routes.js'
 import { tradeIdeasRoutes } from './api/trade-ideas/tradeIdeas.routes.js'
@@ -80,6 +83,10 @@ app.use('/api/broker',      brokerRoutes)
 app.use('/portfolio',       portfolioRoutes)
 app.use('/scanner',         scannerRoutes)
 app.use('/market',          marketRoutes)
+app.use('/api/chat',        chatRoutes)
+
+attachChatWs(server)
+ensureChatIndexes()
 
 newsFeedService.start()
 monitorService.start()

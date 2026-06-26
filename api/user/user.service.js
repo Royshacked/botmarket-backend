@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs'
 import { getDb } from '../../providers/mongodb.provider.js'
 import { COLLECTION, stripUser } from './user.model.js'
 import { logger } from '../../services/logger.service.js'
+import { seedBotConversation } from '../chat/chat.service.js'
 
 const LOG = '[userService]'
 
@@ -68,6 +69,7 @@ async function createUser({ username, fullname, password }) {
 
     await db.collection(COLLECTION).insertOne(doc)
     logger.info(LOG, 'user created', { username })
+    seedBotConversation(doc.id).catch(err => logger.warn(LOG, 'seedBotConversation failed', err.message))
     return stripUser(doc)
 }
 

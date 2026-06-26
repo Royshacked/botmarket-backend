@@ -181,13 +181,120 @@ All routed through the single `sendBotMessage(userId, content, type, payload)` h
 
 ---
 
-## Build order
+## Phase 1 — Concrete implementation plan
 
-1. **Data layer.** `conversations` + `messages` collections, indexes, `sendBotMessage` helper, bot user seed.
-2. **REST API.** All five endpoints above. Verify with curl before touching WS.
-3. **WS server.** Attach to Express, JWT auth on upgrade, in-memory socket map, `new_message` push.
-4. **Bot conversation seeding.** Wire to user signup; back-fill for existing users.
-5. **Frontend.** WhatsApp layout, WS client, conversation list, active chat, header badge.
-6. **Portfolio managing integration.** Replace Phase 1 badge/dropdown with bot message + action card in the chat thread.
+### 1-A. Data layer + `sendBotMessage`
 
-Start with step 1 and verify `sendBotMessage` end-to-end (writes to DB, pushes to socket) before building any UI.
+New file: **`api/chat/chat.service.js`**
+
+Collections: `chat_conversations`, `chat_messages` (prefixed to avoid collision with any future general `messages` collection).
+
+**Indexes** (created once on service init via `createIndexes`):
+```js
+chat_conversations: [
+  { participants: 1 },                          // find all convs for a user
+  { participants: 1, lastMessageAt: -1 },       // sorted list
+]
+chat_messages: [
+  { conversationId: 1, createdAt: -1 },         // paginate history
+  { conversationId: 1, readAt: 1 },             // unread count
+]
+```
+
+**Exported functions:**
+- `getOrCreateConversation(userIdA, userIdB)` → finds existing conv between two participants or creates one. Used for DMs and bot seeding.
+- `sendMessage(conversationId, senderId, content, type = 'text', payload = null)` → writes to `chat_messages`, updates `chat_conversations.lastMessageAt` + `lastMessage`, returns the saved message object.
+- `sendBotMessage(userId, content, type = 'text', payload = null)` → calls `getOrCreateConversation(userId, 'ar2trade_bot')` then `sendMessage`. This is the single function all platform features call to notify a user. After writing, it calls `chatWs.emit(userId, 'new_message', message)` to push if the user is connected.
+- `getConversations(userId)` → returns all conversations with unread count per conv (aggregation over `chat_messages` where `readAt: null` and `senderId ≠ userId`).
+- `getMessages(conversationId, userId, before, limit = 50)` → paginated history, verifies participant membership.
+- `markRead(conversationId, userId)` → `$set { readAt: Date.now() }` on all unread messages where `senderId ≠ userId`.
+- `searchUsers(query, currentUserId)` → text search on `users` collection by name/email, excludes self and `ar2trade_bot`.
+- `seedBotConversation(userId)` → calls `getOrCreateConversation(userId, 'ar2trade_bot')`, then if the conv is new sends a welcome message from the bot.
+
+**Bot constant:** `export const BOT_USER_ID = 'ar2trade_bot'`
+
+---
+
+### 1-B. REST API
+
+New files: **`api/chat/chat.controller.js`**, **`api/chat/chat.routes.js`**
+
+| Method | Route | Handler | Notes |
+|--------|-------|---------|-------|
+| `GET` | `/api/chat/conversations` | `listConversations` | Returns convs + unread counts |
+| `GET` | `/api/chat/conversations/:id/messages` | `listMessages` | `?before=<epoch>&limit=50` |
+| `POST` | `/api/chat/conversations/:id/messages` | `postMessage` | Writes + WS push to recipient |
+| `POST` | `/api/chat/conversations/:id/read` | `markRead` | Clears unread for caller |
+| `GET` | `/api/chat/users/search` | `searchUsers` | `?q=<string>` — start new DM |
+
+All routes behind `requireAuth`. `postMessage` verifies the caller is a participant before writing.
+
+---
+
+### 1-C. WebSocket server
+
+New file: **`api/chat/chatWs.js`**
+
+Attaches to the Express `http.Server` via `server.on('upgrade', handler)` — same process, same port. Uses the Node built-in `ws` package (already in the ecosystem for cTrader; add if not present).
+
+**On upgrade:**
+1. Parse JWT from `cookie` (preferred) or `?token=` query param — same auth as REST.
+2. Reject with 401 if invalid.
+3. Register socket in `socketMap: Map<userId, WebSocket>`.
+4. Send `{ event: 'connected' }` — client re-fetches conversations via REST immediately after.
+5. Handle `ping` → `pong` for keepalive.
+6. On close → remove from `socketMap`.
+
+**`emit(userId, event, data)`** — exported helper:
+```js
+export function emit(userId, event, data) {
+    const socket = socketMap.get(String(userId))
+    if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ event, data }))
+    }
+}
+```
+
+Called by `sendBotMessage` and `postMessage` controller to push `new_message` to the recipient.
+
+**`attach(httpServer)`** — exported setup function called from `server.js`.
+
+---
+
+### 1-D. Bot seeding
+
+Wire `seedBotConversation(userId)` into the user signup flow:
+- **File:** `api/user/user.service.js` (or wherever `createUser` lives) — call `seedBotConversation` after the user doc is saved.
+- **Back-fill:** one-off script `scripts/seed-bot-conversations.mjs` — queries all existing users, calls `seedBotConversation` for each, idempotent (skips if conv already exists).
+
+---
+
+### 1-E. Wire into server.js
+
+```js
+// In server.js — after existing imports:
+import { chatRoutes }  from './api/chat/chat.routes.js'
+import { attach as attachChatWs } from './api/chat/chatWs.js'
+
+// After route registrations:
+app.use('/api/chat', chatRoutes)
+
+// After server is created (http.createServer already exists):
+attachChatWs(server)
+```
+
+---
+
+### Build sequence
+
+| Step | What | File(s) |
+|------|------|---------|
+| 1 | Data layer + `sendBotMessage` | `api/chat/chat.service.js` (new) |
+| 2 | REST API | `api/chat/chat.controller.js`, `api/chat/chat.routes.js` (new) |
+| 3 | WS server | `api/chat/chatWs.js` (new) |
+| 4 | Bot seeding + back-fill script | `api/user/user.service.js` + `scripts/seed-bot-conversations.mjs` |
+| 5 | Wire into server.js | `server.js` |
+| 6 | Frontend | frontend repo |
+| 7 | Portfolio managing integration | Replace Phase 1 badge/dropdown with bot `sendBotMessage` call |
+
+**Start with step 1.** Verify `sendBotMessage` writes correctly to MongoDB before adding WS or any REST routes. Test with a quick `node` script against the real DB.
