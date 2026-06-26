@@ -116,6 +116,11 @@ async function saveIdea(tradeIdea, userId) {
 
         additional_entries: additionalEntries,
         notes:      tradeIdea.notes      ?? null,
+
+        thesis:              _normalizeThesis(tradeIdea.thesis),
+        thesis_status:       null,
+        thesis_status_reason: null,
+
         chat_state: _trimChatState(tradeIdea.chat_state),
         accounts:      Array.isArray(tradeIdea.accounts) ? tradeIdea.accounts : [],
         mainAccountId: tradeIdea.mainAccountId ?? null,
@@ -282,6 +287,15 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
     // write — it places the working order at the broker. Delegate to that flow.
     if (patch.status === 'resting') {
         return placeRestingEntryForIdea(id, userId, isAdmin)
+    }
+
+    // Normalize thesis when present; merge entry/tp sub-objects so a partial patch
+    // (e.g. only entry.reasoning) doesn't wipe the tp slot already stored.
+    if (patch.thesis !== undefined) {
+        patch.thesis = _normalizeThesis(patch.thesis)
+        // Clearing thesis_status so the monitor re-evaluates with the new thesis.
+        if (patch.thesis_status === undefined) patch.thesis_status = null
+        if (patch.thesis_status_reason === undefined) patch.thesis_status_reason = null
     }
 
     // Rebuild condition trees when conditions are updated via chat edit
@@ -874,6 +888,32 @@ function _refTimeframe(idea) {
         ?? idea.entry_timeframe
         ?? idea.timeframe
         ?? 'day'
+}
+
+/**
+ * Normalise a thesis object from client input.
+ * Returns null if nothing meaningful was provided.
+ *
+ * Shape:
+ *   thesis.entry  — { reasoning, key_assumptions[], stress_triggers[] }
+ *   thesis.tp     — { reasoning, stress_triggers[] }   (stored now, used in Phase 2)
+ */
+function _normalizeThesis(raw) {
+    if (!raw || typeof raw !== 'object') return null
+
+    const entry = raw.entry && typeof raw.entry === 'object' ? {
+        reasoning:        raw.entry.reasoning        ?? null,
+        key_assumptions:  Array.isArray(raw.entry.key_assumptions)  ? raw.entry.key_assumptions  : [],
+        stress_triggers:  Array.isArray(raw.entry.stress_triggers)  ? raw.entry.stress_triggers  : [],
+    } : null
+
+    const tp = raw.tp && typeof raw.tp === 'object' ? {
+        reasoning:       raw.tp.reasoning       ?? null,
+        stress_triggers: Array.isArray(raw.tp.stress_triggers) ? raw.tp.stress_triggers : [],
+    } : null
+
+    if (!entry && !tp) return null
+    return { entry, tp }
 }
 
 // strip MongoDB's internal _id before sending to client

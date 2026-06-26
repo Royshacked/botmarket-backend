@@ -31,6 +31,7 @@ import { buildOrderPlanForIdea }                from '../services/orderPlan.serv
 import { getCheckGap, isIntradayTimeframe }     from '../services/timeframe.service.js'
 import { collectSymbols, firstLeaf, extractLeaves, resolveConditionTree } from '../services/conditionTree.service.js'
 import { brokerService }                        from '../api/broker/broker.service.js'
+import { checkThesis }                          from './thesis.monitor.js'
 
 const LOG        = '[monitor.service]'
 const COLLECTION = 'ideas'
@@ -400,6 +401,7 @@ async function _checkEntry(db, idea, candles) {
         // the order confirmation dialog, which calls POST /trade-ideas/:id/orders.
     } else {
         logger.info(LOG, `⏳ Entry not triggered yet for idea ${id} (${asset})`)
+        await checkThesis(db, idea, symbolMap)
     }
 }
 
