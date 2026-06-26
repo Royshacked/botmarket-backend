@@ -47,7 +47,11 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(ls -la logs/)",
       "Bash(find . -maxdepth 2 -name \"*.log\" -not -path \"./node_modules/*\")",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(git -C \"D:\\\\roy personal\\\\coding academy\\\\projects\\\\ar2trade\\\\botmarket-frontend\" add src/cmps/SocialChat/ChatWindow.jsx src/cmps/SocialChat/SocialChat.scss src/pages/MainPage.jsx src/services/event-bus.service.js)",
+      "Bash(git -C 'D:\\\\roy personal\\\\coding academy\\\\projects\\\\ar2trade\\\\botmarket-frontend' commit -m ' *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
