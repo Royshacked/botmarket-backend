@@ -159,7 +159,7 @@ const TOOL_HANDLERS = {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], model: requestedModel, reasoningEffort, onToken, onTicker, onToolStart, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, model: requestedModel, reasoningEffort, onToken, onTicker, onToolStart, signal }) {
     const normalized   = _buildMessages(messages)
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
@@ -171,6 +171,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     const dynamicSections = [`CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.`]
     if (ideaAccounts.length > 0) dynamicSections.push(_buildAccountsSection(ideaAccounts))
     if (portfolioId && portfolioIdeas.length > 0) dynamicSections.push(_buildPortfolioContext(portfolioId, portfolioIdeas))
+    if (portfolioState) dynamicSections.push(_buildPortfolioStateSection(portfolioState))
 
     const systemPrompt = [
         { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
@@ -292,4 +293,55 @@ function _buildAccountsSection(accounts) {
         return `  - ${parts.join(', ')}`
     })
     return `PORTFOLIO ACCOUNTS (the user plans to execute ideas from this portfolio on):\n${lines.join('\n')}\n\nWhen suggesting position sizes, use these account balances to recommend concrete allocations. If a main account is identified by a larger balance or context, use it as the reference for scaling other accounts.`
+}
+
+function _buildPortfolioStateSection(state) {
+    const fmtMoney = (n) => {
+        if (n == null) return '—'
+        const abs = Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
+        return `${n >= 0 ? '+' : '-'}$${abs}`
+    }
+    const fmtPct = (n, decimals = 1) => {
+        if (n == null) return '—'
+        return `${n >= 0 ? '+' : ''}${n.toFixed(decimals)}%`
+    }
+    const fmtDrift = (drift) => {
+        if (drift == null) return ''
+        const pts = (drift * 100).toFixed(1)
+        if (Math.abs(drift) < 0.01) return 'on target'
+        return drift > 0 ? `OVERWEIGHT +${pts}pt` : `underweight ${pts}pt`
+    }
+
+    const date = new Date(state.computedAt).toISOString().slice(0, 10)
+    const header = [
+        `PORTFOLIO REVIEW STATE — computed ${date}`,
+        `Total notional: $${Math.round(state.totalNotional).toLocaleString('en-US')} | P&L: ${fmtMoney(state.totalPnl)} (${fmtPct(state.totalPnlPct)})`,
+    ].join('\n')
+
+    const live    = state.ideas.filter(s => s.actualWeight != null)
+    const pending = state.ideas.filter(s => s.actualWeight == null)
+
+    const liveLines = live.map(s => {
+        const target  = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
+        const actual  = `actual ${Math.round(s.actualWeight * 100)}%`
+        const drift   = fmtDrift(s.drift)
+        const pnl     = `P&L ${fmtMoney(s.pnl)} (${fmtPct(s.pnlPct)})`
+        const age     = s.thesisAgeDays != null ? `${s.thesisAgeDays}d` : ''
+        const earn    = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
+        return `  ${s.asset.padEnd(6)} ${s.direction.padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${earn}`
+    })
+
+    const pendingLines = pending.map(s => {
+        const target = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
+        const earn   = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
+        return `  ${s.asset.padEnd(6)} ${s.direction?.padEnd(6) ?? '      '} ${target}  [${s.status}]${earn}`
+    })
+
+    const sections = [header]
+    if (liveLines.length)    sections.push(`Live positions:\n${liveLines.join('\n')}`)
+    if (pendingLines.length) sections.push(`Pending (awaiting entry):\n${pendingLines.join('\n')}`)
+
+    sections.push('Use this data as the starting point for the review. Do not call get_quotes for tickers already shown above — prices are current. Propose specific actions (rebalance, trim, add, exit, swap) where the data warrants it.')
+
+    return sections.join('\n\n')
 }

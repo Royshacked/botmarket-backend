@@ -1,5 +1,6 @@
 import { portfolioAgentService } from '../../services/portfolio.agent.service.js'
 import { portfolioChatService }  from './portfolioChat.service.js'
+import { computePortfolioState } from '../../services/portfolioState.service.js'
 import { logger }                from '../../services/logger.service.js'
 
 const LOG = '[portfolio:controller]'
@@ -34,11 +35,18 @@ export async function streamPortfolio(req, res) {
     res.on('close', () => { if (!finished) ac.abort() })
 
     try {
+        // In review mode, pre-compute live portfolio state and inject into the agent.
+        const isReviewMode = req.body?.reviewMode === true
+        const portfolioState = (isReviewMode && portfolioId)
+            ? await computePortfolioState(portfolioId, req.user._id).catch(() => null)
+            : null
+
         const result = await portfolioAgentService.chatStream({
             messages,
             ideaAccounts: validatedAccounts,
             portfolioId:   portfolioId   ?? null,
             portfolioIdeas: Array.isArray(portfolioIdeas) ? portfolioIdeas : [],
+            portfolioState,
             model,
             reasoningEffort,
             signal:   ac.signal,
@@ -96,5 +104,38 @@ export async function deletePortfolioChatState(req, res) {
     } catch (err) {
         logger.error(LOG, 'deletePortfolioChatState failed', err)
         res.status(500).json({ error: 'Failed to delete chat state' })
+    }
+}
+
+export async function getPendingReviews(req, res) {
+    try {
+        const reviews = await portfolioChatService.getPendingReviews(req.user._id)
+        res.json({ reviews })
+    } catch (err) {
+        logger.error(LOG, 'getPendingReviews failed', err)
+        res.status(500).json({ error: 'Failed to get pending reviews' })
+    }
+}
+
+export async function completeReview(req, res) {
+    try {
+        const { portfolioId } = req.params
+        if (!portfolioId) return res.status(400).json({ error: 'Missing portfolioId' })
+
+        const lifecycle = await portfolioChatService.getPortfolioLifecycle(portfolioId, req.user._id)
+        const cadence   = req.body?.reviewCadence ?? lifecycle?.reviewCadence ?? 'monthly'
+        const cadenceMs = cadence === 'quarterly' ? 90 * 86400000 : 30 * 86400000
+        const now       = Date.now()
+
+        await portfolioChatService.setPortfolioLifecycle(portfolioId, req.user._id, {
+            reviewCadence: cadence,
+            lastReviewAt:  now,
+            nextReviewAt:  now + cadenceMs,
+        })
+
+        res.json({ ok: true, nextReviewAt: now + cadenceMs })
+    } catch (err) {
+        logger.error(LOG, 'completeReview failed', err)
+        res.status(500).json({ error: 'Failed to complete review' })
     }
 }

@@ -183,6 +183,34 @@ export async function getEarningsCalendar(from, to, symbols = []) {
 }
 
 /**
+ * Raw upcoming earnings rows for programmatic use (not LLM-formatted).
+ * Reuses the same cache as getEarningsCalendar.
+ * Returns [{ symbol, date, epsEstimated, revenueEstimated }] filtered to the given symbols.
+ */
+export async function getEarningsCalendarRaw(from, to, symbols = []) {
+    const today = new Date().toISOString().slice(0, 10)
+    const f = /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : today
+    const t = /^\d{4}-\d{2}-\d{2}$/.test(to)   ? to   : new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10)
+    const key = `${f}|${t}`
+
+    let rows
+    const hit = _calCache.get(key)
+    if (hit && Date.now() - hit.at < CAL_TTL_MS) {
+        rows = hit.rows
+    } else {
+        const arr = await _fmpGet(`/earnings-calendar?from=${f}&to=${t}`)
+        rows = Array.isArray(arr) ? arr : []
+        if (_calCache.size > 50) _calCache.clear()
+        _calCache.set(key, { at: Date.now(), rows })
+    }
+
+    const wanted = new Set(symbols.map(s => String(s).toUpperCase()))
+    return (wanted.size ? rows.filter(r => wanted.has(String(r.symbol).toUpperCase())) : rows)
+        .filter(r => r.date)
+        .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+/**
  * Fundamentals for a ticker as an LLM-ready string. Profile is fetched first and
  * its `isEtf`/`isFund` flag decides the shape: stocks get valuation/quality/
  * growth; ETFs get exposure/profile only (and skip the empty statement calls).
