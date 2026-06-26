@@ -125,10 +125,27 @@ export async function getConversations(userId) {
 
     const unreadMap = Object.fromEntries(unreadRows.map(r => [r._id, r.unread]))
 
-    return convs.map(c => ({
-        ..._stripId(c),
-        unread: unreadMap[c.id] ?? 0,
-    }))
+    // Enrich with the other participant's display name
+    const otherIds = [...new Set(
+        convs.flatMap(c => c.participants.filter(p => p !== uid && p !== BOT_USER_ID))
+    )]
+    const userDocs = otherIds.length
+        ? await db.collection('users')
+            .find({ id: { $in: otherIds } }, { projection: { id: 1, username: 1, fullname: 1 } })
+            .toArray()
+        : []
+    const userMap = Object.fromEntries(userDocs.map(u => [u.id, u]))
+
+    return convs.map(c => {
+        const otherId   = c.participants.find(p => p !== uid) ?? ''
+        const otherUser = userMap[otherId]
+        return {
+            ..._stripId(c),
+            unread:        unreadMap[c.id] ?? 0,
+            otherName:     otherUser?.fullname  ?? null,
+            otherUsername: otherUser?.username  ?? null,
+        }
+    })
 }
 
 export async function getMessages(conversationId, userId, before, limit = 50) {
