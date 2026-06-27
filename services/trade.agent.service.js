@@ -146,6 +146,7 @@ const TOOLS = [
             properties: { symbol: { type: 'string', description: 'e.g. BTC, ETH, SOL (or BTC-USD / BTCUSDT)' } },
             required: ['symbol'],
         },
+        cache_control: { type: 'ephemeral' },
     },
 ]
 

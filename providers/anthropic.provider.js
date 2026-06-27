@@ -138,7 +138,7 @@ export async function streamAnthropicWithTools({
         }
 
         if (stopReason === 'pause_turn') {
-            messages.push({ role: 'assistant', content: validBlocks })
+            messages.push({ role: 'assistant', content: _compactServerResults(validBlocks) })
             continue
         }
 
@@ -256,4 +256,29 @@ function _extractText(content) {
         .filter((b) => b.type === 'text')
         .map((b) => b.text)
         .join('')
+}
+
+// Cap web search result text carried into subsequent continuations. The model
+// already read the full content on the turn it arrived; we only truncate what
+// goes back into the messages array for later turns, where verbatim raw results
+// add input tokens without adding new information.
+const _SEARCH_RESULT_CHARS = 3000
+function _compactServerResults(blocks) {
+    return blocks.map(block => {
+        if (block.type !== 'server_tool_result') return block
+        if (Array.isArray(block.content)) {
+            return {
+                ...block,
+                content: block.content.map(c =>
+                    c.type === 'text' && c.text?.length > _SEARCH_RESULT_CHARS
+                        ? { ...c, text: c.text.slice(0, _SEARCH_RESULT_CHARS) + '\n[truncated]' }
+                        : c
+                ),
+            }
+        }
+        if (typeof block.content === 'string' && block.content.length > _SEARCH_RESULT_CHARS) {
+            return { ...block, content: block.content.slice(0, _SEARCH_RESULT_CHARS) + '\n[truncated]' }
+        }
+        return block
+    })
 }

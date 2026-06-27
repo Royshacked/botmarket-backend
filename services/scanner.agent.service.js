@@ -15,7 +15,7 @@ const __dirname     = dirname(fileURLToPath(import.meta.url))
 const SYSTEM_PROMPT = readFileSync(join(__dirname, '../scanner_system_prompt.md'), 'utf-8')
 
 const LOG   = '[scannerAgent]'
-const MAX_MESSAGES = 20
+const MAX_MESSAGES = 10
 
 const TOOLS = [
     { type: 'web_search_20250305', name: 'web_search' },
@@ -127,6 +127,7 @@ const TOOLS = [
             properties: { symbol: { type: 'string', description: 'e.g. BTC, ETH, SOL (or BTC-USD / BTCUSDT)' } },
             required: ['symbol'],
         },
+        cache_control: { type: 'ephemeral' },
     },
 ]
 

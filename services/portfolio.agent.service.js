@@ -15,7 +15,7 @@ const __dirname    = dirname(fileURLToPath(import.meta.url))
 const SYSTEM_PROMPT = readFileSync(join(__dirname, '../trade_portfolio_system_prompt.md'), 'utf-8')
 
 const LOG   = '[portfolioAgent]'
-const MAX_MESSAGES = 20
+const MAX_MESSAGES = 10
 
 const TOOLS = [
     { type: 'web_search_20250305', name: 'web_search' },
@@ -112,6 +112,7 @@ const TOOLS = [
             },
             required: ['from', 'to'],
         },
+        cache_control: { type: 'ephemeral' },
     },
 ]
 
