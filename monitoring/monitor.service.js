@@ -32,6 +32,7 @@ import { getCheckGap, isIntradayTimeframe }     from '../services/timeframe.serv
 import { collectSymbols, firstLeaf, extractLeaves, resolveConditionTree } from '../services/conditionTree.service.js'
 import { brokerService }                        from '../api/broker/broker.service.js'
 import { checkThesis }                          from './thesis.monitor.js'
+import { checkPortfolioReviews }               from './portfolio.monitor.js'
 
 const LOG        = '[monitor.service]'
 const COLLECTION = 'ideas'
@@ -94,6 +95,9 @@ async function _tick() {
 
         // Surface any orders that were deferred while the market was closed.
         await _marketSweep(db)
+
+        // Notify users whose portfolios are due for a periodic review.
+        await checkPortfolioReviews().catch(err => logger.error(LOG, 'Portfolio review check failed', err.message))
 
         if (!ideas || ideas.length === 0) return
         logger.info(LOG, `Checking ${ideas.length} idea(s) (looking + long + short)`)

@@ -121,10 +121,13 @@ async function addReviewHistoryEntry(portfolioId, userId, entry) {
  */
 async function getPendingReviews(userId) {
     try {
-        const db   = await getDb()
+        const db    = await getDb()
+        const query = userId
+            ? { userId, nextReviewAt: { $lte: Date.now() } }
+            : { nextReviewAt: { $lte: Date.now() } }
         const docs = await db.collection(COLLECTION)
-            .find({ userId, nextReviewAt: { $lte: Date.now() } })
-            .project({ portfolioId: 1, reviewCadence: 1, nextReviewAt: 1, lastReviewAt: 1 })
+            .find(query)
+            .project({ portfolioId: 1, userId: 1, reviewCadence: 1, nextReviewAt: 1, lastReviewAt: 1, notifiedAt: 1 })
             .toArray()
 
         if (!docs.length) return []
@@ -141,10 +144,12 @@ async function getPendingReviews(userId) {
 
         return docs.map(d => ({
             portfolioId:   d.portfolioId,
+            userId:        d.userId,
             portfolioName: nameMap[d.portfolioId] ?? 'Portfolio',
             reviewCadence: d.reviewCadence ?? 'monthly',
             nextReviewAt:  d.nextReviewAt,
             lastReviewAt:  d.lastReviewAt ?? null,
+            notifiedAt:    d.notifiedAt   ?? null,
         }))
     } catch (err) {
         logger.error(LOG, 'Failed to get pending reviews', err)
