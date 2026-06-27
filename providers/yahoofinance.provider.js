@@ -285,6 +285,213 @@ export async function getPriceAction(ticker) {
     ].join('\n')
 }
 
+// --- Cycle analysis -----------------------------------------------------------
+
+function _findExtrema(closes, lookback = 5) {
+    const peaks = [], troughs = []
+    for (let i = lookback; i < closes.length - lookback; i++) {
+        let isPeak = true, isTrough = true
+        for (let j = i - lookback; j <= i + lookback; j++) {
+            if (j === i) continue
+            if (closes[j] >= closes[i]) isPeak = false
+            if (closes[j] <= closes[i]) isTrough = false
+        }
+        if (isPeak)   peaks.push(i)
+        if (isTrough) troughs.push(i)
+    }
+    return { peaks, troughs }
+}
+
+function _cycleStats(indices) {
+    if (indices.length < 3) return null
+    const intervals = []
+    for (let i = 1; i < indices.length; i++) intervals.push(indices[i] - indices[i - 1])
+    const mean = intervals.reduce((a, b) => a + b, 0) / intervals.length
+    const variance = intervals.reduce((a, b) => a + (b - mean) ** 2, 0) / intervals.length
+    const std = Math.sqrt(variance)
+    const consistency = intervals.filter(d => Math.abs(d - mean) <= mean * 0.35).length / intervals.length
+    return { mean: Math.round(mean), std: Math.round(std), consistency, count: intervals.length }
+}
+
+// Trading days → approximate calendar days (×1.4)
+function _tdToCalDays(td) { return Math.round(td * 1.4) }
+
+function _addCalDays(date, days) {
+    const d = new Date(date)
+    d.setDate(d.getDate() + days)
+    return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Detect recurring price cycles or calendar-window seasonality for a ticker.
+ *
+ * mode: "price"    — peak-to-peak / trough-to-trough cycle detection
+ *       "calendar" — how this stock behaves in a specific calendar window each year
+ *
+ * calendarWindow (for mode "calendar"):
+ *   { month_start, month_end, day_start?, day_end? }
+ *   month_start/month_end are 1-based (Jan=1). day_start/day_end optional (defaults: 1/last day).
+ *
+ * lookbackYears: how many years of history to use (default 4).
+ */
+export async function getCycleAnalysis(ticker, mode, calendarWindow = null, lookbackYears = 4) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    if (!sym) return 'No ticker provided.'
+
+    const calDaysNeeded = mode === 'calendar'
+        ? (lookbackYears + 1) * 365 + 60
+        : 730   // 2 years for price cycle detection
+
+    const candles = await _dailyCandles(sym, calDaysNeeded)
+    if (candles.length < 60) return `${sym}: not enough price history for cycle analysis.`
+
+    const closes = candles.map(c => c.close)
+    const dates  = candles.map(c => new Date(c.timestamp * 1000))
+    const lines  = [`${sym} — cycle analysis:`]
+
+    // ── Price cycle ─────────────────────────────────────────────────────────
+    if (mode === 'price') {
+        const { peaks, troughs } = _findExtrema(closes)
+
+        const troughStats = _cycleStats(troughs)
+        const peakStats   = _cycleStats(peaks)
+
+        if (!troughStats && !peakStats) {
+            lines.push('No clear repeating cycle detected in the available price history.')
+            return lines.join('\n')
+        }
+
+        const stats = troughStats ?? peakStats
+        const label = troughStats ? 'trough-to-trough' : 'peak-to-peak'
+        const anchors = troughStats ? troughs : peaks
+        const anchorLabel = troughStats ? 'trough' : 'peak'
+
+        lines.push(`\nDominant price cycle (${label}):`)
+        lines.push(`Cycle length: ~${stats.mean} trading days (~${_tdToCalDays(stats.mean)} calendar days)`)
+        lines.push(`Consistency: ${Math.round(stats.consistency * 100)}% of cycles within ±35% of mean (${stats.count} cycles observed)`)
+
+        const lastIdx  = anchors[anchors.length - 1]
+        const daysSince = closes.length - 1 - lastIdx
+        const lastDate  = dates[lastIdx].toISOString().slice(0, 10)
+        const lastPrice = closes[lastIdx]
+
+        lines.push(`Last ${anchorLabel}: ${lastDate} at $${lastPrice.toFixed(2)}`)
+        lines.push(`Days since last ${anchorLabel}: ${daysSince} trading days (~${_tdToCalDays(daysSince)} calendar days)`)
+
+        const halfCycle = Math.round(stats.mean / 2)
+        const today = new Date()
+
+        if (daysSince < halfCycle) {
+            const daysToMidpoint  = halfCycle - daysSince
+            const estOpposite     = _addCalDays(today, _tdToCalDays(daysToMidpoint))
+            lines.push(`Current phase: UPSWING — ${daysSince}/${halfCycle} trading days through`)
+            lines.push(`Estimated peak: ~${estOpposite} (±${_tdToCalDays(stats.std)} calendar days)`)
+        } else if (daysSince < stats.mean) {
+            const daysIntoDown    = daysSince - halfCycle
+            const daysToNextAnchor = stats.mean - daysSince
+            const estNext         = _addCalDays(today, _tdToCalDays(daysToNextAnchor))
+            lines.push(`Current phase: DOWNSWING — ${daysIntoDown} trading days into the down leg`)
+            lines.push(`Estimated next ${anchorLabel}: ~${estNext} (±${_tdToCalDays(stats.std)} calendar days)`)
+        } else {
+            lines.push(`Current phase: EXTENDED — ${daysSince} trading days since last ${anchorLabel} (cycle avg is ${stats.mean}). Possible cycle break or low-volatility drift.`)
+        }
+
+        // Conviction signal
+        if (stats.consistency >= 0.7) {
+            lines.push(`Cycle reliability: STRONG (${Math.round(stats.consistency * 100)}% hit rate) — usable as a timing signal.`)
+        } else if (stats.consistency >= 0.5) {
+            lines.push(`Cycle reliability: MODERATE (${Math.round(stats.consistency * 100)}% hit rate) — treat as context, not a precise timer.`)
+        } else {
+            lines.push(`Cycle reliability: WEAK (${Math.round(stats.consistency * 100)}% hit rate) — irregular pattern, use with caution.`)
+        }
+    }
+
+    // ── Calendar cycle ───────────────────────────────────────────────────────
+    if (mode === 'calendar') {
+        if (!calendarWindow || !calendarWindow.month_start) {
+            return `${sym}: calendar mode requires a calendarWindow with at least month_start.`
+        }
+
+        const { month_start, month_end, day_start = 1, day_end = 31 } = calendarWindow
+        const mEnd = month_end ?? month_start
+
+        const currentYear = new Date().getFullYear()
+        const results = []
+
+        for (let year = currentYear - lookbackYears; year <= currentYear; year++) {
+            const winStart = new Date(year, month_start - 1, day_start)
+            const winEnd   = new Date(year, mEnd - 1, day_end)
+            // Clamp end to today for current year
+            const clampedEnd = year === currentYear ? new Date(Math.min(winEnd.getTime(), Date.now())) : winEnd
+
+            const inWindow = candles.filter(c => {
+                const d = dates[candles.indexOf(c)]
+                return d >= winStart && d <= clampedEnd
+            })
+
+            if (inWindow.length < 3) continue
+
+            const open  = inWindow[0].close
+            const close = inWindow[inWindow.length - 1].close
+            const ret   = ((close - open) / open) * 100
+            const isCurrent  = year === currentYear
+            const isComplete = !isCurrent || new Date() > winEnd
+
+            results.push({ year, ret, isCurrent, isComplete })
+        }
+
+        if (!results.length) {
+            lines.push('Not enough data to compute calendar seasonality for the requested window.')
+            return lines.join('\n')
+        }
+
+        const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+        const windowLabel = month_start === mEnd
+            ? `${monthNames[month_start - 1]}${day_start !== 1 || day_end !== 31 ? ` ${day_start}–${day_end}` : ''}`
+            : `${monthNames[month_start - 1]}–${monthNames[mEnd - 1]}`
+
+        lines.push(`\nCalendar seasonality — window: ${windowLabel}`)
+
+        const pastResults = results.filter(r => !r.isCurrent)
+        for (const r of results) {
+            const label = r.isCurrent
+                ? `${r.year} (current${r.isComplete ? '' : ', in progress'})`
+                : String(r.year)
+            lines.push(`  ${label}: ${r.ret >= 0 ? '+' : ''}${r.ret.toFixed(1)}%`)
+        }
+
+        if (pastResults.length >= 2) {
+            const avgRet   = pastResults.reduce((a, b) => a + b.ret, 0) / pastResults.length
+            const positives = pastResults.filter(r => r.ret > 0).length
+            const hitRate  = positives / pastResults.length
+
+            lines.push(`Average return (past ${pastResults.length} years): ${avgRet >= 0 ? '+' : ''}${avgRet.toFixed(1)}%`)
+            lines.push(`Hit rate: ${Math.round(hitRate * 100)}% positive (${positives}/${pastResults.length} years)`)
+
+            if (hitRate >= 0.75 && avgRet > 1) {
+                lines.push(`Seasonality signal: STRONG BULLISH — consistent positive returns in this window.`)
+            } else if (hitRate <= 0.25 && avgRet < -1) {
+                lines.push(`Seasonality signal: STRONG BEARISH — consistent negative returns in this window.`)
+            } else if (hitRate >= 0.6) {
+                lines.push(`Seasonality signal: MODERATE BULLISH — tends positive but not decisive.`)
+            } else if (hitRate <= 0.4) {
+                lines.push(`Seasonality signal: MODERATE BEARISH — tends negative but not decisive.`)
+            } else {
+                lines.push(`Seasonality signal: MIXED — no clear directional pattern in this window.`)
+            }
+
+            const current = results.find(r => r.isCurrent)
+            if (current && !current.isComplete) {
+                const direction = avgRet > 0 ? 'positive' : 'negative'
+                const aligns = (current.ret > 0) === (avgRet > 0)
+                lines.push(`Current year vs historical: ${current.ret >= 0 ? '+' : ''}${current.ret.toFixed(1)}% so far — ${aligns ? 'aligns with' : 'diverges from'} the historical ${direction} bias.`)
+            }
+        }
+    }
+
+    return lines.join('\n')
+}
+
 // --- Earnings -----------------------------------------------------------------
 // Per-ticker earnings snapshot: upcoming date + EPS estimate + last 4 quarterly
 // actuals vs estimates. Uses Yahoo's calendarEvents + earnings modules. The

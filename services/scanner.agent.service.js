@@ -2,7 +2,7 @@ import { readFileSync }   from 'fs'
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { resolveStreamFn } from './llmModels.js'
-import { getQuotes, getRiskMetrics, getPriceAction } from '../providers/yahoofinance.provider.js'
+import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { toolError }     from './toolResult.util.js'
@@ -78,6 +78,30 @@ const TOOLS = [
         },
     },
     {
+        name: 'get_cycle_analysis',
+        description: 'Detect recurring cycles in a stock\'s price history. Two modes: "price" finds the dominant peak-to-peak / trough-to-trough interval, tells you the current phase, and estimates the next turning point. "calendar" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking with the historical pattern. Use "price" when the user asks about recurring timing cycles; use "calendar" when the user asks about seasonal or time-of-year patterns. If unsure which the user means, ask one clarifying question.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' },
+                mode: { type: 'string', enum: ['price', 'calendar'], description: '"price" for recurring interval cycles, "calendar" for seasonal window analysis' },
+                calendar_window: {
+                    type: 'object',
+                    description: 'Required for mode "calendar". Defines the window to analyze each year.',
+                    properties: {
+                        month_start: { type: 'number', description: '1-based month number (Jan=1). Start month of the window.' },
+                        month_end:   { type: 'number', description: '1-based month number. End month — same as month_start for a single month.' },
+                        day_start:   { type: 'number', description: 'Optional. Starting day within month_start (default 1).' },
+                        day_end:     { type: 'number', description: 'Optional. Ending day within month_end (default last day of month).' },
+                    },
+                    required: ['month_start'],
+                },
+                lookback_years: { type: 'number', description: 'Years of history to use (default 4, max 6). More years = more reliable pattern but older data.' },
+            },
+            required: ['ticker', 'mode'],
+        },
+    },
+    {
         name: 'get_short_interest',
         description: 'Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it for squeeze potential and crowded-bearish-positioning context on a scan candidate, not as a live read. No data for ETFs, crypto, FX or futures.',
         input_schema: {
@@ -130,6 +154,10 @@ const TOOL_HANDLERS = {
     get_sec_filings: async ({ ticker }) => {
         try { return await getSecFilings(ticker) }
         catch (err) { return toolError(`Could not fetch SEC filings for ${ticker}: ${err.message}`) }
+    },
+    get_cycle_analysis: async ({ ticker, mode, calendar_window, lookback_years }) => {
+        try { return await getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4) }
+        catch (err) { return toolError(`Could not compute cycle analysis for ${ticker}: ${err.message}`) }
     },
     ...COMMON_TOOL_HANDLERS,
 }

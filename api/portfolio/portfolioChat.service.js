@@ -18,13 +18,15 @@ export const portfolioChatService = {
     setMandate,
 }
 
-async function saveChatState(portfolioId, messages, userId) {
+async function saveChatState(portfolioId, messages, userId, mandate = null) {
     try {
         const db = await getDb()
+        const setFields = { portfolioId, messages, userId, savedAt: Date.now() }
+        if (mandate && typeof mandate === 'object') setFields.mandate = mandate
         await db.collection(COLLECTION).findOneAndUpdate(
             { portfolioId, userId },
             {
-                $set: { portfolioId, messages, userId, savedAt: Date.now() },
+                $set: setFields,
                 // Lifecycle defaults — only written when the doc is first created.
                 $setOnInsert: {
                     reviewCadence: 'monthly',

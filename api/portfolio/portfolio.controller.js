@@ -89,11 +89,11 @@ export async function streamPortfolio(req, res) {
 
 export async function savePortfolioChatState(req, res) {
     try {
-        const { portfolioId, messages } = req.body ?? {}
+        const { portfolioId, messages, mandate } = req.body ?? {}
         if (!portfolioId || !Array.isArray(messages)) {
             return res.status(400).json({ error: 'Missing portfolioId or messages' })
         }
-        const result = await portfolioChatService.saveChatState(portfolioId, messages, req.user._id)
+        const result = await portfolioChatService.saveChatState(portfolioId, messages, req.user._id, mandate ?? null)
         if (!result.ok) return res.status(500).json({ error: 'Failed to save' })
         res.json({ ok: true })
     } catch (err) {
