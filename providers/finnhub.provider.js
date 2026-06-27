@@ -81,6 +81,19 @@ export async function fetchEarningsCalendar(ticker,from=0,to=0) {
     }
 }
 
+export async function fetchEarningsCalendarByDate(from, to) {
+    try {
+        const f = toFinnhubDate(from || new Date())
+        const t = toFinnhubDate(to   || new Date())
+        const url = `https://finnhub.io/api/v1/calendar/earnings?from=${f}&to=${t}&token=${FINNHUB_API_KEY}`
+        const res = await axios.get(url)
+        return res.data
+    } catch (error) {
+        logger.error('Error getting earnings calendar by date', error)
+        return { earningsCalendar: [] }
+    }
+}
+
 export async function fetchFdaCalendar(from, to) {
     try {
         const f = toFinnhubDate(from || new Date())
