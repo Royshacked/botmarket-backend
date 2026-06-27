@@ -81,3 +81,24 @@ export async function fetchEarningsCalendar(ticker,from=0,to=0) {
     }
 }
 
+export async function fetchFdaCalendar(from, to) {
+    try {
+        const f = toFinnhubDate(from || new Date())
+        const t = toFinnhubDate(to   || new Date())
+        const url = `https://finnhub.io/api/v1/drug/fda-calendar?from=${f}&to=${t}&token=${FINNHUB_API_KEY}`
+        const res = await axios.get(url)
+        const raw = Array.isArray(res.data) ? res.data : []
+        return raw.map(r => ({
+            date:    r.date,
+            drug:    r.drugName    || r.name || '',
+            action:  r.action      || '',
+            company: r.company     || '',
+            ticker:  r.ticker      || null,
+            status:  r.status      || null,
+        }))
+    } catch (error) {
+        logger.error('Error getting FDA calendar', error)
+        return []
+    }
+}
+

@@ -31,6 +31,7 @@ import { transcribeRoutes }  from './api/transcribe/transcribe.routes.js'
 import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
 import { scannerRoutes }     from './api/scanner/scanner.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
+import { calendarRoutes }    from './api/calendar/calendar.routes.js'
 import { newsFeedService }  from './api/news-feed/newsFeed.service.js'
 import { monitorService }   from './monitoring/monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
@@ -85,6 +86,7 @@ app.use('/api/broker',      brokerRoutes)
 app.use('/api/portfolio',   portfolioRoutes)
 app.use('/api/scanner',     scannerRoutes)
 app.use('/api/market',      marketRoutes)
+app.use('/api/calendar',    calendarRoutes)
 app.use('/api/chat',        chatRoutes)
 
 attachChatWs(server)
