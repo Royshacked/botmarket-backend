@@ -130,6 +130,40 @@ function _formatStock(symbol, p, ratios = {}, growth = {}) {
     ].filter(Boolean).join('\n')
 }
 
+// ─── Sector lookup ──────────────────────────────────────────────────────────
+// Lightweight profile cache keyed by symbol — stores only sector/industry so
+// portfolioState.service can group positions by sector without re-fetching the
+// full fundamentals blob. Shares the same 24h TTL as fundamentals.
+const _sectorCache = new Map() // SYMBOL -> { at, sector, industry }
+const SECTOR_TTL_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Sector and industry for a ticker as raw strings, cached 24h.
+ * Returns { sector, industry } or null when the ticker is unknown / ETF / foreign.
+ */
+export async function getSectorRaw(ticker) {
+    const symbol = String(ticker || '').toUpperCase().trim()
+    if (!symbol) return null
+
+    const hit = _sectorCache.get(symbol)
+    if (hit && Date.now() - hit.at < SECTOR_TTL_MS) return { sector: hit.sector, industry: hit.industry }
+
+    try {
+        const arr = await _fmpGet(`/profile?symbol=${symbol}`)
+        const p   = Array.isArray(arr) ? arr[0] : null
+        if (!p) return null
+        const entry = { sector: p.sector || null, industry: p.industry || null, at: Date.now() }
+        if (_sectorCache.size > 500) {
+            const oldest = [..._sectorCache.keys()].slice(0, 250)
+            for (const k of oldest) _sectorCache.delete(k)
+        }
+        _sectorCache.set(symbol, entry)
+        return { sector: entry.sector, industry: entry.industry }
+    } catch {
+        return null
+    }
+}
+
 // ─── Earnings calendar (forward-looking) ────────────────────────────────────
 // Short-TTL cache keyed by the date window; the calendar shifts daily as
 // estimates/actuals land. Free plan exposes this (verified): each row carries

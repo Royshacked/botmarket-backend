@@ -134,42 +134,119 @@ export async function getRiskMetrics(ticker) {
 }
 
 /**
+ * Annualized volatility for a ticker as a raw number (for server-side math).
+ * Returns null when there is not enough price history.
+ */
+export async function getAnnualizedVolRaw(ticker) {
+    const sym = String(ticker).toUpperCase()
+    const candles = await _dailyCandles(sym, 365)
+    if (candles.length < 20) return null
+    return _stdev(_logReturns(candles.map(c => c.close))) * Math.sqrt(TRADING_DAYS)
+}
+
+function _pearson(a, b) {
+    const n  = Math.min(a.length, b.length)
+    const ma = a.reduce((x, y) => x + y, 0) / n
+    const mb = b.reduce((x, y) => x + y, 0) / n
+    let num = 0, da = 0, db = 0
+    for (let i = 0; i < n; i++) {
+        const x = a[i] - ma, y = b[i] - mb
+        num += x * y; da += x * x; db += y * y
+    }
+    return da && db ? num / Math.sqrt(da * db) : 0
+}
+
+// Shared core for correlation computation — returns { symbols, matrix } or null.
+async function _computeCorrelationData(tickers) {
+    const symbols = [...new Set(tickers.map(t => String(t).toUpperCase()))].filter(Boolean)
+    if (symbols.length < 2) return null
+
+    const series = await Promise.all(symbols.map(async sym => {
+        const candles = await _dailyCandles(sym, 365)
+        const byDay   = new Map(candles.map(c => [c.timestamp, c.close]))
+        return { sym, byDay }
+    }))
+
+    const common = series.reduce((acc, s) => acc.filter(ts => s.byDay.has(ts)), [...series[0].byDay.keys()])
+    if (common.length < 20) return null
+    common.sort((a, b) => a - b)
+
+    const returns = series.map(s => _logReturns(common.map(ts => s.byDay.get(ts))))
+    const matrix  = symbols.map((_, i) => symbols.map((_, j) => _pearson(returns[i], returns[j])))
+    return { symbols, matrix }
+}
+
+/**
+ * Pairwise Pearson correlation matrix as raw numbers — for server-side math.
+ * Returns { symbols: string[], matrix: number[][] } or null on failure.
+ */
+export async function getCorrelationsRaw(tickers = []) {
+    return _computeCorrelationData(tickers)
+}
+
+/**
+ * Fetch daily candles once per ticker and derive both annualized volatilities
+ * and the correlation matrix in a single pass — half the Yahoo API calls vs
+ * calling getAnnualizedVolRaw + getCorrelationsRaw separately.
+ *
+ * Returns { vols: Array<number|null>, corrData: {symbols,matrix}|null }
+ * where vols[i] corresponds to tickers[i] (order and duplicates preserved).
+ */
+export async function getVolsAndCorrelationsRaw(tickers = []) {
+    const unique = [...new Set(tickers.map(t => String(t || '').toUpperCase()))].filter(Boolean)
+    if (unique.length === 0) return { vols: tickers.map(() => null), corrData: null }
+
+    const seriesArr = await Promise.all(unique.map(async sym => {
+        try {
+            const candles = await _dailyCandles(sym, 365)
+            return { sym, candles }
+        } catch {
+            return { sym, candles: [] }
+        }
+    }))
+    const candlesBySym = Object.fromEntries(seriesArr.map(s => [s.sym, s.candles]))
+
+    const vols = tickers.map(t => {
+        const candles = candlesBySym[String(t || '').toUpperCase()] ?? []
+        if (candles.length < 20) return null
+        return _stdev(_logReturns(candles.map(c => c.close))) * Math.sqrt(TRADING_DAYS)
+    })
+
+    let corrData = null
+    if (unique.length >= 2) {
+        const series = seriesArr.map(({ sym, candles }) => ({
+            sym, byDay: new Map(candles.map(c => [c.timestamp, c.close])),
+        }))
+        const common = series.reduce(
+            (acc, s) => acc.filter(ts => s.byDay.has(ts)),
+            [...series[0].byDay.keys()]
+        )
+        if (common.length >= 20) {
+            common.sort((a, b) => a - b)
+            const returns = series.map(s => _logReturns(common.map(ts => s.byDay.get(ts))))
+            const matrix  = unique.map((_, i) => unique.map((_, j) => _pearson(returns[i], returns[j])))
+            corrData = { symbols: unique, matrix }
+        }
+    }
+
+    return { vols, corrData }
+}
+
+/**
  * Pairwise Pearson correlation of daily returns across tickers, as an
  * LLM-ready matrix string. Makes "diversified" checkable instead of guessed.
  */
 export async function getCorrelations(tickers = []) {
-    const symbols = [...new Set(tickers.map(t => String(t).toUpperCase()))].filter(Boolean)
-    if (symbols.length < 2) return 'Provide at least two tickers to compute correlations.'
+    const unique = [...new Set(tickers.map(t => String(t).toUpperCase()))].filter(Boolean)
+    if (unique.length < 2) return 'Provide at least two distinct tickers to compute correlations.'
+    const data = await _computeCorrelationData(unique)
+    if (!data) return 'Not enough overlapping price history to compute correlations.'
 
-    const series = await Promise.all(symbols.map(async sym => {
-        const candles = await _dailyCandles(sym, 365)
-        const byDay = new Map(candles.map(c => [c.timestamp, c.close]))
-        return { sym, byDay }
-    }))
-
-    // Align on the set of timestamps present for every ticker.
-    const common = series.reduce((acc, s) => acc.filter(ts => s.byDay.has(ts)), [...series[0].byDay.keys()])
-    if (common.length < 20) return 'Not enough overlapping price history to compute correlations.'
-    common.sort((a, b) => a - b)
-
-    const returns = series.map(s => _logReturns(common.map(ts => s.byDay.get(ts))))
-
-    const corr = (a, b) => {
-        const n = Math.min(a.length, b.length)
-        const ma = a.reduce((x, y) => x + y, 0) / n
-        const mb = b.reduce((x, y) => x + y, 0) / n
-        let num = 0, da = 0, db = 0
-        for (let i = 0; i < n; i++) {
-            const x = a[i] - ma, y = b[i] - mb
-            num += x * y; da += x * x; db += y * y
-        }
-        return da && db ? num / Math.sqrt(da * db) : 0
-    }
-
-    const pad = s => String(s).padStart(7)
+    const { symbols, matrix } = data
+    const pad    = s => String(s).padStart(7)
     const header = '       ' + symbols.map(pad).join('')
-    const rows = symbols.map((sym, i) =>
-        pad(sym) + symbols.map((_, j) => pad(corr(returns[i], returns[j]).toFixed(2))).join('')
+    const rows   = symbols.map((sym, i) =>
+        pad(sym) + symbols.map((_, j) => pad(matrix[i][j].toFixed(2))).join('')
     )
     return ['Correlation matrix (1y daily returns):', header, ...rows].join('\n')
 }
@@ -206,6 +283,68 @@ export async function getPriceAction(ticker) {
         `1y range: $${lo52.toFixed(2)} – $${hi52.toFixed(2)}${rangePos != null ? ` (at ${rangePos.toFixed(0)}% of range)` : ''}`,
         `Last volume: ${volRel}`,
     ].join('\n')
+}
+
+// --- Earnings -----------------------------------------------------------------
+// Per-ticker earnings snapshot: upcoming date + EPS estimate + last 4 quarterly
+// actuals vs estimates. Uses Yahoo's calendarEvents + earnings modules. The
+// upcoming date is typically a window (earningsDate[0] → earningsDate[1]).
+const _earnCache = new Map() // SYMBOL -> { at, text }
+const EARN_TTL_MS = 6 * 60 * 60 * 1000
+
+export async function getEarnings(ticker) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    if (!sym) return 'No ticker provided.'
+
+    const hit = _earnCache.get(sym)
+    if (hit && Date.now() - hit.at < EARN_TTL_MS) return hit.text
+
+    let cal, chart
+    try {
+        const s = await yf.quoteSummary(sym, { modules: ['calendarEvents', 'earnings'] })
+        cal   = s?.calendarEvents?.earnings ?? {}
+        chart = s?.earnings?.earningsChart   ?? {}
+    } catch (err) {
+        return `No earnings data for ${sym}: ${err.message}`
+    }
+
+    const lines = [`${sym} — earnings:`]
+
+    const dates = cal.earningsDate
+    if (Array.isArray(dates) && dates.length) {
+        const fmt = dates.map(d => (d instanceof Date ? d : new Date(d)).toISOString().slice(0, 10))
+        lines.push(`Next earnings: ${fmt.join(' – ')}`)
+    }
+
+    const epsEst  = cal.earningsAverage
+    const epsLow  = cal.earningsLow
+    const epsHigh = cal.earningsHigh
+    if (epsEst != null) {
+        const range = (epsLow != null && epsHigh != null)
+            ? ` (range ${Number(epsLow).toFixed(2)} – ${Number(epsHigh).toFixed(2)})`
+            : ''
+        lines.push(`EPS estimate: ${Number(epsEst).toFixed(2)}${range}`)
+    }
+
+    const quarterly = chart.quarterly
+    if (Array.isArray(quarterly) && quarterly.length) {
+        lines.push('Recent quarters (actual vs estimate):')
+        for (const q of quarterly.slice(-4)) {
+            const actual = q.actual?.raw   ?? (typeof q.actual   === 'number' ? q.actual   : null)
+            const est    = q.estimate?.raw ?? (typeof q.estimate === 'number' ? q.estimate : null)
+            const actStr = actual != null ? Number(actual).toFixed(2) : 'n/a'
+            const estStr = est    != null ? Number(est).toFixed(2)    : 'n/a'
+            const surp   = (actual != null && est != null && est !== 0)
+                ? ` (${((actual - est) / Math.abs(est) * 100).toFixed(1)}% surprise)`
+                : ''
+            lines.push(`  ${q.date ?? '?'}: actual ${actStr} vs est ${estStr}${surp}`)
+        }
+    }
+
+    const text = lines.join('\n')
+    if (_earnCache.size > 500) _earnCache.clear()
+    _earnCache.set(sym, { at: Date.now(), text })
+    return text
 }
 
 // --- Short interest -----------------------------------------------------------

@@ -35,11 +35,21 @@ export async function streamPortfolio(req, res) {
     res.on('close', () => { if (!finished) ac.abort() })
 
     try {
-        // In review mode, pre-compute live portfolio state and inject into the agent.
         const isReviewMode = req.body?.reviewMode === true
-        const portfolioState = (isReviewMode && portfolioId)
-            ? await computePortfolioState(portfolioId, req.user._id).catch(() => null)
-            : null
+
+        // Fetch portfolio state (review mode only) and lifecycle (any mode with a
+        // portfolioId) in parallel — both feed the agent's dynamic context.
+        const [portfolioState, lifecycle, mandate] = await Promise.all([
+            (isReviewMode && portfolioId)
+                ? computePortfolioState(portfolioId, req.user._id).catch(() => null)
+                : Promise.resolve(null),
+            portfolioId
+                ? portfolioChatService.getPortfolioLifecycle(portfolioId, req.user._id).catch(() => null)
+                : Promise.resolve(null),
+            portfolioId
+                ? portfolioChatService.getMandate(portfolioId, req.user._id).catch(() => null)
+                : Promise.resolve(null),
+        ])
 
         const result = await portfolioAgentService.chatStream({
             messages,
@@ -47,6 +57,8 @@ export async function streamPortfolio(req, res) {
             portfolioId:   portfolioId   ?? null,
             portfolioIdeas: Array.isArray(portfolioIdeas) ? portfolioIdeas : [],
             portfolioState,
+            lifecycle,
+            mandate,
             model,
             reasoningEffort,
             userId:   req.user._id,
@@ -58,7 +70,12 @@ export async function streamPortfolio(req, res) {
 
         finished = true
         if (!ac.signal.aborted) {
-            sendEvent('done', { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null })
+            if (result.mandate && portfolioId) {
+                portfolioChatService.setMandate(portfolioId, req.user._id, result.mandate)
+                    .then(r => { if (!r.ok) logger.warn(LOG, 'setMandate returned not-ok, mandate may not be persisted') })
+                    .catch(err => logger.warn(LOG, 'setMandate unexpected error', err))
+            }
+            sendEvent('done', { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null })
             res.end()
         }
     } catch (err) {

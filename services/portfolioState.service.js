@@ -1,7 +1,7 @@
-import { getDb }                  from '../providers/mongodb.provider.js'
-import { brokerService }          from '../api/broker/broker.service.js'
-import { getEarningsCalendarRaw } from '../providers/fmp.provider.js'
-import { logger }                 from './logger.service.js'
+import { getDb }                             from '../providers/mongodb.provider.js'
+import { brokerService }                     from '../api/broker/broker.service.js'
+import { getEarningsCalendarRaw, getSectorRaw } from '../providers/fmp.provider.js'
+import { logger }                            from './logger.service.js'
 
 const LOG = '[portfolioState]'
 
@@ -108,11 +108,16 @@ export async function computePortfolioState(portfolioId, userId) {
         }
     })
 
-    // Back-fill actual weights and drift once totalNotional is settled
+    // Back-fill actual weights and drift once totalNotional is settled.
+    // Normalize drift against live-only allocation so pending positions don't
+    // make live ones appear overweight (pending have no notional in totalNotional).
+    const liveAllocTotal = liveIdeas.reduce((sum, i) => sum + (i.allocationRatio ?? 0), 0)
     for (const s of liveStates) {
         if (totalNotional > 0) {
             s.actualWeight = s._notional / totalNotional
-            s.drift = s.allocationRatio != null ? s.actualWeight - s.allocationRatio : null
+            s.drift = (s.allocationRatio != null && liveAllocTotal > 0)
+                ? s.actualWeight - (s.allocationRatio / liveAllocTotal)
+                : null
         }
         delete s._notional
     }
@@ -136,8 +141,40 @@ export async function computePortfolioState(portfolioId, userId) {
 
     const allStates = [...liveStates, ...pendingStates]
 
-    // ── Upcoming earnings for all tickers (next 30 days) ──────────────────────
+    // ── Sector lookup for all tickers (cached 24h via FMP) ───────────────────
     const tickers = [...new Set(allStates.map(s => s.asset).filter(Boolean))]
+    const sectorResults = await Promise.all(
+        tickers.map(async asset => {
+            const raw = await getSectorRaw(asset).catch(() => null)
+            return { asset: asset.toUpperCase(), sector: raw?.sector ?? null }
+        })
+    )
+    const sectorByAsset = Object.fromEntries(sectorResults.map(r => [r.asset, r.sector]))
+    for (const s of allStates) {
+        s.sector = sectorByAsset[String(s.asset ?? '').toUpperCase()] ?? null
+    }
+
+    // ── Sector weight aggregates ──────────────────────────────────────────────
+    // Use live positions only (actualWeight != null) so pending ideas don't
+    // inflate targets and make deployed sectors look underweight.
+    const sectorTargets = {}
+    const sectorActuals = {}
+    for (const s of allStates) {
+        if (!s.sector || s.actualWeight == null) continue
+        if (s.allocationRatio != null && liveAllocTotal > 0)
+            sectorTargets[s.sector] = (sectorTargets[s.sector] ?? 0) + (s.allocationRatio / liveAllocTotal)
+        sectorActuals[s.sector] = (sectorActuals[s.sector] ?? 0) + s.actualWeight
+    }
+    const sectors = [...new Set([...Object.keys(sectorTargets), ...Object.keys(sectorActuals)])].map(sector => ({
+        sector,
+        targetWeight: sectorTargets[sector] ?? null,
+        actualWeight: sectorActuals[sector] ?? null,
+        drift:        (sectorTargets[sector] != null && sectorActuals[sector] != null)
+                          ? sectorActuals[sector] - sectorTargets[sector]
+                          : null,
+    })).sort((a, b) => (b.targetWeight ?? 0) - (a.targetWeight ?? 0))
+
+    // ── Upcoming earnings for all tickers (next 30 days) ──────────────────────
     const now  = new Date()
     const from = now.toISOString().slice(0, 10)
     const to   = new Date(now.getTime() + 30 * 86400000).toISOString().slice(0, 10)
@@ -172,5 +209,6 @@ export async function computePortfolioState(portfolioId, userId) {
         totalPnl,
         totalPnlPct,
         ideas:         allStates,
+        sectors,
     }
 }

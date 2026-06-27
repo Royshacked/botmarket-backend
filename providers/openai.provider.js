@@ -124,6 +124,7 @@ export async function streamOpenAIWithTools({
     onPlan,
     onUpdate,
     onScan,
+    onMandate,
     onToolStart,
     onUsage,
     reasoningEffort,
@@ -131,7 +132,7 @@ export async function streamOpenAIWithTools({
 }) {
     let input          = normalizeInput(promptOrMessages, systemPrompt)
     const openAITools  = _toOpenAITools(tools)
-    const suppressor   = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan)
+    const suppressor   = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan, onMandate)
     const reasoning    = _reasoningParam(reasoningEffort)
 
     for (let i = 0; i < maxContinuations; i++) {

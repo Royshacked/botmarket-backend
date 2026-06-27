@@ -14,6 +14,8 @@ export const portfolioChatService = {
     setPortfolioLifecycle,
     addReviewHistoryEntry,
     getPendingReviews,
+    getMandate,
+    setMandate,
 }
 
 async function saveChatState(portfolioId, messages, userId) {
@@ -111,6 +113,34 @@ async function addReviewHistoryEntry(portfolioId, userId, entry) {
         return { ok: true }
     } catch (err) {
         logger.error(LOG, 'Failed to add review history entry', err)
+        return { ok: false }
+    }
+}
+
+async function getMandate(portfolioId, userId) {
+    try {
+        const db  = await getDb()
+        const doc = await db.collection(COLLECTION).findOne(
+            { portfolioId, userId },
+            { projection: { mandate: 1 } }
+        )
+        return doc?.mandate ?? null
+    } catch (err) {
+        logger.error(LOG, 'Failed to get mandate', err)
+        return null
+    }
+}
+
+async function setMandate(portfolioId, userId, mandate) {
+    try {
+        const db = await getDb()
+        await db.collection(COLLECTION).updateOne(
+            { portfolioId, userId },
+            { $set: { mandate } }
+        )
+        return { ok: true }
+    } catch (err) {
+        logger.error(LOG, 'Failed to set mandate', err)
         return { ok: false }
     }
 }

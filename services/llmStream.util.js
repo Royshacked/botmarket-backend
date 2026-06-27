@@ -7,16 +7,17 @@
 // Used by both the Anthropic and OpenAI streaming tool loops so the two providers
 // expose identical streaming behavior to the agent services.
 
-export function createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan) {
+export function createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan, onMandate) {
     const TAGS = [
         { open: '<state>',               close: '</state>',               onCapture: null       },
         { open: '<trade_idea>',          close: '</trade_idea>',          onCapture: null       },
         { open: '<asset>',               close: '</asset>',               onCapture: onAsset    },
         { open: '<interval>',            close: '</interval>',            onCapture: onInterval },
-        ...(onTicker ? [{ open: '<ticker>',            close: '</ticker>',            onCapture: onTicker, keepText: true }] : []),
-        ...(onPlan   ? [{ open: '<portfolio_plan>',    close: '</portfolio_plan>',    onCapture: onPlan   }] : []),
-        ...(onUpdate ? [{ open: '<portfolio_update>',  close: '</portfolio_update>',  onCapture: onUpdate }] : []),
-        ...(onScan   ? [{ open: '<scan_list>',         close: '</scan_list>',         onCapture: onScan   }] : []),
+        ...(onTicker  ? [{ open: '<ticker>',             close: '</ticker>',             onCapture: onTicker,  keepText: true }] : []),
+        ...(onPlan    ? [{ open: '<portfolio_plan>',     close: '</portfolio_plan>',     onCapture: onPlan    }] : []),
+        ...(onUpdate  ? [{ open: '<portfolio_update>',   close: '</portfolio_update>',   onCapture: onUpdate  }] : []),
+        ...(onScan    ? [{ open: '<scan_list>',          close: '</scan_list>',          onCapture: onScan    }] : []),
+        { open: '<portfolio_mandate>',  close: '</portfolio_mandate>',  onCapture: onMandate ?? null },
     ]
 
     let pending         = ''     // pre-tag lookahead buffer

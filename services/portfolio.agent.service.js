@@ -2,7 +2,7 @@ import { readFileSync }   from 'fs'
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { resolveStreamFn } from './llmModels.js'
-import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote } from '../providers/yahoofinance.provider.js'
+import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { toolError }      from './toolResult.util.js'
@@ -149,7 +149,7 @@ const TOOL_HANDLERS = {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onToolStart, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, lifecycle = null, mandate = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onToolStart, signal }) {
     const normalized   = _buildMessages(messages)
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
@@ -161,6 +161,8 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     const dynamicSections = [`CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.`]
     if (ideaAccounts.length > 0) dynamicSections.push(_buildAccountsSection(ideaAccounts))
     if (portfolioId && portfolioIdeas.length > 0) dynamicSections.push(_buildPortfolioContext(portfolioId, portfolioIdeas))
+    if (mandate)    dynamicSections.push(_buildMandateSection(mandate))
+    if (lifecycle)  dynamicSections.push(_buildLifecycleSection(lifecycle))
     if (portfolioState) dynamicSections.push(_buildPortfolioStateSection(portfolioState))
 
     const systemPrompt = [
@@ -170,8 +172,9 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
 
     logger.info(LOG, 'chatStream start', { messageCount: normalized.length, accountCount: ideaAccounts.length, editMode: !!portfolioId, model, provider })
 
-    let capturedPlan   = null
-    let capturedUpdate = null
+    let capturedPlan    = null
+    let capturedUpdate  = null
+    let capturedMandate = null
 
     const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
 
@@ -193,18 +196,22 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
         onUpdate: (json) => {
             try { capturedUpdate = JSON.parse(json) } catch { /* malformed */ }
         },
+        onMandate: (json) => {
+            try { capturedMandate = JSON.parse(json) } catch { /* malformed */ }
+        },
     })
 
     const reply = raw
         .replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1')
         .replace(/<portfolio_plan>[\s\S]*?<\/portfolio_plan>/g, '')
         .replace(/<portfolio_update>[\s\S]*?<\/portfolio_update>/g, '')
+        .replace(/<portfolio_mandate>[\s\S]*?<\/portfolio_mandate>/g, '')
         .trim()
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate })
-    return { reply, plan: capturedPlan, update: capturedUpdate }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate })
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate }
 }
 
 /**
@@ -236,18 +243,41 @@ async function _sizePlan(plan) {
         return plan
     }
 
-    // Fetch live prices for all assets in parallel, then size by dollar weight.
-    const prices = await Promise.all(ideas.map(async (idea) => {
-        try { return (await getNumericQuote(idea.asset)).price }
-        catch (err) { logger.warn(LOG, `sizePlan: price fetch failed for ${idea.asset}`, err.message); return null }
-    }))
+    // Fetch live prices in parallel with vols+correlation (single candle fetch per ticker).
+    const assets = ideas.map(i => i.asset)
+    const [prices, volAndCorr] = await Promise.all([
+        Promise.all(ideas.map(async (idea) => {
+            try { return (await getNumericQuote(idea.asset)).price }
+            catch (err) { logger.warn(LOG, `sizePlan: price fetch failed for ${idea.asset}`, err.message); return null }
+        })),
+        getVolsAndCorrelationsRaw(assets).catch(() => null),
+    ])
+    const vols     = volAndCorr?.vols     ?? assets.map(() => null)
+    const corrData = volAndCorr?.corrData ?? null
+
     ideas.forEach((idea, i) => {
         const price = prices[i]
         idea.quantity = (price > 0)
             ? Math.floor((positionSize * idea.allocationRatio) / price)
             : null
     })
-    logger.info(LOG, 'sizePlan: quantities computed', { positionSize, ideas: ideas.length })
+
+    // Portfolio volatility: √(wᵀ Σ w) where Σ[i][j] = ρ[i][j] × σ[i] × σ[j]
+    if (vols.every(v => v != null) && corrData) {
+        const symIdx = Object.fromEntries(corrData.symbols.map((s, k) => [s, k]))
+        let portfolioVar = 0
+        for (let i = 0; i < ideas.length; i++) {
+            for (let j = 0; j < ideas.length; j++) {
+                const ri  = symIdx[assets[i].toUpperCase()] ?? -1
+                const rj  = symIdx[assets[j].toUpperCase()] ?? -1
+                const rho = (ri >= 0 && rj >= 0) ? corrData.matrix[ri][rj] : (i === j ? 1 : 0)
+                portfolioVar += norm[i] * norm[j] * vols[i] * vols[j] * rho
+            }
+        }
+        plan.portfolioVol = Number(Math.sqrt(portfolioVar).toFixed(4))  // annualized, e.g. 0.18 = 18%
+    }
+
+    logger.info(LOG, 'sizePlan: quantities computed', { positionSize, ideas: ideas.length, portfolioVol: plan.portfolioVol ?? null })
     return plan
 }
 
@@ -285,6 +315,47 @@ function _buildAccountsSection(accounts) {
     return `PORTFOLIO ACCOUNTS (the user plans to execute ideas from this portfolio on):\n${lines.join('\n')}\n\nWhen suggesting position sizes, use these account balances to recommend concrete allocations. If a main account is identified by a larger balance or context, use it as the reference for scaling other accounts.`
 }
 
+function _buildMandateSection(mandate) {
+    const lines = ['INVESTMENT MANDATE (established in a prior session):']
+    if (mandate.objective)     lines.push(`Objective: ${mandate.objective}`)
+    if (mandate.horizon)       lines.push(`Time horizon: ${mandate.horizon}`)
+    if (mandate.riskTolerance) lines.push(`Risk tolerance: ${mandate.riskTolerance}`)
+    if (mandate.constraints)   lines.push(`Constraints: ${mandate.constraints}`)
+    if (mandate.benchmark)     lines.push(`Benchmark: ${mandate.benchmark}`)
+    lines.push('Do not re-ask for mandate details — use these directly.')
+    return lines.join('\n')
+}
+
+function _buildLifecycleSection(lifecycle) {
+    const fmtDate = ts => ts ? new Date(ts).toISOString().slice(0, 10) : null
+    const now = Date.now()
+
+    const lastReview = lifecycle.lastReviewAt ? fmtDate(lifecycle.lastReviewAt) : 'never'
+    const nextDue    = lifecycle.nextReviewAt  ? fmtDate(lifecycle.nextReviewAt)  : null
+    const overdue    = lifecycle.nextReviewAt && lifecycle.nextReviewAt <= now
+
+    const lines = [
+        `PORTFOLIO LIFECYCLE:`,
+        `Review cadence: ${lifecycle.reviewCadence ?? 'monthly'}`,
+        `Last review: ${lastReview}`,
+        nextDue ? `Next review due: ${nextDue}${overdue ? ' (OVERDUE)' : ''}` : null,
+    ].filter(Boolean)
+
+    const history = Array.isArray(lifecycle.reviewHistory) ? lifecycle.reviewHistory.slice(-3) : []
+    if (history.length > 0) {
+        lines.push('Recent review history (oldest to newest):')
+        for (const entry of history) {
+            const date    = fmtDate(entry.completedAt ?? entry.date ?? null) ?? '?'
+            const summary = typeof entry.summary === 'string' ? entry.summary
+                          : typeof entry.notes   === 'string' ? entry.notes
+                          : null
+            lines.push(`  ${date}${summary ? `: ${summary}` : ''}`)
+        }
+    }
+
+    return lines.join('\n')
+}
+
 function _buildPortfolioStateSection(state) {
     const fmtMoney = (n) => {
         if (n == null) return '—'
@@ -318,7 +389,7 @@ function _buildPortfolioStateSection(state) {
         const pnl     = `P&L ${fmtMoney(s.pnl)} (${fmtPct(s.pnlPct)})`
         const age     = s.thesisAgeDays != null ? `${s.thesisAgeDays}d` : ''
         const earn    = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
-        return `  ${s.asset.padEnd(6)} ${s.direction.padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${earn}`
+        return `  ${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${earn}`
     })
 
     const pendingLines = pending.map(s => {
@@ -330,6 +401,17 @@ function _buildPortfolioStateSection(state) {
     const sections = [header]
     if (liveLines.length)    sections.push(`Live positions:\n${liveLines.join('\n')}`)
     if (pendingLines.length) sections.push(`Pending (awaiting entry):\n${pendingLines.join('\n')}`)
+
+    const sectorRows = Array.isArray(state.sectors) ? state.sectors : []
+    if (sectorRows.length > 0) {
+        const sectorLines = sectorRows.map(s => {
+            const target = s.targetWeight != null ? `target ${Math.round(s.targetWeight * 100)}%` : 'target —'
+            const actual = s.actualWeight != null ? `actual ${Math.round(s.actualWeight * 100)}%` : 'actual —'
+            const drift  = fmtDrift(s.drift)
+            return `  ${String(s.sector).padEnd(20)} ${target}  ${actual}  ${drift}`
+        })
+        sections.push(`Sector weights:\n${sectorLines.join('\n')}`)
+    }
 
     sections.push('Use this data as the starting point for the review. Do not call get_quotes for tickers already shown above — prices are current. Propose specific actions (rebalance, trim, add, exit, swap) where the data warrants it.')
 

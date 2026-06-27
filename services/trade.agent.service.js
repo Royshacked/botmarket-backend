@@ -4,7 +4,8 @@ import { dirname, join } from 'path'
 import { callAnthropicWithTools } from '../providers/anthropic.provider.js'
 import { resolveStreamFn, DEFAULT_MODEL } from './llmModels.js'
 import { recordUsage } from './tokenUsage.service.js'
-import { getQuote, getTickerAggregates } from '../providers/yahoofinance.provider.js'
+import { getQuote, getTickerAggregates, getEarnings } from '../providers/yahoofinance.provider.js'
+import { getSecFilings } from '../providers/sec.provider.js'
 import { fetchChartImage } from '../providers/chartImg.provider.js'
 import { buildStudies } from '../monitoring/evaluators/chart.evaluator.js'
 import { logger } from './logger.service.js'
@@ -68,6 +69,28 @@ const TOOLS = [
                 },
             },
             required: ['ticker', 'timeframe'],
+        },
+    },
+    {
+        name: 'get_earnings',
+        description: 'Upcoming earnings date + EPS estimate for a ticker, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use this in early formation when checking if there is a catalyst coming up, whether to hold through earnings, or whether the company has a history of beating/missing. US equities only — no ETFs, crypto, FX or futures.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker: { type: 'string', description: 'e.g. AAPL, NVDA, TSLA' },
+            },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_sec_filings',
+        description: 'Recent earnings-relevant SEC filings for a US-listed equity: latest 8-K (flagging item 2.02 earnings releases), 10-Q and 10-K with filing dates and document links. Use when the user wants to dig into what was actually reported — guidance, material events, or any red flags in recent filings. US equities only (EDGAR filers); not for ETFs, crypto, FX or futures.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker: { type: 'string', description: 'e.g. AAPL, NVDA, TSLA' },
+            },
+            required: ['ticker'],
         },
     },
     {
@@ -203,6 +226,24 @@ const TOOL_HANDLERS = {
         } catch (err) {
             logger.warn(LOG, `get_candles failed for ${ticker}:`, err.message)
             return toolError(`Could not fetch candles for ${ticker}: ${err.message}`)
+        }
+    },
+
+    get_earnings: async ({ ticker }) => {
+        try {
+            return await getEarnings(ticker)
+        } catch (err) {
+            logger.warn(LOG, `get_earnings failed for ${ticker}:`, err.message)
+            return toolError(`Could not fetch earnings for ${ticker}: ${err.message}`)
+        }
+    },
+
+    get_sec_filings: async ({ ticker }) => {
+        try {
+            return await getSecFilings(ticker)
+        } catch (err) {
+            logger.warn(LOG, `get_sec_filings failed for ${ticker}:`, err.message)
+            return toolError(`Could not fetch SEC filings for ${ticker}: ${err.message}`)
         }
     },
 
