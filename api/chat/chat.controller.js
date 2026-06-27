@@ -8,21 +8,17 @@ import {
     getOrCreateConversation,
 } from './chat.service.js'
 import { emit }   from './chatWs.js'
-import { logger } from '../../services/logger.service.js'
 
-const LOG = '[chat:controller]'
-
-export async function listConversations(req, res) {
+export async function listConversations(req, res, next) {
     try {
         const convs = await getConversations(req.user._id)
         res.json({ conversations: convs })
     } catch (err) {
-        logger.error(LOG, 'listConversations failed', err)
-        res.status(500).json({ error: 'Failed to load conversations' })
+        next(err)
     }
 }
 
-export async function listMessages(req, res) {
+export async function listMessages(req, res, next) {
     try {
         const { id } = req.params
         const { before, limit } = req.query
@@ -30,12 +26,11 @@ export async function listMessages(req, res) {
         if (msgs === null) return res.status(403).json({ error: 'Forbidden' })
         res.json({ messages: msgs })
     } catch (err) {
-        logger.error(LOG, 'listMessages failed', err)
-        res.status(500).json({ error: 'Failed to load messages' })
+        next(err)
     }
 }
 
-export async function postMessage(req, res) {
+export async function postMessage(req, res, next) {
     try {
         const { id: conversationId } = req.params
         const { content } = req.body ?? {}
@@ -57,41 +52,37 @@ export async function postMessage(req, res) {
 
         res.json({ message: msg })
     } catch (err) {
-        logger.error(LOG, 'postMessage failed', err)
-        res.status(500).json({ error: 'Failed to send message' })
+        next(err)
     }
 }
 
-export async function markConversationRead(req, res) {
+export async function markConversationRead(req, res, next) {
     try {
         const { id } = req.params
         await markRead(id, req.user._id)
         res.json({ ok: true })
     } catch (err) {
-        logger.error(LOG, 'markRead failed', err)
-        res.status(500).json({ error: 'Failed to mark as read' })
+        next(err)
     }
 }
 
-export async function searchUsersHandler(req, res) {
+export async function searchUsersHandler(req, res, next) {
     try {
         const { q } = req.query
         const users = await searchUsers(q, req.user._id)
         res.json({ users })
     } catch (err) {
-        logger.error(LOG, 'searchUsers failed', err)
-        res.status(500).json({ error: 'Failed to search users' })
+        next(err)
     }
 }
 
-export async function startConversation(req, res) {
+export async function startConversation(req, res, next) {
     try {
         const { userId } = req.body ?? {}
         if (!userId) return res.status(400).json({ error: 'userId required' })
         const { conv } = await getOrCreateConversation(req.user._id, userId)
         res.json({ conversation: conv })
     } catch (err) {
-        logger.error(LOG, 'startConversation failed', err)
-        res.status(500).json({ error: 'Failed to start conversation' })
+        next(err)
     }
 }

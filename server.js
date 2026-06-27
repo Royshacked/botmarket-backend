@@ -19,6 +19,8 @@ import cookieParser from 'cookie-parser'
 import { chatRoutes }         from './api/chat/chat.routes.js'
 import { attach as attachChatWs } from './api/chat/chatWs.js'
 import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
+import { ensureUserIndexes } from './api/user/user.model.js'
+import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
 import { orchestratorRoutes } from './api/orchestrator/orchestrator.routes.js'
 import { newsFeedRoutes } from './api/news-feed/newsFeed.routes.js'
 import { tradeIdeasRoutes } from './api/trade-ideas/tradeIdeas.routes.js'
@@ -74,19 +76,21 @@ if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve('public')))
 }
 
-app.use('/orchestrator', orchestratorRoutes)
-app.use('/news-feed', newsFeedRoutes)
-app.use('/trade-ideas', tradeIdeasRoutes)
-app.use('/api/auth',   authRoutes)
-app.use('/api/users',  userRoutes)
+app.use('/api/orchestrator', orchestratorRoutes)
+app.use('/api/news-feed',   newsFeedRoutes)
+app.use('/api/trade-ideas', tradeIdeasRoutes)
+app.use('/api/auth',        authRoutes)
+app.use('/api/users',       userRoutes)
 app.use('/api/broker',      brokerRoutes)
-app.use('/portfolio',       portfolioRoutes)
-app.use('/scanner',         scannerRoutes)
-app.use('/market',          marketRoutes)
+app.use('/api/portfolio',   portfolioRoutes)
+app.use('/api/scanner',     scannerRoutes)
+app.use('/api/market',      marketRoutes)
 app.use('/api/chat',        chatRoutes)
 
 attachChatWs(server)
 ensureChatIndexes()
+ensureUserIndexes()
+ensureIdeaIndexes()
 
 newsFeedService.start()
 monitorService.start()

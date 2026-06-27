@@ -2,10 +2,9 @@ import { readFileSync, statSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { callAnthropicWithTools } from '../providers/anthropic.provider.js'
-import { resolveStreamFn } from './llmModels.js'
+import { resolveStreamFn, DEFAULT_MODEL } from './llmModels.js'
 import { recordUsage } from './tokenUsage.service.js'
-import { getQuote, getTickerAggregates, getShortInterest, getOptionsContext } from '../providers/yahoofinance.provider.js'
-import { getDerivativesContext } from '../providers/binance.provider.js'
+import { getQuote, getTickerAggregates } from '../providers/yahoofinance.provider.js'
 import { fetchChartImage } from '../providers/chartImg.provider.js'
 import { buildStudies } from '../monitoring/evaluators/chart.evaluator.js'
 import { logger } from './logger.service.js'
@@ -13,6 +12,7 @@ import { toolError } from './toolResult.util.js'
 import { normalizeTimeframe } from './timeframe.service.js'
 import { normalizeTreeNode, firstLeafTimeframe } from './conditionTree.service.js'
 import { cleanConviction } from './conviction.util.js'
+import { COMMON_TOOL_HANDLERS } from './agentUtils.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PROMPT_PATH = join(__dirname, '../trade_assistant_system_prompt.md')
@@ -36,7 +36,6 @@ function _baseSystemPrompt() {
     }
     return _promptCache.text
 }
-const MODEL = 'claude-sonnet-4-6'   // non-streaming chat() path only
 const MAX_RECENT_MESSAGES = 6
 
 const TOOLS = [
@@ -207,29 +206,7 @@ const TOOL_HANDLERS = {
         }
     },
 
-    get_short_interest: async ({ ticker }) => {
-        try { return await getShortInterest(ticker) }
-        catch (err) {
-            logger.warn(LOG, `get_short_interest failed for ${ticker}:`, err.message)
-            return toolError(`Could not fetch short interest for ${ticker}: ${err.message}`)
-        }
-    },
-
-    get_options_context: async ({ ticker }) => {
-        try { return await getOptionsContext(ticker) }
-        catch (err) {
-            logger.warn(LOG, `get_options_context failed for ${ticker}:`, err.message)
-            return toolError(`Could not fetch options context for ${ticker}: ${err.message}`)
-        }
-    },
-
-    get_derivatives_context: async ({ symbol }) => {
-        try { return await getDerivativesContext(symbol) }
-        catch (err) {
-            logger.warn(LOG, `get_derivatives_context failed for ${symbol}:`, err.message)
-            return toolError(`Could not fetch derivatives context for ${symbol}: ${err.message}`)
-        }
-    },
+    ...COMMON_TOOL_HANDLERS,
 }
 
 // ─── Chart image (vision) ─────────────────────────────────────────────────────
@@ -299,7 +276,7 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
     })
 
     const raw = await callAnthropicWithTools({
-        model: MODEL,
+        model: DEFAULT_MODEL,
         promptOrMessages: builtMessages,
         systemPrompt,
         tools: TOOLS,

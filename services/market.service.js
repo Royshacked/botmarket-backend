@@ -273,7 +273,3 @@ export function sessionStartMs(symbol, assetClass, date = new Date()) {
     return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
 }
 
-export const marketService = {
-    isCrypto, isFutures, isMarketOpen, isFuturesOpen, isForexOpen, isAssetOpen,
-    nextMarketOpenMs, nextFuturesOpenMs, nextForexOpenMs, getMarketStatus, sessionStartMs,
-}

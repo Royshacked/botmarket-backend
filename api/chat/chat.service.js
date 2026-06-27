@@ -97,12 +97,8 @@ export async function sendBotMessage(userId, content, type = 'text', payload = n
  * Seed the bot conversation for a new user. Idempotent — safe to call multiple times.
  */
 export async function seedBotConversation(userId) {
-    const { created } = await getOrCreateConversation(userId, BOT_USER_ID)
-    if (created) await sendMessage(
-        (await getOrCreateConversation(userId, BOT_USER_ID)).conv.id,
-        BOT_USER_ID,
-        BOT_WELCOME
-    )
+    const { conv, created } = await getOrCreateConversation(userId, BOT_USER_ID)
+    if (created) await sendMessage(conv.id, BOT_USER_ID, BOT_WELCOME)
 }
 
 export async function getConversations(userId) {

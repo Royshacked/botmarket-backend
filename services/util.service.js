@@ -4,12 +4,12 @@ import { logger } from './logger.service.js'
 
 
 export function getStartOfTodayUTC() {
-	const now = new Date();
-	return Date.UTC(
-	  now.getUTCFullYear(),
-	  now.getUTCMonth(),
-	  now.getUTCDate()
-	) / 1000; // convert to seconds
+    const now = new Date()
+    return Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate()
+    ) / 1000
 }
 
 
@@ -27,11 +27,11 @@ export function filterTodaysItems(data) {
 }
 
 
-export async function deduplicateItems(type='', name, data) {
+export async function deduplicateItems(type = '', name, data) {
     const loaded = await loadItemsFromFile(type, name)
-    const news = _itemsArrayFromLoaded(loaded)
+    const news = itemsArrayFromLoaded(loaded)
     const today = filterTodaysItems(news)
-    if(today.length === 0) return data
+    if (today.length === 0) return data
 
     const unique = data.filter(item => !today.some(todayItem => todayItem.datetime === item.datetime && todayItem.headline === item.headline))
     return unique
@@ -39,16 +39,16 @@ export async function deduplicateItems(type='', name, data) {
 
 
 export function cleanJSON(text) {
-	return text
-	  .replace(/```json/g, '')
-	  .replace(/```/g, '')
-	  .trim();
+    return text
+        .replace(/```json/g, '')
+        .replace(/```/g, '')
+        .trim()
 }
 
 
 export function isCacheFresh(lastFetchedAt, cacheTimeMs = 5 * 60 * 1000) {
-	// if (!lastFetchedAt) return false;
-	return Date.now() - lastFetchedAt < cacheTimeMs;
+    if (!lastFetchedAt) return false
+    return Date.now() - lastFetchedAt < cacheTimeMs
 }
 
 
@@ -68,12 +68,6 @@ export function safeParseJsonObject(text) {
 }
 
 
-/**
- * @param {string} ticker
- * @param {{ timeSpan: string, multiplier: number }} options
- * @param {unknown} data
- * @returns {Promise<{ ok: true } | { ok: false, error: Error }>}
- */
 export async function saveCandlesToFile(ticker, options, data) {
     const filePath = candlesFilePath(ticker, options)
     try {
@@ -87,14 +81,7 @@ export async function saveCandlesToFile(ticker, options, data) {
     }
 }
 
-/**
- * @param {string} ticker
- * @param {{ timeSpan: string, multiplier: number }} options
- * @returns {Promise<
- *   | { ok: true, data: unknown }
- *   | { ok: false, reason: 'missing' | 'empty' | 'parse_error' | 'io_error', data: null, error?: Error }
- * >}
- */
+
 export async function loadCandlesFromFile(ticker, options) {
     const filePath = candlesFilePath(ticker, options)
     try {
@@ -122,12 +109,6 @@ export function candlesFilePath(ticker, { timeSpan, multiplier }) {
 }
 
 
-/**
- * @param {string} type
- * @param {string} name
- * @param {unknown} data
- * @returns {Promise<{ ok: true } | { ok: false, error: Error }>}
- */
 export async function saveItemsToFile(type, name, data) {
     const filePath = _itemsFilePath(type, name)
     try {
@@ -141,14 +122,7 @@ export async function saveItemsToFile(type, name, data) {
     }
 }
 
-/**
- * @param {string} [type]
- * @param {string} name
- * @returns {Promise<
- *   | { ok: true, data: unknown }
- *   | { ok: false, reason: 'missing' | 'empty' | 'parse_error' | 'io_error', data: null, error?: Error }
- * >}
- */
+
 export async function loadItemsFromFile(type = '', name) {
     const filePath = _itemsFilePath(type, name)
     try {
@@ -168,17 +142,8 @@ export async function loadItemsFromFile(type = '', name) {
     }
 }
 
-/** @param {{ ok: boolean, data?: unknown }} loaded */
+
 export function itemsArrayFromLoaded(loaded) {
-    return _itemsArrayFromLoaded(loaded)
-}
-
-function _itemsFilePath(type, name) {
-    return path.join(path.resolve(`./data/${type}`), `${name}.json`)
-}
-
-/** @param {{ ok: boolean, data?: unknown }} loaded */
-function _itemsArrayFromLoaded(loaded) {
     if (!loaded?.ok) return []
     const raw = loaded.data
     if (Array.isArray(raw)) return raw
@@ -187,11 +152,14 @@ function _itemsArrayFromLoaded(loaded) {
 }
 
 
+function _itemsFilePath(type, name) {
+    return path.join(path.resolve(`./data/${type}`), `${name}.json`)
+}
+
 
 function _formatYyyyMmDd(date) {
     return date.toISOString().slice(0, 10)
 }
-
 
 
 function _extractFirstJsonObject(text) {
@@ -201,4 +169,3 @@ function _extractFirstJsonObject(text) {
     if (start === -1 || end === -1 || end <= start) return null
     return text.slice(start, end + 1)
 }
-

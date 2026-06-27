@@ -1,6 +1,5 @@
-import bcrypt from 'bcryptjs'
 import { getDb } from '../../providers/mongodb.provider.js'
-import { COLLECTION, stripUser } from './user.model.js'
+import { COLLECTION, stripUser, buildUserDoc } from './user.model.js'
 import { logger } from '../../services/logger.service.js'
 import { seedBotConversation } from '../chat/chat.service.js'
 import { getMonthlyUsage } from '../../services/tokenUsage.service.js'
@@ -62,17 +61,7 @@ async function createUser({ username, fullname, password }) {
         throw err
     }
 
-    const passwordHash = await bcrypt.hash(password, 10)
-    const now = Date.now()
-    const doc = {
-        id: String(now),
-        username,
-        fullname,
-        passwordHash,
-        createdAt: now,
-        updatedAt: now,
-    }
-
+    const doc = await buildUserDoc({ username, fullname, password })
     await db.collection(COLLECTION).insertOne(doc)
     logger.info(LOG, 'user created', { username })
     seedBotConversation(doc.id).catch(err => logger.warn(LOG, 'seedBotConversation failed', err.message))

@@ -1,6 +1,6 @@
 import { getDb } from '../providers/mongodb.provider.js'
 
-const TOKEN_BUDGET_USD = 20
+const TOKEN_BUDGET_USD = Number(process.env.TOKEN_BUDGET_USD) || 20
 
 // Pricing per 1M tokens in USD
 const PRICING = {

@@ -27,7 +27,7 @@ export async function signin(req, res, next) {
         res.cookie('token', token, {
             httpOnly: true,
             sameSite: 'strict',
-            secure: false,
+            secure: process.env.NODE_ENV === 'production',
             maxAge: SEVEN_DAYS_MS,
         })
         res.json({ username: user.username, fullname: user.fullname })

@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { getDb } from '../../providers/mongodb.provider.js'
-import { COLLECTION, stripUser } from '../user/user.model.js'
+import { COLLECTION, stripUser, buildUserDoc } from '../user/user.model.js'
 import { logger } from '../../services/logger.service.js'
 
 const LOG = '[authService]'
@@ -9,7 +9,6 @@ const LOG = '[authService]'
 export const authService = {
     signup,
     signin,
-    signout,
 }
 
 async function signup(username, fullname, password) {
@@ -22,17 +21,7 @@ async function signup(username, fullname, password) {
         throw err
     }
 
-    const passwordHash = await bcrypt.hash(password, 10)
-    const now = Date.now()
-    const doc = {
-        id: String(now),
-        username,
-        fullname,
-        passwordHash,
-        createdAt: now,
-        updatedAt: now,
-    }
-
+    const doc = await buildUserDoc({ username, fullname, password })
     await db.collection(COLLECTION).insertOne(doc)
     logger.info(LOG, 'user signed up', { username })
     return stripUser(doc)
@@ -60,8 +49,4 @@ async function signin(username, password) {
 
     logger.info(LOG, 'user signed in', { username })
     return { token, user: { username: user.username, fullname: user.fullname } }
-}
-
-function signout() {
-    return { message: 'Signed out successfully' }
 }

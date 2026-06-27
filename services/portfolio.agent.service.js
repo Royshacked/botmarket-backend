@@ -2,14 +2,14 @@ import { readFileSync }   from 'fs'
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { resolveStreamFn } from './llmModels.js'
-import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getShortInterest, getOptionsContext } from '../providers/yahoofinance.provider.js'
+import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
-import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError }      from './toolResult.util.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }         from './logger.service.js'
 import { recordUsage }   from './tokenUsage.service.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages } from './agentUtils.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
 const SYSTEM_PROMPT = readFileSync(join(__dirname, '../trade_portfolio_system_prompt.md'), 'utf-8')
@@ -144,18 +144,7 @@ const TOOL_HANDLERS = {
         try { return await getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []) }
         catch (err) { return toolError(`Could not fetch earnings calendar: ${err.message}`) }
     },
-    get_short_interest: async ({ ticker }) => {
-        try { return await getShortInterest(ticker) }
-        catch (err) { return toolError(`Could not fetch short interest for ${ticker}: ${err.message}`) }
-    },
-    get_options_context: async ({ ticker }) => {
-        try { return await getOptionsContext(ticker) }
-        catch (err) { return toolError(`Could not fetch options context for ${ticker}: ${err.message}`) }
-    },
-    get_derivatives_context: async ({ symbol }) => {
-        try { return await getDerivativesContext(symbol) }
-        catch (err) { return toolError(`Could not fetch derivatives context for ${symbol}: ${err.message}`) }
-    },
+    ...COMMON_TOOL_HANDLERS,
 }
 
 export const portfolioAgentService = { chatStream }
@@ -263,10 +252,7 @@ async function _sizePlan(plan) {
 }
 
 function _buildMessages(messages) {
-    return messages
-        .filter(m => m && (m.role === 'user' || m.role === 'assistant') && m.content?.trim())
-        .map(({ role, content }) => ({ role, content: content.trim() }))
-        .slice(-MAX_MESSAGES)
+    return normalizeMessages(messages, MAX_MESSAGES)
 }
 
 function _buildPortfolioContext(portfolioId, ideas) {
