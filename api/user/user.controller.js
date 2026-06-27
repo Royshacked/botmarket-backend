@@ -48,3 +48,13 @@ export async function remove(req, res, next) {
         next(err)
     }
 }
+
+export async function getTokenUsage(req, res, next) {
+    try {
+        const { month } = req.query
+        const usage = await userService.getTokenUsage(req.params.id, month)
+        res.json(usage)
+    } catch (err) {
+        next(err)
+    }
+}

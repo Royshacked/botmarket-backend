@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { callAnthropicWithTools } from '../providers/anthropic.provider.js'
 import { resolveStreamFn } from './llmModels.js'
+import { recordUsage } from './tokenUsage.service.js'
 import { getQuote, getTickerAggregates, getShortInterest, getOptionsContext } from '../providers/yahoofinance.provider.js'
 import { getDerivativesContext } from '../providers/binance.provider.js'
 import { fetchChartImage } from '../providers/chartImg.provider.js'
@@ -316,7 +317,7 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, reasoningEffort, onToken, onAsset, onInterval, onChart, onToolStart, signal }) {
+async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onToolStart, signal }) {
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
     // get_chart returns an image tool_result, which only the Anthropic provider
@@ -338,6 +339,8 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
         provider,
     })
 
+    const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
+
     const raw = await streamFn({
         model,
         promptOrMessages: builtMessages,
@@ -350,6 +353,7 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
         onAsset,
         onInterval,
         onToolStart,
+        onUsage,
     })
 
     const { reply, updatedState, tradeIdea } = _parseResponse(raw, analysisState, userPrompt)

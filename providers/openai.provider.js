@@ -24,12 +24,13 @@ function _reasoningParam(reasoningEffort) {
 
 
 
-export async function callOpenAI(model, promptOrMessages, systemPrompt = DEFAULT_SYSTEM_PROMPT) {
+export async function callOpenAI(model, promptOrMessages, systemPrompt = DEFAULT_SYSTEM_PROMPT, { onUsage } = {}) {
     const response = await client.responses.create({
         model,
         input: normalizeInput(promptOrMessages, systemPrompt),
     })
 
+    onUsage?.(response.usage)
     return response.output_text ?? ''
 }
 
@@ -41,6 +42,7 @@ export async function callOpenAIWithTools({
     executeTool,
     tool_choice = 'auto',
     maxTurns = DEFAULT_MAX_TOOL_TURNS,
+    onUsage,
 }) {
     let input = normalizeInput(promptOrMessages, systemPrompt)
 
@@ -52,6 +54,7 @@ export async function callOpenAIWithTools({
             tool_choice,
         })
 
+        onUsage?.(response.usage)
         const functionCalls = (response.output ?? []).filter((item) => item?.type === 'function_call')
 
         if (functionCalls.length === 0) {
@@ -122,6 +125,7 @@ export async function streamOpenAIWithTools({
     onUpdate,
     onScan,
     onToolStart,
+    onUsage,
     reasoningEffort,
     signal,
 }) {
@@ -160,6 +164,7 @@ export async function streamOpenAIWithTools({
         }
 
         const final         = await stream.finalResponse()
+        onUsage?.(final.usage)
         const functionCalls  = (final.output ?? []).filter((item) => item?.type === 'function_call')
 
         // Surface each tool call so the UI can show a status chip (parity with the

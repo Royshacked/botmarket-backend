@@ -36,6 +36,7 @@ export async function streamScanner(req, res) {
             model,
             editList: editList && typeof editList === 'object' ? editList : null,
             reasoningEffort,
+            userId:   req.user._id,
             signal:   ac.signal,
             onToken:  (text)   => sendEvent('token',  { text }),
             onTicker: (symbol) => sendEvent('ticker', { symbol }),

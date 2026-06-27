@@ -45,6 +45,7 @@ export async function streamAnthropicWithTools({
     onUpdate,
     onScan,
     onToolStart,
+    onUsage,
     reasoningEffort,
     signal,
 }) {
@@ -68,10 +69,14 @@ export async function streamAnthropicWithTools({
 
         const contentBlocks = []
         let stopReason = null
+        let turnUsage  = null
 
         try {
             for await (const event of stream) {
-                if (event.type === 'content_block_start') {
+                if (event.type === 'message_start') {
+                    const u = event.message?.usage
+                    if (u) turnUsage = { input_tokens: u.input_tokens ?? 0, output_tokens: 0, cache_read_input_tokens: u.cache_read_input_tokens ?? 0, cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0 }
+                } else if (event.type === 'content_block_start') {
                     contentBlocks[event.index] = { ...event.content_block }
                     // Surface a tool call as soon as its block opens so the UI can
                     // show a "Analyzing…" status chip without the model spending
@@ -100,6 +105,7 @@ export async function streamAnthropicWithTools({
                     }
                 } else if (event.type === 'message_delta') {
                     stopReason = event.delta.stop_reason
+                    if (turnUsage && event.usage?.output_tokens) turnUsage.output_tokens = event.usage.output_tokens
                 }
             }
         } catch (err) {
@@ -111,6 +117,8 @@ export async function streamAnthropicWithTools({
             }
             throw err
         }
+
+        if (turnUsage) onUsage?.(turnUsage)
 
         // Finalise tool blocks (merge partial JSON) — covers both tool_use and server_tool_use
         for (const block of contentBlocks) {
@@ -148,7 +156,7 @@ export async function streamAnthropicWithTools({
     throw new Error(`Anthropic stream tool loop exceeded maxContinuations (${maxContinuations})`)
 }
 
-export async function callAnthropic(model, promptOrMessages, systemPrompt) {
+export async function callAnthropic(model, promptOrMessages, systemPrompt, { onUsage } = {}) {
     const messages = _normalizeMessages(promptOrMessages)
     const response = await client.messages.create({
         model: model ?? DEFAULT_MODEL,
@@ -156,6 +164,7 @@ export async function callAnthropic(model, promptOrMessages, systemPrompt) {
         messages,
         max_tokens: DEFAULT_MAX_TOKENS,
     })
+    onUsage?.(response.usage)
     return _extractText(response.content)
 }
 
@@ -166,6 +175,7 @@ export async function callAnthropicWithTools({
     tools = [],
     toolHandlers = {},
     maxContinuations = DEFAULT_MAX_CONTINUATIONS,
+    onUsage,
 }) {
     const messages = _normalizeMessages(promptOrMessages)
 
@@ -177,6 +187,8 @@ export async function callAnthropicWithTools({
             tools,
             max_tokens: DEFAULT_MAX_TOKENS,
         })
+
+        onUsage?.(response.usage)
 
         if (response.stop_reason === 'end_turn') {
             return _extractText(response.content)

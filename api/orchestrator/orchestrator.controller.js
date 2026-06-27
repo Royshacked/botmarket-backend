@@ -43,6 +43,7 @@ export async function streamOrchestration(req, res) {
             ideaAccounts:  parsed.ideaAccounts ?? [],
             model:         req.body?.model,
             reasoningEffort: req.body?.reasoningEffort,
+            userId:        req.user._id,
             signal:        ac.signal,
             onToken:       (text)     => sendEvent('token',    { text }),
             onAsset:       (symbol)   => sendEvent('asset',    { symbol }),

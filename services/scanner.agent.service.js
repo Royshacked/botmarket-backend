@@ -9,6 +9,7 @@ import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError }     from './toolResult.util.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
+import { recordUsage }  from './tokenUsage.service.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
 const SYSTEM_PROMPT = readFileSync(join(__dirname, '../scanner_system_prompt.md'), 'utf-8')
@@ -146,7 +147,7 @@ const TOOL_HANDLERS = {
 
 export const scannerAgentService = { chatStream }
 
-async function chatStream({ messages = [], model: requestedModel, editList = null, reasoningEffort, onToken, onTicker, onToolStart, signal }) {
+async function chatStream({ messages = [], model: requestedModel, editList = null, reasoningEffort, userId, onToken, onTicker, onToolStart, signal }) {
     const normalized = _buildMessages(messages)
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
@@ -167,6 +168,8 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
 
     let capturedScan = null
 
+    const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
+
     const raw = await streamFn({
         model,
         promptOrMessages: normalized,
@@ -178,6 +181,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         onToken,
         onTicker,
         onToolStart,
+        onUsage,
         onScan: (json) => {
             try { capturedScan = JSON.parse(json) } catch { /* malformed — ignore */ }
         },

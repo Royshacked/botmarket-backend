@@ -49,6 +49,7 @@ export async function streamPortfolio(req, res) {
             portfolioState,
             model,
             reasoningEffort,
+            userId:   req.user._id,
             signal:   ac.signal,
             onToken:  (text)   => sendEvent('token',  { text }),
             onTicker: (symbol) => sendEvent('ticker', { symbol }),

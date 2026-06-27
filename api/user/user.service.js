@@ -3,6 +3,7 @@ import { getDb } from '../../providers/mongodb.provider.js'
 import { COLLECTION, stripUser } from './user.model.js'
 import { logger } from '../../services/logger.service.js'
 import { seedBotConversation } from '../chat/chat.service.js'
+import { getMonthlyUsage } from '../../services/tokenUsage.service.js'
 
 const LOG = '[userService]'
 
@@ -12,6 +13,11 @@ export const userService = {
     createUser,
     updateUser,
     deleteUser,
+    getTokenUsage,
+}
+
+async function getTokenUsage(userId, month) {
+    return getMonthlyUsage(userId, month)
 }
 
 async function listUsers({ search, page = 1, limit = 20 } = {}) {

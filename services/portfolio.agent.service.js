@@ -9,6 +9,7 @@ import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError }      from './toolResult.util.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }         from './logger.service.js'
+import { recordUsage }   from './tokenUsage.service.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
 const SYSTEM_PROMPT = readFileSync(join(__dirname, '../trade_portfolio_system_prompt.md'), 'utf-8')
@@ -159,7 +160,7 @@ const TOOL_HANDLERS = {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, model: requestedModel, reasoningEffort, onToken, onTicker, onToolStart, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onToolStart, signal }) {
     const normalized   = _buildMessages(messages)
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
@@ -183,6 +184,8 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     let capturedPlan   = null
     let capturedUpdate = null
 
+    const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
+
     const raw = await streamFn({
         model,
         promptOrMessages: normalized,
@@ -194,6 +197,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
         onToken,
         onTicker,
         onToolStart,
+        onUsage,
         onPlan: (json) => {
             try { capturedPlan = JSON.parse(json) } catch { /* malformed */ }
         },
