@@ -8,6 +8,36 @@ const LOG = '[portfolioState]'
 const LIVE_STATUSES    = new Set(['long', 'short'])
 const PENDING_STATUSES = new Set(['looking', 'waiting', 'resting', 'hit'])
 
+// ── Short-TTL snapshot cache ──────────────────────────────────────────────
+// A review conversation sends several follow-up turns. Recomputing the state
+// each turn repeats broker getPositions + FMP calls AND re-sends a freshly
+// timestamped block that can never be prompt-cached. Snapshotting for a few
+// minutes both kills the repeated round-trips and makes the dynamic context
+// byte-identical across turns so it can sit behind a cache_control breakpoint.
+const STATE_TTL_MS = 5 * 60 * 1000
+const _stateCache  = new Map()   // `${portfolioId}|${userId}` → { state, expiresAt }
+
+/**
+ * Cached wrapper around computePortfolioState. Returns the same snapshot for up
+ * to ttlMs so review follow-ups reuse it (prices frozen for the window).
+ */
+export async function getPortfolioStateCached(portfolioId, userId, { ttlMs = STATE_TTL_MS } = {}) {
+    const key = `${portfolioId}|${userId}`
+    const hit = _stateCache.get(key)
+    if (hit && hit.expiresAt > Date.now()) {
+        logger.info(LOG, 'snapshot cache hit', { portfolioId })
+        return hit.state
+    }
+    const state = await computePortfolioState(portfolioId, userId)
+    _stateCache.set(key, { state, expiresAt: Date.now() + ttlMs })
+    return state
+}
+
+/** Drop a cached snapshot — call when the portfolio changes out-of-band. */
+export function invalidatePortfolioState(portfolioId, userId) {
+    _stateCache.delete(`${portfolioId}|${userId}`)
+}
+
 /**
  * Compute the live state of a portfolio: actual weights, drift vs target,
  * unrealized P&L, thesis age, and upcoming earnings per holding.

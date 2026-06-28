@@ -219,7 +219,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         .replace(/<phase>[\s\S]*?<\/phase>/g, '')
         .trim()
 
-    const scan = _normalizeScan(capturedScan)
+    const scan = _normalizeScan(capturedScan, editList)
 
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, phase: capturedPhase })
     return { reply, scan, phase: capturedPhase }
@@ -229,22 +229,19 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
  * Defensively normalize a captured scan so a malformed/partial block from the
  * model never reaches persistence or the UI. Drops candidates without a ticker,
  * uppercases symbols, and guarantees the period/thesis shape.
+ *
+ * In edit mode the model emits untouched candidates as a bare
+ * `{ ticker, keep: true }` reference instead of re-typing their full
+ * analysis/signals/sources (saves premium output and avoids regeneration drift).
+ * We rehydrate those from editList — the full prior record we already hold.
  */
-function _normalizeScan(scan) {
+function _normalizeScan(scan, editList = null) {
     if (!scan || typeof scan !== 'object') return null
+    const priorByTicker = _editListByTicker(editList)
     const candidates = Array.isArray(scan.candidates) ? scan.candidates : []
     const clean = candidates
-        .filter(c => c && typeof c.ticker === 'string' && c.ticker.trim())
-        .map(c => ({
-            ticker:    c.ticker.toUpperCase().trim(),
-            name:      typeof c.name === 'string' ? c.name : null,
-            direction: c.direction === 'short' ? 'short' : 'long',
-            thesis:    typeof c.thesis === 'string' ? c.thesis : '',
-            analysis:  typeof c.analysis === 'string' ? c.analysis : '',
-            signals:   (c.signals && typeof c.signals === 'object') ? c.signals : {},
-            conviction: cleanConviction(c.conviction),
-            sources:   Array.isArray(c.sources) ? c.sources.filter(s => s && s.url) : [],
-        }))
+        .map(c => _resolveCandidate(c, priorByTicker))
+        .filter(Boolean)
     if (!clean.length) return null
 
     const period = (scan.period && typeof scan.period === 'object') ? scan.period : {}
@@ -260,6 +257,45 @@ function _normalizeScan(scan) {
     }
 }
 
+function _editListByTicker(editList) {
+    const map = new Map()
+    if (editList && Array.isArray(editList.candidates)) {
+        for (const c of editList.candidates) {
+            if (c && typeof c.ticker === 'string' && c.ticker.trim()) {
+                map.set(c.ticker.toUpperCase().trim(), c)
+            }
+        }
+    }
+    return map
+}
+
+// Resolve one emitted candidate to a full clean record. A `keep:true` reference
+// (or a bare ticker that matches a prior candidate and carries no new content)
+// is rehydrated from the prior list so untouched names keep their original
+// analysis verbatim instead of being regenerated.
+function _resolveCandidate(c, priorByTicker) {
+    if (!c || typeof c.ticker !== 'string' || !c.ticker.trim()) return null
+    const key = c.ticker.toUpperCase().trim()
+    const isBareReference = !c.analysis && !c.signals && !c.thesis
+    if ((c.keep === true || isBareReference) && priorByTicker.has(key)) {
+        return _cleanCandidate(priorByTicker.get(key))
+    }
+    return _cleanCandidate(c)
+}
+
+function _cleanCandidate(c) {
+    return {
+        ticker:    c.ticker.toUpperCase().trim(),
+        name:      typeof c.name === 'string' ? c.name : null,
+        direction: c.direction === 'short' ? 'short' : 'long',
+        thesis:    typeof c.thesis === 'string' ? c.thesis : '',
+        analysis:  typeof c.analysis === 'string' ? c.analysis : '',
+        signals:   (c.signals && typeof c.signals === 'object') ? c.signals : {},
+        conviction: cleanConviction(c.conviction),
+        sources:   Array.isArray(c.sources) ? c.sources.filter(s => s && s.url) : [],
+    }
+}
+
 // When the user reopens a saved list to edit it, tell the agent exactly what's
 // currently on the list so it edits against it (add/remove/replace names) and
 // re-emits the FULL updated <scan_list> rather than starting a new one.
@@ -272,7 +308,7 @@ function _buildEditSection(editList) {
         `EDIT MODE — the user is refining an existing list: "${editList.thesis || 'Scan'}"${when ? ` — ${when}` : ''}.`,
         `Current candidates:`,
         ...lines,
-        `When they ask to add, remove, or change names, apply the change and re-emit the FULL updated <scan_list> (keep the names they didn't touch, same period unless they change it). Keep each candidate's analysis/signals rich, as usual.`,
+        `When they ask to add, remove, or change names, re-emit the FULL <scan_list> (same period unless they change it) — but do NOT rewrite untouched names. Emit each unchanged candidate as a bare reference: { "ticker": "NVDA", "keep": true } — its saved analysis, signals and sources are preserved automatically. Write full rich fields ONLY for candidates you are adding or actually changing. To remove a name, just omit it.`,
     ].join('\n')
 }
 

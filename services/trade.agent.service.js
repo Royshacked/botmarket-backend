@@ -526,7 +526,11 @@ function _parseResponse(raw, priorState, userPrompt) {
     if (!updatedState || !_isValidState(updatedState)) {
         updatedState = _fallbackState(priorState, userPrompt, text)
     } else {
-        updatedState.recent_messages = _trimMessages(updatedState.recent_messages ?? [])
+        // recent_messages is tracked backend-side, not emitted by the LLM — it was
+        // pure output-token waste to have the model retype the conversation verbatim
+        // every turn. Build it here from prior history + this turn's user/assistant
+        // exchange (same logic as _fallbackState).
+        updatedState.recent_messages = _buildRecentMessages(priorState, userPrompt, text)
         const pt      = updatedState.structured_state.pending_trade
         const priorPt = priorState?.structured_state?.pending_trade
 
@@ -609,20 +613,25 @@ function _isValidState(state) {
     return (
         state &&
         typeof state === 'object' &&
-        Array.isArray(state.recent_messages) &&
         typeof state.recent_chat_summary === 'string' &&
         state.structured_state &&
         typeof state.structured_state === 'object'
     )
 }
 
-function _fallbackState(priorState, userPrompt, replyText) {
-    const prior = priorState && typeof priorState === 'object' ? priorState : emptyAnalysisState()
-    const recent_messages = _trimMessages([
-        ...(prior.recent_messages ?? []),
+// Build the rolling chat history backend-side from prior history + this turn's
+// exchange. The LLM no longer emits recent_messages (saves premium output tokens).
+function _buildRecentMessages(priorState, userPrompt, replyText) {
+    return _trimMessages([
+        ...(priorState?.recent_messages ?? []),
         ...(userPrompt?.trim() ? [{ role: 'user', content: userPrompt.trim() }] : []),
         ...(replyText?.trim() ? [{ role: 'assistant', content: replyText.trim() }] : []),
     ])
+}
+
+function _fallbackState(priorState, userPrompt, replyText) {
+    const prior = priorState && typeof priorState === 'object' ? priorState : emptyAnalysisState()
+    const recent_messages = _buildRecentMessages(prior, userPrompt, replyText)
     return {
         recent_messages,
         recent_chat_summary: prior.recent_chat_summary ?? '',

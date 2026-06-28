@@ -166,9 +166,16 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     if (lifecycle)  dynamicSections.push(_buildLifecycleSection(lifecycle))
     if (portfolioState) dynamicSections.push(_buildPortfolioStateSection(portfolioState))
 
+    // Two cache breakpoints: the static instructions, and the dynamic context
+    // tail. The tail (date + accounts + mandate + lifecycle + snapshotted
+    // portfolio state) is byte-identical across the follow-up turns of a review
+    // session, so caching it lets turns 2+ read it at ~0.1× instead of re-paying
+    // full price every turn. A turn where it does change just re-writes it once.
     const systemPrompt = [
         { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
-        ...(dynamicSections.length ? [{ type: 'text', text: dynamicSections.join('\n\n') }] : []),
+        ...(dynamicSections.length
+            ? [{ type: 'text', text: dynamicSections.join('\n\n'), cache_control: { type: 'ephemeral' } }]
+            : []),
     ]
 
     logger.info(LOG, 'chatStream start', { messageCount: normalized.length, accountCount: ideaAccounts.length, editMode: !!portfolioId, model, provider })

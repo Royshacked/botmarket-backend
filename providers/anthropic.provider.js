@@ -139,12 +139,14 @@ export async function streamAnthropicWithTools({
         }
 
         if (stopReason === 'pause_turn') {
+            _compactPriorToolResults(messages)
             messages.push({ role: 'assistant', content: _compactServerResults(validBlocks) })
             continue
         }
 
         if (stopReason === 'tool_use') {
             const toolUseBlocks = validBlocks.filter(b => b.type === 'tool_use')
+            _compactPriorToolResults(messages)
             messages.push({ role: 'assistant', content: validBlocks })
             const results = await Promise.all(toolUseBlocks.map(b => _runTool(toolHandlers, b)))
             messages.push({ role: 'user', content: results })
@@ -197,12 +199,14 @@ export async function callAnthropicWithTools({
         }
 
         if (response.stop_reason === 'pause_turn') {
-            messages.push({ role: 'assistant', content: response.content })
+            _compactPriorToolResults(messages)
+            messages.push({ role: 'assistant', content: _compactServerResults(response.content) })
             continue
         }
 
         if (response.stop_reason === 'tool_use') {
             const toolUseBlocks = response.content.filter((b) => b.type === 'tool_use')
+            _compactPriorToolResults(messages)
             messages.push({ role: 'assistant', content: response.content })
             const results = await Promise.all(toolUseBlocks.map(b => _runTool(toolHandlers, b)))
             messages.push({ role: 'user', content: results })
@@ -282,4 +286,46 @@ function _compactServerResults(blocks) {
         }
         return block
     })
+}
+
+// Within one tool loop the messages array accumulates every client tool_result.
+// Once the model has consumed a result, re-sending it verbatim on each later
+// continuation just re-bills input — a base64 get_chart image (~1.5k image
+// tokens) is the worst offender. Shrink already-consumed tool_result blocks:
+// drop images to a short placeholder, truncate long text. Safe to call at the
+// top of a tool_use/pause_turn branch — every result already in `messages` was
+// visible to the call that just returned, so none are awaiting a first read.
+// The fresh results are appended raw afterwards, so they reach the model in full.
+function _compactPriorToolResults(messages) {
+    for (const msg of messages) {
+        if (!msg || msg.role !== 'user' || !Array.isArray(msg.content)) continue
+        msg.content = msg.content.map(_compactToolResultBlock)
+    }
+}
+
+// Idempotent: a block already compacted has no image and short text, so a
+// repeat pass returns it unchanged — no marker field needed (and none must be
+// added, since the block is sent verbatim to the API on the next call).
+function _compactToolResultBlock(block) {
+    if (!block || block.type !== 'tool_result') return block
+    const content = block.content
+    if (Array.isArray(content)) {
+        let changed = false
+        const next = content.map(c => {
+            if (c?.type === 'image') {
+                changed = true
+                return { type: 'text', text: '[image omitted from history — already analyzed]' }
+            }
+            if (c?.type === 'text' && c.text?.length > _SEARCH_RESULT_CHARS) {
+                changed = true
+                return { ...c, text: c.text.slice(0, _SEARCH_RESULT_CHARS) + '\n[truncated]' }
+            }
+            return c
+        })
+        return changed ? { ...block, content: next } : block
+    }
+    if (typeof content === 'string' && content.length > _SEARCH_RESULT_CHARS) {
+        return { ...block, content: content.slice(0, _SEARCH_RESULT_CHARS) + '\n[truncated]' }
+    }
+    return block
 }

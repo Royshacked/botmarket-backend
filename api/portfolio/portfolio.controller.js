@@ -1,6 +1,6 @@
 import { portfolioAgentService } from '../../services/portfolio.agent.service.js'
 import { portfolioChatService }  from './portfolioChat.service.js'
-import { computePortfolioState } from '../../services/portfolioState.service.js'
+import { getPortfolioStateCached, invalidatePortfolioState } from '../../services/portfolioState.service.js'
 import { logger }                from '../../services/logger.service.js'
 import { resolveModel }          from '../../services/modelRouter.service.js'
 
@@ -42,7 +42,7 @@ export async function streamPortfolio(req, res) {
         // portfolioId) in parallel — both feed the agent's dynamic context.
         const [portfolioState, lifecycle, mandate] = await Promise.all([
             (isReviewMode && portfolioId)
-                ? computePortfolioState(portfolioId, req.user._id).catch(() => null)
+                ? getPortfolioStateCached(portfolioId, req.user._id).catch(() => null)
                 : Promise.resolve(null),
             portfolioId
                 ? portfolioChatService.getPortfolioLifecycle(portfolioId, req.user._id).catch(() => null)
@@ -155,6 +155,9 @@ export async function completeReview(req, res) {
             lastReviewAt:  now,
             nextReviewAt:  now + cadenceMs,
         })
+
+        // Review done — drop the snapshot so the next review computes fresh.
+        invalidatePortfolioState(portfolioId, req.user._id)
 
         res.json({ ok: true, nextReviewAt: now + cadenceMs })
     } catch (err) {

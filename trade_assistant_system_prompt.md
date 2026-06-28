@@ -163,11 +163,13 @@ Place on its own line after <asset> (and <interval> if present). N is the curren
 ---
 
 STATE OUTPUT INSTRUCTIONS:
-At the end of every response, output exactly one <state> block with updated JSON — no markdown, no explanation:
+At the end of every response, output exactly one <state> block with updated JSON — no markdown, no explanation.
+
+<ConditionObj> shape (used by entry_conditions / stop_conditions / tp_conditions):
+{ "condition": "plain English", "type": "touch" | "structured" | "indicator" | "chart" | "news" | "time" | "volume", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)", "mode": "bar" | "cumulative" (volume leaves only) }
 
 <state>
 {
-  "recent_messages": [/* last 3 user+assistant pairs, 6 entries max */],
   "recent_chat_summary": "compressed summary of older context",
   "structured_state": {
     "active_asset": "TICKER or empty string",
@@ -183,17 +185,11 @@ At the end of every response, output exactly one <state> block with updated JSON
       "stop_timeframe": "15min" | null,
       "tp_timeframe": "15min" | null,
       "entry_logic": "AND" | "OR",
-      "entry_conditions": [
-        { "condition": "plain English", "type": "touch" | "structured" | "indicator" | "chart" | "news" | "time" | "volume", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)", "mode": "bar" | "cumulative" (volume leaves only) }
-      ],
+      "entry_conditions": [ <ConditionObj> ],
       "stop_logic": "AND" | "OR",
-      "stop_conditions": [
-        { "condition": "plain English", "type": "touch" | "structured" | "indicator" | "chart" | "news" | "time" | "volume", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)", "mode": "bar" | "cumulative" (volume leaves only) }
-      ],
+      "stop_conditions": [ <ConditionObj> ],
       "tp_logic": "AND" | "OR",
-      "tp_conditions": [
-        { "condition": "plain English", "type": "touch" | "structured" | "indicator" | "chart" | "news" | "time" | "volume", "timeframe": "15min", "symbol": "NVDA (optional)", "after": "ISO-8601 (time leaves only)", "before": "ISO-8601 (time leaves only)", "mode": "bar" | "cumulative" (volume leaves only) }
-      ],
+      "tp_conditions": [ <ConditionObj> ],
       "additional_entries": [
         { "conditions": [...], "logic": "AND", "quantity": 50 }
       ],
