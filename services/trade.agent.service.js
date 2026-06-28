@@ -336,7 +336,7 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onToolStart, signal }) {
+async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, signal }) {
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
     // get_chart returns an image tool_result, which only the Anthropic provider
@@ -360,6 +360,8 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
 
     const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
 
+    let capturedPhase = null
+
     const raw = await streamFn({
         model,
         promptOrMessages: builtMessages,
@@ -373,6 +375,13 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
         onInterval,
         onToolStart,
         onUsage,
+        onPhase: (p) => {
+            const n = parseInt(p, 10)
+            if (n >= 1 && n <= 5) {
+                capturedPhase = n
+                onPhase?.(n)
+            }
+        },
     })
 
     const { reply, updatedState, tradeIdea } = _parseResponse(raw, analysisState, userPrompt)
@@ -381,9 +390,10 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
         replyLength:       reply.length,
         hasTradeIdea:      Boolean(tradeIdea),
         recentMessageCount: updatedState.recent_messages.length,
+        phase: capturedPhase,
     })
 
-    return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
+    return { reply, analysisState: updatedState, phase: capturedPhase, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
 function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = [], { hasChartTool = true } = {}) {
@@ -484,6 +494,7 @@ function _parseResponse(raw, priorState, userPrompt) {
 
 
     text = text.replace(/<asset>[\s\S]*?<\/asset>/, '').trim()
+    text = text.replace(/<phase>[\s\S]*?<\/phase>/, '').trim()
 
     const tradeMatch = text.match(/<trade_idea>([\s\S]*?)<\/trade_idea>/)
     if (tradeMatch) {

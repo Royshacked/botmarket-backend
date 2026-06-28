@@ -2,11 +2,12 @@ import { portfolioAgentService } from '../../services/portfolio.agent.service.js
 import { portfolioChatService }  from './portfolioChat.service.js'
 import { computePortfolioState } from '../../services/portfolioState.service.js'
 import { logger }                from '../../services/logger.service.js'
+import { resolveModel }          from '../../services/modelRouter.service.js'
 
 const LOG = '[portfolio:controller]'
 
 export async function streamPortfolio(req, res) {
-    const { messages, ideaAccounts, portfolioId, portfolioIdeas, model, reasoningEffort } = req.body ?? {}
+    const { messages, ideaAccounts, portfolioId, portfolioIdeas, model, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
 
     if (!Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ error: 'messages must be a non-empty array' })
@@ -51,6 +52,9 @@ export async function streamPortfolio(req, res) {
                 : Promise.resolve(null),
         ])
 
+        const lastMessage = messages.at(-1)?.content ?? ''
+        const routing = await resolveModel({ routingMode, agent: 'portfolio', phase: currentPhase, model, reasoningEffort, lastMessage })
+
         const result = await portfolioAgentService.chatStream({
             messages,
             ideaAccounts: validatedAccounts,
@@ -59,13 +63,14 @@ export async function streamPortfolio(req, res) {
             portfolioState,
             lifecycle,
             mandate,
-            model,
-            reasoningEffort,
+            model:           routing.model,
+            reasoningEffort: routing.reasoningEffort,
             userId:   req.user._id,
             signal:   ac.signal,
-            onToken:  (text)   => sendEvent('token',  { text }),
-            onTicker: (symbol) => sendEvent('ticker', { symbol }),
-            onToolStart: (tool) => sendEvent('status', { tool }),
+            onToken:     (text)   => sendEvent('token',  { text }),
+            onTicker:    (symbol) => sendEvent('ticker', { symbol }),
+            onPhase:     (phase)  => sendEvent('phase',  { phase }),
+            onToolStart: (tool)   => sendEvent('status', { tool }),
         })
 
         finished = true
@@ -75,7 +80,7 @@ export async function streamPortfolio(req, res) {
                     .then(r => { if (!r.ok) logger.warn(LOG, 'setMandate returned not-ok, mandate may not be persisted') })
                     .catch(err => logger.warn(LOG, 'setMandate unexpected error', err))
             }
-            sendEvent('done', { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null })
+            sendEvent('done', { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, phase: result.phase ?? null })
             res.end()
         }
     } catch (err) {

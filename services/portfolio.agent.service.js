@@ -150,7 +150,7 @@ const TOOL_HANDLERS = {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, lifecycle = null, mandate = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onToolStart, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, lifecycle = null, mandate = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, signal }) {
     const normalized   = _buildMessages(messages)
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
@@ -176,6 +176,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     let capturedPlan    = null
     let capturedUpdate  = null
     let capturedMandate = null
+    let capturedPhase   = null
 
     const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
 
@@ -191,6 +192,13 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
         onTicker,
         onToolStart,
         onUsage,
+        onPhase: (p) => {
+            const n = parseInt(p, 10)
+            if (n >= 1 && n <= 6) {
+                capturedPhase = n
+                onPhase?.(n)
+            }
+        },
         onPlan: (json) => {
             try { capturedPlan = JSON.parse(json) } catch { /* malformed */ }
         },
@@ -204,6 +212,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
 
     const reply = raw
         .replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1')
+        .replace(/<phase>[\s\S]*?<\/phase>/g, '')
         .replace(/<portfolio_plan>[\s\S]*?<\/portfolio_plan>/g, '')
         .replace(/<portfolio_update>[\s\S]*?<\/portfolio_update>/g, '')
         .replace(/<portfolio_mandate>[\s\S]*?<\/portfolio_mandate>/g, '')
@@ -211,8 +220,8 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, phase: capturedPhase })
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, phase: capturedPhase }
 }
 
 /**

@@ -2,11 +2,12 @@ import { scannerAgentService } from '../../services/scanner.agent.service.js'
 import { scannerChatService }  from './scannerChat.service.js'
 import { scanService }         from './scan.service.js'
 import { logger }              from '../../services/logger.service.js'
+import { resolveModel }        from '../../services/modelRouter.service.js'
 
 const LOG = '[scanner:controller]'
 
 export async function streamScanner(req, res) {
-    const { messages, model, editList, reasoningEffort } = req.body ?? {}
+    const { messages, model, editList, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
 
     if (!Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ error: 'messages must be a non-empty array' })
@@ -31,21 +32,25 @@ export async function streamScanner(req, res) {
     res.on('close', () => { if (!finished) ac.abort() })
 
     try {
+        const lastMessage = messages.at(-1)?.content ?? ''
+        const routing = await resolveModel({ routingMode, agent: 'scanner', phase: currentPhase, model, reasoningEffort, lastMessage })
+
         const result = await scannerAgentService.chatStream({
             messages,
-            model,
-            editList: editList && typeof editList === 'object' ? editList : null,
-            reasoningEffort,
+            model:           routing.model,
+            editList:        editList && typeof editList === 'object' ? editList : null,
+            reasoningEffort: routing.reasoningEffort,
             userId:   req.user._id,
             signal:   ac.signal,
-            onToken:  (text)   => sendEvent('token',  { text }),
-            onTicker: (symbol) => sendEvent('ticker', { symbol }),
-            onToolStart: (tool) => sendEvent('status', { tool }),
+            onToken:     (text)   => sendEvent('token',  { text }),
+            onTicker:    (symbol) => sendEvent('ticker', { symbol }),
+            onPhase:     (phase)  => sendEvent('phase',  { phase }),
+            onToolStart: (tool)   => sendEvent('status', { tool }),
         })
 
         finished = true
         if (!ac.signal.aborted) {
-            sendEvent('done', { reply: result.reply, scan: result.scan ?? null })
+            sendEvent('done', { reply: result.reply, scan: result.scan ?? null, phase: result.phase ?? null })
             res.end()
         }
     } catch (err) {

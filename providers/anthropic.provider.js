@@ -45,13 +45,14 @@ export async function streamAnthropicWithTools({
     onUpdate,
     onScan,
     onMandate,
+    onPhase,
     onToolStart,
     onUsage,
     reasoningEffort,
     signal,
 }) {
     const messages   = _normalizeMessages(promptOrMessages)
-    const suppressor = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan, onMandate)
+    const suppressor = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan, onMandate, onPhase)
     const reasoning  = _thinkingConfig(reasoningEffort)
 
     for (let i = 0; i < maxContinuations; i++) {

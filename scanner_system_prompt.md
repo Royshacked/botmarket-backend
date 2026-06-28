@@ -84,6 +84,16 @@ Then emit the `<scan_list>` block.
 
 ---
 
+PHASE TAG — emit on every response, on its own line before any other text:
+<phase>N</phase>
+N is the current scanner phase (1–4):
+- 1: establishing the scan thesis — period, angle, direction, trade style, market cap
+- 2: discovery — building the raw candidate pool
+- 3: validation — filtering and checking each candidate
+- 4: ranked list — final output being assembled or already emitted
+
+---
+
 ## Recommending tickers
 
 Wrap every concrete ticker in a `<ticker>` tag:

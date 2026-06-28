@@ -7,12 +7,13 @@
 // Used by both the Anthropic and OpenAI streaming tool loops so the two providers
 // expose identical streaming behavior to the agent services.
 
-export function createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan, onMandate) {
+export function createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan, onMandate, onPhase) {
     const TAGS = [
         { open: '<state>',               close: '</state>',               onCapture: null       },
         { open: '<trade_idea>',          close: '</trade_idea>',          onCapture: null       },
         { open: '<asset>',               close: '</asset>',               onCapture: onAsset    },
         { open: '<interval>',            close: '</interval>',            onCapture: onInterval },
+        { open: '<phase>',               close: '</phase>',               onCapture: onPhase ?? null },
         ...(onTicker  ? [{ open: '<ticker>',             close: '</ticker>',             onCapture: onTicker,  keepText: true }] : []),
         ...(onPlan    ? [{ open: '<portfolio_plan>',     close: '</portfolio_plan>',     onCapture: onPlan    }] : []),
         ...(onUpdate  ? [{ open: '<portfolio_update>',   close: '</portfolio_update>',   onCapture: onUpdate  }] : []),

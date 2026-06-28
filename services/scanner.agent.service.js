@@ -165,7 +165,7 @@ const TOOL_HANDLERS = {
 
 export const scannerAgentService = { chatStream }
 
-async function chatStream({ messages = [], model: requestedModel, editList = null, reasoningEffort, userId, onToken, onTicker, onToolStart, signal }) {
+async function chatStream({ messages = [], model: requestedModel, editList = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, signal }) {
     const normalized = _buildMessages(messages)
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
@@ -184,7 +184,8 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
 
     logger.info(LOG, 'chatStream start', { messageCount: normalized.length, model, provider })
 
-    let capturedScan = null
+    let capturedScan  = null
+    let capturedPhase = null
 
     const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
 
@@ -203,17 +204,25 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         onScan: (json) => {
             try { capturedScan = JSON.parse(json) } catch { /* malformed — ignore */ }
         },
+        onPhase: (p) => {
+            const n = parseInt(p, 10)
+            if (n >= 1 && n <= 4) {
+                capturedPhase = n
+                onPhase?.(n)
+            }
+        },
     })
 
     const reply = raw
         .replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1')
         .replace(/<scan_list>[\s\S]*?<\/scan_list>/g, '')
+        .replace(/<phase>[\s\S]*?<\/phase>/g, '')
         .trim()
 
     const scan = _normalizeScan(capturedScan)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0 })
-    return { reply, scan }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, phase: capturedPhase })
+    return { reply, scan, phase: capturedPhase }
 }
 
 /**

@@ -1,6 +1,7 @@
 import { logger }           from '../../services/logger.service.js'
 import { tradeAgentService, emptyAnalysisState } from '../../services/trade.agent.service.js'
 import { brokerService }     from '../broker/broker.service.js'
+import { resolveModel }      from '../../services/modelRouter.service.js'
 
 const LOG = '[orchestrator:controller]'
 
@@ -35,20 +36,25 @@ export async function streamOrchestration(req, res) {
     try {
         const brokerContext = await _loadBrokerContext(req.user._id)
 
+        const { routingMode, currentPhase, model, reasoningEffort } = req.body ?? {}
+        const lastMessage = parsed.messages?.at(-1)?.content ?? parsed.userPrompt ?? ''
+        const routing = await resolveModel({ routingMode, agent: 'idea', phase: currentPhase, model, reasoningEffort, lastMessage })
+
         const result = await tradeAgentService.chatStream({
             messages:      parsed.messages,
             userPrompt:    parsed.userPrompt,
             analysisState: parsed.analysisState ?? emptyAnalysisState(),
             brokerContext,
             ideaAccounts:  parsed.ideaAccounts ?? [],
-            model:         req.body?.model,
-            reasoningEffort: req.body?.reasoningEffort,
+            model:         routing.model,
+            reasoningEffort: routing.reasoningEffort,
             userId:        req.user._id,
             signal:        ac.signal,
             onToken:       (text)     => sendEvent('token',    { text }),
             onAsset:       (symbol)   => sendEvent('asset',    { symbol }),
             onInterval:    (interval) => sendEvent('interval', { interval }),
-            onChart:       (chart)    => sendEvent('chart',    chart),   // { symbol, timeframe, imageBase64 }
+            onChart:       (chart)    => sendEvent('chart',    chart),
+            onPhase:       (phase)    => sendEvent('phase',    { phase }),
             onToolStart:   (tool)     => sendEvent('status',   { tool }),
         })
 
@@ -57,6 +63,7 @@ export async function streamOrchestration(req, res) {
             sendEvent('done', {
                 reply:         result.reply,
                 analysisState: result.analysisState,
+                phase:         result.phase ?? null,
                 ...(result.tradeIdea ? { tradeIdea: result.tradeIdea } : {}),
             })
             res.end()
