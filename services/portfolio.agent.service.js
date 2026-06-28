@@ -267,9 +267,12 @@ async function _sizePlan(plan) {
 
     ideas.forEach((idea, i) => {
         const price = prices[i]
-        idea.quantity = (price > 0)
-            ? Math.floor((positionSize * idea.allocationRatio) / price)
-            : null
+        if (price > 0) {
+            const raw = Math.floor((positionSize * idea.allocationRatio) / price)
+            idea.quantity = raw > 0 ? raw : 1
+        } else {
+            idea.quantity = null
+        }
     })
 
     // Portfolio volatility: √(wᵀ Σ w) where Σ[i][j] = ρ[i][j] × σ[i] × σ[j]
