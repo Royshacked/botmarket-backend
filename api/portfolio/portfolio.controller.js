@@ -40,7 +40,7 @@ export async function streamPortfolio(req, res) {
 
         // Fetch portfolio state (review mode only) and lifecycle (any mode with a
         // portfolioId) in parallel — both feed the agent's dynamic context.
-        const [portfolioState, lifecycle, mandate] = await Promise.all([
+        const [portfolioState, lifecycle, storedMandate] = await Promise.all([
             (isReviewMode && portfolioId)
                 ? getPortfolioStateCached(portfolioId, req.user._id).catch(() => null)
                 : Promise.resolve(null),
@@ -51,6 +51,15 @@ export async function streamPortfolio(req, res) {
                 ? portfolioChatService.getMandate(portfolioId, req.user._id).catch(() => null)
                 : Promise.resolve(null),
         ])
+
+        // Carry the mandate forward across turns. During first-time construction
+        // there's no portfolioId yet (nothing persisted), so the client re-sends the
+        // mandate it captured from earlier 'done' events — without this the agent
+        // loses the answers once the trimmed history scrolls past them. The fresh
+        // body mandate wins; the stored one (edit/review of an existing portfolio)
+        // is the fallback.
+        const bodyMandate = (req.body?.mandate && typeof req.body.mandate === 'object') ? req.body.mandate : null
+        const mandate = bodyMandate ?? storedMandate
 
         const lastMessage = messages.at(-1)?.content ?? ''
         const routing = await resolveModel({ routingMode, agent: 'portfolio', phase: currentPhase, model, reasoningEffort, lastMessage })

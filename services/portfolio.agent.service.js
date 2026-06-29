@@ -336,7 +336,7 @@ function _buildAccountsSection(accounts) {
 }
 
 function _buildMandateSection(mandate) {
-    const lines = ['INVESTMENT MANDATE (established in a prior session):']
+    const lines = ['INVESTMENT MANDATE (already established — do not re-ask for any field listed here):']
     if (mandate.objective)     lines.push(`Objective: ${mandate.objective}`)
     if (mandate.horizon)       lines.push(`Time horizon: ${mandate.horizon}`)
     if (mandate.riskTolerance) lines.push(`Risk tolerance: ${mandate.riskTolerance}`)
