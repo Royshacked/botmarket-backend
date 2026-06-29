@@ -48,5 +48,7 @@ async function signin(username, password) {
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' })
 
     logger.info(LOG, 'user signed in', { username })
-    return { token, user: { username: user.username, fullname: user.fullname } }
+    // Return the same shape as /api/auth/me (the decoded token) so the client has
+    // a complete user — _id drives the chat WS and every authenticated call.
+    return { token, user: payload }
 }

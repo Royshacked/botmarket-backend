@@ -55,7 +55,9 @@
       "PowerShell(Get-Process *)",
       "PowerShell(try { $r = Invoke-WebRequest -Uri 'http://localhost:3030/api/auth/me' -UseBasicParsing -TimeoutSec 5; \"STATUS: $\\($r.StatusCode\\)\"; $r.Content } catch { \"ERROR: $\\($_.Exception.Message\\)\"; if \\($_.Exception.Response\\) { \"HTTP STATUS: $\\([int]$_.Exception.Response.StatusCode\\)\" } })",
       "PowerShell(Get-NetTCPConnection *)",
-      "PowerShell($h=@{Origin='http://localhost:5173'}; try { Invoke-WebRequest -Uri 'http://localhost:3030/api/auth/me' -Headers $h -UseBasicParsing -TimeoutSec 5 } catch { $resp=$_.Exception.Response; \"ACAO = \" + $resp.Headers['Access-Control-Allow-Origin']; \"ACAC = \" + $resp.Headers['Access-Control-Allow-Credentials'] })"
+      "PowerShell($h=@{Origin='http://localhost:5173'}; try { Invoke-WebRequest -Uri 'http://localhost:3030/api/auth/me' -Headers $h -UseBasicParsing -TimeoutSec 5 } catch { $resp=$_.Exception.Response; \"ACAO = \" + $resp.Headers['Access-Control-Allow-Origin']; \"ACAC = \" + $resp.Headers['Access-Control-Allow-Credentials'] })",
+      "Bash(curl -s -i -X POST -H \"Origin: http://localhost:5173\" -H \"Content-Type: application/json\" --max-time 10 -d '{\"username\":\"__nope__\",\"password\":\"__nope__\"}' http://localhost:3030/api/auth/signin)",
+      "Bash(curl -s -X POST -H \"Content-Type: application/json\" --max-time 10 -d '{\"username\":\"__nope__\",\"password\":\"__nope__\"}' http://localhost:3030/api/auth/signin)"
     ]
   }
 }

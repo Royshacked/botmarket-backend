@@ -18,6 +18,7 @@
     "dependencies": {
         "@anthropic-ai/sdk": "^0.54.0",
         "@massive.com/client-js": "^10.7.0",
+        "@stoqey/ib": "^1.6.3",
         "axios": "^1.15.2",
         "bcryptjs": "^3.0.3",
         "cookie-parser": "^1.4.6",

@@ -30,7 +30,7 @@ export async function signin(req, res, next) {
             secure: process.env.NODE_ENV === 'production',
             maxAge: SEVEN_DAYS_MS,
         })
-        res.json({ username: user.username, fullname: user.fullname })
+        res.json(user)
     } catch (err) {
         next(err)
     }

@@ -23,6 +23,7 @@ const COLLECTION = 'brokerConnections'
 export const brokerConnectionService = {
     getConnection,
     saveConnection,
+    saveGatewayConnection,
     updateTokens,
     getAccountId,
     setAccountId,
@@ -55,12 +56,14 @@ async function getConnection(userId, brokerType) {
 async function listConnections(userId) {
     const db   = await getDb()
     const docs = await db.collection(COLLECTION)
-        .find({ userId }, { projection: { brokerType: 1, refreshToken: 1, _id: 0 } })
+        .find({ userId }, { projection: { brokerType: 1, refreshToken: 1, gateway: 1, _id: 0 } })
         .toArray()
 
     const result = {}
     for (const doc of docs) {
-        result[doc.brokerType] = !!doc.refreshToken
+        // OAuth brokers connect via a refreshToken; socket/gateway brokers (IBKR via
+        // IB Gateway) have no tokens — a stored gateway doc IS the connection.
+        result[doc.brokerType] = !!doc.refreshToken || !!doc.gateway
     }
     return result
 }
@@ -85,6 +88,33 @@ async function saveConnection(userId, brokerType, tokens) {
                 refreshToken: tokens.refreshToken,
                 expiresAt:    Date.now() + (tokens.expiresIn ?? 3600) * 1000,
                 connectedAt:  Date.now(),
+            },
+        },
+        { upsert: true }
+    )
+}
+
+/**
+ * Upsert a socket/gateway connection (IBKR via IB Gateway). Unlike OAuth brokers
+ * there are no tokens — the connection is just the gateway coordinates the adapter
+ * dials. Paper vs live is encoded in the port.
+ * @param {string} userId
+ * @param {string} brokerType
+ * @param {{ host: string, port: number, clientId: number }} coords
+ */
+async function saveGatewayConnection(userId, brokerType, { host, port, clientId }) {
+    const db = await getDb()
+    await db.collection(COLLECTION).updateOne(
+        { userId, brokerType },
+        {
+            $set: {
+                userId,
+                brokerType,
+                gateway:     true,
+                host,
+                port:        Number(port),
+                clientId:    Number(clientId),
+                connectedAt: Date.now(),
             },
         },
         { upsert: true }
