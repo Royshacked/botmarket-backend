@@ -43,6 +43,9 @@ const LOG = '[invalidation.monitor]'
  *   - invalidation_status is already set (latched; awaiting user action)
  */
 export async function checkInvalidation(db, idea, symbolMap, { inPosition = false } = {}) {
+    // Portfolio holdings are governed by the scheduled portfolio review (which
+    // re-validates the whole book against its thesis), NOT this intrabar watcher.
+    if (idea.portfolioId) return
     const range = idea.invalidation?.range
     if (!range || (range.lower == null && range.upper == null)) return
     if (idea.invalidation_status != null) return   // latched; awaiting user action

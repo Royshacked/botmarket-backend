@@ -4,7 +4,7 @@ import { logger }  from '../../services/logger.service.js'
 const LOG        = '[portfolioChat]'
 const COLLECTION = 'portfolio_chats'
 
-const CADENCE_MS = { monthly: 30 * 86400000, quarterly: 90 * 86400000 }
+const CADENCE_MS = { weekly: 7 * 86400000, monthly: 30 * 86400000, quarterly: 90 * 86400000 }
 
 export const portfolioChatService = {
     saveChatState,
@@ -16,6 +16,9 @@ export const portfolioChatService = {
     getPendingReviews,
     getMandate,
     setMandate,
+    getThesis,
+    setThesis,
+    completeReview,
 }
 
 async function saveChatState(portfolioId, messages, userId, mandate = null) {
@@ -29,8 +32,8 @@ async function saveChatState(portfolioId, messages, userId, mandate = null) {
                 $set: setFields,
                 // Lifecycle defaults — only written when the doc is first created.
                 $setOnInsert: {
-                    reviewCadence: 'monthly',
-                    nextReviewAt:  Date.now() + CADENCE_MS.monthly,
+                    reviewCadence: 'weekly',
+                    nextReviewAt:  Date.now() + CADENCE_MS.weekly,
                     lastReviewAt:  null,
                     reviewHistory: [],
                 },
@@ -178,7 +181,7 @@ async function getPendingReviews(userId) {
             portfolioId:   d.portfolioId,
             userId:        d.userId,
             portfolioName: nameMap[d.portfolioId] ?? 'Portfolio',
-            reviewCadence: d.reviewCadence ?? 'monthly',
+            reviewCadence: d.reviewCadence ?? 'weekly',
             nextReviewAt:  d.nextReviewAt,
             lastReviewAt:  d.lastReviewAt ?? null,
             notifiedAt:    d.notifiedAt   ?? null,
@@ -186,5 +189,78 @@ async function getPendingReviews(userId) {
     } catch (err) {
         logger.error(LOG, 'Failed to get pending reviews', err)
         return []
+    }
+}
+
+// ─── Portfolio thesis ─────────────────────────────────────────────────────────
+// The explicit portfolio-level intent the weekly review validates drift against:
+// strategy rationale + target exposures. Mandate stays its own field; the thesis
+// is the strategy layer on top of it. Versioned so we can enforce validate-weekly
+// / rewrite-only-on-deliberate-change (never auto-synced to drift).
+
+async function getThesis(portfolioId, userId) {
+    try {
+        const db  = await getDb()
+        const doc = await db.collection(COLLECTION).findOne(
+            { portfolioId, userId },
+            { projection: { thesis: 1 } }
+        )
+        return doc?.thesis ?? null
+    } catch (err) {
+        logger.error(LOG, 'Failed to get thesis', err)
+        return null
+    }
+}
+
+// reason: 'construction' | 'mandate-edit' | 'accepted-rebalance'. Bumps version and
+// stamps updatedAt/updatedReason; preserves prior fields when a partial patch is given.
+async function setThesis(portfolioId, userId, thesis, reason = 'construction') {
+    try {
+        const db   = await getDb()
+        const prev = await db.collection(COLLECTION).findOne(
+            { portfolioId, userId },
+            { projection: { thesis: 1 } }
+        )
+        const next = {
+            strategy:        typeof thesis?.strategy === 'string' ? thesis.strategy : (prev?.thesis?.strategy ?? null),
+            targetExposures: Array.isArray(thesis?.targetExposures) ? thesis.targetExposures : (prev?.thesis?.targetExposures ?? []),
+            version:         ((prev?.thesis?.version) ?? 0) + 1,
+            updatedAt:       Date.now(),
+            updatedReason:   reason,
+        }
+        await db.collection(COLLECTION).updateOne(
+            { portfolioId, userId },
+            { $set: { thesis: next } },
+            { upsert: true }
+        )
+        logger.info(LOG, 'Thesis updated', { portfolioId, version: next.version, reason })
+        return { ok: true, thesis: next }
+    } catch (err) {
+        logger.error(LOG, 'Failed to set thesis', err)
+        return { ok: false }
+    }
+}
+
+// Bump the schedule forward after a review is completed/dismissed: stamp lastReviewAt,
+// advance nextReviewAt by the cadence, and clear notifiedAt so the next cycle can notify.
+async function completeReview(portfolioId, userId) {
+    try {
+        const db  = await getDb()
+        const doc = await db.collection(COLLECTION).findOne(
+            { portfolioId, userId },
+            { projection: { reviewCadence: 1 } }
+        )
+        const cadence = doc?.reviewCadence ?? 'weekly'
+        const now     = Date.now()
+        const next    = now + (CADENCE_MS[cadence] ?? CADENCE_MS.weekly)
+        await db.collection(COLLECTION).updateOne(
+            { portfolioId, userId },
+            { $set: { lastReviewAt: now, nextReviewAt: next, notifiedAt: null } }
+        )
+        logger.info(LOG, 'Review completed', { portfolioId, nextReviewAt: next })
+        return { ok: true, nextReviewAt: next }
+    } catch (err) {
+        logger.error(LOG, 'Failed to complete review', err)
+        return { ok: false }
     }
 }

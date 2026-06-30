@@ -150,7 +150,7 @@ const TOOL_HANDLERS = {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, lifecycle = null, mandate = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const normalized   = _buildMessages(messages)
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
@@ -163,6 +163,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     if (ideaAccounts.length > 0) dynamicSections.push(_buildAccountsSection(ideaAccounts))
     if (portfolioId && portfolioIdeas.length > 0) dynamicSections.push(_buildPortfolioContext(portfolioId, portfolioIdeas))
     if (mandate)    dynamicSections.push(_buildMandateSection(mandate))
+    if (thesis)     dynamicSections.push(_buildThesisSection(thesis))
     if (lifecycle)  dynamicSections.push(_buildLifecycleSection(lifecycle))
     if (portfolioState) dynamicSections.push(_buildPortfolioStateSection(portfolioState))
 
@@ -183,6 +184,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     let capturedPlan    = null
     let capturedUpdate  = null
     let capturedMandate = null
+    let capturedThesis  = null
     let capturedPhase   = null
 
     const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
@@ -218,18 +220,25 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
         },
     })
 
+    // <portfolio_thesis> is suppressed from the UI stream but remains in raw — pull it here.
+    const thesisMatch = raw.match(/<portfolio_thesis>([\s\S]*?)<\/portfolio_thesis>/)
+    if (thesisMatch) {
+        try { capturedThesis = JSON.parse(thesisMatch[1].trim()) } catch { /* malformed */ }
+    }
+
     const reply = raw
         .replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1')
         .replace(/<phase>[\s\S]*?<\/phase>/g, '')
         .replace(/<portfolio_plan>[\s\S]*?<\/portfolio_plan>/g, '')
         .replace(/<portfolio_update>[\s\S]*?<\/portfolio_update>/g, '')
         .replace(/<portfolio_mandate>[\s\S]*?<\/portfolio_mandate>/g, '')
+        .replace(/<portfolio_thesis>[\s\S]*?<\/portfolio_thesis>/g, '')
         .trim()
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, phase: capturedPhase })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, phase: capturedPhase }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, phase: capturedPhase })
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: capturedPhase }
 }
 
 /**
@@ -347,6 +356,21 @@ function _buildMandateSection(mandate) {
     return lines.join('\n')
 }
 
+function _buildThesisSection(thesis) {
+    const lines = ['PORTFOLIO THESIS (the persisted intent — validate drift against THIS; do not silently rewrite it to match the book):']
+    if (thesis.strategy) lines.push(`Strategy: ${thesis.strategy}`)
+    if (Array.isArray(thesis.targetExposures) && thesis.targetExposures.length) {
+        lines.push('Target exposures:')
+        for (const e of thesis.targetExposures) {
+            const t = e?.target != null ? ` — target ${Math.round(e.target * 100)}%` : ''
+            lines.push(`  ${e?.label ?? '?'}${t}`)
+        }
+    }
+    if (thesis.version != null) lines.push(`(thesis v${thesis.version}${thesis.updatedReason ? `, last changed by ${thesis.updatedReason}` : ''})`)
+    lines.push('Only propose a thesis change (via <portfolio_thesis>) if the STRATEGY itself is stale — not to chase drift.')
+    return lines.join('\n')
+}
+
 function _buildLifecycleSection(lifecycle) {
     const fmtDate = ts => ts ? new Date(ts).toISOString().slice(0, 10) : null
     const now = Date.now()
@@ -403,6 +427,14 @@ function _buildPortfolioStateSection(state) {
     const live    = state.ideas.filter(s => s.actualWeight != null)
     const pending = state.ideas.filter(s => s.actualWeight == null)
 
+    const fmtConviction = (s) => {
+        const cur = s.conviction?.level
+        if (!cur) return ''
+        const prev = s.convictionPrev?.level
+        const trend = prev && prev !== cur ? ` (was ${prev})` : ''
+        return `  conviction ${cur}${trend}`
+    }
+
     const liveLines = live.map(s => {
         const target  = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
         const actual  = `actual ${Math.round(s.actualWeight * 100)}%`
@@ -410,7 +442,7 @@ function _buildPortfolioStateSection(state) {
         const pnl     = `P&L ${fmtMoney(s.pnl)} (${fmtPct(s.pnlPct)})`
         const age     = s.thesisAgeDays != null ? `${s.thesisAgeDays}d` : ''
         const earn    = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
-        return `  ${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${earn}`
+        return `  ${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${fmtConviction(s)}${earn}`
     })
 
     const pendingLines = pending.map(s => {

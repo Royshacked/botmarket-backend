@@ -19,6 +19,8 @@ export function createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPl
         ...(onUpdate  ? [{ open: '<portfolio_update>',   close: '</portfolio_update>',   onCapture: onUpdate  }] : []),
         ...(onScan    ? [{ open: '<scan_list>',          close: '</scan_list>',          onCapture: onScan    }] : []),
         { open: '<portfolio_mandate>',  close: '</portfolio_mandate>',  onCapture: onMandate ?? null },
+        // Suppressed from the UI stream; captured from the raw text post-stream in the agent service.
+        { open: '<portfolio_thesis>',   close: '</portfolio_thesis>',   onCapture: null },
     ]
 
     let pending         = ''     // pre-tag lookahead buffer

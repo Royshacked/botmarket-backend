@@ -1,5 +1,6 @@
 import { portfolioAgentService } from '../../services/portfolio.agent.service.js'
 import { portfolioChatService }  from './portfolioChat.service.js'
+import { applyRebalance, snapshotConvictions } from './portfolioRebalance.service.js'
 import { getPortfolioStateCached, invalidatePortfolioState } from '../../services/portfolioState.service.js'
 import { logger }                from '../../services/logger.service.js'
 import { resolveModel }          from '../../services/modelRouter.service.js'
@@ -40,7 +41,7 @@ export async function streamPortfolio(req, res) {
 
         // Fetch portfolio state (review mode only) and lifecycle (any mode with a
         // portfolioId) in parallel — both feed the agent's dynamic context.
-        const [portfolioState, lifecycle, storedMandate] = await Promise.all([
+        const [portfolioState, lifecycle, storedMandate, storedThesis] = await Promise.all([
             (isReviewMode && portfolioId)
                 ? getPortfolioStateCached(portfolioId, req.user._id).catch(() => null)
                 : Promise.resolve(null),
@@ -49,6 +50,9 @@ export async function streamPortfolio(req, res) {
                 : Promise.resolve(null),
             portfolioId
                 ? portfolioChatService.getMandate(portfolioId, req.user._id).catch(() => null)
+                : Promise.resolve(null),
+            portfolioId
+                ? portfolioChatService.getThesis(portfolioId, req.user._id).catch(() => null)
                 : Promise.resolve(null),
         ])
 
@@ -72,6 +76,7 @@ export async function streamPortfolio(req, res) {
             portfolioState,
             lifecycle,
             mandate,
+            thesis: storedThesis,
             model:           routing.model,
             reasoningEffort: routing.reasoningEffort,
             userId:   req.user._id,
@@ -90,7 +95,17 @@ export async function streamPortfolio(req, res) {
                     .then(r => { if (!r.ok) logger.warn(LOG, 'setMandate returned not-ok, mandate may not be persisted') })
                     .catch(err => logger.warn(LOG, 'setMandate unexpected error', err))
             }
-            sendEvent('done', { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, phase: result.phase ?? null })
+            // Persist a captured portfolio thesis on construction/edit only. In REVIEW
+            // mode a thesis change is a PROPOSAL — it persists only when the user confirms
+            // the rebalance (applyRebalance stamps reason 'accepted-rebalance'), preserving
+            // the rewrite-only-on-accept rule (never auto-synced to drift). For first-time
+            // construction portfolioId is null — the thesis rides 'done' and is persisted
+            // with the chat state.
+            if (result.thesis && portfolioId && !isReviewMode) {
+                portfolioChatService.setThesis(portfolioId, req.user._id, result.thesis, storedThesis ? 'mandate-edit' : 'construction')
+                    .catch(err => logger.warn(LOG, 'setThesis unexpected error', err))
+            }
+            sendEvent('done', { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null })
             res.end()
         }
     } catch (err) {
@@ -104,12 +119,16 @@ export async function streamPortfolio(req, res) {
 
 export async function savePortfolioChatState(req, res) {
     try {
-        const { portfolioId, messages, mandate } = req.body ?? {}
+        const { portfolioId, messages, mandate, thesis } = req.body ?? {}
         if (!portfolioId || !Array.isArray(messages)) {
             return res.status(400).json({ error: 'Missing portfolioId or messages' })
         }
         const result = await portfolioChatService.saveChatState(portfolioId, messages, req.user._id, mandate ?? null)
         if (!result.ok) return res.status(500).json({ error: 'Failed to save' })
+        // Persist the portfolio thesis captured during construction (portfolioId now exists).
+        if (thesis && typeof thesis === 'object') {
+            await portfolioChatService.setThesis(portfolioId, req.user._id, thesis, 'construction').catch(() => {})
+        }
         res.json({ ok: true })
     } catch (err) {
         logger.error(LOG, 'savePortfolioChatState failed', err)
@@ -155,23 +174,40 @@ export async function completeReview(req, res) {
         const { portfolioId } = req.params
         if (!portfolioId) return res.status(400).json({ error: 'Missing portfolioId' })
 
-        const lifecycle = await portfolioChatService.getPortfolioLifecycle(portfolioId, req.user._id)
-        const cadence   = req.body?.reviewCadence ?? lifecycle?.reviewCadence ?? 'monthly'
-        const cadenceMs = cadence === 'quarterly' ? 90 * 86400000 : 30 * 86400000
-        const now       = Date.now()
+        // Optional cadence change carried on the body (e.g. user switched weekly→monthly).
+        const bodyCadence = req.body?.reviewCadence
+        if (bodyCadence) {
+            await portfolioChatService.setPortfolioLifecycle(portfolioId, req.user._id, { reviewCadence: bodyCadence })
+        }
 
-        await portfolioChatService.setPortfolioLifecycle(portfolioId, req.user._id, {
-            reviewCadence: cadence,
-            lastReviewAt:  now,
-            nextReviewAt:  now + cadenceMs,
-        })
+        // Record a conviction-trajectory point, then advance the (cadence-aware) clock.
+        await snapshotConvictions(portfolioId, req.user._id)
+        const result = await portfolioChatService.completeReview(portfolioId, req.user._id)
 
         // Review done — drop the snapshot so the next review computes fresh.
         invalidatePortfolioState(portfolioId, req.user._id)
 
-        res.json({ ok: true, nextReviewAt: now + cadenceMs })
+        res.json({ ok: true, nextReviewAt: result?.nextReviewAt ?? null })
     } catch (err) {
         logger.error(LOG, 'completeReview failed', err)
         res.status(500).json({ error: 'Failed to complete review' })
+    }
+}
+
+// Apply an accepted portfolio_update (the confirmed review proposal) to the live book.
+export async function applyPortfolioRebalance(req, res) {
+    try {
+        const { portfolioId } = req.params
+        const { update }      = req.body ?? {}
+        if (!portfolioId) return res.status(400).json({ error: 'Missing portfolioId' })
+        if (!update || !Array.isArray(update.changes)) {
+            return res.status(400).json({ error: 'Missing update.changes' })
+        }
+        const result = await applyRebalance(portfolioId, req.user._id, update, req.user?.isAdmin === true)
+        if (!result.ok) return res.status(400).json(result)
+        res.json(result)
+    } catch (err) {
+        logger.error(LOG, 'applyPortfolioRebalance failed', err)
+        res.status(500).json({ error: 'Failed to apply rebalance' })
     }
 }

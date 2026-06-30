@@ -8,6 +8,7 @@ import {
     deletePortfolioChatState,
     getPendingReviews,
     completeReview,
+    applyPortfolioRebalance,
 } from './portfolio.controller.js'
 
 const router = express.Router()
@@ -20,5 +21,6 @@ router.post('/chat-state',                    log, savePortfolioChatState)
 router.get('/chat-state/:portfolioId',        log, getPortfolioChatState)
 router.delete('/chat-state/:portfolioId',     log, deletePortfolioChatState)
 router.post('/:portfolioId/complete-review',  log, completeReview)
+router.post('/:portfolioId/rebalance',        log, applyPortfolioRebalance)
 
 export const portfolioRoutes = router

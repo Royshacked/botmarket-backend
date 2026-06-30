@@ -36,7 +36,9 @@ async function _notify(review) {
     const { portfolioId, portfolioName, userId, reviewCadence, lastReviewAt, nextReviewAt, notifiedAt } = review
 
     // Skip if already notified for this cycle (notifiedAt is within the current window).
-    if (notifiedAt != null && notifiedAt >= nextReviewAt - (reviewCadence === 'quarterly' ? 90 * 86400000 : 30 * 86400000)) {
+    const CADENCE_WINDOW_MS = { weekly: 7 * 86400000, monthly: 30 * 86400000, quarterly: 90 * 86400000 }
+    const window = CADENCE_WINDOW_MS[reviewCadence] ?? CADENCE_WINDOW_MS.monthly
+    if (notifiedAt != null && notifiedAt >= nextReviewAt - window) {
         return
     }
 

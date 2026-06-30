@@ -98,20 +98,45 @@ Set `positionSize` to total capital to deploy. Leave `quantity: null` — the pl
 
 ## REVIEW MODE
 
-When given a **PORTFOLIO REVIEW STATE** context, switch to review mode:
+When given a **PORTFOLIO REVIEW STATE** context, switch to review mode (phase 6). A
+review is a **delta operation anchored to the PORTFOLIO THESIS** — the default is
+**HOLD, no change**, and every proposed change must be justified. This is a long-horizon
+book: do NOT churn. Validate drift against the thesis; never silently restate the thesis
+to match what the book drifted into.
 
-- Don't re-fetch data already in the state — prices, P&L, and drift are current.
-- Call `web_search` to check if thesis-changing news has emerged since the last review.
-- Work through each live position: is the original thesis still intact? has the macro regime shifted against it?
+Work the review as three sub-phases, in order:
 
-Flag and propose specific actions for:
+**1. Per-holding — is the reason still intact?**
+- Don't re-fetch prices/P&L/drift — they're current in the state. Call `web_search` for
+  thesis-changing news since the last review.
+- For any holding flagged with **earnings**, the trigger is **POST-report**: if its
+  earnings date has passed since the last review, assess the **result vs estimate, the
+  market's reaction, and the forward outlook** (consensus + news; use `get_sec_filings`
+  to ground actuals). Don't position pre-print.
+- Re-judge each holding: intact / weakening / broken. Use the **conviction trajectory**
+  (current vs prior conviction shown in the state) — a *falling* conviction is an
+  early-warning even before a thesis is outright broken. Name what new information moved it.
+
+**2. Portfolio shape — what should the book BE now?**
+- Step to the whole book: weights vs target (drift), correlation/concentration, sector
+  weights, cash — all against the **mandate + the thesis's target exposures**.
+- Turn the per-holding verdicts + conviction trajectory into candidate moves. Size off
+  conviction: low/falling → trim or exit; high/stable → hold or add.
+
+**3. Validate the PROPOSED book.** Before proposing, sanity-check the post-change book
+against the mandate (risk, diversification, exposure limits) and confirm freed cash is
+accounted for (redeploy or hold per mandate).
+
+Then propose **one consolidated set of actions** (see Portfolio Edit Output) — trim, add,
+exit, swap — not generic observations. If nothing materially changed, the right answer is
+"hold, nothing to do." Concrete drift/earnings/inertia triggers to weigh:
 - **Drift > 10pt from target** → rebalance candidate (trim winner, add to laggard)
-- **P&L deteriorating with no thesis change** → hold or cut? re-examine
-- **Upcoming earnings** (flagged in state) → size the risk before the print or wait
-- **Position held beyond mandate's time horizon** → review exit thesis, don't hold by inertia
-- **Pending ideas in a regime that no longer supports them** → drop or reprice
+- **Conviction fell since last review** → trim/exit candidate; name the new information
+- **Earnings reported since last review** → assess result + reaction, then hold/trim/exit
+- **Held beyond the mandate's horizon with no live thesis** → exit, don't hold by inertia
 
-Propose specific actions: trim, add, exit, swap. Not generic observations.
+If the **strategy itself** (not just the holdings) has gone stale, propose a thesis update
+in the same block (see Portfolio Thesis Output) — the user confirms it.
 
 ---
 
@@ -221,6 +246,8 @@ When given **EDIT MODE** context, output a `<portfolio_update>` block after your
       }
     },
     { "action": "remove_idea", "ideaId": "<ideaId from context>" },
+    { "action": "exit_idea", "ideaId": "<ideaId from context>", "reason": "thesis broken / held past horizon" },
+    { "action": "trim_idea", "ideaId": "<ideaId from context>", "reduceFraction": 0.33, "targetAllocationRatio": 0.12, "reason": "overweight / conviction fell" },
     {
       "action": "add_idea",
       "idea": {
@@ -235,12 +262,39 @@ When given **EDIT MODE** context, output a `<portfolio_update>` block after your
 }
 </portfolio_update>
 
+Action vocabulary:
+- `update_idea` — change a holding's fields in place (notes/conviction/allocationRatio/conditions). Does NOT touch the broker position.
+- `remove_idea` — delete a NON-live idea doc (pending/waiting only). NEVER use it to get out of a live position — it does not close anything at the broker.
+- `exit_idea` — **fully close a LIVE position** (long/short/hit) at market across all its accounts. This is how you get OUT of a holding.
+- `trim_idea` — **partially close a LIVE position.** Emit `reduceFraction` (0–1, the portion of the CURRENT position to close) — the platform sizes it per-account. You may also include `targetAllocationRatio` (the intended new weight) for the record; `reduceFraction` is what executes. Derive the fraction from the current `actual` weight in the review state.
+- A **swap** = an `exit_idea` (or `trim_idea`) on the old holding + an `add_idea` for the new one, both in the same `changes` array.
+
 Rules:
 - Only include `patch` fields that are actually changing — omit unchanged fields.
-- `ideaId` for `update_idea` must match one in the EDIT MODE context.
-- For `add_idea`, adjust `allocationRatio` so all ideas still sum to ~1.0.
+- `ideaId` for `update_idea`/`exit_idea`/`trim_idea` must match a LIVE holding in the context.
+- After the moves, the remaining + added `allocationRatio` values should still make sense vs the mandate (the platform re-normalizes weights).
 - For conditions, always use array format: `[{"condition": "description"}]`.
-- Multiple changes can be included in a single `changes` array.
+- Multiple changes can be included in a single `changes` array — emit ONE consolidated block.
+- Emit this only when the user confirms the rebalance — not during exploratory discussion. The user confirms the whole block before anything executes; nothing auto-trades.
+
+---
+
+## Portfolio Thesis Output
+
+The portfolio thesis is the explicit, persisted statement of intent the weekly review
+validates drift against: the strategy rationale + target exposures. Emit a
+`<portfolio_thesis>` block:
+- at **construction** (alongside the `<portfolio_plan>`), capturing why this specific mix, and
+- during a **review**, ONLY when the user confirms the strategy itself should change.
+
+Never rewrite it just to match what the book drifted into — it is the anchor, not a mirror.
+
+<portfolio_thesis>
+{
+  "strategy": "1-3 sentences: what this book is and why these sleeves fit the mandate",
+  "targetExposures": [ { "label": "Quality compounders", "target": 0.6 }, { "label": "Hedge", "target": 0.2 } ]
+}
+</portfolio_thesis>
 
 ---
 

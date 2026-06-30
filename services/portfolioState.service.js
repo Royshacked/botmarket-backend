@@ -133,6 +133,7 @@ export async function computePortfolioState(portfolioId, userId) {
             pnlPct,
             thesisAgeDays:   idea.activatedAt ? Math.floor((Date.now() - idea.activatedAt) / 86400000) : null,
             conviction:      idea.conviction ?? null,
+            convictionPrev:  _lastConviction(idea),
             notes:           idea.notes ?? null,
             upcomingEarnings: null,
         }
@@ -165,6 +166,7 @@ export async function computePortfolioState(portfolioId, userId) {
         pnlPct:          null,
         thesisAgeDays:   idea.activatedAt ? Math.floor((Date.now() - idea.activatedAt) / 86400000) : null,
         conviction:      idea.conviction ?? null,
+        convictionPrev:  _lastConviction(idea),
         notes:           idea.notes ?? null,
         upcomingEarnings: null,
     }))
@@ -241,4 +243,11 @@ export async function computePortfolioState(portfolioId, userId) {
         ideas:         allStates,
         sectors,
     }
+}
+
+// Most recent conviction snapshot taken at a prior review (for the trajectory shown
+// in the review state). Snapshots are appended to idea.conviction_history on review.
+function _lastConviction(idea) {
+    const h = idea.conviction_history
+    return (Array.isArray(h) && h.length) ? h[h.length - 1] : null
 }
