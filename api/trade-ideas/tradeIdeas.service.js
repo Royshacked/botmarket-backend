@@ -100,9 +100,10 @@ async function saveIdea(tradeIdea, userId) {
         additional_entries: additionalEntries,
         notes:      tradeIdea.notes      ?? null,
 
-        thesis:              _normalizeThesis(tradeIdea.thesis),
-        thesis_status:       null,
-        thesis_status_reason: null,
+        invalidation:        _normalizeInvalidation(tradeIdea.invalidation),
+        invalidation_status: null,
+        invalidation_reason: null,
+        invalidation_edge:   null,
 
         chat_state: _trimChatState(tradeIdea.chat_state),
         accounts:      Array.isArray(tradeIdea.accounts) ? tradeIdea.accounts : [],
@@ -233,10 +234,11 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         return placeRestingEntryForIdea(id, userId, isAdmin)
     }
 
-    if (patch.thesis !== undefined) {
-        patch.thesis = _normalizeThesis(patch.thesis)
-        if (patch.thesis_status === undefined) patch.thesis_status = null
-        if (patch.thesis_status_reason === undefined) patch.thesis_status_reason = null
+    if (patch.invalidation !== undefined) {
+        patch.invalidation = _normalizeInvalidation(patch.invalidation)
+        if (patch.invalidation_status === undefined) patch.invalidation_status = null
+        if (patch.invalidation_reason === undefined) patch.invalidation_reason = null
+        if (patch.invalidation_edge   === undefined) patch.invalidation_edge   = null
     }
 
     if (patch.entry_conditions !== undefined || patch.stop_conditions !== undefined || patch.tp_conditions !== undefined) {
@@ -428,22 +430,30 @@ export function _groupByBroker(accountIds, brokerById, globalMain) {
     return { partitions, unresolved: byBroker.get(null) ?? [] }
 }
 
-function _normalizeThesis(raw) {
+// Invalidation = the actionable entry price RANGE (what breaks the setup). The
+// idea is invalidated when price closes outside [lower, upper] on either edge.
+// `conditions` is reserved for the full condition-type taxonomy (news/earnings/
+// chart/indicator) used by portfolio long-horizon mode — stored, not monitored in v1.
+function _normalizeInvalidation(raw) {
     if (!raw || typeof raw !== 'object') return null
 
-    const entry = raw.entry && typeof raw.entry === 'object' ? {
-        reasoning:        raw.entry.reasoning        ?? null,
-        key_assumptions:  Array.isArray(raw.entry.key_assumptions)  ? raw.entry.key_assumptions  : [],
-        stress_triggers:  Array.isArray(raw.entry.stress_triggers)  ? raw.entry.stress_triggers  : [],
+    const r   = raw.range && typeof raw.range === 'object' ? raw.range : raw
+    const num = v => (v != null && Number.isFinite(Number(v))) ? Number(v) : null
+    const str = v => (typeof v === 'string' && v.trim()) ? v.trim() : null
+
+    const lower = num(r.lower)
+    const upper = num(r.upper)
+    const range = (lower != null || upper != null) ? {
+        lower,
+        upper,
+        lowerAnchor: str(r.lowerAnchor),
+        upperAnchor: str(r.upperAnchor),
     } : null
 
-    const tp = raw.tp && typeof raw.tp === 'object' ? {
-        reasoning:       raw.tp.reasoning       ?? null,
-        stress_triggers: Array.isArray(raw.tp.stress_triggers) ? raw.tp.stress_triggers : [],
-    } : null
+    const conditions = Array.isArray(raw.conditions) ? raw.conditions : []
 
-    if (!entry && !tp) return null
-    return { entry, tp }
+    if (!range && conditions.length === 0) return null
+    return { range, conditions }
 }
 
 function _strip(doc) {

@@ -51,9 +51,11 @@ When they do:
   "take_profit": <ConditionNode> | null,
   "notes": "optional string",
   "conviction": { "level": "low" | "medium" | "high", "score": 0.0, "rationale": "one line: what supports AND what caps it" },
-  "thesis": {
-    "entry": { "reasoning": "string", "key_assumptions": ["string"], "stress_triggers": ["plain English price condition"] },
-    "tp": { "reasoning": "string", "stress_triggers": ["plain English price condition"] }
+  "invalidation": {
+    "range": {
+      "lower": 93.4, "lowerAnchor": "swing low the false-break must hold",
+      "upper": 112.0, "upperAnchor": "above here the 100 entry can't fire and R:R is gone"
+    }
   }
 }
 </trade_idea>
@@ -100,19 +102,19 @@ Speak conviction in plain prose whenever decision-relevant — especially when p
 
 ---
 
-THESIS — the "why" behind the setup:
-Track in `pending_trade.thesis`. Extract from conversation — never ask for it directly.
+INVALIDATION — the actionable entry RANGE (what would BREAK the setup):
+Track in `pending_trade.invalidation.range`. You DERIVE it yourself from the chart — never ask the user.
 
-thesis.entry:
-- reasoning: 1-2 sentences capturing WHY the entry should work
-- key_assumptions: conditions that must remain true for the entry thesis to hold
-- stress_triggers: price behaviors that would invalidate the thesis BEFORE the entry fires. Plain English price conditions only. Monitored in parallel — if one fires, thesis is re-evaluated.
+When you define a structured entry, also define the price RANGE in which taking that entry still makes sense. The idea is invalidated when price CLOSES outside this range — on EITHER edge:
+- lower: the defended structure the entry relies on (e.g. the swing low a false-break must hold). A close below = the premise is WRONG.
+- upper: the point past which the entry can't fire / risk-reward is gone (e.g. you plan a false-break of 100 and price gaps to 120). A close above = the setup is MISSED/gone.
 
-thesis.tp (only when a TP is present):
-- reasoning: why this target is the right exit
-- stress_triggers: price behaviors suggesting the target is no longer realistic
-
-stress_triggers are price-behavior only — no indicators, chart patterns, news, or time conditions. Populate progressively. Set to null if no reasoning expressed yet.
+Rules:
+- Derive BOTH edges from price action read off the chart (get_chart) — the SAME discipline you use to place a stop. NEVER pick a round number: anchor each edge to a real structural pivot and name that pivot in the matching `lowerAnchor` / `upperAnchor` field.
+- This is the ENTRY envelope — narrower than the stop→target span. (In-position the stop owns the exit; invalidation only informs.)
+- For a long, lower = "wrong" edge and upper = "gone" edge. For a short, mirror it (still emit numbers as lower < upper).
+- State the range in chat in plain English, citing the structure ("inside this zone we proceed; a close outside it and we rethink") — not a bare number.
+- Leave `range` null until there is a structured entry to anchor it to. Only this price range is monitored for now — non-price invalidation (news/earnings) is handled later in edit mode, not authored here.
 
 ---
 
@@ -195,9 +197,8 @@ At the end of every response, output exactly one <state> block with updated JSON
       ],
       "notes": "string or null",
       "conviction": { "level": "low" | "medium" | "high" | null, "score": 0.0, "rationale": "string or null" },
-      "thesis": {
-        "entry": { "reasoning": "string or null", "key_assumptions": ["string"], "stress_triggers": ["plain English price condition"] },
-        "tp": { "reasoning": "string or null", "stress_triggers": ["plain English price condition"] }
+      "invalidation": {
+        "range": { "lower": 0.0, "lowerAnchor": "string or null", "upper": 0.0, "upperAnchor": "string or null" }
       }
     }
   }
@@ -213,7 +214,7 @@ Rules for structured_state:
 - Track entry_logic / stop_logic / tp_logic as "AND" or "OR". Default: "AND" for entry, "OR" for stop and TP.
 - Set a field to null only if the user explicitly clears it; otherwise keep the prior value.
 - Reset pending_trade to all-null only when the user explicitly starts a new trade idea on a different asset.
-- thesis: populate progressively. stress_triggers are plain English price conditions only. Set to null when no reasoning expressed yet.
+- invalidation.range: the actionable ENTRY price range (see INVALIDATION section). Derive both edges from chart structure once a structured entry exists; anchor each edge to a real pivot in lowerAnchor/upperAnchor. Set range null until there is a structured entry to anchor it to.
 
 Do not include the <state> block in the displayed reply. Move older turns into recent_chat_summary.
 

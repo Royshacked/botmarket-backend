@@ -19,7 +19,7 @@ import { isAssetOpen }                          from '../services/market.service
 import { buildOrderPlanForIdea }                from '../services/orderPlan.service.js'
 import { getCheckGap, isIntradayTimeframe }     from '../services/timeframe.service.js'
 import { collectSymbols, resolveConditionTree } from '../services/conditionTree.service.js'
-import { checkThesis }                          from './thesis.monitor.js'
+import { checkInvalidation }                    from './invalidation.monitor.js'
 import { checkPortfolioReviews }               from './portfolio.monitor.js'
 import { checkPosition }                        from './positionMonitor.js'
 import {
@@ -177,6 +177,11 @@ async function _checkIdea(db, idea) {
             _lastChecked.set(id, Date.now())
             logCheck(id, asset, status, `stop=${stopTf}/tp=${tpTf}`, stopCandles)
             await checkPosition(db, idea, stopCandles, tpCandles, aeCandles, (ideaId, reason) => _close(db, ideaId, reason))
+
+            // Invalidation runs in-position too (advisory): structure break → notify,
+            // but the stop owns the exit. Reuses the entry-timeframe candles.
+            const invMap = await buildSymbolMap(id, asset, aeCandles, entryTf, [])
+            await checkInvalidation(db, idea, invMap, { inPosition: true })
         }
     } catch (err) {
         logger.error(LOG, `Error processing idea ${id}:`, err.message)
@@ -238,7 +243,7 @@ async function _checkEntry(db, idea, candles) {
         await _patch(db, id, patch)
     } else {
         logger.info(LOG, `⏳ Entry not triggered yet for idea ${id} (${asset})`)
-        await checkThesis(db, idea, symbolMap)
+        await checkInvalidation(db, idea, symbolMap, { inPosition: false })
     }
 }
 
