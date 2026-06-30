@@ -336,7 +336,7 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, signal }) {
+async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, signal }) {
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
     // get_chart returns an image tool_result, which only the Anthropic provider
@@ -374,6 +374,7 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
         onAsset,
         onInterval,
         onToolStart,
+        onReasoning,
         onUsage,
         onPhase: (p) => {
             const n = parseInt(p, 10)

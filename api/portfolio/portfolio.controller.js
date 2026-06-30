@@ -76,10 +76,11 @@ export async function streamPortfolio(req, res) {
             reasoningEffort: routing.reasoningEffort,
             userId:   req.user._id,
             signal:   ac.signal,
-            onToken:     (text)   => sendEvent('token',  { text }),
-            onTicker:    (symbol) => sendEvent('ticker', { symbol }),
-            onPhase:     (phase)  => sendEvent('phase',  { phase }),
-            onToolStart: (tool)   => sendEvent('status', { tool }),
+            onToken:     (text)   => sendEvent('token',     { text }),
+            onTicker:    (symbol) => sendEvent('ticker',    { symbol }),
+            onPhase:     (phase)  => sendEvent('phase',     { phase }),
+            onToolStart: (tool)   => sendEvent('status',    { tool }),
+            onReasoning: (text)   => sendEvent('reasoning', { text }),
         })
 
         finished = true

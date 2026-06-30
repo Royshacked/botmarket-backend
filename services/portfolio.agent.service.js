@@ -150,7 +150,7 @@ const TOOL_HANDLERS = {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, lifecycle = null, mandate = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, lifecycle = null, mandate = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const normalized   = _buildMessages(messages)
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
@@ -198,6 +198,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
         onToken,
         onTicker,
         onToolStart,
+        onReasoning,
         onUsage,
         onPhase: (p) => {
             const n = parseInt(p, 10)

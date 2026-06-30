@@ -54,8 +54,9 @@ export async function streamOrchestration(req, res) {
             onAsset:       (symbol)   => sendEvent('asset',    { symbol }),
             onInterval:    (interval) => sendEvent('interval', { interval }),
             onChart:       (chart)    => sendEvent('chart',    chart),
-            onPhase:       (phase)    => sendEvent('phase',    { phase }),
-            onToolStart:   (tool)     => sendEvent('status',   { tool }),
+            onPhase:       (phase)    => sendEvent('phase',     { phase }),
+            onToolStart:   (tool)     => sendEvent('status',    { tool }),
+            onReasoning:   (text)     => sendEvent('reasoning', { text }),
         })
 
         finished = true

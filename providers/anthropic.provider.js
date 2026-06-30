@@ -47,6 +47,7 @@ export async function streamAnthropicWithTools({
     onMandate,
     onPhase,
     onToolStart,
+    onReasoning,
     onUsage,
     reasoningEffort,
     signal,
@@ -97,11 +98,13 @@ export async function streamAnthropicWithTools({
                     } else if (event.delta.type === 'input_json_delta') {
                         block._json = (block._json || '') + event.delta.partial_json
                     } else if (event.delta.type === 'thinking_delta') {
-                        // Accumulate the model's reasoning but never push it to onToken
-                        // — it stays hidden from the UI. We keep it (with its signature
-                        // below) so the thinking block can be echoed back intact on the
-                        // next tool turn, which the API requires.
+                        // Accumulate the model's reasoning (kept with its signature below
+                        // so the thinking block can be echoed back intact on the next tool
+                        // turn, which the API requires) and stream it to onReasoning so the
+                        // UI can surface it live, the same way tokens/status are surfaced.
+                        // It is never sent to onToken — the visible reply stays separate.
                         block.thinking = (block.thinking || '') + event.delta.thinking
+                        onReasoning?.(event.delta.thinking)
                     } else if (event.delta.type === 'signature_delta') {
                         block.signature = (block.signature || '') + event.delta.signature
                     }
