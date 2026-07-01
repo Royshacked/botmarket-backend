@@ -6,6 +6,7 @@
     "type": "module",
     "scripts": {
         "start": "node server.js",
+        "test": "node --test \"tests/unit/*.test.js\"",
         "dev": "node scripts/free-port.mjs && nodemon server.js --ignore data/",
         "server:prod": "set NODE_ENV=production&node server.js",
         "server:prod:mac": "export NODE_ENV=production && node server.js"
