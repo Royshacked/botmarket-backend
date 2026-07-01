@@ -224,8 +224,10 @@ brokerRoutes.patch('/:type/orders/:orderId', requireAuth, async (req, res) => {
             return res.status(400).json({ error: 'limitPrice or stopPrice required' })
         }
         const acct = accountId ?? await _selectedAccountId(req.params.type, req.user._id)
-        await brokerService.amendOrder(req.params.type, req.user._id, acct, req.params.orderId, { limitPrice, stopPrice })
-        res.json({ ok: true })
+        // amendOrder may return a NEW order id (brokers that amend by cancel-then-place,
+        // e.g. cTrader). Surface it so the client retracks the live order.
+        const result = await brokerService.amendOrder(req.params.type, req.user._id, acct, req.params.orderId, { limitPrice, stopPrice })
+        res.json({ ok: true, orderId: result?.orderId ?? req.params.orderId })
     } catch (err) {
         logger.error(LOG, `amendOrder (${req.params.type}):`, err.message)
         res.status(err.status ?? 500).json({ error: err.message })

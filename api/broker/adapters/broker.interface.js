@@ -323,16 +323,55 @@ export class BrokerAdapter {
     }
 
     /**
-     * Change a working order's price (keeps its id). Requires `capabilities().amendOrder`.
+     * Change a working order's price. Requires `capabilities().amendOrder`.
+     * Returns the working order's id AFTER the amend: brokers that amend in place
+     * echo the same id; brokers that amend by cancel-then-place (e.g. cTrader) return
+     * a NEW id. Callers MUST retrack the returned id — the original may no longer exist.
      * @param {string} userId
      * @param {string} accountId
      * @param {string} orderId
      * @param {{ limitPrice?: number, stopPrice?: number }} fields
-     * @returns {Promise<void>}
+     * @returns {Promise<{ orderId?: string }>}
      */
     // eslint-disable-next-line no-unused-vars
     async amendOrder(userId, accountId, orderId, fields) {
         throw new Error(`${this.constructor.name}: amendOrder() not implemented`)
+    }
+
+    /**
+     * Authoritative single-position lookup used by the broker-authoritative reconciler.
+     * Three-state contract:
+     *   - a position object → the position is still open at the broker
+     *   - `null`            → confirmed gone (closed/liquidated)
+     *   - `undefined`       → this broker can't check (caller treats as "unknown" and
+     *                         must NOT close the idea on it)
+     * Adapters that implement it MUST THROW on a transport/session error, so the caller
+     * can distinguish "gone" (null) from "unreachable" (throw) and never close an idea on
+     * a transient failure. The default reports unsupported.
+     * @param {string} userId
+     * @param {string} accountId
+     * @param {string} positionId
+     * @returns {Promise<BrokerPosition|object|null|undefined>}
+     */
+    // eslint-disable-next-line no-unused-vars
+    async findOpenPosition(userId, accountId, positionId) {
+        return undefined   // default: unsupported → caller treats as "unknown", never closes
+    }
+
+    /**
+     * Snapshot the broker's live spot quote for a symbol. Used to shift an absolute order
+     * price onto the broker's book when it lists an aliased instrument whose price basis
+     * differs from the canonical feed (see BrokerOrder.referenceQuote). Optional — the
+     * default returns null, meaning "no basis shift": such adapters place at the canonical
+     * price and ignore referenceQuote.
+     * @param {string} userId
+     * @param {string} accountId
+     * @param {string} symbol   the broker's tradable (broker) symbol
+     * @returns {Promise<{ bid:number|null, ask:number|null, mid:number }|null>}
+     */
+    // eslint-disable-next-line no-unused-vars
+    async getSpot(userId, accountId, symbol) {
+        return null   // default: no spot available → no basis shift
     }
 
     /**

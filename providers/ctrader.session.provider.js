@@ -316,13 +316,7 @@ export class CTraderSession extends EventEmitter {
             const name     = symbolId != null ? this.symbolNameById(symbolId) : null
 
             // tradeData.volume is in cTrader native units; lotSize (same units) → lots.
-            let volume = _num(td.volume)
-            if (symbolId != null) {
-                try {
-                    const specs = await this._symbolSpecs(symbolId, name)
-                    if (specs?.lotSize > 0 && volume != null) volume = volume / specs.lotSize
-                } catch { /* keep native volume if specs unavailable */ }
-            }
+            const volume = await this._volumeToLots(symbolId, name, td.volume)
 
             const scale = 10 ** _int(p.moneyDigits, 2)
             return {
@@ -338,6 +332,23 @@ export class CTraderSession extends EventEmitter {
                 openedAt:     td.openTimestamp != null ? Number(td.openTimestamp) : null,
             }
         }))
+    }
+
+    /**
+     * Convert a cTrader native volume to lots via the symbol's lotSize (same native
+     * units). Falls back to the raw native volume when specs are unavailable. Shared by
+     * getOpenPositions / getWorkingOrders so the conversion rule lives in one place.
+     * @returns {Promise<number|null>}
+     */
+    async _volumeToLots(symbolId, name, rawVolume) {
+        let volume = _num(rawVolume)
+        if (symbolId != null) {
+            try {
+                const specs = await this._symbolSpecs(symbolId, name)
+                if (specs?.lotSize > 0 && volume != null) volume = volume / specs.lotSize
+            } catch { /* keep native volume if specs unavailable */ }
+        }
+        return volume
     }
 
     // ── Working orders ───────────────────────────────────────────────────────────
@@ -363,13 +374,7 @@ export class CTraderSession extends EventEmitter {
             const symbolId = td.symbolId
             const name     = symbolId != null ? this.symbolNameById(symbolId) : null
 
-            let volume = _num(td.volume)
-            if (symbolId != null) {
-                try {
-                    const specs = await this._symbolSpecs(symbolId, name)
-                    if (specs?.lotSize > 0 && volume != null) volume = volume / specs.lotSize
-                } catch { /* keep native volume if specs unavailable */ }
-            }
+            const volume = await this._volumeToLots(symbolId, name, td.volume)
 
             const isLimit = o.orderType === ORDER_TYPE_LIMIT
             return {
