@@ -60,7 +60,8 @@
       "Bash(curl -s -X POST -H \"Content-Type: application/json\" --max-time 10 -d '{\"username\":\"__nope__\",\"password\":\"__nope__\"}' http://localhost:3030/api/auth/signin)",
       "Bash(git -C \"C:/Roy/Coding Academy/Projects/ar2trade/botmarket-frontend\" add src/customHooks/useBrokerAccounts.js src/cmps/PaperTrading/PaperTradingSection.jsx)",
       "Bash(git -C 'C:/Roy/Coding Academy/Projects/ar2trade/botmarket-frontend' commit -q -m ' *)",
-      "Bash(git -C \"C:/Roy/Coding Academy/Projects/ar2trade/botmarket-frontend\" log --oneline -2)"
+      "Bash(git -C \"C:/Roy/Coding Academy/Projects/ar2trade/botmarket-frontend\" log --oneline -2)",
+      "Bash(xargs -I{} sh -c 'echo \"FILE: {}\"; grep -o \"backdrop-filter:[^;}]*\" \"{}\" | head; echo \"---count---\"; grep -o \"backdrop-filter\" \"{}\" | wc -l; echo \"---webkit---\"; grep -o \"\\\\-webkit-backdrop-filter\" \"{}\" | wc -l')"
     ]
   }
 }
