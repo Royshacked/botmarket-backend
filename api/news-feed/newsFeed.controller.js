@@ -1,5 +1,6 @@
 import { newsFeedService } from './newsFeed.service.js'
 import { logger } from '../../services/logger.service.js'
+import { startSseStream } from '../_shared/sse.util.js'
 
 export function getNewsFeed(req, res) {
     res.send({ articles: newsFeedService.get() })
@@ -38,24 +39,17 @@ export async function getAssetNewsSentiment(req, res) {
 }
 
 export function streamNewsFeed(req, res) {
-    res.setHeader('Content-Type', 'text/event-stream')
-    res.setHeader('Cache-Control', 'no-cache')
-    res.setHeader('Connection', 'keep-alive')
-    res.setHeader('X-Accel-Buffering', 'no') // disable Render/nginx proxy buffering
-    res.flushHeaders()
+    // startSseStream sets the SSE headers (incl. X-Accel-Buffering), flushes,
+    // starts the keep-alive heartbeat, and clears it on res close. This feed
+    // pushes raw `data:` frames (no named events), so we ignore sendEvent and
+    // write directly; we only add the client (de)registration on close.
+    startSseStream(req, res)
 
     res.write(`data: ${JSON.stringify(newsFeedService.get())}\n\n`)
 
     newsFeedService.addClient(res)
 
-    // keep-alive ping every 30s so Render doesn't cut the idle connection
-    const heartbeat = setInterval(() => res.write(': ping\n\n'), 30000)
-
-    // Listen on res, not req — req's 'close' fires as soon as the request is fully
-    // received (Node ≥ ~18), which would drop the client immediately. res 'close'
-    // fires only when the response connection actually closes (client navigates away).
     res.on('close', () => {
-        clearInterval(heartbeat)
         newsFeedService.removeClient(res)
     })
 }

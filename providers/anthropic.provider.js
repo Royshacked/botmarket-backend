@@ -38,14 +38,7 @@ export async function streamAnthropicWithTools({
     toolHandlers = {},
     maxContinuations = DEFAULT_MAX_CONTINUATIONS,
     onToken,
-    onAsset,
-    onInterval,
-    onTicker,
-    onPlan,
-    onUpdate,
-    onScan,
-    onMandate,
-    onPhase,
+    tagCaptures = [],
     onToolStart,
     onReasoning,
     onUsage,
@@ -53,7 +46,7 @@ export async function streamAnthropicWithTools({
     signal,
 }) {
     const messages   = _normalizeMessages(promptOrMessages)
-    const suppressor = createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan, onMandate, onPhase)
+    const suppressor = createTagSuppressor({ onToken, captures: tagCaptures })
     const reasoning  = _thinkingConfig(reasoningEffort)
 
     for (let i = 0; i < maxContinuations; i++) {

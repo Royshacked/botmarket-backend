@@ -1,4 +1,3 @@
-import { readFileSync, statSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { callAnthropicWithTools } from '../providers/anthropic.provider.js'
@@ -13,7 +12,7 @@ import { toolError } from './toolResult.util.js'
 import { normalizeTimeframe } from './timeframe.service.js'
 import { normalizeTreeNode, firstLeafTimeframe } from './conditionTree.service.js'
 import { cleanConviction } from './conviction.util.js'
-import { COMMON_TOOL_HANDLERS } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines } from './agentUtils.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PROMPT_PATH = join(__dirname, '../trade_assistant_system_prompt.md')
@@ -21,22 +20,8 @@ const PROMPT_PATH = join(__dirname, '../trade_assistant_system_prompt.md')
 const LOG = '[tradeAgent]'
 
 // Load the system prompt fresh when the file changes (mtime-gated), so prompt
-// edits take effect on the next request without a server restart. The read is
-// skipped when the file is unchanged, so the steady-state cost is one statSync.
-let _promptCache = { mtimeMs: 0, text: '' }
-function _baseSystemPrompt() {
-    try {
-        const { mtimeMs } = statSync(PROMPT_PATH)
-        if (mtimeMs !== _promptCache.mtimeMs) {
-            _promptCache = { mtimeMs, text: readFileSync(PROMPT_PATH, 'utf-8') }
-            logger.info(LOG, 'System prompt (re)loaded')
-        }
-    } catch (err) {
-        if (!_promptCache.text) throw err   // first load must succeed — surface it
-        logger.warn(LOG, `prompt reload failed, using cached copy: ${err.message}`)
-    }
-    return _promptCache.text
-}
+// edits take effect on the next request without a server restart.
+const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 const MAX_RECENT_MESSAGES = 6
 
 const TOOLS = [
@@ -362,6 +347,27 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
 
     let capturedPhase = null
 
+    const onPhaseCapture = (p) => {
+        const n = parseInt(p, 10)
+        if (n >= 1 && n <= 5) {
+            capturedPhase = n
+            onPhase?.(n)
+        }
+    }
+
+    // Tag capture set for the tag suppressor — same tags/order the positional
+    // suppressor produced for this agent (state, trade_idea, asset, interval,
+    // phase, portfolio_mandate, portfolio_thesis — the last two suppress-only).
+    const tagCaptures = [
+        { open: '<state>',             close: '</state>',             onCapture: null           },
+        { open: '<trade_idea>',        close: '</trade_idea>',        onCapture: null           },
+        { open: '<asset>',             close: '</asset>',             onCapture: onAsset        },
+        { open: '<interval>',          close: '</interval>',          onCapture: onInterval     },
+        { open: '<phase>',             close: '</phase>',             onCapture: onPhaseCapture  },
+        { open: '<portfolio_mandate>', close: '</portfolio_mandate>', onCapture: null           },
+        { open: '<portfolio_thesis>',  close: '</portfolio_thesis>',  onCapture: null           },
+    ]
+
     const raw = await streamFn({
         model,
         promptOrMessages: builtMessages,
@@ -371,18 +377,10 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
         reasoningEffort,
         signal,
         onToken,
-        onAsset,
-        onInterval,
+        tagCaptures,
         onToolStart,
         onReasoning,
         onUsage,
-        onPhase: (p) => {
-            const n = parseInt(p, 10)
-            if (n >= 1 && n <= 5) {
-                capturedPhase = n
-                onPhase?.(n)
-            }
-        },
     })
 
     const { reply, updatedState, tradeIdea } = _parseResponse(raw, analysisState, userPrompt)
@@ -459,14 +457,7 @@ function _buildBrokerSection(brokerContext) {
 
 function _buildIdeaAccountsSection(accounts) {
     if (!Array.isArray(accounts) || accounts.length === 0) return ''
-    const fmt = (v) => v != null ? `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'
-    const lines = accounts.map(a => {
-        const type = a.isLive ? 'LIVE' : 'DEMO'
-        const parts = [`${(a.broker || '').toUpperCase()} ${type} — login: ${a.login || '—'}, currency: ${a.currency || '—'}`]
-        if (a.balance != null) parts.push(`balance: ${fmt(a.balance)}`)
-        if (a.equity  != null) parts.push(`equity: ${fmt(a.equity)}`)
-        return `  - ${parts.join(', ')}`
-    })
+    const lines = buildAccountLines(accounts)
     return `\n\nIDEA ACCOUNTS (the user plans to execute this trade on):\n${lines.join('\n')}`
 }
 

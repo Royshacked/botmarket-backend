@@ -2,10 +2,11 @@ import { logger }           from '../../services/logger.service.js'
 import { tradeAgentService, emptyAnalysisState } from '../../services/trade.agent.service.js'
 import { brokerService }     from '../broker/broker.service.js'
 import { resolveModel }      from '../../services/modelRouter.service.js'
+import { startSseStream }    from '../_shared/sse.util.js'
+import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
 
 const LOG = '[orchestrator:controller]'
 
-const ALLOWED_MESSAGE_ROLES = new Set(['user', 'assistant'])
 const MAX_RECENT_CHAT_TURNS = 3
 
 export async function streamOrchestration(req, res) {
@@ -14,24 +15,8 @@ export async function streamOrchestration(req, res) {
         return res.status(400).json({ error: parsed.error })
     }
 
-    // SSE headers
-    res.setHeader('Content-Type',  'text/event-stream')
-    res.setHeader('Cache-Control', 'no-cache')
-    res.setHeader('Connection',    'keep-alive')
-    res.flushHeaders()
-
-    function sendEvent(event, data) {
-        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-    }
-
-    // User hit Stop → the browser aborts the fetch and the connection closes.
-    // Abort the agent loop so it stops generating instead of finishing silently.
-    // NOTE: listen on res, not req — req's 'close' fires as soon as the request
-    // body is fully received (Node ≥ ~18), which would abort every stream instantly.
-    // res 'close' fires only when the response connection actually closes.
-    const ac = new AbortController()
-    let finished = false
-    res.on('close', () => { if (!finished) ac.abort() })
+    const { sendEvent, signal: acSignal, finish } = startSseStream(req, res)
+    const ac = { signal: acSignal }
 
     try {
         const brokerContext = await _loadBrokerContext(req.user._id)
@@ -59,7 +44,7 @@ export async function streamOrchestration(req, res) {
             onReasoning:   (text)     => sendEvent('reasoning', { text }),
         })
 
-        finished = true
+        finish()
         if (!ac.signal.aborted) {
             sendEvent('done', {
                 reply:         result.reply,
@@ -70,7 +55,7 @@ export async function streamOrchestration(req, res) {
             res.end()
         }
     } catch (err) {
-        finished = true
+        finish()
         if (ac.signal.aborted) return   // client gone — nothing to send
         logger.error(LOG, 'Failed to stream orchestration', err)
         sendEvent('error', { message: 'Streaming failed' })
@@ -138,46 +123,30 @@ function parseOrchestratorBody(body) {
         if (!Array.isArray(messages)) {
             return { error: 'messages must be an array' }
         }
+        // Empty messages with a userPrompt fallback is allowed here (unlike the
+        // shared validator, which treats empty as an error).
         if (messages.length === 0) {
             if (trimmedPrompt) {
-                return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: _parseIdeaAccounts(ideaAccounts) }
+                return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: parseIdeaAccounts(ideaAccounts) }
             }
             return { error: 'messages must be a non-empty array' }
         }
 
-        const normalized = []
-        for (let i = 0; i < messages.length; i++) {
-            const msg = messages[i]
-            if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
-                return { error: `messages[${i}] must be an object with role and content` }
-            }
-            const { role, content } = msg
-            if (!ALLOWED_MESSAGE_ROLES.has(role)) {
-                return { error: `messages[${i}].role must be user or assistant` }
-            }
-            if (typeof content !== 'string' || !content.trim()) {
-                return { error: `messages[${i}].content must be a non-empty string` }
-            }
-            normalized.push({ role, content: content.trim() })
-        }
+        const validated = parseChatMessages(messages)
+        if (validated.error) return { error: validated.error }
 
-        const trimmed = normalized.slice(-MAX_RECENT_CHAT_TURNS * 2)
+        const trimmed = validated.messages.slice(-MAX_RECENT_CHAT_TURNS * 2)
         return {
             userPrompt:    trimmedPrompt || undefined,
             messages:      trimmed,
             analysisState: priorState,
-            ideaAccounts:  _parseIdeaAccounts(ideaAccounts),
+            ideaAccounts:  parseIdeaAccounts(ideaAccounts),
         }
     }
 
     if (trimmedPrompt) {
-        return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: _parseIdeaAccounts(ideaAccounts) }
+        return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: parseIdeaAccounts(ideaAccounts) }
     }
 
     return { error: 'Request must include messages or userPrompt' }
-}
-
-function _parseIdeaAccounts(raw) {
-    if (!Array.isArray(raw)) return []
-    return raw.filter(a => a && typeof a === 'object' && a.id)
 }
