@@ -23,7 +23,7 @@
 
 import { getDb }                    from '../../providers/mongodb.provider.js'
 import { logger }                   from '../../services/logger.service.js'
-import { ideaService }              from './tradeIdeas.service.js'
+import { ideaService }              from '../trade-ideas/tradeIdeas.service.js'
 import { brokerService }            from '../broker/broker.service.js'
 import { portfolioChatService }     from './portfolioChat.service.js'
 import { invalidatePortfolioState } from '../../services/portfolioState.service.js'

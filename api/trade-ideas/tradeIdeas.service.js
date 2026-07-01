@@ -11,6 +11,7 @@ import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } 
 import { cleanConviction } from '../../services/conviction.util.js'
 import { placeOrdersForIdea, placeRestingEntryForIdea } from './ideaExecution.service.js'
 import { armExitsInPosition } from './exitOrders.service.js'
+import { paperBrokerService } from '../broker/paperBroker.service.js'
 
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
@@ -389,6 +390,13 @@ async function _cancelRestingOrders(idea, userId) {
 }
 
 async function _partitionByBroker(idea, userId) {
+    // Global paper mode: route EVERY new idea to the simulated broker on the user's
+    // single paper account, regardless of which live accounts were selected.
+    const paper = await paperBrokerService.getAccount(userId)
+    if (paper?.enabled) {
+        return [{ broker: 'paper', accountIds: [paper.accountId], mainAccountId: paper.accountId }]
+    }
+
     const accountIds = (idea.accounts ?? []).map(a => String(typeof a === 'object' ? a.id : a))
     const globalMain = idea.mainAccountId != null ? String(idea.mainAccountId) : null
     if (accountIds.length === 0) return [{ broker: null, accountIds: [], mainAccountId: globalMain }]

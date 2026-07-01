@@ -39,6 +39,7 @@ import { getDb }         from '../providers/mongodb.provider.js'
 import { logger }        from '../services/logger.service.js'
 import { executionBus }  from '../services/executionBus.js'
 import { brokerService } from '../api/broker/broker.service.js'
+import { tradeCaptureService } from '../services/tradeCapture.service.js'
 
 const LOG        = '[execution.reconciler]'
 const COLLECTION = 'ideas'
@@ -97,7 +98,7 @@ async function _onClosed(exec) {
         const reason  = matched?.leg ?? idea.pendingCloseReason ?? exec.reason ?? 'broker'
 
         await _finalizeClose(db, idea, {
-            reason, pnl: exec.pnl, at: exec.at, accountId: exec.accountId, positionId: exec.positionId,
+            reason, pnl: exec.pnl, at: exec.at, accountId: exec.accountId, positionId: exec.positionId, price: exec.price,
         })
     })
 }
@@ -150,7 +151,7 @@ async function _onReduced(exec) {
             // an untracked panel order that wasn't the one that filled — the orphan case).
             const reason = matched?.leg ?? exec.reason ?? 'broker'
             await _finalizeClose(db, { ...idea, exitOrders: orders }, {
-                reason, pnl: exec.pnl, at: exec.at, accountId: exec.accountId, positionId: exec.positionId,
+                reason, pnl: exec.pnl, at: exec.at, accountId: exec.accountId, positionId: exec.positionId, price: exec.price,
             })
             return
         }
@@ -197,17 +198,21 @@ async function _onOpened(exec) {
         )
         if (resting) {
             logger.info(LOG, `Resting entry filled → idea ${resting.id} now ${direction} (position ${exec.positionId})`)
+            await tradeCaptureService.captureOpen(resting, exec)
             await _withLock(exec.accountId, exec.positionId, () => placeExits(db, resting, exec.accountId))
             return
         }
     }
 
-    // Already linked? Then this is just a duplicate/again — nothing to backfill.
+    // Already linked? Then the position was stamped inline (a market/immediate entry) or
+    // this is a re-delivery — nothing to backfill, but capture the open (idempotent).
     const linked = await db.collection(COLLECTION).findOne(
         { brokerOrders: { $elemMatch: { accountId: String(exec.accountId), positionId: String(exec.positionId) } } },
-        { projection: { id: 1 } },
     )
-    if (linked) return
+    if (linked) {
+        await tradeCaptureService.captureOpen(linked, exec)
+        return
+    }
 
     // Find an active idea on this account+symbol with an unlinked order slot and
     // stamp the positionId onto it (positional $ + arrayFilters target one element).
@@ -227,6 +232,7 @@ async function _onOpened(exec) {
     )
     if (!result) return
     logger.info(LOG, `Backfilled positionId ${exec.positionId} onto idea ${result.id}`)
+    await tradeCaptureService.captureOpen(result, exec)
 
     // Position is open — place this account's native exit orders (once).
     await _withLock(exec.accountId, exec.positionId, () => placeExits(db, result, exec.accountId))
@@ -358,7 +364,7 @@ function _brokerFor(idea, accountId) {
  * cancel EVERY working broker order still bound to the closed position. Shared by the
  * full-close event path and the broker-confirmed full close detected from a reduce.
  */
-async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId }) {
+async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId, price }) {
     const patch = { status: 'closed', closedReason: reason, closedAt: at ?? Date.now() }
     if (pnl != null) patch.realizedPnl = pnl
 
@@ -370,6 +376,7 @@ async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId
     if (!result) return false   // someone else closed it first
     logger.info(LOG, `Idea ${result.id} closed by broker (reason=${reason}, pnl=${patch.realizedPnl ?? '·'})`)
 
+    await tradeCaptureService.captureClose({ accountId, positionId, price, reason, pnl, at })
     await _cancelExitsForPosition(db, result, accountId, positionId)
     return true
 }

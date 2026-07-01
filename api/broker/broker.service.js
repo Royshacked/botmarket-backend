@@ -11,6 +11,7 @@ import jwt                         from 'jsonwebtoken'
 import { getBrokerAdapter,
          SUPPORTED_BROKERS }       from './broker.factory.js'
 import { brokerConnectionService } from './brokerConnection.service.js'
+import { paperBrokerService }      from './paperBroker.service.js'
 import { logger }                  from '../../services/logger.service.js'
 
 const LOG = '[broker.service]'
@@ -84,7 +85,12 @@ async function listConnections(userId) {
 
     // Merge with what's actually in the DB
     const saved = await brokerConnectionService.listConnections(userId)
-    return { ...result, ...saved }
+    const merged = { ...result, ...saved }
+
+    // Paper has no brokerConnections doc — it's "connected" when paper mode is enabled,
+    // so resolveUserAccounts / the order-plan builder can resolve the paper account.
+    try { merged.paper = await paperBrokerService.isEnabled(userId) } catch { /* non-fatal */ }
+    return merged
 }
 
 /**

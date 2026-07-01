@@ -27,6 +27,7 @@ import { tradeIdeasRoutes } from './api/trade-ideas/tradeIdeas.routes.js'
 import { authRoutes }   from './api/authentication/authentication.routes.js'
 import { userRoutes }   from './api/user/user.routes.js'
 import { brokerRoutes }      from './api/broker/broker.routes.js'
+import { paperRoutes }       from './api/paper/paper.routes.js'
 import { transcribeRoutes }  from './api/transcribe/transcribe.routes.js'
 import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
 import { scannerRoutes }     from './api/scanner/scanner.routes.js'
@@ -35,6 +36,8 @@ import { calendarRoutes }    from './api/calendar/calendar.routes.js'
 import { newsFeedService }  from './api/news-feed/newsFeed.service.js'
 import { monitorService }   from './monitoring/monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
+import { paperFillService }  from './monitoring/paperFill.service.js'
+import { paperEquityService } from './monitoring/paperEquity.service.js'
 import { logger }           from './services/logger.service.js'
 
 const app = express()
@@ -83,6 +86,7 @@ app.use('/api/trade-ideas', tradeIdeasRoutes)
 app.use('/api/auth',        authRoutes)
 app.use('/api/users',       userRoutes)
 app.use('/api/broker',      brokerRoutes)
+app.use('/api/paper',       paperRoutes)
 app.use('/api/portfolio',   portfolioRoutes)
 app.use('/api/scanner',     scannerRoutes)
 app.use('/api/market',      marketRoutes)
@@ -97,6 +101,8 @@ ensureIdeaIndexes()
 newsFeedService.start()
 monitorService.start()
 executionReconciler.start()
+paperFillService.start()
+paperEquityService.start()
 
 // SPA fallback: only in production when static assets live in public/
 if (process.env.NODE_ENV === 'production') {

@@ -10,10 +10,12 @@
 
 import { CTraderAdapter } from './adapters/ctrader.adapter.js'
 import { IBKRAdapter }    from './adapters/ibkr.adapter.js'
+import { PaperAdapter }   from './adapters/paper.adapter.js'
 
 const ADAPTERS = {
     ctrader: CTraderAdapter,
     ibkr:    IBKRAdapter,
+    paper:   PaperAdapter,
 }
 
 /** All broker type identifiers the system currently supports. */
