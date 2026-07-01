@@ -8,6 +8,7 @@
 import { claudeText }   from '../monitor.claude.js'
 import { newsService }  from '../../services/news.service.js'
 import { logger }       from '../../services/logger.service.js'
+import { parseYesNo }   from '../monitorUtils.js'
 
 const LOG = '[news.evaluator]'
 
@@ -54,7 +55,7 @@ export async function evaluateNews(condition, symbol) {
 
     try {
         const raw  = await claudeText(SYSTEM, user)
-        const pass = raw.trim().toUpperCase() === 'YES'
+        const pass = parseYesNo(raw)
         logger.info(LOG, `News eval "${condition.slice(0, 60)}" for ${symbol} → ${pass ? 'YES' : 'NO'}`)
         return pass
     } catch (err) {

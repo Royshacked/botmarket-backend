@@ -5,6 +5,7 @@ import { buildOrderPlanForIdea } from '../../services/orderPlan.service.js'
 import { routeExits, detectNativeEntryLevel } from '../../services/protectionPlan.service.js'
 import { toBrokerSymbol }       from '../../services/brokerSymbol.service.js'
 import { executionReconciler }  from '../../monitoring/execution.reconciler.js'
+import { orderSymbol }          from '../../monitoring/exitOrders.util.js'
 import { armExitsInPosition, exitFields, basisReferenceQuote } from './exitOrders.service.js'
 
 const LOG        = '[ideaExecution]'
@@ -37,7 +38,7 @@ export async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
         const brokerOrders = []
         for (const order of plan) {
             const type = toExecType(order.type)
-            const brokerOrder = { symbol: idea.brokerSymbol ?? idea.asset, direction: idea.direction, quantity: order.quantity, type }
+            const brokerOrder = { symbol: orderSymbol(idea), direction: idea.direction, quantity: order.quantity, type }
 
             try {
                 const result = await brokerService.placeOrder(order.broker, userId, order.accountId, brokerOrder)
@@ -120,7 +121,7 @@ export async function placeRestingEntryForIdea(id, userId, isAdmin = false) {
         const brokerOrders = []
         for (const order of plan) {
             const brokerOrder = {
-                symbol:    idea.brokerSymbol ?? idea.asset,
+                symbol:    orderSymbol(idea),
                 direction: idea.direction,
                 quantity:  order.quantity,
                 type:      'stop',

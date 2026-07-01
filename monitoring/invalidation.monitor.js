@@ -22,10 +22,10 @@
  *   { ideaId, asset, edge, level, anchor, reason, inPosition }
  */
 
-import { evaluateTree }   from './monitor.orchestrator.js'
-import { sendBotMessage } from '../api/chat/chat.service.js'
-import { firstLeaf }      from '../services/conditionTree.service.js'
-import { logger }         from '../services/logger.service.js'
+import { evaluateTree }         from './monitor.orchestrator.js'
+import { sendBotMessage }       from '../api/chat/chat.service.js'
+import { resolveEntryTimeframe } from './monitorUtils.js'
+import { logger }               from '../services/logger.service.js'
 
 const LOG = '[invalidation.monitor]'
 
@@ -51,7 +51,7 @@ export async function checkInvalidation(db, idea, symbolMap, { inPosition = fals
     if (idea.invalidation_status != null) return   // latched; awaiting user action
 
     const { id, asset } = idea
-    const tf      = _entryTf(idea)
+    const tf      = resolveEntryTimeframe(idea)
     const floorAt = inPosition
         ? (idea.entryTriggeredAt ?? idea.savedAt ?? null)
         : (idea.entryFloorAt     ?? idea.savedAt ?? null)
@@ -116,18 +116,4 @@ async function _notify(idea, edge, level, anchor, reason, inPosition) {
         reason,
         inPosition,
     })
-}
-
-// --- Helpers ------------------------------------------------------------------
-
-function _entryTf(idea) {
-    const tree = idea.entry_condition_tree
-    if (tree) {
-        const leaf = firstLeaf(tree)
-        if (leaf?.timeframe) return leaf.timeframe
-    }
-    return idea.entry_conditions?.[0]?.timeframe
-        ?? idea.entry_timeframe
-        ?? idea.timeframe
-        ?? 'day'
 }

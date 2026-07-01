@@ -73,6 +73,19 @@ export async function buildVolumeCtx(id, asset, assetClass, tree, flat) {
     return { sessionStartMs: start, minuteCandles: { [asset]: minute } }
 }
 
+// ─── Candle timestamp normalisation ───────────────────────────────────────────
+
+// Candle timestamps arrive in seconds from some sources (Massive/Yahoo divide by
+// 1000) while floors/sessions are ms epochs. Normalise to ms, tolerating either
+// unit in case a source changes. Shared by the structured/touch/volume evaluators.
+export const candleMs = t => (t < 1e12 ? t * 1000 : t)
+
+// ─── LLM yes/no parsing ────────────────────────────────────────────────────────
+
+// Standard lenient parse of an LLM yes/no reply: trim, upper-case, first char 'Y'.
+// Shared by the news/indicator/chart evaluators so "YES", "Yes.", "yes" all pass.
+export const parseYesNo = raw => String(raw ?? '').trim().toUpperCase().startsWith('Y')
+
 // ─── Logging ──────────────────────────────────────────────────────────────────
 
 export function logCheck(id, asset, status, tf, candles) {

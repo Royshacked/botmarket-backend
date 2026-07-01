@@ -16,10 +16,7 @@
  * Pure function — no I/O, no Claude calls.
  */
 
-/** Candle timestamps may arrive in seconds; floors are ms. Normalise to ms. */
-function _candleMs(t) {
-    return t < 1e12 ? t * 1000 : t
-}
+import { candleMs } from '../monitorUtils.js'
 
 /**
  * Evaluate a touch level against a candle series.
@@ -41,7 +38,7 @@ export function evaluateTouch(parsed, candles, floorAt = null) {
 
     for (const c of candles) {
         if (c == null || c.h == null || c.l == null) continue
-        const tMs = _candleMs(c.t)
+        const tMs = candleMs(c.t)
         if (floorAt != null && tMs < floorAt) continue
         if (c.l <= level && level <= c.h) return { pass: true, triggerAt: tMs }
     }

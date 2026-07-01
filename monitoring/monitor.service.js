@@ -210,7 +210,7 @@ async function _checkEntry(db, idea, candles) {
     } else if (Array.isArray(idea.entry_conditions) && idea.entry_conditions.length > 0) {
         logger.info(LOG, `[${id}] Evaluating entry conditions (legacy flat format)`)
         const entryLogic = idea.entry_logic ?? 'AND'
-        ;({ triggered, triggerAt } = await evaluateConditions(idea.entry_conditions, entryLogic, symbolMap, asset, floorAt))
+        ;({ triggered, triggerAt } = await evaluateConditions(idea.entry_conditions, entryLogic, symbolMap, asset, floorAt, entryStates))
     } else {
         logger.warn(LOG, `Idea ${id} has no entry conditions — skipping`)
         return

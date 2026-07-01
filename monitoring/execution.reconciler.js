@@ -40,6 +40,8 @@ import { logger }        from '../services/logger.service.js'
 import { executionBus }  from '../services/executionBus.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { tradeCaptureService } from '../services/tradeCapture.service.js'
+import { round, remainingForAccount } from './monitorUtils.js'
+import { buildExitOrder, exitOrderRecord } from './exitOrders.util.js'
 
 const LOG        = '[execution.reconciler]'
 const COLLECTION = 'ideas'
@@ -160,7 +162,7 @@ async function _onReduced(exec) {
         // position's live remaining size (netting safety). Prefer the broker's volume as
         // the source of truth (handles panel-managed fills our records never saw); fall
         // back to deriving it from tracked slices when the broker is unreachable.
-        const remaining = position != null ? _round(Number(position.volume)) : undefined
+        const remaining = position != null ? round(Number(position.volume)) : undefined
         if (position != null || matched) {
             await _resyncExits(db, { ...idea, exitOrders: orders }, exec.accountId, remaining)
         }
@@ -262,16 +264,16 @@ async function placeExits(db, idea, accountId) {
         if (native && entryQty > 0) {
             for (const leg of ['stop', 'tp']) {
                 for (const lvl of native[leg] ?? []) {
-                    const qty = _round(Number(lvl.quantity) * factor)
+                    const qty = round(Number(lvl.quantity) * factor)
                     if (!(qty > 0)) continue
                     try {
                         const placed = await _placeOneExit(idea, acct, slot?.broker, leg, lvl.level, qty, positionId)
-                        newOrders.push({
+                        newOrders.push(exitOrderRecord({
                             accountId: acct, broker: slot?.broker, leg,
                             type: leg === 'tp' ? 'limit' : 'stop',
                             price: lvl.level, quantity: qty, positionId,
-                            orderId: placed.orderId, status: 'working', placedAt: Date.now(),
-                        })
+                            orderId: placed.orderId,
+                        }))
                         logger.info(LOG, `Idea ${idea.id}: exit order placed — ${leg} ${qty} @ ${lvl.level} (acct ${acct})`)
                     } catch (err) {
                         logger.error(LOG, `Idea ${idea.id}: exit order place failed (${leg} @ ${lvl.level}): ${err.message}`)
@@ -306,7 +308,7 @@ async function _resyncExits(db, idea, accountId, remainingOverride) {
     const acct      = String(accountId)
     // Prefer the broker's live position size when the caller has it (authoritative even
     // for panel-managed fills); otherwise derive it from our tracked filled slices.
-    const remaining = remainingOverride != null ? Math.max(0, remainingOverride) : _remainingForAccount(idea, acct)
+    const remaining = remainingOverride != null ? Math.max(0, remainingOverride) : remainingForAccount(idea, acct)
     const orders    = idea.exitOrders ?? []
     let changed     = false
 
@@ -452,34 +454,16 @@ async function _cancelWorkingExits(db, idea, accountId) {
 
 /** Place a single exit order as a CLOSING order (close side, tied to positionId). */
 async function _placeOneExit(idea, accountId, broker, leg, level, qty, positionId) {
-    const order = {
-        symbol:    idea.brokerSymbol ?? idea.asset,
-        direction: idea.direction === 'long' ? 'short' : 'long',   // close side
-        quantity:  qty,
-        type:      leg === 'tp' ? 'limit' : 'stop',
-        ...(positionId != null && { positionId }),   // closing order: reduces this position only
-    }
-    if (leg === 'tp') order.limitPrice = level
-    else              order.stopPrice  = level
-    const rq = idea.nativeExit?.referenceQuote
-    if (rq != null) order.referenceQuote = rq
-
+    const order = buildExitOrder(idea, {
+        type: leg,          // 'stop' | 'tp' → STOP | LIMIT at `level`
+        level,
+        qty,
+        positionId,
+        referenceQuote: idea.nativeExit?.referenceQuote ?? null,
+    })
     const res = await brokerService.placeOrder(broker, idea.userId, accountId, order)
     return { orderId: res?.orderId != null ? String(res.orderId) : null }
 }
-
-/** Remaining open quantity (idea units) for an account: entry qty − filled slices. */
-function _remainingForAccount(idea, accountId) {
-    const acct     = String(accountId)
-    const slot     = (idea.brokerOrders ?? []).find(b => String(b.accountId) === acct)
-    const entryQty = Number(slot?.quantity) || 0
-    const closed   = (idea.exitOrders ?? [])
-        .filter(o => o.status === 'filled' && String(o.accountId) === acct)
-        .reduce((s, o) => s + (Number(o.quantity) || 0), 0)
-    return Math.max(0, _round(entryQty - closed))
-}
-
-const _round = n => Math.round((Number(n) || 0) * 10000) / 10000
 
 // ─── Per-(account,position) serialization ─────────────────────────────────────
 // Exit-order placement / resync / cancel read-modify-write the idea's exitOrders
