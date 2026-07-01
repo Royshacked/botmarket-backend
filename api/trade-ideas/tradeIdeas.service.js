@@ -9,7 +9,7 @@ import { isAssetOpen } from '../../services/market.service.js'
 import { toBrokerSymbol, normSymbol } from '../../services/brokerSymbol.service.js'
 import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } from '../../services/conditionTree.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
-import { placeOrdersForIdea, placeRestingEntryForIdea } from './ideaExecution.service.js'
+import { placeOrdersForIdea, placeRestingEntryForIdea, triggerEntryNow } from './ideaExecution.service.js'
 import { armExitsInPosition } from './exitOrders.service.js'
 import { paperBrokerService } from '../broker/paperBroker.service.js'
 
@@ -28,6 +28,7 @@ export const ideaService = {
     deleteIdea,
     updateIdea,
     placeOrdersForIdea,
+    triggerEntryNow,
 }
 
 export async function ensureIdeaIndexes() {
@@ -332,6 +333,15 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
             monitorService.resetIdea(id)
         }
 
+        // "Reset" from the arm-time pre-flight prompt: keep the idea 'looking' but
+        // push the entry floor forward to now, so a level that's already held is
+        // ignored and only a fresh cross from here on fires.
+        if (patch.resetPreEntry) {
+            patch.entryFloorAt = Date.now()
+            monitorService.resetIdea(id)
+        }
+        delete patch.resetPreEntry
+
         delete patch.resetWindow
 
         const updateFilter = isAdmin || !existing.userId
@@ -345,7 +355,17 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         )
         if (!result) return { ok: false, reason: 'not_found' }
         logger.info(LOG, 'Idea updated', { id, patch })
-        return { ok: true, idea: stripId(result) }
+
+        // Arm-time pre-flight: if the entry level is already satisfied on the last
+        // closed candle (so the monitor's rising-edge will never fire), tell the
+        // client to prompt the user (Buy now / Edit / Reset). Best-effort — never
+        // blocks or fails the update.
+        let preEntry
+        if (patch.status === 'looking') {
+            preEntry = await monitorService.preflightEntry(result)
+        }
+
+        return { ok: true, idea: stripId(result), ...(preEntry && { preEntry }) }
     } catch (err) {
         logger.error(LOG, 'Failed to update idea', err)
         return { ok: false, error: err }

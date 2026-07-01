@@ -92,7 +92,15 @@ export async function checkInvalidation(db, idea, symbolMap, { inPosition = fals
     // ── ARMED / in-position: the entry envelope ─────────────────────────────────
     logger.info(LOG, `[${id}] Checking invalidation envelope [${lower ?? '-'}, ${upper ?? '-'}] (${inPosition ? 'in-position' : 'armed'})`)
 
-    for (const { edge, level, anchor, leaf } of buildEnvelopeEdges(range, tf)) {
+    // Pre-entry watches BOTH edges (a close above the upper edge means "don't enter —
+    // too high / R:R gone"). In-position, only the ADVERSE edge invalidates: for a long
+    // a close above the upper edge is favorable (the TP owns that exit), so we alert
+    // only on a close below the lower edge — and the upper edge for a short.
+    const dir         = idea.direction ?? idea.status
+    const adverseEdge = dir === 'short' ? 'upper' : 'lower'
+    const edges       = buildEnvelopeEdges(range, tf).filter(e => !inPosition || e.edge === adverseEdge)
+
+    for (const { edge, level, anchor, leaf } of edges) {
         let triggered
         try {
             ;({ triggered } = await evaluateTree(leaf, symbolMap, asset, floorAt, [], null))

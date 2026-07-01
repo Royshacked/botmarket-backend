@@ -4,6 +4,7 @@ import {
     getMessages,
     sendMessage,
     markRead,
+    dismissMessage,
     searchUsers,
     getOrCreateConversation,
 } from './chat.service.js'
@@ -60,6 +61,17 @@ export async function markConversationRead(req, res, next) {
     try {
         const { id } = req.params
         await markRead(id, req.user._id)
+        res.json({ ok: true })
+    } catch (err) {
+        next(err)
+    }
+}
+
+export async function dismissMessageHandler(req, res, next) {
+    try {
+        const { id, msgId } = req.params
+        const result = await dismissMessage(id, msgId, req.user._id)
+        if (!result.ok) return res.status(403).json({ error: 'Forbidden' })
         res.json({ ok: true })
     } catch (err) {
         next(err)

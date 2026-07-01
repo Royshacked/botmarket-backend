@@ -25,7 +25,7 @@ import { logger }       from './logger.service.js'
 const COLLECTION = 'trades'
 const LOG        = '[tradeCapture]'
 
-export const tradeCaptureService = { captureOpen, captureClose, listTrades }
+export const tradeCaptureService = { captureOpen, captureOpenBare, captureClose, listTrades }
 
 /** paper broker → 'paper' mode, everything else → 'live'. */
 const modeOf = broker => (broker === 'paper' ? 'paper' : 'live')
@@ -99,6 +99,52 @@ async function captureOpen(idea, exec) {
         logger.info(LOG, `Captured OPEN ${modeOf(broker)} trade — ${idea.asset} ${exec.direction ?? idea.direction} pos ${positionId} @ ${exec.price ?? '?'}`)
     } catch (err) {
         logger.error(LOG, `captureOpen failed (pos ${exec?.positionId}): ${err.message}`)
+    }
+}
+
+/**
+ * Record a trade opening WITHOUT an idea (idealess fallback) — for a paper position
+ * that isn't backed by a linked active idea, so it still shows in trade history. Built
+ * from the execution event alone; no idea snapshot. Idempotent on (accountId, positionId),
+ * so it never conflicts with the idea-based captureOpen (that path returns first when an
+ * idea matches — the two are mutually exclusive per position).
+ * @param {import('../api/broker/adapters/broker.interface.js').BrokerExecution} exec
+ */
+async function captureOpenBare(exec) {
+    try {
+        if (exec?.positionId == null || exec?.accountId == null || exec?.userId == null) return
+        const db         = await getDb()
+        const accountId  = String(exec.accountId)
+        const positionId = String(exec.positionId)
+        const now        = Date.now()
+        await db.collection(COLLECTION).updateOne(
+            { accountId, positionId },
+            {
+                $setOnInsert: {
+                    tradeId:    randomUUID(),
+                    ideaId:     null,
+                    groupId:    null,
+                    userId:     String(exec.userId),
+                    portfolioId: null, portfolioName: null, allocationRatio: null,
+                    mode:       modeOf(exec.broker),
+                    broker:     exec.broker ?? null, accountId, positionId,
+                    symbol:     exec.symbol ?? null,
+                    asset_class: null,
+                    direction:  exec.direction ?? null,
+                    quantity:   exec.quantity ?? null,
+                    entry:      { price: exec.price ?? null, ts: exec.at ?? now },
+                    snapshot:   null,
+                    accountSnapshot: null,
+                    exit:       null,
+                    status:     'open',
+                    openedAt:   exec.at ?? now,
+                },
+            },
+            { upsert: true },
+        )
+        logger.info(LOG, `Captured OPEN ${modeOf(exec.broker)} trade (idealess) — ${exec.symbol} ${exec.direction} pos ${positionId} @ ${exec.price ?? '?'}`)
+    } catch (err) {
+        logger.error(LOG, `captureOpenBare failed (pos ${exec?.positionId}): ${err.message}`)
     }
 }
 

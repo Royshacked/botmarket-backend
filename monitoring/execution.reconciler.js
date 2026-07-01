@@ -90,6 +90,14 @@ async function _onClosed(exec) {
         const idea = await _findActiveByPosition(db, exec.accountId, exec.positionId)
         if (!idea) {
             logger.info(LOG, `No active idea matched closed position ${exec.accountId}/${exec.positionId}`)
+            // Paper positions still get a trade-history close even without a linked idea,
+            // so recent-trades reflects them (patches the idealess open from _onOpened).
+            if (exec.broker === 'paper') {
+                await tradeCaptureService.captureClose({
+                    accountId: exec.accountId, positionId: exec.positionId,
+                    price: exec.price, reason: exec.reason, pnl: exec.pnl, at: exec.at,
+                })
+            }
             return
         }
 
@@ -232,7 +240,12 @@ async function _onOpened(exec) {
             returnDocument: 'after',
         },
     )
-    if (!result) return
+    if (!result) {
+        // No idea linkage at all — for paper, still record the open so the trade
+        // appears in history (idealess; idempotent with the idea path above).
+        if (exec.broker === 'paper') await tradeCaptureService.captureOpenBare(exec)
+        return
+    }
     logger.info(LOG, `Backfilled positionId ${exec.positionId} onto idea ${result.id}`)
     await tradeCaptureService.captureOpen(result, exec)
 

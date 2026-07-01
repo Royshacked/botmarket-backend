@@ -41,7 +41,7 @@ let _running = false
 
 // ─── Public interface ─────────────────────────────────────────────────────────
 
-export const monitorService = { start, stop, resetIdea }
+export const monitorService = { start, stop, resetIdea, preflightEntry }
 
 function resetIdea(id) {
     _lastChecked.delete(id)
@@ -204,13 +204,16 @@ async function _checkEntry(db, idea, candles) {
     let triggerAt = null
     const entryStates = []
 
+    // requireHeld: a structured entry leg needs a fresh edge since the floor AND the
+    // level still held on the latest candle — so a reverted breakout doesn't keep an
+    // AND leg latched true and fire once a sibling (e.g. volume) later turns true.
     if (idea.entry_condition_tree) {
         logger.info(LOG, `[${id}] Evaluating entry condition tree`)
-        ;({ triggered, triggerAt } = await evaluateTree(idea.entry_condition_tree, symbolMap, asset, floorAt, [], entryStates, volCtx))
+        ;({ triggered, triggerAt } = await evaluateTree(idea.entry_condition_tree, symbolMap, asset, floorAt, [], entryStates, volCtx, { requireHeld: true }))
     } else if (Array.isArray(idea.entry_conditions) && idea.entry_conditions.length > 0) {
         logger.info(LOG, `[${id}] Evaluating entry conditions (legacy flat format)`)
         const entryLogic = idea.entry_logic ?? 'AND'
-        ;({ triggered, triggerAt } = await evaluateConditions(idea.entry_conditions, entryLogic, symbolMap, asset, floorAt, entryStates))
+        ;({ triggered, triggerAt } = await evaluateConditions(idea.entry_conditions, entryLogic, symbolMap, asset, floorAt, entryStates, { requireHeld: true }))
     } else {
         logger.warn(LOG, `Idea ${id} has no entry conditions — skipping`)
         return
@@ -245,6 +248,70 @@ async function _checkEntry(db, idea, candles) {
         logger.info(LOG, `⏳ Entry not triggered yet for idea ${id} (${asset})`)
         await checkInvalidation(db, idea, symbolMap, { inPosition: false })
     }
+}
+
+// ─── Pre-flight entry check ─────────────────────────────────────────────────
+//
+// Run once when an idea is armed (status → 'looking'): is the entry condition
+// ALREADY satisfied as a static level on the last closed candle, while the
+// monitor's rising-edge path would NOT fire it? That's the case where the
+// breakout already happened before the floor and price never dipped back, so the
+// idea would sit at 'looking' forever. We surface it (Buy now / Edit / Reset)
+// instead of waiting silently.
+//
+// Detection: state-eval (floorAt = null → the evaluator's "true right now"
+// snapshot) is true, but edge-eval (floorAt = the monitor's real floor) is false.
+//
+// Best-effort and never throws — on any failure it returns not-satisfied so the
+// status change is unaffected.
+async function preflightEntry(idea) {
+    try {
+        const { id, asset } = idea
+
+        // v1 scope: only tree-based ideas whose entry is purely structured price
+        // leaves. Mixed trees (indicator/chart/news/…) would drag heavy LLM
+        // evaluators into a synchronous request and have fuzzier "already true"
+        // semantics — skipped for now.
+        const tree = idea.entry_condition_tree
+        if (!tree || !_isStructuredOnly(tree)) return { alreadySatisfied: false }
+
+        const entryTf = resolveEntryTimeframe(idea)
+        const candles = await fetchCandles(id, asset, entryTf)
+        if (!candles) return { alreadySatisfied: false }
+
+        const crossSyms = collectSymbols(tree, idea.entry_conditions)
+        const symbolMap = await buildSymbolMap(id, asset, candles, entryTf, crossSyms)
+        const volCtx    = await buildVolumeCtx(id, asset, idea.asset_class, tree, idea.entry_conditions)
+
+        // Same floor the monitor uses, so edge-eval predicts real monitor behaviour.
+        const floorAt = idea.entryFloorAt ?? idea.savedAt ?? null
+
+        const edge  = await evaluateTree(tree, symbolMap, asset, floorAt, [], [], volCtx, { requireHeld: true }) // will the monitor fire?
+        const state = await evaluateTree(tree, symbolMap, asset, null,   [], [], volCtx, { stateLevel: true })  // is the level held right now?
+
+        const alreadySatisfied = !!(state.triggered && !edge.triggered)
+        const close = candles.at(-1)?.c ?? null
+
+        if (alreadySatisfied) {
+            logger.info(LOG, `[${id}] Pre-flight: entry level already held but not a fresh rising edge (close=${close}) — prompting user`)
+        }
+        return { alreadySatisfied, close }
+    } catch (err) {
+        logger.warn(LOG, `Pre-flight entry check failed for idea ${idea?.id}:`, err.message)
+        return { alreadySatisfied: false }
+    }
+}
+
+// True when every leaf in the tree is a structured (price/indicator-math) leaf —
+// no chart/news/indicator-LLM/touch/time/volume leaves. Empty/invalid → false.
+function _isStructuredOnly(node) {
+    if (!node || typeof node !== 'object') return false
+    if (typeof node.condition === 'string') {
+        const type = node.type ?? 'structured'
+        return type === 'structured'
+    }
+    if (!Array.isArray(node.children) || node.children.length === 0) return false
+    return node.children.every(_isStructuredOnly)
 }
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────

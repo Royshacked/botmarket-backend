@@ -47,12 +47,12 @@ const COST = { time: -1, touch: 0, structured: 0, volume: 0, indicator: 1, news:
  * @param {object|null}   ctx            cumulative-volume context { sessionStartMs, minuteCandles } (see volume.evaluator)
  * @returns {Promise<{ triggered: boolean, which?: string, finding?: string, triggerAt?: number|null }>}
  */
-export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = null, priorFindings = [], out = null, ctx = null) {
+export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = null, priorFindings = [], out = null, ctx = null, opts = {}) {
     if (!node || typeof node !== 'object') return { triggered: false }
 
     // ── Leaf node ────────────────────────────────────────────────────────────
     if (typeof node.condition === 'string') {
-        const result = await _evalOne(node, symbolMap, defaultSymbol, floorAt, priorFindings, ctx)
+        const result = await _evalOne(node, symbolMap, defaultSymbol, floorAt, priorFindings, ctx, opts)
         logger.info(LOG, `  ${result.pass ? '✓' : '✗'} [${node.type ?? 'structured'}] "${node.condition?.slice(0, 60)}"${node.symbol ? ` (${node.symbol})` : ''}`)
         // Record this leaf's evaluated state so the UI can mark met conditions. Only
         // leaves actually reached are recorded (short-circuited siblings are not).
@@ -78,7 +78,7 @@ export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = nul
         // (OR branches are independent — no structured condition "caused" the chart).
         const sortedOR = [...children].sort((a, b) => _nodeCost(a) - _nodeCost(b))
         for (const child of sortedOR) {
-            const result = await evaluateTree(child, symbolMap, defaultSymbol, floorAt, [], out, ctx)
+            const result = await evaluateTree(child, symbolMap, defaultSymbol, floorAt, [], out, ctx, opts)
             if (result.triggered) {
                 logger.info(LOG, `  ✅ OR group triggered: "${(result.which ?? '').slice(0, 60)}"`)
                 return result
@@ -96,7 +96,7 @@ export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = nul
     const accumulated = [...priorFindings]
     let triggerAt = null
     for (let i = 0; i < sorted.length; i++) {
-        const result = await evaluateTree(sorted[i], symbolMap, defaultSymbol, floorAt, accumulated, out, ctx)
+        const result = await evaluateTree(sorted[i], symbolMap, defaultSymbol, floorAt, accumulated, out, ctx, opts)
         if (!result.triggered) {
             logger.info(LOG, `  ✗ AND group failed at child ${i + 1}/${sorted.length}`)
             return { triggered: false }
@@ -173,14 +173,14 @@ function _nodeCost(node) {
  *                                    so flat-format ideas persist conditionStates too.
  * @returns {Promise<{ triggered: boolean, which?: string, triggerAt?: number|null }>}
  */
-export async function evaluateConditions(conditions, logic, symbolMap, defaultSymbol, floorAt = null, out = null) {
+export async function evaluateConditions(conditions, logic, symbolMap, defaultSymbol, floorAt = null, out = null, opts = {}) {
     if (!Array.isArray(conditions) || conditions.length === 0) {
         return { triggered: false }
     }
 
     return logic === 'OR'
-        ? _evalOR(conditions, symbolMap, defaultSymbol, floorAt, out)
-        : _evalAND(conditions, symbolMap, defaultSymbol, floorAt, out)
+        ? _evalOR(conditions, symbolMap, defaultSymbol, floorAt, out, opts)
+        : _evalAND(conditions, symbolMap, defaultSymbol, floorAt, out, opts)
 }
 
 // Record a flat leaf's evaluated state, matching the tree path's out.push exactly:
@@ -192,7 +192,7 @@ function _recordFlat(out, cond, result) {
 
 // ─── AND: sequential gate-then-verify ─────────────────────────────────────────
 
-async function _evalAND(conditions, symbolMap, defaultSymbol, floorAt, out = null) {
+async function _evalAND(conditions, symbolMap, defaultSymbol, floorAt, out = null, opts = {}) {
     const sorted = [...conditions].sort(
         (a, b) => (COST[a.type] ?? 0) - (COST[b.type] ?? 0)
     )
@@ -201,7 +201,7 @@ async function _evalAND(conditions, symbolMap, defaultSymbol, floorAt, out = nul
     let triggerAt = null
     const priorFindings = []
     for (const cond of sorted) {
-        const result = await _evalOne(cond, symbolMap, defaultSymbol, floorAt, priorFindings)
+        const result = await _evalOne(cond, symbolMap, defaultSymbol, floorAt, priorFindings, null, opts)
         _recordFlat(out, cond, result)
         const label  = result.condition?.slice(0, 60) ?? '(malformed)'
         const type   = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
@@ -223,13 +223,13 @@ async function _evalAND(conditions, symbolMap, defaultSymbol, floorAt, out = nul
 
 // ─── OR: sequential, short-circuit on first true ─────────────────────────────
 
-async function _evalOR(conditions, symbolMap, defaultSymbol, floorAt, out = null) {
+async function _evalOR(conditions, symbolMap, defaultSymbol, floorAt, out = null, opts = {}) {
     const sorted = [...conditions].sort(
         (a, b) => (COST[a?.type] ?? 0) - (COST[b?.type] ?? 0)
     )
     for (const cond of sorted) {
         // OR branches are independent — chart gets floorAt but no prior findings
-        const result = await _evalOne(cond, symbolMap, defaultSymbol, floorAt, [])
+        const result = await _evalOne(cond, symbolMap, defaultSymbol, floorAt, [], null, opts)
         _recordFlat(out, cond, result)
         const type   = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
         const icon   = result.pass ? '✓' : '✗'
@@ -245,7 +245,7 @@ async function _evalOR(conditions, symbolMap, defaultSymbol, floorAt, out = null
 
 // ─── Single condition evaluation ──────────────────────────────────────────────
 
-async function _evalOne(cond, symbolMap, defaultSymbol, floorAt = null, priorFindings = [], ctx = null) {
+async function _evalOne(cond, symbolMap, defaultSymbol, floorAt = null, priorFindings = [], ctx = null, opts = {}) {
     const conditionText = typeof cond === 'string' ? cond : cond?.condition
     const type          = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'structured')
 
@@ -312,7 +312,7 @@ async function _evalOne(cond, symbolMap, defaultSymbol, floorAt = null, priorFin
         // structured (default) — precise rising-edge timestamp since the floor.
         // ctx?.sessionStartMs anchors session-relative subjects like VWAP.
         const parsed = await parseCondition(conditionText)
-        const { pass, triggerAt } = evaluate(parsed, candles, floorAt, ctx?.sessionStartMs ?? null)
+        const { pass, triggerAt } = evaluate(parsed, candles, floorAt, ctx?.sessionStartMs ?? null, opts)
         return { pass, condition: conditionText, triggerAt: triggerAt ?? null }
 
     } catch (err) {

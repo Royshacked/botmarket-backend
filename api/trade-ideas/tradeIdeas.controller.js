@@ -106,6 +106,28 @@ export async function placeTradeIdeaOrders(req, res) {
     }
 }
 
+// "Buy now" from the arm-time pre-flight prompt: force-trigger a 'looking' idea's
+// entry (→ 'hit' + built plan) so the normal order-confirm dialog appears.
+export async function triggerTradeIdeaEntry(req, res) {
+    try {
+        const { id } = req.params
+        if (!id) return res.status(400).send({ error: 'Missing id' })
+
+        const result = await ideaService.triggerEntryNow(id, req.user._id, req.user.isAdmin)
+        if (!result.ok) {
+            if (result.reason === 'not_found')   return res.status(404).send({ error: 'Idea not found' })
+            if (result.reason === 'forbidden')   return res.status(403).send({ error: 'Forbidden' })
+            if (result.reason === 'not_looking') return res.status(409).send({ error: 'Idea is not armed (looking)' })
+            return res.status(500).send({ error: 'Failed to trigger entry' })
+        }
+
+        res.send({ idea: result.idea })
+    } catch (err) {
+        logger.error(LOG, 'triggerTradeIdeaEntry failed', err)
+        res.status(500).send({ error: 'Failed to trigger entry' })
+    }
+}
+
 export async function updateTradeIdea(req, res) {
     try {
         const { id } = req.params
@@ -120,7 +142,7 @@ export async function updateTradeIdea(req, res) {
             tp_conditions,    tp_logic,    tp_condition_tree,
             notes, invalidation,
             accounts, mainAccountId,
-            resetWindow,
+            resetWindow, resetPreEntry,
         } = req.body ?? {}
 
         if (!status && type === undefined && quantity === undefined && timeframe === undefined &&
@@ -130,7 +152,7 @@ export async function updateTradeIdea(req, res) {
             entry_logic === undefined && stop_logic === undefined && tp_logic === undefined &&
             entry_condition_tree === undefined && stop_condition_tree === undefined && tp_condition_tree === undefined &&
             accounts === undefined && mainAccountId === undefined &&
-            invalidation === undefined && resetWindow === undefined &&
+            invalidation === undefined && resetWindow === undefined && resetPreEntry === undefined &&
             notes === undefined) {
             return res.status(400).send({ error: 'Nothing to update' })
         }
@@ -166,6 +188,7 @@ export async function updateTradeIdea(req, res) {
         // Control flag (not persisted): distinguishes "reset window" from a plain
         // dismiss on a hit→waiting transition. Stripped in the service before write.
         if (resetWindow !== undefined)           patch.resetWindow = resetWindow
+        if (resetPreEntry !== undefined)         patch.resetPreEntry = resetPreEntry
 
         const result = await ideaService.updateIdea(id, patch, req.user._id, req.user.isAdmin)
         if (!result.ok) {
@@ -181,7 +204,11 @@ export async function updateTradeIdea(req, res) {
             return res.status(500).send({ error: 'Failed to update idea' })
         }
 
-        res.send({ idea: result.idea, ...(result.results && { results: result.results }) })
+        res.send({
+            idea: result.idea,
+            ...(result.results  && { results:  result.results }),
+            ...(result.preEntry && { preEntry: result.preEntry }),
+        })
     } catch (err) {
         logger.error(LOG, 'updateTradeIdea failed', err)
         res.status(500).send({ error: 'Failed to update trade idea' })

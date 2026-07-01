@@ -17,7 +17,7 @@ import { getDb }                 from '../providers/mongodb.provider.js'
 import { paperBrokerService }    from '../api/broker/paperBroker.service.js'
 import { openPosition,
          reducePosition,
-         latestPrice }           from '../api/broker/paperExecution.service.js'
+         latestQuote }           from '../api/broker/paperExecution.service.js'
 import { logger }                from '../services/logger.service.js'
 
 const LOG              = '[paperFill.service]'
@@ -40,17 +40,24 @@ function stop() {
 }
 
 /**
- * Whether a resting order is triggered by the current price.
+ * Whether a resting order is triggered by the latest candle's intra-bar range.
  *   stop  → long fills at/above the trigger, short at/below (breakout/breakdown).
  *   limit → long fills at/below the trigger, short at/above (better-price fill).
  * Holds for both entries and closing exits because an exit carries the closing side
  * as its direction (a long position's stop is a short stop, its TP a short limit).
+ *
+ * Uses the candle HIGH for "at/above" tests and LOW for "at/below" — so a resting
+ * order fills the instant price TRADES through the level (a touch), not only when a
+ * candle closes beyond it. A long TP at 432 fills when the high reaches 432 even if
+ * the bar closes back below.
  */
-export function isTriggered(order, price) {
+export function isTriggered(order, quote) {
     const t = order.triggerPrice
-    if (t == null || price == null) return false
-    if (order.type === 'stop')  return order.direction === 'long' ? price >= t : price <= t
-    if (order.type === 'limit') return order.direction === 'long' ? price <= t : price >= t
+    if (t == null || quote == null) return false
+    const { h, l } = quote
+    if (h == null || l == null) return false
+    if (order.type === 'stop')  return order.direction === 'long' ? h >= t : l <= t
+    if (order.type === 'limit') return order.direction === 'long' ? l <= t : h >= t
     return false
 }
 
@@ -62,13 +69,13 @@ async function _tick() {
         const orders = await db.collection(ORDERS).find({ status: 'working' }, { projection: { _id: 0 } }).toArray()
         if (!orders.length) return
 
-        // One price lookup per distinct symbol.
+        // One quote lookup per distinct symbol (intra-bar high/low for touch triggers).
         const symbols = [...new Set(orders.map(o => o.symbol))]
-        const priceBy = new Map(await Promise.all(symbols.map(async s => [s, await latestPrice(s)])))
+        const quoteBy = new Map(await Promise.all(symbols.map(async s => [s, await latestQuote(s)])))
 
         for (const order of orders) {
-            const price = priceBy.get(order.symbol)
-            if (!isTriggered(order, price)) continue
+            const quote = quoteBy.get(order.symbol)
+            if (!isTriggered(order, quote)) continue
             await _fill(order, order.triggerPrice).catch(err =>
                 logger.error(LOG, `fill failed (order ${order.orderId}): ${err.message}`))
         }

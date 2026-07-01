@@ -2,6 +2,7 @@ import { getDb, stripId }       from '../../providers/mongodb.provider.js'
 import { logger }               from '../../services/logger.service.js'
 import { brokerService }        from '../broker/broker.service.js'
 import { buildOrderPlanForIdea } from '../../services/orderPlan.service.js'
+import { isAssetOpen }          from '../../services/market.service.js'
 import { routeExits, detectNativeEntryLevel } from '../../services/protectionPlan.service.js'
 import { toBrokerSymbol }       from '../../services/brokerSymbol.service.js'
 import { executionReconciler }  from '../../monitoring/execution.reconciler.js'
@@ -89,6 +90,42 @@ export async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
         return { ok: true, idea: stripId(updated), results }
     } catch (err) {
         logger.error(LOG, 'Failed to place orders for idea', err)
+        return { ok: false, error: err }
+    }
+}
+
+/**
+ * Force-trigger an idea's entry now — the "Buy now" pre-flight action, taken when
+ * the entry level is already held so the monitor's rising edge would never fire.
+ *
+ * Mirrors the monitor's on-trigger transition (monitor.service _checkEntry): flips
+ * a 'looking' idea to 'hit', builds the per-account order plan and sets orderState,
+ * so the normal order-confirm dialog surfaces. It does NOT place at the broker —
+ * the user still confirms (which routes through placeOrdersForIdea).
+ */
+export async function triggerEntryNow(id, userId, isAdmin = false) {
+    try {
+        const db   = await getDb()
+        const idea = await db.collection(COLLECTION).findOne({ id })
+        if (!idea) return { ok: false, reason: 'not_found' }
+        if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+        if (idea.status !== 'looking') return { ok: false, reason: 'not_looking' }
+
+        // Explicit user action → not a "triggered while waiting" event.
+        const patch = { status: 'hit', entryTriggeredAt: Date.now(), triggeredWhileWaiting: false, triggerEventAt: null }
+
+        const plan = await buildOrderPlanForIdea(idea)
+        if (plan.length > 0) {
+            const open = isAssetOpen(idea.asset, idea.asset_class)
+            patch.pendingOrder = { plan, builtAt: Date.now() }
+            patch.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
+        }
+
+        const updated = await db.collection(COLLECTION).findOneAndUpdate({ id }, { $set: patch }, { returnDocument: 'after' })
+        logger.info(LOG, 'Entry force-triggered (buy now)', { id, orderState: patch.orderState ?? 'none' })
+        return { ok: true, idea: stripId(updated) }
+    } catch (err) {
+        logger.error(LOG, 'Failed to force-trigger entry', err)
         return { ok: false, error: err }
     }
 }

@@ -35,18 +35,27 @@ export function applySpread(price, isBuy, spreadBps = 0) {
     return isBuy ? price + half : price - half
 }
 
-/** Latest live price for a symbol (most recent candle close), or null. */
-export async function latestPrice(symbol) {
+/**
+ * Latest live quote for a symbol from the most recent 1-min candle (day fallback):
+ * `{ c, h, l }` — close for marking P&L, high/low for intrabar touch triggers. null
+ * if no candle. h/l fall back to c for degenerate feeds.
+ */
+export async function latestQuote(symbol) {
     for (const tf of ['1min', 'day']) {
         try {
             const candles = await getCandles(symbol, tf, 1)
             const last    = candles?.at(-1)
-            if (last?.c != null) return last.c
+            if (last?.c != null) return { c: last.c, h: last.h ?? last.c, l: last.l ?? last.c }
         } catch (err) {
-            logger.warn(LOG, `latestPrice ${symbol}/${tf} failed: ${err.message}`)
+            logger.warn(LOG, `latestQuote ${symbol}/${tf} failed: ${err.message}`)
         }
     }
     return null
+}
+
+/** Latest live price for a symbol (most recent candle close), or null. */
+export async function latestPrice(symbol) {
+    return (await latestQuote(symbol))?.c ?? null
 }
 
 /**
@@ -82,6 +91,7 @@ export async function openPosition({ userId, accountId, symbol, direction, qty, 
     setImmediate(() => executionBus.emit('execution', {
         broker:    'paper',
         type:      'position.opened',
+        userId,
         accountId,
         orderId,
         positionId,
@@ -121,7 +131,7 @@ export async function reducePosition({ userId, positionId, qty, price, reason = 
     if (remaining > 0) {
         await paperBrokerService.updatePosition(userId, positionId, { qty: remaining })
         executionBus.emit('execution', {
-            broker: 'paper', type: 'position.reduced', accountId: pos.accountId,
+            broker: 'paper', type: 'position.reduced', userId, accountId: pos.accountId,
             positionId, ...(orderId != null && { orderId }),
             symbol: pos.symbol, direction: pos.direction,
             quantity: closeQty, price: exitPrice, pnl: round2(net), reason, at: Date.now(),
@@ -135,7 +145,7 @@ export async function reducePosition({ userId, positionId, qty, price, reason = 
     })
     await _cancelClosingOrders(userId, positionId, orderId)
     executionBus.emit('execution', {
-        broker: 'paper', type: 'position.closed', accountId: pos.accountId,
+        broker: 'paper', type: 'position.closed', userId, accountId: pos.accountId,
         positionId, ...(orderId != null && { orderId }),
         symbol: pos.symbol, direction: pos.direction,
         price: exitPrice, pnl: round2(net), reason, at: Date.now(),

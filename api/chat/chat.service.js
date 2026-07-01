@@ -175,6 +175,24 @@ export async function markRead(conversationId, userId) {
     return { ok: true }
 }
 
+// Mark a single message as dismissed (used by the invalidation-alert bubble so the
+// user's choice persists — the message stays but renders acknowledged). Message-level
+// only; it never touches the idea's invalidation latch, so a re-armed idea still emits
+// a fresh new alert message.
+export async function dismissMessage(conversationId, messageId, userId) {
+    const db  = await getDb()
+    const uid = String(userId)
+
+    const conv = await db.collection(CONVS).findOne({ id: conversationId })
+    if (!conv || !conv.participants.includes(uid)) return { ok: false }
+
+    await db.collection(MSGS).updateOne(
+        { id: messageId, conversationId },
+        { $set: { dismissed: true } }
+    )
+    return { ok: true }
+}
+
 export async function searchUsers(query, currentUserId) {
     if (!query || query.trim().length < 2) return []
     const db     = await getDb()

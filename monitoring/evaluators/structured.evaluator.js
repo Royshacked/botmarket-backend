@@ -26,9 +26,18 @@ import { candleMs } from '../monitorUtils.js'
  * @param {number|null}     floorAt  ms timestamp; only events at/after this count
  * @param {number|null}     anchorMs session-start ms — anchors session-relative
  *                                   subjects (vwap). null falls back to UTC-day open.
+ * @param {object}          opts     { stateLevel, requireHeld }
+ *   • stateLevel  — snapshot mode only (floorAt null): evaluate a cross operator as
+ *     its underlying LEVEL (crossAbove → gt, crossBelow → lt), i.e. "is price on the
+ *     trigger side right now?" rather than "did it just cross?". Used by the pre-flight.
+ *   • requireHeld — windowed mode only (floorAt set): a fresh edge since the floor is
+ *     necessary but NOT sufficient — the level must ALSO still hold on the latest
+ *     candle. Stops a breakout that has since reverted from staying latched true (e.g.
+ *     an AND leg that fired yesterday while price is back below the level today). Used
+ *     on the entry path.
  * @returns {{ pass: boolean, triggerAt?: number, reason?: string }}
  */
-export function evaluate(parsed, candles, floorAt = null, anchorMs = null) {
+export function evaluate(parsed, candles, floorAt = null, anchorMs = null, opts = {}) {
     if (!candles || candles.length < 2) return { pass: false, reason: 'insufficient_data' }
 
     const { operator, subject } = parsed
@@ -36,9 +45,22 @@ export function evaluate(parsed, candles, floorAt = null, anchorMs = null) {
         return { pass: false, reason: 'unparseable' }
     }
 
-    return floorAt == null
-        ? _evaluateLatest(parsed, candles, anchorMs)
-        : _evaluateWindow(parsed, candles, floorAt, anchorMs)
+    if (floorAt != null) {
+        const edge = _evaluateWindow(parsed, candles, floorAt, anchorMs)
+        if (!edge.pass || !opts.requireHeld) return edge
+        // Edge fired since the floor — also require the level to currently hold, so a
+        // reverted breakout doesn't keep the leg true. The held check is the snapshot
+        // level test (a cross collapses to its threshold).
+        const held = evaluate(parsed, candles, null, anchorMs, { stateLevel: true })
+        return held.pass ? edge : { pass: false, reason: 'level_not_held' }
+    }
+
+    // Snapshot mode. In stateLevel mode a cross collapses to its level test so a
+    // condition that already holds (but isn't a fresh cross) reads as satisfied.
+    const p = opts.stateLevel && (operator === 'crossAbove' || operator === 'crossBelow')
+        ? { ...parsed, operator: operator === 'crossAbove' ? 'gt' : 'lt' }
+        : parsed
+    return _evaluateLatest(p, candles, anchorMs)
 }
 
 // ─── Legacy snapshot evaluation (latest bar / confirmation window) ──────────────
