@@ -1,6 +1,19 @@
 import YahooFinance from 'yahoo-finance2'
 import { compactNumber } from '../services/format.util.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
+import {
+    logReturns as _logReturns,
+    stdev as _stdev,
+    atr as _atr,
+    pearson as _pearson,
+    correlationMatrix as _correlationMatrix,
+} from '../services/priceStats.util.js'
+import {
+    findExtrema as _findExtrema,
+    cycleStats as _cycleStats,
+    tdToCalDays as _tdToCalDays,
+    addCalDays as _addCalDays,
+} from '../services/cycleAnalysis.service.js'
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] })
 
@@ -85,34 +98,6 @@ async function _dailyCandles(ticker, days = 365) {
     return getTickerAggregates(ticker, { timeSpan: 'day', multiplier: 1, from, to: Date.now() })
 }
 
-function _logReturns(closes) {
-    const out = []
-    for (let i = 1; i < closes.length; i++) {
-        if (closes[i - 1] > 0 && closes[i] > 0) out.push(Math.log(closes[i] / closes[i - 1]))
-    }
-    return out
-}
-
-function _stdev(xs) {
-    if (xs.length < 2) return 0
-    const mean = xs.reduce((a, b) => a + b, 0) / xs.length
-    const variance = xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (xs.length - 1)
-    return Math.sqrt(variance)
-}
-
-// Average True Range over the last `period` candles.
-function _atr(candles, period = 14) {
-    if (candles.length < 2) return null
-    const trs = []
-    for (let i = 1; i < candles.length; i++) {
-        const { high, low } = candles[i]
-        const prevClose = candles[i - 1].close
-        trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)))
-    }
-    const slice = trs.slice(-period)
-    return slice.reduce((a, b) => a + b, 0) / slice.length
-}
-
 /**
  * Annualized volatility + ATR for a ticker, as an LLM-ready string.
  * Enables risk-based sizing and sensible stop distances.
@@ -145,18 +130,6 @@ export async function getAnnualizedVolRaw(ticker) {
     return _stdev(_logReturns(candles.map(c => c.close))) * Math.sqrt(TRADING_DAYS)
 }
 
-function _pearson(a, b) {
-    const n  = Math.min(a.length, b.length)
-    const ma = a.reduce((x, y) => x + y, 0) / n
-    const mb = b.reduce((x, y) => x + y, 0) / n
-    let num = 0, da = 0, db = 0
-    for (let i = 0; i < n; i++) {
-        const x = a[i] - ma, y = b[i] - mb
-        num += x * y; da += x * x; db += y * y
-    }
-    return da && db ? num / Math.sqrt(da * db) : 0
-}
-
 // Shared core for correlation computation — returns { symbols, matrix } or null.
 async function _computeCorrelationData(tickers) {
     const symbols = [...new Set(tickers.map(t => String(t).toUpperCase()))].filter(Boolean)
@@ -173,7 +146,7 @@ async function _computeCorrelationData(tickers) {
     common.sort((a, b) => a - b)
 
     const returns = series.map(s => _logReturns(common.map(ts => s.byDay.get(ts))))
-    const matrix  = symbols.map((_, i) => symbols.map((_, j) => _pearson(returns[i], returns[j])))
+    const matrix  = _correlationMatrix(returns)
     return { symbols, matrix }
 }
 
@@ -225,7 +198,7 @@ export async function getVolsAndCorrelationsRaw(tickers = []) {
         if (common.length >= 20) {
             common.sort((a, b) => a - b)
             const returns = series.map(s => _logReturns(common.map(ts => s.byDay.get(ts))))
-            const matrix  = unique.map((_, i) => unique.map((_, j) => _pearson(returns[i], returns[j])))
+            const matrix  = _correlationMatrix(returns)
             corrData = { symbols: unique, matrix }
         }
     }
@@ -287,41 +260,6 @@ export async function getPriceAction(ticker) {
 }
 
 // --- Cycle analysis -----------------------------------------------------------
-
-function _findExtrema(closes, lookback = 5) {
-    const peaks = [], troughs = []
-    for (let i = lookback; i < closes.length - lookback; i++) {
-        let isPeak = true, isTrough = true
-        for (let j = i - lookback; j <= i + lookback; j++) {
-            if (j === i) continue
-            if (closes[j] >= closes[i]) isPeak = false
-            if (closes[j] <= closes[i]) isTrough = false
-        }
-        if (isPeak)   peaks.push(i)
-        if (isTrough) troughs.push(i)
-    }
-    return { peaks, troughs }
-}
-
-function _cycleStats(indices) {
-    if (indices.length < 3) return null
-    const intervals = []
-    for (let i = 1; i < indices.length; i++) intervals.push(indices[i] - indices[i - 1])
-    const mean = intervals.reduce((a, b) => a + b, 0) / intervals.length
-    const variance = intervals.reduce((a, b) => a + (b - mean) ** 2, 0) / intervals.length
-    const std = Math.sqrt(variance)
-    const consistency = intervals.filter(d => Math.abs(d - mean) <= mean * 0.35).length / intervals.length
-    return { mean: Math.round(mean), std: Math.round(std), consistency, count: intervals.length }
-}
-
-// Trading days → approximate calendar days (×1.4)
-function _tdToCalDays(td) { return Math.round(td * 1.4) }
-
-function _addCalDays(date, days) {
-    const d = new Date(date)
-    d.setDate(d.getDate() + days)
-    return d.toISOString().slice(0, 10)
-}
 
 /**
  * Detect recurring price cycles or calendar-window seasonality for a ticker.
