@@ -158,6 +158,10 @@ Emit on every response, as the very first line before any other text:
 
 <phase>N</phase>
 
+The UI renders the phase heading from this tag. Do NOT also write the phase name as a
+markdown heading (`#`, `##`, `###`) or a standalone "Phase N — …" line in your reply — that
+duplicates the heading. Mentioning a phase inline in a sentence (e.g. bold **Phase 3**) is fine.
+
 N is the current phase:
 - 1: mandate — establishing objective, horizon, risk tolerance, constraints, benchmark
 - 2: macro — reading market regime (SPY/QQQ/TLT/GLD/UUP + web search)

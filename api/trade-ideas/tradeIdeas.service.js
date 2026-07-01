@@ -105,6 +105,7 @@ async function saveIdea(tradeIdea, userId) {
         invalidation_status: null,
         invalidation_reason: null,
         invalidation_edge:   null,
+        invalidation_armed:  false,   // waiting→armed latch (see invalidation.monitor.js)
 
         chat_state: _trimChatState(tradeIdea.chat_state),
         accounts:      Array.isArray(tradeIdea.accounts) ? tradeIdea.accounts : [],
@@ -237,9 +238,11 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
 
     if (patch.invalidation !== undefined) {
         patch.invalidation = _normalizeInvalidation(patch.invalidation)
+        // Editing the range re-arms the watcher from scratch (back to waiting).
         if (patch.invalidation_status === undefined) patch.invalidation_status = null
         if (patch.invalidation_reason === undefined) patch.invalidation_reason = null
         if (patch.invalidation_edge   === undefined) patch.invalidation_edge   = null
+        if (patch.invalidation_armed  === undefined) patch.invalidation_armed  = false
     }
 
     if (patch.entry_conditions !== undefined || patch.stop_conditions !== undefined || patch.tp_conditions !== undefined) {
@@ -456,6 +459,11 @@ function _normalizeInvalidation(raw) {
         upper,
         lowerAnchor: str(r.lowerAnchor),
         upperAnchor: str(r.upperAnchor),
+        // Away pivot for a distant entry: the structural level, on the side price
+        // must travel FROM, past which the setup is drifting away (see the approach
+        // guard in invalidation.monitor.js). Optional — only when entry is far from spot.
+        approach:       num(r.approach),
+        approachAnchor: str(r.approachAnchor),
     } : null
 
     const conditions = Array.isArray(raw.conditions) ? raw.conditions : []

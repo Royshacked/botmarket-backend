@@ -18,6 +18,59 @@ Frontend (build green):
 
 Reused the existing alert→edit→dismiss/re-arm flow wholesale (renamed). The dismiss = clear status (re-arm); edit = user adjusts then save re-arms.
 
+## Distant-entry / approach watch — **BUILT 2026-07-01** (not yet live-verified)
+
+**The bug this fixes.** The v1 envelope assumes price is *inside* `[lower, upper]` at
+authoring. For an entry far from spot — "buy the false-break of 10" while price is 100,
+or a breakout buy-stop above the market — price STARTS outside the envelope on the side
+it must travel from, so the very first candle close fired a false "missed/gone"
+invalidation. This hits any patient/limit-style entry (buy-the-dip, breakout-pullback),
+not a rare edge case.
+
+**The model — a pre-entry two-state machine.** The watched side is decided by
+`sign(spot − entry)`, NOT long/short (a breakout long watches the *bottom*, a breakdown
+short watches the *top*).
+
+- **waiting** — the envelope is disarmed. Price is en route. We only flag the setup dying
+  before it arrives, via two structured close leaves (OR), fired as a softer `drifting`
+  status:
+  - **away pivot** (`range.approach`, agent-derived + cited): a close *past* it means price
+    ran the wrong way — "not coming."
+  - **overshoot**: a close clean through the *far* edge of the zone (the side price would
+    exit if it blew past) — "gapped through, never set up."
+- **armed** — reached when any candle CLOSES inside `[lower, upper]`. The existing envelope
+  now owns it; a close outside fires the normal `fired` status.
+
+The waiting state partitions the whole price line into four regions (ran-away / silent
+corridor / arm-zone / overshoot) — every close lands in exactly one.
+
+**Arming is STATE-based, not a rising edge.** `_closedInZoneSinceFloor` scans for any
+candle whose close is inside the band. A rising-edge leaf would (a) never arm an idea
+authored with price already in the zone, and (b) miss a dip-in between checks. Arming is
+checked FIRST each tick, so a dip-into-then-through in one window arms rather than
+false-drifting. Once armed it stays armed (leaving the zone = the fire).
+
+**As-built:**
+- `tradeIdeas.service.js` — `range` gains `approach` + `approachAnchor`; new `invalidation_armed`
+  bool (false on create; reset to false whenever the range is edited → full re-arm).
+- `invalidation.monitor.js` — rewritten: `checkInvalidation` branches waiting→armed pre-entry;
+  `_checkApproach` builds the away/overshoot leaves from `approach` vs the envelope;
+  `_closedInZoneSinceFloor` arming scan; new `drifting` status + `approach`/`overshoot` edges;
+  `_notify` payload gains `status`. In-position path unchanged (no waiting phase — you're past entry).
+- `trade_assistant_system_prompt.md` — DISTANT ENTRY authoring rule + `approach`/`approachAnchor`
+  in the `<trade_idea>`/`<state>` schemas. Omit `approach` when the entry is near spot.
+- Frontend — `ChatWindow` bubble reads `payload.status` (drifting vs fired wording/colour);
+  `MainPage` dismiss + review-save also clear `invalidation_armed`; `IdeaPage`
+  `DevInvalidationPanel` shows the approach pivot + a waiting/armed phase chip; `SocialChat.scss`
+  + `IdeaPage.scss` `--drifting`/`--waiting`/`--armed` variants.
+
+**Decisions locked (2026-07-01):** approach breach = softer `drifting` status (distinct from
+`fired`); away pivot must be structural + cited (no naked number); arming = a candle *close*
+inside the zone (a fast wick that closes back out does not arm); waiting-state overshoot maps
+to `drifting` (pre-entry, never-in-play). A full envelope with NO `approach` authored, created
+with price outside the zone, waits silently until arm (safe default — no false fire). One-sided
+ranges (only lower or only upper) skip the waiting machinery entirely (legacy single-edge behaviour).
+
 ## Why this exists / what it replaces
 
 The word **thesis** was overloaded into three incompatible meanings (a structured
