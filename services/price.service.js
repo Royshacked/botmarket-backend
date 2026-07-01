@@ -7,7 +7,11 @@ const CANDLE_CACHE_TTL_MS = 60 * 60 * 1000
 const CANDLE_SCHEMA = 'ohlcv6'
 
 /** @typedef {[number, number, number, number, number, number]} CandleRow */
-/** @typedef {{ timestamp: number, open: number, high: number, low: number, close: number, volume: number }} CandleObject */
+/**
+ * Verbose object candle shape shared by the aggregate providers
+ * (massive.provider, yahoofinance.provider) and this service.
+ * @typedef {{ timestamp: number, open: number, high: number, low: number, close: number, volume: number }} CandleObject
+ */
 /**
  * @typedef {{
  *   timeSpan?: string,

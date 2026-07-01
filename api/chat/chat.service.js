@@ -1,4 +1,4 @@
-import { getDb }  from '../../providers/mongodb.provider.js'
+import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger } from '../../services/logger.service.js'
 
 const LOG   = '[chat]'
@@ -44,7 +44,7 @@ export async function getOrCreateConversation(userIdA, userIdB) {
     const participants = [String(userIdA), String(userIdB)].sort()
 
     const existing = await db.collection(CONVS).findOne({ participants })
-    if (existing) return { conv: _stripId(existing), created: false }
+    if (existing) return { conv: stripId(existing), created: false }
 
     const conv = {
         id:            `conv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -54,7 +54,7 @@ export async function getOrCreateConversation(userIdA, userIdB) {
         lastMessage:   '',
     }
     await db.collection(CONVS).insertOne(conv)
-    return { conv: _stripId(conv), created: true }
+    return { conv: stripId(conv), created: true }
 }
 
 export async function sendMessage(conversationId, senderId, content, type = 'text', payload = null) {
@@ -74,7 +74,7 @@ export async function sendMessage(conversationId, senderId, content, type = 'tex
         { id: conversationId },
         { $set: { lastMessageAt: msg.createdAt, lastMessage: String(content).slice(0, 120) } }
     )
-    return _stripId(msg)
+    return stripId(msg)
 }
 
 /**
@@ -136,7 +136,7 @@ export async function getConversations(userId) {
         const otherId   = c.participants.find(p => p !== uid) ?? ''
         const otherUser = userMap[otherId]
         return {
-            ..._stripId(c),
+            ...stripId(c),
             unread:        unreadMap[c.id] ?? 0,
             otherName:     otherUser?.fullname  ?? null,
             otherUsername: otherUser?.username  ?? null,
@@ -158,7 +158,7 @@ export async function getMessages(conversationId, userId, before, limit = 50) {
         .limit(Math.min(limit, 100))
         .toArray()
 
-    return msgs.map(_stripId).reverse()
+    return msgs.map(stripId).reverse()
 }
 
 export async function markRead(conversationId, userId) {
@@ -193,11 +193,5 @@ export async function searchUsers(query, currentUserId) {
         .limit(20)
         .toArray()
 
-    return users.map(_stripId)
-}
-
-function _stripId(doc) {
-    if (!doc) return doc
-    const { _id, ...rest } = doc
-    return rest
+    return users.map(stripId)
 }

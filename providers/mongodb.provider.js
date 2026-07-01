@@ -29,3 +29,15 @@ export async function getDb() {
     logger.info(LOG, 'Connected to MongoDB')
     return _db
 }
+
+/** Return `doc` without its Mongo `_id` field. Passes through falsy values. */
+export function stripId(doc) {
+    if (!doc) return doc
+    const { _id, ...rest } = doc
+    return rest
+}
+
+/** Map stripId over an array of docs. */
+export function stripIds(docs) {
+    return docs.map(stripId)
+}

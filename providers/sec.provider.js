@@ -15,6 +15,8 @@
 //  - XBRL facts:      https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json
 
 import { logger } from '../services/logger.service.js'
+import { createTtlCache } from '../services/ttlCache.util.js'
+import { getJson } from '../services/http.util.js'
 
 const LOG = '[sec]'
 const UA  = process.env.SEC_USER_AGENT || 'ar2trade scanner roy.shacked@mail.huji.ac.il'
@@ -25,9 +27,10 @@ let _cikMapAt   = 0
 const CIK_TTL_MS = 24 * 60 * 60 * 1000
 
 async function _secGet(url) {
-    const res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Encoding': 'gzip, deflate' } })
-    if (!res.ok) throw new Error(`SEC ${url} → HTTP ${res.status}`)
-    return res.json()
+    return getJson(url, {
+        headers: { 'User-Agent': UA, 'Accept-Encoding': 'gzip, deflate' },
+        label: `SEC ${url} → HTTP`,
+    })
 }
 
 async function _getCikMap() {
@@ -44,15 +47,14 @@ async function _getCikMap() {
 }
 
 // ─── submissions cache (short TTL — new filings appear intraday) ──────────────
-const _subCache = new Map() // CIK -> { at, data }
 const SUB_TTL_MS = 60 * 60 * 1000
+const _subCache = createTtlCache({ ttlMs: SUB_TTL_MS, max: 300 }) // CIK -> data
 
 async function _getSubmissions(cik) {
     const hit = _subCache.get(cik)
-    if (hit && Date.now() - hit.at < SUB_TTL_MS) return hit.data
+    if (hit) return hit
     const data = await _secGet(`https://data.sec.gov/submissions/CIK${cik}.json`)
-    if (_subCache.size > 300) _subCache.clear()
-    _subCache.set(cik, { at: Date.now(), data })
+    _subCache.set(cik, data)
     return data
 }
 

@@ -13,6 +13,14 @@ function _toDateStr(ms) {
     return new Date(ms).toISOString().slice(0, 10)
 }
 
+/**
+ * Fetch OHLCV candles from Massive (equities daily/weekly; intraday routes to Yahoo).
+ *
+ * @param {string} ticker
+ * @param {{ timeSpan?: string, multiplier?: number, from?: number, to?: number }} options
+ *   from/to in Unix milliseconds
+ * @returns {Promise<import('../services/price.service.js').CandleObject[]>}
+ */
 export async function getTickerAggregates(ticker, options = {}) {
     const { timeSpan = 'day', multiplier, from, to } = options
 

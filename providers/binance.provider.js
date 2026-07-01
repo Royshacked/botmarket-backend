@@ -10,12 +10,15 @@
 //    consolidated cross-venue figure. Good enough for positioning context.
 
 import { logger } from '../services/logger.service.js'
+import { compactMoney } from '../services/format.util.js'
+import { createTtlCache } from '../services/ttlCache.util.js'
+import { getJson } from '../services/http.util.js'
 
 const LOG  = '[binance]'
 const BASE = 'https://fapi.binance.com'
 
-const _cache = new Map() // PERP -> { at, text }
 const TTL_MS = 5 * 60 * 1000
+const _cache = createTtlCache({ ttlMs: TTL_MS, max: 300 }) // PERP -> text
 
 // Normalize a user/idea symbol to a Binance USDT perpetual: BTC, BTC-USD,
 // BTCUSD, BTC/USDT, BTCUSDT → BTCUSDT.
@@ -30,18 +33,10 @@ function _toPerp(symbol) {
 }
 
 async function _get(path) {
-    const res = await fetch(`${BASE}${path}`)
-    if (!res.ok) throw new Error(`Binance ${path} → HTTP ${res.status}`)
-    return res.json()
+    return getJson(`${BASE}${path}`, { label: `Binance ${path} → HTTP` })
 }
 
-const money = v => {
-    const n = Number(v)
-    if (!Number.isFinite(n)) return null
-    if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`
-    if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`
-    return `$${n.toFixed(0)}`
-}
+const money = compactMoney
 
 /**
  * Derivatives positioning for a crypto perpetual as an LLM-ready string.
@@ -53,7 +48,7 @@ export async function getDerivativesContext(symbol) {
     if (!perp) return 'No symbol provided.'
 
     const hit = _cache.get(perp)
-    if (hit && Date.now() - hit.at < TTL_MS) return hit.text
+    if (hit) return hit
 
     const [premium, oiHist, lsRatio] = await Promise.allSettled([
         _get(`/fapi/v1/premiumIndex?symbol=${perp}`),
@@ -91,8 +86,7 @@ export async function getDerivativesContext(symbol) {
         'Note: Binance-only positioning, not a consolidated cross-exchange figure.',
     ].filter(Boolean).join('\n')
 
-    if (_cache.size > 300) _cache.clear()
-    _cache.set(perp, { at: Date.now(), text })
+    _cache.set(perp, text)
     logger.info(LOG, 'derivatives context fetched', { perp })
     return text
 }

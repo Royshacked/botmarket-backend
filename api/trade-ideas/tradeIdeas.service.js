@@ -1,5 +1,5 @@
 import { randomUUID }       from 'crypto'
-import { getDb }           from '../../providers/mongodb.provider.js'
+import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { monitorService }  from '../../monitoring/monitor.service.js'
 import { brokerService }   from '../broker/broker.service.js'
@@ -152,7 +152,7 @@ async function saveIdea(tradeIdea, userId) {
         await db.collection(COLLECTION).insertMany(children)
         logger.info(LOG, 'Idea saved', { id: enriched.id, asset: enriched.asset, immediate: isImmediate, forked, children: children.length })
 
-        return { ok: true, idea: _strip(children[0]), ideas: children.map(_strip) }
+        return { ok: true, idea: stripId(children[0]), ideas: children.map(stripId) }
     } catch (err) {
         logger.error(LOG, 'Failed to save idea', err)
         return { ok: false, error: err }
@@ -174,7 +174,7 @@ async function getIdeaById(id, userId, isAdmin = false) {
         const idea = await db.collection(COLLECTION).findOne({ id })
         if (!idea) return { ok: false, reason: 'not_found' }
         if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
-        return { ok: true, idea: _strip(idea) }
+        return { ok: true, idea: stripId(idea) }
     } catch (err) {
         logger.error(LOG, 'Failed to get idea by id', err)
         return { ok: false, error: err }
@@ -186,7 +186,7 @@ async function getIdeas(userId, isAdmin = false) {
         const db = await getDb()
         const query = isAdmin ? {} : { userId }
         const items = await db.collection(COLLECTION).find(query).sort({ savedAt: -1 }).toArray()
-        return items.map(_strip)
+        return items.map(stripId)
     } catch (err) {
         logger.error(LOG, 'Failed to get ideas', err)
         return []
@@ -342,7 +342,7 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         )
         if (!result) return { ok: false, reason: 'not_found' }
         logger.info(LOG, 'Idea updated', { id, patch })
-        return { ok: true, idea: _strip(result) }
+        return { ok: true, idea: stripId(result) }
     } catch (err) {
         logger.error(LOG, 'Failed to update idea', err)
         return { ok: false, error: err }
@@ -462,10 +462,4 @@ function _normalizeInvalidation(raw) {
 
     if (!range && conditions.length === 0) return null
     return { range, conditions }
-}
-
-function _strip(doc) {
-    if (!doc) return doc
-    const { _id, ...rest } = doc
-    return rest
 }

@@ -1,21 +1,22 @@
 import YahooFinance from 'yahoo-finance2'
+import { compactNumber } from '../services/format.util.js'
+import { createTtlCache } from '../services/ttlCache.util.js'
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] })
 
 // Short-TTL quote cache. A single agent turn can price the same ticker several
 // times (get_quote, get_quotes, get_risk_metrics, and server-side sizing all
 // hit yf.quote); within ~30s a price is effectively unchanged, so dedupe.
-const _quoteCache = new Map() // SYMBOL -> { at: epochMs, data }
 const QUOTE_TTL_MS  = 30_000
 const QUOTE_CACHE_MAX = 500
+const _quoteCache = createTtlCache({ ttlMs: QUOTE_TTL_MS, max: QUOTE_CACHE_MAX }) // SYMBOL -> data
 
 async function _quote(ticker) {
     const symbol = String(ticker).toUpperCase()
     const hit = _quoteCache.get(symbol)
-    if (hit && Date.now() - hit.at < QUOTE_TTL_MS) return hit.data
+    if (hit) return hit
     const data = await yf.quote(symbol)
-    if (_quoteCache.size >= QUOTE_CACHE_MAX) _quoteCache.clear()
-    _quoteCache.set(symbol, { at: Date.now(), data })
+    _quoteCache.set(symbol, data)
     return data
 }
 
@@ -496,15 +497,15 @@ export async function getCycleAnalysis(ticker, mode, calendarWindow = null, look
 // Per-ticker earnings snapshot: upcoming date + EPS estimate + last 4 quarterly
 // actuals vs estimates. Uses Yahoo's calendarEvents + earnings modules. The
 // upcoming date is typically a window (earningsDate[0] → earningsDate[1]).
-const _earnCache = new Map() // SYMBOL -> { at, text }
 const EARN_TTL_MS = 6 * 60 * 60 * 1000
+const _earnCache = createTtlCache({ ttlMs: EARN_TTL_MS }) // SYMBOL -> text
 
 export async function getEarnings(ticker) {
     const sym = String(ticker || '').toUpperCase().trim()
     if (!sym) return 'No ticker provided.'
 
     const hit = _earnCache.get(sym)
-    if (hit && Date.now() - hit.at < EARN_TTL_MS) return hit.text
+    if (hit) return hit
 
     let cal, chart
     try {
@@ -549,8 +550,7 @@ export async function getEarnings(ticker) {
     }
 
     const text = lines.join('\n')
-    if (_earnCache.size > 500) _earnCache.clear()
-    _earnCache.set(sym, { at: Date.now(), text })
+    _earnCache.set(sym, text)
     return text
 }
 
@@ -559,15 +559,15 @@ export async function getEarnings(ticker) {
 // inherently stale. We surface the `dateShortInterest` as-of prominently so the
 // agent never treats it as a live read. Equities/ADRs only — ETFs, crypto, FX
 // and futures have no short-interest figure.
-const _siCache = new Map() // SYMBOL -> { at, text }
 const SI_TTL_MS = 12 * 60 * 60 * 1000
+const _siCache = createTtlCache({ ttlMs: SI_TTL_MS }) // SYMBOL -> text
 
 export async function getShortInterest(ticker) {
     const sym = String(ticker || '').toUpperCase().trim()
     if (!sym) return 'No ticker provided.'
 
     const hit = _siCache.get(sym)
-    if (hit && Date.now() - hit.at < SI_TTL_MS) return hit.text
+    if (hit) return hit
 
     let stats, price
     try {
@@ -589,13 +589,6 @@ export async function getShortInterest(ticker) {
     const moM = (sharesShort != null && prior != null && prior > 0)
         ? `${(((sharesShort - prior) / prior) * 100).toFixed(1)}% vs prior month`
         : null
-    const fmtShares = v => {
-        const n = Number(v)
-        if (!Number.isFinite(n)) return null
-        if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`
-        if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`
-        return `${n.toFixed(0)}`
-    }
     const asOf = stats.dateShortInterest
         ? (stats.dateShortInterest instanceof Date ? stats.dateShortInterest : new Date(stats.dateShortInterest)).toISOString().slice(0, 10)
         : 'unknown'
@@ -604,13 +597,12 @@ export async function getShortInterest(ticker) {
         `${sym}${price.shortName ? ` (${price.shortName})` : ''} — short interest`,
         pctFloat   ? `Short % of float: ${pctFloat}` : null,
         daysCover  ? `Days to cover (short ratio): ${daysCover}` : null,
-        sharesShort != null ? `Shares short: ${fmtShares(sharesShort)}` : null,
+        sharesShort != null ? `Shares short: ${compactNumber(sharesShort)}` : null,
         moM ? `Change: ${moM}` : null,
         `As of: ${asOf} (FINRA settlement date — reported bi-monthly with a ~2-week lag; treat as background, not a live read).`,
     ].filter(Boolean).join('\n')
 
-    if (_siCache.size > 500) _siCache.clear()
-    _siCache.set(sym, { at: Date.now(), text })
+    _siCache.set(sym, text)
     return text
 }
 
@@ -618,15 +610,15 @@ export async function getShortInterest(ticker) {
 // Nearest-expiry options snapshot: put/call ratio (by open interest AND volume),
 // at-the-money implied volatility, and the available expiries. Quotes are
 // 15-min delayed on the free feed. Equities/ETFs with listed options only.
-const _optCache = new Map() // SYMBOL -> { at, text }
 const OPT_TTL_MS = 60 * 60 * 1000
+const _optCache = createTtlCache({ ttlMs: OPT_TTL_MS }) // SYMBOL -> text
 
 export async function getOptionsContext(ticker) {
     const sym = String(ticker || '').toUpperCase().trim()
     if (!sym) return 'No ticker provided.'
 
     const hit = _optCache.get(sym)
-    if (hit && Date.now() - hit.at < OPT_TTL_MS) return hit.text
+    if (hit) return hit
 
     let chain
     try {
@@ -674,8 +666,7 @@ export async function getOptionsContext(ticker) {
         expiries.length ? `Available expiries: ${expiries.join(', ')}` : null,
     ].filter(Boolean).join('\n')
 
-    if (_optCache.size > 500) _optCache.clear()
-    _optCache.set(sym, { at: Date.now(), text })
+    _optCache.set(sym, text)
     return text
 }
 
@@ -699,6 +690,7 @@ function _toInterval(timeSpan, multiplier) {
  * @param {string} ticker
  * @param {{ timeSpan?: string, multiplier?: number, from?: number, to?: number }} options
  *   from/to in Unix milliseconds (same convention as massive.provider)
+ * @returns {Promise<import('../services/price.service.js').CandleObject[]>}
  */
 export async function getTickerAggregates(ticker, options = {}) {
     const { timeSpan = 'day', multiplier = 1, from, to } = options
