@@ -26,7 +26,9 @@
 
 import { EventEmitter }      from 'node:events'
 import { getCTraderSocket }  from './ctrader.ws.provider.js'
+import * as ctrader          from './ctrader.provider.js'
 import { logger }            from '../services/logger.service.js'
+import { asList }            from '../api/broker/adapters/normalize.js'
 import { normSymbol as _normSymbol, baseSymbol as _baseSymbol } from '../services/brokerSymbol.service.js'
 
 const LOG = '[ctrader.session]'
@@ -73,6 +75,58 @@ export async function listCTraderAccounts(accessToken, isLive = false) {
         isLive:      !!a.isLive,
         traderLogin: a.traderLogin ?? null,
     }))
+}
+
+// REST trading-account id → traderLogin. The id↔login mapping is stable, so cache
+// it to avoid a REST round-trip every time an order is placed by REST account id.
+const _loginByRestId = new Map()   // `${userId}:${restAccountId}` → traderLogin
+
+/**
+ * Resolve a caller's accountId to a ProtoOA account ({ ctid, isLive, traderLogin }).
+ * The id can arrive in two shapes:
+ *   • the ctidTraderAccountId itself — what placeOrder() returns and the execution
+ *     feed / reconciler pass back (fast path: direct ctid match);
+ *   • a REST `/tradingaccounts` id — what ideas persist; this is NOT the ctid, so
+ *     map it REST id → traderLogin → ctid (the login is the shared join key).
+ * @param {string} userId
+ * @param {string|number|null} accountId
+ * @param {Array<{ ctid:number, isLive:boolean, traderLogin:number|null }>} protoAccounts
+ * @param {object} tokens  broker tokens (for the REST lookup)
+ */
+export async function matchCTraderAccount(userId, accountId, protoAccounts, tokens) {
+    if (accountId == null) {
+        if (protoAccounts.length === 1) return protoAccounts[0]
+        throw new Error('cTrader: multiple trading accounts — accountId is required')
+    }
+
+    const byCtid = protoAccounts.find(a => String(a.ctid) === String(accountId))
+    if (byCtid) return byCtid
+
+    const login = await loginForRestAccountId(userId, accountId, tokens)
+    if (login != null) {
+        const byLogin = protoAccounts.find(a => String(a.traderLogin) === String(login))
+        if (byLogin) return byLogin
+    }
+    throw new Error(`cTrader: account ${accountId} not found on this connection`)
+}
+
+/** Look up a REST trading-account id's traderLogin (cached; stable mapping). */
+export async function loginForRestAccountId(userId, accountId, tokens) {
+    const key = `${userId}:${accountId}`
+    if (_loginByRestId.has(key)) return _loginByRestId.get(key)
+    try {
+        const raw  = await ctrader.get('/tradingaccounts', tokens)
+        const list = asList(raw)
+        for (const a of list) {
+            const id    = String(a.id ?? a.accountId ?? '')
+            const login = a.traderLogin ?? a.login ?? a.accountNumber ?? null
+            if (id && login != null) _loginByRestId.set(`${userId}:${id}`, login)
+        }
+        return _loginByRestId.get(key) ?? null
+    } catch (err) {
+        logger.warn(LOG, `REST account lookup failed for ${accountId}: ${err.message}`)
+        return null
+    }
 }
 
 /**
