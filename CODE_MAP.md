@@ -61,7 +61,7 @@ services/
   logger.service.js  tokenUsage.service.js
 providers/
   anthropic.provider.js  openai.provider.js            LLMs
-  yahoofinance / massive / finnhub / fmp / sec / gnews / binance / chartImg / ohlcv
+  yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / chartImg / ohlcv
   ctrader.provider.js  ctrader.session.provider.js  ctrader.ws.provider.js
   ibkr.provider.js (retired) / ibkr.gateway.provider.js
   mongodb.provider.js       getDb(), stripId/stripIds

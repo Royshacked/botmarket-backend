@@ -31,6 +31,7 @@ TOKEN_BUDGET_USD
 # market data / news
 MASSIVE_API_KEY        FINNHUB_API_KEY     FMP_API_KEY
 GNEWS_API_KEY          CHART_IMG_API_KEY   SEC_USER_AGENT
+FRED_API_KEY           # macro/Fed calendar (free: fredaccount.stlouisfed.org)
 
 # brokers
 CTRADER_CLIENTID       CTRADER_SECRET      CTRADER_REDIRECT_URI   CTRADER_REDIRECT_URL_PROD
@@ -407,7 +408,7 @@ GET  /equity-curve   equity points (?fromMs=)
   alert) arrive here as bot messages.
 - **News feed** `/api/news-feed` — `GET /`, `GET /stream` (SSE), `GET /asset/:symbol`,
   `GET /asset/:symbol/sentiment`.
-- **Market** `/api/market/status` · **Calendar** `/api/calendar/earnings`, `/api/calendar/fda`.
+- **Market** `/api/market/status` · **Calendar** `/api/calendar/earnings` (Finnhub, +company logo/name), `/api/calendar/fed` (macro/FOMC via FRED), `/api/calendar/ipo` (Finnhub).
 - **Transcribe** `/api/transcribe` — raw audio → text (registered before `express.json`).
 
 ---

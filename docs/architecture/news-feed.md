@@ -226,6 +226,19 @@ MainPage.jsx
 
 ---
 
-## Future: Earnings Calendar
+## Calendar tabs (Axl Radar)
 
-Finnhub is already integrated as a provider but currently dormant. Planned use: earnings calendar events as a separate feed, displayed alongside the GNews feed. Will be a **third pipeline** — no changes to the existing two.
+The news feed shares its UI panel (`cmps/Radar/Radar.jsx`, "Axl Radar") with three
+calendar tabs, each a simple request/response REST call (no SSE) under
+`api/calendar/` — separate from the GNews pipeline above:
+
+- **Earnings** — `GET /api/calendar/earnings` (Finnhub `/calendar/earnings`). Next
+  trading day; rows enriched with company **name + logo** via Finnhub
+  `/stock/profile2`, cached two-layer (in-mem → Mongo `finnhub_profile_cache`, 30d).
+- **Fed** — `GET /api/calendar/fed` (`providers/fred.provider.js`, free FRED API).
+  ~45-day window of curated high-impact macro releases + FOMC decision dates
+  (FOMC dates are a static list — update annually; FRED release 101 reports daily).
+- **IPO** — `GET /api/calendar/ipo` (Finnhub `/calendar/ipo`, free). ~45-day window.
+
+The former **FDA** tab was removed: Finnhub's `/drug/fda-calendar` is premium-only
+and returned HTML on the free key, so it was repurposed into the Fed tab.
