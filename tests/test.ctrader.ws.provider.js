@@ -11,8 +11,8 @@
  */
 
 import 'dotenv/config'
-import { getDb }             from './mongodb.provider.js'
-import { getCTraderSocket }  from './ctrader.ws.provider.js'
+import { getDb }             from '../providers/mongodb.provider.js'
+import { getCTraderSocket }  from '../providers/ctrader.ws.provider.js'
 
 const GET_ACCOUNTS_REQ = 2149
 

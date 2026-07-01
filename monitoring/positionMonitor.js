@@ -1,7 +1,7 @@
 import { evaluateTree, evaluateConditions } from './monitor.orchestrator.js'
 import { logger }                            from '../services/logger.service.js'
 import { brokerService }                     from '../api/broker/broker.service.js'
-import { collectSymbols, extractLeaves }     from '../services/conditionTree.service.js'
+import { collectSymbols }                     from '../services/conditionTree.service.js'
 import {
     buildSymbolMap, buildVolumeCtx, persistConditionStates,
     round, remainingForAccount, resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe,

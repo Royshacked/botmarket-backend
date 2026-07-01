@@ -3,3 +3,8 @@ logs
 newsFeeds.json
 .env
 data/
+
+# Local scratch / one-off scripts — never commit (some hit prod DB/broker)
+_tmp_*
+_edit.mjs
+*.backup*.md

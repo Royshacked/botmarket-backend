@@ -178,7 +178,11 @@ export async function markRead(conversationId, userId) {
 export async function searchUsers(query, currentUserId) {
     if (!query || query.trim().length < 2) return []
     const db     = await getDb()
-    const regex  = new RegExp(query.trim(), 'i')
+    // Escape regex metacharacters before building the matcher: the query is raw
+    // user input, so an unescaped pattern like "(a+)+$" is a catastrophic-
+    // backtracking (ReDoS) vector, and stray metachars break intended matching.
+    const safe   = query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex  = new RegExp(safe, 'i')
     const users  = await db.collection('users')
         .find({
             id:       { $ne: String(currentUserId) },

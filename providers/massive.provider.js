@@ -35,14 +35,19 @@ export async function getTickerAggregates(ticker, options = {}) {
         }
         );
         const results = Array.isArray(response?.results) ? response.results : []
-        return results.map((bar) => ({
-            timestamp: typeof bar?.t === 'number' ? Math.floor(bar.t / 1000) : undefined,
-            open: bar?.o,
-            high: bar?.h,
-            low: bar?.l,
-            close: bar?.c,
-            volume: bar?.v,
-        }))
+        // Drop bars without a finite timestamp rather than emitting a candle with
+        // `timestamp: undefined`, which would survive into the monitor's candle
+        // merge as a malformed row.
+        return results
+            .filter((bar) => Number.isFinite(bar?.t))
+            .map((bar) => ({
+                timestamp: Math.floor(bar.t / 1000),
+                open: bar?.o,
+                high: bar?.h,
+                low: bar?.l,
+                close: bar?.c,
+                volume: bar?.v,
+            }))
 
   } catch (e) {
     logger.error(`couldn't get stocks aggregates for ${ticker}`, e);
