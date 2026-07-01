@@ -35,6 +35,12 @@ waiting ──► looking ──► hit ──► long / short ──► closed
 
 - **Entry conditions met** → status `hit` → order plan built → user confirms via
   `POST /api/trade-ideas/:id/orders` → orders placed → status `long`/`short`.
+- **Arm-time pre-flight.** When an idea is armed (→ `looking`), the update response carries
+  `preEntry` when the entry level is **already held** on the last closed candle but the
+  rising-edge won't fire (breakout already past). The frontend then prompts **Buy now / Edit /
+  Reset**: *Buy now* force-triggers via `POST /api/trade-ideas/:id/trigger` (`triggerEntryNow`:
+  → `hit` + built plan → normal confirm dialog); *Reset* re-arms `entryFloorAt=now` (the
+  `resetPreEntry` PATCH flag) so only a fresh cross fires; *Edit* reopens the idea in chat.
 - **Exits are always broker/stop-owned.** `touch` exit levels rest as broker closing orders
   (`positionId` reduce-only on hedging brokers); non-`touch` exits are watched by the software
   monitor and closed via a market order when they fire.
@@ -65,6 +71,13 @@ Entry / stop / TP are **condition trees**: AND/OR group nodes over typed leaves.
 - A leaf's **timeframe** resolves via `resolvePhaseTimeframe` (entry/stop/tp). Per-leaf pass/fail
   is persisted to `conditionStates` for the UI (both the tree path and the legacy flat-array path).
 - Adding an 8th type = new `evaluators/<type>.evaluator.js` + wire into `_evalOne` + the parser.
+- **Entry legs must currently hold (`requireHeld`).** On the entry path a `structured` leg fires
+  only if it had a fresh rising edge since the floor **AND** the level is still held on the last
+  candle — so a reverted breakout (e.g. "close above 1150 AND cumulative volume", price back below
+  1150) can't keep an AND leg latched true until a lagging sibling turns true. Scoped to entry
+  (stop/TP unaffected); only `structured` legs (`touch` rests as a broker/monitor order). The
+  evaluator's `stateLevel` snapshot mode (crossAbove→"is above now") backs both this and the
+  arm-time pre-flight.
 
 ### Invalidation (advisory, never executes)
 
@@ -73,6 +86,13 @@ derives from chart structure. `invalidation.monitor.js` watches it deterministic
 a `structured` leaf per edge — **no LLM in the hot path**). A candle **close** outside either edge
 fires a one-shot advisory alert (bot message + edit deep-link), latched by `invalidation_status`.
 It runs pre-entry AND in-position but only INFORMS; exits stay stop-owned.
+
+- **Pre-entry watches both edges** (above = "don't enter, too high"); **in-position watches only the
+  adverse edge** — long → `lower`, short → `upper` (a favorable-side cross is fine; the TP owns it).
+- The chat alert bubble offers **Update** (edit) / **Close** (in-position → resolves the open
+  position by symbol → `closePosition`) / **Dismiss**. Dismiss is persisted per-message
+  (`chat_messages.dismissed`) and never touches the `invalidation_status` latch, so a re-armed idea
+  still produces a fresh new alert.
 
 ---
 
@@ -117,8 +137,14 @@ the `BrokerAdapter` contract. **Consumers branch on `capabilities()` flags, neve
 - Paper is a real broker adapter, so the same monitor + reconciler drive it unchanged. Fills come
   from the app's OHLCV feed (NOT cTrader); cost model = spread (bps) + commission per trade.
 - Decided at **save time**: flipping the toggle does not convert or freeze existing ideas.
-- `trades` (append-only) captures BOTH paper and live, tagged `mode: 'paper' | 'live'`, since both
-  flow through the same reconciler.
+- **Working orders fill on an intrabar touch.** The paper fill engine triggers a resting limit/stop
+  against the latest candle's **high/low** (`latestQuote`), not its close — a long TP at 432 fills
+  when the high reaches 432 even if the bar closes back below. Only paper working orders (`touch`
+  exits/entries) go through this path; `structured` exits still fire at candle close via the monitor.
+- `trades` (append-only) captures BOTH paper and live, tagged `mode: 'paper' | 'live'`. Idea-linked
+  fills are captured by the reconciler; a paper position with **no matching idea** is still captured
+  directly (`captureOpenBare`, idealess fallback — mutually exclusive with the idea path, no double
+  capture) so every closed paper trade appears in trade history.
 
 ### Symbol normalization
 
@@ -134,7 +160,8 @@ everything else resolves by identity. Paper uses canonical symbols unchanged.
   brokerOrders, exitOrders, allocationRatio, portfolioId, broker, accounts…).
 - `trades` — append-only point-in-time capture of each opened/closed idea (paper + live).
 - `paperAccounts` / `paperPositions` / `paperOrders` — the virtual broker store.
-- `chat_conversations` / `chat_messages` — social DM + bot notifications.
+- `chat_conversations` / `chat_messages` — social DM + bot notifications (`chat_messages.dismissed`
+  persists a dismissed actionable alert bubble).
 - Portfolio/scanner chat state persisted per user/portfolio.
 
 ---

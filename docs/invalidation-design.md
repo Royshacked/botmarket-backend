@@ -71,6 +71,24 @@ to `drifting` (pre-entry, never-in-play). A full envelope with NO `approach` aut
 with price outside the zone, waits silently until arm (safe default — no false fire). One-sided
 ranges (only lower or only upper) skip the waiting machinery entirely (legacy single-edge behaviour).
 
+## In-position adverse edge + alert actions — **BUILT 2026-07-01** (not yet live-verified)
+
+Two in-position refinements (matches the "yellow = structure break" model in *Lifecycle /
+monitoring behavior* below, which the code wasn't honoring):
+
+- **In-position watches only the ADVERSE edge.** `buildEnvelopeEdges` still yields both edges, but
+  `checkInvalidation` filters to the adverse one when `inPosition` — long → `lower`, short → `upper`
+  (via `idea.direction`/`status`). Pre-entry is unchanged (both edges — you also don't want to enter
+  too high). Fixes a long alerting when price closed *above* the upper edge (favorable; the TP owns
+  that exit).
+- **Alert bubble actions.** `InvalidationAlertBubble` now renders **Update** (edit) / **Close**
+  (in-position only → `INVALIDATION_CLOSE_TRADE` eventBus → `MainPage` resolves the open position by
+  the idea's symbol/broker-alias → `closePosition`) / **Dismiss**.
+- **Dismiss is persisted per-message.** New `chat_messages.dismissed` flag + `dismissMessage` service
+  / `POST /api/chat/conversations/:id/messages/:msgId/dismiss`. The bubble renders from `msg.dismissed`,
+  so the choice survives reload. It deliberately does **not** touch `invalidation_status`, so a
+  re-armed idea (edit / Update) still emits a brand-new alert message.
+
 ## Why this exists / what it replaces
 
 The word **thesis** was overloaded into three incompatible meanings (a structured

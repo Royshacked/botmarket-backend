@@ -46,10 +46,11 @@ A real-time chat layer connecting users and the platform bot. Users can message 
   conversationId: string,
   senderId:       string,          // userId or 'ar2trade_bot'
   content:        string,          // plain text for now
-  type:           'text',          // 'text' | 'portfolio_card' | 'idea_card' | 'scan_card' | 'action_card' (future)
-  payload:        null,            // future: { portfolioId } | { ideaId } | { scanId } | { actions[] }
+  type:           'text',          // 'text' | 'invalidation_alert' | 'portfolio_review' | …cards (future)
+  payload:        null,            // e.g. invalidation_alert: { ideaId, asset, status, edge, level, inPosition, … }
   createdAt:      epoch ms,
   readAt:         epoch ms | null, // null = unread
+  dismissed:      boolean,         // (as-built) actionable alert bubble acknowledged; renders collapsed, no re-prompt
 }
 ```
 
@@ -145,6 +146,7 @@ Clicking the chat icon opens a panel (or dedicated page):
 | `GET` | `/api/chat/conversations/:id/messages?before=<cursor>&limit=50` | Paginated message history |
 | `POST` | `/api/chat/conversations/:id/messages` | Send a message (also emits WS push) |
 | `POST` | `/api/chat/conversations/:id/read` | Mark all messages in conv as read |
+| `POST` | `/api/chat/conversations/:id/messages/:msgId/dismiss` | (as-built) persist an alert bubble's `dismissed` flag |
 | `GET` | `/api/chat/users/search?q=` | Search users to start a new DM |
 
 ### WebSocket events
@@ -208,6 +210,7 @@ chat_messages: [
 - `getConversations(userId)` → returns all conversations with unread count per conv (aggregation over `chat_messages` where `readAt: null` and `senderId ≠ userId`).
 - `getMessages(conversationId, userId, before, limit = 50)` → paginated history, verifies participant membership.
 - `markRead(conversationId, userId)` → `$set { readAt: Date.now() }` on all unread messages where `senderId ≠ userId`.
+- `dismissMessage(conversationId, messageId, userId)` *(as-built)* → participant-guarded `$set { dismissed: true }` on one message; used by the actionable invalidation-alert bubble so a dismissed alert stays collapsed across reload. Message-level only — never touches the idea's `invalidation_status` latch.
 - `searchUsers(query, currentUserId)` → text search on `users` collection by name/email, excludes self and `ar2trade_bot`.
 - `seedBotConversation(userId)` → calls `getOrCreateConversation(userId, 'ar2trade_bot')`, then if the conv is new sends a welcome message from the bot.
 

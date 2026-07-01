@@ -104,7 +104,7 @@ Fields added to idea documents (all optional, non-destructive):
 | Field | Type | Set when |
 |---|---|---|
 | `activatedAt` | ms timestamp | Status transitions to `looking` |
-| `entryFloorAt` | ms timestamp | User chooses "reset window" (else absent → floor falls back to `savedAt`) |
+| `entryFloorAt` | ms timestamp | User chooses "reset window" / pre-flight "Reset" (`resetWindow` / `resetPreEntry` flags); else absent → floor falls back to `savedAt` |
 | `entryTriggeredAt` | ms timestamp | Entry conditions trigger |
 | `triggeredWhileWaiting` | boolean | Entry fired on an event that predates `activatedAt` |
 | `triggerEventAt` | ms timestamp | The triggering event's candle time (when `triggeredWhileWaiting`) |
@@ -144,6 +144,30 @@ where the condition *transitions* into true after the floor). LLM evaluators
 (indicator / chart / news) read current state and timestamp a pass as "now", so the
 `triggeredWhileWaiting` flag is precise only for structured-driven entries.
 
+### Entry legs must currently hold (`requireHeld`)
+
+A rising edge since the floor is necessary but **not sufficient** on the entry path. A
+`structured` entry leg is evaluated with `{ requireHeld: true }` (passed from `_checkEntry`,
+tree + flat), so it passes only if the edge fired **and** the level is still held on the last
+candle (`evaluate` re-checks a snapshot; returns `{ pass:false, reason:'level_not_held' }`
+otherwise). This stops a reverted breakout from staying latched true and firing an AND once a
+lagging sibling (e.g. cumulative volume) later turns true — the classic "close above 1150 AND
+volume, price back below 1150" false entry. Scoped to entry only (stop/TP unchanged); only
+`structured` legs (`touch` legs rest as broker/monitor orders, not this path).
+
+The evaluator's `stateLevel` snapshot mode (`floorAt=null`, `crossAbove`→`gt` / `crossBelow`→`lt`)
+answers "is the level held right now?" — reused by both `requireHeld` and the pre-flight below.
+
+### Arm-time pre-flight (already-satisfied entries)
+
+When an idea is armed (→ `looking`, `tradeIdeas.service.updateIdea`), `monitor.service.preflightEntry(idea)`
+runs once (structured-only trees): it compares the **edge** eval (real floor) against the **state**
+eval (`stateLevel`). If the level is already held but the edge won't fire (breakout already past, so
+the idea would sit forever), the update returns `preEntry:{ alreadySatisfied, close }`. The frontend
+prompts **Buy now / Edit / Reset** — *Buy now* → `POST /:id/trigger` (`triggerEntryNow`: → `hit` +
+built plan → confirm dialog); *Reset* → `resetPreEntry` (re-stamp `entryFloorAt=now`); *Edit* → reopen
+in chat. Best-effort; never blocks the status change.
+
 ---
 
 ## Condition orchestrator
@@ -154,6 +178,7 @@ The two key pieces of context threaded through all evaluations:
 
 - **`floorAt`** — the detection floor (`entryFloorAt ?? savedAt` for entry; `activatedAt` for exits). Structured conditions use it for windowed rising-edge detection and to report a trigger candle timestamp; the chart evaluator uses it to constrain pattern recognition to candles formed at/after the floor.
 - **`priorFindings`** — accumulated list of structured condition texts that already passed earlier in the same AND gate. Passed to chart evaluations as causal context.
+- **`opts`** — an options object threaded through `evaluateTree`/`evaluateConditions`→`_evalOne`→`evaluate`: `stateLevel` (snapshot "is the level held now", collapses crosses to their threshold) and `requireHeld` (entry legs need edge **and** currently-held). Off by default; the entry path sets `requireHeld`, the arm-time pre-flight uses both.
 
 ### AND (entry conditions) — Gate-then-verify with context injection
 

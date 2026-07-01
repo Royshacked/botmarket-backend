@@ -26,7 +26,7 @@ api/
   orchestrator/           Trade Agent SSE chat        POST /api/orchestrator/stream
   trade-ideas/            idea CRUD + order placement /api/trade-ideas/*
     tradeIdeas.service.js     save/get/update/delete, broker forking
-    ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea
+    ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now")
     exitOrders.service.js     in-position exit (re)arming
   portfolio/              Portfolio Agent + review    /api/portfolio/*
   scanner/                Scanner Agent + saved scans /api/scanner/*
@@ -59,6 +59,7 @@ services/
   price.service.js  market.service.js  timeframe.service.js  brokerSymbol.service.js
   format.util.js  http.util.js  ttlCache.util.js  priceStats.util.js  cycleAnalysis.service.js
   logger.service.js  tokenUsage.service.js
+  tradeCapture.service.js   append-only `trades` history (captureOpen / captureOpenBare / captureClose)
 providers/
   anthropic.provider.js  openai.provider.js            LLMs
   yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / chartImg / ohlcv
@@ -66,8 +67,8 @@ providers/
   ibkr.provider.js (retired) / ibkr.gateway.provider.js
   mongodb.provider.js       getDb(), stripId/stripIds
 monitoring/
-  monitor.service.js        the 60s poll loop
-  monitor.orchestrator.js   evaluateTree / evaluateConditions → _evalOne
+  monitor.service.js        the 60s poll loop; preflightEntry (arm-time already-satisfied check)
+  monitor.orchestrator.js   evaluateTree / evaluateConditions → _evalOne (opts: stateLevel, requireHeld)
   evaluators/               touch · structured · indicator · time · volume · news · chart
   execution.reconciler.js   broker-authoritative fill/close → idea status
   invalidation.monitor.js   entry-range watcher (advisory, never executes)

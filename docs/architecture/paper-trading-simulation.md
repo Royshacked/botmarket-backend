@@ -123,10 +123,17 @@ Market orders fill instantly at observed price. **Working orders** (resting STOP
 STOP/LIMIT exits the reconciler places) need a watcher — the job a real broker's execution feed does
 intrabar. `PaperBroker.startExecutionFeed` registers the account with a fill loop that:
 
-1. pulls latest price per symbol with open paper working orders (reuse `ohlcv.provider`, ~60s),
-2. checks whether price crossed each order's trigger,
+1. pulls the latest **quote** per symbol with open paper working orders (reuse `ohlcv.provider`, ~30s),
+2. checks whether the candle's **range** reached each order's trigger — an intrabar TOUCH, not a close,
 3. on fill: mutate `paperPositions` + `cashBalance`, then
    `executionBus.emit({ type:'position.opened|reduced|closed', positionId, … })`.
+
+`isTriggered(order, quote)` takes `{ c, h, l }` and fires on the candle **high** for at/above tests
+(long stop / short limit) and the **low** for at/below (long limit / short stop) — so a resting
+limit/stop fills the instant price trades through the level, matching a real broker (a long TP at 432
+fills when the high hits 432 even if the bar closes below). Quote via `latestQuote(symbol)` (`{c,h,l}`,
+1min→day fallback); `latestPrice` (close, used for P&L marks) delegates to it. Only paper working orders
+(`touch` exits/entries) reach this engine — `structured` exits go to the monitor's candle-close path.
 
 The reconciler then runs unmodified. Caveat: this inherits intrabar path ambiguity (stop & TP in the
 same poll window) — minor in forward mode (frequent live polling), unlike historical replay.
@@ -152,13 +159,17 @@ This yields live capture for free (`mode:'live'`).
 2. **Fill engine** — working-order watch loop → synthetic execution events. Resting entries + stops/TPs
    fire; reconciler closes them.
    **DONE 2026-06-30.** Files: `monitoring/paperFill.service.js` (global 30s sweep — env
-   `PAPER_FILL_INTERVAL_MS` — over all users' `status:'working'` paper orders; one price lookup per
-   symbol; `isTriggered(order,price)` rule: stop→long≥/short≤ trigger, limit→long≤/short≥, holds for
+   `PAPER_FILL_INTERVAL_MS` — over all users' `status:'working'` paper orders; one quote lookup per
+   symbol; `isTriggered(order,quote)` rule: stop→long≥/short≤ trigger, limit→long≤/short≥, holds for
    entries AND closing exits since an exit carries the closing side), started in `server.js`. Position
    open/reduce extracted to `api/broker/paperExecution.service.js` (`openPosition`/`reducePosition`/
    `latestPrice`), shared by the adapter and the engine; events carry `orderId` so the reconciler
    matches resting-entry fills (`_onOpened`) and exit slices (`_onReduced`/`_onClosed`). Fills at the
-   trigger price (slippage/gaps deferred to Phase 3). Trigger logic unit-tested 9/9; not yet live-routed.
+   trigger price (slippage/gaps deferred to Phase 3). Trigger logic unit-tested; not yet live-routed.
+   **Update (2026-07-01) — intrabar touch:** `isTriggered` now takes a quote `{c,h,l}` and fires on the
+   candle **high** for at/above tests, **low** for at/below (a resting order fills on an intrabar TOUCH,
+   not only a close). New `latestQuote(symbol)` (`{c,h,l}`); `latestPrice` (close, for P&L) delegates to
+   it. `paperExecution` events now also carry `userId` (for idealess capture, Phase 4). Tests: `tests/unit/paperFill.test.js`.
    NOTE: end-to-end exits depend on `routeExits` populating `idea.nativeExit` for `broker:'paper'`
    (a Phase 5 routing detail) so `placeExits` rests the closing orders the engine then fills.
 3. **Costs + equity curve** — spread/commission in fills; equity = cash + unrealized.
@@ -185,6 +196,13 @@ This yields live capture for free (`mode:'live'`).
    `brokerService.getAccount`, uniform both modes) — never a reference to the mutable idea. Capture is
    best-effort (never throws into the reconciler). `listTrades(userId,{mode,status,portfolioId})` read
    ready for Phase 5. No import cycle.
+   **Update (2026-07-01) — idealess paper fallback:** capture depended on the reconciler matching an
+   active idea, so a paper position with no idea linkage produced NO trade row (invisible in recent
+   trades). Added `captureOpenBare(exec)` (idea-less open record built from the execution event, idempotent
+   on `accountId+positionId`); `execution.reconciler` calls it on the **no-idea** branch of `_onOpened`,
+   and calls `captureClose` on the no-idea branch of `_onClosed` — paper only, mutually exclusive with the
+   idea path (no double capture). Paper execution events now carry `userId` so the idealess record has an
+   owner. Result: every closed paper trade appears in `trades`.
 5. **Frontend + routing** — global paper toggle (profile), account-size config, equity/P&L readout,
    paper-vs-live badge, trade-history view.
    **DONE 2026-06-30** (both repos build green). **Routing:** `enabled` flag on the paper account
