@@ -18,9 +18,10 @@ import * as ctrader                from '../../../providers/ctrader.provider.js'
 import { brokerConnectionService } from '../brokerConnection.service.js'
 import { logger }                  from '../../../services/logger.service.js'
 import { executionBus }            from '../../../services/executionBus.js'
-import { toAppAsset }              from '../../../services/brokerSymbol.service.js'
+import { toExecution, TRADE_SIDE, PROTO_ORDER_TYPE } from './ctrader.execution.js'
 import {
     listCTraderAccounts,
+    matchCTraderAccount,
     getCTraderSession,
     normalizeVolume,
     lotsToVolume,
@@ -31,8 +32,9 @@ import {
 const LOG = '[ctrader.adapter]'
 
 // ProtoOA enums (sent as integers in JSON).
+// TRADE_SIDE / PROTO_ORDER_TYPE (and the inbound execution enums) live in
+// ctrader.execution.js alongside the translator; imported back where still used.
 const ORDER_TYPE   = { market: 1, limit: 2, stop: 3 }
-const TRADE_SIDE   = { long: 1, short: 2 }
 const PT = {
     NEW_ORDER:      2106,   // ProtoOANewOrderReq
     // NOTE: 2107 is ProtoOATrailingSLChangedEvent — CancelOrder/AmendOrder are 2108/2109.
@@ -43,22 +45,9 @@ const PT = {
     RECONCILE:      2124,   // ProtoOAReconcileReq → open positions/orders
 }
 
-// Inbound ProtoOA enums for translating ProtoOAExecutionEvent (2126).
-const EXEC_TYPE = {       // ProtoOAExecutionType
-    ORDER_ACCEPTED: 2, ORDER_FILLED: 3, ORDER_CANCELLED: 5,
-    ORDER_EXPIRED: 6, ORDER_REJECTED: 7, ORDER_PARTIAL_FILL: 11,
-}
-const POSITION_STATUS  = { OPEN: 1, CLOSED: 2 }   // ProtoOAPositionStatus
-const PROTO_ORDER_TYPE = { LIMIT: 2, STOP: 3 }    // a TP closes via LIMIT, an SL via STOP
-const MONEY_SCALE      = 100   // ProtoOA money fields are integer cents (moneyDigits=2)
-
 // Module-level so the idempotency guard survives the factory minting a fresh
 // adapter per call — the listener lives on the cached (singleton) session.
 const _wiredFeeds = new Set()  // `${env}:${ctid}`
-
-// REST trading-account id → traderLogin. The id↔login mapping is stable, so cache
-// it to avoid a REST round-trip every time an order is placed by REST account id.
-const _loginByRestId = new Map()   // `${userId}:${restAccountId}` → traderLogin
 
 export class CTraderAdapter extends BrokerAdapter {
 
@@ -415,82 +404,13 @@ export class CTraderAdapter extends BrokerAdapter {
         _wiredFeeds.add(key)
         session.on('execution', payload => {
             try {
-                const exec = this._toExecution(session, payload)
+                const exec = toExecution(session, payload)
                 if (exec) executionBus.emit('execution', exec)
             } catch (err) {
                 logger.error(LOG, `execution translate error (${key}):`, err.message)
             }
         })
         logger.info(LOG, `Execution feed wired for ${key}`)
-    }
-
-    /**
-     * Translate a ProtoOAExecutionEvent (2126) into a normalized BrokerExecution,
-     * or null for events the reconciler doesn't care about (swaps, deposits, acks).
-     * @returns {import('./broker.interface.js').BrokerExecution|null}
-     */
-    _toExecution(session, p) {
-        const order    = p?.order ?? {}
-        const deal     = p?.deal ?? {}
-        const position = p?.position ?? {}
-        const closeDetail = deal.closePositionDetail ?? null
-
-        const positionId = position.positionId ?? deal.positionId ?? order.positionId
-        const symbolId   = order.tradeData?.symbolId ?? position.tradeData?.symbolId
-        const tradeSide  = position.tradeData?.tradeSide ?? order.tradeData?.tradeSide
-
-        // Reverse the broker symbol back to the app's canonical asset (e.g. US100 →
-        // NQ) so the reconciler can match `exec.symbol` to the idea's stored `asset`.
-        const brokerName = symbolId != null ? session.symbolNameById(symbolId) : null
-        const appAsset   = brokerName ? toAppAsset('ctrader', brokerName) : null
-
-        const base = {
-            broker:    'ctrader',
-            accountId: String(p?.ctidTraderAccountId ?? session.ctid),
-            at:        Number(deal.executionTimestamp ?? p?.timestamp ?? Date.now()),
-            ...(order.orderId   != null && { orderId:    String(order.orderId) }),
-            ...(positionId      != null && { positionId: String(positionId) }),
-            ...(appAsset        != null && { symbol: appAsset }),
-            ...(tradeSide       != null && { direction: tradeSide === TRADE_SIDE.short ? 'short' : 'long' }),
-        }
-
-        switch (p?.executionType) {
-            case EXEC_TYPE.ORDER_REJECTED:
-                return { ...base, type: 'order.rejected' }
-            case EXEC_TYPE.ORDER_CANCELLED:
-            case EXEC_TYPE.ORDER_EXPIRED:
-                return { ...base, type: 'order.cancelled' }
-            case EXEC_TYPE.ORDER_FILLED:
-            case EXEC_TYPE.ORDER_PARTIAL_FILL: {
-                const fullyClosed = position.positionStatus === POSITION_STATUS.CLOSED
-                const closing = fullyClosed || order.closingOrder === true || closeDetail != null
-                if (closing) {
-                    // A partial close (position still OPEN) must NOT close the idea — it's
-                    // one slice of a multi-level exit. Report it as position.reduced so the
-                    // reconciler records the slice and re-syncs the remaining exit orders;
-                    // only a full close (positionStatus CLOSED) flips the idea to closed.
-                    return {
-                        ...base,
-                        type:   fullyClosed ? 'position.closed' : 'position.reduced',
-                        reason: _closeReason(order),
-                        ...(deal.executionPrice != null && { price: deal.executionPrice }),
-                        ...(deal.filledVolume   != null && { quantity: deal.filledVolume }),
-                        ...(closeDetail?.profit != null && { pnl: closeDetail.profit / MONEY_SCALE }),
-                    }
-                }
-                // A fill that doesn't close → a new/added position.
-                return {
-                    ...base,
-                    type: position.positionStatus === POSITION_STATUS.OPEN ? 'position.opened' : 'order.filled',
-                    ...(deal.executionPrice  != null && { price: deal.executionPrice }),
-                    ...(deal.filledVolume    != null && { quantity: deal.filledVolume }),
-                    ...(position.stopLoss    != null && { stopLoss: position.stopLoss }),
-                    ...(position.takeProfit  != null && { takeProfit: position.takeProfit }),
-                }
-            }
-            default:
-                return null   // ORDER_ACCEPTED, SWAP, DEPOSIT_WITHDRAW, … — not reconciled
-        }
     }
 
     // ── Private ────────────────────────────────────────────────────────────────
@@ -505,56 +425,12 @@ export class CTraderAdapter extends BrokerAdapter {
         const accounts = await listCTraderAccounts(tokens.accessToken)
         if (accounts.length === 0) throw new Error('cTrader: no trading accounts on this connection')
 
-        const acct = await this._matchAccount(userId, accountId, accounts, tokens)
+        const acct = await matchCTraderAccount(userId, accountId, accounts, tokens)
         return getCTraderSession({
             ctid:           acct.ctid,
             isLive:         acct.isLive,
             getAccessToken: async () => (await this._freshTokens(userId)).accessToken,
         })
-    }
-
-    /**
-     * Resolve the caller's accountId to a ProtoOA account ({ ctid, isLive, traderLogin }).
-     * The id can arrive in two shapes:
-     *   • the ctidTraderAccountId itself — what placeOrder() returns and the execution
-     *     feed / reconciler pass back (fast path: direct ctid match);
-     *   • a REST `/tradingaccounts` id — what ideas persist; this is NOT the ctid, so
-     *     map it REST id → traderLogin → ctid (the login is the shared join key).
-     */
-    async _matchAccount(userId, accountId, protoAccounts, tokens) {
-        if (accountId == null) {
-            if (protoAccounts.length === 1) return protoAccounts[0]
-            throw new Error('cTrader: multiple trading accounts — accountId is required')
-        }
-
-        const byCtid = protoAccounts.find(a => String(a.ctid) === String(accountId))
-        if (byCtid) return byCtid
-
-        const login = await this._loginForRestAccountId(userId, accountId, tokens)
-        if (login != null) {
-            const byLogin = protoAccounts.find(a => String(a.traderLogin) === String(login))
-            if (byLogin) return byLogin
-        }
-        throw new Error(`cTrader: account ${accountId} not found on this connection`)
-    }
-
-    /** Look up a REST trading-account id's traderLogin (cached; stable mapping). */
-    async _loginForRestAccountId(userId, accountId, tokens) {
-        const key = `${userId}:${accountId}`
-        if (_loginByRestId.has(key)) return _loginByRestId.get(key)
-        try {
-            const raw  = await ctrader.get('/tradingaccounts', tokens)
-            const list = asList(raw)
-            for (const a of list) {
-                const id    = String(a.id ?? a.accountId ?? '')
-                const login = a.traderLogin ?? a.login ?? a.accountNumber ?? null
-                if (id && login != null) _loginByRestId.set(`${userId}:${id}`, login)
-            }
-            return _loginByRestId.get(key) ?? null
-        } catch (err) {
-            logger.warn(LOG, `REST account lookup failed for ${accountId}: ${err.message}`)
-            return null
-        }
     }
 
     /**
@@ -602,15 +478,6 @@ export class CTraderAdapter extends BrokerAdapter {
         logger.info(LOG, `Account ID ${accountId} cached for user ${userId}`)
         return accountId
     }
-}
-
-// Infer why a position closed from the order that closed it: a native take-profit
-// is a LIMIT order, a native stop-loss is a STOP order; anything else (a manual
-// market close) we can't attribute, so report 'manual'.
-function _closeReason(order) {
-    if (order?.orderType === PROTO_ORDER_TYPE.LIMIT) return 'tp'
-    if (order?.orderType === PROTO_ORDER_TYPE.STOP)  return 'stop'
-    return 'manual'
 }
 
 

@@ -10,11 +10,11 @@
 
 import 'dotenv/config'
 import { getCandles }         from '../providers/ohlcv.provider.js'
-import { parseCondition }     from './parsers/condition.parser.js'
-import { evaluate }           from './evaluators/structured.evaluator.js'
-import { evaluateIndicator }  from './evaluators/indicator.evaluator.js'
-import { evaluateNews }       from './evaluators/news.evaluator.js'
-import { evaluateConditions } from './monitor.orchestrator.js'
+import { parseCondition }     from '../monitoring/parsers/condition.parser.js'
+import { evaluate }           from '../monitoring/evaluators/structured.evaluator.js'
+import { evaluateIndicator }  from '../monitoring/evaluators/indicator.evaluator.js'
+import { evaluateNews }       from '../monitoring/evaluators/news.evaluator.js'
+import { evaluateConditions } from '../monitoring/monitor.orchestrator.js'
 
 const SYMBOL    = 'AAPL'
 const TIMEFRAME = 'daily'

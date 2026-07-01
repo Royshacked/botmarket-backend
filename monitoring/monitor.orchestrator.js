@@ -168,21 +168,31 @@ function _nodeCost(node) {
  * @param {object}      symbolMap     Map of symbol → Candle[]
  * @param {string}      defaultSymbol The traded asset
  * @param {number|null} floorAt       ms timestamp; only events at/after this count
+ * @param {Array|null}  out           when provided, per-leaf { key, pass, at } states
+ *                                    are pushed (same shape/semantics as the tree path)
+ *                                    so flat-format ideas persist conditionStates too.
  * @returns {Promise<{ triggered: boolean, which?: string, triggerAt?: number|null }>}
  */
-export async function evaluateConditions(conditions, logic, symbolMap, defaultSymbol, floorAt = null) {
+export async function evaluateConditions(conditions, logic, symbolMap, defaultSymbol, floorAt = null, out = null) {
     if (!Array.isArray(conditions) || conditions.length === 0) {
         return { triggered: false }
     }
 
     return logic === 'OR'
-        ? _evalOR(conditions, symbolMap, defaultSymbol, floorAt)
-        : _evalAND(conditions, symbolMap, defaultSymbol, floorAt)
+        ? _evalOR(conditions, symbolMap, defaultSymbol, floorAt, out)
+        : _evalAND(conditions, symbolMap, defaultSymbol, floorAt, out)
+}
+
+// Record a flat leaf's evaluated state, matching the tree path's out.push exactly:
+// keyed by leafStateKey, pass coerced to bool, `at` = triggerAt (or now) on pass else null.
+function _recordFlat(out, cond, result) {
+    if (!out) return
+    out.push({ key: leafStateKey(cond), pass: !!result.pass, at: result.pass ? (result.triggerAt ?? Date.now()) : null })
 }
 
 // ─── AND: sequential gate-then-verify ─────────────────────────────────────────
 
-async function _evalAND(conditions, symbolMap, defaultSymbol, floorAt) {
+async function _evalAND(conditions, symbolMap, defaultSymbol, floorAt, out = null) {
     const sorted = [...conditions].sort(
         (a, b) => (COST[a.type] ?? 0) - (COST[b.type] ?? 0)
     )
@@ -192,6 +202,7 @@ async function _evalAND(conditions, symbolMap, defaultSymbol, floorAt) {
     const priorFindings = []
     for (const cond of sorted) {
         const result = await _evalOne(cond, symbolMap, defaultSymbol, floorAt, priorFindings)
+        _recordFlat(out, cond, result)
         const label  = result.condition?.slice(0, 60) ?? '(malformed)'
         const type   = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
 
@@ -212,13 +223,14 @@ async function _evalAND(conditions, symbolMap, defaultSymbol, floorAt) {
 
 // ─── OR: sequential, short-circuit on first true ─────────────────────────────
 
-async function _evalOR(conditions, symbolMap, defaultSymbol, floorAt) {
+async function _evalOR(conditions, symbolMap, defaultSymbol, floorAt, out = null) {
     const sorted = [...conditions].sort(
         (a, b) => (COST[a?.type] ?? 0) - (COST[b?.type] ?? 0)
     )
     for (const cond of sorted) {
         // OR branches are independent — chart gets floorAt but no prior findings
         const result = await _evalOne(cond, symbolMap, defaultSymbol, floorAt, [])
+        _recordFlat(out, cond, result)
         const type   = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
         const icon   = result.pass ? '✓' : '✗'
         logger.info(LOG, `  ${icon} [${type}] "${result.condition?.slice(0, 60) ?? '(malformed)'}"`)

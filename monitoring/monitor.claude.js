@@ -55,11 +55,11 @@ export async function claudeText(systemPrompt, userMessage) {
 }
 
 /**
- * Call Claude Sonnet with a chart image URL + text prompt.
+ * Call Claude Sonnet with a chart image + text prompt.
  * Used by the chart evaluator for visual pattern recognition.
  * @param {string} systemPrompt
  * @param {string} userMessage
- * @param {string} imageUrl     publicly accessible chart image URL
+ * @param {string} imageBase64  base64-encoded PNG bytes of the chart
  * @returns {Promise<string>}
  */
 export async function claudeVision(systemPrompt, userMessage, imageBase64) {

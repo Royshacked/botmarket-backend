@@ -1,11 +1,12 @@
 import { evaluateTree, evaluateConditions } from './monitor.orchestrator.js'
 import { logger }                            from '../services/logger.service.js'
 import { brokerService }                     from '../api/broker/broker.service.js'
-import { collectSymbols, extractLeaves }     from '../services/conditionTree.service.js'
+import { collectSymbols }                     from '../services/conditionTree.service.js'
 import {
     buildSymbolMap, buildVolumeCtx, persistConditionStates,
     round, remainingForAccount, resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe,
 } from './monitorUtils.js'
+import { buildExitOrder, exitOrderRecord } from './exitOrders.util.js'
 
 const LOG        = '[positionMonitor]'
 const COLLECTION = 'ideas'
@@ -67,7 +68,7 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
         ;({ triggered, which } = await evaluateTree(tree, symbolMap, asset, floorAt, [], states, volCtx))
     } else if (Array.isArray(conditions) && conditions.length > 0) {
         const logic = idea[`${phase}_logic`] ?? 'OR'
-        ;({ triggered, which } = await evaluateConditions(conditions, logic, symbolMap, asset, floorAt))
+        ;({ triggered, which } = await evaluateConditions(conditions, logic, symbolMap, asset, floorAt, states))
     } else {
         logger.info(LOG, `[${id}] No ${reason} conditions defined — skipping ${reason} check`)
         return false
@@ -137,19 +138,16 @@ async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose) {
         if (qty > remaining) qty = remaining
         if (!(qty > 0)) continue
         try {
-            const res = await brokerService.placeOrder(link.broker, idea.userId, link.accountId, {
-                symbol:    idea.brokerSymbol ?? idea.asset,
-                direction: idea.direction === 'long' ? 'short' : 'long',
-                quantity:  qty,
-                type:      'market',
-                ...(link.positionId != null && { positionId: link.positionId }),
-            })
-            newOrders.push({
+            const res = await brokerService.placeOrder(link.broker, idea.userId, link.accountId, buildExitOrder(idea, {
+                type:       'market',
+                qty,
+                positionId: link.positionId,
+            }))
+            newOrders.push(exitOrderRecord({
                 accountId: String(link.accountId), broker: link.broker, leg,
                 type: 'market', price: null, quantity: qty, positionId: link.positionId ?? null,
                 orderId: res?.orderId != null ? String(res.orderId) : null,
-                status: 'working', placedAt: Date.now(),
-            })
+            }))
             logger.info(LOG, `[${idea.id}] Monitor close sent — ${leg} ${qty} market (acct ${link.accountId})`)
         } catch (err) {
             logger.error(LOG, `[${idea.id}] Monitor close failed (acct ${link.accountId}): ${err.message}`)

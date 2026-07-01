@@ -2,15 +2,13 @@
 // (resolved dates) and thesis, and holds rich per-candidate analysis so a later
 // trade-idea chat can be pre-loaded from a clicked candidate.
 
-import { getDb }   from '../../providers/mongodb.provider.js'
+import { getDb, stripId }   from '../../providers/mongodb.provider.js'
 import { logger }  from '../../services/logger.service.js'
 
 const LOG        = '[scan]'
 const COLLECTION = 'scans'
 
 export const scanService = { saveScan, getScans, getScanById, updateScan, deleteScan }
-
-const _strip = (doc) => { if (!doc) return doc; const { _id, ...rest } = doc; return rest }
 
 async function saveScan(scan, userId) {
     try {
@@ -29,7 +27,7 @@ async function saveScan(scan, userId) {
         }
         await db.collection(COLLECTION).insertOne(doc)
         logger.info(LOG, 'Scan saved', { id: doc.id, candidates: doc.candidates.length })
-        return { ok: true, scan: _strip(doc) }
+        return { ok: true, scan: stripId(doc) }
     } catch (err) {
         logger.error(LOG, 'Failed to save scan', err)
         return { ok: false, error: err }
@@ -41,7 +39,7 @@ async function getScans(userId, isAdmin = false) {
         const db    = await getDb()
         const query = isAdmin ? {} : { userId }
         const rows  = await db.collection(COLLECTION).find(query).sort({ savedAt: -1 }).toArray()
-        return rows.map(_strip)
+        return rows.map(stripId)
     } catch (err) {
         logger.error(LOG, 'Failed to get scans', err)
         return []
@@ -54,7 +52,7 @@ async function getScanById(id, userId, isAdmin = false) {
         const scan = await db.collection(COLLECTION).findOne({ id })
         if (!scan) return { ok: false, reason: 'not_found' }
         if (scan.userId && scan.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
-        return { ok: true, scan: _strip(scan) }
+        return { ok: true, scan: stripId(scan) }
     } catch (err) {
         logger.error(LOG, 'Failed to get scan by id', err)
         return { ok: false, error: err }
@@ -79,7 +77,7 @@ async function updateScan(id, patch, userId, isAdmin = false) {
             { id }, { $set: set }, { returnDocument: 'after' }
         )
         logger.info(LOG, 'Scan updated', { id, candidates: set.candidates?.length })
-        return { ok: true, scan: _strip(updated) }
+        return { ok: true, scan: stripId(updated) }
     } catch (err) {
         logger.error(LOG, 'Failed to update scan', err)
         return { ok: false, error: err }

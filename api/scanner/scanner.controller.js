@@ -3,33 +3,22 @@ import { scannerChatService }  from './scannerChat.service.js'
 import { scanService }         from './scan.service.js'
 import { logger }              from '../../services/logger.service.js'
 import { resolveModel }        from '../../services/modelRouter.service.js'
+import { startSseStream }      from '../_shared/sse.util.js'
+import { parseChatMessages }   from '../_shared/parse.util.js'
+import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 
 const LOG = '[scanner:controller]'
 
 export async function streamScanner(req, res) {
     const { messages, model, editList, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
 
-    if (!Array.isArray(messages) || messages.length === 0) {
-        return res.status(400).json({ error: 'messages must be a non-empty array' })
+    const validatedMessages = parseChatMessages(messages)
+    if (validatedMessages.error) {
+        return res.status(400).json({ error: validatedMessages.error })
     }
 
-    res.setHeader('Content-Type',  'text/event-stream')
-    res.setHeader('Cache-Control', 'no-cache')
-    res.setHeader('Connection',    'keep-alive')
-    res.flushHeaders()
-
-    function sendEvent(event, data) {
-        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-    }
-
-    // User hit Stop → the browser aborts the fetch and the connection closes.
-    // Abort the agent loop so it stops generating instead of finishing silently.
-    // NOTE: listen on res, not req — req's 'close' fires as soon as the request
-    // body is fully received (Node ≥ ~18), which would abort every stream instantly.
-    // res 'close' fires only when the response connection actually closes.
-    const ac = new AbortController()
-    let finished = false
-    res.on('close', () => { if (!finished) ac.abort() })
+    const { sendEvent, signal: acSignal, finish } = startSseStream(req, res)
+    const ac = { signal: acSignal }
 
     try {
         const lastMessage = messages.at(-1)?.content ?? ''
@@ -49,13 +38,13 @@ export async function streamScanner(req, res) {
             onReasoning: (text)   => sendEvent('reasoning', { text }),
         })
 
-        finished = true
+        finish()
         if (!ac.signal.aborted) {
             sendEvent('done', { reply: result.reply, scan: result.scan ?? null, phase: result.phase ?? null })
             res.end()
         }
     } catch (err) {
-        finished = true
+        finish()
         if (ac.signal.aborted) return   // client gone — nothing to send
         logger.error(LOG, 'Scanner stream failed', err)
         sendEvent('error', { message: 'Streaming failed' })
@@ -129,22 +118,14 @@ export async function saveScannerChatState(req, res) {
     }
 }
 
-export async function getScannerChatState(req, res) {
-    try {
-        const chatState = await scannerChatService.getChatState(req.user._id)
-        res.json({ chatState: chatState ?? null })
-    } catch (err) {
-        logger.error(LOG, 'getScannerChatState failed', err)
-        res.status(500).json({ error: 'Failed to get chat state' })
-    }
-}
+export const getScannerChatState = makeGetChatState({
+    service: scannerChatService,
+    keyArgs: (req) => [req.user._id],
+    logger, log: LOG, failMsg: 'getScannerChatState failed',
+})
 
-export async function deleteScannerChatState(req, res) {
-    try {
-        await scannerChatService.deleteChatState(req.user._id)
-        res.json({ ok: true })
-    } catch (err) {
-        logger.error(LOG, 'deleteScannerChatState failed', err)
-        res.status(500).json({ error: 'Failed to delete chat state' })
-    }
-}
+export const deleteScannerChatState = makeDeleteChatState({
+    service: scannerChatService,
+    keyArgs: (req) => [req.user._id],
+    logger, log: LOG, failMsg: 'deleteScannerChatState failed',
+})

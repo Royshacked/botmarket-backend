@@ -23,13 +23,9 @@
 import { evaluate }        from './structured.evaluator.js'
 import { parseCondition }  from '../parsers/condition.parser.js'
 import { logger }          from '../../services/logger.service.js'
+import { candleMs }        from '../monitorUtils.js'
 
 const LOG = '[volume.evaluator]'
-
-/** Candle timestamps may arrive in seconds; floors/sessions are ms. Normalise to ms. */
-function _candleMs(t) {
-    return t < 1e12 ? t * 1000 : t
-}
 
 /**
  * Evaluate a volume leaf.
@@ -64,7 +60,7 @@ export async function evaluateVolume(leaf, candles, ctx = {}, floorAt = null) {
     let counted = 0
     for (const c of candles) {
         if (c == null || c.v == null) continue
-        if (_candleMs(c.t) < sessionStart) continue
+        if (candleMs(c.t) < sessionStart) continue
         total += Number(c.v) || 0
         counted++
     }

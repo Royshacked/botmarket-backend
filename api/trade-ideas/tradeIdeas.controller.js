@@ -118,7 +118,7 @@ export async function updateTradeIdea(req, res) {
             entry_conditions, entry_logic, entry_condition_tree,
             stop_conditions,  stop_logic,  stop_condition_tree,
             tp_conditions,    tp_logic,    tp_condition_tree,
-            notes,
+            notes, invalidation,
             accounts, mainAccountId,
             resetWindow,
         } = req.body ?? {}
@@ -130,6 +130,7 @@ export async function updateTradeIdea(req, res) {
             entry_logic === undefined && stop_logic === undefined && tp_logic === undefined &&
             entry_condition_tree === undefined && stop_condition_tree === undefined && tp_condition_tree === undefined &&
             accounts === undefined && mainAccountId === undefined &&
+            invalidation === undefined && resetWindow === undefined &&
             notes === undefined) {
             return res.status(400).send({ error: 'Nothing to update' })
         }
@@ -154,6 +155,9 @@ export async function updateTradeIdea(req, res) {
         if (tp_logic !== undefined)              patch.tp_logic = tp_logic
         if (tp_condition_tree !== undefined)     patch.tp_condition_tree = tp_condition_tree
         if (notes !== undefined)                 patch.notes = notes
+        // Editable invalidation range (the edit-link path re-arms the watcher):
+        // the service normalizes it and resets the invalidation_* latch fields.
+        if (invalidation !== undefined)          patch.invalidation = invalidation
         // Broker accounts attached to the idea (e.g. attaching an account after the
         // fact so a re-activated idea can actually place orders). Without these the
         // monitor flips the idea to 'hit' but builds no order plan (alert-only).

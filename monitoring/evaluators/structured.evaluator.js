@@ -6,6 +6,8 @@
  * Candle format: { o, h, l, c, v, t }  — array newest-last.
  */
 
+import { candleMs } from '../monitorUtils.js'
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -160,18 +162,12 @@ function _evaluateWindow(parsed, candles, floorAt, anchorMs = null) {
     // triggerAt is normalised to ms so callers can compare it to ms epochs.
     for (let i = 0; i < n; i++) {
         if (!satisfied[i]) continue
-        const tMs = _candleMs(candles[i].t)
+        const tMs = candleMs(candles[i].t)
         if (tMs < floorAt) continue
         if (!isCross && i > 0 && satisfied[i - 1]) continue
         return { pass: true, triggerAt: tMs }
     }
     return { pass: false }
-}
-
-// Candle timestamps arrive in seconds (Massive/Yahoo divide by 1000); floors are ms
-// epochs. Normalise to ms, tolerating either unit in case a source changes.
-function _candleMs(t) {
-    return t < 1e12 ? t * 1000 : t
 }
 
 // ─── Subject series resolution ─────────────────────────────────────────────────
@@ -347,14 +343,14 @@ export function calcVWAPSeries(candles, anchorMs = null) {
     // anchor at the epoch and accumulate across the whole window instead of a session.
     let anchor = anchorMs == null ? NaN : Number(anchorMs)
     if (!Number.isFinite(anchor)) {
-        const lastMs = _candleMs(candles[candles.length - 1].t)
+        const lastMs = candleMs(candles[candles.length - 1].t)
         anchor = lastMs - (lastMs % 86_400_000)   // start of the newest bar's UTC day
     }
 
     let cumPV = 0, cumV = 0
     for (let i = 0; i < candles.length; i++) {
         const c = candles[i]
-        if (_candleMs(c.t) < anchor) continue          // pre-session bar — no VWAP
+        if (candleMs(c.t) < anchor) continue           // pre-session bar — no VWAP
         const tp  = (c.h + c.l + c.c) / 3
         const vol = Number(c.v) || 0
         cumPV += tp * vol

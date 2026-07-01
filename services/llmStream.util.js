@@ -5,23 +5,12 @@
 // callback have their inner text captured and forwarded.
 //
 // Used by both the Anthropic and OpenAI streaming tool loops so the two providers
-// expose identical streaming behavior to the agent services.
+// expose identical streaming behavior to the agent services. Each agent passes its
+// own `captures` array of tag descriptors ({ open, close, onCapture, keepText });
+// the providers forward it verbatim with no agent-specific tag knowledge.
 
-export function createTagSuppressor(onToken, onAsset, onInterval, onTicker, onPlan, onUpdate, onScan, onMandate, onPhase) {
-    const TAGS = [
-        { open: '<state>',               close: '</state>',               onCapture: null       },
-        { open: '<trade_idea>',          close: '</trade_idea>',          onCapture: null       },
-        { open: '<asset>',               close: '</asset>',               onCapture: onAsset    },
-        { open: '<interval>',            close: '</interval>',            onCapture: onInterval },
-        { open: '<phase>',               close: '</phase>',               onCapture: onPhase ?? null },
-        ...(onTicker  ? [{ open: '<ticker>',             close: '</ticker>',             onCapture: onTicker,  keepText: true }] : []),
-        ...(onPlan    ? [{ open: '<portfolio_plan>',     close: '</portfolio_plan>',     onCapture: onPlan    }] : []),
-        ...(onUpdate  ? [{ open: '<portfolio_update>',   close: '</portfolio_update>',   onCapture: onUpdate  }] : []),
-        ...(onScan    ? [{ open: '<scan_list>',          close: '</scan_list>',          onCapture: onScan    }] : []),
-        { open: '<portfolio_mandate>',  close: '</portfolio_mandate>',  onCapture: onMandate ?? null },
-        // Suppressed from the UI stream; captured from the raw text post-stream in the agent service.
-        { open: '<portfolio_thesis>',   close: '</portfolio_thesis>',   onCapture: null },
-    ]
+export function createTagSuppressor({ onToken, captures = [] }) {
+    const TAGS = captures
 
     let pending         = ''     // pre-tag lookahead buffer
     let inBlock         = false  // currently inside a suppressed block

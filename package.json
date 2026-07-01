@@ -25,7 +25,6 @@
         "cors": "^2.8.5",
         "dotenv": "^17.4.2",
         "express": "^4.17.1",
-        "finnhub": "^2.0.14",
         "jsonwebtoken": "^9.0.3",
         "mongodb": "^6.6.2",
         "openai": "^6.35.0",

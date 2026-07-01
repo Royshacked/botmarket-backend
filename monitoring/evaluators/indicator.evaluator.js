@@ -13,6 +13,8 @@
 
 import { claudeText } from '../monitor.claude.js'
 import { logger }     from '../../services/logger.service.js'
+import { parseYesNo } from '../monitorUtils.js'
+import { parseIndicators } from '../parsers/indicators.parser.js'
 import {
     calcRSISeries,
     calcEMASeries,
@@ -62,7 +64,7 @@ export async function evaluateIndicator(condition, candles, anchorMs = null) {
 
     try {
         const raw  = await claudeText(SYSTEM, user)
-        const pass = raw.trim().toUpperCase().startsWith('Y')
+        const pass = parseYesNo(raw)
         logger.info(LOG, `Indicator eval "${condition.slice(0, 60)}" → ${pass ? 'YES' : 'NO'}`)
         return pass
     } catch (err) {
@@ -87,22 +89,14 @@ function _computeIndicators(condition, candles, anchorMs = null) {
         vwap: /vwap/i.test(condition) ? calcVWAPSeries(candles, anchorMs) : null,
     }
 
-    // Add any custom periods explicitly mentioned in the condition text
-    for (const [, p] of condition.matchAll(/rsi\((\d+)\)/gi)) {
-        const period = +p
-        if (!result.rsi[period]) result.rsi[period] = calcRSISeries(closes, period)
-    }
-    for (const [, p] of condition.matchAll(/ema\((\d+)\)/gi)) {
-        const period = +p
-        if (!result.ema[period]) result.ema[period] = calcEMASeries(closes, period)
-    }
-    for (const [, p] of condition.matchAll(/sma\((\d+)\)/gi)) {
-        const period = +p
-        if (!result.sma[period]) result.sma[period] = calcSMASeries(closes, period)
-    }
-    for (const [, p] of condition.matchAll(/atr\((\d+)\)/gi)) {
-        const period = +p
-        if (!result.atr[period]) result.atr[period] = calcATRSeries(candles, period)
+    // Add any custom periods explicitly mentioned in the condition text.
+    // Same family(N) grammar as before, now via the shared parser.
+    for (const { family, period } of parseIndicators(condition)) {
+        if (result[family][period]) continue
+        if (family === 'rsi')      result.rsi[period] = calcRSISeries(closes, period)
+        else if (family === 'ema') result.ema[period] = calcEMASeries(closes, period)
+        else if (family === 'sma') result.sma[period] = calcSMASeries(closes, period)
+        else if (family === 'atr') result.atr[period] = calcATRSeries(candles, period)
     }
 
     return result

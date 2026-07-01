@@ -14,6 +14,9 @@
 
 import { getDb } from './mongodb.provider.js'
 import { logger } from '../services/logger.service.js'
+import { compactMoney } from '../services/format.util.js'
+import { createTtlCache } from '../services/ttlCache.util.js'
+import { getJson } from '../services/http.util.js'
 
 const LOG     = '[fmp]'
 const BASE    = 'https://financialmodelingprep.com/stable'
@@ -25,18 +28,17 @@ const API_KEY = process.env.FMP_API_KEY
 const COLLECTION  = 'fmp_fundamentals_cache'
 const TTL_MS      = 24 * 60 * 60 * 1000   // 24h
 const MEM_MAX     = 500
-const _mem        = new Map() // SYMBOL -> { at: epochMs, asOf: ISO, text: string }
+const _mem        = createTtlCache({ ttlMs: TTL_MS, max: MEM_MAX }) // SYMBOL -> { asOf: ISO, text: string }
 
 async function _readCache(symbol) {
     const hit = _mem.get(symbol)
-    if (hit && Date.now() - hit.at < TTL_MS) return hit
+    if (hit) return hit
 
     try {
         const db  = await getDb()
         const doc = await db.collection(COLLECTION).findOne({ symbol })
         if (doc && Date.now() - doc.fetchedAt < TTL_MS) {
-            const entry = { at: doc.fetchedAt, asOf: doc.asOf, text: doc.text }
-            if (_mem.size >= MEM_MAX) _mem.clear()
+            const entry = { asOf: doc.asOf, text: doc.text }
             _mem.set(symbol, entry)
             return entry
         }
@@ -47,8 +49,7 @@ async function _readCache(symbol) {
 }
 
 async function _writeCache(symbol, entry) {
-    if (_mem.size >= MEM_MAX) _mem.clear()
-    _mem.set(symbol, { at: entry.fetchedAt, asOf: entry.asOf, text: entry.text })
+    _mem.set(symbol, { asOf: entry.asOf, text: entry.text })
     try {
         const db = await getDb()
         await db.collection(COLLECTION).updateOne(
@@ -65,22 +66,13 @@ async function _writeCache(symbol, entry) {
 async function _fmpGet(path) {
     if (!API_KEY) throw new Error('FMP_API_KEY is not set')
     const sep = path.includes('?') ? '&' : '?'
-    const res = await fetch(`${BASE}${path}${sep}apikey=${API_KEY}`)
-    if (!res.ok) throw new Error(`FMP ${path} → HTTP ${res.status}`)
-    return res.json()
+    return getJson(`${BASE}${path}${sep}apikey=${API_KEY}`, { label: `FMP ${path} → HTTP` })
 }
 
 // ─── Formatting helpers ─────────────────────────────────────────────────────
 const num  = (v, d = 2) => (Number.isFinite(Number(v)) ? Number(v).toFixed(d) : null)
 const pct  = (v, d = 1) => (Number.isFinite(Number(v)) ? `${(Number(v) * 100).toFixed(d)}%` : null)
-const money = (v) => {
-    const n = Number(v)
-    if (!Number.isFinite(n)) return null
-    if (Math.abs(n) >= 1e12) return `$${(n / 1e12).toFixed(2)}T`
-    if (Math.abs(n) >= 1e9)  return `$${(n / 1e9).toFixed(2)}B`
-    if (Math.abs(n) >= 1e6)  return `$${(n / 1e6).toFixed(2)}M`
-    return `$${n.toFixed(0)}`
-}
+const money = compactMoney
 const line = (label, val) => (val != null ? `${label}: ${val}` : null)
 
 function _formatEtf(symbol, p) {
@@ -134,8 +126,8 @@ function _formatStock(symbol, p, ratios = {}, growth = {}) {
 // Lightweight profile cache keyed by symbol — stores only sector/industry so
 // portfolioState.service can group positions by sector without re-fetching the
 // full fundamentals blob. Shares the same 24h TTL as fundamentals.
-const _sectorCache = new Map() // SYMBOL -> { at, sector, industry }
 const SECTOR_TTL_MS = 24 * 60 * 60 * 1000
+const _sectorCache = createTtlCache({ ttlMs: SECTOR_TTL_MS }) // SYMBOL -> { sector, industry }
 
 /**
  * Sector and industry for a ticker as raw strings, cached 24h.
@@ -146,17 +138,13 @@ export async function getSectorRaw(ticker) {
     if (!symbol) return null
 
     const hit = _sectorCache.get(symbol)
-    if (hit && Date.now() - hit.at < SECTOR_TTL_MS) return { sector: hit.sector, industry: hit.industry }
+    if (hit) return { sector: hit.sector, industry: hit.industry }
 
     try {
         const arr = await _fmpGet(`/profile?symbol=${symbol}`)
         const p   = Array.isArray(arr) ? arr[0] : null
         if (!p) return null
-        const entry = { sector: p.sector || null, industry: p.industry || null, at: Date.now() }
-        if (_sectorCache.size > 500) {
-            const oldest = [..._sectorCache.keys()].slice(0, 250)
-            for (const k of oldest) _sectorCache.delete(k)
-        }
+        const entry = { sector: p.sector || null, industry: p.industry || null }
         _sectorCache.set(symbol, entry)
         return { sector: entry.sector, industry: entry.industry }
     } catch {
@@ -168,8 +156,8 @@ export async function getSectorRaw(ticker) {
 // Short-TTL cache keyed by the date window; the calendar shifts daily as
 // estimates/actuals land. Free plan exposes this (verified): each row carries
 // symbol, date, epsEstimated and revenueEstimated.
-const _calCache = new Map() // "from|to" -> { at, rows }
 const CAL_TTL_MS = 6 * 60 * 60 * 1000
+const _calCache = createTtlCache({ ttlMs: CAL_TTL_MS, max: 50 }) // "from|to" -> rows
 
 /**
  * Upcoming earnings between `from` and `to` (YYYY-MM-DD, max ~3-month window),
@@ -185,13 +173,12 @@ export async function getEarningsCalendar(from, to, symbols = []) {
 
     let rows
     const hit = _calCache.get(key)
-    if (hit && Date.now() - hit.at < CAL_TTL_MS) {
-        rows = hit.rows
+    if (hit) {
+        rows = hit
     } else {
         const arr = await _fmpGet(`/earnings-calendar?from=${f}&to=${t}`)
         rows = Array.isArray(arr) ? arr : []
-        if (_calCache.size > 50) _calCache.clear()
-        _calCache.set(key, { at: Date.now(), rows })
+        _calCache.set(key, rows)
     }
 
     const wanted = new Set(symbols.map(s => String(s).toUpperCase()))
@@ -229,13 +216,12 @@ export async function getEarningsCalendarRaw(from, to, symbols = []) {
 
     let rows
     const hit = _calCache.get(key)
-    if (hit && Date.now() - hit.at < CAL_TTL_MS) {
-        rows = hit.rows
+    if (hit) {
+        rows = hit
     } else {
         const arr = await _fmpGet(`/earnings-calendar?from=${f}&to=${t}`)
         rows = Array.isArray(arr) ? arr : []
-        if (_calCache.size > 50) _calCache.clear()
-        _calCache.set(key, { at: Date.now(), rows })
+        _calCache.set(key, rows)
     }
 
     const wanted = new Set(symbols.map(s => String(s).toUpperCase()))

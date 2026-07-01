@@ -13,6 +13,14 @@ function _toDateStr(ms) {
     return new Date(ms).toISOString().slice(0, 10)
 }
 
+/**
+ * Fetch OHLCV candles from Massive (equities daily/weekly; intraday routes to Yahoo).
+ *
+ * @param {string} ticker
+ * @param {{ timeSpan?: string, multiplier?: number, from?: number, to?: number }} options
+ *   from/to in Unix milliseconds
+ * @returns {Promise<import('../services/price.service.js').CandleObject[]>}
+ */
 export async function getTickerAggregates(ticker, options = {}) {
     const { timeSpan = 'day', multiplier, from, to } = options
 
@@ -35,14 +43,19 @@ export async function getTickerAggregates(ticker, options = {}) {
         }
         );
         const results = Array.isArray(response?.results) ? response.results : []
-        return results.map((bar) => ({
-            timestamp: typeof bar?.t === 'number' ? Math.floor(bar.t / 1000) : undefined,
-            open: bar?.o,
-            high: bar?.h,
-            low: bar?.l,
-            close: bar?.c,
-            volume: bar?.v,
-        }))
+        // Drop bars without a finite timestamp rather than emitting a candle with
+        // `timestamp: undefined`, which would survive into the monitor's candle
+        // merge as a malformed row.
+        return results
+            .filter((bar) => Number.isFinite(bar?.t))
+            .map((bar) => ({
+                timestamp: Math.floor(bar.t / 1000),
+                open: bar?.o,
+                high: bar?.h,
+                low: bar?.l,
+                close: bar?.c,
+                volume: bar?.v,
+            }))
 
   } catch (e) {
     logger.error(`couldn't get stocks aggregates for ${ticker}`, e);

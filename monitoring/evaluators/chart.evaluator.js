@@ -10,6 +10,8 @@
 import { claudeVision }   from '../monitor.claude.js'
 import { fetchChartImage } from '../../providers/chartImg.provider.js'
 import { logger }          from '../../services/logger.service.js'
+import { parseYesNo }      from '../monitorUtils.js'
+import { parseIndicators } from '../parsers/indicators.parser.js'
 
 const LOG = '[chart.evaluator]'
 
@@ -61,7 +63,7 @@ export async function evaluateChart(condition, symbol, timeframe, floorAt = null
 
     try {
         const raw  = await claudeVision(SYSTEM, user, imageBase64)
-        const pass = raw.trim().toUpperCase().startsWith('Y')
+        const pass = parseYesNo(raw)
         logger.info(LOG, `Chart eval "${condition.slice(0, 60)}" (${symbol}/${timeframe}) → ${pass ? 'YES' : 'NO'}`)
         return pass
     } catch (err) {
@@ -129,14 +131,13 @@ function _buildStudies(condition) {
         add({ name: 'VWAP', forceOverlay: true }, 'vwap')
     }
 
-    // Explicit EMA periods
-    for (const [, p] of condition.matchAll(/ema\((\d+)\)/gi)) {
-        add({ name: 'Moving Average Exponential', input: { in_0: +p }, forceOverlay: true }, `ema${p}`)
+    // Explicit EMA / SMA periods (family(N) grammar, via the shared parser — same
+    // matches as the previous ema-then-sma matchAll loops, in the same order).
+    for (const { family, period } of parseIndicators(condition)) {
+        if (family === 'ema') add({ name: 'Moving Average Exponential', input: { in_0: period }, forceOverlay: true }, `ema${period}`)
     }
-
-    // Explicit SMA periods
-    for (const [, p] of condition.matchAll(/sma\((\d+)\)/gi)) {
-        add({ name: 'Moving Average', input: { in_0: +p }, forceOverlay: true }, `sma${p}`)
+    for (const { family, period } of parseIndicators(condition)) {
+        if (family === 'sma') add({ name: 'Moving Average', input: { in_0: period }, forceOverlay: true }, `sma${period}`)
     }
 
     // Fill remaining slots with EMA(20) / EMA(50) as price context

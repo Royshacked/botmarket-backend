@@ -1,20 +1,18 @@
-import { readFileSync }   from 'fs'
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { resolveStreamFn } from './llmModels.js'
 import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
-import { toolError }     from './toolResult.util.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
 import { recordUsage }  from './tokenUsage.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler } from './agentUtils.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
-const SYSTEM_PROMPT = readFileSync(join(__dirname, '../scanner_system_prompt.md'), 'utf-8')
-
 const LOG   = '[scannerAgent]'
+// Hot-reload the system prompt on file change (mtime-gated) — no restart needed.
+const _systemPrompt = makePromptLoader(join(__dirname, '../scanner_system_prompt.md'), LOG)
 const MAX_MESSAGES = 10
 
 const TOOLS = [
@@ -132,34 +130,27 @@ const TOOLS = [
 ]
 
 const TOOL_HANDLERS = {
-    get_price_action: async ({ ticker }) => {
-        try { return await getPriceAction(ticker) }
-        catch (err) { return toolError(`Could not fetch price action for ${ticker}: ${err.message}`) }
-    },
-    get_quotes: async ({ tickers }) => {
-        try { return await getQuotes(tickers) }
-        catch (err) { return toolError(`Could not fetch quotes: ${err.message}`) }
-    },
-    get_risk_metrics: async ({ ticker }) => {
-        try { return await getRiskMetrics(ticker) }
-        catch (err) { return toolError(`Could not fetch risk metrics for ${ticker}: ${err.message}`) }
-    },
-    get_fundamentals: async ({ ticker }) => {
-        try { return await getFundamentals(ticker) }
-        catch (err) { return toolError(`Could not fetch fundamentals for ${ticker}: ${err.message}`) }
-    },
-    get_earnings_calendar: async ({ from, to, symbols }) => {
-        try { return await getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []) }
-        catch (err) { return toolError(`Could not fetch earnings calendar: ${err.message}`) }
-    },
-    get_sec_filings: async ({ ticker }) => {
-        try { return await getSecFilings(ticker) }
-        catch (err) { return toolError(`Could not fetch SEC filings for ${ticker}: ${err.message}`) }
-    },
-    get_cycle_analysis: async ({ ticker, mode, calendar_window, lookback_years }) => {
-        try { return await getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4) }
-        catch (err) { return toolError(`Could not compute cycle analysis for ${ticker}: ${err.message}`) }
-    },
+    get_price_action: makeToolHandler('get_price_action',
+        ({ ticker }) => getPriceAction(ticker),
+        (err, { ticker }) => `Could not fetch price action for ${ticker}: ${err.message}`, LOG),
+    get_quotes: makeToolHandler('get_quotes',
+        ({ tickers }) => getQuotes(tickers),
+        (err) => `Could not fetch quotes: ${err.message}`, LOG),
+    get_risk_metrics: makeToolHandler('get_risk_metrics',
+        ({ ticker }) => getRiskMetrics(ticker),
+        (err, { ticker }) => `Could not fetch risk metrics for ${ticker}: ${err.message}`, LOG),
+    get_fundamentals: makeToolHandler('get_fundamentals',
+        ({ ticker }) => getFundamentals(ticker),
+        (err, { ticker }) => `Could not fetch fundamentals for ${ticker}: ${err.message}`, LOG),
+    get_earnings_calendar: makeToolHandler('get_earnings_calendar',
+        ({ from, to, symbols }) => getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []),
+        (err) => `Could not fetch earnings calendar: ${err.message}`, LOG),
+    get_sec_filings: makeToolHandler('get_sec_filings',
+        ({ ticker }) => getSecFilings(ticker),
+        (err, { ticker }) => `Could not fetch SEC filings for ${ticker}: ${err.message}`, LOG),
+    get_cycle_analysis: makeToolHandler('get_cycle_analysis',
+        ({ ticker, mode, calendar_window, lookback_years }) => getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4),
+        (err, { ticker }) => `Could not compute cycle analysis for ${ticker}: ${err.message}`, LOG),
     ...COMMON_TOOL_HANDLERS,
 }
 
@@ -178,7 +169,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     if (editSection) dynamic.push(editSection)
 
     const systemPrompt = [
-        { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: _systemPrompt(), cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamic.join('\n\n') },
     ]
 
@@ -189,6 +180,30 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
 
     const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
 
+    const onScan = (json) => { try { capturedScan = JSON.parse(json) } catch { /* malformed — ignore */ } }
+    const onPhaseCapture = (p) => {
+        const n = parseInt(p, 10)
+        if (n >= 1 && n <= 4) {
+            capturedPhase = n
+            onPhase?.(n)
+        }
+    }
+
+    // Tag capture set — same tags/order the positional suppressor produced for
+    // this agent: ticker keeps its inner text in the UI; scan_list is captured;
+    // the rest are suppress-only.
+    const tagCaptures = [
+        { open: '<state>',             close: '</state>',             onCapture: null           },
+        { open: '<trade_idea>',        close: '</trade_idea>',        onCapture: null           },
+        { open: '<asset>',             close: '</asset>',             onCapture: null           },
+        { open: '<interval>',          close: '</interval>',          onCapture: null           },
+        { open: '<phase>',             close: '</phase>',             onCapture: onPhaseCapture  },
+        { open: '<ticker>',            close: '</ticker>',            onCapture: onTicker, keepText: true },
+        { open: '<scan_list>',         close: '</scan_list>',         onCapture: onScan         },
+        { open: '<portfolio_mandate>', close: '</portfolio_mandate>', onCapture: null           },
+        { open: '<portfolio_thesis>',  close: '</portfolio_thesis>',  onCapture: null           },
+    ]
+
     const raw = await streamFn({
         model,
         promptOrMessages: normalized,
@@ -198,27 +213,17 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         reasoningEffort,
         signal,
         onToken,
-        onTicker,
+        tagCaptures,
         onToolStart,
         onReasoning,
         onUsage,
-        onScan: (json) => {
-            try { capturedScan = JSON.parse(json) } catch { /* malformed — ignore */ }
-        },
-        onPhase: (p) => {
-            const n = parseInt(p, 10)
-            if (n >= 1 && n <= 4) {
-                capturedPhase = n
-                onPhase?.(n)
-            }
-        },
     })
 
-    const reply = raw
-        .replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1')
-        .replace(/<scan_list>[\s\S]*?<\/scan_list>/g, '')
-        .replace(/<phase>[\s\S]*?<\/phase>/g, '')
-        .trim()
+    const reply = stripEmitTags(
+        // <ticker> keeps its inner text in the reply (unwrap, don't strip).
+        raw.replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1'),
+        ['scan_list', 'phase'],
+    ).trim()
 
     const scan = _normalizeScan(capturedScan, editList)
 

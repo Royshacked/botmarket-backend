@@ -12,14 +12,14 @@
  */
 
 import 'dotenv/config'
-import { getDb } from './mongodb.provider.js'
+import { getDb } from '../providers/mongodb.provider.js'
 import {
     listCTraderAccounts,
     getCTraderSession,
     normalizeVolume,
     roundPrice,
     priceToRelative,
-} from './ctrader.session.provider.js'
+} from '../providers/ctrader.session.provider.js'
 
 const TARGET_SYMBOL = 'BTCUSD'
 

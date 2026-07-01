@@ -9,7 +9,11 @@ export const ROUTING_MODES = {
     CLASSIFIER: 'classifier',
 }
 
-const DEFAULT_ROUTE = { model: SONNET, reasoningEffort: 'off' }
+// Canonical reasoning-effort values. Providers treat 'off' (and undefined) as
+// no-thinking; 'off' is the canonical no-reasoning value across all routing paths.
+export const REASONING_EFFORT = { OFF: 'off', LOW: 'low', HIGH: 'high' }
+
+const DEFAULT_ROUTE = { model: SONNET, reasoningEffort: REASONING_EFFORT.OFF }
 
 // Conservative phase-to-model tables. Haiku for pure extraction turns,
 // Sonnet for everything else. Reasoning only where output ambiguity is real.
@@ -65,7 +69,7 @@ Output format: {"model":"haiku"|"sonnet","reasoning":"off"|"low"}`
  */
 export async function resolveModel({ routingMode, agent, phase, model, reasoningEffort, lastMessage }) {
     if (routingMode === ROUTING_MODES.MANUAL) {
-        return { model: model ?? SONNET, reasoningEffort: reasoningEffort ?? 'none' }
+        return { model: model ?? SONNET, reasoningEffort: reasoningEffort ?? REASONING_EFFORT.OFF }
     }
 
     if (routingMode === ROUTING_MODES.AUTO) {

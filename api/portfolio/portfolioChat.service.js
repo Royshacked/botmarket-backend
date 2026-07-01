@@ -1,4 +1,4 @@
-import { getDb }   from '../../providers/mongodb.provider.js'
+import { getDb, stripId }   from '../../providers/mongodb.provider.js'
 import { logger }  from '../../services/logger.service.js'
 
 const LOG        = '[portfolioChat]'
@@ -65,8 +65,7 @@ async function getChatState(portfolioId, userId) {
         const db  = await getDb()
         const doc = await db.collection(COLLECTION).findOne({ portfolioId, userId })
         if (!doc) return null
-        const { _id, ...rest } = doc
-        return rest
+        return stripId(doc)
     } catch (err) {
         logger.error(LOG, 'Failed to get chat state', err)
         return null

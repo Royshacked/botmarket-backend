@@ -1,20 +1,18 @@
-import { readFileSync }   from 'fs'
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { resolveStreamFn } from './llmModels.js'
 import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
-import { toolError }      from './toolResult.util.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }         from './logger.service.js'
 import { recordUsage }   from './tokenUsage.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler } from './agentUtils.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
-const SYSTEM_PROMPT = readFileSync(join(__dirname, '../trade_portfolio_system_prompt.md'), 'utf-8')
-
 const LOG   = '[portfolioAgent]'
+// Hot-reload the system prompt on file change (mtime-gated) — no restart needed.
+const _systemPrompt = makePromptLoader(join(__dirname, '../trade_portfolio_system_prompt.md'), LOG)
 const MAX_MESSAGES = 10
 
 const TOOLS = [
@@ -117,34 +115,27 @@ const TOOLS = [
 ]
 
 const TOOL_HANDLERS = {
-    get_quote: async ({ ticker }) => {
-        try { return await getQuote(ticker) }
-        catch (err) { return toolError(`Could not fetch quote for ${ticker}: ${err.message}`) }
-    },
-    get_quotes: async ({ tickers }) => {
-        try { return await getQuotes(tickers) }
-        catch (err) { return toolError(`Could not fetch quotes: ${err.message}`) }
-    },
-    get_risk_metrics: async ({ ticker }) => {
-        try { return await getRiskMetrics(ticker) }
-        catch (err) { return toolError(`Could not fetch risk metrics for ${ticker}: ${err.message}`) }
-    },
-    get_correlations: async ({ tickers }) => {
-        try { return await getCorrelations(tickers) }
-        catch (err) { return toolError(`Could not compute correlations: ${err.message}`) }
-    },
-    get_fundamentals: async ({ ticker }) => {
-        try { return await getFundamentals(ticker) }
-        catch (err) { return toolError(`Could not fetch fundamentals for ${ticker}: ${err.message}`) }
-    },
-    get_sec_filings: async ({ ticker }) => {
-        try { return await getSecFilings(ticker) }
-        catch (err) { return toolError(`Could not fetch SEC filings for ${ticker}: ${err.message}`) }
-    },
-    get_earnings_calendar: async ({ from, to, symbols }) => {
-        try { return await getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []) }
-        catch (err) { return toolError(`Could not fetch earnings calendar: ${err.message}`) }
-    },
+    get_quote: makeToolHandler('get_quote',
+        ({ ticker }) => getQuote(ticker),
+        (err, { ticker }) => `Could not fetch quote for ${ticker}: ${err.message}`, LOG),
+    get_quotes: makeToolHandler('get_quotes',
+        ({ tickers }) => getQuotes(tickers),
+        (err) => `Could not fetch quotes: ${err.message}`, LOG),
+    get_risk_metrics: makeToolHandler('get_risk_metrics',
+        ({ ticker }) => getRiskMetrics(ticker),
+        (err, { ticker }) => `Could not fetch risk metrics for ${ticker}: ${err.message}`, LOG),
+    get_correlations: makeToolHandler('get_correlations',
+        ({ tickers }) => getCorrelations(tickers),
+        (err) => `Could not compute correlations: ${err.message}`, LOG),
+    get_fundamentals: makeToolHandler('get_fundamentals',
+        ({ ticker }) => getFundamentals(ticker),
+        (err, { ticker }) => `Could not fetch fundamentals for ${ticker}: ${err.message}`, LOG),
+    get_sec_filings: makeToolHandler('get_sec_filings',
+        ({ ticker }) => getSecFilings(ticker),
+        (err, { ticker }) => `Could not fetch SEC filings for ${ticker}: ${err.message}`, LOG),
+    get_earnings_calendar: makeToolHandler('get_earnings_calendar',
+        ({ from, to, symbols }) => getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []),
+        (err) => `Could not fetch earnings calendar: ${err.message}`, LOG),
     ...COMMON_TOOL_HANDLERS,
 }
 
@@ -173,7 +164,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     // session, so caching it lets turns 2+ read it at ~0.1× instead of re-paying
     // full price every turn. A turn where it does change just re-writes it once.
     const systemPrompt = [
-        { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: _systemPrompt(), cache_control: { type: 'ephemeral' } },
         ...(dynamicSections.length
             ? [{ type: 'text', text: dynamicSections.join('\n\n'), cache_control: { type: 'ephemeral' } }]
             : []),
@@ -189,6 +180,33 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
 
     const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
 
+    const onPhaseCapture = (p) => {
+        const n = parseInt(p, 10)
+        if (n >= 1 && n <= 6) {
+            capturedPhase = n
+            onPhase?.(n)
+        }
+    }
+    const onPlan    = (json) => { try { capturedPlan    = JSON.parse(json) } catch { /* malformed */ } }
+    const onUpdate  = (json) => { try { capturedUpdate  = JSON.parse(json) } catch { /* malformed */ } }
+    const onMandate = (json) => { try { capturedMandate = JSON.parse(json) } catch { /* malformed */ } }
+
+    // Tag capture set — same tags/order the positional suppressor produced for
+    // this agent: ticker keeps its inner text in the UI; plan/update/mandate are
+    // captured; state/trade_idea and the null-callback tags are suppress-only.
+    const tagCaptures = [
+        { open: '<state>',             close: '</state>',             onCapture: null           },
+        { open: '<trade_idea>',        close: '</trade_idea>',        onCapture: null           },
+        { open: '<asset>',             close: '</asset>',             onCapture: null           },
+        { open: '<interval>',          close: '</interval>',          onCapture: null           },
+        { open: '<phase>',             close: '</phase>',             onCapture: onPhaseCapture  },
+        { open: '<ticker>',            close: '</ticker>',            onCapture: onTicker, keepText: true },
+        { open: '<portfolio_plan>',    close: '</portfolio_plan>',    onCapture: onPlan         },
+        { open: '<portfolio_update>',  close: '</portfolio_update>',  onCapture: onUpdate       },
+        { open: '<portfolio_mandate>', close: '</portfolio_mandate>', onCapture: onMandate      },
+        { open: '<portfolio_thesis>',  close: '</portfolio_thesis>',  onCapture: null           },
+    ]
+
     const raw = await streamFn({
         model,
         promptOrMessages: normalized,
@@ -198,26 +216,10 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
         reasoningEffort,
         signal,
         onToken,
-        onTicker,
+        tagCaptures,
         onToolStart,
         onReasoning,
         onUsage,
-        onPhase: (p) => {
-            const n = parseInt(p, 10)
-            if (n >= 1 && n <= 6) {
-                capturedPhase = n
-                onPhase?.(n)
-            }
-        },
-        onPlan: (json) => {
-            try { capturedPlan = JSON.parse(json) } catch { /* malformed */ }
-        },
-        onUpdate: (json) => {
-            try { capturedUpdate = JSON.parse(json) } catch { /* malformed */ }
-        },
-        onMandate: (json) => {
-            try { capturedMandate = JSON.parse(json) } catch { /* malformed */ }
-        },
     })
 
     // <portfolio_thesis> is suppressed from the UI stream but remains in raw — pull it here.
@@ -226,14 +228,11 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
         try { capturedThesis = JSON.parse(thesisMatch[1].trim()) } catch { /* malformed */ }
     }
 
-    const reply = raw
-        .replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1')
-        .replace(/<phase>[\s\S]*?<\/phase>/g, '')
-        .replace(/<portfolio_plan>[\s\S]*?<\/portfolio_plan>/g, '')
-        .replace(/<portfolio_update>[\s\S]*?<\/portfolio_update>/g, '')
-        .replace(/<portfolio_mandate>[\s\S]*?<\/portfolio_mandate>/g, '')
-        .replace(/<portfolio_thesis>[\s\S]*?<\/portfolio_thesis>/g, '')
-        .trim()
+    const reply = stripEmitTags(
+        // <ticker> keeps its inner text in the reply (unwrap, don't strip).
+        raw.replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1'),
+        ['phase', 'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis'],
+    ).trim()
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
 
@@ -334,14 +333,7 @@ function _buildPortfolioContext(portfolioId, ideas) {
 }
 
 function _buildAccountsSection(accounts) {
-    const fmt = (v) => v != null ? `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'
-    const lines = accounts.map(a => {
-        const type  = a.isLive ? 'LIVE' : 'DEMO'
-        const parts = [`${(a.broker || '').toUpperCase()} ${type} — login: ${a.login || '—'}, currency: ${a.currency || '—'}`]
-        if (a.balance != null) parts.push(`balance: ${fmt(a.balance)}`)
-        if (a.equity  != null) parts.push(`equity: ${fmt(a.equity)}`)
-        return `  - ${parts.join(', ')}`
-    })
+    const lines = buildAccountLines(accounts)
     return `PORTFOLIO ACCOUNTS (the user plans to execute ideas from this portfolio on):\n${lines.join('\n')}\n\nWhen suggesting position sizes, use these account balances to recommend concrete allocations. If a main account is identified by a larger balance or context, use it as the reference for scaling other accounts.`
 }
 

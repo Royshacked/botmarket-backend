@@ -7,6 +7,7 @@
 
 import YahooFinance from 'yahoo-finance2'
 import { logger } from '../services/logger.service.js'
+import { createTtlCache } from '../services/ttlCache.util.js'
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] })
 
@@ -77,7 +78,10 @@ const YAHOO_TO_TV = {
     BTS: 'CBOE',    // BATS/CBOE
 }
 
-const _tvCache = new Map()
+// Exchange lookups barely change; cache them 24h so we don't re-hit Yahoo on
+// every chart. Bounded (default max) to avoid the previous unbounded growth.
+const TV_TTL_MS = 24 * 60 * 60 * 1000
+const _tvCache = createTtlCache({ ttlMs: TV_TTL_MS })
 
 /**
  * Convert an internal ticker to TradingView exchange:symbol format.
@@ -90,7 +94,8 @@ export async function toTVSymbol(symbol) {
     if (!symbol) return 'NASDAQ:SPY'
     const upper = symbol.toUpperCase()
     if (/USDT$|USDC$/i.test(upper)) return `BINANCE:${upper}`
-    if (_tvCache.has(upper)) return _tvCache.get(upper)
+    const cached = _tvCache.get(upper)
+    if (cached !== undefined) return cached
 
     try {
         const q  = await yf.quote(upper)
