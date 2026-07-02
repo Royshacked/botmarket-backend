@@ -38,7 +38,7 @@
 
 import { evaluateTree }                     from './monitor.orchestrator.js'
 import { sendBotMessage }                   from '../api/chat/chat.service.js'
-import { resolveEntryTimeframe, candleMs }  from './monitorUtils.js'
+import { resolveEntryTimeframe }            from './monitorUtils.js'
 import { logger }                           from '../services/logger.service.js'
 
 const LOG = '[invalidation.monitor]'
@@ -75,13 +75,13 @@ export async function checkInvalidation(db, idea, symbolMap, { inPosition = fals
         : (idea.entryFloorAt     ?? idea.savedAt ?? null)
 
     // ── Pre-entry WAITING state (only for a full, two-sided envelope) ────────────
-    // Arm the moment price has closed inside the zone since the floor; until then a
+    // Arm the moment the latest candle has closed inside the zone; until then a
     // distant entry only watches the approach corridor. A one-sided range has no
     // zone to arm into, so it falls straight through to the envelope check (legacy
     // behaviour — a single edge).
     const hasFullEnvelope = lower != null && upper != null
     if (!inPosition && hasFullEnvelope && !idea.invalidation_armed) {
-        if (closedInZoneSinceFloor(symbolMap[asset], lower, upper, floorAt)) {
+        if (closedInZone(symbolMap[asset], lower, upper)) {
             await db.collection('ideas').updateOne({ id }, { $set: { invalidation_armed: true } })
             logger.info(LOG, `[${id}] Invalidation armed — price entered entry zone [${lower}, ${upper}]`)
             return   // the envelope takes over from the next tick
@@ -173,18 +173,20 @@ async function _checkApproach(db, idea, symbolMap, { range, tf, floorAt }) {
 }
 
 /**
- * True when any candle at/after the floor CLOSED strictly inside (lower, upper).
- * State-based on purpose: unlike a rising-edge leaf this also arms an idea that was
- * authored with price already in the zone (its live candles read inside → armed).
+ * True when the LATEST candle's close sits strictly inside (lower, upper).
+ *
+ * Arming is a pure STATE check ("is price in the zone right now"), NOT a rising edge,
+ * so it deliberately ignores the entry floor. Applying the floor here wrongly excluded
+ * the current bar on higher timeframes: a daily bar is stamped at 00:00, always before
+ * an intraday author-time floor (entryFloorAt = Date.now()), so an idea authored with
+ * price already in the zone could never arm on its own timeframe. Reading only the
+ * latest close both fixes that and reflects the true current state.
  */
-export function closedInZoneSinceFloor(candles, lower, upper, floorAt) {
+export function closedInZone(candles, lower, upper) {
     if (!Array.isArray(candles) || lower == null || upper == null) return false
-    for (const c of candles) {
-        if (c?.c == null) continue
-        if (floorAt != null && candleMs(c.t) < floorAt) continue
-        if (c.c > lower && c.c < upper) return true
-    }
-    return false
+    const last = candles.at(-1)
+    if (last?.c == null) return false
+    return last.c > lower && last.c < upper
 }
 
 /**

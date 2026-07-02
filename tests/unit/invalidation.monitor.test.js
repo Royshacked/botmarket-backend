@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     checkInvalidation,
-    closedInZoneSinceFloor,
+    closedInZone,
     buildEnvelopeEdges,
     buildApproachEdges,
 } from '../../monitoring/invalidation.monitor.js'
@@ -15,37 +15,44 @@ import {
 const candle = (c, t) => ({ o: c, h: c, l: c, c, v: 0, t })
 const series = (...closes) => closes.map((c, i) => candle(c, 1_000 + i))
 
-// ── closedInZoneSinceFloor (the state-based arming scan) ─────────────────────────
+// ── closedInZone (the state-based arming check) ──────────────────────────────────
 
-test('closedInZoneSinceFloor: true when a close lands strictly inside the band', () => {
-    assert.equal(closedInZoneSinceFloor(series(100, 11), 9, 12, 1), true)
+test('closedInZone: true when the latest close lands strictly inside the band', () => {
+    assert.equal(closedInZone(series(100, 11), 9, 12), true)
 })
 
-test('closedInZoneSinceFloor: arms an idea authored already in the zone', () => {
-    // Every candle in-zone — a rising-edge leaf would never fire; the scan still arms.
-    assert.equal(closedInZoneSinceFloor(series(10, 10), 9, 12, 1), true)
+test('closedInZone: arms an idea authored already in the zone', () => {
+    assert.equal(closedInZone(series(10, 10), 9, 12), true)
 })
 
-test('closedInZoneSinceFloor: false while price is only in the corridor', () => {
-    assert.equal(closedInZoneSinceFloor(series(100, 100), 9, 12, 1), false)
+test('closedInZone: false while price is only in the corridor', () => {
+    assert.equal(closedInZone(series(100, 100), 9, 12), false)
 })
 
-test('closedInZoneSinceFloor: false when price gaps clean through the band', () => {
-    assert.equal(closedInZoneSinceFloor(series(100, 8), 9, 12, 1), false)
+test('closedInZone: false when the latest candle closed through the band', () => {
+    assert.equal(closedInZone(series(11, 8), 9, 12), false)
 })
 
-test('closedInZoneSinceFloor: edges are exclusive (a close exactly on an edge does not arm)', () => {
-    assert.equal(closedInZoneSinceFloor(series(9, 12), 9, 12, 1), false)
+test('closedInZone: only the latest candle counts (an earlier dip that left does not arm)', () => {
+    // Dipped to 11 (in-zone) then closed at 8 — not in the zone now, so no arm.
+    assert.equal(closedInZone(series(100, 11, 8), 9, 12), false)
 })
 
-test('closedInZoneSinceFloor: candles before the floor are ignored', () => {
-    // candle t=1000 → candleMs 1_000_000; floor 2_000_000 excludes it.
-    assert.equal(closedInZoneSinceFloor(series(11), 9, 12, 2_000_000), false)
+test('closedInZone: edges are exclusive (a close exactly on an edge does not arm)', () => {
+    assert.equal(closedInZone(series(12), 9, 12), false)  // upper edge
+    assert.equal(closedInZone(series(9),  9, 12), false)  // lower edge
 })
 
-test('closedInZoneSinceFloor: guards missing candles / half-open ranges', () => {
-    assert.equal(closedInZoneSinceFloor(null, 9, 12, 1), false)
-    assert.equal(closedInZoneSinceFloor(series(11), null, 12, 1), false)
+test('closedInZone: arms on the current bar regardless of its timestamp (daily-bar fix)', () => {
+    // A daily bar is stamped at 00:00 — older than an intraday author-time floor. The
+    // arm is a pure state check now, so an in-zone close still arms (was the NNOX bug).
+    assert.equal(closedInZone(series(11), 9, 12), true)
+})
+
+test('closedInZone: guards missing candles / half-open ranges', () => {
+    assert.equal(closedInZone(null, 9, 12), false)
+    assert.equal(closedInZone([], 9, 12), false)
+    assert.equal(closedInZone(series(11), null, 12), false)
 })
 
 // ── buildEnvelopeEdges ───────────────────────────────────────────────────────────
@@ -114,9 +121,18 @@ test('checkInvalidation: reaching the zone writes the armed latch (no status)', 
     assert.deepEqual(db.writes, [{ invalidation_armed: true }])
 })
 
-test('checkInvalidation: arming is checked before drifting (dip-in then through in one window)', async () => {
+test('checkInvalidation: arms on the latest close in-zone even after an earlier excursion', async () => {
     const db = makeDb()
-    await run(db, idea(), [100, 11, 8])
+    // Approached from above, overshot to 8, recovered to 11 (in the zone now) → arm.
+    await run(db, idea(), [100, 8, 11])
+    assert.deepEqual(db.writes, [{ invalidation_armed: true }])
+})
+
+test('checkInvalidation: a high entry floor no longer blocks arming (daily-bar regression)', async () => {
+    // Repro of the NNOX bug: entryFloorAt = Date.now() sits after a daily bar's 00:00
+    // stamp, so the old floor scan discarded the in-zone bar and never armed.
+    const db = makeDb()
+    await run(db, idea({ entryFloorAt: 9_999_999_999_999 }), [11])
     assert.deepEqual(db.writes, [{ invalidation_armed: true }])
 })
 
