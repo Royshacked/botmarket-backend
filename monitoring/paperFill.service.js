@@ -22,7 +22,12 @@ import { logger }                from '../services/logger.service.js'
 
 const LOG              = '[paperFill.service]'
 const ORDERS           = 'paperOrders'
-const POLL_INTERVAL_MS = Number(process.env.PAPER_FILL_INTERVAL_MS) || 30_000
+// Paper stop/limit entries and stop-loss/take-profit exits don't rest on a real venue —
+// this loop IS the matching engine, so it must re-check the live price every few seconds
+// or a touched level fills late (or misses a spike that reverts within the interval).
+// Quote fetches are deduped/cached in latestQuote (PAPER_QUOTE_TTL_MS), so a tight loop
+// doesn't multiply provider load.
+const POLL_INTERVAL_MS = Number(process.env.PAPER_FILL_INTERVAL_MS) || 5_000
 
 let _timer   = null
 let _running = false

@@ -13,6 +13,7 @@
 import { randomUUID }        from 'crypto'
 import { paperBrokerService } from './paperBroker.service.js'
 import { getCandles }         from '../../providers/ohlcv.provider.js'
+import { getNumericQuote }    from '../../providers/yahoofinance.provider.js'
 import { executionBus }       from '../../services/executionBus.js'
 import { logger }             from '../../services/logger.service.js'
 
@@ -35,20 +36,46 @@ export function applySpread(price, isBuy, spreadBps = 0) {
     return isBuy ? price + half : price - half
 }
 
+// Last-known quote per symbol, shared by P&L marking and the fill engine. Both the
+// client mark poll (~4s, ×each symbol ×[positions + equity]) and the fill loop
+// (~5s, PAPER_FILL_INTERVAL_MS) need "latest price per symbol", and the OHLCV provider
+// is rate-limited (429s) — so an uncached fetch-per-call exhausts the quota and blanks
+// the price → P&L shows "—" and simulated stop/TP levels stop being checked. This cache
+// collapses the overlapping callers to ~one real fetch per symbol per TTL, and on a
+// failed/empty fetch reuses the last good quote instead of returning null. Keep the TTL
+// in the "every few seconds" range so touch-based stop/TP fills stay responsive — the
+// fill loop can only be as fresh as the quote it reads.
+const _quoteCache   = new Map()   // symbol → { quote, at }
+const QUOTE_TTL_MS  = Number(process.env.PAPER_QUOTE_TTL_MS) || 5_000
+
 /**
  * Latest live quote for a symbol from the most recent 1-min candle (day fallback):
- * `{ c, h, l }` — close for marking P&L, high/low for intrabar touch triggers. null
- * if no candle. h/l fall back to c for degenerate feeds.
+ * `{ c, h, l }` — close for marking P&L, high/low for intrabar touch triggers. h/l fall
+ * back to c for degenerate feeds. Returns the last-known quote when a fresh fetch fails,
+ * and null only when the symbol has never resolved.
  */
 export async function latestQuote(symbol) {
+    const cached = _quoteCache.get(symbol)
+    if (cached && Date.now() - cached.at < QUOTE_TTL_MS) return cached.quote
+
     for (const tf of ['1min', 'day']) {
         try {
             const candles = await getCandles(symbol, tf, 1)
             const last    = candles?.at(-1)
-            if (last?.c != null) return { c: last.c, h: last.h ?? last.c, l: last.l ?? last.c }
+            if (last?.c != null) {
+                const quote = { c: last.c, h: last.h ?? last.c, l: last.l ?? last.c }
+                _quoteCache.set(symbol, { quote, at: Date.now() })
+                return quote
+            }
         } catch (err) {
             logger.warn(LOG, `latestQuote ${symbol}/${tf} failed: ${err.message}`)
         }
+    }
+    // Fresh fetch failed / no candles — reuse the last good quote so marking doesn't
+    // blank out on a transient provider error. Only truly-never-seen symbols return null.
+    if (cached) {
+        logger.warn(LOG, `latestQuote ${symbol}: fresh fetch failed, reusing last-known quote`)
+        return cached.quote
     }
     return null
 }
@@ -56,6 +83,35 @@ export async function latestQuote(symbol) {
 /** Latest live price for a symbol (most recent candle close), or null. */
 export async function latestPrice(symbol) {
     return (await latestQuote(symbol))?.c ?? null
+}
+
+// Symbols Yahoo can't price (crypto / futures / forex / broker symbols) — cached with
+// a retry TTL so we don't re-hit Yahoo every mark tick for a symbol it can't resolve,
+// but a transient miss on a real equity re-tries later instead of downgrading forever.
+const _noYahooUntil  = new Map()   // symbol → ts to retry Yahoo after
+const NO_YAHOO_TTL_MS = 10 * 60_000
+
+/**
+ * Best price for MARKING open-position P&L. Prefers a real-time last-traded quote
+ * (Yahoo regularMarketPrice — equities / ETFs / indices) over the 1-min candle close,
+ * so P&L updates more granularly and dodges the rate-limited aggregates endpoint. Falls
+ * back to the candle close for anything Yahoo can't price (crypto / futures / forex /
+ * broker symbols). NOT for the fill engine — touch fills need the candle's intrabar
+ * high/low (latestQuote), which a single last price can't provide.
+ */
+export async function latestMarkPrice(symbol) {
+    const retryAfter = _noYahooUntil.get(symbol)
+    if (retryAfter == null || Date.now() > retryAfter) {
+        try {
+            const { price } = await getNumericQuote(symbol)
+            if (price != null && Number.isFinite(price) && price > 0) {
+                _noYahooUntil.delete(symbol)
+                return price
+            }
+        } catch { /* unresolved symbol / provider error — fall back to the candle */ }
+        _noYahooUntil.set(symbol, Date.now() + NO_YAHOO_TTL_MS)
+    }
+    return latestPrice(symbol)
 }
 
 /**
@@ -166,9 +222,10 @@ export async function computeEquity(userId) {
     let unrealized = 0
     if (positions.length) {
         const symbols = [...new Set(positions.map(p => p.symbol))]
-        const priceBy = new Map(await Promise.all(symbols.map(async s => [s, await latestPrice(s)])))
+        const priceBy = new Map(await Promise.all(symbols.map(async s => [s, await latestMarkPrice(s)])))
         for (const p of positions) {
-            const px = priceBy.get(p.symbol)
+            // Fall back to the last stored mark so equity doesn't jump when a quote misses.
+            const px = priceBy.get(p.symbol) ?? p.currentPrice
             if (px == null) continue
             unrealized += (px - p.avgPrice) * p.qty * dirSign(p.direction)
         }
@@ -193,4 +250,4 @@ async function _cancelClosingOrders(userId, positionId, exceptOrderId = null) {
     }
 }
 
-export const paperExecutionService = { openPosition, reducePosition, computeEquity, latestPrice, applySpread, dirSign, round2 }
+export const paperExecutionService = { openPosition, reducePosition, computeEquity, latestPrice, latestMarkPrice, applySpread, dirSign, round2 }

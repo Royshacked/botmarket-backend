@@ -38,6 +38,7 @@ import { monitorService }   from './monitoring/monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
 import { paperEquityService } from './monitoring/paperEquity.service.js'
+import { paperMarkService }   from './monitoring/paperMark.service.js'
 import { logger }           from './services/logger.service.js'
 
 const app = express()
@@ -103,6 +104,7 @@ monitorService.start()
 executionReconciler.start()
 paperFillService.start()
 paperEquityService.start()
+paperMarkService.start()
 
 // SPA fallback: only in production when static assets live in public/
 if (process.env.NODE_ENV === 'production') {

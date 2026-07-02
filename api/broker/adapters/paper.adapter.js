@@ -25,6 +25,7 @@ import { openPosition,
          reducePosition,
          computeEquity,
          latestPrice,
+         latestMarkPrice,
          dirSign, round2 }    from '../paperExecution.service.js'
 import { logger }             from '../../../services/logger.service.js'
 
@@ -92,7 +93,7 @@ export class PaperAdapter extends BrokerAdapter {
     async findOpenPosition(userId, accountId, positionId) {
         const pos = await paperBrokerService.getPosition(userId, positionId)
         if (!pos || pos.status !== 'open') return null
-        const price = await latestPrice(pos.symbol)
+        const price = await latestMarkPrice(pos.symbol)
         return this._toBrokerPosition(pos, price)
     }
 
@@ -221,8 +222,11 @@ export class PaperAdapter extends BrokerAdapter {
     }
 
     _toBrokerPosition(p, currentPrice = null) {
-        const pnl = currentPrice != null
-            ? (currentPrice - p.avgPrice) * p.qty * dirSign(p.direction)
+        // Prefer this call's live price; when the fetch missed, fall back to the last
+        // mark stamped by the paperMark loop so P&L doesn't blank out between ticks.
+        const markPrice = currentPrice ?? p.currentPrice ?? null
+        const pnl = markPrice != null
+            ? (markPrice - p.avgPrice) * p.qty * dirSign(p.direction)
             : null
         return {
             id:           p.positionId,
@@ -230,7 +234,7 @@ export class PaperAdapter extends BrokerAdapter {
             direction:    p.direction,
             volume:       p.qty,
             entryPrice:   p.avgPrice,
-            currentPrice,
+            currentPrice: markPrice,
             pnl:          pnl != null ? round2(pnl) : null,
             pnlPips:      null,
             swap:         null,
@@ -241,10 +245,11 @@ export class PaperAdapter extends BrokerAdapter {
         }
     }
 
-    /** Map of symbol → latest price for the distinct symbols given. */
+    /** Map of symbol → mark price for the distinct symbols given (real-time quote for
+     *  equities, candle-close fallback otherwise). Used to price P&L, not to fill. */
     async _priceMap(symbols) {
         const distinct = [...new Set(symbols)]
-        const entries  = await Promise.all(distinct.map(async s => [s, await latestPrice(s)]))
+        const entries  = await Promise.all(distinct.map(async s => [s, await latestMarkPrice(s)]))
         return new Map(entries)
     }
 }

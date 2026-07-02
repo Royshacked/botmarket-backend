@@ -19,6 +19,14 @@ const COLLECTION = 'ideas'
 const LOCKED_DELETE_STATUSES = new Set(['long', 'short'])
 const VALID_STATUSES = new Set(['waiting', 'looking', 'resting', 'hit', 'long', 'short', 'closed'])
 
+// A pending idea can be flipped to an immediate market entry ("go in now") from the
+// edit/build flow. Guard it tightly: only an explicit immediate flag on a still-pending
+// (waiting/looking) idea — never an in-position, resting, hit, or closed one, and never a
+// plain update that happened to carry the flag along (those strip it client-side).
+export function shouldMarketEnterOnUpdate(patch, existingStatus) {
+    return patch?.immediate === true && (existingStatus === 'waiting' || existingStatus === 'looking')
+}
+
 export const ideaService = {
     saveIdea,
     saveBatchIdeas,
@@ -343,6 +351,23 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         delete patch.resetPreEntry
 
         delete patch.resetWindow
+
+        // "Go in at market now" from the edit/build flow: flip a still-pending idea
+        // to immediate. Mirrors saveIdea's immediate path — transition to 'hit' and
+        // attach the order plan so the OrderConfirm dialog surfaces. In-position,
+        // resting, hit and closed ideas are left untouched (can't market-enter them).
+        if (shouldMarketEnterOnUpdate(patch, existing.status)) {
+            patch.status           = 'hit'
+            patch.entryTriggeredAt = Date.now()
+            const merged = { ...(await db.collection(COLLECTION).findOne({ id })), ...patch }
+            const plan   = await buildOrderPlanForIdea(merged)
+            if (plan.length > 0) {
+                const open = isAssetOpen(merged.asset, merged.asset_class)
+                patch.pendingOrder = { plan, builtAt: Date.now() }
+                patch.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
+            }
+            monitorService.resetIdea(id)
+        }
 
         const updateFilter = isAdmin || !existing.userId
             ? { id }

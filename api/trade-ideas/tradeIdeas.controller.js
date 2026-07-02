@@ -142,7 +142,7 @@ export async function updateTradeIdea(req, res) {
             tp_conditions,    tp_logic,    tp_condition_tree,
             notes, invalidation,
             accounts, mainAccountId,
-            resetWindow, resetPreEntry,
+            resetWindow, resetPreEntry, immediate,
         } = req.body ?? {}
 
         if (!status && type === undefined && quantity === undefined && timeframe === undefined &&
@@ -151,7 +151,7 @@ export async function updateTradeIdea(req, res) {
             entry_conditions === undefined && stop_conditions === undefined && tp_conditions === undefined &&
             entry_logic === undefined && stop_logic === undefined && tp_logic === undefined &&
             entry_condition_tree === undefined && stop_condition_tree === undefined && tp_condition_tree === undefined &&
-            accounts === undefined && mainAccountId === undefined &&
+            accounts === undefined && mainAccountId === undefined && immediate === undefined &&
             invalidation === undefined && resetWindow === undefined && resetPreEntry === undefined &&
             notes === undefined) {
             return res.status(400).send({ error: 'Nothing to update' })
@@ -185,6 +185,9 @@ export async function updateTradeIdea(req, res) {
         // monitor flips the idea to 'hit' but builds no order plan (alert-only).
         if (accounts !== undefined)              patch.accounts = accounts
         if (mainAccountId !== undefined)         patch.mainAccountId = mainAccountId
+        // "Go in at market now" from the edit/build flow: the service transitions a
+        // still-pending idea to 'hit' + builds the order plan (see shouldMarketEnterOnUpdate).
+        if (immediate !== undefined)             patch.immediate = immediate
         // Control flag (not persisted): distinguishes "reset window" from a plain
         // dismiss on a hit→waiting transition. Stripped in the service before write.
         if (resetWindow !== undefined)           patch.resetWindow = resetWindow
