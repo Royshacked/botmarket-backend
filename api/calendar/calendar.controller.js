@@ -1,51 +1,47 @@
 import { fetchEarningsCalendarByDate, fetchCompanyProfile, fetchIpoCalendar } from '../../providers/finnhub.provider.js'
 import { fetchFedEvents } from '../../providers/fred.provider.js'
+import { enrichWithProfiles } from '../../services/companyProfile.util.js'
 import { logger } from '../../services/logger.service.js'
 
 const LOG = '[calendar:controller]'
 
-// Which day's calendar to show, as a day offset indexed by getDay() (0=Sun … 6=Sat):
-// today on weekdays; on the weekend, tomorrow (Sat→Sun, Sun→Mon).
-const _CALENDAR_DAY_SHIFT = [1, 0, 0, 0, 0, 0, 1]
+// Which window the calendar shows = the current trading week. On a weekday that's
+// today → this week's Friday; on the weekend it rolls forward to the coming
+// Mon–Fri. Offsets indexed by getDay() (0=Sun … 6=Sat): FROM is the window start
+// (today, or the coming Monday on Sat/Sun), TO is that week's Friday.
+const _WEEK_FROM_SHIFT = [1, 0, 0, 0, 0, 0, 2]
+const _WEEK_TO_SHIFT   = [5, 4, 3, 2, 1, 0, 6]
 
-function _calendarDay() {
-    const d = new Date()
-    d.setDate(d.getDate() + _CALENDAR_DAY_SHIFT[d.getDay()])
-    return d.toISOString().slice(0, 10)
+export function _calendarWeek(now = new Date()) {
+    const day = now.getDay()
+    const from = new Date(now); from.setDate(now.getDate() + _WEEK_FROM_SHIFT[day])
+    const to   = new Date(now); to.setDate(now.getDate() + _WEEK_TO_SHIFT[day])
+    return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
 }
 
-// Attach company name + logo to each row. Concurrency-capped so a busy earnings
-// day doesn't burst past Finnhub's rate limit; cached profiles return instantly.
-// `fetchProfile` is injectable for testing.
+// Thin wrapper over the shared profile enrichment (keyed on `symbol`), kept for
+// the calendar's callers and unit tests. `fetchProfile` is injectable for testing.
 export async function _enrichWithProfiles(items, fetchProfile = fetchCompanyProfile, concurrency = 5) {
-    let idx = 0
-    async function worker() {
-        while (idx < items.length) {
-            const item = items[idx++]
-            const { name, logo } = await fetchProfile(item.symbol)
-            item.name = name
-            item.logo = logo
-        }
-    }
-    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker))
-    return items
+    return enrichWithProfiles(items, { fetchProfile, concurrency })
 }
 
 export async function getEarnings(req, res) {
     try {
-        const date = _calendarDay()
-        const data = await fetchEarningsCalendarByDate(date, date)
+        const { from, to } = _calendarWeek()
+        const data = await fetchEarningsCalendarByDate(from, to)
         const rows = Array.isArray(data?.earningsCalendar) ? data.earningsCalendar : []
-        const items = rows.map(r => ({
-            symbol:           r.symbol,
-            date:             r.date,
-            time:             r.hour              || null,
-            epsEstimated:     r.epsEstimate        ?? null,
-            epsActual:        r.epsActual          ?? null,
-            revenueEstimated: r.revenueEstimate    ?? null,
-        }))
+        const items = rows
+            .map(r => ({
+                symbol:           r.symbol,
+                date:             r.date,
+                time:             r.hour              || null,
+                epsEstimated:     r.epsEstimate        ?? null,
+                epsActual:        r.epsActual          ?? null,
+                revenueEstimated: r.revenueEstimate    ?? null,
+            }))
+            .sort((a, b) => (a.date || '').localeCompare(b.date || ''))  // chronological → groups by day cleanly
         await _enrichWithProfiles(items)
-        res.json({ date, items })
+        res.json({ from, to, items })
     } catch (err) {
         logger.error(LOG, 'getEarnings failed', err)
         res.status(500).json({ error: 'Failed to fetch earnings calendar' })
@@ -64,8 +60,7 @@ export async function getFed(req, res) {
 
 export async function getIpo(req, res) {
     try {
-        const from = new Date().toISOString().slice(0, 10)
-        const to   = new Date(Date.now() + 45 * 864e5).toISOString().slice(0, 10)
+        const { from, to } = _calendarWeek()
         const rows = await fetchIpoCalendar(from, to)
         const items = rows
             .map(r => ({
@@ -79,6 +74,9 @@ export async function getIpo(req, res) {
                 status:   r.status || null,
             }))
             .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+        // Attach logos + fill blank names (many IPO rows carry a name already, so
+        // don't clobber it — only fill when Finnhub's calendar left it empty).
+        await enrichWithProfiles(items, { overwriteName: false })
         res.json({ items })
     } catch (err) {
         logger.error(LOG, 'getIpo failed', err)
