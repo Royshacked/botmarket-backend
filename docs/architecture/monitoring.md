@@ -184,7 +184,7 @@ The two key pieces of context threaded through all evaluations:
 
 ```
 conditions sorted by cost:
-  structured (cost 0) → indicator (cost 1) → news (cost 2) → chart (cost 3)
+  time (-1) → touch (0) → structured (0) → volume (0) → indicator (1) → news (2) → chart (3)
       │
       ▼
   eval cheapest first; bail immediately on first failure
@@ -265,6 +265,21 @@ Old ideas stored conditions as plain strings. The orchestrator normalises both:
 
 ## Condition types
 
+There are **seven** leaf types. `structured` / `touch` / `volume` are deterministic local
+math; `indicator` / `news` / `chart` are Claude reads; `time` is a pure clock gate.
+
+| `type:` | evaluator | what it is |
+|---|---|---|
+| `structured` (default) | `structured.evaluator.js` | candle-**close** comparison (price/indicator vs number) |
+| `touch` | `touch.evaluator.js` | intra-candle price **level** (usually offloaded to the broker) |
+| `indicator` | `indicator.evaluator.js` | qualitative candle-pattern YES/NO |
+| `chart` | `chart.evaluator.js` | visual chart pattern (vision) |
+| `news` | `news.evaluator.js` | headline sentiment YES/NO |
+| `time` | `time.evaluator.js` | wall-clock `after`/`before` gate |
+| `volume` | `volume.evaluator.js` | volume threshold, `bar` \| `cumulative` |
+
+A leaf with no `type` (or a bare string) defaults to `structured`.
+
 ### 1. Structured (`type: 'structured'`)
 
 **Parse → Evaluate** pipeline, fully deterministic after parsing.
@@ -299,6 +314,17 @@ structured.evaluator.js  →  pure math, no I/O
 | `sma(N)` | SMA with period N |
 | `macd_line`, `macd_signal`, `macd_hist` | MACD (12/26/9) |
 | `atr(N)` | ATR with period N (Wilder smoothing) |
+| `vwap` | Session-anchored VWAP (no period) — **intraday only** |
+
+**VWAP** is a first-class subject with no period. It is anchored to the session start
+(`ctx.sessionStartMs` — equity RTH 09:30 ET, crypto/futures/forex UTC-midnight; see
+`market.service.sessionStartMs`) and computed by `calcVWAPSeries(candles, anchorMs)`
+(`structured.evaluator.js`): cumulative `Σ(typicalPrice × vol) / Σvol` where typical price
+= `(h+l+c)/3`, skipping pre-session bars. If the anchor is missing it falls back to the
+newest bar's UTC-day open. The anchor is plumbed in only when a leaf's text matches
+`/vwap/i` (`monitorUtils.hasVwap`) — a VWAP-only idea builds the session context with no
+extra fetch. VWAP also works as an `indicator`-type column (the LLM candle table gets a
+session-correct VWAP column when the condition mentions it).
 
 **`confirmation`:** number of consecutive candles that must all satisfy the condition (0 = current bar only).
 
@@ -379,6 +405,138 @@ Claude Haiku: "YES or NO — do these headlines reflect the condition?"
 pass = response starts with 'Y'
 ```
 
+### 5. Touch (`type: 'touch'`)
+
+A pure price **level** that triggers the instant price *trades at* it — intra-candle, not
+on a candle close. `touch.evaluator.js`:
+
+```
+level = parsed.value              (non-finite → { pass:false, reason:'no_level' })
+    │
+    ▼
+first candle at/after floorAt whose range includes the level:
+    c.l <= level <= c.h           (direction-agnostic — from above OR below)
+    │
+    ▼
+{ pass:true, triggerAt: <that candle's ms> }
+```
+
+Unlike `structured`, touch has **no rising-edge / confirmation logic** — it's a discrete
+range-inclusion event. Both `structured` and `touch` are treated as *price leaves*
+(`isPriceLeaf`), so their findings feed sibling `chart` nodes as causal context.
+
+**Touch leaves are normally offloaded to the broker, not monitored.** The leaf `type` is
+the single source of truth for what rests at the broker vs. what the software monitor
+watches (`services/protectionPlan.service.js`):
+
+- A **single** clean touch entry leaf → a broker-native **stop-market entry** (idea gets
+  `entryOrderType:'stop'`, status `resting`).
+- Each touch level in a stop/TP leg → its **own `positionId` closing order** (LIMIT for
+  tp, STOP for stop), placed when the position opens. Touches no longer ride an attached
+  native SL/TP on hedging accounts — every touch exit is a discrete closing order.
+- `_leafBareLevel` gates offload hard: requires `type==='touch'`, no cross-asset `symbol`,
+  a numeric `parsed.value`, and a price subject (`close/open/high/low`) — a mistyped
+  `volume` leaf can never become a $-level order.
+
+The touch evaluator therefore acts as a **fallback**: when a touch leaf sits in an AND
+group with non-touch siblings, the leg can't be offloaded whole, so it stays on the
+software monitor and this evaluator handles it. At a real broker the intrabar fill is done
+by the venue; in paper mode the **paper fill engine** supplies it (see *Intrabar
+evaluation* below).
+
+### 6. Time (`type: 'time'`)
+
+A wall-clock gate on a phase. `time.evaluator.js`:
+
+```
+leaf: { type:'time', after?, before? }   (each ISO-8601, or epoch ms, or epoch seconds)
+    │
+    ▼
+pass = (after  == null || now >= after)
+    && (before == null || now <= before)
+```
+
+- Both bounds empty/unparseable → **`true`** (the condition is ignored, so an author can
+  fill dates in later). An unparseable-but-present value logs a warn, is treated as null,
+  and never blocks.
+- Time is the **cheapest leaf (cost −1)** and gates first. It also powers a candle-fetch
+  optimisation: `isTimeBlocked` evaluates the tree optimistically (every non-time leaf
+  assumed true, time leaves use the real clock); if the tree is still false, only the clock
+  is to blame, so the monitor **skips fetching candles that tick** (`_canPassOnTime`).
+
+### 7. Volume (`type: 'volume'`)
+
+A volume threshold with two modes (`leaf.mode`, default `'bar'`). `volume.evaluator.js`:
+
+**`bar`** — threshold on the stated-timeframe bar, evaluated at **candle close**.
+Delegates straight to the structured engine with subject `volume` (→ `c.v`), so it inherits
+full rising-edge / confirmation semantics. No new math.
+
+**`cumulative`** — running total volume **since session start**, evaluated **intrabar**:
+
+```
+requires ctx.sessionStartMs   (else reason:'no_session_start')
+candles here are 1-MINUTE bars (ctx.minuteCandles[symbol])
+    │
+    ▼
+total = Σ c.v  for every 1-min bar with t >= sessionStartMs
+    │
+    ▼
+snapshot compare (NOT rising edge): total vs threshold, triggerAt = now
+    crossAbove/crossBelow on a monotonic intraday total collapse to > N / < N
+```
+
+Session anchor comes from `market.service.sessionStartMs` (crypto/futures/forex →
+UTC-midnight, equities → RTH open 09:30 ET). Cumulative volume works for **exit** phases
+too (`positionMonitor` builds the same `volCtx` for stop/TP).
+
+---
+
+## Intrabar evaluation
+
+Most leaves are evaluated on the 60s poll against **closed** candles. Two mechanisms handle
+genuinely intra-bar conditions:
+
+**1. Cumulative-volume 1-min clamp.** When any phase has a cumulative-volume leaf
+(`hasCumulativeVolume`), that idea's per-idea check gap is clamped to `min(gap, 60_000)` so
+it re-checks at most every 60s, reading a freshly-fetched 1-min series
+(`buildVolumeCtx`). The monitor itself has **no sub-minute loop** — touch in the monitor
+path evaluates against fetched candles, not a live tick.
+
+**2. Paper fill engine** (`monitoring/paperFill.service.js`) — a separate global loop
+(`setInterval`, default **5s**, `PAPER_FILL_INTERVAL_MS`) that sweeps every user's `working`
+paper orders and does true intra-bar touch/limit fills off the live quote's high/low:
+
+```
+isTriggered(order, quote):
+  stop  long  → quote.h >= trigger      limit long  → quote.l <= trigger
+  stop  short → quote.l <= trigger      limit short → quote.h >= trigger
+```
+
+i.e. a long TP at 432 fills the moment the high reaches 432 even if the bar closes back
+below. This is the paper "matching engine" that stands in for the fills an offloaded
+(broker-native) order would get at a real venue — for both resting entries and `positionId`
+closing exits. (See `docs/architecture/paper-trading-simulation.md`.)
+
+---
+
+## Cost map (leaf ordering)
+
+`monitor.orchestrator.js` sorts each AND/OR gate cheapest-first and, for groups, orders by
+the **max** cost of the group's children:
+
+| type | cost | why |
+|---|---|---|
+| `time` | −1 | pure wall-clock, gates first + can skip candle fetch |
+| `touch` | 0 | local range check |
+| `structured` | 0 | local math |
+| `volume` | 0 | local sum/compare |
+| `indicator` | 1 | Claude Haiku read |
+| `news` | 2 | Claude Haiku + GNews fetch |
+| `chart` | 3 | Claude vision + screenshot |
+
+Unknown types default to cost 0.
+
 ---
 
 ## Claude usage
@@ -409,11 +567,17 @@ monitoring/
     condition.parser.js       NL → ParsedCondition via Claude; in-memory cache
 
   evaluators/
-    structured.evaluator.js   Pure math evaluation + all indicator calculations
+    structured.evaluator.js   Pure math evaluation + all indicator calcs + VWAP series
+    touch.evaluator.js        Intra-candle price-level range check (offload fallback)
     indicator.evaluator.js    Candle table + pre-computed indicators → Claude Haiku YES/NO
     visual.evaluator.js       Legacy alias for indicator.evaluator.js
     news.evaluator.js         GNews headlines → Claude Haiku YES/NO
     chart.evaluator.js        Chart screenshot + time/causal context → Claude vision YES/NO
+    time.evaluator.js         Wall-clock after/before gate
+    volume.evaluator.js       Volume threshold — bar (candle close) | cumulative (intrabar)
+
+  ../services/protectionPlan.service.js   Routes touch leaves → broker native / closing orders
+  ../monitoring/paperFill.service.js      Global 5s loop: intra-bar touch/limit paper fills
 
   providers/
     ohlcv.provider.js         Thin wrapper around priceService; normalises to {t,o,h,l,c,v}
