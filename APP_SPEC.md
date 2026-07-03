@@ -60,13 +60,13 @@ Entry / stop / TP are **condition trees**: AND/OR group nodes over typed leaves.
 
 | Type | Fires on | Notes |
 |------|----------|-------|
-| `touch` | price crossing a level, intrabar | becomes a native broker order for exits |
-| `structured` | a pattern at candle **close** | monitored, not intrabar |
-| `indicator` | TA condition (RSI/EMA/SMA/ATR/MACD/VWAP…) | grammar in `parsers/indicators.parser.js` |
-| `time` | a session/clock condition | |
-| `volume` | bar or cumulative volume threshold | intraday, session-anchored |
+| `touch` | price trading **at** a level, intrabar | direction-agnostic; becomes a native broker order for entries/exits |
+| `structured` | a deterministic threshold at candle **close** | pure math, no LLM; subjects: price/volume + RSI/EMA/SMA/MACD/ATR/VWAP vs a number |
+| `indicator` | a qualitative TA judgment (e.g. "bullish engulfing") | Haiku YES/NO over the candle+indicator table; `parsers/indicators.parser.js` supplies the shared `family(N)` grammar |
+| `time` | a wall-clock `after`/`before` window | cheapest leaf; can skip the candle fetch |
+| `volume` | bar or cumulative volume threshold | `bar` = candle close; `cumulative` = intraday, session-anchored, ~1-min poll |
 | `news` | an LLM judgment over recent news | Haiku YES/NO (`parseYesNo`) |
-| `chart` | an LLM vision judgment over a chart image | |
+| `chart` | an LLM vision judgment over a chart image | Sonnet vision; most expensive |
 
 - A leaf's **timeframe** resolves via `resolvePhaseTimeframe` (entry/stop/tp). Per-leaf pass/fail
   is persisted to `conditionStates` for the UI (both the tree path and the legacy flat-array path).
@@ -126,9 +126,9 @@ the `BrokerAdapter` contract. **Consumers branch on `capabilities()` flags, neve
 
 | Broker | Status | Trading |
 |--------|--------|---------|
-| `ctrader` | live | full (REST + ProtoOA WebSocket) |
-| `paper` | live | full — virtual venue, fills against the live price feed |
-| `ibkr` | in progress | data-only (`ohlcv` true, trading false) — **paused; do not extend without asking** |
+| `ctrader` | live | full — OAuth+REST for accounts, ProtoOA WebSocket for orders/positions/exec (`nativeProtection` true) |
+| `paper` | live | full — virtual venue, fills against the live price feed (`nativeProtection` false → exits rest as `positionId` closing orders) |
+| `ibkr` | in progress | data-only over IB Gateway / TWS socket (`@stoqey/ib`; `ohlcv` true, trading false) — **paused; do not extend without asking** |
 
 ### Paper mode
 
