@@ -60,6 +60,13 @@ services/
   format.util.js  http.util.js  ttlCache.util.js  priceStats.util.js  cycleAnalysis.service.js
   logger.service.js  tokenUsage.service.js
   tradeCapture.service.js   append-only `trades` history (captureOpen / captureOpenBare / captureClose)
+  thread.service.js  thread.util.js   unified subject-bound conversation threads
+                          (`threads` collection). A conversation gets a threadId at the
+                          start (subject-independent), is saved as a `draft` once it crosses
+                          the agent's substantive floor (thread.util.isSubstantive over the
+                          agent's emitted phase — NOT content), TTL-expired + LRU-capped, and
+                          is `linked` to its artifact (idea/portfolio/scan) on generate.
+                          Generalizes portfolio_chats; migrating agents off per-agent chat-state.
 providers/
   anthropic.provider.js  openai.provider.js            LLMs
   yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / chartImg / ohlcv

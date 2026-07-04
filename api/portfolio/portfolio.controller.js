@@ -7,11 +7,13 @@ import { resolveModel }          from '../../services/modelRouter.service.js'
 import { startSseStream }        from '../_shared/sse.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
+import { threadService }          from '../../services/thread.service.js'
+import { isSubstantive }          from '../../services/thread.util.js'
 
 const LOG = '[portfolio:controller]'
 
 export async function streamPortfolio(req, res) {
-    const { messages, ideaAccounts, portfolioId, portfolioIdeas, model, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
+    const { messages, ideaAccounts, portfolioId, portfolioIdeas, threadId, model, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
 
     const validatedMessages = parseChatMessages(messages)
     if (validatedMessages.error) {
@@ -43,14 +45,17 @@ export async function streamPortfolio(req, res) {
                 : Promise.resolve(null),
         ])
 
-        // Carry the mandate forward across turns. During first-time construction
-        // there's no portfolioId yet (nothing persisted), so the client re-sends the
-        // mandate it captured from earlier 'done' events — without this the agent
-        // loses the answers once the trimmed history scrolls past them. The fresh
-        // body mandate wins; the stored one (edit/review of an existing portfolio)
-        // is the fallback.
+        // Carry the mandate forward across turns. During first-time construction there's
+        // no portfolioId yet, so the conversation is persisted to a DRAFT thread keyed by
+        // threadId — that draft's mandate is the durable fallback (survives a reload; the
+        // client re-send is now belt-and-suspenders, not the only source of truth). The
+        // fresh body mandate wins; then the draft; then the stored one (edit/review).
+        const draftThread = (!portfolioId && threadId)
+            ? await threadService.getThread({ threadId, userId: req.user._id }).catch(() => null)
+            : null
+
         const bodyMandate = (req.body?.mandate && typeof req.body.mandate === 'object') ? req.body.mandate : null
-        const mandate = bodyMandate ?? storedMandate
+        const mandate = bodyMandate ?? draftThread?.mandate ?? storedMandate
 
         const lastMessage = messages.at(-1)?.content ?? ''
         const routing = await resolveModel({ routingMode, agent: 'portfolio', phase: currentPhase, model, reasoningEffort, lastMessage })
@@ -92,6 +97,19 @@ export async function streamPortfolio(req, res) {
                 portfolioChatService.setThesis(portfolioId, req.user._id, result.thesis, storedThesis ? 'mandate-edit' : 'construction')
                     .catch(err => logger.warn(LOG, 'setThesis unexpected error', err))
             }
+            // Construction only: once the agent has emitted a mandate (portfolio's
+            // substantive floor), persist/refresh the conversation as a draft thread so it
+            // survives a stop-before-generate. Full conversation incl. this reply; the
+            // thread service TTL-manages + LRU-caps drafts. Linked on generate (savePortfolioChatState).
+            const knownMandate = result.mandate ?? mandate
+            if (!portfolioId && threadId && isSubstantive({ agent: 'portfolio', phase: result.phase, mandateReady: !!knownMandate })) {
+                const draftMessages = [...messages, { role: 'assistant', content: result.reply }]
+                threadService.saveDraft({
+                    threadId, userId: req.user._id, agent: 'portfolio',
+                    messages: draftMessages, phase: result.phase ?? null,
+                    subjectType: 'portfolio', mandate: knownMandate ?? null,
+                }).catch(err => logger.warn(LOG, 'construction saveDraft failed', err))
+            }
             sendEvent('done', { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null })
             res.end()
         }
@@ -106,7 +124,7 @@ export async function streamPortfolio(req, res) {
 
 export async function savePortfolioChatState(req, res) {
     try {
-        const { portfolioId, messages, mandate, thesis } = req.body ?? {}
+        const { portfolioId, messages, mandate, thesis, threadId, portfolioName } = req.body ?? {}
         if (!portfolioId || !Array.isArray(messages)) {
             return res.status(400).json({ error: 'Missing portfolioId or messages' })
         }
@@ -115,6 +133,14 @@ export async function savePortfolioChatState(req, res) {
         // Persist the portfolio thesis captured during construction (portfolioId now exists).
         if (thesis && typeof thesis === 'object') {
             await portfolioChatService.setThesis(portfolioId, req.user._id, thesis, 'construction').catch(() => {})
+        }
+        // Link the construction draft thread to the now-created portfolio: stamps subjectId,
+        // promotes it to 'linked' and clears its TTL so the conversation lives with the book.
+        if (threadId) {
+            threadService.linkToArtifact({
+                threadId, userId: req.user._id,
+                subjectType: 'portfolio', subjectId: portfolioId, artifactName: portfolioName ?? null,
+            }).catch(err => logger.warn(LOG, 'linkToArtifact failed', err))
         }
         res.json({ ok: true })
     } catch (err) {

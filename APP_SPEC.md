@@ -162,7 +162,16 @@ everything else resolves by identity. Paper uses canonical symbols unchanged.
 - `paperAccounts` / `paperPositions` / `paperOrders` — the virtual broker store.
 - `chat_conversations` / `chat_messages` — social DM + bot notifications (`chat_messages.dismissed`
   persists a dismissed actionable alert bubble).
-- Portfolio/scanner chat state persisted per user/portfolio.
+- `threads` — unified agent conversation threads (idea / portfolio / scanner). A conversation gets a
+  subject-independent `threadId` at the start and moves through three tiers: **trivial** (below the
+  agent's substantive floor — `thread.util.isSubstantive` over the agent's *emitted phase*, not
+  content → never saved), **draft** (`saveDraft`; TTL-expired via `expiresAt` + LRU-capped per user),
+  **linked** (`linkToArtifact` stamps `subjectId` to the generated idea/portfolio/scan and clears the
+  TTL). Portfolio drafts persist server-side inline; idea/scanner drive drafts client-side through
+  `/api/threads` (their server never holds the full conversation). Fixes the mandate re-send hack —
+  construction state is durable before the artifact exists.
+- Portfolio/scanner legacy chat state (`portfolio_chats` / `scanner_chats`) still persists per
+  user/portfolio for post-create edit restore; being superseded by `threads`.
 
 ---
 

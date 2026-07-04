@@ -21,6 +21,7 @@ import { attach as attachChatWs } from './api/chat/chatWs.js'
 import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
+import { threadService } from './services/thread.service.js'
 import { orchestratorRoutes } from './api/orchestrator/orchestrator.routes.js'
 import { newsFeedRoutes } from './api/news-feed/newsFeed.routes.js'
 import { tradeIdeasRoutes } from './api/trade-ideas/tradeIdeas.routes.js'
@@ -31,6 +32,7 @@ import { paperRoutes }       from './api/paper/paper.routes.js'
 import { transcribeRoutes }  from './api/transcribe/transcribe.routes.js'
 import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
 import { scannerRoutes }     from './api/scanner/scanner.routes.js'
+import { threadsRoutes }     from './api/threads/threads.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
 import { newsFeedService }  from './api/news-feed/newsFeed.service.js'
@@ -90,6 +92,7 @@ app.use('/api/broker',      brokerRoutes)
 app.use('/api/paper',       paperRoutes)
 app.use('/api/portfolio',   portfolioRoutes)
 app.use('/api/scanner',     scannerRoutes)
+app.use('/api/threads',     threadsRoutes)
 app.use('/api/market',      marketRoutes)
 app.use('/api/calendar',    calendarRoutes)
 app.use('/api/chat',        chatRoutes)
@@ -98,6 +101,7 @@ attachChatWs(server)
 ensureChatIndexes()
 ensureUserIndexes()
 ensureIdeaIndexes()
+threadService.ensureThreadIndexes()
 
 newsFeedService.start()
 monitorService.start()
