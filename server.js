@@ -22,7 +22,7 @@ import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
 import { threadService } from './services/thread.service.js'
-import { orchestratorRoutes } from './api/orchestrator/orchestrator.routes.js'
+import { ideaRoutes } from './api/idea/idea.routes.js'
 import { newsFeedRoutes } from './api/news-feed/newsFeed.routes.js'
 import { tradeIdeasRoutes } from './api/trade-ideas/tradeIdeas.routes.js'
 import { authRoutes }   from './api/authentication/authentication.routes.js'
@@ -32,6 +32,7 @@ import { paperRoutes }       from './api/paper/paper.routes.js'
 import { transcribeRoutes }  from './api/transcribe/transcribe.routes.js'
 import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
 import { scannerRoutes }     from './api/scanner/scanner.routes.js'
+import { axlRoutes }         from './api/axl/axl.routes.js'
 import { threadsRoutes }     from './api/threads/threads.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
@@ -83,7 +84,7 @@ if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve('public')))
 }
 
-app.use('/api/orchestrator', orchestratorRoutes)
+app.use('/api/idea', ideaRoutes)
 app.use('/api/news-feed',   newsFeedRoutes)
 app.use('/api/trade-ideas', tradeIdeasRoutes)
 app.use('/api/auth',        authRoutes)
@@ -92,6 +93,7 @@ app.use('/api/broker',      brokerRoutes)
 app.use('/api/paper',       paperRoutes)
 app.use('/api/portfolio',   portfolioRoutes)
 app.use('/api/scanner',     scannerRoutes)
+app.use('/api/axl',         axlRoutes)
 app.use('/api/threads',     threadsRoutes)
 app.use('/api/market',      marketRoutes)
 app.use('/api/calendar',    calendarRoutes)

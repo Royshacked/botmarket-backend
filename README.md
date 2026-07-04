@@ -60,7 +60,7 @@ equity snapshotter.
 ```
 server.js              Express app, route mounts, background-service boot
 api/                   HTTP surface — one folder per feature (routes + controller + service)
-  orchestrator/        Trade Agent SSE chat (the AI idea-building conversation)
+  idea/                Trade Agent SSE chat (the AI idea-building conversation)
   trade-ideas/         idea CRUD + order placement
   portfolio/           Portfolio Agent chat + review lifecycle
   scanner/             Scanner Agent chat + saved scans
@@ -86,10 +86,10 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                  TRADE AGENT CHAT (Orchestrator)                 │
-│  POST /api/orchestrator/stream   (SSE)                           │
+│                  TRADE AGENT CHAT (Idea)                         │
+│  POST /api/idea/stream   (SSE)                                   │
 │                                                                  │
-│  User ──► tradeAgentService.chatStream()                         │
+│  User ──► ideaAgentService.chatStream()                          │
 │             │  model chosen per-request by modelRouter           │
 │             │  Tools: get_quote, get_candles, get_chart,         │
 │             │         get_short_interest, get_options_context,   │
@@ -404,7 +404,7 @@ GET  /equity-curve   equity points (?fromMs=)
 - **Users** `/api/users` — CRUD + `GET /:id/usage` (token-usage stats).
 - **Social chat** `/api/chat` — user-to-user messaging (`/conversations`, messages, read
   receipts, `GET /users/search`). Realtime via WebSocket (`api/chat/chatWs.js`). This is **not**
-  the AI agent chat — that's the orchestrator SSE. Agent notifications (idea hit, invalidation
+  the AI agent chat — that's the idea-agent SSE. Agent notifications (idea hit, invalidation
   alert) arrive here as bot messages.
 - **News feed** `/api/news-feed` — `GET /`, `GET /stream` (SSE), `GET /asset/:symbol`,
   `GET /asset/:symbol/sentiment`.

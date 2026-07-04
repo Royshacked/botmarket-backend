@@ -29,6 +29,12 @@ test('isSubstantive: past nucleus (phase >= 2) is saved', () => {
     assert.equal(isSubstantive({ agent: 'scanner', phase: 3 }), true)
 })
 
+test('isSubstantive: axl is always substantive (no phases / no artifact)', () => {
+    assert.equal(isSubstantive({ agent: 'axl' }), true)
+    assert.equal(isSubstantive({ agent: 'axl', phase: null }), true)
+    assert.equal(isSubstantive({ agent: 'axl', phase: 1 }), true)
+})
+
 test('isSubstantive: portfolio mandate-ready is saved even at phase 1', () => {
     assert.equal(isSubstantive({ agent: 'portfolio', phase: 1, mandateReady: true }), true)
     // mandateReady is a portfolio-only signal — it does not lift other agents

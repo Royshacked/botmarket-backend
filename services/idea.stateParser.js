@@ -3,7 +3,7 @@ import { normalizeTimeframe } from './timeframe.service.js'
 import { normalizeTreeNode, firstLeafTimeframe } from './conditionTree.service.js'
 import { cleanConviction } from './conviction.util.js'
 
-const LOG = '[tradeAgent]'
+const LOG = '[ideaStateParser]'
 const MAX_RECENT_MESSAGES = 6
 
 export function _parseResponse(raw, priorState, userPrompt) {

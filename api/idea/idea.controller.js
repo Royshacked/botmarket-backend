@@ -1,16 +1,16 @@
 import { logger }           from '../../services/logger.service.js'
-import { tradeAgentService, emptyAnalysisState } from '../../services/trade.agent.service.js'
+import { ideaAgentService, emptyAnalysisState } from '../../services/idea.agent.service.js'
 import { brokerService }     from '../broker/broker.service.js'
 import { resolveModel }      from '../../services/modelRouter.service.js'
 import { startSseStream }    from '../_shared/sse.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
 
-const LOG = '[orchestrator:controller]'
+const LOG = '[idea:controller]'
 
 const MAX_RECENT_CHAT_TURNS = 3
 
-export async function streamOrchestration(req, res) {
-    const parsed = parseOrchestratorBody(req.body)
+export async function streamIdea(req, res) {
+    const parsed = parseIdeaBody(req.body)
     if (parsed.error) {
         return res.status(400).json({ error: parsed.error })
     }
@@ -25,7 +25,7 @@ export async function streamOrchestration(req, res) {
         const lastMessage = parsed.messages?.at(-1)?.content ?? parsed.userPrompt ?? ''
         const routing = await resolveModel({ routingMode, agent: 'idea', phase: currentPhase, model, reasoningEffort, lastMessage })
 
-        const result = await tradeAgentService.chatStream({
+        const result = await ideaAgentService.chatStream({
             messages:      parsed.messages,
             userPrompt:    parsed.userPrompt,
             analysisState: parsed.analysisState ?? emptyAnalysisState(),
@@ -57,22 +57,22 @@ export async function streamOrchestration(req, res) {
     } catch (err) {
         finish()
         if (ac.signal.aborted) return   // client gone — nothing to send
-        logger.error(LOG, 'Failed to stream orchestration', err)
+        logger.error(LOG, 'Failed to stream idea', err)
         sendEvent('error', { message: 'Streaming failed' })
         res.end()
     }
 }
 
-export async function getOrchestration(req, res) {
+export async function getIdea(req, res) {
     try {
-        const parsed = parseOrchestratorBody(req.body)
+        const parsed = parseIdeaBody(req.body)
         if (parsed.error) {
             return res.status(400).send({ error: parsed.error })
         }
 
         const brokerContext = await _loadBrokerContext(req.user._id)
 
-        const result = await tradeAgentService.chat({
+        const result = await ideaAgentService.chat({
             messages:      parsed.messages,
             userPrompt:    parsed.userPrompt,
             analysisState: parsed.analysisState ?? emptyAnalysisState(),
@@ -81,8 +81,8 @@ export async function getOrchestration(req, res) {
 
         res.send(result)
     } catch (err) {
-        logger.error(LOG, 'Failed to run orchestration', err)
-        res.status(500).send({ error: 'Failed to run orchestration' })
+        logger.error(LOG, 'Failed to run idea', err)
+        res.status(500).send({ error: 'Failed to run idea' })
     }
 }
 
@@ -107,7 +107,7 @@ async function _loadBrokerContext(userId) {
     } catch { return {} }
 }
 
-function parseOrchestratorBody(body) {
+function parseIdeaBody(body) {
     const { messages, userPrompt, analysisState, ideaAccounts } = body ?? {}
     const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
 

@@ -30,7 +30,7 @@ Define **portfolio managing**: what happens *after* a portfolio is generated and
 - **Missing today:** drift monitoring, portfolio-level P&L aggregation, any action on **live** positions (no trim/add), and scheduled reviews.
 
 Key files:
-- `services/portfolio.agent.service.js`, `trade_portfolio_system_prompt.md`
+- `services/portfolio.agent.service.js`, `portfolio_system_prompt.md`
 - `api/trade-ideas/tradeIdeas.service.js` — `saveBatchIdeas` (~623), `updateIdea` (~276), `placeOrdersForIdea` (~434)
 - Frontend: `MainPage.jsx` (`handleEditPortfolio` / `handleUpdatePlan` ~579-651), `TradeIdeasList.jsx` (portfolio grouping ~85-116)
 - `portfolio_chats` MongoDB collection (1:1 by `portfolioId`)

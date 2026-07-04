@@ -33,7 +33,7 @@ All three agents stream over Server-Sent Events; every router applies `requireAu
 
 | Agent | Route file | Endpoint | Controller |
 |---|---|---|---|
-| Trade | `api/orchestrator/orchestrator.routes.js` | `POST /api/orchestrator/stream` | `streamOrchestration` |
+| Trade | `api/idea/idea.routes.js` | `POST /api/idea/stream` | `streamIdea` |
 | Portfolio | `api/portfolio/portfolio.routes.js` | `POST /api/portfolio/stream` | `streamPortfolio` |
 | Scanner | `api/scanner/scanner.routes.js` | `POST /api/scanner/stream` | `streamScanner` |
 
@@ -69,8 +69,8 @@ System prompts are hot-reloaded (mtime-gated) by `agentUtils.js` `makePromptLoad
 and sent as two cached content blocks — a stable base (`cache_control: ephemeral`) + a
 volatile context tail.
 
-### Trade agent — `services/trade.agent.service.js`
-Prompt `trade_assistant_system_prompt.md`. Entry `chatStream` (non-stream `chat`). Tools:
+### Trade agent — `services/idea.agent.service.js`
+Prompt `idea_system_prompt.md`. Entry `chatStream` (non-stream `chat`). Tools:
 
 | Tool | Purpose |
 |---|---|
@@ -85,7 +85,7 @@ Prompt `trade_assistant_system_prompt.md`. Entry `chatStream` (non-stream `chat`
 | `get_derivatives_context` | crypto perps |
 
 ### Portfolio agent — `services/portfolio.agent.service.js`
-Prompt `trade_portfolio_system_prompt.md`. Tools add `get_quotes` (batch),
+Prompt `portfolio_system_prompt.md`. Tools add `get_quotes` (batch),
 `get_risk_metrics` (annualized vol + ATR → sizing), `get_correlations` (pairwise matrix →
 diversification), `get_fundamentals`, `get_earnings_calendar` (plus the shared sentiment
 tools).
@@ -111,12 +111,12 @@ still stream to the user, e.g. `<ticker>`.) Each agent registers its own capture
   `<portfolio_mandate>` → `onMandate`, `<portfolio_thesis>` (post-hoc from raw)
 - **Scanner:** `<scan_list>` → `onScan`
 
-**Trade parse** — after streaming, `services/trade.stateParser.js` `_parseResponse` regex-
+**Trade parse** — after streaming, `services/idea.stateParser.js` `_parseResponse` regex-
 extracts `<trade_idea>…</trade_idea>`, JSON-parses it, normalizes timeframes across the
 condition trees, and extracts the rolling `<state>` block. The visible `<state>` block (not
 the JSON) is what drives the frontend **Generate** button.
 
-**Minimum to emit** (`trade_assistant_system_prompt.md`): Asset, Direction (long/short),
+**Minimum to emit** (`idea_system_prompt.md`): Asset, Direction (long/short),
 ≥1 entry condition with a timeframe **or** `immediate:true`, Stop loss (not required for
 immediate), Quantity. When all are present the Generate button activates on its own
 (`ChatPanel.jsx` `generateReady`), tracking the live `<state>` block.
@@ -181,7 +181,7 @@ leaf arrays) are accepted and migrated on read (`normalizeTreeNode`). Helpers:
 (cross-asset leaves).
 
 The **seven leaf types** (`touch` / `structured` / `indicator` / `chart` / `news` / `time`
-/ `volume`) are defined for the agent in `trade_assistant_system_prompt.md` and evaluated in
+/ `volume`) are defined for the agent in `idea_system_prompt.md` and evaluated in
 `monitoring/evaluators/` — see [monitoring.md](./monitoring.md) for the evaluation
 semantics of each. A leaf with no `type` defaults to `structured`.
 
@@ -259,10 +259,10 @@ AND/OR tree). Dialogs: **OrderConfirmDialog** (idea hit → order plan), **PreEn
 
 ```
 SSE            api/_shared/sse.util.js
-routes         api/{orchestrator,portfolio,scanner}/*.routes.js + *.controller.js
-agents         services/{trade,portfolio,scanner}.agent.service.js
-prompts        trade_assistant_system_prompt.md / trade_portfolio_system_prompt.md / scanner_system_prompt.md
-emit/parse     services/llmStream.util.js  +  services/trade.stateParser.js
+routes         api/{idea,portfolio,scanner}/*.routes.js + *.controller.js
+agents         services/{idea,portfolio,scanner}.agent.service.js
+prompts        idea_system_prompt.md / portfolio_system_prompt.md / scanner_system_prompt.md
+emit/parse     services/llmStream.util.js  +  services/idea.stateParser.js
 trees          services/conditionTree.service.js
 persistence    api/trade-ideas/tradeIdeas.{routes,controller,service}.js
 arming         tradeIdeas.service.updateIdea  +  monitoring/monitor.service.preflightEntry

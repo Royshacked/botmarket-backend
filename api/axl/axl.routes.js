@@ -2,12 +2,12 @@ import express from 'express'
 
 import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
-import { getIdea, streamIdea } from './idea.controller.js'
+import { streamAxl }   from './axl.controller.js'
 
 const router = express.Router()
 
 router.use(requireAuth)
 
-router.post('/',       log, getIdea)
-router.post('/stream', log, streamIdea)
-export const ideaRoutes = router
+router.post('/stream', log, streamAxl)
+
+export const axlRoutes = router

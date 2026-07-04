@@ -7,6 +7,8 @@ import {
     dismissMessage,
     searchUsers,
     getOrCreateConversation,
+    triggerAxlReply,
+    BOT_USER_ID,
 } from './chat.service.js'
 import { emit }   from './chatWs.js'
 
@@ -34,7 +36,7 @@ export async function listMessages(req, res, next) {
 export async function postMessage(req, res, next) {
     try {
         const { id: conversationId } = req.params
-        const { content } = req.body ?? {}
+        const { content, routingMode, model, reasoningEffort } = req.body ?? {}
         if (!content?.trim()) return res.status(400).json({ error: 'content required' })
 
         // Verify sender is a participant before writing
@@ -49,6 +51,11 @@ export async function postMessage(req, res, next) {
         if (conv) {
             const recipientId = conv.participants.find(p => p !== String(req.user._id))
             if (recipientId) emit(recipientId, 'new_message', msg)
+            // If the message is to Axl, generate + push a reply (fire-and-forget so
+            // the POST returns immediately; Axl's answer arrives over WS when ready).
+            if (recipientId === BOT_USER_ID) {
+                triggerAxlReply(req.user._id, conversationId, { routingMode, model, reasoningEffort }).catch(() => {})
+            }
         }
 
         res.json({ message: msg })

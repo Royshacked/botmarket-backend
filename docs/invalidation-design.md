@@ -10,7 +10,7 @@ Backend:
 - `tradeIdeas.service.js` — idea fields `thesis*` → `invalidation { range:{lower,upper,lowerAnchor,upperAnchor}, conditions:[] }` + `invalidation_status` ('fired'|null) + `invalidation_reason` + `invalidation_edge` ('lower'|'upper'). `_normalizeInvalidation` (`conditions:[]` reserved, stored not monitored).
 - `monitoring/invalidation.monitor.js` (replaced `thesis.monitor.js`) — `checkInvalidation(db, idea, symbolMap, {inPosition})`: one structured candle-close leaf per edge via `evaluateTree`, deterministic, fires on close outside range. Fire-once latch on `invalidation_status`. Drops the old `_aiEval` judge.
 - `monitoring/monitor.service.js` — calls `checkInvalidation` pre-entry (looking, in `_checkEntry`) AND in-position (long/short, after `checkPosition`, reusing the entry-tf `aeCandles`).
-- `trade_assistant_system_prompt.md` — `<trade_idea>` + `<state>` schemas carry `invalidation.range`; authoring rules: derive both edges from chart, cite the anchor, never a round number, range null until a structured entry exists.
+- `idea_system_prompt.md` — `<trade_idea>` + `<state>` schemas carry `invalidation.range`; authoring rules: derive both edges from chart, cite the anchor, never a round number, range null until a structured entry exists.
 
 Frontend (build green):
 - `event-bus.service.js` `THESIS_EDIT_IDEA`→`INVALIDATION_EDIT_IDEA`; `ChatWindow.jsx` `invalidation_alert` bubble; `SocialChat.scss` classes; `MainPage.jsx` `isInvalidationReview` + dismiss/re-arm clears `invalidation_status/reason/edge`; `ChatPanel.jsx` review labels; `IdeaPage.jsx` `DevInvalidationPanel` renders the range + fired edge/reason.
@@ -57,7 +57,7 @@ false-drifting. Once armed it stays armed (leaving the zone = the fire).
   `_checkApproach` builds the away/overshoot leaves from `approach` vs the envelope;
   `_closedInZoneSinceFloor` arming scan; new `drifting` status + `approach`/`overshoot` edges;
   `_notify` payload gains `status`. In-position path unchanged (no waiting phase — you're past entry).
-- `trade_assistant_system_prompt.md` — DISTANT ENTRY authoring rule + `approach`/`approachAnchor`
+- `idea_system_prompt.md` — DISTANT ENTRY authoring rule + `approach`/`approachAnchor`
   in the `<trade_idea>`/`<state>` schemas. Omit `approach` when the entry is near spot.
 - Frontend — `ChatWindow` bubble reads `payload.status` (drifting vs fired wording/colour);
   `MainPage` dismiss + review-save also clear `invalidation_armed`; `IdeaPage`
@@ -184,7 +184,7 @@ When the agent defines a **structured entry** condition it must also:
 4. State the reference in chat in plain English ("inside this zone we proceed; outside it we rethink").
 
 This mirrors how the agent already derives stops ("where is the thesis wrong",
-`trade_assistant_system_prompt.md`) — same competence, different timing (pre-entry).
+`idea_system_prompt.md`) — same competence, different timing (pre-entry).
 
 ## Portfolio & scans
 
@@ -226,7 +226,7 @@ type + frontend options card (new vs old setup / exits / dismiss). Guardrail hol
 agent only **proposes**, user confirms, nothing auto-executes, exits stay stop-owned.
 
 (Pin the exact building phase to re-enter when building this — it's in
-`trade_assistant_system_prompt.md`.)
+`idea_system_prompt.md`.)
 
 ## Portfolio invalidation — **v1 BUILT 2026-06-30** (incl. execution; not live-verified)
 

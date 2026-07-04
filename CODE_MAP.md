@@ -23,7 +23,7 @@ monitoring/   →  services/  →  providers/            background path (poll +
 ```
 server.js                 app wiring, route mounts, background-service boot
 api/
-  orchestrator/           Trade Agent SSE chat        POST /api/orchestrator/stream
+  idea/                   Trade Agent SSE chat        POST /api/idea/stream
   trade-ideas/            idea CRUD + order placement /api/trade-ideas/*
     tradeIdeas.service.js     save/get/update/delete, broker forking
     ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now")
@@ -48,7 +48,7 @@ api/
       parse.util.js           parseChatMessages / parseIdeaAccounts
       chatState.util.js       makeGetChatState / makeDeleteChatState factories
 services/
-  trade.agent.service.js  + trade.stateParser.js (response/state machine)
+  idea.agent.service.js   + idea.stateParser.js (response/state machine)
   portfolio.agent.service.js  scanner.agent.service.js
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue

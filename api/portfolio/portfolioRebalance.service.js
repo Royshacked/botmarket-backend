@@ -5,7 +5,7 @@
  * the user) to the live book. This is the only path that turns a review into real
  * orders. Nothing here runs autonomously — the user confirms the whole block first.
  *
- * Action vocabulary (see trade_portfolio_system_prompt.md "Portfolio Edit Output"):
+ * Action vocabulary (see portfolio_system_prompt.md "Portfolio Edit Output"):
  *   update_idea  — patch a holding's fields in place (no broker touch)
  *   remove_idea  — delete a NON-live idea doc (pending/waiting only)
  *   exit_idea    — fully close a LIVE position across all its accounts

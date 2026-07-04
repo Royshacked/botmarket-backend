@@ -11,7 +11,7 @@ reconciler keeps idea state honest against the broker.
 
 ## 1. Trade Idea lifecycle
 
-An idea is authored by the **Trade Agent** (`POST /api/orchestrator/stream`), which emits
+An idea is authored by the **Trade Agent** (`POST /api/idea/stream`), which emits
 a `<trade_idea>` block the frontend saves via `POST /api/trade-ideas`.
 
 ### Statuses

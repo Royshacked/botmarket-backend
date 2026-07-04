@@ -12,7 +12,7 @@ import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccount
 const __dirname    = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[portfolioAgent]'
 // Hot-reload the system prompt on file change (mtime-gated) — no restart needed.
-const _systemPrompt = makePromptLoader(join(__dirname, '../trade_portfolio_system_prompt.md'), LOG)
+const _systemPrompt = makePromptLoader(join(__dirname, '../portfolio_system_prompt.md'), LOG)
 const MAX_MESSAGES = 10
 
 const TOOLS = [

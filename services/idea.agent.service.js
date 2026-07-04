@@ -10,17 +10,17 @@ import { buildStudies } from '../monitoring/evaluators/chart.evaluator.js'
 import { logger } from './logger.service.js'
 import { toolError } from './toolResult.util.js'
 import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines } from './agentUtils.js'
-import { _parseResponse, emptyAnalysisState } from './trade.stateParser.js'
+import { _parseResponse, emptyAnalysisState } from './idea.stateParser.js'
 
-// emptyAnalysisState lives in trade.stateParser.js (with the response parser it
+// emptyAnalysisState lives in idea.stateParser.js (with the response parser it
 // seeds), but is re-exported here so existing importers of this module keep
 // resolving it unchanged.
 export { emptyAnalysisState }
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const PROMPT_PATH = join(__dirname, '../trade_assistant_system_prompt.md')
+const PROMPT_PATH = join(__dirname, '../idea_system_prompt.md')
 
-const LOG = '[tradeAgent]'
+const LOG = '[ideaAgent]'
 
 // Load the system prompt fresh when the file changes (mtime-gated), so prompt
 // edits take effect on the next request without a server restart.
@@ -290,7 +290,7 @@ function _buildToolHandlers(onChart) {
     }
 }
 
-export const tradeAgentService = {
+export const ideaAgentService = {
     chat,
     chatStream,
 }

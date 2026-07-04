@@ -1,12 +1,15 @@
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger } from '../../services/logger.service.js'
+import { axlAgentService } from '../../services/axl.agent.service.js'
+import { resolveModel }    from '../../services/modelRouter.service.js'
+import { toAgentMessages } from './axlReply.util.js'
 
 const LOG   = '[chat]'
 const CONVS = 'chat_conversations'
 const MSGS  = 'chat_messages'
 
-export const BOT_USER_ID = 'ar2trade_bot'
-const BOT_WELCOME = "Hi! I'm your ar2trade assistant. I'll notify you here about portfolio reviews, position alerts, and anything else that needs your attention."
+export const BOT_USER_ID = 'axl'
+const BOT_WELCOME = "Hi, I'm Axl — your trading assistant. I'll notify you here about portfolio reviews, position alerts, and anything that needs your attention, and you can ask me how the app works. Just message me."
 
 // Lazy import to avoid circular dependency (chatWs imports nothing from here).
 // emit is only called at runtime, never at module-load time.
@@ -90,6 +93,48 @@ export async function sendBotMessage(userId, content, type = 'text', payload = n
     } catch (err) {
         logger.error(LOG, 'sendBotMessage failed', err)
         return null
+    }
+}
+
+/**
+ * Generate Axl's reply to a user message in the social chat and send it back.
+ * Called (fire-and-forget) after a user posts into their Axl conversation.
+ *
+ * Role #1 of the Axl agent: the social-chat assistant. Non-streaming — it collects
+ * the full reply and pushes it as a single bot message (the social chat is WS
+ * push, not SSE). Routing to specialists + thread resolution are later layers;
+ * for now Axl answers general / app-guide questions itself and, per its prompt,
+ * routes any build/change request to the relevant specialist chat.
+ *
+ * `aiPref` ({ routingMode, model, reasoningEffort }) is the user's shared AI-mode
+ * setting, forwarded by the social-chat client so Axl obeys the same model routing
+ * as Idea/Atlas/Argus. Resolved via the shared modelRouter (agent 'axl' is
+ * phaseless → auto/classifier fall back to the default route; manual honours the
+ * picked model + reasoning).
+ */
+export async function triggerAxlReply(userId, conversationId, aiPref = {}) {
+    try {
+        const history = await getMessages(conversationId, userId, null, 12)
+        if (!history || !history.length) return
+
+        const agentMessages = toAgentMessages(history, BOT_USER_ID, 12)
+        // Only answer when the latest turn is actually the user's (guards against
+        // a race where the trigger fires but the newest message is Axl's own).
+        if (agentMessages.at(-1)?.role !== 'user') return
+
+        const { routingMode, model, reasoningEffort } = aiPref
+        const lastMessage = agentMessages.at(-1)?.content ?? ''
+        const routing = await resolveModel({ routingMode, agent: 'axl', phase: null, model, reasoningEffort, lastMessage })
+
+        const { reply } = await axlAgentService.chatStream({
+            messages:        agentMessages,
+            model:           routing.model,
+            reasoningEffort: routing.reasoningEffort,
+            userId,
+        })
+        if (reply?.trim()) await sendBotMessage(userId, reply.trim())
+    } catch (err) {
+        logger.error(LOG, 'triggerAxlReply failed', err)
     }
 }
 

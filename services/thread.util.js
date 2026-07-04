@@ -26,6 +26,10 @@ export function newThreadId() {
 export function isSubstantive({ agent, phase, hasArtifact = false, mandateReady = false } = {}) {
     if (hasArtifact) return true
     if (agent === 'portfolio' && mandateReady === true) return true
+    // Axl (concierge) never generates an artifact and has no phases — every real
+    // exchange the client chooses to save is substantive. The client only saves
+    // once an assistant reply exists, so this never persists an empty conversation.
+    if (agent === 'axl') return true
     const p = Number(phase)
     return Number.isFinite(p) && p >= 2
 }

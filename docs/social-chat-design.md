@@ -301,3 +301,107 @@ attachChatWs(server)
 | 7 | Portfolio managing integration | Replace Phase 1 badge/dropdown with bot `sendBotMessage` call |
 
 **Start with step 1.** Verify `sendBotMessage` writes correctly to MongoDB before adding WS or any REST routes. Test with a quick `node` script against the real DB.
+
+---
+
+# Axl Routing & Thread Resolution
+
+> **Status: DESIGN (not built) — captured 2026-07-04.** Extends the Phase-1 chat layer (built) into a two-way, agent-routed assistant. Builds on the Thread abstraction (BUILT — see `services/thread.service.js`) and the Axl agent design (see the `project_axl_agent` memory node). Phase 1 above made the bot thread a one-way notifier; this section makes it *answer*.
+
+> **PREREQUISITE — Axl does not yet exist as an agent.** There are three agent services (`trade` / `portfolio` / `scanner`); there is no `axl.agent.service.js`. Axl today is cosmetic only (hub persona, notification voice, Radar UI, `axl-bot.svg`). This whole routing design assumes an Axl *brain* that decides a domain and answers concierge/help questions — so **Layer 0 (build Axl as the 4th agent) must land before Layer 1 (this routing mechanism)**. Layer 0 = `axl.agent.service.js` cloning the scanner template + `axl_system_prompt.md` + read-only tools only (no `<trade_idea>`/order emit — the identity boundary), minimal viable = routing decision + concierge/app-guide answering. Layer 1 additionally needs a **read-only "explain" mode on the three specialists** (they answer in build-mode today, emitting artifacts; social-chat answering must explain without authoring). Scoping fork for Layer 0: full 4th-agent chat (service+SSE+frontend tab, unlocks concierge/critic/reports + the "Continue in Axl →" target) vs. agent-service brain only (callable by dispatch, chat UI deferred).
+
+## Why this exists
+
+Today the bot thread is a **dead-end for inbound**: `postMessage` (chat.controller.js) stores a user's message and pushes it to `ar2trade_bot` — which is not a connected socket, so nothing ever replies. `sendBotMessage` is one-way (monitor → user). This design builds the *first* inbound-answering path: a typed social-chat message gets routed by Axl to the right agent, answered into the right thread, and mirrored back Axl-voiced.
+
+## Two surfaces linked by routing (locked)
+
+- **Social chat = inbox / dispatcher.** Axl notifies (invalidation / review / fills) + answers questions + offers routing. Existing WS + `sendBotMessage` infra unchanged. `ar2trade_bot` persona = Axl's voice.
+- **4th-agent chat = the workspace** (reports, app-help, concierge, critic; and where mutations happen). Just the 4th agent chat — SSE + chat-state, same pattern as Idea/Atlas/Argus.
+- **Link = routing, not shared history.** Answers live in the subject's canonical thread; social chat renders a projection with a "Continue in …→" deep-link that routes OUT into the workspace.
+
+## Responsibility split
+
+- **Axl picks the *domain* agent** (idea / portfolio / scanner / itself). For an anchored reply it reads the notification payload's origin; for a spontaneous ask it infers domain from the question.
+- **The specialist resolves the *thread*** within its own domain and appends the turn there. Only the Idea agent knows all the user's ideas/drafts — so thread-picking lives with it, not Axl.
+
+Rationale: each decision sits where the knowledge is. Axl needn't know every idea; the Idea agent does. Keeps routing an agent decision, not a code classifier (`feedback_agent_decides_no_hardcoded_rules`).
+
+## Subject binding — two layers
+
+A typed social-chat message resolves in two independent layers:
+
+1. **Subject binding (deterministic, client-stamped).** Every answerable notification bubble carries an **"Ask about this"** affordance. Typing from it stamps the outbound message with `replyTo: <notifMsgId>`, inheriting that notification's `payload` refs (`ideaId` / `portfolioId` / `scanId`). Explicit — no inference. A message typed into the *main* input (no `replyTo`) is **unbound** → defaults to Axl.
+2. **Agent routing (Axl's LLM decision).** Given the message + bound subject, Axl decides *who answers*. The binding says *what it's about*; Axl decides *who speaks*. So a reply anchored to an NVDA idea whose text is "what does edge mean?" is app-help → **Axl** answers, even though the subject is an Idea.
+
+## Thread resolution ladder (the specialist follows this)
+
+Once Axl routes to a specialist, the specialist resolves the target thread in precedence order — encoded as prompt guidance + a `resolve_subject` tool, **not** a hardcoded matcher:
+
+1. **Explicit ref** — Axl forwards the anchoring notification's `payload.ideaId`. Deterministic; skip inference, load that thread.
+2. **Active binding** — the ongoing exchange's current bound thread (`chat_conversations.activeBinding = { agent, threadId, subjectId }`). Follow-ups stick to it unless the message clearly names a different subject. This is what lets "why?" → "and the stop?" stay on one idea without re-specifying.
+3. **Inferred from the roster** — no ref, no binding: the specialist calls `resolve_subject` → its `listThreads({ userId, agent })` roster (asset/status joined from the artifact for `linked`, from `title` / `state` for `draft`) → matches on asset + direction + status + recency + intent.
+4. **Disambiguate** — multiple plausible matches (a *live* NVDA idea **and** an NVDA *draft*) → one Axl-voiced clarifier. Default lean: most-recently-active wins; ask only when genuinely tied.
+5. **Not-mine** — no match in domain → specialist returns a "not mine" signal → Axl re-routes or asks. Prevents hallucinating a subject when Axl guessed the wrong domain.
+
+Both `draft` and `linked` threads are valid targets ("identify the related idea **or draft**").
+
+### Roster source
+
+`listThreads({ userId, agent })` already returns drafts + linked, newest-first, messages projected out, each carrying `threadId`, `subjectId`, `subjectType`, `title`, `phase`, `state`, `tier`, `updatedAt`. That *is* the roster. Asset/status for `linked` subjects comes from a join to the artifact doc by `subjectId`; for `draft` subjects from `title` / `state` (e.g. the idea agent's `analysisState`). Use a lean projection — `state` can be large.
+
+## Answer model
+
+- The resolved agent answers over the subject's canonical thread. The Q + A **append to that thread** — that's the continuable memory.
+- The answer is also surfaced in social chat as an Axl-voiced bubble (`type: 'axl_answer'`, `payload: { threadId, agent, subjectId }`) via `sendBotMessage`. The bubble carries a **"Continue in Idea / Atlas / Argus →"** deep-link that routes OUT into the workspace seeded from that thread.
+- **Voice = attribution, not a second model call.** The specialist's answer text goes out as `ar2trade_bot` (Axl's persona). Seamless UX ("you talk to Axl"), no restyle LLM. An optional restyle pass is deferred polish.
+
+### New thread-service primitive required
+
+`saveDraft` unconditionally stamps `tier: 'draft'` + re-arms the TTL — calling it on a `linked` thread would silently downgrade a live idea's thread and give it an expiry. So the thread service needs **`appendMessages({ threadId, userId, messages })`** that `$push`es + bumps `updatedAt` **without touching `tier` / `expiresAt`**. Real gap, not cosmetic.
+
+## Conversation lifecycle — social chat is a dispatcher, not a conversation
+
+Unlike a chat panel (which ends on **generate** / **clear** / **switch agent** because it's a build session for one artifact), the social-chat thread is a permanent inbox and **never ends**. No conversation *content* lives there — every answer is appended to its subject's thread, which keeps its existing lifecycle:
+
+- `linked` → permanent, dies with the artifact
+- `draft` → 14-day TTL / LRU cap
+- Axl concierge → its own thread
+
+The only transient state is `activeBinding` (current focus), released **implicitly, never by a user act**:
+
+1. **Subject switch** — the next message resolves to a different subject → binding is *replaced*. The always-on terminator.
+2. **Staleness** — idle beyond a window (start ~30–60 min / per-session), or a new session → binding cleared → next message re-resolves from scratch. Stops a day-later "how's it looking?" latching onto yesterday's NVDA. **This window is the one value to pick.**
+3. **Subject invalidation** — the bound idea is closed/deleted → binding dangles → clear + re-resolve. (A draft *generating* into a linked artifact keeps the same thread — fine.)
+
+New notifications don't end anything — they present their own "Ask about this" anchor; engaging one *starts* a new binding, ignoring one leaves the current binding intact.
+
+**Open flag:** the Axl concierge thread (subject-less general/help questions) has no artifact to die with → could grow unbounded. May want session-windowing / topic segmentation. Flagged, not solved.
+
+## Boundary — explain inline, mutate routes to the editor (locked)
+
+Axl applies one per-message rule:
+
+- **Ask / explain / report** ("why did it invalidate?", "how's it doing?", "what's my stop?") → answered inline, Axl-voiced, specialist under the hood.
+- **Change anything** (entry conditions, size, stop, or build a new idea) → Axl does **not** form or commit it. It routes: *"Let's change that in Idea →"* — a deep-link into the Idea editor seeded with the thread. Literally "go speak to Idea."
+
+This keeps Axl's read-only identity intact and reuses the existing route-out deep-link as the whole mutation path — no inline-commit, no action-bubble-applies-changes, no parametric-vs-structural threshold. The deep-link edit target must be reachable **on mobile** (`project_mobile_companion` already allows edit-via-deep-link — same entry as portfolio review).
+
+**Deferred (not discarded):** an inline propose→confirm-bubble→commit path (specialist drafts the change in-thread, user confirms via an `action_card`, commit reuses the existing idea-update write path + edit-lock guards). A possible later evolution if quick mobile edits prove worth it. For v1, mutations always route out.
+
+## The one new server piece
+
+An **`axl.dispatch` orchestrator** — where "Axl decides which agent answers + which thread it joins" physically lives. It: receives inbound social-chat messages (new endpoint, or `postMessage` extended when the recipient is the bot), resolves subject (`replyTo` → payload refs / `activeBinding`), runs the Axl domain-routing decision, then either (a) invokes the resolved specialist's read-only answer entrypoint on the canonical thread + mirrors Axl-voiced, or (b) emits a route-out deep-link for any mutation request.
+
+## Build sequence (Axl routing)
+
+| Step | What | File(s) |
+|------|------|---------|
+| 1 | `appendMessages` (tier-preserving) + `activeBinding` on `chat_conversations` | `services/thread.service.js`, `api/chat/chat.service.js` |
+| 2 | `resolve_subject` tool + roster helper (`listThreads` + artifact-status join) | new `services/axl/` |
+| 3 | `axl.dispatch` orchestrator (domain routing + specialist answer entrypoints, read-only) | new `api/chat/axl.dispatch.service.js` |
+| 4 | Inbound endpoint — extend `postMessage` (bot recipient → dispatch) | `api/chat/chat.controller.js` |
+| 5 | Mirror answer via `sendBotMessage` (`type: 'axl_answer'`) + route-out deep-link payloads | `api/chat/chat.service.js` |
+| 6 | Frontend — "Ask about this" affordance (`replyTo`), `axl_answer` bubble + Continue deep-link, mutation route-out | frontend repo |
+
+**Start with step 1** — the append primitive is the load-bearing gap; verify it never downgrades a linked thread before wiring routing on top.
