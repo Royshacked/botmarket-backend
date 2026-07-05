@@ -10,6 +10,11 @@
 // the providers forward it verbatim with no agent-specific tag knowledge.
 
 export function createTagSuppressor({ onToken, captures = [] }) {
+    // onToken is optional: non-streaming callers (e.g. the Axl social-chat reply,
+    // which collects the full return value instead of streaming) omit it. Default
+    // to a no-op so emitting text never throws — the suppressor still buffers and
+    // swallows tag blocks, and the provider returns the accumulated text as usual.
+    const emit = onToken ?? (() => {})
     const TAGS = captures
 
     let pending         = ''     // pre-tag lookahead buffer
@@ -34,7 +39,7 @@ export function createTagSuppressor({ onToken, captures = [] }) {
                         if (trimmed) captureCallback(trimmed)
                         captureCallback = null
                     }
-                    if (keepText && content) onToken(content)
+                    if (keepText && content) emit(content)
                     pending  = pending.slice(ci + closeTag.length)
                     inBlock  = false
                     closeTag = ''
@@ -47,12 +52,12 @@ export function createTagSuppressor({ onToken, captures = [] }) {
 
             const ltIdx = pending.indexOf('<')
             if (ltIdx === -1) {
-                if (pending) { onToken(pending); pending = '' }
+                if (pending) { emit(pending); pending = '' }
                 return
             }
 
             if (ltIdx > 0) {
-                onToken(pending.slice(0, ltIdx))
+                emit(pending.slice(0, ltIdx))
                 pending = pending.slice(ltIdx)
             }
 
@@ -71,14 +76,14 @@ export function createTagSuppressor({ onToken, captures = [] }) {
             }
 
             if (!matched) {
-                onToken('<')
+                emit('<')
                 pending = pending.slice(1)
             }
         }
     }
 
     function flush() {
-        if (!inBlock && pending) onToken(pending)
+        if (!inBlock && pending) emit(pending)
         pending         = ''
         inBlock         = false
         closeTag        = ''

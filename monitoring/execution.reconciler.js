@@ -264,7 +264,18 @@ async function _onOpened(exec) {
 async function placeExits(db, idea, accountId) {
     try {
         const acct = String(accountId)
-        if ((idea.exitPlacedAccounts ?? []).map(String).includes(acct)) return   // already placed
+
+        // Atomically CLAIM this account before placing anything. Both the confirm/place
+        // flow (placeOrdersForIdea) and the fill-event reconciler call placeExits, each
+        // with its own idea snapshot — the old in-memory `exitPlacedAccounts` guard let
+        // both pass (neither had seen the other's write yet) and place the stops/TPs
+        // twice. `$addToSet` under a `$ne` filter is atomic: only the first caller
+        // matches (modifiedCount 1) and proceeds; the loser no-ops here.
+        const claim = await db.collection(COLLECTION).updateOne(
+            { id: idea.id, exitPlacedAccounts: { $ne: acct } },
+            { $addToSet: { exitPlacedAccounts: acct } },
+        )
+        if (claim.modifiedCount === 0) return   // already claimed / placed by another caller
 
         const native     = idea.nativeExit
         const slot       = (idea.brokerOrders ?? []).find(b => String(b.accountId) === acct)
@@ -295,17 +306,15 @@ async function placeExits(db, idea, accountId) {
             }
         }
 
-        // Mark the account handled even when nothing was placed, so a repeat
-        // open/fill event doesn't re-attempt.
-        await db.collection(COLLECTION).updateOne(
-            { id: idea.id },
-            {
-                $push: {
-                    ...(newOrders.length ? { exitOrders: { $each: newOrders } } : {}),
-                    exitPlacedAccounts: acct,
-                },
-            },
-        )
+        // The account was already marked handled by the atomic claim above (so a
+        // repeat open/fill event doesn't re-attempt); only the placed orders remain
+        // to record.
+        if (newOrders.length) {
+            await db.collection(COLLECTION).updateOne(
+                { id: idea.id },
+                { $push: { exitOrders: { $each: newOrders } } },
+            )
+        }
     } catch (err) {
         logger.error(LOG, `Idea ${idea.id}: placeExits error: ${err.message}`)
     }
