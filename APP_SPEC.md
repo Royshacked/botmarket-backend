@@ -103,8 +103,15 @@ Authored by the **Portfolio Agent** (`POST /api/portfolio/stream`), which emits 
 Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/batch`.
 
 - Portfolio ideas start `waiting` with no entry conditions and carry `allocationRatio`.
-- **Review cycle:** `reviewCadence` (`monthly`/`quarterly`), `nextReviewAt`. `GET /pending-reviews`,
-  review-mode stream injects live P&L/drift, `POST /:portfolioId/rebalance`, `POST /:portfolioId/complete-review`.
+- **Construction** is gated at two decision points (lock mandate → present regime + architecture →
+  then selection/sizing/plan flow); sizing enforces the mandate's hard constraints (max-position /
+  sector caps, and the cash floor via a reduced `positionSize`, since `_sizePlan` re-normalizes ratios to 1.0).
+- **Review** runs in two modes on the same `reviewMode` stream: **in-position** (live P&L/drift →
+  scoreboard + rebalance memo) and **pre-activation** (all-pending book, `~$0` notional — a pre-flight
+  check before *Activate all*, no scoreboard). The scheduled cadence (`reviewCadence`, `nextReviewAt`,
+  60s monitor) only **notifies** via a social-chat bubble; the review itself is user-initiated (the
+  bubble, the portfolio-row review action, or the *Activate all* pre-activation gate). Endpoints:
+  `GET /pending-reviews`, `POST /:portfolioId/rebalance`, `POST /:portfolioId/complete-review`.
 - Portfolio holdings are governed by the scheduled review, **not** the intrabar invalidation watcher.
 
 ---

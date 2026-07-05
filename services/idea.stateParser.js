@@ -106,6 +106,12 @@ export function _parseResponse(raw, priorState, userPrompt) {
             if (pt.quantity == null && priorPt?.quantity != null) pt.quantity = priorPt.quantity
             if (pt.quantity != null) pt.quantity = Number(pt.quantity) || null
 
+            // Carry forward reward-to-risk — recomputed by the model whenever a level
+            // changes, but kept on turns where it re-emits pending_trade without it so
+            // the summary-panel R:R doesn't flicker out.
+            if (pt.rr == null && priorPt?.rr != null) pt.rr = priorPt.rr
+            if (pt.rr != null) pt.rr = Number(pt.rr) || null
+
             // Carry forward conviction — once the model has judged the setup, keep
             // that assessment on later turns where it re-emits pending_trade without
             // re-stating it (very common). cleanConviction nulls a malformed block;
@@ -213,6 +219,7 @@ export function emptyAnalysisState() {
                 tp_conditions: [],          // [{ condition, type, timeframe }]
                 additional_entries: [],     // [{ conditions, logic, quantity }]
                 notes: null,
+                rr: null,                   // reward-to-risk ratio (number, e.g. 1.5); null until entry+stop+target levels exist
             },
         },
     }
