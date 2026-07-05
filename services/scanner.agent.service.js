@@ -77,7 +77,7 @@ const TOOLS = [
     },
     {
         name: 'get_cycle_analysis',
-        description: 'Detect recurring cycles in a stock\'s price history. Two modes: "price" finds the dominant peak-to-peak / trough-to-trough interval, tells you the current phase, and estimates the next turning point. "calendar" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking with the historical pattern. Use "price" when the user asks about recurring timing cycles; use "calendar" when the user asks about seasonal or time-of-year patterns. If unsure which the user means, ask one clarifying question.',
+        description: 'Detect recurring cycles in a stock\'s price history. Two modes: "price" finds the dominant peak-to-peak / trough-to-trough interval, tells you the current phase, and estimates the next turning point. "calendar" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking with the historical pattern. Use "price" for recurring-interval / cyclic-window theses ("cycles every ~6 weeks"); use "calendar" for seasonal / calendar-pattern theses ("June is always weak"). The angle makes the mode clear — pick it directly rather than asking which they mean.',
         input_schema: {
             type: 'object',
             properties: {
@@ -155,6 +155,9 @@ const TOOL_HANDLERS = {
 }
 
 export const scannerAgentService = { chatStream }
+
+// Exported for unit tests (scanner scorecard normalization + ranking).
+export { _normalizeScan, _cleanScore }
 
 async function chatStream({ messages = [], model: requestedModel, editList = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const normalized = _buildMessages(messages)
@@ -250,6 +253,10 @@ function _normalizeScan(scan, editList = null) {
         .filter(Boolean)
     if (!clean.length) return null
 
+    // Deterministic ranking: highest composite score first, regardless of the
+    // order the model emitted. Stable, so equal scores keep their emitted order.
+    clean.sort((a, b) => _scoreTotal(b) - _scoreTotal(a))
+
     const period = (scan.period && typeof scan.period === 'object') ? scan.period : {}
     return {
         period: {
@@ -297,9 +304,38 @@ function _cleanCandidate(c) {
         thesis:    typeof c.thesis === 'string' ? c.thesis : '',
         analysis:  typeof c.analysis === 'string' ? c.analysis : '',
         signals:   (c.signals && typeof c.signals === 'object') ? c.signals : {},
+        score:     _cleanScore(c.score),
         conviction: cleanConviction(c.conviction),
         sources:   Array.isArray(c.sources) ? c.sources.filter(s => s && s.url) : [],
     }
+}
+
+// Coerce the transparent scorecard the agent emits into a 0–100 shape, or null
+// when nothing usable is present (the UI then falls back to the conviction chip
+// alone). Each component is clamped to 0–100; a non-numeric field becomes null so
+// a partial card (e.g. total + technical only) still renders what it has.
+const SCORE_KEYS = ['total', 'catalyst', 'technical', 'relativeStrength', 'liquidity']
+
+function _cleanScore(raw) {
+    if (!raw || typeof raw !== 'object') return null
+    const out = {}
+    let any = false
+    for (const k of SCORE_KEYS) {
+        const v = raw[k]
+        // Reject null/''/undefined explicitly — Number(null) and Number('') are 0,
+        // which would fabricate a real score out of an absent field.
+        const n = (v === null || v === undefined || v === '') ? NaN : Number(v)
+        if (Number.isFinite(n)) { out[k] = Math.min(100, Math.max(0, Math.round(n))); any = true }
+        else out[k] = null
+    }
+    return any ? out : null
+}
+
+// Sort key for ranking: composite total, highest first. Names without a usable
+// total sort last (−1) so a partial/missing score never jumps the queue.
+function _scoreTotal(c) {
+    const t = c?.score?.total
+    return Number.isFinite(t) ? t : -1
 }
 
 // When the user reopens a saved list to edit it, tell the agent exactly what's
