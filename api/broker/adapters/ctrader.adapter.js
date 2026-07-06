@@ -8,8 +8,10 @@
  *                                      and OHLCV-grade symbol specs.
  *
  * Note on candles: cTrader's OHLCV data lives on the ProtoOA WebSocket
- * protocol, NOT on the REST API we use here. So getCandles() returns null
- * and the monitoring system falls back to Massive/Polygon.
+ * protocol, NOT on the REST API. getCandles() fetches trendbars over the
+ * session socket so the monitor can evaluate a cTrader idea in the broker's
+ * own price space (capabilities().ohlcv = true); an unsupported timeframe or
+ * any failure returns null, so the caller falls back to Massive/Yahoo.
  */
 
 import { BrokerAdapter }           from './broker.interface.js'
@@ -17,6 +19,7 @@ import { asList, num, money }      from './normalize.js'
 import * as ctrader                from '../../../providers/ctrader.provider.js'
 import { brokerConnectionService } from '../brokerConnection.service.js'
 import { logger }                  from '../../../services/logger.service.js'
+import { parseTimeframe }          from '../../../services/timeframe.service.js'
 import { executionBus }            from '../../../services/executionBus.js'
 import { toExecution, TRADE_SIDE, PROTO_ORDER_TYPE } from './ctrader.execution.js'
 import {
@@ -48,6 +51,29 @@ const PT = {
 // Module-level so the idempotency guard survives the factory minting a fresh
 // adapter per call — the listener lives on the cached (singleton) session.
 const _wiredFeeds = new Set()  // `${env}:${ctid}`
+
+// App timeframe (via parseTimeframe → {timeSpan, multiplier}) → ProtoOATrendbarPeriod
+// enum. Only cTrader-supported bar widths are listed; any other timeframe (e.g. 2hr,
+// 3min) has no cTrader period and yields null → the caller falls back to the app feed.
+const TRENDBAR_PERIOD = {
+    'minute:1': 1,  'minute:2': 2,  'minute:3': 3,  'minute:4': 4,
+    'minute:5': 5,  'minute:10': 6, 'minute:15': 7, 'minute:30': 8,
+    'hour:1':   9,  'hour:4':  10,  'hour:12': 11,
+    'day:1':   12,  'week:1':  13,  'month:1': 14,
+}
+
+/**
+ * Map an app timeframe string ("5min"/"1hr"/"day") to a ProtoOATrendbarPeriod enum,
+ * or null when cTrader has no matching bar width. Exported for unit testing.
+ * @param {string} timeframe
+ * @returns {number|null}
+ */
+export function toTrendbarPeriod(timeframe) {
+    const opts = parseTimeframe(timeframe)
+    if (!opts) return null
+    const m = Math.max(1, Math.trunc(Number(opts.multiplier) || 1))
+    return TRENDBAR_PERIOD[`${opts.timeSpan}:${m}`] ?? null
+}
 
 export class CTraderAdapter extends BrokerAdapter {
 
@@ -142,9 +168,53 @@ export class CTraderAdapter extends BrokerAdapter {
         return list.map(_normaliseTradingAccount)
     }
 
-    // ── Candles — not supported via REST ──────────────────────────────────────
-    // Returns null → caller falls back to Massive/Polygon
-    async getCandles() { return null }
+    // ── Candles — OHLCV via ProtoOA trendbars ──────────────────────────────────
+
+    /**
+     * OHLCV bars over the ProtoOA socket (cTrader has no REST candles). The monitor
+     * prefers this (capabilities().ohlcv) so a cTrader idea is evaluated in the
+     * broker's own price space. Any user account can fetch symbol data, so we resolve
+     * the user's default trading account for the session. Unsupported timeframe or any
+     * failure → null, so the caller falls back to the app feed (Massive/Yahoo).
+     * @param {string} symbol     broker symbol, e.g. 'US100.cash'
+     * @param {string} timeframe  app timeframe, e.g. '5min' | '1hr' | 'day'
+     * @param {number} count
+     * @param {string} userId
+     * @returns {Promise<Array<{t,o,h,l,c,v}>|null>}
+     */
+    async getCandles(symbol, timeframe, count = 300, userId) {
+        if (!symbol || !userId) return null
+        const period = toTrendbarPeriod(timeframe)
+        if (period == null) return null
+
+        try {
+            const tokens    = await this._freshTokens(userId)
+            const accountId = await this._resolveAccountId(userId, tokens)
+            const session   = await this._session(userId, accountId)
+            const bars      = await session.getTrendbars(symbol, period, count)
+            return bars.length ? bars : null
+        } catch (err) {
+            logger.warn(LOG, `getCandles ${symbol}/${timeframe}: ${err.message}`)
+            return null
+        }
+    }
+
+    /**
+     * Resolve an app symbol to cTrader's tradable name via the account's symbol list
+     * ("getTicker"), e.g. 'NQ'/'US100' → 'US100.cash'. Returns found:false when the
+     * instrument isn't listed on the account; RE-THROWS transport/session errors so the
+     * caller can tell "not listed" from "unreachable" (see interface contract).
+     */
+    async resolveSymbol(userId, accountId, symbol) {
+        const session = await this._session(userId, accountId)
+        try {
+            const specs = await session.resolveSymbol(symbol)
+            return { symbol: specs.symbolName ?? symbol, found: true }
+        } catch (err) {
+            if (/not found on account/.test(err.message)) return { symbol, found: false }
+            throw err
+        }
+    }
 
     // ── Trading ──────────────────────────────────────────────────────────────────
 
@@ -157,7 +227,7 @@ export class CTraderAdapter extends BrokerAdapter {
             cancelOrder:      true,
             listOrders:       true,
             amendOrder:       true,
-            ohlcv:            false,
+            ohlcv:            true,
         }
     }
 

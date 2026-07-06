@@ -23,7 +23,7 @@ import { checkInvalidation }                    from './invalidation.monitor.js'
 import { checkPortfolioReviews }               from './portfolio.monitor.js'
 import { checkPosition }                        from './positionMonitor.js'
 import {
-    fetchCandles, buildSymbolMap, buildVolumeCtx,
+    fetchCandles, buildSymbolMap, buildVolumeCtx, brokerCandleCtx,
     hasCumulativeVolume, logCheck, persistConditionStates,
     resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe,
 } from './monitorUtils.js'
@@ -122,6 +122,15 @@ async function _marketSweep(db) {
 async function _checkIdea(db, idea) {
     const { id, asset, status } = idea
 
+    // Gate #5 backstop: an explicit null broker means no trading venue (no account
+    // resolved + paper off) — the monitor could detect a trigger but never place an
+    // order, so skip. `=== null` only: legacy ideas predating the broker field are
+    // `undefined` and stay monitored on the app feed.
+    if (idea.broker === null) {
+        logger.info(LOG, `[${id}] No trading venue (broker=null) — skipping`)
+        return
+    }
+
     const entryTf    = resolveEntryTimeframe(idea)
     const isPosition = status === 'long' || status === 'short'
     const stopTf     = isPosition ? resolveStopTimeframe(idea) : null
@@ -156,22 +165,26 @@ async function _checkIdea(db, idea) {
     const lastAt = _lastChecked.get(id) ?? 0
     if (Date.now() - lastAt < gap) return
 
+    // Primary-instrument candles come from the broker (shifted to authored space) for an
+    // ohlcv-capable broker, else the app feed. Built once; cross-asset legs stay app-feed.
+    const cctx = brokerCandleCtx(idea)
+
     try {
         if (status === 'looking') {
-            const candles = await fetchCandles(id, asset, entryTf)
+            const candles = await fetchCandles(id, asset, entryTf, undefined, cctx)
             if (!candles) return
             _lastChecked.set(id, Date.now())
             logCheck(id, asset, status, entryTf, candles)
             await _checkEntry(db, idea, candles)
 
         } else if (isPosition) {
-            const stopCandles = await fetchCandles(id, asset, stopTf)
+            const stopCandles = await fetchCandles(id, asset, stopTf, undefined, cctx)
             if (!stopCandles) return
 
-            const tpCandles = tpTf === stopTf ? stopCandles : await fetchCandles(id, asset, tpTf)
+            const tpCandles = tpTf === stopTf ? stopCandles : await fetchCandles(id, asset, tpTf, undefined, cctx)
             if (!tpCandles) return
 
-            const aeCandles = entryTf === stopTf ? stopCandles : await fetchCandles(id, asset, entryTf)
+            const aeCandles = entryTf === stopTf ? stopCandles : await fetchCandles(id, asset, entryTf, undefined, cctx)
             if (!aeCandles) return
 
             _lastChecked.set(id, Date.now())
@@ -196,7 +209,7 @@ async function _checkEntry(db, idea, candles) {
 
     const crossSyms = collectSymbols(idea.entry_condition_tree, idea.entry_conditions)
     const symbolMap = await buildSymbolMap(id, asset, candles, entryTf, crossSyms)
-    const volCtx    = await buildVolumeCtx(id, asset, idea.asset_class, idea.entry_condition_tree, idea.entry_conditions)
+    const volCtx    = await buildVolumeCtx(id, asset, idea.asset_class, idea.entry_condition_tree, idea.entry_conditions, brokerCandleCtx(idea))
 
     const floorAt = idea.entryFloorAt ?? idea.savedAt ?? null
 
@@ -276,12 +289,13 @@ async function preflightEntry(idea) {
         if (!tree || !_isStructuredOnly(tree)) return { alreadySatisfied: false }
 
         const entryTf = resolveEntryTimeframe(idea)
-        const candles = await fetchCandles(id, asset, entryTf)
+        const cctx    = brokerCandleCtx(idea)
+        const candles = await fetchCandles(id, asset, entryTf, undefined, cctx)
         if (!candles) return { alreadySatisfied: false }
 
         const crossSyms = collectSymbols(tree, idea.entry_conditions)
         const symbolMap = await buildSymbolMap(id, asset, candles, entryTf, crossSyms)
-        const volCtx    = await buildVolumeCtx(id, asset, idea.asset_class, tree, idea.entry_conditions)
+        const volCtx    = await buildVolumeCtx(id, asset, idea.asset_class, tree, idea.entry_conditions, cctx)
 
         // Same floor the monitor uses, so edge-eval predicts real monitor behaviour.
         const floorAt = idea.entryFloorAt ?? idea.savedAt ?? null

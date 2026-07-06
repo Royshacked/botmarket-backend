@@ -25,6 +25,8 @@ export const brokerService = {
     getPositions,
     findOpenPosition,
     getCandles,
+    resolveSymbol,
+    getSpot,
     getTradingAccounts,
     setSelectedAccount,
     capabilities,
@@ -141,6 +143,33 @@ async function findOpenPosition(brokerType, userId, accountId, positionId) {
  */
 async function getCandles(brokerType, symbol, timeframe, count, userId) {
     return getBrokerAdapter(brokerType).getCandles(symbol, timeframe, count, userId)
+}
+
+/**
+ * Resolve an app symbol to the broker's tradable symbol ("getTicker"), confirming the
+ * instrument exists on the account. See BrokerAdapter.resolveSymbol for the three-state
+ * `found` contract (true/false/null). Throws on transport/session errors.
+ * @param {string} brokerType
+ * @param {string} userId
+ * @param {string} accountId
+ * @param {string} symbol
+ * @returns {Promise<{ symbol: string, found: boolean|null }>}
+ */
+async function resolveSymbol(brokerType, userId, accountId, symbol) {
+    return getBrokerAdapter(brokerType).resolveSymbol(userId, accountId, symbol)
+}
+
+/**
+ * Snapshot the broker's live spot quote for a symbol (bid/ask/mid). Used to measure the
+ * basis offset for aliased instruments. Returns null when the broker has no spot feed.
+ * @param {string} brokerType
+ * @param {string} userId
+ * @param {string} accountId
+ * @param {string} symbol   the broker's tradable symbol
+ * @returns {Promise<{ bid:number|null, ask:number|null, mid:number, at:number }|null>}
+ */
+async function getSpot(brokerType, userId, accountId, symbol) {
+    return getBrokerAdapter(brokerType).getSpot(userId, accountId, symbol)
 }
 
 // ─── Trading accounts ─────────────────────────────────────────────────────────

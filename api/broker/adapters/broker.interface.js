@@ -375,6 +375,27 @@ export class BrokerAdapter {
     }
 
     /**
+     * Resolve an app/canonical symbol to this broker's own tradable symbol, confirming
+     * the instrument exists on the account ("getTicker"). Used at idea-build time so the
+     * persisted brokerSymbol is the broker's real name (e.g. 'US100.cash') rather than a
+     * static-map guess. Three-state `found`:
+     *   - `true`  → resolved; `symbol` is the broker's tradable name.
+     *   - `false` → the broker genuinely does not list this instrument.
+     *   - `null`  → this broker can't resolve symbols (default) → caller falls back to the
+     *              static alias map. Adapters SHOULD throw on a transport/session error so
+     *              the caller can tell "not listed" (false) from "unreachable" (throw) and
+     *              not treat a transient failure as a bad symbol.
+     * @param {string} userId
+     * @param {string} accountId
+     * @param {string} symbol   app/canonical asset, e.g. 'NQ'
+     * @returns {Promise<{ symbol: string, found: boolean|null }>}
+     */
+    // eslint-disable-next-line no-unused-vars
+    async resolveSymbol(userId, accountId, symbol) {
+        return { symbol, found: null }   // default: unsupported → caller uses the static map
+    }
+
+    /**
      * Set or amend protective stop-loss / take-profit on an open position.
      * Omitted fields are left unchanged. Requires `capabilities().modifyProtection`.
      * @param {string} userId

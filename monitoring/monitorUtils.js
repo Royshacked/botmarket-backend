@@ -2,16 +2,18 @@ import { getCandles }          from '../providers/ohlcv.provider.js'
 import { extractLeaves }       from '../services/conditionTree.service.js'
 import { logger }              from '../services/logger.service.js'
 import { sessionStartMs }      from '../services/market.service.js'
+import { brokerService }       from '../api/broker/broker.service.js'
+import { normSymbol }          from '../services/brokerSymbol.service.js'
 
 const LOG        = '[monitorUtils]'
 const CANDLE_COUNT = 300
 
 // ─── Candle fetching ──────────────────────────────────────────────────────────
 
-export async function fetchCandles(id, asset, tf, count = CANDLE_COUNT) {
+export async function fetchCandles(id, asset, tf, count = CANDLE_COUNT, ctx = null) {
     let candles
     try {
-        candles = await getCandles(asset, tf, count)
+        candles = await _sourceCandles(asset, tf, count, ctx)
     } catch (err) {
         logger.error(LOG, `Candle fetch error for ${asset}/${tf}:`, err.message)
         return null
@@ -21,6 +23,56 @@ export async function fetchCandles(id, asset, tf, count = CANDLE_COUNT) {
         return null
     }
     return candles
+}
+
+// Resolve candles for one symbol. For the idea's PRIMARY instrument on an ohlcv-capable
+// broker (cTrader/IBKR), fetch the broker's own candles and shift them into the authored
+// (real) price space by the idea's basis offset — so an index-future idea is monitored in
+// cTrader prices without touching its (real-priced) condition text. Everything else —
+// cross-asset legs, paper, no broker — uses the app feed (Massive/Yahoo).
+async function _sourceCandles(symbol, tf, count, ctx) {
+    if (ctx?.useBroker && ctx.brokerSymbol && normSymbol(symbol) === normSymbol(ctx.asset)) {
+        try {
+            const bars = await brokerService.getCandles(ctx.broker, ctx.brokerSymbol, tf, count, ctx.userId)
+            if (bars && bars.length) return shiftCandles(bars, ctx.offset)
+            logger.warn(LOG, `[${ctx.broker}] no candles for ${ctx.brokerSymbol}/${tf} — app feed`)
+        } catch (err) {
+            logger.warn(LOG, `[${ctx.broker}] candle fetch failed for ${ctx.brokerSymbol}/${tf}: ${err.message} — app feed`)
+        }
+    }
+    return getCandles(symbol, tf, count)
+}
+
+// Shift OHLC by −offset to bring broker-space candles into the authored (real) space.
+// offset = cashIndex − future (e.g. −227 for NQ), so `− offset` moves US100 up into NQ
+// space. Volume/timestamp untouched. No-op when offset is 0 (every non-index case).
+function shiftCandles(bars, offset) {
+    const off = Number(offset) || 0
+    if (!off) return bars
+    return bars.map(b => ({ ...b, o: b.o - off, h: b.h - off, l: b.l - off, c: b.c - off }))
+}
+
+/**
+ * Candle-source context for an idea: instructs fetchCandles to pull the PRIMARY instrument
+ * from the broker (shifted into authored space) when the broker serves candles, else the
+ * app feed. Returns null for paper / no-broker / non-ohlcv brokers → app feed. Sync (broker
+ * capabilities are static), so it's cheap to build per call site.
+ * @returns {{ asset,broker,userId,brokerSymbol,offset:number,useBroker:true } | null}
+ */
+export function brokerCandleCtx(idea) {
+    const broker = idea?.broker
+    if (!broker || !idea.brokerSymbol) return null
+    let ohlcv = false
+    try { ohlcv = !!brokerService.capabilities(broker)?.ohlcv } catch { /* unknown broker → app feed */ }
+    if (!ohlcv) return null
+    return {
+        asset:        idea.asset,
+        broker,
+        userId:       idea.userId,
+        brokerSymbol: idea.brokerSymbol,
+        offset:       Number(idea.basisOffset) || 0,
+        useBroker:    true,
+    }
 }
 
 export async function buildSymbolMap(id, defaultSymbol, defaultCandles, timeframe, crossSymbols) {
@@ -54,7 +106,7 @@ export function hasVwap(tree, flat) {
     })
 }
 
-export async function buildVolumeCtx(id, asset, assetClass, tree, flat) {
+export async function buildVolumeCtx(id, asset, assetClass, tree, flat, ctx = null) {
     const needsCumulative = hasCumulativeVolume(tree, flat)
     const needsVwap       = hasVwap(tree, flat)
     if (!needsCumulative && !needsVwap) return null
@@ -65,7 +117,7 @@ export async function buildVolumeCtx(id, asset, assetClass, tree, flat) {
 
     const minutesSince = Math.ceil((Date.now() - start) / 60_000)
     const count        = Math.min(1500, Math.max(5, minutesSince + 5))
-    const minute       = await fetchCandles(id, asset, '1min', count)
+    const minute       = await fetchCandles(id, asset, '1min', count, ctx)
     if (!minute) {
         logger.warn(LOG, `[${id}] cumulative-volume: no 1-min candles for ${asset} — leaf will read false this tick`)
         return { sessionStartMs: start, minuteCandles: {} }

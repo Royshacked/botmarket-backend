@@ -35,6 +35,11 @@ export const closeSide = direction => (direction === 'long' ? 'short' : 'long')
  * @returns {object} broker order payload
  */
 export function buildExitOrder(idea, { type, level = null, qty, positionId = null, referenceQuote = null }) {
+    // Shift the authored (real-space) level into the broker's price space by the idea's
+    // basis offset — measured once at fork, 0 for everything but aliased index futures, so
+    // a no-op elsewhere. The persisted exitOrders record keeps the real level (app display);
+    // only the broker order carries the shifted price.
+    const px = level != null ? level + (Number(idea.basisOffset) || 0) : level
     const order = {
         symbol:    orderSymbol(idea),
         direction: closeSide(idea.direction),
@@ -42,8 +47,8 @@ export function buildExitOrder(idea, { type, level = null, qty, positionId = nul
         type:      type === 'tp' ? 'limit' : type === 'stop' ? 'stop' : 'market',
         ...(positionId != null && { positionId }),   // closing order: reduces this position only
     }
-    if (type === 'tp')        order.limitPrice = level
-    else if (type === 'stop') order.stopPrice  = level
+    if (type === 'tp')        order.limitPrice = px
+    else if (type === 'stop') order.stopPrice  = px
     if (referenceQuote != null) order.referenceQuote = referenceQuote
     return order
 }

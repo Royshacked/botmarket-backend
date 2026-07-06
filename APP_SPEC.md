@@ -133,7 +133,7 @@ the `BrokerAdapter` contract. **Consumers branch on `capabilities()` flags, neve
 
 | Broker | Status | Trading |
 |--------|--------|---------|
-| `ctrader` | live | full — OAuth+REST for accounts, ProtoOA WebSocket for orders/positions/exec (`nativeProtection` true) |
+| `ctrader` | live | full — OAuth+REST for accounts, ProtoOA WebSocket for orders/positions/exec (`nativeProtection` true); serves candles via trendbars (`ohlcv` true) |
 | `paper` | live | full — virtual venue, fills against the live price feed (`nativeProtection` false → exits rest as `positionId` closing orders) |
 | `ibkr` | in progress | data-only over IB Gateway / TWS socket (`@stoqey/ib`; `ohlcv` true, trading false) — **paused; do not extend without asking** |
 
@@ -153,18 +153,47 @@ the `BrokerAdapter` contract. **Consumers branch on `capabilities()` flags, neve
   directly (`captureOpenBare`, idealess fallback — mutually exclusive with the idea path, no double
   capture) so every closed paper trade appears in trade history.
 
-### Symbol normalization
+### Venue gate
+
+Every monitored idea must have a venue. If a child resolves to `broker == null` (no account resolved and
+paper off), `saveIdea` **rejects** it (`{ok:false, reason:'no_venue'}` → HTTP 422) and the monitor skips any
+`broker === null` idea. The *primary* gate is agent-level (setup won't proceed without a marked account/paper);
+this is the backstop. (Legacy ideas predating the `broker` field are `undefined`, not `null`, and are untouched.)
+
+### Symbol normalization + getTicker
 
 The app speaks one **canonical asset** per instrument. `brokerSymbol.service.js` renames only genuine
 index-future↔cash-CFD aliases per broker (cTrader `NQ↔US100`, `ES↔US500`, `YM↔US30`, `RTY↔US2000`);
-everything else resolves by identity. Paper uses canonical symbols unchanged.
+everything else resolves by identity. Paper uses canonical symbols unchanged. At fork time the persisted
+`brokerSymbol` is the broker's **real** tradable name, resolved by `adapter.resolveSymbol` (getTicker) against
+the live symbol list (`NQ`→static `US100`→broker `US100.cash`), falling back to the static map on
+unsupported/unreachable/not-listed. Cross-account suffixes (`.cash`/`.spot`) resolve tolerantly.
+
+### Native price space (basis conversion)
+
+A broker may price an instrument differently from the real-market reference the user analyzes: cTrader trades
+the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ future** — a ~227pt basis. Only
+**index futures** carry such a gap (oil/gold/stocks ≈ the same instrument the broker lists → ~0).
+
+- **Measured once, at fork.** `computeBasisOffset` = `yahooClose(cashIndex) − yahooClose(future)` (e.g. `^NDX − NQ=F`,
+  both settled daily closes → delay-free, alignment-free). Persisted as `idea.basisOffset` (a scalar; `0` for
+  everything that isn't an aliased index future, so a no-op elsewhere).
+- **Conditions are never rewritten** — they stay in the authored (real) price space.
+- **Monitor:** the primary instrument's candles come from the broker (`capabilities().ohlcv`) and are shifted by
+  `−basisOffset` (O/H/L/C only) into the authored space, so conditions compare unchanged. Cross-asset legs / paper /
+  no-broker use the app feed. (Broker-served candles are also cost-free vs the paid app feed.)
+- **Execution:** order prices are shifted by `+basisOffset` into the broker's space (`buildExitOrder`, resting entry).
+  Persisted `entryTriggerPrice` / `exitOrders.price` stay REAL (the app shows real prices; the broker order holds the
+  shifted price — surfaced by a "trades as US100" pill). The legacy `basisReferenceQuote` adapter shift is neutralised
+  (no double-conversion).
 
 ---
 
 ## 6. Key collections
 
 - `ideas` — the central document (status, direction, condition trees, timeframes, invalidation,
-  brokerOrders, exitOrders, allocationRatio, portfolioId, broker, accounts…).
+  brokerOrders, exitOrders, allocationRatio, portfolioId, broker, accounts, `brokerSymbol` (getTicker-resolved),
+  `basisOffset` (fork-measured price shift, 0 unless aliased index future), `groupId` (multi-broker fork display)…).
 - `trades` — append-only point-in-time capture of each opened/closed idea (paper + live).
 - `paperAccounts` / `paperPositions` / `paperOrders` — the virtual broker store.
 - `chat_conversations` / `chat_messages` — social DM + bot notifications (`chat_messages.dismissed`

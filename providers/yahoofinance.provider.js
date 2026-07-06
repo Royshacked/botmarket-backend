@@ -71,6 +71,24 @@ export async function getNumericQuote(ticker) {
 }
 
 /**
+ * Numeric quote WITH the source timestamp — for the basis-offset math, which must know
+ * how fresh the real-price reference is (a live quote vs a stale Friday close). `at` is
+ * unix ms of the last price (Yahoo's regularMarketTime), or null.
+ * @returns {Promise<{ symbol: string, price: number|null, at: number|null }>}
+ */
+export async function getNumericQuoteWithTime(ticker) {
+    const q = await _quote(ticker)
+    const t = q?.regularMarketTime
+    const at = t == null ? null : (t instanceof Date ? t.getTime() : Number(t) * 1000)
+    return {
+        symbol:    q.symbol,
+        price:     q.regularMarketPrice ?? null,
+        prevClose: q.regularMarketPreviousClose ?? null,   // settled prior close — delay-free
+        at,
+    }
+}
+
+/**
  * Batch quotes for several tickers in one call. Returns an LLM-ready string
  * table so the agent doesn't have to fetch prices one ticker at a time.
  */

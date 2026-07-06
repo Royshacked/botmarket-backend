@@ -7,6 +7,7 @@ import { buildOrderPlanForIdea, resolveUserAccounts } from '../../services/order
 import { routeExits, currentReferencePrice, detectNativeEntryLevel } from '../../services/protectionPlan.service.js'
 import { isAssetOpen } from '../../services/market.service.js'
 import { toBrokerSymbol, normSymbol } from '../../services/brokerSymbol.service.js'
+import { computeBasisOffset }         from '../broker/brokerPrice.service.js'
 import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } from '../../services/conditionTree.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
 import { placeOrdersForIdea, placeRestingEntryForIdea, triggerEntryNow } from './ideaExecution.service.js'
@@ -138,20 +139,36 @@ async function saveIdea(tradeIdea, userId) {
         }
 
         const partitions = await _partitionByBroker(enriched, userId)
+
+        // Gate #5: every monitored idea needs a trading venue (a real broker or paper).
+        // A null-broker partition = no account resolved and paper off → reject rather than
+        // persist a dead idea the monitor can never act on. The PRIMARY gate is agent-level
+        // (it won't reach setup without a marked venue); this is the defensive backstop.
+        if (partitions.every(p => p.broker == null)) {
+            logger.warn(LOG, 'Idea has no trading venue — not saved', { asset: enriched.asset })
+            return { ok: false, reason: 'no_venue', error: new Error('No trading venue — connect a broker or enable paper') }
+        }
+
         const forked  = partitions.length > 1
         const groupId = forked ? `grp_${enriched.id}` : null
 
         const children = []
         for (let i = 0; i < partitions.length; i++) {
-            const part  = partitions[i]
+            const part         = partitions[i]
+            const accountId    = part.mainAccountId ?? part.accountIds[0] ?? null
+            const brokerSymbol = await _resolveBrokerSymbol(part.broker, userId, accountId, enriched.asset)
             const child = {
                 ...enriched,
                 id:            forked ? `${enriched.id}-${i + 1}` : enriched.id,
                 accounts:      part.accountIds,
                 mainAccountId: part.mainAccountId,
                 groupId,
-                broker:        part.broker ?? null,
-                brokerSymbol:  part.broker ? toBrokerSymbol(part.broker, enriched.asset) : null,
+                broker:        part.broker,
+                brokerSymbol,
+                // Basis offset measured ONCE, here. Downstream (monitor candle-shift, order
+                // placement) apply this stored scalar; 0 for everything but aliased index
+                // futures, so the shift is a no-op elsewhere. See brokerPrice.service.
+                basisOffset:   await _basisOffset(brokerSymbol, enriched.asset),
             }
 
             if (isImmediate) await _attachImmediatePlan(child)
@@ -434,6 +451,46 @@ async function _cancelRestingOrders(idea, userId) {
         } catch (err) {
             logger.warn(LOG, 'Resting order cancel failed', { id: idea.id, orderId: link.orderId, error: err.message })
         }
+    }
+}
+
+/**
+ * Resolve the broker's tradable symbol for an idea ("getTicker") — ask the broker's live
+ * symbol list so the persisted brokerSymbol is the broker's real name (e.g. 'US100.cash').
+ * Falls back to the static alias map when the broker can't resolve (unsupported), can't be
+ * reached (transport error), or genuinely doesn't list the instrument. Never throws — a
+ * failure just yields the static-map guess, so save never breaks on a symbol lookup.
+ * @returns {Promise<string|null>}
+ */
+async function _resolveBrokerSymbol(broker, userId, accountId, asset) {
+    if (!broker) return null
+    // Static map first: bridge the semantic gap the broker CAN'T (NQ→US100) — the broker's
+    // symbol list only knows its own names. Then ask the broker to resolve that base to its
+    // exact tradable name (US100→US100.cash) and confirm it's listed.
+    const mapped = toBrokerSymbol(broker, asset)
+    try {
+        const res = await brokerService.resolveSymbol(broker, userId, accountId, mapped)
+        if (res?.found && res.symbol) return res.symbol
+    } catch (err) {
+        logger.warn(LOG, `getTicker ${asset}→${mapped} on ${broker} failed — using static map: ${err.message}`)
+    }
+    return mapped
+}
+
+/**
+ * Measure the basis offset for an idea ONCE, at fork time (see brokerPrice.service).
+ * A non-zero scalar only for aliased index futures; 0 for everything else. Persisted on
+ * the idea so the monitor (candle-shift) and execution (order-price shift) apply it
+ * without re-measuring. Never throws — a failure yields 0 (no shift, place at authored).
+ * @returns {Promise<number>}
+ */
+async function _basisOffset(brokerSymbol, asset) {
+    try {
+        const { offset } = await computeBasisOffset({ brokerSymbol, asset })
+        return offset || 0
+    } catch (err) {
+        logger.warn(LOG, `basis offset failed for ${asset}→${brokerSymbol}: ${err.message}`)
+        return 0
     }
 }
 

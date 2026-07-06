@@ -25,20 +25,26 @@ server.js                 app wiring, route mounts, background-service boot
 api/
   idea/                   Trade Agent SSE chat        POST /api/idea/stream
   trade-ideas/            idea CRUD + order placement /api/trade-ideas/*
-    tradeIdeas.service.js     save/get/update/delete, broker forking
+    tradeIdeas.service.js     save/get/update/delete, broker forking; getTicker-resolved
+                              brokerSymbol + fork-time basisOffset per child; venue gate
+                              (no broker + no paper → reject, reason:'no_venue')
     ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now")
-    exitOrders.service.js     in-position exit (re)arming
+    exitOrders.service.js     in-position exit (re)arming (basisReferenceQuote now a neutralised no-op)
   portfolio/              Portfolio Agent + review    /api/portfolio/*
   scanner/                Scanner Agent + saved scans /api/scanner/*
   broker/                 broker connections/orders/positions  /api/broker/*
     adapters/
       broker.interface.js     BrokerAdapter base class — THE contract every broker fulfils
-      ctrader.adapter.js      + ctrader.execution.js (ProtoOA→BrokerExecution translator)
-      paper.adapter.js        virtual venue
+                              (incl. getCandles + capabilities().ohlcv, resolveSymbol "getTicker", getSpot)
+      ctrader.adapter.js      + ctrader.execution.js (ProtoOA→BrokerExecution translator).
+                              getCandles now serves trendbars (ohlcv:true); resolveSymbol via symbol list
+      paper.adapter.js        virtual venue (resolveSymbol = identity; ohlcv:false → app feed)
       ibkr.adapter.js         data-only, in progress — see APP_SPEC / do not extend casually
       normalize.js
     broker.factory.js         getBrokerAdapter(type); SUPPORTED_BROKERS registry
-    broker.service.js         broker-agnostic entry point used everywhere
+    broker.service.js         broker-agnostic entry point used everywhere (getCandles/resolveSymbol/getSpot)
+    brokerPrice.service.js    basis conversion: computeBasisOffset (cashIndex−future daily closes,
+                              index futures only) + applyOffset + real/cash ticker maps
     paperBroker.service.js / paperExecution.service.js
   paper/                  paper mode toggle/settings/reset/trades/equity  /api/paper/*
   chat/                   social DM + bot notifications (chatWs.js = WebSocket)
@@ -70,7 +76,7 @@ services/
 providers/
   anthropic.provider.js  openai.provider.js            LLMs
   yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / chartImg / ohlcv
-  ctrader.provider.js  ctrader.session.provider.js  ctrader.ws.provider.js
+  ctrader.provider.js  ctrader.session.provider.js (getTrendbars + trendbarToOHLCV)  ctrader.ws.provider.js
   ibkr.provider.js (retired) / ibkr.gateway.provider.js
   mongodb.provider.js       getDb(), stripId/stripIds
 monitoring/
@@ -81,8 +87,11 @@ monitoring/
   invalidation.monitor.js   entry-range watcher (advisory, never executes)
   positionMonitor.js  portfolio.monitor.js
   paperFill.service.js  paperEquity.service.js
-  exitOrders.util.js        buildExitOrder / exitOrderRecord / closeSide / orderSymbol
-  monitorUtils.js           candleMs, parseYesNo, round, remainingForAccount, timeframe resolvers
+  exitOrders.util.js        buildExitOrder (applies +basisOffset → broker price space) / exitOrderRecord / closeSide / orderSymbol
+  monitorUtils.js           candleMs, parseYesNo, round, remainingForAccount, timeframe resolvers;
+                            brokerCandleCtx + fetchCandles/buildVolumeCtx broker-candle routing
+                            (primary instrument → broker candles shifted −basisOffset into authored space;
+                            cross-assets/paper/no-broker → app feed)
   parsers/                  condition.parser.js, indicators.parser.js
 tests/
   unit/                     node:test unit tests — run by `npm test`
@@ -114,6 +123,7 @@ docs/                       architecture design docs
 | New SSE stream | `startSseStream()` from `api/_shared/sse.util.js` |
 | New agent tool | schema + handler; put shared ones in `agentUtils` (`COMMON_TOOL_HANDLERS`, `makeToolHandler`) |
 | New broker | `providers/<b>.provider.js` + `adapters/<b>.adapter.js` (extend `BrokerAdapter`) + one line in `broker.factory.js`; add aliases in `brokerSymbol.service.js` only if it renames instruments |
+| New aliased index future (broker basis) | add to `brokerSymbol.service.ALIASES` + `brokerPrice.service` REAL_TICKER/CASH_INDEX maps; offset auto-measured at fork, candle-shifted in monitor |
 | New evaluator / leaf type | `evaluators/<type>.evaluator.js` + wire into `monitor.orchestrator._evalOne` + `condition.parser` |
 | New pure utility | add a `tests/unit/<name>.test.js` (that's the "write tests after a feature" rule in practice) |
 

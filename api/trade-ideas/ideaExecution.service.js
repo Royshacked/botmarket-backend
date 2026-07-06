@@ -162,7 +162,10 @@ export async function placeRestingEntryForIdea(id, userId, isAdmin = false) {
                 direction: idea.direction,
                 quantity:  order.quantity,
                 type:      'stop',
-                stopPrice: triggerPrice,
+                // Shift authored (real) price → broker space by the fork-measured offset
+                // (0 for all but aliased index futures). Persisted entryTriggerPrice below
+                // stays the real level (app display); only the order carries the shift.
+                stopPrice: triggerPrice + (Number(idea.basisOffset) || 0),
                 ...(referenceQuote != null && { referenceQuote }),
             }
             try {

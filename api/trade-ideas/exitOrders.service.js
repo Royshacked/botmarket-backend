@@ -1,7 +1,4 @@
 import { brokerService }        from '../broker/broker.service.js'
-import { currentReferencePrice } from '../../services/protectionPlan.service.js'
-import { normSymbol }            from '../../services/brokerSymbol.service.js'
-import { firstLeafTimeframe }    from '../../services/conditionTree.service.js'
 import { logger }                from '../../services/logger.service.js'
 
 const LOG = '[exitOrders]'
@@ -103,21 +100,12 @@ export async function exitFields(idea, route, referenceQuote) {
 }
 
 /**
- * Canonical live quote for the cTrader basis-price shift, or null.
- * Only returned when the idea's broker symbol maps to a different price basis
- * (e.g. NQ→US100); identity symbols return null (no shift needed).
+ * Broker reference quote for the LEGACY adapter price-shift. NEUTRALISED: the basis is now
+ * measured ONCE at fork (idea.basisOffset) and applied to order prices at build time
+ * (buildExitOrder / resting entry). Returning null keeps the adapter's referenceQuote shift
+ * OFF, so the basis is never applied twice. Kept as an exported no-op so callers that still
+ * pass its result see the (correct) null.
  */
-export async function basisReferenceQuote(idea) {
-    const aliased = idea.brokerSymbol && normSymbol(idea.brokerSymbol) !== normSymbol(idea.asset)
-    if (!aliased) return null
-    const quote = await currentReferencePrice(idea.asset, _refTimeframe(idea))
-    if (quote == null) logger.warn(LOG, 'basis shift: no canonical quote — placing at authored price', { asset: idea.asset, brokerSymbol: idea.brokerSymbol })
-    return quote
-}
-
-function _refTimeframe(idea) {
-    return firstLeafTimeframe(idea.entry_condition_tree)
-        ?? idea.entry_timeframe
-        ?? idea.timeframe
-        ?? 'day'
+export async function basisReferenceQuote() {
+    return null
 }

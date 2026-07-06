@@ -115,6 +115,14 @@ export class PaperAdapter extends BrokerAdapter {
     }
 
     /**
+     * Paper trades the app's canonical asset directly (no CFD aliasing), so the symbol
+     * resolves to itself. found:true = paper is a valid venue for this instrument.
+     */
+    async resolveSymbol(userId, accountId, symbol) {
+        return { symbol, found: true }
+    }
+
+    /**
      * Place an order. MARKET orders fill instantly at the live price (opening a new
      * position, or reducing one when positionId is set). LIMIT/STOP orders — resting
      * entries and positionId closing exits — are stored working and filled by the

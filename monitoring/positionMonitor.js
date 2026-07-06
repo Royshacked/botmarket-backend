@@ -3,7 +3,7 @@ import { logger }                            from '../services/logger.service.js
 import { brokerService }                     from '../api/broker/broker.service.js'
 import { collectSymbols }                     from '../services/conditionTree.service.js'
 import {
-    buildSymbolMap, buildVolumeCtx, persistConditionStates,
+    buildSymbolMap, buildVolumeCtx, brokerCandleCtx, persistConditionStates,
     round, remainingForAccount, resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe,
 } from './monitorUtils.js'
 import { buildExitOrder, exitOrderRecord } from './exitOrders.util.js'
@@ -54,7 +54,7 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
     const crossSyms  = collectSymbols(tree, conditions)
     const symbolMap  = await buildSymbolMap(id, asset, candles, timeframe, crossSyms)
     const floorAt    = idea.activatedAt ?? null
-    const volCtx     = await buildVolumeCtx(id, asset, idea.asset_class, tree, conditions)
+    const volCtx     = await buildVolumeCtx(id, asset, idea.asset_class, tree, conditions, brokerCandleCtx(idea))
 
     if (residual) {
         return _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji, volCtx }, onClose)

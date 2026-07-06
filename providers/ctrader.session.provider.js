@@ -40,6 +40,8 @@ const PT = {
     RECONCILE_REQ:         2124,   // ProtoOAReconcileReq → open positions/orders
     SUBSCRIBE_SPOTS_REQ:   2127,   // ProtoOASubscribeSpotsReq   (→ 2128 ack)
     UNSUBSCRIBE_SPOTS_REQ: 2129,   // ProtoOAUnsubscribeSpotsReq (→ 2130 ack)
+    GET_TRENDBARS_REQ:     2137,   // ProtoOAGetTrendbarsReq (→ 2138 res). Standard numbering
+                                   // (cf. 2114/2116/2127/2131 verified); confirm live on demo.
     GET_ACCOUNTS_REQ:      2149,
     POSITION_PNL_REQ:      2187,   // ProtoOAGetPositionUnrealizedPnLReq (→ 2188)
 }
@@ -52,8 +54,14 @@ const ORDER_TYPE_LIMIT = 2
 const ORDER_TYPE_STOP  = 3
 
 // ProtoOASpotEvent (2131) bid/ask are integers in 1/100000 of a price unit.
+// ProtoOATrendbar low + deltas use the SAME 1/100000 scale.
 const SPOT_PRICE_SCALE = 1e5
 const SPOT_TIMEOUT_MS  = 5_000
+
+// Short dedupe window for repeated trendbar fetches of the same symbol/period within
+// a monitor tick (many ideas can share one instrument). Not a real cache — just avoids
+// duplicate round-trips; the next tick refetches so intraday closes stay fresh.
+const TREND_CACHE_MS   = 5_000
 
 // One session per (environment, account). Reused across requests so the symbol
 // cache and account-auth state survive between adapter calls.
@@ -177,6 +185,7 @@ export class CTraderSession extends EventEmitter {
         this._normToId      = new Map()     // normalized name (BTCUSD) → symbolId, for fuzzy lookup
         this._specsById     = new Map()     // symbolId → Promise<specs>
         this._spotInflight  = new Map()     // symbolId → Promise<Quote> (dedupes concurrent snapshots)
+        this._trendCache    = new Map()     // `${symbolId}:${period}` → { at, bars } (short TTL)
 
         // After every (re)connect the app re-authenticates; our account-auth is gone,
         // so drop it and let the next send() re-issue 2102.
@@ -342,6 +351,42 @@ export class CTraderSession extends EventEmitter {
         return { symbolId, bid: round(bid), ask: round(ask), mid: round(mid), digits, at: Date.now() }
     }
 
+    // ── Trendbars (OHLCV) ──────────────────────────────────────────────────────
+
+    /**
+     * Fetch historical OHLCV bars for a symbol (ProtoOAGetTrendbarsReq 2137).
+     * cTrader serves no candles over REST — this is the ONLY OHLCV source for the
+     * broker, so the monitor can evaluate a cTrader idea in the broker's own price
+     * space instead of the (equities-only, wrong-symbol) app feed.
+     *
+     * Bars are returned oldest→newest to match the app feed (so `[-count]` = the most
+     * recent bars). A short TTL cache dedupes repeated fetches for the same
+     * symbol/period across a monitor tick.
+     *
+     * @param {string} symbolName  broker symbol, e.g. 'US100.cash'
+     * @param {number} period      ProtoOATrendbarPeriod enum (M5=5, H1=9, D1=12…)
+     * @param {number} count       number of bars to return (newest last)
+     * @returns {Promise<Array<{t:number,o:number,h:number,l:number,c:number,v:number}>>}
+     */
+    async getTrendbars(symbolName, period, count = 300) {
+        const { symbolId, digits } = await this.resolveSymbol(symbolName)
+
+        const key    = `${symbolId}:${period}`
+        const cached = this._trendCache.get(key)
+        if (cached && Date.now() - cached.at < TREND_CACHE_MS && cached.bars.length >= count) {
+            return cached.bars.slice(-count)
+        }
+
+        const res  = await this.send(PT.GET_TRENDBARS_REQ, { symbolId, period, count })
+        const bars = (res?.trendbar ?? [])
+            .map(b => trendbarToOHLCV(b, digits))
+            .sort((a, b) => a.t - b.t)
+
+        this._trendCache.set(key, { at: Date.now(), bars })
+        logger.info(LOG, `[${this.env}:${this.ctid}] trendbars ${symbolName} p=${period}: ${bars.length} bars`)
+        return bars.slice(-count)
+    }
+
     // ── Open positions ─────────────────────────────────────────────────────────
 
     /**
@@ -488,6 +533,28 @@ function _normalizeSpecs(s, symbolName) {
         stepVolume:  _int(s.stepVolume, 0),
         maxVolume:   _int(s.maxVolume, 0),
         lotSize:     Number.isFinite(Number(s.lotSize)) ? Number(s.lotSize) : null,
+    }
+}
+
+/**
+ * Reconstruct one ProtoOATrendbar into an OHLCV bar. cTrader encodes a bar as an
+ * absolute `low` plus non-negative deltas for open/high/close, all integers in
+ * 1/100000 of price; `utcTimestampInMinutes` is minutes since epoch. Pure (no I/O)
+ * so it's unit-testable without a socket.
+ * @param {object} b       raw ProtoOATrendbar
+ * @param {number} digits  symbol price decimals (for rounding)
+ * @returns {{t:number,o:number,h:number,l:number,c:number,v:number}}
+ */
+export function trendbarToOHLCV(b, digits) {
+    const low   = Number(b.low)
+    const round = v => roundPrice({ digits }, v)
+    return {
+        t: Number(b.utcTimestampInMinutes) * 60_000,
+        o: round((low + Number(b.deltaOpen  ?? 0)) / SPOT_PRICE_SCALE),
+        h: round((low + Number(b.deltaHigh  ?? 0)) / SPOT_PRICE_SCALE),
+        l: round(low / SPOT_PRICE_SCALE),
+        c: round((low + Number(b.deltaClose ?? 0)) / SPOT_PRICE_SCALE),
+        v: Number(b.volume ?? 0),
     }
 }
 

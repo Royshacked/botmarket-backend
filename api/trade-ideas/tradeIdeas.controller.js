@@ -26,7 +26,12 @@ export async function createTradeIdea(req, res) {
         if (!body.asset && !body.ticker) return res.status(400).send({ error: 'Missing asset' })
 
         const result = await ideaService.saveIdea(body, req.user._id)
-        if (!result.ok) return res.status(500).send({ error: 'Failed to save idea' })
+        if (!result.ok) {
+            if (result.reason === 'no_venue') {
+                return res.status(422).send({ error: result.error?.message ?? 'No trading venue', reason: 'no_venue' })
+            }
+            return res.status(500).send({ error: 'Failed to save idea' })
+        }
 
         // `idea` = primary child (back-compat); `ideas` = all children when a
         // multi-broker idea was forked into independent single-broker children.
