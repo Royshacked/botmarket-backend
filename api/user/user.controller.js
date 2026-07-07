@@ -58,3 +58,32 @@ export async function getTokenUsage(req, res, next) {
         next(err)
     }
 }
+
+// Own-preferences only (admins may read/write any) — prefs are personal UI state.
+function assertOwnPrefs(req) {
+    if (req.params.id !== req.user?._id && !req.user?.isAdmin) {
+        const err = new Error('Forbidden')
+        err.status = 403
+        throw err
+    }
+}
+
+export async function getPreferences(req, res, next) {
+    try {
+        assertOwnPrefs(req)
+        const prefs = await userService.getPreferences(req.params.id)
+        res.json(prefs)
+    } catch (err) {
+        next(err)
+    }
+}
+
+export async function updatePreferences(req, res, next) {
+    try {
+        assertOwnPrefs(req)
+        const prefs = await userService.savePreferences(req.params.id, req.body ?? {})
+        res.json(prefs)
+    } catch (err) {
+        next(err)
+    }
+}

@@ -12,6 +12,7 @@ export async function buildUserDoc({ username, fullname, password }) {
         username,
         fullname,
         passwordHash,
+        preferences: {}, // account-level UI prefs (theme/accent/design/AI settings), synced from the client
         createdAt: now,
         updatedAt: now,
     }

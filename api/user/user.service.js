@@ -13,6 +13,42 @@ export const userService = {
     updateUser,
     deleteUser,
     getTokenUsage,
+    getPreferences,
+    savePreferences,
+}
+
+// Account-level UI preferences (theme/accent/design/AI settings). The client owns the
+// full snapshot (localStorage is the live copy) and pushes it whole; we store it as an
+// opaque object so new preference keys need no backend change.
+async function getPreferences(id) {
+    const db = await getDb()
+    const user = await db.collection(COLLECTION).findOne({ id }, { projection: { preferences: 1 } })
+    if (!user) {
+        const err = new Error('User not found')
+        err.status = 404
+        throw err
+    }
+    return user.preferences ?? {}
+}
+
+async function savePreferences(id, preferences) {
+    if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) {
+        const err = new Error('preferences must be an object')
+        err.status = 400
+        throw err
+    }
+    const db = await getDb()
+    const updated = await db.collection(COLLECTION).findOneAndUpdate(
+        { id },
+        { $set: { preferences, updatedAt: Date.now() } },
+        { returnDocument: 'after', projection: { preferences: 1 } }
+    )
+    if (!updated) {
+        const err = new Error('User not found')
+        err.status = 404
+        throw err
+    }
+    return updated.preferences ?? {}
 }
 
 async function getTokenUsage(userId, month) {
