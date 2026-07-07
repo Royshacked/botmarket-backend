@@ -19,8 +19,7 @@
 
 import { randomUUID }         from 'crypto'
 import { BrokerAdapter }      from './broker.interface.js'
-import { paperBrokerService,
-         paperAccountId }     from '../paperBroker.service.js'
+import { paperBrokerService } from '../paperBroker.service.js'
 import { openPosition,
          reducePosition,
          computeEquity,
@@ -40,18 +39,24 @@ export class PaperAdapter extends BrokerAdapter {
     // No OAuth / socket — the account IS the connection. It's created on first use.
 
     async isConnected(userId) {
-        return !!(await paperBrokerService.getAccount(userId))
+        return (await paperBrokerService.listAccounts(userId, { mode: 'paper' })).length > 0
     }
 
     // ── Account ──────────────────────────────────────────────────────────────────
+    // `accountId` picks a specific paper account; callers that don't carry one (the
+    // generic broker dispatch) resolve the user's DEFAULT paper account.
 
-    async getAccount(userId) {
-        const acct = await paperBrokerService.getOrCreateAccount(userId)
-        const eq   = await computeEquity(userId)
+    async getAccount(userId, accountId) {
+        const acct = accountId
+            ? await paperBrokerService.getAccount(userId, accountId)
+            : await paperBrokerService.getOrCreateDefaultAccount(userId, 'paper')
+        if (!acct) throw Object.assign(new Error(`paper account ${accountId} not found`), { status: 404 })
+        const eq = await computeEquity(userId, acct.accountId)
 
-        // Margin model (MVP): cash-only, no leverage — positions don't reserve margin,
-        // so equity = cashBalance + Σ unrealized and freeMargin == equity. Buying-power
-        // enforcement + per-asset_class contract sizing are deferred (see plan doc).
+        // Exposure model: marginUsed = Σ notional. A buying-power cap (settings.maxLeverage)
+        // is ADVISORY — freeMargin/marginLevel reflect it for display, but a fill is never
+        // blocked (see computeEquity). maxLeverage 0 = off → buyingPower null, freeMargin == equity.
+        const maxLeverage = Number(acct.settings?.maxLeverage) || 0
         return {
             id:          acct.accountId,
             login:       acct.accountId,
@@ -59,29 +64,33 @@ export class PaperAdapter extends BrokerAdapter {
             currency:    eq.currency,
             balance:     eq.cashBalance,
             equity:      eq.equity,
-            margin:      0,
-            freeMargin:  eq.equity,
-            marginLevel: null,
-            leverage:    null,
+            margin:      eq.marginUsed,
+            freeMargin:  eq.buyingPower != null ? Math.max(0, round2(eq.buyingPower - eq.marginUsed)) : eq.equity,
+            marginLevel: eq.marginUsed > 0 ? round2((eq.equity / eq.marginUsed) * 100) : null,
+            leverage:    maxLeverage || null,
         }
     }
 
     async getTradingAccounts(userId) {
-        const acct = await paperBrokerService.getOrCreateAccount(userId)
-        return [{
+        let accts = await paperBrokerService.listAccounts(userId, { mode: 'paper' })
+        if (!accts.length) accts = [await paperBrokerService.getOrCreateDefaultAccount(userId, 'paper')]
+        return accts.map(acct => ({
             id:       acct.accountId,
             login:    acct.accountId,
+            name:     acct.name,
             currency: acct.currency,
             balance:  round2(acct.cashBalance),
             broker:   'Paper',
             isLive:   false,
-        }]
+        }))
     }
 
     // ── Positions ────────────────────────────────────────────────────────────────
 
-    async getPositions(userId) {
-        const positions = await paperBrokerService.listPositions(userId, { status: 'open' })
+    async getPositions(userId, accountId) {
+        // Scope to one account when the caller names it (a user may own several paper
+        // accounts); otherwise return every paper position for the user.
+        const positions = await paperBrokerService.listPositions(userId, { status: 'open', accountId })
         const priceBy   = await this._priceMap(positions.map(p => p.symbol))
         return positions.map(p => this._toBrokerPosition(p, priceBy.get(p.symbol)))
     }
@@ -130,8 +139,9 @@ export class PaperAdapter extends BrokerAdapter {
      * @returns {Promise<{ orderId: string, positionId?: string, accountId: string }>}
      */
     async placeOrder(userId, accountId, order) {
-        const acctId  = paperAccountId(userId)
-        await paperBrokerService.getOrCreateAccount(userId)
+        // The chosen account is passed by the dispatch (an idea binds to exactly one
+        // paper account) — orders/positions are stamped with it, not a derived id.
+        const acctId  = accountId
         const orderId = randomUUID()
 
         if (order.type === 'market') {

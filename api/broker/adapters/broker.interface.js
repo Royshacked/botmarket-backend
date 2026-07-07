@@ -207,22 +207,27 @@ export class BrokerAdapter {
     }
 
     /**
-     * Return normalised account summary.
+     * Return normalised account summary. `accountId` is optional: adapters that manage
+     * several accounts under one user (e.g. paper) use it to pick the account; adapters
+     * that resolve their own selected account (live brokers) may ignore it.
      * @param {string} userId
+     * @param {string} [accountId]
      * @returns {Promise<BrokerAccount>}
      */
     // eslint-disable-next-line no-unused-vars
-    async getAccount(userId) {
+    async getAccount(userId, accountId) {
         throw new Error(`${this.constructor.name}: getAccount() not implemented`)
     }
 
     /**
-     * Return list of open positions.
+     * Return list of open positions. `accountId` is optional (see getAccount): when
+     * given, adapters that manage several accounts scope to it; otherwise all are returned.
      * @param {string} userId
+     * @param {string} [accountId]
      * @returns {Promise<BrokerPosition[]>}
      */
     // eslint-disable-next-line no-unused-vars
-    async getPositions(userId) {
+    async getPositions(userId, accountId) {
         throw new Error(`${this.constructor.name}: getPositions() not implemented`)
     }
 

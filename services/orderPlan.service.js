@@ -8,8 +8,10 @@
  * browser, and can be acted on by the monitor (deferred / auto modes).
  */
 
-import { brokerService } from '../api/broker/broker.service.js'
-import { logger }        from './logger.service.js'
+import { brokerService }      from '../api/broker/broker.service.js'
+import { paperBrokerService } from '../api/broker/paperBroker.service.js'
+import { SUPPORTED_BROKERS }  from '../api/broker/broker.factory.js'
+import { logger }             from './logger.service.js'
 
 const LOG = '[orderPlan]'
 
@@ -28,12 +30,31 @@ export async function resolveUserAccounts(userId, wantedIds) {
 
     const connections = await brokerService.listConnections(userId)
     for (const [broker, connected] of Object.entries(connections)) {
-        if (!connected) continue
+        // Virtual modes (paper/manual) are resolved below straight from their store —
+        // per-idea-bound and not gated on the global connection/toggle — so skip them
+        // here to keep ONE canonical resolution path (no divergent double-mapping).
+        if (!connected || paperBrokerService.VIRTUAL_MODES.includes(broker)) continue
         const { accounts: accs = [] } = await brokerService.getTradingAccounts(broker, userId)
         for (const a of accs) {
             const id = String(a.id)
             if (want.has(id)) byId.set(id, { ...a, broker })
         }
+    }
+
+    // Virtual accounts: resolve any still-unmatched wanted id straight from the store,
+    // tagging it with its mode as the broker. Only modes with a REGISTERED adapter are
+    // tagged — a 'manual' id (no adapter yet) is left unresolved rather than producing a
+    // broker:'manual' partition that placeOrder can't service (400). This is how an idea
+    // bound to a chosen paper account partitions onto broker:'paper' through the normal path.
+    for (const id of want) {
+        if (byId.has(id)) continue
+        const mode = paperBrokerService.accountMode(id)
+        if (!mode || !SUPPORTED_BROKERS.includes(mode)) continue
+        const acct = await paperBrokerService.getAccount(userId, id)
+        if (acct) byId.set(id, {
+            id: acct.accountId, login: acct.accountId, name: acct.name,
+            currency: acct.currency, balance: acct.cashBalance, broker: mode,
+        })
     }
     return byId
 }

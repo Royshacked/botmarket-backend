@@ -48,9 +48,11 @@ async function captureOpen(idea, exec) {
         const quantity  = exec.quantity ?? slot?.quantity ?? idea.quantity ?? null
 
         // Best-effort account snapshot — uniform for paper & live via the broker layer.
+        // Pass the trade's own accountId so a multi-account broker (paper) snapshots the
+        // account the fill landed on, not its default.
         let accountSnapshot = null
         try {
-            const acct = broker ? await brokerService.getAccount(broker, idea.userId) : null
+            const acct = broker ? await brokerService.getAccount(broker, idea.userId, accountId) : null
             if (acct) accountSnapshot = { equity: acct.equity, cashBalance: acct.balance, currency: acct.currency }
         } catch { /* non-fatal */ }
 
@@ -175,7 +177,7 @@ async function captureClose({ accountId, positionId, price, reason, pnl, at }) {
 
 /**
  * Read trades for a user, newest first.
- * @param {{ mode?: 'paper'|'live', status?: 'open'|'closed', portfolioId?: string, limit?: number }} [filter]
+ * @param {{ mode?: 'paper'|'live', status?: 'open'|'closed', portfolioId?: string, accountId?: string, limit?: number }} [filter]
  */
 async function listTrades(userId, filter = {}) {
     const db = await getDb()
@@ -183,6 +185,7 @@ async function listTrades(userId, filter = {}) {
     if (filter.mode)        q.mode        = filter.mode
     if (filter.status)      q.status      = filter.status
     if (filter.portfolioId) q.portfolioId = filter.portfolioId
+    if (filter.accountId)   q.accountId   = String(filter.accountId)
     return db.collection(COLLECTION)
         .find(q, { projection: { _id: 0 } })
         .sort({ openedAt: -1 })

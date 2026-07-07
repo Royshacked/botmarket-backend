@@ -106,14 +106,24 @@ async function isConnected(brokerType, userId) {
 
 // ─── Account data ─────────────────────────────────────────────────────────────
 
-/** @returns {Promise<import('./adapters/broker.interface.js').BrokerAccount>} */
-async function getAccount(brokerType, userId) {
-    return getBrokerAdapter(brokerType).getAccount(userId)
+/**
+ * @param {string} brokerType
+ * @param {string} userId
+ * @param {string} [accountId]  optional: pick a specific account (paper manages several)
+ * @returns {Promise<import('./adapters/broker.interface.js').BrokerAccount>}
+ */
+async function getAccount(brokerType, userId, accountId) {
+    return getBrokerAdapter(brokerType).getAccount(userId, accountId)
 }
 
-/** @returns {Promise<import('./adapters/broker.interface.js').BrokerPosition[]>} */
-async function getPositions(brokerType, userId) {
-    return getBrokerAdapter(brokerType).getPositions(userId)
+/**
+ * @param {string} brokerType
+ * @param {string} userId
+ * @param {string} [accountId]  optional: scope to one account (paper manages several)
+ * @returns {Promise<import('./adapters/broker.interface.js').BrokerPosition[]>}
+ */
+async function getPositions(brokerType, userId, accountId) {
+    return getBrokerAdapter(brokerType).getPositions(userId, accountId)
 }
 
 /**

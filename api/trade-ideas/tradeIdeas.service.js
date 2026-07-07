@@ -495,15 +495,20 @@ async function _basisOffset(brokerSymbol, asset) {
 }
 
 async function _partitionByBroker(idea, userId) {
-    // Global paper mode: route EVERY new idea to the simulated broker on the user's
-    // single paper account, regardless of which live accounts were selected.
-    const paper = await paperBrokerService.getAccount(userId)
-    if (paper?.enabled) {
-        return [{ broker: 'paper', accountIds: [paper.accountId], mainAccountId: paper.accountId }]
-    }
-
     const accountIds = (idea.accounts ?? []).map(a => String(typeof a === 'object' ? a.id : a))
     const globalMain = idea.mainAccountId != null ? String(idea.mainAccountId) : null
+
+    // Per-idea binding: an idea that explicitly names a virtual (paper/manual) account
+    // resolves through the normal path below (resolveUserAccounts reads it from the store).
+    // TRANSITIONAL fallback — only while the per-idea account picker isn't in the UI yet:
+    // the global paper toggle routes an otherwise-unbound idea to the default paper account.
+    const hasVirtual = accountIds.some(id => paperBrokerService.accountMode(id))
+    if (!hasVirtual) {
+        const paper = await paperBrokerService.getAccount(userId)
+        if (paper?.enabled) {
+            return [{ broker: 'paper', accountIds: [paper.accountId], mainAccountId: paper.accountId }]
+        }
+    }
     if (accountIds.length === 0) return [{ broker: null, accountIds: [], mainAccountId: globalMain }]
 
     const brokerById = new Map()

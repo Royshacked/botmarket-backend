@@ -20,7 +20,7 @@ const INTERVAL_MS  = Number(process.env.PAPER_EQUITY_SNAPSHOT_MS) || 300_000   /
 let _timer   = null
 let _running = false
 
-export const paperEquityService = { start, stop, snapshotUser, _tick }
+export const paperEquityService = { start, stop, snapshotAccount, _tick }
 
 function start() {
     if (_timer) return
@@ -32,11 +32,12 @@ function stop() {
     if (_timer) { clearInterval(_timer); _timer = null }
 }
 
-/** Snapshot one user's current equity into the curve. */
-async function snapshotUser(userId) {
-    const eq = await computeEquity(userId)
+/** Snapshot one account's current equity into its curve. */
+async function snapshotAccount(userId, accountId) {
+    const eq = await computeEquity(userId, accountId)
     await paperBrokerService.insertEquitySnapshot({
         userId,
+        accountId,
         ts:            Date.now(),
         equity:        eq.equity,
         cashBalance:   eq.cashBalance,
@@ -51,11 +52,12 @@ async function _tick() {
     if (_running) return
     _running = true
     try {
-        const userIds = await paperBrokerService.listActiveUserIds()
-        for (const userId of userIds) {
-            await snapshotUser(userId).catch(err => logger.error(LOG, `snapshot failed (user ${userId}): ${err.message}`))
+        const accounts = await paperBrokerService.listActiveAccounts()
+        for (const { userId, accountId } of accounts) {
+            await snapshotAccount(userId, accountId).catch(err =>
+                logger.error(LOG, `snapshot failed (account ${accountId}): ${err.message}`))
         }
-        if (userIds.length) logger.info(LOG, `Snapshotted equity for ${userIds.length} active paper account(s)`)
+        if (accounts.length) logger.info(LOG, `Snapshotted equity for ${accounts.length} active account(s)`)
     } finally {
         _running = false
     }

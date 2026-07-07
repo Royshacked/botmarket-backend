@@ -32,7 +32,7 @@ const POLL_INTERVAL_MS = Number(process.env.PAPER_FILL_INTERVAL_MS) || 5_000
 let _timer   = null
 let _running = false
 
-export const paperFillService = { start, stop, _tick }
+export const paperFillService = { start, stop, _tick, selectFills }
 
 function start() {
     if (_timer) return
@@ -66,6 +66,28 @@ export function isTriggered(order, quote) {
     return false
 }
 
+/**
+ * Choose which triggered orders to actually fill this sweep, resolving the intrabar
+ * stop-vs-TP ambiguity ADVERSELY: when a position has BOTH its stop and its take-profit
+ * triggered in the same window (price ranged through both levels), a touch feed can't
+ * know which printed first — so assume the STOP filled first and DROP that position's TP.
+ * Otherwise the sim flatters itself by always booking the favorable exit. Entries and
+ * single-sided exits pass through unchanged.
+ *
+ * @param {object[]} triggered  orders that isTriggered() this sweep
+ * @returns {object[]} the subset to fill
+ */
+export function selectFills(triggered) {
+    const stoppedPositions = new Set(
+        triggered
+            .filter(o => o.positionId != null && o.type === 'stop')
+            .map(o => String(o.positionId))
+    )
+    if (stoppedPositions.size === 0) return triggered
+    return triggered.filter(o =>
+        !(o.positionId != null && o.type === 'limit' && stoppedPositions.has(String(o.positionId))))
+}
+
 async function _tick() {
     if (_running) return   // never overlap a slow sweep
     _running = true
@@ -78,9 +100,8 @@ async function _tick() {
         const symbols = [...new Set(orders.map(o => o.symbol))]
         const quoteBy = new Map(await Promise.all(symbols.map(async s => [s, await latestQuote(s)])))
 
-        for (const order of orders) {
-            const quote = quoteBy.get(order.symbol)
-            if (!isTriggered(order, quote)) continue
+        const triggered = orders.filter(o => isTriggered(o, quoteBy.get(o.symbol)))
+        for (const order of selectFills(triggered)) {
             await _fill(order, order.triggerPrice).catch(err =>
                 logger.error(LOG, `fill failed (order ${order.orderId}): ${err.message}`))
         }

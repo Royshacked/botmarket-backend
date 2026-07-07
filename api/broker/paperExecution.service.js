@@ -125,7 +125,11 @@ export async function latestMarkPrice(symbol) {
  * @returns {Promise<string>} the new positionId
  */
 export async function openPosition({ userId, accountId, symbol, direction, qty, price, orderId }) {
-    const acct = await paperBrokerService.getOrCreateAccount(userId)
+    const acct = await paperBrokerService.getAccount(userId, accountId)
+    // Fail loud rather than stamp a position with a dead accountId (which computeEquity
+    // can't roll up and whose close would silently drop realized P&L). The old
+    // getOrCreateAccount masked this by auto-creating; accounts are now explicit.
+    if (!acct) throw new Error(`paper openPosition: account ${accountId} not found`)
     const { spreadBps = 0, commissionPerTrade = 0 } = acct.settings ?? {}
     const fillPrice = applySpread(price, direction === 'long', spreadBps)
 
@@ -141,7 +145,7 @@ export async function openPosition({ userId, accountId, symbol, direction, qty, 
 
     // Entry commission is a realized cost (spread is already captured via avgPrice).
     if (commissionPerTrade) {
-        await paperBrokerService.adjustBalance(userId, { cash: -commissionPerTrade, realizedPnl: -commissionPerTrade })
+        await paperBrokerService.adjustBalance(userId, accountId, { cash: -commissionPerTrade, realizedPnl: -commissionPerTrade })
     }
 
     setImmediate(() => executionBus.emit('execution', {
@@ -172,7 +176,14 @@ export async function openPosition({ userId, accountId, symbol, direction, qty, 
 export async function reducePosition({ userId, positionId, qty, price, reason = 'manual', orderId = null }) {
     const pos = await paperBrokerService.getPosition(userId, positionId)
     if (!pos || pos.status !== 'open') return
-    const acct = await paperBrokerService.getOrCreateAccount(userId)
+    const acct = await paperBrokerService.getAccount(userId, pos.accountId)
+    // Defensive: deleteAccount guards against removing an account with open positions,
+    // so this is unreachable — but if it ever happens, skip loudly instead of banking
+    // P&L into a no-op adjustBalance (which would silently vanish the realized amount).
+    if (!acct) {
+        logger.error(LOG, `reducePosition: account ${pos.accountId} missing for open position ${positionId} — skipping to avoid dropping P&L`)
+        return
+    }
     const { spreadBps = 0, commissionPerTrade = 0 } = acct.settings ?? {}
 
     const closeQty  = Math.min(qty, pos.qty)
@@ -181,7 +192,7 @@ export async function reducePosition({ userId, positionId, qty, price, reason = 
     const exitPrice = applySpread(price, pos.direction === 'short', spreadBps)
     const gross     = (exitPrice - pos.avgPrice) * closeQty * dirSign(pos.direction)
     const net       = gross - commissionPerTrade
-    await paperBrokerService.adjustBalance(userId, { cash: net, realizedPnl: net })
+    await paperBrokerService.adjustBalance(userId, pos.accountId, { cash: net, realizedPnl: net })
 
     const remaining = round8(pos.qty - closeQty)
     if (remaining > 0) {
@@ -210,33 +221,53 @@ export async function reducePosition({ userId, positionId, qty, price, reason = 
 }
 
 /**
- * Mark-to-market the account: cash + Σ unrealized (open positions valued at the live
- * price). The single source of truth for equity, used by getAccount and the equity-
+ * Mark-to-market ONE account: cash + Σ unrealized (its open positions valued at the
+ * live price). The single source of truth for equity, used by getAccount and the equity-
  * curve snapshotter. Identity: equity = startingBalance + realizedPnl + unrealized.
- * @returns {Promise<{currency,cashBalance,realizedPnl,unrealized,equity,openPositions}>}
+ * Returns a zeroed reading when the account is missing (deleted mid-flight).
+ *
+ * Also reports EXPOSURE: marginUsed = Σ notional (qty × avgPrice, computed live so a
+ * partial reduce shrinks it) and, when a buying-power cap is set (settings.maxLeverage),
+ * buyingPower = equity × maxLeverage plus an overLeveraged flag. maxLeverage 0 = off →
+ * buyingPower null (advisory-only, never blocks a fill).
+ * @param {string} userId
+ * @param {string} accountId
+ * @returns {Promise<{currency,cashBalance,realizedPnl,unrealized,equity,openPositions,marginUsed,buyingPower,overLeveraged}>}
  */
-export async function computeEquity(userId) {
-    const acct      = await paperBrokerService.getOrCreateAccount(userId)
-    const positions = await paperBrokerService.listPositions(userId, { status: 'open' })
+export async function computeEquity(userId, accountId) {
+    const acct = await paperBrokerService.getAccount(userId, accountId)
+    if (!acct) return {
+        currency: 'USD', cashBalance: 0, realizedPnl: 0, unrealized: 0, equity: 0,
+        openPositions: 0, marginUsed: 0, buyingPower: null, overLeveraged: false,
+    }
+    const positions = await paperBrokerService.listPositions(userId, { status: 'open', accountId })
 
     let unrealized = 0
+    let marginUsed = 0
     if (positions.length) {
         const symbols = [...new Set(positions.map(p => p.symbol))]
         const priceBy = new Map(await Promise.all(symbols.map(async s => [s, await latestMarkPrice(s)])))
         for (const p of positions) {
+            marginUsed += Math.abs(p.avgPrice * p.qty)   // exposure at entry price (live qty)
             // Fall back to the last stored mark so equity doesn't jump when a quote misses.
             const px = priceBy.get(p.symbol) ?? p.currentPrice
             if (px == null) continue
             unrealized += (px - p.avgPrice) * p.qty * dirSign(p.direction)
         }
     }
+    const equity      = round2(acct.cashBalance + unrealized)
+    const maxLeverage = Number(acct.settings?.maxLeverage) || 0
+    const buyingPower = maxLeverage > 0 ? round2(equity * maxLeverage) : null
     return {
         currency:      acct.currency,
         cashBalance:   round2(acct.cashBalance),
         realizedPnl:   round2(acct.realizedPnl),
         unrealized:    round2(unrealized),
-        equity:        round2(acct.cashBalance + unrealized),
+        equity,
         openPositions: positions.length,
+        marginUsed:    round2(marginUsed),
+        buyingPower,
+        overLeveraged: buyingPower != null && round2(marginUsed) > buyingPower,
     }
 }
 
