@@ -44,7 +44,9 @@ async function signin(username, password) {
         throw err
     }
 
-    const payload = { _id: user.id, username: user.username, fullname: user.fullname, isAdmin: user.isAdmin ?? false }
+    // Admin cross-user visibility disabled for now (see auth.middleware) — keep
+    // fresh tokens clean too. Restore `user.isAdmin ?? false` to re-enable.
+    const payload = { _id: user.id, username: user.username, fullname: user.fullname, isAdmin: false }
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' })
 
     logger.info(LOG, 'user signed in', { username })
