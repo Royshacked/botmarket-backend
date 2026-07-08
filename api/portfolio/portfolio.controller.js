@@ -9,6 +9,7 @@ import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { threadService }          from '../../services/thread.service.js'
 import { isSubstantive }          from '../../services/thread.util.js'
+import { resolvePortfolioReviewCard } from '../chat/chat.service.js'
 
 const LOG = '[portfolio:controller]'
 
@@ -187,6 +188,14 @@ export async function completeReview(req, res) {
         await snapshotConvictions(portfolioId, req.user._id)
         const result = await portfolioChatService.completeReview(portfolioId, req.user._id)
 
+        // Flip the Atlas notification card to a resolved state: 'reviewed' (user accepted a
+        // hold with no changes) or 'dismissed' (skipped). Defaults to dismissed.
+        const outcome = req.body?.outcome === 'reviewed' ? 'reviewed' : 'dismissed'
+        await resolvePortfolioReviewCard(req.user._id, portfolioId, {
+            nextReviewAt: result?.nextReviewAt ?? null,
+            outcome,
+        })
+
         // Review done — drop the snapshot so the next review computes fresh.
         invalidatePortfolioState(portfolioId, req.user._id)
 
@@ -208,6 +217,12 @@ export async function applyPortfolioRebalance(req, res) {
         }
         const result = await applyRebalance(portfolioId, req.user._id, update, req.user?.isAdmin === true)
         if (!result.ok) return res.status(400).json(result)
+
+        // Flip the Atlas notification card to "Updated · next review <date>".
+        await resolvePortfolioReviewCard(req.user._id, portfolioId, {
+            nextReviewAt: result.nextReviewAt ?? null,
+            outcome: 'updated',
+        })
         res.json(result)
     } catch (err) {
         logger.error(LOG, 'applyPortfolioRebalance failed', err)

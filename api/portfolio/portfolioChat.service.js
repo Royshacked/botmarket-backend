@@ -1,5 +1,6 @@
 import { getDb, stripId }   from '../../providers/mongodb.provider.js'
 import { logger }  from '../../services/logger.service.js'
+import { paperBrokerService } from '../broker/paperBroker.service.js'
 
 const LOG        = '[portfolioChat]'
 const COLLECTION = 'portfolio_chats'
@@ -167,28 +168,95 @@ async function getPendingReviews(userId) {
         if (!docs.length) return []
 
         const portfolioIds = docs.map(d => d.portfolioId)
-        const nameRows = await db.collection('ideas')
+        // One representative idea per portfolio carries the display name plus the
+        // broker/account the whole batch was saved under. Paper/live/manual is a uniform
+        // per-batch mode (applied at save time), so the first idea speaks for the batch.
+        const ideaMatch = userId
+            ? { portfolioId: { $in: portfolioIds }, userId }
+            : { portfolioId: { $in: portfolioIds } }
+        const metaRows = await db.collection('ideas')
             .aggregate([
-                { $match: { portfolioId: { $in: portfolioIds }, userId } },
-                { $group: { _id: '$portfolioId', portfolioName: { $first: '$portfolioName' } } },
+                { $match: ideaMatch },
+                { $sort:  { createdAt: 1 } },
+                { $group: {
+                    _id:           '$portfolioId',
+                    portfolioName: { $first: '$portfolioName' },
+                    broker:        { $first: '$broker' },
+                    mainAccountId: { $first: '$mainAccountId' },
+                    accounts:      { $first: '$accounts' },
+                } },
             ])
             .toArray()
 
-        const nameMap = Object.fromEntries(nameRows.map(r => [r._id, r.portfolioName ?? 'Portfolio']))
+        const metaMap = Object.fromEntries(metaRows.map(r => [r._id, r]))
+        // Virtual (paper/manual) accounts carry a user-facing name; resolve them once per
+        // user. Live accounts fall back to their raw account id (the broker login number).
+        const nameByAccount = await _virtualAccountNames(docs.map(d => d.userId))
 
-        return docs.map(d => ({
-            portfolioId:   d.portfolioId,
-            userId:        d.userId,
-            portfolioName: nameMap[d.portfolioId] ?? 'Portfolio',
-            reviewCadence: d.reviewCadence ?? 'weekly',
-            nextReviewAt:  d.nextReviewAt,
-            lastReviewAt:  d.lastReviewAt ?? null,
-            notifiedAt:    d.notifiedAt   ?? null,
-        }))
+        return docs.map(d => {
+            const meta      = metaMap[d.portfolioId] ?? {}
+            const accountId = meta.mainAccountId ?? _firstAccountId(meta.accounts)
+            const mode      = _deriveMode(meta.broker, accountId)
+            return {
+                portfolioId:   d.portfolioId,
+                userId:        d.userId,
+                portfolioName: meta.portfolioName ?? 'Portfolio',
+                mode,
+                account:       _accountLabel(mode, accountId, nameByAccount, meta.broker),
+                accountId:     accountId ?? null,
+                reviewCadence: d.reviewCadence ?? 'weekly',
+                nextReviewAt:  d.nextReviewAt,
+                lastReviewAt:  d.lastReviewAt ?? null,
+                notifiedAt:    d.notifiedAt   ?? null,
+            }
+        })
     } catch (err) {
         logger.error(LOG, 'Failed to get pending reviews', err)
         return []
     }
+}
+
+// ── Mode/account derivation (mirrors the frontend ideaWorkspace deriver) ────────
+// Exported for unit testing; the pure logic mirrors tradeIdea.utils.ideaWorkspace.
+// An idea's account can be a bare id string or a { id } object; take the first.
+export function _firstAccountId(accounts) {
+    const a = (accounts ?? [])[0]
+    if (a == null) return null
+    return typeof a === 'object' ? a.id : a
+}
+
+// 'paper' | 'manual' | 'live'. The top-level broker stamped at save time is primary;
+// the virtual-account prefix (paper-/manual-) is the fallback for legacy ideas.
+export function _deriveMode(broker, accountId) {
+    if (broker === 'paper' || broker === 'manual') return broker
+    return paperBrokerService.accountMode(accountId) ?? 'live'
+}
+
+// Batch-resolve virtual-account display names, one listAccounts per distinct user.
+// Best-effort: a failed lookup just leaves the account unresolved (label falls back).
+async function _virtualAccountNames(userIds) {
+    const uniq = [...new Set(userIds.filter(Boolean))]
+    const map  = {}
+    await Promise.all(uniq.map(async uid => {
+        try {
+            const accts = await paperBrokerService.listAccounts(uid)
+            for (const a of accts) map[a.accountId] = a.name
+        } catch { /* leave unresolved */ }
+    }))
+    return map
+}
+
+// Display names for the live brokers (raw keys are lowercase).
+const BROKER_LABELS = { ctrader: 'cTrader', ibkr: 'IBKR' }
+
+// A human-friendly account label for the review notification. Virtual accounts show
+// their user name; live accounts show "<Broker> #<login>" (the broker login IS the id).
+export function _accountLabel(mode, accountId, nameByAccount, broker = null) {
+    const fallback = mode === 'manual' ? 'Manual' : mode === 'paper' ? 'Paper' : 'Live account'
+    if (!accountId) return fallback
+    if (mode === 'paper' || mode === 'manual') return nameByAccount[accountId] ?? fallback
+    const brokerLabel = BROKER_LABELS[broker] ?? (broker ? String(broker) : 'Live')
+    return `${brokerLabel} #${accountId}`
 }
 
 // ─── Portfolio thesis ─────────────────────────────────────────────────────────

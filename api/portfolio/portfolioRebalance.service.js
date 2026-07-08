@@ -27,6 +27,7 @@ import { ideaService }              from '../trade-ideas/tradeIdeas.service.js'
 import { brokerService }            from '../broker/broker.service.js'
 import { portfolioChatService }     from './portfolioChat.service.js'
 import { invalidatePortfolioState } from '../../services/portfolioState.service.js'
+import { notifyManualExit, exitLegFromIdea } from '../../services/manualNotify.service.js'
 
 const LOG        = '[portfolio:rebalance]'
 const COLLECTION = 'ideas'
@@ -39,9 +40,11 @@ export async function applyRebalance(portfolioId, userId, update, isAdmin = fals
     }
 
     const results = []
+    const manualExitLegs = []   // manual legs can't be closed programmatically → one Fill card
     for (const change of update.changes) {
         try {
             const r = await _applyOne(portfolioId, userId, change, isAdmin)
+            if (r?.manualExitLeg) manualExitLegs.push(r.manualExitLeg)
             results.push({ action: change.action, ideaId: change.ideaId ?? null, ...r })
         } catch (err) {
             logger.error(LOG, `change failed (${change.action})`, err.message)
@@ -49,16 +52,32 @@ export async function applyRebalance(portfolioId, userId, update, isAdmin = fals
         }
     }
 
+    // Manual mode: the user reports real fills, so exits post ONE N-leg exit Fill card in
+    // social chat (confirmManualExit closes each leg as its price is submitted) instead of
+    // placing broker orders. See [[project_paper_trading_sim]] / manual-mode.md §4b.
+    let manualExitPosted = false
+    if (manualExitLegs.length) {
+        const db  = await getDb()
+        const sib = await db.collection(COLLECTION).findOne({ portfolioId, userId }, { projection: { portfolioName: 1 } })
+        await notifyManualExit(userId, {
+            portfolioId,
+            portfolioName: sib?.portfolioName ?? null,
+            reason:        'rebalance',
+            legs:          manualExitLegs,
+        })
+        manualExitPosted = true
+    }
+
     // Trajectory point, then deliberate thesis update (if any), then advance the clock.
     await snapshotConvictions(portfolioId, userId)
     if (update.thesis && typeof update.thesis === 'object') {
         await portfolioChatService.setThesis(portfolioId, userId, update.thesis, 'accepted-rebalance')
     }
-    await portfolioChatService.completeReview(portfolioId, userId)
+    const rev = await portfolioChatService.completeReview(portfolioId, userId)
     invalidatePortfolioState(portfolioId, userId)
 
-    logger.info(LOG, 'rebalance applied', { portfolioId, changes: results.length })
-    return { ok: true, results }
+    logger.info(LOG, 'rebalance applied', { portfolioId, changes: results.length, manualExitPosted })
+    return { ok: true, results, manualExitPosted, nextReviewAt: rev?.nextReviewAt ?? null }
 }
 
 async function _applyOne(portfolioId, userId, change, isAdmin) {
@@ -97,6 +116,13 @@ async function _exitIdea(db, ideaId, userId, reason) {
     const legs = (idea.brokerOrders ?? []).filter(b => b.positionId != null)
     if (legs.length === 0) return { ok: false, reason: 'no_position' }
 
+    // Manual: can't place a broker close — hand the exit leg back so applyRebalance posts
+    // ONE Fill card; the user confirms the real exit price (confirmManualExit finalizes it).
+    if (legs.some(l => l.broker === 'manual')) {
+        await db.collection(COLLECTION).updateOne({ id: ideaId }, { $set: { pendingCloseReason: reason } })
+        return { ok: true, manual: true, manualExitLeg: exitLegFromIdea(idea) }
+    }
+
     let closed = 0, skipped = 0
     for (const leg of legs) {
         if (!brokerService.capabilities(leg.broker)?.closePosition) { skipped++; continue }
@@ -120,6 +146,10 @@ async function _trimIdea(db, ideaId, userId, change) {
 
     const legs = (idea.brokerOrders ?? []).filter(b => b.positionId != null)
     if (legs.length === 0) return { ok: false, reason: 'no_position' }
+
+    // Manual: the Fill card closes a leg fully, not a fraction — partial manual trims aren't
+    // supported. Skip (a full exit_idea is the manual-mode path). Rare in practice.
+    if (legs.some(l => l.broker === 'manual')) return { ok: false, reason: 'manual_trim_unsupported' }
 
     let trimmed = 0, skipped = 0
     for (const leg of legs) {

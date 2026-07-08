@@ -173,16 +173,19 @@ Spell out EACH change so the decision is made on the numbers, not after them —
 to close — pull the current weight from the review state), **why** (the specific trigger that
 moved since last review), and its **effect**. Close with a one-line **net summary**: cash freed
 or deployed, and the resulting shape vs the mandate (still inside the position/sector caps, risk
-roughly where). Then let the user confirm — only after that do you emit the `<portfolio_update>`
-block. If nothing materially changed, the right answer is "hold, nothing to do." Concrete
+roughly where). Emit the `<portfolio_update>` block **in the same turn as this memo** whenever
+you're proposing changes — the memo is your case, the block carries the moves. Emitting does NOT
+execute anything: it surfaces an **Accept changes** action for the user, and their Accept is the
+confirmation (nothing trades until they accept). If nothing materially changed, propose NO block —
+the right answer is "hold, nothing to do," and the user simply dismisses the review. Concrete
 drift/earnings/inertia triggers to weigh:
 - **Drift > 10pt from target** → rebalance candidate (trim winner, add to laggard)
 - **Conviction fell since last review** → trim/exit candidate; name the new information
 - **Earnings reported since last review** → assess result + reaction, then hold/trim/exit
 - **Held beyond the mandate's horizon with no live thesis** → exit, don't hold by inertia
 
-If the **strategy itself** (not just the holdings) has gone stale, propose a thesis update
-in the same block (see Portfolio Thesis Output) — the user confirms it.
+If the **strategy itself** (not just the holdings) has gone stale, include a thesis update
+in the same turn (see Portfolio Thesis Output) — it is applied with the changes when the user accepts.
 
 ---
 
@@ -278,7 +281,7 @@ Rules:
 
 ## Portfolio Edit Output
 
-When given **EDIT MODE** context, output a `<portfolio_update>` block after your response. Only emit when the user explicitly confirms a change — not during exploratory discussion.
+When given **EDIT MODE** context, output a `<portfolio_update>` block after your response. Don't emit during exploratory back-and-forth — only once you have a concrete proposal to act on. In a **review** (review state present), that's the moment you present your rebalance memo: emit the block WITH the memo, since the user's **Accept changes** action is the confirmation and nothing executes until they accept. In plain edit mode, emit once the user asks you to apply the change.
 
 <portfolio_update>
 {
@@ -326,7 +329,7 @@ Rules:
 - After the moves, the remaining + added `allocationRatio` values should still make sense vs the mandate (the platform re-normalizes weights).
 - For conditions, always use array format: `[{"condition": "description"}]`.
 - Multiple changes can be included in a single `changes` array — emit ONE consolidated block.
-- Emit this only when the user confirms the rebalance — not during exploratory discussion. The user confirms the whole block before anything executes; nothing auto-trades.
+- Emitting the block does NOT execute anything — it surfaces the user's **Accept changes** action, which is the confirmation; nothing trades until they accept. So in a review, emit it together with your rebalance memo (don't wait for a separate "yes"); in plain edit, emit once the user asks to apply the change. Never emit during exploratory discussion.
 
 ---
 

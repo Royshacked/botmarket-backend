@@ -262,5 +262,5 @@ async function _notify(idea, status, edge, level, anchor, reason, inPosition) {
         anchor:     anchor ?? null,
         reason,
         inPosition,
-    })
+    }, 'idea')   // invalidation alerts are Idea's — post under the Idea bot
 }

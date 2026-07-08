@@ -51,7 +51,8 @@ export async function notifyManualEntry(userId, { legs, portfolioId = null, port
         ? `Manual entry — ${String(legs[0].direction).toUpperCase()} ${legs[0].asset}. Enter your fill at your broker, then confirm your average price and size.`
         : `Manual entry — ${portfolioName || 'portfolio'}: ${legs.length} legs. Enter each at your broker and fill in your average prices.`
     logger.info(LOG, `Manual entry card → user ${userId}: ${legs.map(l => l.asset).join(', ')}`)
-    return sendBotMessage(userId, content, 'manual_entry', { kind: 'entry', portfolioId, portfolioName, legs })
+    // Attribute to the authoring agent: a portfolio basket is Atlas's, a lone idea is Idea's.
+    return sendBotMessage(userId, content, 'manual_entry', { kind: 'entry', portfolioId, portfolioName, legs }, portfolioId ? 'portfolio' : 'idea')
 }
 
 /**
@@ -69,7 +70,8 @@ export async function notifyManualExit(userId, { legs, reason = 'manual', portfo
         ? `${label} on ${legs[0].asset} — close at your broker and confirm your exit price.`
         : `Exit ${portfolioName || 'portfolio'} — ${legs.length} open legs. Confirm your exit price for each one you've closed.`
     logger.info(LOG, `Manual exit card → user ${userId}: ${legs.map(l => l.asset).join(', ')} (${reason})`)
-    return sendBotMessage(userId, content, 'manual_exit', { kind: 'exit', reason, portfolioId, portfolioName, legs })
+    // Attribute to the authoring agent: a portfolio basket is Atlas's, a lone idea is Idea's.
+    return sendBotMessage(userId, content, 'manual_exit', { kind: 'exit', reason, portfolioId, portfolioName, legs }, portfolioId ? 'portfolio' : 'idea')
 }
 
 export const manualNotifyService = { notifyManualEntry, notifyManualExit, entryLegFromIdea, exitLegFromIdea }

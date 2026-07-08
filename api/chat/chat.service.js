@@ -8,7 +8,13 @@ const LOG   = '[chat]'
 const CONVS = 'chat_conversations'
 const MSGS  = 'chat_messages'
 
-export const BOT_USER_ID = 'axl'
+export const BOT_USER_ID = 'axl'   // the default + the one conversational bot
+// One notification bot per agent (ids are the canonical agent keys). Each producer
+// posts under its authoring agent so the social-chat conversation sender matches the
+// card's agent tag — a portfolio review reads "from Atlas", an invalidation "from Idea".
+// The specialist threads are notify-only feeds; only Axl handles replies.
+export const BOT_IDS = ['axl', 'idea', 'portfolio', 'scanner']
+export const isBot = (id) => BOT_IDS.includes(String(id))
 const BOT_WELCOME = "Hi, I'm Axl — your trading assistant. I'll notify you here about portfolio reviews, position alerts, and anything that needs your attention, and you can ask me how the app works. Just message me."
 
 // Lazy import to avoid circular dependency (chatWs imports nothing from here).
@@ -84,10 +90,11 @@ export async function sendMessage(conversationId, senderId, content, type = 'tex
  * The single function all platform features call to notify a user from the bot.
  * Writes to DB then pushes a WS event to the user if they are connected.
  */
-export async function sendBotMessage(userId, content, type = 'text', payload = null) {
+export async function sendBotMessage(userId, content, type = 'text', payload = null, botId = BOT_USER_ID) {
     try {
-        const { conv } = await getOrCreateConversation(userId, BOT_USER_ID)
-        const msg = await sendMessage(conv.id, BOT_USER_ID, content, type, payload)
+        const bot = isBot(botId) ? String(botId) : BOT_USER_ID
+        const { conv } = await getOrCreateConversation(userId, bot)
+        const msg = await sendMessage(conv.id, bot, content, type, payload)
         await _tryEmit(String(userId), 'new_message', msg)
         return msg
     } catch (err) {
@@ -166,9 +173,10 @@ export async function getConversations(userId) {
 
     const unreadMap = Object.fromEntries(unreadRows.map(r => [r._id, r.unread]))
 
-    // Enrich with the other participant's display name
+    // Enrich with the other participant's display name. Bots aren't real user docs —
+    // the client renders their brand/avatar from agent metadata — so skip them here.
     const otherIds = [...new Set(
-        convs.flatMap(c => c.participants.filter(p => p !== uid && p !== BOT_USER_ID))
+        convs.flatMap(c => c.participants.filter(p => p !== uid && !isBot(p)))
     )]
     const userDocs = otherIds.length
         ? await db.collection('users')
@@ -238,6 +246,42 @@ export async function dismissMessage(conversationId, messageId, userId) {
     return { ok: true }
 }
 
+/**
+ * Flip a portfolio_review notification card to a resolved state after the user finishes a
+ * review (dismissed with no changes, or accepted an update). Finds the latest portfolio_review
+ * message for this portfolio in the user's Atlas-bot ('portfolio') conversation and stamps its
+ * payload with the outcome + next review date, so the card renders "Dismissed/Updated · next
+ * review <date>" and stops routing into an active review. No-op (safe) when there's no such
+ * conversation/card. Patched payload surfaces on the client's next social-chat load.
+ * @param {string} userId
+ * @param {string} portfolioId
+ * @param {{ nextReviewAt?: number|null, outcome?: 'dismissed'|'updated' }} [opts]
+ */
+export async function resolvePortfolioReviewCard(userId, portfolioId, { nextReviewAt = null, outcome = 'dismissed' } = {}) {
+    try {
+        const db = await getDb()
+        const participants = [String(userId), 'portfolio'].sort()
+        const conv = await db.collection(CONVS).findOne({ participants })
+        if (!conv) return { ok: false, reason: 'no_conversation' }
+
+        const msg = await db.collection(MSGS)
+            .find({ conversationId: conv.id, type: 'portfolio_review', 'payload.portfolioId': portfolioId })
+            .sort({ createdAt: -1 })
+            .limit(1)
+            .next()
+        if (!msg) return { ok: false, reason: 'no_card' }
+
+        await db.collection(MSGS).updateOne(
+            { id: msg.id },
+            { $set: { 'payload.resolved': true, 'payload.outcome': outcome, 'payload.nextReviewAt': nextReviewAt } }
+        )
+        return { ok: true, messageId: msg.id }
+    } catch (err) {
+        logger.error(LOG, 'resolvePortfolioReviewCard failed', err)
+        return { ok: false, reason: 'error' }
+    }
+}
+
 export async function searchUsers(query, currentUserId) {
     if (!query || query.trim().length < 2) return []
     const db     = await getDb()
@@ -249,7 +293,7 @@ export async function searchUsers(query, currentUserId) {
     const users  = await db.collection('users')
         .find({
             id:       { $ne: String(currentUserId) },
-            username: { $ne: BOT_USER_ID },
+            username: { $nin: BOT_IDS },
             $or: [{ username: regex }, { fullname: regex }],
         })
         .project({ id: 1, username: 1, fullname: 1 })
