@@ -139,15 +139,18 @@ the `BrokerAdapter` contract. **Consumers branch on `capabilities()` flags, neve
 
 ### Paper mode
 
-- Global per-user toggle (`/api/paper/mode`). When ON, `_partitionByBroker` routes **every new idea**
-  to `broker:'paper'` / `accountId='paper-<userId>'`, **ignoring selected live accounts**.
+- **Account binding is per-idea and explicit** (paper account picked in the selector, exactly one per
+  idea). There is **no silent default** — the global toggle (`/api/paper/mode`) is a workspace VIEW
+  switch only, never a router. An idea with no account bound resolves to no venue; the idea agent
+  prompts the user to pick an account before the setup is finalized.
 - Paper is a real broker adapter, so the same monitor + reconciler drive it unchanged. Fills come
   from the app's OHLCV feed (NOT cTrader); cost model = spread (bps) + commission per trade.
-- Decided at **save time**: flipping the toggle does not convert or freeze existing ideas.
-- **Working orders fill on an intrabar touch.** The paper fill engine triggers a resting limit/stop
-  against the latest candle's **high/low** (`latestQuote`), not its close — a long TP at 432 fills
-  when the high reaches 432 even if the bar closes back below. Only paper working orders (`touch`
-  exits/entries) go through this path; `structured` exits still fire at candle close via the monitor.
+- Decided at **save time**: changing the view does not convert or freeze existing ideas.
+- **Touch working orders fill on a sampled price.** The paper fill engine samples the Yahoo last quote
+  (`latestMarkPrice`, ~3s fast cache; candle-close fallback for symbols Yahoo can't price) and fills a
+  resting limit/stop the first sweep price crosses the level. This is a touch approximation — a spike
+  that reverts inside a ~3s window can be missed. Only paper working orders (`touch` exits/entries) go
+  through this path; `structured` exits still fire at candle close via the monitor.
 - `trades` (append-only) captures BOTH paper and live, tagged `mode: 'paper' | 'live'`. Idea-linked
   fills are captured by the reconciler; a paper position with **no matching idea** is still captured
   directly (`captureOpenBare`, idealess fallback — mutually exclusive with the idea path, no double

@@ -89,8 +89,10 @@ export class PaperAdapter extends BrokerAdapter {
 
     async getPositions(userId, accountId) {
         // Scope to one account when the caller names it (a user may own several paper
-        // accounts); otherwise return every paper position for the user.
-        const positions = await paperBrokerService.listPositions(userId, { status: 'open', accountId })
+        // accounts); otherwise return every PAPER position — filter by account mode so a
+        // manual position (same store, different mode) never leaks into the paper view.
+        const all       = await paperBrokerService.listPositions(userId, { status: 'open', accountId })
+        const positions = accountId ? all : all.filter(p => paperBrokerService.accountMode(p.accountId) === 'paper')
         const priceBy   = await this._priceMap(positions.map(p => p.symbol))
         return positions.map(p => this._toBrokerPosition(p, priceBy.get(p.symbol)))
     }

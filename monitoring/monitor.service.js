@@ -22,6 +22,7 @@ import { collectSymbols, resolveConditionTree } from '../services/conditionTree.
 import { checkInvalidation }                    from './invalidation.monitor.js'
 import { checkPortfolioReviews }               from './portfolio.monitor.js'
 import { checkPosition }                        from './positionMonitor.js'
+import { notifyManualEntry, entryLegFromIdea }  from '../services/manualNotify.service.js'
 import {
     fetchCandles, buildSymbolMap, buildVolumeCtx, brokerCandleCtx,
     hasCumulativeVolume, logCheck, persistConditionStates,
@@ -244,6 +245,17 @@ async function _checkEntry(db, idea, candles) {
         if (triggeredWhileWaiting) {
             patch.triggeredWhileWaiting = true
             patch.triggerEventAt        = triggerAt
+        }
+
+        // Manual (broker-less) idea: don't build a broker order plan — flip to hit and post
+        // the "enter at your broker" card; confirmManualEntry opens the position on the
+        // user's reported fill. No OrderConfirm dialog, no reconciler.
+        if (idea.broker === 'manual') {
+            patch.orderState = 'awaiting_manual_fill'
+            await _patch(db, id, patch)
+            await notifyManualEntry(idea.userId, { legs: [entryLegFromIdea(idea)] })
+            logger.info(LOG, `✅ Entry triggered for manual idea ${id} (${asset}) — status → hit, awaiting user fill`)
+            return
         }
 
         const plan = await buildOrderPlanForIdea(idea)

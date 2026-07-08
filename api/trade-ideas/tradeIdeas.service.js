@@ -12,7 +12,6 @@ import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } 
 import { cleanConviction } from '../../services/conviction.util.js'
 import { placeOrdersForIdea, placeRestingEntryForIdea, triggerEntryNow } from './ideaExecution.service.js'
 import { armExitsInPosition } from './exitOrders.service.js'
-import { paperBrokerService } from '../broker/paperBroker.service.js'
 
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
@@ -498,17 +497,11 @@ async function _partitionByBroker(idea, userId) {
     const accountIds = (idea.accounts ?? []).map(a => String(typeof a === 'object' ? a.id : a))
     const globalMain = idea.mainAccountId != null ? String(idea.mainAccountId) : null
 
-    // Per-idea binding: an idea that explicitly names a virtual (paper/manual) account
-    // resolves through the normal path below (resolveUserAccounts reads it from the store).
-    // TRANSITIONAL fallback — only while the per-idea account picker isn't in the UI yet:
-    // the global paper toggle routes an otherwise-unbound idea to the default paper account.
-    const hasVirtual = accountIds.some(id => paperBrokerService.accountMode(id))
-    if (!hasVirtual) {
-        const paper = await paperBrokerService.getAccount(userId)
-        if (paper?.enabled) {
-            return [{ broker: 'paper', accountIds: [paper.accountId], mainAccountId: paper.accountId }]
-        }
-    }
+    // Account binding is per-idea and explicit: the account(s) the user picked (paper or
+    // real broker) route the idea via resolveUserAccounts below. There is NO silent global
+    // default — the paper toggle is a workspace VIEW switch only, never a router. An idea
+    // with no account bound resolves to a null-broker (no venue); the idea agent prompts
+    // the user to pick an account before it gets that far.
     if (accountIds.length === 0) return [{ broker: null, accountIds: [], mainAccountId: globalMain }]
 
     const brokerById = new Map()

@@ -25,13 +25,18 @@
  */
 
 import { Router }              from 'express'
-import { paperBrokerService }  from '../broker/paperBroker.service.js'
+import { paperBrokerService, VIRTUAL_MODES } from '../broker/paperBroker.service.js'
 import { computeEquity }       from '../broker/paperExecution.service.js'
 import { tradeCaptureService } from '../../services/tradeCapture.service.js'
 import { requireAuth }         from '../../middleware/auth.middleware.js'
 import { logger }              from '../../services/logger.service.js'
 
 const LOG = '[paper.routes]'
+
+/** The virtual account mode for a list/create request — 'paper' (default) or 'manual'.
+ *  The per-account routes below are mode-agnostic (the accountId encodes its mode); only
+ *  list + create need to say which mode's accounts they operate on. */
+const _mode = raw => (VIRTUAL_MODES.includes(raw) ? raw : 'paper')
 
 export const paperRoutes = Router()
 
@@ -94,7 +99,7 @@ async function _requireAccount(userId, accountId) {
 
 paperRoutes.get('/accounts', requireAuth, async (req, res) => {
     try {
-        const accts    = await paperBrokerService.listAccounts(req.user._id, { mode: 'paper' })
+        const accts    = await paperBrokerService.listAccounts(req.user._id, { mode: _mode(req.query.mode) })
         const accounts = await Promise.all(accts.map(a => _accountState(req.user._id, a)))
         res.json({ accounts })
     } catch (err) {
@@ -105,8 +110,8 @@ paperRoutes.get('/accounts', requireAuth, async (req, res) => {
 
 paperRoutes.post('/accounts', requireAuth, async (req, res) => {
     try {
-        const { name, startingBalance, currency } = req.body ?? {}
-        const acct = await paperBrokerService.createAccount(req.user._id, { mode: 'paper', name, startingBalance, currency })
+        const { name, startingBalance, currency, mode } = req.body ?? {}
+        const acct = await paperBrokerService.createAccount(req.user._id, { mode: _mode(mode), name, startingBalance, currency })
         res.status(201).json(await _accountState(req.user._id, acct))
     } catch (err) {
         logger.error(LOG, 'create account error:', err.message)

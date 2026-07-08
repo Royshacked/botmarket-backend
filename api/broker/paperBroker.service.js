@@ -152,6 +152,12 @@ async function createAccount(userId, { mode = 'paper', name, startingBalance, cu
     if (!VIRTUAL_MODES.includes(mode)) throw new Error(`unknown account mode: ${mode}`)
     const db      = await getDb()
     const balance = startingBalance != null ? Number(startingBalance) : DEFAULTS.startingBalance
+    // Manual accounts have NO cost model — the user reports a real fill that already
+    // includes real spread/commission, so a simulated cost would double-count. Paper keeps
+    // the configurable spread/commission defaults.
+    const settings = mode === 'manual'
+        ? { spreadBps: 0, commissionPerTrade: 0, maxLeverage: 0 }
+        : { ...DEFAULTS.settings }
     const doc = {
         userId,
         accountId:       makeAccountId(mode, userId),
@@ -161,8 +167,8 @@ async function createAccount(userId, { mode = 'paper', name, startingBalance, cu
         startingBalance: balance,
         cashBalance:     balance,
         realizedPnl:     0,
-        enabled:         false,   // toggle state (transitional); routing reads this on the default account
-        settings:        { ...DEFAULTS.settings },
+        enabled:         false,   // paper workspace-view flag; unused by manual (manual is paper-off)
+        settings,
         createdAt:       Date.now(),
         updatedAt:       Date.now(),
     }

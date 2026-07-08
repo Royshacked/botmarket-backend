@@ -9,7 +9,7 @@
  */
 
 import { brokerService }      from '../api/broker/broker.service.js'
-import { paperBrokerService } from '../api/broker/paperBroker.service.js'
+import { paperBrokerService, VIRTUAL_MODES } from '../api/broker/paperBroker.service.js'
 import { SUPPORTED_BROKERS }  from '../api/broker/broker.factory.js'
 import { logger }             from './logger.service.js'
 
@@ -33,7 +33,7 @@ export async function resolveUserAccounts(userId, wantedIds) {
         // Virtual modes (paper/manual) are resolved below straight from their store —
         // per-idea-bound and not gated on the global connection/toggle — so skip them
         // here to keep ONE canonical resolution path (no divergent double-mapping).
-        if (!connected || paperBrokerService.VIRTUAL_MODES.includes(broker)) continue
+        if (!connected || VIRTUAL_MODES.includes(broker)) continue
         const { accounts: accs = [] } = await brokerService.getTradingAccounts(broker, userId)
         for (const a of accs) {
             const id = String(a.id)

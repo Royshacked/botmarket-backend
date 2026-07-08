@@ -25,7 +25,7 @@ import { logger }       from '../services/logger.service.js'
 
 const LOG              = '[paperMark.service]'
 const POSITIONS        = 'paperPositions'
-const POLL_INTERVAL_MS = Number(process.env.PAPER_MARK_INTERVAL_MS) || 5_000
+const POLL_INTERVAL_MS = Number(process.env.PAPER_MARK_INTERVAL_MS) || 3_000
 
 let _timer   = null
 let _running = false

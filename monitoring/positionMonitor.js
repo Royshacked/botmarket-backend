@@ -7,6 +7,7 @@ import {
     round, remainingForAccount, resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe,
 } from './monitorUtils.js'
 import { buildExitOrder, exitOrderRecord } from './exitOrders.util.js'
+import { notifyManualExit, exitLegFromIdea } from '../services/manualNotify.service.js'
 
 const LOG        = '[positionMonitor]'
 const COLLECTION = 'ideas'
@@ -19,6 +20,14 @@ const COLLECTION = 'ideas'
  */
 export async function checkPosition(db, idea, stopCandles, tpCandles, aeCandles, onClose) {
     const { id, asset } = idea
+
+    // Manual idea already alerted for a close — waiting on the user's reported exit price.
+    // Don't re-evaluate exits (which would re-alert every poll) until they confirm.
+    if (idea.orderState === 'awaiting_manual_close') {
+        logger.info(LOG, `[${id}] Awaiting user manual close — skipping exit checks`)
+        return
+    }
+
     const stopTf  = resolveStopTimeframe(idea)
     const tpTf    = resolveTpTimeframe(idea)
     const entryTf = resolveEntryTimeframe(idea)
@@ -106,6 +115,18 @@ async function _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, 
 }
 
 async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose) {
+    // Manual (broker-less): don't close through a broker — alert the user to close at their
+    // broker and report the exit price (confirmManualExit books it). Park awaiting_manual_close
+    // + guard in-memory so we alert ONCE, not every poll / every residual slice this tick.
+    if (idea.broker === 'manual') {
+        if (idea.orderState === 'awaiting_manual_close') return
+        idea.orderState = 'awaiting_manual_close'   // in-tick guard (same idea ref across calls)
+        await db.collection(COLLECTION).updateOne({ id: idea.id }, { $set: { orderState: 'awaiting_manual_close', pendingCloseReason: reason } })
+        await notifyManualExit(idea.userId, { legs: [exitLegFromIdea(idea)], reason })
+        logger.info(LOG, `[${idea.id}] Manual exit alert sent (${reason}) — awaiting user close`)
+        return
+    }
+
     const links = (idea.brokerOrders ?? []).filter(b => b.positionId != null)
 
     if (links.length === 0) {

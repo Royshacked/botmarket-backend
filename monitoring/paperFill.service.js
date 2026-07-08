@@ -17,17 +17,17 @@ import { getDb }                 from '../providers/mongodb.provider.js'
 import { paperBrokerService }    from '../api/broker/paperBroker.service.js'
 import { openPosition,
          reducePosition,
-         latestQuote }           from '../api/broker/paperExecution.service.js'
+         latestMarkPrice }       from '../api/broker/paperExecution.service.js'
 import { logger }                from '../services/logger.service.js'
 
 const LOG              = '[paperFill.service]'
 const ORDERS           = 'paperOrders'
 // Paper stop/limit entries and stop-loss/take-profit exits don't rest on a real venue —
-// this loop IS the matching engine, so it must re-check the live price every few seconds
-// or a touched level fills late (or misses a spike that reverts within the interval).
-// Quote fetches are deduped/cached in latestQuote (PAPER_QUOTE_TTL_MS), so a tight loop
-// doesn't multiply provider load.
-const POLL_INTERVAL_MS = Number(process.env.PAPER_FILL_INTERVAL_MS) || 5_000
+// this loop IS the matching engine, so it re-checks the live price every few seconds via
+// latestMarkPrice (Yahoo last quote on a 3s cache; candle-close fallback for symbols
+// Yahoo can't price). A touched level fills at the next sweep. Point-sampling means a
+// spike that reverts inside the interval can be missed — accepted for a forward sim.
+const POLL_INTERVAL_MS = Number(process.env.PAPER_FILL_INTERVAL_MS) || 3_000
 
 let _timer   = null
 let _running = false
@@ -45,24 +45,23 @@ function stop() {
 }
 
 /**
- * Whether a resting order is triggered by the latest candle's intra-bar range.
+ * Whether a resting order is triggered by the latest sampled price.
  *   stop  → long fills at/above the trigger, short at/below (breakout/breakdown).
  *   limit → long fills at/below the trigger, short at/above (better-price fill).
  * Holds for both entries and closing exits because an exit carries the closing side
  * as its direction (a long position's stop is a short stop, its TP a short limit).
  *
- * Uses the candle HIGH for "at/above" tests and LOW for "at/below" — so a resting
- * order fills the instant price TRADES through the level (a touch), not only when a
- * candle closes beyond it. A long TP at 432 fills when the high reaches 432 even if
- * the bar closes back below.
+ * `price` is the latest last-traded quote (latestMarkPrice) — a single point sample, so
+ * the order fills on the first sweep where the sampled price has crossed the level. This
+ * is a touch approximation: unlike a real resting order it can miss a spike that reverts
+ * between two ~3s samples (candle high/low would catch it, but a delayed last-price feed
+ * can't) — an accepted trade-off for the forward sim.
  */
-export function isTriggered(order, quote) {
+export function isTriggered(order, price) {
     const t = order.triggerPrice
-    if (t == null || quote == null) return false
-    const { h, l } = quote
-    if (h == null || l == null) return false
-    if (order.type === 'stop')  return order.direction === 'long' ? h >= t : l <= t
-    if (order.type === 'limit') return order.direction === 'long' ? l <= t : h >= t
+    if (t == null || price == null) return false
+    if (order.type === 'stop')  return order.direction === 'long' ? price >= t : price <= t
+    if (order.type === 'limit') return order.direction === 'long' ? price <= t : price >= t
     return false
 }
 
@@ -96,11 +95,11 @@ async function _tick() {
         const orders = await db.collection(ORDERS).find({ status: 'working' }, { projection: { _id: 0 } }).toArray()
         if (!orders.length) return
 
-        // One quote lookup per distinct symbol (intra-bar high/low for touch triggers).
+        // One price lookup per distinct symbol (Yahoo last quote / candle-close fallback).
         const symbols = [...new Set(orders.map(o => o.symbol))]
-        const quoteBy = new Map(await Promise.all(symbols.map(async s => [s, await latestQuote(s)])))
+        const priceBy = new Map(await Promise.all(symbols.map(async s => [s, await latestMarkPrice(s)])))
 
-        const triggered = orders.filter(o => isTriggered(o, quoteBy.get(o.symbol)))
+        const triggered = orders.filter(o => isTriggered(o, priceBy.get(o.symbol)))
         for (const order of selectFills(triggered)) {
             await _fill(order, order.triggerPrice).catch(err =>
                 logger.error(LOG, `fill failed (order ${order.orderId}): ${err.message}`))

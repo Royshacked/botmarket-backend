@@ -13,7 +13,7 @@
 import { randomUUID }        from 'crypto'
 import { paperBrokerService } from './paperBroker.service.js'
 import { getCandles }         from '../../providers/ohlcv.provider.js'
-import { getNumericQuote }    from '../../providers/yahoofinance.provider.js'
+import { getNumericQuoteFast } from '../../providers/yahoofinance.provider.js'
 import { executionBus }       from '../../services/executionBus.js'
 import { logger }             from '../../services/logger.service.js'
 
@@ -92,18 +92,18 @@ const _noYahooUntil  = new Map()   // symbol → ts to retry Yahoo after
 const NO_YAHOO_TTL_MS = 10 * 60_000
 
 /**
- * Best price for MARKING open-position P&L. Prefers a real-time last-traded quote
- * (Yahoo regularMarketPrice — equities / ETFs / indices) over the 1-min candle close,
- * so P&L updates more granularly and dodges the rate-limited aggregates endpoint. Falls
- * back to the candle close for anything Yahoo can't price (crypto / futures / forex /
- * broker symbols). NOT for the fill engine — touch fills need the candle's intrabar
- * high/low (latestQuote), which a single last price can't provide.
+ * Best price for MARKING open-position P&L AND for touch-fill detection. Prefers a
+ * real-time last-traded quote (Yahoo regularMarketPrice — equities / ETFs / indices, on
+ * the fast 3s cache) over the 1-min candle close, so both P&L and touch triggers track
+ * price sub-minute. Falls back to the candle close for anything Yahoo can't price
+ * (crypto / futures / forex / broker symbols) — for those, touch detection is only as
+ * granular as the candle feed.
  */
 export async function latestMarkPrice(symbol) {
     const retryAfter = _noYahooUntil.get(symbol)
     if (retryAfter == null || Date.now() > retryAfter) {
         try {
-            const { price } = await getNumericQuote(symbol)
+            const { price } = await getNumericQuoteFast(symbol)
             if (price != null && Number.isFinite(price) && price > 0) {
                 _noYahooUntil.delete(symbol)
                 return price

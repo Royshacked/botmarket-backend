@@ -70,6 +70,26 @@ export async function getNumericQuote(ticker) {
     return { symbol: q.symbol, price: q.regularMarketPrice ?? null }
 }
 
+// Fast-refresh quote for the paper touch-fill + mark loops. They sample every ~3s and
+// need a price fresher than the 30s agent cache gives — but lowering that shared cache
+// would multiply yf.quote calls across the WHOLE app (agent tools + sizing) and invite
+// 429s. So this rides a SEPARATE short-TTL cache: the extra load stays scoped to the
+// small set of active paper symbols, deduped to ~one fetch per symbol per TTL.
+const FAST_QUOTE_TTL_MS = Number(process.env.PAPER_FAST_QUOTE_TTL_MS) || 3_000
+const _fastQuoteCache   = createTtlCache({ ttlMs: FAST_QUOTE_TTL_MS, max: QUOTE_CACHE_MAX }) // SYMBOL -> data
+
+/**
+ * Like getNumericQuote, but on a 3s cache instead of 30s — for the paper loops that
+ * need sub-minute freshness. Returns { symbol, price } or throws.
+ */
+export async function getNumericQuoteFast(ticker) {
+    const symbol = String(ticker).toUpperCase()
+    const hit = _fastQuoteCache.get(symbol)
+    const data = hit ?? await yf.quote(symbol)
+    if (!hit) _fastQuoteCache.set(symbol, data)
+    return { symbol: data.symbol, price: data.regularMarketPrice ?? null }
+}
+
 /**
  * Numeric quote WITH the source timestamp — for the basis-offset math, which must know
  * how fresh the real-price reference is (a live quote vs a stale Friday close). `at` is

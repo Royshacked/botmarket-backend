@@ -1,7 +1,83 @@
 import { ideaService } from './tradeIdeas.service.js'
+import { confirmManualEntry, confirmManualExit, activateManualPortfolio, requestManualPortfolioExit } from './manualIdea.service.js'
 import { logger } from '../../services/logger.service.js'
 
 const LOG = '[tradeIdeas:controller]'
+
+// ─── Manual (broker-less) confirmations ───────────────────────────────────────
+// The two user confirmations that drive manual mode: report the real entry fill
+// (price + size) and the real exit price. See docs/architecture/manual-mode.md.
+
+const _manualErr = {
+    not_found:          [404, 'Idea not found'],
+    forbidden:          [403, 'Forbidden'],
+    not_manual:         [400, 'Not a manual idea'],
+    already_placed:     [409, 'Already filled'],
+    not_awaiting_fill:  [409, 'Idea is not awaiting a manual fill'],
+    not_in_position:    [409, 'Idea is not in a position'],
+    no_account:         [400, 'No account bound'],
+    no_position:        [409, 'No open position to close'],
+    bad_price:          [400, 'A valid fill price is required'],
+    bad_quantity:       [400, 'A valid quantity is required'],
+    nothing_to_activate:[409, 'No manual legs to activate'],
+    nothing_open:       [409, 'No open manual legs to exit'],
+}
+
+function _sendManual(res, result, onOk) {
+    if (result.ok) return res.send(onOk(result))
+    const [code, msg] = _manualErr[result.reason] ?? [500, 'Manual action failed']
+    return res.status(code).send({ error: msg })
+}
+
+export async function confirmManualEntryOrder(req, res) {
+    try {
+        const { id } = req.params
+        if (!id) return res.status(400).send({ error: 'Missing id' })
+        const { price, quantity } = req.body ?? {}
+        const result = await confirmManualEntry(id, { price, quantity }, req.user._id, req.user.isAdmin)
+        _sendManual(res, result, r => ({ idea: r.idea }))
+    } catch (err) {
+        logger.error(LOG, 'confirmManualEntryOrder failed', err)
+        res.status(500).send({ error: 'Failed to confirm manual entry' })
+    }
+}
+
+export async function confirmManualExitOrder(req, res) {
+    try {
+        const { id } = req.params
+        if (!id) return res.status(400).send({ error: 'Missing id' })
+        const { price } = req.body ?? {}
+        const result = await confirmManualExit(id, { price }, req.user._id, req.user.isAdmin)
+        _sendManual(res, result, r => ({ idea: r.idea }))
+    } catch (err) {
+        logger.error(LOG, 'confirmManualExitOrder failed', err)
+        res.status(500).send({ error: 'Failed to confirm manual exit' })
+    }
+}
+
+export async function activateManualPortfolioOrders(req, res) {
+    try {
+        const { portfolioId } = req.params
+        if (!portfolioId) return res.status(400).send({ error: 'Missing portfolioId' })
+        const result = await activateManualPortfolio(portfolioId, req.user._id, req.user.isAdmin)
+        _sendManual(res, result, r => ({ legs: r.legs }))
+    } catch (err) {
+        logger.error(LOG, 'activateManualPortfolioOrders failed', err)
+        res.status(500).send({ error: 'Failed to activate manual portfolio' })
+    }
+}
+
+export async function requestManualPortfolioExitOrders(req, res) {
+    try {
+        const { portfolioId } = req.params
+        if (!portfolioId) return res.status(400).send({ error: 'Missing portfolioId' })
+        const result = await requestManualPortfolioExit(portfolioId, req.user._id, req.user.isAdmin)
+        _sendManual(res, result, r => ({ legs: r.legs }))
+    } catch (err) {
+        logger.error(LOG, 'requestManualPortfolioExitOrders failed', err)
+        res.status(500).send({ error: 'Failed to request manual portfolio exit' })
+    }
+}
 
 export async function getTradeIdea(req, res) {
     try {

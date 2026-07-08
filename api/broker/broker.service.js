@@ -92,6 +92,9 @@ async function listConnections(userId) {
     // Paper has no brokerConnections doc — it's "connected" when paper mode is enabled,
     // so resolveUserAccounts / the order-plan builder can resolve the paper account.
     try { merged.paper = await paperBrokerService.isEnabled(userId) } catch { /* non-fatal */ }
+    // Manual has no toggle — it's "connected" whenever the user owns ≥1 manual account,
+    // so an idea bound to a manual account resolves and its positions surface.
+    try { merged.manual = (await paperBrokerService.listAccounts(userId, { mode: 'manual' })).length > 0 } catch { /* non-fatal */ }
     return merged
 }
 

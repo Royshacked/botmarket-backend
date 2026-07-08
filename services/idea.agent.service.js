@@ -459,7 +459,13 @@ function _buildBrokerSection(brokerContext) {
 }
 
 function _buildIdeaAccountsSection(accounts) {
-    if (!Array.isArray(accounts) || accounts.length === 0) return ''
+    if (!Array.isArray(accounts) || accounts.length === 0) {
+        // No account is selected. A trade can't be monitored or executed without one
+        // (paper or live), so tell the user to pick one in the account selector before
+        // you finalize/activate the setup — don't hand off a ready-to-execute trade
+        // without a chosen account.
+        return `\n\nIDEA ACCOUNTS: none selected. Before finalizing or activating this trade, tell the user they need to choose a trading account (paper or live) in the account selector — the idea can't be monitored or executed without one.`
+    }
     const lines = buildAccountLines(accounts)
     return `\n\nIDEA ACCOUNTS (the user plans to execute this trade on):\n${lines.join('\n')}`
 }
