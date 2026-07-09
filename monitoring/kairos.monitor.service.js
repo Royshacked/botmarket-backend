@@ -3,6 +3,7 @@ import { getDb } from '../providers/mongodb.provider.js'
 import { getQuote, getTickerAggregates } from '../providers/yahoofinance.provider.js'
 import { fetchChartImage } from '../providers/chartImg.provider.js'
 import { buildStudies } from './evaluators/chart.evaluator.js'
+import { userService } from '../api/user/user.service.js'
 import { logger } from '../services/logger.service.js'
 
 // Kairos monitor — the self-scheduling readiness loop (KAIROS_PLAN.md, Phase 2). Its own tick,
@@ -287,6 +288,21 @@ function _defaultOnCard(call, assessment) {
 // ─── Real four-axis assessment (LLM + vision) — mocked in unit tests ───────────
 const _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const ASSESS_MODEL = 'claude-sonnet-4-6'
+const ALLOWED_MODELS = new Set(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-8'])
+
+// Hermes (this monitor) runs under the user's AI preferences: read their synced `hermesModel`
+// from the account preferences and use it for the readiness assessment. Falls back to Sonnet
+// (the default vision model) when unset, invalid, or unreadable. All allowed models are
+// vision-capable, so the chart read is safe whichever the user picks.
+async function _hermesModel(userId) {
+    if (!userId) return ASSESS_MODEL
+    try {
+        const prefs = await userService.getPreferences(userId)
+        return ALLOWED_MODELS.has(prefs?.hermesModel) ? prefs.hermesModel : ASSESS_MODEL
+    } catch {
+        return ASSESS_MODEL
+    }
+}
 
 const _ASSESS_SYSTEM = `You are Kairos, a discretionary day/swing trader running a readiness check on a pre-built trade "call".
 You are given the call (zones, reference levels, patterns), a rendered chart image, recent candles, the current price, and why you were woken.
@@ -319,7 +335,7 @@ async function _defaultAssess(call, zone, ctx, _d) {
             : userText
 
         const msg = await _client.messages.create({
-            model: ASSESS_MODEL, max_tokens: 900, system: _ASSESS_SYSTEM,
+            model: await _hermesModel(call.user_id), max_tokens: 900, system: _ASSESS_SYSTEM,
             messages: [{ role: 'user', content }],
         })
         return _extractJSON(msg.content[0]?.text ?? '')
