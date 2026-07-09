@@ -21,8 +21,10 @@ import { attach as attachChatWs } from './api/chat/chatWs.js'
 import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
+import { ensureKairosIndexes } from './api/kairos/kairos.service.js'
 import { threadService } from './services/thread.service.js'
 import { ideaRoutes } from './api/idea/idea.routes.js'
+import { kairosRoutes } from './api/kairos/kairos.routes.js'
 import { newsFeedRoutes } from './api/news-feed/newsFeed.routes.js'
 import { tradeIdeasRoutes } from './api/trade-ideas/tradeIdeas.routes.js'
 import { authRoutes }   from './api/authentication/authentication.routes.js'
@@ -38,6 +40,7 @@ import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
 import { newsFeedService }  from './api/news-feed/newsFeed.service.js'
 import { monitorService }   from './monitoring/monitor.service.js'
+import { kairosMonitorService } from './monitoring/kairos.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
 import { paperEquityService } from './monitoring/paperEquity.service.js'
@@ -85,6 +88,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.use('/api/idea', ideaRoutes)
+app.use('/api/kairos',      kairosRoutes)
 app.use('/api/news-feed',   newsFeedRoutes)
 app.use('/api/trade-ideas', tradeIdeasRoutes)
 app.use('/api/auth',        authRoutes)
@@ -103,10 +107,12 @@ attachChatWs(server)
 ensureChatIndexes()
 ensureUserIndexes()
 ensureIdeaIndexes()
+ensureKairosIndexes()
 threadService.ensureThreadIndexes()
 
 newsFeedService.start()
 monitorService.start()
+kairosMonitorService.start()
 executionReconciler.start()
 paperFillService.start()
 paperEquityService.start()

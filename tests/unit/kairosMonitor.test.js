@@ -1,0 +1,222 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import {
+    _zoneGate, _isExpiring, _computeNextCheckAt, _nextStatus, _snapToReference,
+    _finalizeProposal, _applyAssessment, _scheduledPatch, _checkCall,
+} from '../../monitoring/kairos.monitor.service.js'
+
+function call(extra = {}) {
+    return {
+        id: 'call_TSLA_x', asset: 'TSLA', bias: 'long', trade_type: 'day',
+        cadence: { min_gap_min: 5, max_gap_min: 60 },
+        entry_zones: [
+            { id: 'ez1', side: 'long', anchor: 248, lower: 247.4, upper: 248.6 },
+            { id: 'ez2', side: 'long', anchor: 245, lower: 244.8, upper: 245.2 },
+        ],
+        reference_levels: [
+            { id: 'rl1', kind: 'support',    price: 245.2 },
+            { id: 'rl2', kind: 'resistance', price: 252.0 },
+            { id: 'rl3', kind: 'target',     price: 255.5 },
+        ],
+        sizing: { max_size: 300 },
+        monitor_state: { check_count: 2, memo: 'prior note', armed_zone_id: null },
+        valid_until: '2026-07-09T20:00:00Z',
+        ...extra,
+    }
+}
+
+const NOW = Date.parse('2026-07-09T15:00:00Z')
+
+// ── _zoneGate: multi-zone first-wins ──────────────────────────────────────
+test('zoneGate: price inside the first zone arms that zone', () => {
+    assert.equal(_zoneGate(call(), 248.0)?.id, 'ez1')
+})
+test('zoneGate: price inside the second zone arms it when the first misses', () => {
+    assert.equal(_zoneGate(call(), 245.0)?.id, 'ez2')
+})
+test('zoneGate: overlapping-eligible price returns the FIRST matching zone', () => {
+    const c = call({ entry_zones: [
+        { id: 'ez1', lower: 244, upper: 249 },
+        { id: 'ez2', lower: 244.8, upper: 245.2 },
+    ] })
+    assert.equal(_zoneGate(c, 245.0)?.id, 'ez1')   // first wins even though both contain 245
+})
+test('zoneGate: price outside every band → null; non-finite → null', () => {
+    assert.equal(_zoneGate(call(), 250), null)
+    assert.equal(_zoneGate(call(), NaN), null)
+    assert.equal(_zoneGate(call(), undefined), null)
+})
+
+// ── _isExpiring ───────────────────────────────────────────────────────────
+test('isExpiring: far from valid_until → false', () => {
+    assert.equal(_isExpiring(call(), Date.parse('2026-07-09T15:00:00Z')), false)
+})
+test('isExpiring: within threshold → true; already past → true', () => {
+    assert.equal(_isExpiring(call(), Date.parse('2026-07-09T19:50:00Z')), true)
+    assert.equal(_isExpiring(call(), Date.parse('2026-07-09T21:00:00Z')), true)
+})
+test('isExpiring: no / bad valid_until → false', () => {
+    assert.equal(_isExpiring(call({ valid_until: null }), NOW), false)
+    assert.equal(_isExpiring(call({ valid_until: 'not-a-date' }), NOW), false)
+})
+
+// ── _computeNextCheckAt: clamp both ends ──────────────────────────────────
+test('computeNextCheckAt: clamps below min, above max, passes through in-range', () => {
+    const cad = { min_gap_min: 5, max_gap_min: 60 }
+    assert.equal(_computeNextCheckAt(NOW, 1,   cad), new Date(NOW + 5 * 60_000).toISOString())   // clamped up to 5
+    assert.equal(_computeNextCheckAt(NOW, 999, cad), new Date(NOW + 60 * 60_000).toISOString())  // clamped down to 60
+    assert.equal(_computeNextCheckAt(NOW, 20,  cad), new Date(NOW + 20 * 60_000).toISOString())  // in range
+})
+test('computeNextCheckAt: non-finite request → max gap', () => {
+    assert.equal(_computeNextCheckAt(NOW, undefined, { min_gap_min: 5, max_gap_min: 60 }), new Date(NOW + 60 * 60_000).toISOString())
+})
+
+// ── _nextStatus ───────────────────────────────────────────────────────────
+test('nextStatus: verdict → status transitions', () => {
+    assert.equal(_nextStatus('enter', 'zone_trip'), 'ready')
+    assert.equal(_nextStatus('edit', 'expiry_review'), 'expiring')
+    assert.equal(_nextStatus('let_expire', 'expiry_review'), 'expired')
+    assert.equal(_nextStatus('wait', 'zone_trip'), 'watching')
+    assert.equal(_nextStatus('stand_aside', 'scheduled'), 'waiting')
+})
+
+// ── _snapToReference ──────────────────────────────────────────────────────
+test('snapToReference: long stop snaps to nearest level BELOW entry', () => {
+    const refs = call().reference_levels
+    assert.deepEqual(_snapToReference(245.0, refs, 'below', 248), { price: 245.2, ref: 'rl1' })
+})
+test('snapToReference: long TP snaps to nearest level ABOVE entry', () => {
+    const refs = call().reference_levels
+    assert.deepEqual(_snapToReference(251.0, refs, 'above', 248), { price: 252.0, ref: 'rl2' })
+})
+test('snapToReference: no level on the required side → keep price, ref null', () => {
+    const refs = [{ id: 'rl1', price: 245 }]
+    assert.deepEqual(_snapToReference(260, refs, 'above', 248), { price: 260, ref: null })
+})
+
+// ── _finalizeProposal ─────────────────────────────────────────────────────
+test('finalizeProposal: snaps stop/TP to structure, clamps size, computes R:R (long)', () => {
+    const p = { entry: 248.3, stop: 245.0, take_profit: [{ price: 251.8 }], size: 500, rationale: 'reclaim' }
+    const out = _finalizeProposal(p, call(), call().entry_zones[0])
+    assert.equal(out.stop, 245.2)
+    assert.equal(out.stop_ref, 'rl1')
+    assert.equal(out.take_profit[0].price, 252.0)
+    assert.equal(out.take_profit[0].ref, 'rl2')
+    assert.equal(out.size, 300)                                   // clamped to max_size
+    assert.equal(out.rr, Math.round((Math.abs(252 - 248.3) / Math.abs(248.3 - 245.2)) * 100) / 100)
+})
+test('finalizeProposal: default size = max when none proposed', () => {
+    const out = _finalizeProposal({ entry: 248, stop: 245, take_profit: [{ price: 252 }] }, call(), call().entry_zones[0])
+    assert.equal(out.size, 300)
+})
+test('finalizeProposal: short inverts snap sides (stop above, TP below)', () => {
+    const c = call({ bias: 'short', reference_levels: [
+        { id: 'a', price: 250 }, { id: 'b', price: 245 },
+    ] })
+    const zone = { id: 'ez1', side: 'short' }
+    const out = _finalizeProposal({ entry: 248, stop: 249.5, take_profit: [{ price: 246 }] }, c, zone)
+    assert.equal(out.stop, 250)        // nearest ABOVE entry
+    assert.equal(out.stop_ref, 'a')
+    assert.equal(out.take_profit[0].price, 245)   // nearest BELOW entry
+})
+test('finalizeProposal: null proposal → null', () => {
+    assert.equal(_finalizeProposal(null, call(), null), null)
+})
+
+// ── _applyAssessment ──────────────────────────────────────────────────────
+test('applyAssessment: enter → ready, arms zone, clamps next check, fires card', () => {
+    const raw = {
+        verdict: 'enter', timeframe_used: '15min', next_check_min: 999,
+        market: { score: 'supportive' }, price_action: { strength: 'strong' },
+        proposal: { entry: 248.3, stop: 245, take_profit: [{ price: 252 }] },
+        memo_update: 'reclaim confirmed',
+    }
+    const { set, fireCard, lastAssessment } = _applyAssessment(call(), call().entry_zones[0], raw, NOW, 'zone_trip')
+    assert.equal(set.status, 'ready')
+    assert.equal(set['monitor_state.armed_zone_id'], 'ez1')
+    assert.equal(set['monitor_state.chosen_timeframe'], '15min')
+    assert.equal(set['monitor_state.check_count'], 3)                     // 2 → 3
+    assert.equal(set['monitor_state.memo'], 'reclaim confirmed')
+    assert.equal(set['monitor_state.next_check_at'], new Date(NOW + 60 * 60_000).toISOString())  // clamped to max
+    assert.equal(fireCard, true)
+    assert.equal(lastAssessment.proposal.stop, 245.2)                     // snapped
+    assert.equal(lastAssessment.verdict, 'enter')
+})
+test('applyAssessment: wait carries the prior memo when no memo_update', () => {
+    const raw = { verdict: 'wait', next_check_min: 10 }
+    const { set, fireCard } = _applyAssessment(call(), call().entry_zones[0], raw, NOW, 'zone_trip')
+    assert.equal(set.status, 'watching')
+    assert.equal(set['monitor_state.memo'], 'prior note')   // carried across the wake
+    assert.equal(fireCard, false)
+})
+test('applyAssessment: let_expire → expired, no proposal, no card', () => {
+    const { set, fireCard, lastAssessment } = _applyAssessment(call(), null, { verdict: 'let_expire', next_check_min: 5 }, NOW, 'expiry_review')
+    assert.equal(set.status, 'expired')
+    assert.equal(fireCard, false)
+    assert.equal(lastAssessment.proposal, undefined)
+})
+test('applyAssessment: edit → expiring + fires card + carries edit_proposal', () => {
+    const raw = { verdict: 'edit', next_check_min: 30, edit_proposal: { why: 'roll', changes: {} } }
+    const { set, fireCard, lastAssessment } = _applyAssessment(call(), null, raw, NOW, 'expiry_review')
+    assert.equal(set.status, 'expiring')
+    assert.equal(fireCard, true)
+    assert.deepEqual(lastAssessment.edit_proposal, { why: 'roll', changes: {} })
+})
+
+// ── _scheduledPatch ───────────────────────────────────────────────────────
+test('scheduledPatch: idle reschedules at max gap; failure retries at min gap', () => {
+    assert.equal(_scheduledPatch(call(), NOW)['monitor_state.next_check_at'], new Date(NOW + 60 * 60_000).toISOString())
+    assert.equal(_scheduledPatch(call(), NOW, true)['monitor_state.next_check_at'], new Date(NOW + 5 * 60_000).toISOString())
+    assert.equal(_scheduledPatch(call(), NOW)['monitor_state.check_count'], 3)
+})
+
+// ── _checkCall orchestration (injected IO, no DB/LLM) ─────────────────────
+function fakeDb() {
+    const updates = []
+    return { updates, collection: () => ({ updateOne: async (q, u) => { updates.push({ id: q.id, set: u.$set }) } }) }
+}
+
+test('checkCall: no zone + not expiring → cheap scheduled path, no assessment', async () => {
+    const db = fakeDb()
+    let assessed = false
+    const deps = { getPrice: async () => 250, assess: async () => { assessed = true; return {} }, onCard: async () => {} }
+    const out = await _checkCall(db, call(), NOW, deps)
+    assert.equal(out.reason, 'scheduled')
+    assert.equal(assessed, false)                                   // gate short-circuited the LLM
+    assert.equal(db.updates[0].set['monitor_state.next_check_at'], new Date(NOW + 60 * 60_000).toISOString())
+})
+
+test('checkCall: price in a zone → assessment runs, verdict persisted, card fired on enter', async () => {
+    const db = fakeDb()
+    let carded = null
+    const deps = {
+        getPrice: async () => 248.0,   // inside ez1
+        assess:   async (c, zone) => ({ verdict: 'enter', timeframe_used: '15min', next_check_min: 20, proposal: { entry: 248, stop: 245, take_profit: [{ price: 252 }] }, memo_update: 'go' }),
+        onCard:   async (c, a) => { carded = a },
+    }
+    const out = await _checkCall(db, call(), NOW, deps)
+    assert.equal(out.reason, 'zone_trip')
+    assert.equal(out.verdict, 'enter')
+    assert.equal(db.updates[0].set.status, 'ready')
+    assert.equal(db.updates[0].set['monitor_state.armed_zone_id'], 'ez1')
+    assert.equal(carded.verdict, 'enter')
+})
+
+test('checkCall: failed assessment → retry-soon reschedule, no card', async () => {
+    const db = fakeDb()
+    let carded = false
+    const deps = { getPrice: async () => 248.0, assess: async () => null, onCard: async () => { carded = true } }
+    const out = await _checkCall(db, call(), NOW, deps)
+    assert.equal(out.failed, true)
+    assert.equal(carded, false)
+    assert.equal(db.updates[0].set['monitor_state.next_check_at'], new Date(NOW + 5 * 60_000).toISOString())  // min gap
+})
+
+test('checkCall: near expiry runs assessment even with no zone tripped', async () => {
+    const db = fakeDb()
+    const expiringCall = call({ valid_until: new Date(NOW + 5 * 60_000).toISOString() })  // 5m from now
+    const deps = { getPrice: async () => 250, assess: async () => ({ verdict: 'let_expire', next_check_min: 5 }), onCard: async () => {} }
+    const out = await _checkCall(db, expiringCall, NOW, deps)
+    assert.equal(out.reason, 'expiry_review')
+    assert.equal(db.updates[0].set.status, 'expired')
+})
