@@ -6,6 +6,7 @@ import { buildStudies } from './evaluators/chart.evaluator.js'
 import { userService } from '../api/user/user.service.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
+import { notifyCallReady, notifyCallExpiry } from '../services/tradeNotify.service.js'
 
 // Kairos monitor — the self-scheduling readiness loop (KAIROS_PLAN.md, Phase 2). Its own tick,
 // its own collection (`kairos_calls`), sharing NO mutable state with the live idea monitor.
@@ -280,7 +281,9 @@ export function _applyAssessment(call, zone, raw, nowMs, reason) {
         'monitor_state.last_assessment':  lastAssessment,
     }
 
-    return { set, fireCard: raw.verdict === 'enter' || raw.verdict === 'edit', lastAssessment }
+    // 'let_expire' now fires a card too (the expiry notification) — previously it was a silent
+    // terminal 'expired'. enter → ready card; edit → re-map card; let_expire → expired card.
+    return { set, fireCard: ['enter', 'edit', 'let_expire'].includes(raw.verdict), lastAssessment }
 }
 
 // Cheap-path reschedule (no assessment ran). Idle → check further out (max gap); after a failed
@@ -403,9 +406,20 @@ async function _defaultGetPrice(call) {
     return null
 }
 
-// Phase 3 replaces this with the real decision-card / eventBus notify. For now, record it.
-function _defaultOnCard(call, assessment) {
+// Post the readiness/expiry card to social chat (notify + route to the call pop-out). `enter`
+// → "ready to enter"; `edit`/`let_expire` → the expiry card (re-map or delete). The fresh
+// `assessment` carries the proposal / edit rationale (the persisted doc may lag). Best-effort:
+// a notify failure must never wedge the monitor loop.
+async function _defaultOnCard(call, assessment) {
     logger.info(LOG, 'READINESS CARD', { id: call.id, asset: call.asset, verdict: assessment?.verdict, entry: assessment?.proposal?.entry })
+    const verdict = assessment?.verdict
+    try {
+        if (verdict === 'enter')            await notifyCallReady(call, assessment)
+        else if (verdict === 'edit')        await notifyCallExpiry(call, 'edit', assessment?.edit_proposal?.why ?? null)
+        else if (verdict === 'let_expire')  await notifyCallExpiry(call, 'expired')
+    } catch (err) {
+        logger.warn(LOG, `onCard notify failed for ${call.id}:`, err.message)
+    }
 }
 
 // ─── Real four-axis assessment (LLM + vision) — mocked in unit tests ───────────

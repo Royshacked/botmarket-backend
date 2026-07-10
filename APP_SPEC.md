@@ -94,6 +94,30 @@ It runs pre-entry AND in-position but only INFORMS; exits stay stop-owned.
   (`chat_messages.dismissed`) and never touches the `invalidation_status` latch, so a re-armed idea
   still produces a fresh new alert.
 
+### Social-chat notification cards (notify + route)
+
+Major events are surfaced as typed cards in social chat via one funnel — `sendBotMessage(userId,
+content, type, payload, botId)` (`api/chat/chat.service.js`) → `chat_messages` → WebSocket →
+`SocialChat/ChatWindow.jsx` dispatches by `type` to a card component. Each `botId` is the authoring
+agent (`BOT_IDS = axl · idea · portfolio · scanner · kairos`; only Axl is conversational, the rest
+are notify-only feeds), so a card reads "from Idea / Atlas / Kairos". The card is the alert + a
+clickable preview; the **existing action UI stays the destination** (deep-link, not embedded action).
+Dismiss/handled state persists per-message.
+
+| `type` | Event | Card actions → destination |
+|---|---|---|
+| `invalidation_alert` | Entry envelope broken (above) | Update / Close / Dismiss |
+| `portfolio_review` | Scheduled review due | Review → Atlas review mode |
+| `manual_entry` / `manual_exit` | Broker-less fill needed | Inline FillCard (price/qty) — the one embedded-action card |
+| `entry_confirm` | Entry triggered, confirm needed (`kind: idea`\|`call`) | idea → workspace + `OrderConfirmDialog`; call → `/call/:id` pop-out |
+| `call_expiry` | Kairos thesis expiring/expired (`kind: edit`\|`expired`) | Edit → `/call/:id` pop-out · Delete · Dismiss |
+
+`entry_confirm` fires for paper/live idea entries (`monitor.service.js`, on `awaiting_confirm`) and
+Kairos-ready calls; **manual** entries keep their own FillCard. `entry_confirm`/`call_expiry` for
+calls come from the Kairos monitor's card hook (`enter`→ready, `edit`→expiring, `let_expire`→expired
+— the last previously expired silently). Once a call's card fires it leaves the monitor's active
+statuses, so no re-fire.
+
 ---
 
 ## 3. Portfolios
@@ -199,8 +223,10 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   `basisOffset` (fork-measured price shift, 0 unless aliased index future), `groupId` (multi-broker fork display)…).
 - `trades` — append-only point-in-time capture of each opened/closed idea (paper + live).
 - `paperAccounts` / `paperPositions` / `paperOrders` — the virtual broker store.
-- `chat_conversations` / `chat_messages` — social DM + bot notifications (`chat_messages.dismissed`
-  persists a dismissed actionable alert bubble).
+- `chat_conversations` / `chat_messages` — social DM + bot notifications; one notify bot per agent
+  (`BOT_IDS`, incl. `kairos`). `chat_messages.type`/`payload` drive the typed notification cards
+  (invalidation_alert, portfolio_review, manual_entry/exit, entry_confirm, call_expiry — see §2);
+  `chat_messages.dismissed`/`dismissOutcome` persist the handled state of an actionable card.
 - `threads` — unified agent conversation threads (idea / portfolio / scanner). A conversation gets a
   subject-independent `threadId` at the start and moves through three tiers: **trivial** (below the
   agent's substantive floor — `thread.util.isSubstantive` over the agent's *emitted phase*, not

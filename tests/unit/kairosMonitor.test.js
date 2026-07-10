@@ -150,10 +150,10 @@ test('applyAssessment: wait carries the prior memo when no memo_update', () => {
     assert.equal(set['monitor_state.memo'], 'prior note')   // carried across the wake
     assert.equal(fireCard, false)
 })
-test('applyAssessment: let_expire → expired, no proposal, no card', () => {
+test('applyAssessment: let_expire → expired, no proposal, fires the expiry card', () => {
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), null, { verdict: 'let_expire', next_check_min: 5 }, NOW, 'expiry_review')
     assert.equal(set.status, 'expired')
-    assert.equal(fireCard, false)
+    assert.equal(fireCard, true)   // now notifies (expiry card) instead of expiring silently
     assert.equal(lastAssessment.proposal, undefined)
 })
 test('applyAssessment: edit → expiring + fires card + carries edit_proposal', () => {

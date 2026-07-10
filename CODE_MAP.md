@@ -47,7 +47,8 @@ api/
                               index futures only) + applyOffset + real/cash ticker maps
     paperBroker.service.js / paperExecution.service.js
   paper/                  paper mode toggle/settings/reset/trades/equity  /api/paper/*
-  chat/                   social DM + bot notifications (chatWs.js = WebSocket)
+  chat/                   social DM + bot notifications (chatWs.js = WebSocket); sendBotMessage funnel,
+                          BOT_IDS = axl·idea·portfolio·scanner·kairos (one notify bot per agent)
   news-feed/ market/ calendar/ user/ authentication/ transcribe/
   _shared/                cross-controller helpers:
       sse.util.js             startSseStream() — SSE headers + heartbeat + abort wiring
@@ -66,6 +67,10 @@ services/
   format.util.js  http.util.js  ttlCache.util.js  priceStats.util.js  cycleAnalysis.service.js
   logger.service.js  tokenUsage.service.js
   tradeCapture.service.js   append-only `trades` history (captureOpen / captureOpenBare / captureClose)
+  manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
+  tradeNotify.service.js    notify+route cards → social chat: entry_confirm (paper/live idea + Kairos
+                            ready call) + call_expiry (Kairos thesis edit/expired). Pure builders +
+                            thin sendBotMessage wrappers; card is the alert, existing UI is the destination
   thread.service.js  thread.util.js   unified subject-bound conversation threads
                           (`threads` collection). A conversation gets a threadId at the
                           start (subject-independent), is saved as a `draft` once it crosses
@@ -85,6 +90,9 @@ monitoring/
   evaluators/               touch · structured · indicator · time · volume · news · chart
   execution.reconciler.js   broker-authoritative fill/close → idea status
   invalidation.monitor.js   entry-range watcher (advisory, never executes)
+  kairos.monitor.service.js Kairos "calls" readiness loop (own tick, `kairos_calls`); cheap zone gate →
+                            LLM assessment → verdict; card hook (_defaultOnCard) posts entry_confirm /
+                            call_expiry via tradeNotify (enter→ready, edit→expiring, let_expire→expired)
   positionMonitor.js  portfolio.monitor.js
   paperFill.service.js  paperEquity.service.js
   exitOrders.util.js        buildExitOrder (applies +basisOffset → broker price space) / exitOrderRecord / closeSide / orderSymbol

@@ -23,6 +23,7 @@ import { checkInvalidation }                    from './invalidation.monitor.js'
 import { checkPortfolioReviews }               from './portfolio.monitor.js'
 import { checkPosition }                        from './positionMonitor.js'
 import { notifyManualEntry, entryLegFromIdea }  from '../services/manualNotify.service.js'
+import { notifyIdeaEntryConfirm }               from '../services/tradeNotify.service.js'
 import {
     fetchCandles, buildSymbolMap, buildVolumeCtx, brokerCandleCtx,
     hasCumulativeVolume, logCheck, persistConditionStates,
@@ -269,6 +270,13 @@ async function _checkEntry(db, idea, candles) {
         }
 
         await _patch(db, id, patch)
+
+        // Notify + route to the OrderConfirmDialog. Only when a plan is actually awaiting
+        // confirmation (open market); 'awaiting_market' defers silently and 'no accounts'
+        // has nothing to confirm. Fires once — the idea is now 'hit', so _checkEntry won't run again.
+        if (patch.orderState === 'awaiting_confirm') {
+            await notifyIdeaEntryConfirm(idea)
+        }
     } else {
         logger.info(LOG, `⏳ Entry not triggered yet for idea ${id} (${asset})`)
         await checkInvalidation(db, idea, symbolMap, { inPosition: false })
