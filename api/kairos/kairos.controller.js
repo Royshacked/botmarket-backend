@@ -102,6 +102,21 @@ export async function listKairos(req, res) {
     }
 }
 
+// Single call (with its monitor_state.timeline) — the pop-out polls this for the live journal.
+export async function getKairos(req, res) {
+    try {
+        const result = await kairosService.getKairosCall(req.params.id, req.user._id, req.user.isAdmin === true)
+        if (!result.ok) {
+            const code = result.reason === 'not_found' ? 404 : result.reason === 'forbidden' ? 403 : 500
+            return res.status(code).send({ error: result.reason ?? 'get_failed' })
+        }
+        res.send(result.call)
+    } catch (err) {
+        logger.error(LOG, 'Failed to get kairos call', err)
+        res.status(500).send({ error: 'Failed to get call' })
+    }
+}
+
 export async function deleteKairos(req, res) {
     try {
         const result = await kairosService.deleteKairosCall(req.params.id, req.user._id, req.user.isAdmin === true)

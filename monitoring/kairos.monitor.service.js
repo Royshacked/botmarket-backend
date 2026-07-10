@@ -22,6 +22,10 @@ const POLL_INTERVAL_MS = 60_000
 // edit card was fired) that Phase 3 re-queues to 'waiting' on accept, preventing card spam.
 const ACTIVE_STATUSES  = ['waiting', 'watching']
 const EXPIRY_THRESHOLD_MS = 15 * 60_000   // run the final "expiry review" within 15m of valid_until
+// A single check must never wedge the loop. If any IO inside _checkCall (vision assess / chart /
+// price fetch) hangs with no timeout, the awaited call never returns, `_running` stays true, and
+// every later tick skips forever. Bounding each check lets a hung one reject so the loop recovers.
+const CHECK_TIMEOUT_MS = 90_000
 
 let _timer   = null
 let _running = false
@@ -40,6 +44,14 @@ function stop() {
     clearInterval(_timer)
     _timer = null
     logger.info(LOG, 'Kairos monitor stopped')
+}
+
+// Race a promise against a timeout so a hung await can't wedge the loop. The underlying promise is
+// left to settle on its own (best-effort); the caller just stops waiting on it. Pure — exported for test.
+export function _withTimeout(promise, ms) {
+    let t
+    const timeout = new Promise((_, reject) => { t = setTimeout(() => reject(new Error(`check timed out after ${ms}ms`)), ms) })
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(t))
 }
 
 // ─── Poll loop ────────────────────────────────────────────────────────────────
@@ -62,7 +74,7 @@ async function _tick() {
         if (!calls.length) return
         logger.info(LOG, `checking ${calls.length} due call(s)`)
         for (const call of calls) {
-            try { await _checkCall(db, call, Date.now(), _deps) }
+            try { await _withTimeout(_checkCall(db, call, Date.now(), _deps), CHECK_TIMEOUT_MS) }
             catch (err) { logger.error(LOG, `checkCall failed for ${call.id}:`, err.message) }
         }
     } catch (err) {
@@ -84,7 +96,8 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
         const patch  = _scheduledPatch(call, nowMs)   // also resets a stale 'watching' → 'waiting'
         const openMs = deps.nextOpenMs?.(call.asset, call.asset_class)
         if (Number.isFinite(openMs) && openMs > nowMs) patch['monitor_state.next_check_at'] = new Date(openMs).toISOString()
-        await _persist(db, call.id, patch)
+        const entry = _timelineEntry('closed', { nowMs, call, nextAt: patch['monitor_state.next_check_at'] })
+        await _persist(db, call.id, patch, entry)
         return { reason: 'closed' }
     }
 
@@ -95,7 +108,9 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
 
     // Cheap path: not near a zone and not expiring → no LLM, just reschedule further out.
     if (reason === 'scheduled') {
-        await _persist(db, call.id, _scheduledPatch(call, nowMs))
+        const patch = _scheduledPatch(call, nowMs)
+        const entry = _timelineEntry('scheduled', { nowMs, price, call, nextAt: patch['monitor_state.next_check_at'] })
+        await _persist(db, call.id, patch, entry)
         return { reason }
     }
 
@@ -103,12 +118,15 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
     const raw = await deps.assess(call, zone, { reason, price }, deps)
     if (!raw) {
         // Assessment failed — retry soon (min cadence) rather than dropping the call.
-        await _persist(db, call.id, _scheduledPatch(call, nowMs, true))
+        const patch = _scheduledPatch(call, nowMs, true)
+        const entry = _timelineEntry(reason, { nowMs, price, call, nextAt: patch['monitor_state.next_check_at'], failed: true })
+        await _persist(db, call.id, patch, entry)
         return { reason, failed: true }
     }
 
     const { set, fireCard, lastAssessment } = _applyAssessment(call, zone, raw, nowMs, reason)
-    await _persist(db, call.id, set)
+    const entry = _timelineEntry(reason, { nowMs, price, zone, call, raw, nextAt: set['monitor_state.next_check_at'], fetched: _fetchedLabel(call) })
+    await _persist(db, call.id, set, entry)
     if (fireCard) {
         try { await deps.onCard(call, lastAssessment) }
         catch (err) { logger.warn(LOG, `onCard failed for ${call.id}:`, err.message) }
@@ -116,8 +134,11 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
     return { reason, verdict: raw.verdict, fireCard }
 }
 
-async function _persist(db, id, set) {
-    await db.collection(COLLECTION).updateOne({ id }, { $set: set })
+// Persist the $set patch and, when given, APPEND a journal entry (capped to the last TIMELINE_MAX).
+async function _persist(db, id, set, logEntry = null) {
+    const update = { $set: set }
+    if (logEntry) update.$push = { 'monitor_state.timeline': { $each: [logEntry], $slice: -TIMELINE_MAX } }
+    await db.collection(COLLECTION).updateOne({ id }, update)
 }
 
 // ─── Pure decision helpers (unit-tested) ───────────────────────────────────────
@@ -237,6 +258,7 @@ export function _applyAssessment(call, zone, raw, nowMs, reason) {
         reason,
         zone_id:       zone?.id ?? null,
         timeframe_used: raw.timeframe_used ?? null,
+        read:          raw.read ?? null,
         market:        raw.market ?? null,
         news:          raw.news ?? null,
         price_action:  raw.price_action ?? null,
@@ -272,6 +294,89 @@ export function _scheduledPatch(call, nowMs, short = false) {
         ...(call?.status === 'watching' ? { status: 'waiting' } : {}),
         'monitor_state.check_count':   (call?.monitor_state?.check_count ?? 0) + 1,
         'monitor_state.next_check_at': new Date(nowMs + gap * 60_000).toISOString(),
+    }
+}
+
+// ─── Timeline / monologue (the monitor journal) ────────────────────────────────
+// An append-only, first-person log of EVERY wake — the "brain" the call pop-out reads. Cheap
+// wakes (closed / not-near-a-zone) get a one-line arithmetic note; a real assessment carries the
+// model's own first-person `read` + the four-axis detail. Kept compact and capped on the doc.
+const TIMELINE_MAX = 50
+
+function _fmt(n) { return Number.isFinite(Number(n)) ? String(Number(n)) : '?' }
+function _num(n) { return Number.isFinite(Number(n)) ? Number(n) : null }
+
+// "188–189" (single) or "188–189, 192–193" (multi). { text, multi }.
+export function _zonesLabel(call) {
+    const zones = Array.isArray(call?.entry_zones) ? call.entry_zones : []
+    const parts = zones
+        .filter(z => Number.isFinite(Number(z?.lower)) && Number.isFinite(Number(z?.upper)))
+        .map(z => `${_fmt(z.lower)}–${_fmt(z.upper)}`)
+    return { text: parts.length ? parts.join(', ') : '(no zones)', multi: parts.length > 1 }
+}
+
+// Whole-minute gap between now and an ISO next-check (≥1), or null if unparseable.
+function _gapMin(nextAt, nowMs) {
+    const t = Date.parse(nextAt)
+    if (!Number.isFinite(t)) return null
+    return Math.max(1, Math.round((t - nowMs) / 60_000))
+}
+
+// What the assessment deterministically pulls (mirrors _defaultAssess) — the "fetched" line.
+function _fetchedLabel(call) {
+    const tf = call?.timeframe_ladder?.at(-1) ?? '15min'
+    return `chart ${tf} (vwap+ema50+vol) · ~30 candles · price`
+}
+
+// When the model gives no first-person note, synthesize one from the verdict so the log still reads.
+function _verdictFallbackNote(raw) {
+    switch (raw?.verdict) {
+        case 'enter':       return 'This finally looks ready — proposing an entry.'
+        case 'wait':        return "In the zone, but the trigger isn't here yet — waiting."
+        case 'stand_aside': return 'Conditions are against this one right now — standing aside.'
+        case 'let_expire':  return 'Nothing materialized — letting it expire.'
+        case 'edit':        return 'The setup has drifted — proposing a re-map.'
+        default:            return 'Read the chart; no change.'
+    }
+}
+
+// Build one compact append-only journal entry for a wake. Pure — `at` derives from nowMs so tests
+// are deterministic. reason ∈ closed | scheduled | zone_trip | expiry_review.
+export function _timelineEntry(reason, { nowMs, price = null, zone = null, call, raw = null, nextAt = null, fetched = null, failed = false }) {
+    const at  = new Date(nowMs).toISOString()
+    const gap = _gapMin(nextAt, nowMs)
+
+    if (reason === 'closed') {
+        return { at, reason, price: null, verdict: null,
+            note: `Market's closed for ${call?.asset ?? 'this asset'} — holding. I'll look again at the open.`,
+            next_check_at: nextAt }
+    }
+    if (reason === 'scheduled') {
+        const zl = _zonesLabel(call)
+        return { at, reason, price: _num(price), verdict: null,
+            note: `Price ${_fmt(price)} is outside my zone${zl.multi ? 's' : ''} ${zl.text}. No setup forming${gap ? ` — checking back in ${gap}m` : ''}.`,
+            next_check_at: nextAt }
+    }
+    if (failed) {
+        return { at, reason, price: _num(price), verdict: null,
+            note: `Went to read ${call?.asset ?? 'the chart'} but the data/vision call failed — retrying shortly.`,
+            next_check_at: nextAt }
+    }
+    // A real assessment (zone tripped or expiry review) — the model's own read + four-axis detail.
+    return {
+        at, reason,
+        price:   _num(price),
+        zone_id: zone?.id ?? null,
+        fetched,
+        verdict: raw?.verdict ?? null,
+        note:    (raw?.read && String(raw.read).trim()) ? String(raw.read).trim() : _verdictFallbackNote(raw),
+        axes: {
+            market:        raw?.market ?? null,
+            news:          raw?.news ?? null,
+            price_action:  raw?.price_action ?? null,
+            patterns_seen: Array.isArray(raw?.patterns_seen) ? raw.patterns_seen : [],
+        },
+        next_check_at: nextAt,
     }
 }
 
@@ -327,8 +432,9 @@ You are given the call (zones, reference levels, patterns), a rendered chart ima
 Decide if NOW is a good moment to enter around the armed zone. Weight price action over indicators. Be strict — most checks should NOT be "enter".
 Assess four axes: market conditions, news/catalyst, price action (from the chart), and whether the mapped patterns are actually happening.
 On an expiry_review, choose enter (it finally looks good), edit (re-map/roll — provide edit_proposal), or let_expire.
+Always include "read": ONE short, plain first-person sentence — what you see right now and what you're doing about it (e.g. "Price is coiling just under the zone, no trigger yet — I'll keep waiting."). This is your live monologue, so keep it human and specific.
 Output ONLY a JSON object, no prose:
-{"timeframe_used":"15min","market":{"read":"...","score":"supportive|neutral|adverse"},"news":{"read":"...","score":"supportive|neutral|adverse|blocking"},"price_action":{"read":"...","strength":"strong|weak|mixed"},"patterns_seen":[{"id":"p1","present":true,"note":"..."}],"verdict":"enter|wait|stand_aside|let_expire|edit","proposal":{"entry":0,"stop":0,"take_profit":[{"price":0}],"rationale":"..."},"next_check_min":15,"memo_update":"..."}
+{"timeframe_used":"15min","read":"<one first-person sentence>","market":{"read":"...","score":"supportive|neutral|adverse"},"news":{"read":"...","score":"supportive|neutral|adverse|blocking"},"price_action":{"read":"...","strength":"strong|weak|mixed"},"patterns_seen":[{"id":"p1","present":true,"note":"..."}],"verdict":"enter|wait|stand_aside|let_expire|edit","proposal":{"entry":0,"stop":0,"take_profit":[{"price":0}],"rationale":"..."},"next_check_min":15,"memo_update":"..."}
 Include "proposal" only when verdict is "enter"; include "edit_proposal":{"why":"...","changes":{}} only when verdict is "edit".`
 
 export async function _defaultAssess(call, zone, ctx, _d) {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
     _zoneGate, _isExpiring, _computeNextCheckAt, _nextStatus, _snapToReference,
     _finalizeProposal, _applyAssessment, _scheduledPatch, _checkCall,
+    _timelineEntry, _zonesLabel, _withTimeout,
 } from '../../monitoring/kairos.monitor.service.js'
 
 function call(extra = {}) {
@@ -173,8 +174,9 @@ test('scheduledPatch: idle reschedules at max gap; failure retries at min gap', 
 // ── _checkCall orchestration (injected IO, no DB/LLM) ─────────────────────
 function fakeDb() {
     const updates = []
-    return { updates, collection: () => ({ updateOne: async (q, u) => { updates.push({ id: q.id, set: u.$set }) } }) }
+    return { updates, collection: () => ({ updateOne: async (q, u) => { updates.push({ id: q.id, set: u.$set, push: u.$push }) } }) }
 }
+const pushedEntry = (u) => u.push?.['monitor_state.timeline']?.$each?.[0]
 
 test('checkCall: no zone + not expiring → cheap scheduled path, no assessment', async () => {
     const db = fakeDb()
@@ -267,4 +269,92 @@ test('checkCall: market CLOSED but EXPIRING → expiry review still runs', async
     const out = await _checkCall(db, expiringCall, NOW, deps)
     assert.equal(out.reason, 'expiry_review')
     assert.equal(db.updates[0].set.status, 'expired')
+})
+
+// ── _zonesLabel + _timelineEntry (the live monitor journal) ────────────────
+test('zonesLabel: joins bands and flags multi', () => {
+    assert.deepEqual(_zonesLabel(call()), { text: '247.4–248.6, 244.8–245.2', multi: true })
+    assert.equal(_zonesLabel(call({ entry_zones: [{ lower: 100, upper: 101 }] })).multi, false)
+    assert.equal(_zonesLabel(call({ entry_zones: [] })).text, '(no zones)')
+})
+
+test('timelineEntry: closed wake → holding note, no price, deterministic at', () => {
+    const e = _timelineEntry('closed', { nowMs: NOW, call: call(), nextAt: new Date(NOW + 3600_000).toISOString() })
+    assert.equal(e.reason, 'closed')
+    assert.equal(e.price, null)
+    assert.equal(e.verdict, null)
+    assert.equal(e.at, new Date(NOW).toISOString())
+    assert.match(e.note, /closed/i)
+})
+
+test('timelineEntry: scheduled heartbeat → price, zones and gap in the note', () => {
+    const e = _timelineEntry('scheduled', { nowMs: NOW, price: 250, call: call(), nextAt: new Date(NOW + 30 * 60_000).toISOString() })
+    assert.equal(e.price, 250)
+    assert.match(e.note, /250/)
+    assert.match(e.note, /247.4–248.6/)
+    assert.match(e.note, /30m/)
+})
+
+test('timelineEntry: assessment uses the model read + carries verdict/axes', () => {
+    const raw = { verdict: 'wait', read: 'coiling under the zone, no trigger yet',
+        market: { read: 'calm', score: 'neutral' }, patterns_seen: [{ id: 'p1', present: true, note: 'flag' }] }
+    const e = _timelineEntry('zone_trip', { nowMs: NOW, price: 248, zone: call().entry_zones[0], call: call(), raw, nextAt: new Date(NOW + 15 * 60_000).toISOString(), fetched: 'chart 15min' })
+    assert.equal(e.verdict, 'wait')
+    assert.equal(e.note, 'coiling under the zone, no trigger yet')
+    assert.equal(e.zone_id, 'ez1')
+    assert.equal(e.fetched, 'chart 15min')
+    assert.equal(e.axes.market.score, 'neutral')
+    assert.equal(e.axes.patterns_seen.length, 1)
+})
+
+test('timelineEntry: assessment with no read → verdict fallback note', () => {
+    const e = _timelineEntry('zone_trip', { nowMs: NOW, price: 248, zone: call().entry_zones[0], call: call(), raw: { verdict: 'stand_aside' }, nextAt: null })
+    assert.match(e.note, /standing aside/i)
+})
+
+test('timelineEntry: failed assessment → retry note, no verdict', () => {
+    const e = _timelineEntry('zone_trip', { nowMs: NOW, price: 248, call: call(), failed: true, nextAt: null })
+    assert.match(e.note, /failed/i)
+    assert.equal(e.verdict, null)
+})
+
+// ── _checkCall appends a journal entry on EVERY wake ──────────────────────
+test('checkCall: scheduled heartbeat appends a capped journal entry', async () => {
+    const db = fakeDb()
+    const deps = { getPrice: async () => 250, assess: async () => ({}), onCard: async () => {}, isAssetOpen: () => true }
+    await _checkCall(db, call(), NOW, deps)
+    const entry = pushedEntry(db.updates[0])
+    assert.ok(entry)
+    assert.equal(entry.reason, 'scheduled')
+    assert.equal(entry.price, 250)
+    assert.equal(db.updates[0].push['monitor_state.timeline'].$slice, -50)   // append-only, capped
+})
+
+test('checkCall: assessment wake appends an entry with the verdict + read', async () => {
+    const db = fakeDb()
+    const deps = { getPrice: async () => 248, assess: async () => ({ verdict: 'wait', read: 'not yet', next_check_min: 15 }), onCard: async () => {}, isAssetOpen: () => true }
+    await _checkCall(db, call(), NOW, deps)
+    const entry = pushedEntry(db.updates[0])
+    assert.equal(entry.reason, 'zone_trip')
+    assert.equal(entry.verdict, 'wait')
+    assert.equal(entry.note, 'not yet')
+    assert.ok(entry.fetched)
+})
+
+test('checkCall: closed wake appends a holding entry', async () => {
+    const db = fakeDb()
+    const deps = { getPrice: async () => 248, assess: async () => ({}), onCard: async () => {}, isAssetOpen: () => false, nextOpenMs: () => NOW + 3600_000 }
+    await _checkCall(db, call(), NOW, deps)
+    assert.equal(pushedEntry(db.updates[0]).reason, 'closed')
+})
+
+// ── _withTimeout: a hung check can't wedge the loop ────────────────────────
+test('withTimeout: rejects a hung promise after ms (loop self-heals)', async () => {
+    await assert.rejects(_withTimeout(new Promise(() => {}), 20), /timed out/)
+})
+test('withTimeout: passes a fast resolve straight through', async () => {
+    assert.equal(await _withTimeout(Promise.resolve('ok'), 1000), 'ok')
+})
+test('withTimeout: a rejecting check surfaces its own error', async () => {
+    await assert.rejects(_withTimeout(Promise.reject(new Error('boom')), 1000), /boom/)
 })
