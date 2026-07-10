@@ -232,16 +232,19 @@ export async function markRead(conversationId, userId) {
 // user's choice persists — the message stays but renders acknowledged). Message-level
 // only; it never touches the idea's invalidation latch, so a re-armed idea still emits
 // a fresh new alert message.
-export async function dismissMessage(conversationId, messageId, userId) {
+export async function dismissMessage(conversationId, messageId, userId, outcome = null) {
     const db  = await getDb()
     const uid = String(userId)
 
     const conv = await db.collection(CONVS).findOne({ id: conversationId })
     if (!conv || !conv.participants.includes(uid)) return { ok: false }
 
+    // `dismissed` collapses the card to an acknowledged state; `dismissOutcome` records WHICH
+    // action the user took (dismissed | editing | closing…) so the collapsed card reads "handled"
+    // accurately rather than always "Dismissed".
     await db.collection(MSGS).updateOne(
         { id: messageId, conversationId },
-        { $set: { dismissed: true } }
+        { $set: { dismissed: true, ...(outcome ? { dismissOutcome: String(outcome) } : {}) } }
     )
     return { ok: true }
 }

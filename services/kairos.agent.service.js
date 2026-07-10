@@ -2,7 +2,7 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { resolveStreamFn } from './llmModels.js'
 import { recordUsage } from './tokenUsage.service.js'
-import { makePromptLoader, stripEmitTags, buildAccountLines } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages } from './agentUtils.js'
 import { KAIROS_TOOLS, buildKairosToolHandlers } from './kairos.tools.js'
 import { kairosService } from '../api/kairos/kairos.service.js'
 import { toBrokerSymbol } from './brokerSymbol.service.js'
@@ -34,7 +34,7 @@ export const kairosAgentService = {
 async function chatStream({
     messages, userPrompt, chatState = emptyKairosState(), accounts = [],
     model: requestedModel, reasoningEffort, userId,
-    onToken, onChart, onToolStart, onReasoning, signal,
+    onToken, onChart, onToolStart, onReasoning, onPhase, signal,
 }) {
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
 
@@ -51,8 +51,18 @@ async function chatStream({
 
     const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
 
-    // Suppress the <call> block from the user-visible token stream; it's parsed from `raw`.
-    const tagCaptures = [{ open: '<call>', close: '</call>', onCapture: null }]
+    // The model emits <phase>N</phase> (1–5) at the start of each turn; capture it for the UI
+    // progress + next-turn model routing. <call> is suppressed from the token stream and parsed
+    // from `raw`.
+    let capturedPhase = null
+    const onPhaseCapture = (p) => {
+        const n = parseInt(p, 10)
+        if (n >= 1 && n <= 5) { capturedPhase = n; onPhase?.(n) }
+    }
+    const tagCaptures = [
+        { open: '<phase>', close: '</phase>', onCapture: onPhaseCapture },
+        { open: '<call>',  close: '</call>',  onCapture: null },
+    ]
 
     const raw = await streamFn({
         model, promptOrMessages: builtMessages, systemPrompt, tools, toolHandlers,
@@ -64,7 +74,7 @@ async function chatStream({
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCall: Boolean(call) })
 
     // The call is a DRAFT — returned for preview, NOT saved. The user clicks Generate to persist.
-    return { reply, ...(call ? { call } : {}) }
+    return { reply, phase: capturedPhase, ...(call ? { call } : {}) }
 }
 
 // ─── Call extraction (pure) ───────────────────────────────────────────────────
@@ -72,7 +82,7 @@ async function chatStream({
 // (block stripped) plus the parsed draft call object (null if absent or malformed).
 export function _parseKairosResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['call']).trim()
+    const reply = stripEmitTags(text, ['call', 'phase']).trim()
 
     const m = text.match(/<call>([\s\S]*?)<\/call>/)
     if (!m) return { reply, call: null }
@@ -173,15 +183,7 @@ function _buildAccountsSection(accounts) {
 
 function _buildMessages({ messages, userPrompt }) {
     if (Array.isArray(messages) && messages.length > 0) {
-        return _trimMessages(messages)
+        return normalizeMessages(messages, MAX_RECENT_MESSAGES)
     }
     return userPrompt?.trim() ? [{ role: 'user', content: userPrompt.trim() }] : []
-}
-
-function _trimMessages(messages) {
-    if (!Array.isArray(messages)) return []
-    return messages
-        .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
-        .map((m) => ({ role: m.role, content: m.content.trim() }))
-        .slice(-MAX_RECENT_MESSAGES)
 }

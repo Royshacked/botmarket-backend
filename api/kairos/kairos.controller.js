@@ -34,12 +34,13 @@ export async function streamKairos(req, res) {
             onChart:     (chart)  => sendEvent('chart',     chart),
             onToolStart: (tool)   => sendEvent('status',    { tool }),
             onReasoning: (text)   => sendEvent('reasoning', { text }),
+            onPhase:     (phase)  => sendEvent('phase',     { phase }),
         })
 
         finish()
         if (!signal.aborted) {
             // `call` here is a DRAFT for preview — the client shows it and lets the user Generate.
-            sendEvent('done', { reply: result.reply, ...(result.call ? { call: result.call } : {}) })
+            sendEvent('done', { reply: result.reply, phase: result.phase ?? null, ...(result.call ? { call: result.call } : {}) })
             res.end()
         }
     } catch (err) {
@@ -98,6 +99,20 @@ export async function listKairos(req, res) {
     } catch (err) {
         logger.error(LOG, 'Failed to list kairos calls', err)
         res.status(500).send({ error: 'Failed to list calls' })
+    }
+}
+
+export async function deleteKairos(req, res) {
+    try {
+        const result = await kairosService.deleteKairosCall(req.params.id, req.user._id, req.user.isAdmin === true)
+        if (!result.ok) {
+            const code = result.reason === 'not_found' ? 404 : result.reason === 'forbidden' ? 403 : 400
+            return res.status(code).send({ error: result.reason ?? 'delete_failed' })
+        }
+        res.send({ ok: true })
+    } catch (err) {
+        logger.error(LOG, 'Failed to delete kairos call', err)
+        res.status(500).send({ error: 'Failed to delete call' })
     }
 }
 

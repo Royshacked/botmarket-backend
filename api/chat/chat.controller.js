@@ -77,7 +77,7 @@ export async function markConversationRead(req, res, next) {
 export async function dismissMessageHandler(req, res, next) {
     try {
         const { id, msgId } = req.params
-        const result = await dismissMessage(id, msgId, req.user._id)
+        const result = await dismissMessage(id, msgId, req.user._id, req.body?.outcome ?? null)
         if (!result.ok) return res.status(403).json({ error: 'Forbidden' })
         res.json({ ok: true })
     } catch (err) {

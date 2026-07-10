@@ -179,7 +179,7 @@ function fakeDb() {
 test('checkCall: no zone + not expiring → cheap scheduled path, no assessment', async () => {
     const db = fakeDb()
     let assessed = false
-    const deps = { getPrice: async () => 250, assess: async () => { assessed = true; return {} }, onCard: async () => {} }
+    const deps = { getPrice: async () => 250, assess: async () => { assessed = true; return {} }, onCard: async () => {}, isAssetOpen: () => true }
     const out = await _checkCall(db, call(), NOW, deps)
     assert.equal(out.reason, 'scheduled')
     assert.equal(assessed, false)                                   // gate short-circuited the LLM
@@ -193,6 +193,7 @@ test('checkCall: price in a zone → assessment runs, verdict persisted, card fi
         getPrice: async () => 248.0,   // inside ez1
         assess:   async (c, zone) => ({ verdict: 'enter', timeframe_used: '15min', next_check_min: 20, proposal: { entry: 248, stop: 245, take_profit: [{ price: 252 }] }, memo_update: 'go' }),
         onCard:   async (c, a) => { carded = a },
+        isAssetOpen: () => true,
     }
     const out = await _checkCall(db, call(), NOW, deps)
     assert.equal(out.reason, 'zone_trip')
@@ -205,7 +206,7 @@ test('checkCall: price in a zone → assessment runs, verdict persisted, card fi
 test('checkCall: failed assessment → retry-soon reschedule, no card', async () => {
     const db = fakeDb()
     let carded = false
-    const deps = { getPrice: async () => 248.0, assess: async () => null, onCard: async () => { carded = true } }
+    const deps = { getPrice: async () => 248.0, assess: async () => null, onCard: async () => { carded = true }, isAssetOpen: () => true }
     const out = await _checkCall(db, call(), NOW, deps)
     assert.equal(out.failed, true)
     assert.equal(carded, false)
@@ -215,7 +216,54 @@ test('checkCall: failed assessment → retry-soon reschedule, no card', async ()
 test('checkCall: near expiry runs assessment even with no zone tripped', async () => {
     const db = fakeDb()
     const expiringCall = call({ valid_until: new Date(NOW + 5 * 60_000).toISOString() })  // 5m from now
-    const deps = { getPrice: async () => 250, assess: async () => ({ verdict: 'let_expire', next_check_min: 5 }), onCard: async () => {} }
+    const deps = { getPrice: async () => 250, assess: async () => ({ verdict: 'let_expire', next_check_min: 5 }), onCard: async () => {}, isAssetOpen: () => true }
+    const out = await _checkCall(db, expiringCall, NOW, deps)
+    assert.equal(out.reason, 'expiry_review')
+    assert.equal(db.updates[0].set.status, 'expired')
+})
+
+test('checkCall: market CLOSED + not expiring → skipped (no price, no assess), rescheduled', async () => {
+    const db = fakeDb()
+    let priced = false, assessed = false
+    const deps = {
+        getPrice: async () => { priced = true; return 248.0 },
+        assess:   async () => { assessed = true; return {} },
+        onCard:   async () => {},
+        isAssetOpen: () => false,   // market shut for this asset
+    }
+    const out = await _checkCall(db, call(), NOW, deps)
+    assert.equal(out.reason, 'closed')
+    assert.equal(priced, false)
+    assert.equal(assessed, false)
+    assert.equal(db.updates[0].set['monitor_state.next_check_at'], new Date(NOW + 60 * 60_000).toISOString())
+})
+
+test('checkCall: a watching call that leaves the zone resets to waiting', async () => {
+    const db = fakeDb()
+    const deps = { getPrice: async () => 250, assess: async () => ({}), onCard: async () => {}, isAssetOpen: () => true }
+    await _checkCall(db, call({ status: 'watching' }), NOW, deps)   // 250 is in no zone → scheduled path
+    assert.equal(db.updates[0].set.status, 'waiting')
+})
+
+test('checkCall: market CLOSED sleeps until the next open + clears stale watching', async () => {
+    const db = fakeDb()
+    const openMs = NOW + 3 * 3600_000
+    const deps = { getPrice: async () => 248, assess: async () => ({}), onCard: async () => {}, isAssetOpen: () => false, nextOpenMs: () => openMs }
+    const out = await _checkCall(db, call({ status: 'watching' }), NOW, deps)
+    assert.equal(out.reason, 'closed')
+    assert.equal(db.updates[0].set.status, 'waiting')                                            // stale watching cleared
+    assert.equal(db.updates[0].set['monitor_state.next_check_at'], new Date(openMs).toISOString())  // sleeps to the open
+})
+
+test('checkCall: market CLOSED but EXPIRING → expiry review still runs', async () => {
+    const db = fakeDb()
+    const expiringCall = call({ valid_until: new Date(NOW + 5 * 60_000).toISOString() })
+    const deps = {
+        getPrice: async () => 250,
+        assess:   async () => ({ verdict: 'let_expire', next_check_min: 5 }),
+        onCard:   async () => {},
+        isAssetOpen: () => false,
+    }
     const out = await _checkCall(db, expiringCall, NOW, deps)
     assert.equal(out.reason, 'expiry_review')
     assert.equal(db.updates[0].set.status, 'expired')

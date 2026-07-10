@@ -4,6 +4,7 @@ import { getQuote, getTickerAggregates } from '../providers/yahoofinance.provide
 import { fetchChartImage } from '../providers/chartImg.provider.js'
 import { buildStudies } from './evaluators/chart.evaluator.js'
 import { userService } from '../api/user/user.service.js'
+import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 
 // Kairos monitor — the self-scheduling readiness loop (KAIROS_PLAN.md, Phase 2). Its own tick,
@@ -74,9 +75,21 @@ async function _tick() {
 // Orchestrate one call: cheap gate → (only if tripped/expiring) expensive assessment → persist.
 // `deps` is injectable so tests exercise the branching without real price/LLM/notify IO.
 export async function _checkCall(db, call, nowMs, deps = _deps) {
-    const price    = await deps.getPrice(call)
     const expiring = _isExpiring(call, nowMs)
-    const zone     = Number.isFinite(price) ? _zoneGate(call, price) : null
+
+    // Market closed for this asset → no entry can happen; skip the check (no price fetch, no LLM)
+    // and SLEEP until the market reopens (not the normal cadence). Expiry review is exempt — a
+    // call may need to roll/expire at the close.
+    if (!expiring && !deps.isAssetOpen(call.asset, call.asset_class)) {
+        const patch  = _scheduledPatch(call, nowMs)   // also resets a stale 'watching' → 'waiting'
+        const openMs = deps.nextOpenMs?.(call.asset, call.asset_class)
+        if (Number.isFinite(openMs) && openMs > nowMs) patch['monitor_state.next_check_at'] = new Date(openMs).toISOString()
+        await _persist(db, call.id, patch)
+        return { reason: 'closed' }
+    }
+
+    const price  = await deps.getPrice(call)
+    const zone   = Number.isFinite(price) ? _zoneGate(call, price) : null
 
     const reason = expiring ? 'expiry_review' : (zone ? 'zone_trip' : 'scheduled')
 
@@ -254,6 +267,9 @@ export function _scheduledPatch(call, nowMs, short = false) {
     const cadence = call?.cadence ?? {}
     const gap = short ? (Number(cadence.min_gap_min) || 1) : (Number(cadence.max_gap_min) || 60)
     return {
+        // No zone tripped (or market closed) → the call isn't actively being assessed, so a stale
+        // 'watching' returns to 'waiting'. Keeps 'watching' meaning exactly "price in a zone now".
+        ...(call?.status === 'watching' ? { status: 'waiting' } : {}),
         'monitor_state.check_count':   (call?.monitor_state?.check_count ?? 0) + 1,
         'monitor_state.next_check_at': new Date(nowMs + gap * 60_000).toISOString(),
     }
@@ -261,9 +277,11 @@ export function _scheduledPatch(call, nowMs, short = false) {
 
 // ─── Default IO deps (real price / LLM assessment / card) ───────────────────────
 const _deps = {
-    getPrice: _defaultGetPrice,
-    assess:   _defaultAssess,
-    onCard:   _defaultOnCard,
+    getPrice:    _defaultGetPrice,
+    assess:      _defaultAssess,
+    onCard:      _defaultOnCard,
+    isAssetOpen: (asset, assetClass) => isAssetOpen(asset, assetClass),
+    nextOpenMs:  (asset, assetClass) => getMarketStatus(asset, assetClass).nextOpenMs,
 }
 
 async function _defaultGetPrice(call) {
@@ -313,7 +331,7 @@ Output ONLY a JSON object, no prose:
 {"timeframe_used":"15min","market":{"read":"...","score":"supportive|neutral|adverse"},"news":{"read":"...","score":"supportive|neutral|adverse|blocking"},"price_action":{"read":"...","strength":"strong|weak|mixed"},"patterns_seen":[{"id":"p1","present":true,"note":"..."}],"verdict":"enter|wait|stand_aside|let_expire|edit","proposal":{"entry":0,"stop":0,"take_profit":[{"price":0}],"rationale":"..."},"next_check_min":15,"memo_update":"..."}
 Include "proposal" only when verdict is "enter"; include "edit_proposal":{"why":"...","changes":{}} only when verdict is "edit".`
 
-async function _defaultAssess(call, zone, ctx, _d) {
+export async function _defaultAssess(call, zone, ctx, _d) {
     try {
         const tf = call.timeframe_ladder?.at(-1) ?? '15min'
         const [png, candlesText] = await Promise.all([

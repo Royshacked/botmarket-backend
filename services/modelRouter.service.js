@@ -39,13 +39,20 @@ const PHASE_TABLES = {
         3: { model: SONNET, reasoningEffort: 'off' },  // validation
         4: { model: SONNET, reasoningEffort: 'off' },  // final list
     },
+    kairos: {
+        1: { model: HAIKU,  reasoningEffort: 'off' },  // locate & classify — thesis + horizon
+        2: { model: SONNET, reasoningEffort: 'low' },  // entry zones — structure read, volatility-sized
+        3: { model: SONNET, reasoningEffort: 'low' },  // risk — invalidation + targets + R:R
+        4: { model: SONNET, reasoningEffort: 'low' },  // trigger — price-action patterns
+        5: { model: SONNET, reasoningEffort: 'off' },  // size/account + emit call
+    },
 }
 
 const _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 const _CLASSIFIER_SYSTEM = `You are a routing classifier for a trading AI assistant. Output ONLY valid JSON — no prose, no markdown.
 
-Agents: idea (trade idea builder, phases 1-5), portfolio (portfolio manager, phases 1-6), scanner (market scanner, phases 1-4)
+Agents: idea (trade idea builder, phases 1-5), portfolio (portfolio manager, phases 1-6), scanner (market scanner, phases 1-4), kairos (discretionary day/swing call builder, phases 1-5)
 
 Model options:
 - "haiku": greeting, simple data lookup, single-field update, no synthesis
