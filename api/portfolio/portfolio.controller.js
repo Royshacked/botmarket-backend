@@ -1,14 +1,13 @@
 import { portfolioAgentService } from '../../services/portfolio.agent.service.js'
 import { portfolioChatService }  from './portfolioChat.service.js'
 import { applyRebalance, snapshotConvictions } from './portfolioRebalance.service.js'
-import { getPortfolioStateCached, invalidatePortfolioState } from '../../services/portfolioState.service.js'
+import { invalidatePortfolioState } from '../../services/portfolioState.service.js'
 import { logger }                from '../../services/logger.service.js'
 import { resolveModel }          from '../../services/modelRouter.service.js'
 import { streamAgentResponse }   from '../_shared/sse.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { threadService }          from '../../services/thread.service.js'
-import { isSubstantive }          from '../../services/thread.util.js'
 import { resolvePortfolioReviewCard } from '../chat/chat.service.js'
 
 const LOG = '[portfolio:controller]'
@@ -27,35 +26,12 @@ export async function streamPortfolio(req, res) {
         log: LOG,
         handler: async ({ sendEvent, signal }) => {
             const isReviewMode = req.body?.reviewMode === true
+            const bodyMandate  = (req.body?.mandate && typeof req.body.mandate === 'object') ? req.body.mandate : null
 
-            // Fetch portfolio state (review mode only) and lifecycle (any mode with a
-            // portfolioId) in parallel — both feed the agent's dynamic context.
-            const [portfolioState, lifecycle, storedMandate, storedThesis] = await Promise.all([
-                (isReviewMode && portfolioId)
-                    ? getPortfolioStateCached(portfolioId, req.user._id).catch(() => null)
-                    : Promise.resolve(null),
-                portfolioId
-                    ? portfolioChatService.getPortfolioLifecycle(portfolioId, req.user._id).catch(() => null)
-                    : Promise.resolve(null),
-                portfolioId
-                    ? portfolioChatService.getMandate(portfolioId, req.user._id).catch(() => null)
-                    : Promise.resolve(null),
-                portfolioId
-                    ? portfolioChatService.getThesis(portfolioId, req.user._id).catch(() => null)
-                    : Promise.resolve(null),
-            ])
-
-            // Carry the mandate forward across turns. During first-time construction there's
-            // no portfolioId yet, so the conversation is persisted to a DRAFT thread keyed by
-            // threadId — that draft's mandate is the durable fallback (survives a reload; the
-            // client re-send is now belt-and-suspenders, not the only source of truth). The
-            // fresh body mandate wins; then the draft; then the stored one (edit/review).
-            const draftThread = (!portfolioId && threadId)
-                ? await threadService.getThread({ threadId, userId: req.user._id }).catch(() => null)
-                : null
-
-            const bodyMandate = (req.body?.mandate && typeof req.body.mandate === 'object') ? req.body.mandate : null
-            const mandate = bodyMandate ?? draftThread?.mandate ?? storedMandate
+            // Pre-stream context load + mandate carry-forward (business logic → service).
+            const { portfolioState, lifecycle, mandate, storedThesis } = await portfolioChatService.loadStreamContext({
+                userId: req.user._id, portfolioId, threadId, isReviewMode, bodyMandate,
+            })
 
             const lastMessage = messages.at(-1)?.content ?? ''
             const routing = await resolveModel({ routingMode, agent: 'portfolio', phase: currentPhase, model, reasoningEffort, lastMessage })
@@ -80,38 +56,12 @@ export async function streamPortfolio(req, res) {
                 onReasoning: (text)   => sendEvent('reasoning', { text }),
             })
 
-            // Post-stream persistence — only when the client is still listening (the
-            // fire-and-forget writes match the previous "after finish, if not aborted" gate).
+            // Post-stream persistence (mandate/thesis/draft) → service. Only when the client is
+            // still listening, matching the previous "after finish, if not aborted" gate.
             if (signal.aborted) return undefined
-
-            if (result.mandate && portfolioId) {
-                portfolioChatService.setMandate(portfolioId, req.user._id, result.mandate)
-                    .then(r => { if (!r.ok) logger.warn(LOG, 'setMandate returned not-ok, mandate may not be persisted') })
-                    .catch(err => logger.warn(LOG, 'setMandate unexpected error', err))
-            }
-            // Persist a captured portfolio thesis on construction/edit only. In REVIEW
-            // mode a thesis change is a PROPOSAL — it persists only when the user confirms
-            // the rebalance (applyRebalance stamps reason 'accepted-rebalance'), preserving
-            // the rewrite-only-on-accept rule (never auto-synced to drift). For first-time
-            // construction portfolioId is null — the thesis rides 'done' and is persisted
-            // with the chat state.
-            if (result.thesis && portfolioId && !isReviewMode) {
-                portfolioChatService.setThesis(portfolioId, req.user._id, result.thesis, storedThesis ? 'mandate-edit' : 'construction')
-                    .catch(err => logger.warn(LOG, 'setThesis unexpected error', err))
-            }
-            // Construction only: once the agent has emitted a mandate (portfolio's
-            // substantive floor), persist/refresh the conversation as a draft thread so it
-            // survives a stop-before-generate. Full conversation incl. this reply; the
-            // thread service TTL-manages + LRU-caps drafts. Linked on generate (savePortfolioChatState).
-            const knownMandate = result.mandate ?? mandate
-            if (!portfolioId && threadId && isSubstantive({ agent: 'portfolio', phase: result.phase, mandateReady: !!knownMandate })) {
-                const draftMessages = [...messages, { role: 'assistant', content: result.reply }]
-                threadService.saveDraft({
-                    threadId, userId: req.user._id, agent: 'portfolio',
-                    messages: draftMessages, phase: result.phase ?? null,
-                    subjectType: 'portfolio', mandate: knownMandate ?? null,
-                }).catch(err => logger.warn(LOG, 'construction saveDraft failed', err))
-            }
+            portfolioChatService.persistStreamOutcome({
+                userId: req.user._id, portfolioId, threadId, isReviewMode, messages, mandate, storedThesis, result,
+            })
 
             return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null }
         },

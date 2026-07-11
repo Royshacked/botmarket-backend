@@ -23,6 +23,7 @@ export const brokerService = {
     isConnected,
     getAccount,
     getPositions,
+    loadContext,
     findOpenPosition,
     getCandles,
     resolveSymbol,
@@ -127,6 +128,35 @@ async function getAccount(brokerType, userId, accountId) {
  */
 async function getPositions(brokerType, userId, accountId) {
     return getBrokerAdapter(brokerType).getPositions(userId, accountId)
+}
+
+/**
+ * Assemble a per-broker context map for a user's CONNECTED brokers:
+ * `{ [brokerType]: { account, positions } }`. Best-effort — a broker that errors is
+ * skipped, and positions not available via REST are left empty. Used by the idea agent
+ * to give the model live account/position context.
+ * @param {string} userId
+ * @returns {Promise<Object>}
+ */
+async function loadContext(userId) {
+    try {
+        const connections = await listConnections(userId)
+        const entries = await Promise.all(
+            Object.entries(connections)
+                .filter(([, connected]) => connected)
+                .map(async ([type]) => {
+                    try {
+                        const account = await getAccount(type, userId)
+                        let positions = []
+                        try {
+                            positions = await getPositions(type, userId)
+                        } catch { /* positions not available via REST — leave empty */ }
+                        return [type, { account, positions }]
+                    } catch { return null }
+                })
+        )
+        return Object.fromEntries(entries.filter(Boolean))
+    } catch { return {} }
 }
 
 /**

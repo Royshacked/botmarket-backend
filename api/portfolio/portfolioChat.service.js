@@ -1,6 +1,9 @@
 import { getDb, stripId }   from '../../providers/mongodb.provider.js'
 import { logger }  from '../../services/logger.service.js'
 import { paperBrokerService } from '../broker/paperBroker.service.js'
+import { getPortfolioStateCached } from '../../services/portfolioState.service.js'
+import { threadService } from '../../services/thread.service.js'
+import { isSubstantive } from '../../services/thread.util.js'
 
 const LOG        = '[portfolioChat]'
 const COLLECTION = 'portfolio_chats'
@@ -20,6 +23,57 @@ export const portfolioChatService = {
     getThesis,
     setThesis,
     completeReview,
+    loadStreamContext,
+    persistStreamOutcome,
+}
+
+/**
+ * Assemble the per-turn context the portfolio agent needs and resolve the effective mandate,
+ * which is carried forward across turns: a fresh body mandate wins, then the draft-thread
+ * mandate (so first-time construction survives a reload), then the stored one (edit/review).
+ * Every fetch is best-effort. Returns { portfolioState, lifecycle, mandate, storedThesis }.
+ */
+async function loadStreamContext({ userId, portfolioId, threadId, isReviewMode, bodyMandate }) {
+    const [portfolioState, lifecycle, storedMandate, storedThesis] = await Promise.all([
+        (isReviewMode && portfolioId) ? getPortfolioStateCached(portfolioId, userId).catch(() => null) : Promise.resolve(null),
+        portfolioId ? getPortfolioLifecycle(portfolioId, userId).catch(() => null) : Promise.resolve(null),
+        portfolioId ? getMandate(portfolioId, userId).catch(() => null) : Promise.resolve(null),
+        portfolioId ? getThesis(portfolioId, userId).catch(() => null) : Promise.resolve(null),
+    ])
+
+    const draftThread = (!portfolioId && threadId)
+        ? await threadService.getThread({ threadId, userId }).catch(() => null)
+        : null
+
+    const mandate = bodyMandate ?? draftThread?.mandate ?? storedMandate
+    return { portfolioState, lifecycle, mandate, storedThesis }
+}
+
+/**
+ * Fire-and-forget persistence after a portfolio stream turn: persist an emitted mandate (edit),
+ * a captured thesis (construction/edit only — in review mode a thesis change persists only on
+ * accepted rebalance), and, during first-time construction, refresh the draft thread once the
+ * mandate floor is crossed. The caller gates this on the client still listening (!aborted).
+ */
+function persistStreamOutcome({ userId, portfolioId, threadId, isReviewMode, messages, mandate, storedThesis, result }) {
+    if (result.mandate && portfolioId) {
+        setMandate(portfolioId, userId, result.mandate)
+            .then(r => { if (!r.ok) logger.warn(LOG, 'setMandate returned not-ok, mandate may not be persisted') })
+            .catch(err => logger.warn(LOG, 'setMandate unexpected error', err))
+    }
+    if (result.thesis && portfolioId && !isReviewMode) {
+        setThesis(portfolioId, userId, result.thesis, storedThesis ? 'mandate-edit' : 'construction')
+            .catch(err => logger.warn(LOG, 'setThesis unexpected error', err))
+    }
+    const knownMandate = result.mandate ?? mandate
+    if (!portfolioId && threadId && isSubstantive({ agent: 'portfolio', phase: result.phase, mandateReady: !!knownMandate })) {
+        const draftMessages = [...messages, { role: 'assistant', content: result.reply }]
+        threadService.saveDraft({
+            threadId, userId, agent: 'portfolio',
+            messages: draftMessages, phase: result.phase ?? null,
+            subjectType: 'portfolio', mandate: knownMandate ?? null,
+        }).catch(err => logger.warn(LOG, 'construction saveDraft failed', err))
+    }
 }
 
 async function saveChatState(portfolioId, messages, userId, mandate = null) {

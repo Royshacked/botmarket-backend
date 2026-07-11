@@ -146,6 +146,34 @@ export async function triggerAxlReply(userId, conversationId, aiPref = {}) {
 }
 
 /**
+ * Post a user's message into a conversation: verify the sender is a participant, write the
+ * message, push it to the other participant over WS, and — when the recipient is Axl — fire
+ * off Axl's reply (fire-and-forget; it arrives later over WS). This is the notification-routing
+ * business logic that used to live in the controller. Returns { ok, message } or
+ * { ok:false, reason:'forbidden' }.
+ */
+export async function postUserMessage(conversationId, senderId, content, aiPref = {}) {
+    // Reuse getMessages' participant check (returns null when the sender isn't in the convo).
+    const allowed = await getMessages(conversationId, senderId, null, 0)
+    if (allowed === null) return { ok: false, reason: 'forbidden' }
+
+    const msg = await sendMessage(conversationId, senderId, content)
+
+    const db   = await getDb()
+    const conv = await db.collection(CONVS).findOne({ id: conversationId })
+    if (conv) {
+        const recipientId = conv.participants.find(p => p !== String(senderId))
+        if (recipientId) await _tryEmit(recipientId, 'new_message', msg)
+        // If the message is to Axl, generate + push a reply (fire-and-forget so the POST
+        // returns immediately; Axl's answer arrives over WS when ready).
+        if (recipientId === BOT_USER_ID) {
+            triggerAxlReply(senderId, conversationId, aiPref).catch(() => {})
+        }
+    }
+    return { ok: true, message: msg }
+}
+
+/**
  * Seed the bot conversation for a new user. Idempotent — safe to call multiple times.
  */
 export async function seedBotConversation(userId) {

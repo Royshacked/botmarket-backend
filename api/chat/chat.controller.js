@@ -1,16 +1,12 @@
-import { getDb }  from '../../providers/mongodb.provider.js'
 import {
     getConversations,
     getMessages,
-    sendMessage,
+    postUserMessage,
     markRead,
     dismissMessage,
     searchUsers,
     getOrCreateConversation,
-    triggerAxlReply,
-    BOT_USER_ID,
 } from './chat.service.js'
-import { emit }   from './chatWs.js'
 
 export async function listConversations(req, res, next) {
     try {
@@ -39,26 +35,9 @@ export async function postMessage(req, res, next) {
         const { content, routingMode, model, reasoningEffort } = req.body ?? {}
         if (!content?.trim()) return res.status(400).json({ error: 'content required' })
 
-        // Verify sender is a participant before writing
-        const msgs = await getMessages(conversationId, req.user._id, null, 0)
-        if (msgs === null) return res.status(403).json({ error: 'Forbidden' })
-
-        const msg = await sendMessage(conversationId, req.user._id, content.trim())
-
-        // Push to the other participant if they are connected
-        const db   = await getDb()
-        const conv = await db.collection('chat_conversations').findOne({ id: conversationId })
-        if (conv) {
-            const recipientId = conv.participants.find(p => p !== String(req.user._id))
-            if (recipientId) emit(recipientId, 'new_message', msg)
-            // If the message is to Axl, generate + push a reply (fire-and-forget so
-            // the POST returns immediately; Axl's answer arrives over WS when ready).
-            if (recipientId === BOT_USER_ID) {
-                triggerAxlReply(req.user._id, conversationId, { routingMode, model, reasoningEffort }).catch(() => {})
-            }
-        }
-
-        res.json({ message: msg })
+        const result = await postUserMessage(conversationId, req.user._id, content.trim(), { routingMode, model, reasoningEffort })
+        if (!result.ok) return res.status(403).json({ error: 'Forbidden' })
+        res.json({ message: result.message })
     } catch (err) {
         next(err)
     }

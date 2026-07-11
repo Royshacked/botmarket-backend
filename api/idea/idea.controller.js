@@ -18,7 +18,7 @@ export async function streamIdea(req, res) {
     await streamAgentResponse(req, res, {
         log: LOG,
         handler: async ({ sendEvent, signal }) => {
-            const brokerContext = await _loadBrokerContext(req.user._id)
+            const brokerContext = await brokerService.loadContext(req.user._id)
 
             const { routingMode, currentPhase, model, reasoningEffort } = req.body ?? {}
             const lastMessage = parsed.messages?.at(-1)?.content ?? parsed.userPrompt ?? ''
@@ -60,7 +60,7 @@ export async function getIdea(req, res) {
             return res.status(400).send({ error: parsed.error })
         }
 
-        const brokerContext = await _loadBrokerContext(req.user._id)
+        const brokerContext = await brokerService.loadContext(req.user._id)
 
         const result = await ideaAgentService.chat({
             messages:      parsed.messages,
@@ -74,27 +74,6 @@ export async function getIdea(req, res) {
         logger.error(LOG, 'Failed to run idea', err)
         res.status(500).send({ error: 'Failed to run idea' })
     }
-}
-
-async function _loadBrokerContext(userId) {
-    try {
-        const connections = await brokerService.listConnections(userId)
-        const entries = await Promise.all(
-            Object.entries(connections)
-                .filter(([, connected]) => connected)
-                .map(async ([type]) => {
-                    try {
-                        const account = await brokerService.getAccount(type, userId)
-                        let positions = []
-                        try {
-                            positions = await brokerService.getPositions(type, userId)
-                        } catch { /* positions not available via REST — leave empty */ }
-                        return [type, { account, positions }]
-                    } catch { return null }
-                })
-        )
-        return Object.fromEntries(entries.filter(Boolean))
-    } catch { return {} }
 }
 
 function parseIdeaBody(body) {
