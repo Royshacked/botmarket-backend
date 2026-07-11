@@ -3,7 +3,7 @@ import { kairosAgentService, emptyKairosState, _finalizeCall } from '../../servi
 import { kairosService }       from './kairos.service.js'
 import { kairosHandoffService } from '../../services/kairos.handoff.service.js'
 import { resolveModel }        from '../../services/modelRouter.service.js'
-import { startSseStream }      from '../_shared/sse.util.js'
+import { streamAgentResponse } from '../_shared/sse.util.js'
 import { reasonToStatus }      from '../_shared/reason.util.js'
 
 const LOG = '[kairos:controller]'
@@ -15,42 +15,33 @@ export async function streamKairos(req, res) {
     const parsed = parseStreamBody(req.body)
     if (parsed.error) return res.status(400).json({ error: parsed.error })
 
-    const { sendEvent, signal, finish } = startSseStream(req, res)
+    await streamAgentResponse(req, res, {
+        log: LOG,
+        handler: async ({ sendEvent, signal }) => {
+            const { routingMode, currentPhase, model, reasoningEffort } = req.body ?? {}
+            const lastMessage = parsed.messages?.at(-1)?.content ?? parsed.userPrompt ?? ''
+            const routing = await resolveModel({ routingMode, agent: 'kairos', phase: currentPhase, model, reasoningEffort, lastMessage })
 
-    try {
-        const { routingMode, currentPhase, model, reasoningEffort } = req.body ?? {}
-        const lastMessage = parsed.messages?.at(-1)?.content ?? parsed.userPrompt ?? ''
-        const routing = await resolveModel({ routingMode, agent: 'kairos', phase: currentPhase, model, reasoningEffort, lastMessage })
+            const result = await kairosAgentService.chatStream({
+                messages:      parsed.messages,
+                userPrompt:    parsed.userPrompt,
+                chatState:     parsed.chatState ?? emptyKairosState(),
+                accounts:      parsed.accounts,
+                model:         routing.model,
+                reasoningEffort: routing.reasoningEffort,
+                userId:        req.user._id,
+                signal,
+                onToken:     (text)   => sendEvent('token',     { text }),
+                onChart:     (chart)  => sendEvent('chart',     chart),
+                onToolStart: (tool)   => sendEvent('status',    { tool }),
+                onReasoning: (text)   => sendEvent('reasoning', { text }),
+                onPhase:     (phase)  => sendEvent('phase',     { phase }),
+            })
 
-        const result = await kairosAgentService.chatStream({
-            messages:      parsed.messages,
-            userPrompt:    parsed.userPrompt,
-            chatState:     parsed.chatState ?? emptyKairosState(),
-            accounts:      parsed.accounts,
-            model:         routing.model,
-            reasoningEffort: routing.reasoningEffort,
-            userId:        req.user._id,
-            signal,
-            onToken:     (text)   => sendEvent('token',     { text }),
-            onChart:     (chart)  => sendEvent('chart',     chart),
-            onToolStart: (tool)   => sendEvent('status',    { tool }),
-            onReasoning: (text)   => sendEvent('reasoning', { text }),
-            onPhase:     (phase)  => sendEvent('phase',     { phase }),
-        })
-
-        finish()
-        if (!signal.aborted) {
             // `call` here is a DRAFT for preview — the client shows it and lets the user Generate.
-            sendEvent('done', { reply: result.reply, phase: result.phase ?? null, ...(result.call ? { call: result.call } : {}) })
-            res.end()
-        }
-    } catch (err) {
-        finish()
-        if (signal.aborted) return
-        logger.error(LOG, 'Failed to stream kairos', err)
-        sendEvent('error', { message: 'Streaming failed' })
-        res.end()
-    }
+            return { reply: result.reply, phase: result.phase ?? null, ...(result.call ? { call: result.call } : {}) }
+        },
+    })
 }
 
 // Generate: persist a drafted call. Binds the marked accounts (bank icon) + resolves the venue,

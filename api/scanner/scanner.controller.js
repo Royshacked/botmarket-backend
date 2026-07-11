@@ -3,7 +3,7 @@ import { scannerChatService }  from './scannerChat.service.js'
 import { scanService }         from './scan.service.js'
 import { logger }              from '../../services/logger.service.js'
 import { resolveModel }        from '../../services/modelRouter.service.js'
-import { startSseStream }      from '../_shared/sse.util.js'
+import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages }   from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { reasonToStatus }      from '../_shared/reason.util.js'
@@ -18,38 +18,29 @@ export async function streamScanner(req, res) {
         return res.status(400).json({ error: validatedMessages.error })
     }
 
-    const { sendEvent, signal, finish } = startSseStream(req, res)
+    await streamAgentResponse(req, res, {
+        log: LOG,
+        handler: async ({ sendEvent, signal }) => {
+            const lastMessage = messages.at(-1)?.content ?? ''
+            const routing = await resolveModel({ routingMode, agent: 'scanner', phase: currentPhase, model, reasoningEffort, lastMessage })
 
-    try {
-        const lastMessage = messages.at(-1)?.content ?? ''
-        const routing = await resolveModel({ routingMode, agent: 'scanner', phase: currentPhase, model, reasoningEffort, lastMessage })
+            const result = await scannerAgentService.chatStream({
+                messages,
+                model:           routing.model,
+                editList:        editList && typeof editList === 'object' ? editList : null,
+                reasoningEffort: routing.reasoningEffort,
+                userId:   req.user._id,
+                signal:   signal,
+                onToken:     (text)   => sendEvent('token',     { text }),
+                onTicker:    (symbol) => sendEvent('ticker',    { symbol }),
+                onPhase:     (phase)  => sendEvent('phase',     { phase }),
+                onToolStart: (tool)   => sendEvent('status',    { tool }),
+                onReasoning: (text)   => sendEvent('reasoning', { text }),
+            })
 
-        const result = await scannerAgentService.chatStream({
-            messages,
-            model:           routing.model,
-            editList:        editList && typeof editList === 'object' ? editList : null,
-            reasoningEffort: routing.reasoningEffort,
-            userId:   req.user._id,
-            signal:   signal,
-            onToken:     (text)   => sendEvent('token',     { text }),
-            onTicker:    (symbol) => sendEvent('ticker',    { symbol }),
-            onPhase:     (phase)  => sendEvent('phase',     { phase }),
-            onToolStart: (tool)   => sendEvent('status',    { tool }),
-            onReasoning: (text)   => sendEvent('reasoning', { text }),
-        })
-
-        finish()
-        if (!signal.aborted) {
-            sendEvent('done', { reply: result.reply, scan: result.scan ?? null, phase: result.phase ?? null })
-            res.end()
-        }
-    } catch (err) {
-        finish()
-        if (signal.aborted) return   // client gone — nothing to send
-        logger.error(LOG, 'Scanner stream failed', err)
-        sendEvent('error', { message: 'Streaming failed' })
-        res.end()
-    }
+            return { reply: result.reply, scan: result.scan ?? null, phase: result.phase ?? null }
+        },
+    })
 }
 
 // ─── Scan CRUD ────────────────────────────────────────────────────────────────

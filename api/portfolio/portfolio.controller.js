@@ -4,7 +4,7 @@ import { applyRebalance, snapshotConvictions } from './portfolioRebalance.servic
 import { getPortfolioStateCached, invalidatePortfolioState } from '../../services/portfolioState.service.js'
 import { logger }                from '../../services/logger.service.js'
 import { resolveModel }          from '../../services/modelRouter.service.js'
-import { startSseStream }        from '../_shared/sse.util.js'
+import { streamAgentResponse }   from '../_shared/sse.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { threadService }          from '../../services/thread.service.js'
@@ -23,65 +23,67 @@ export async function streamPortfolio(req, res) {
 
     const validatedAccounts = parseIdeaAccounts(ideaAccounts)
 
-    const { sendEvent, signal, finish } = startSseStream(req, res)
+    await streamAgentResponse(req, res, {
+        log: LOG,
+        handler: async ({ sendEvent, signal }) => {
+            const isReviewMode = req.body?.reviewMode === true
 
-    try {
-        const isReviewMode = req.body?.reviewMode === true
+            // Fetch portfolio state (review mode only) and lifecycle (any mode with a
+            // portfolioId) in parallel — both feed the agent's dynamic context.
+            const [portfolioState, lifecycle, storedMandate, storedThesis] = await Promise.all([
+                (isReviewMode && portfolioId)
+                    ? getPortfolioStateCached(portfolioId, req.user._id).catch(() => null)
+                    : Promise.resolve(null),
+                portfolioId
+                    ? portfolioChatService.getPortfolioLifecycle(portfolioId, req.user._id).catch(() => null)
+                    : Promise.resolve(null),
+                portfolioId
+                    ? portfolioChatService.getMandate(portfolioId, req.user._id).catch(() => null)
+                    : Promise.resolve(null),
+                portfolioId
+                    ? portfolioChatService.getThesis(portfolioId, req.user._id).catch(() => null)
+                    : Promise.resolve(null),
+            ])
 
-        // Fetch portfolio state (review mode only) and lifecycle (any mode with a
-        // portfolioId) in parallel — both feed the agent's dynamic context.
-        const [portfolioState, lifecycle, storedMandate, storedThesis] = await Promise.all([
-            (isReviewMode && portfolioId)
-                ? getPortfolioStateCached(portfolioId, req.user._id).catch(() => null)
-                : Promise.resolve(null),
-            portfolioId
-                ? portfolioChatService.getPortfolioLifecycle(portfolioId, req.user._id).catch(() => null)
-                : Promise.resolve(null),
-            portfolioId
-                ? portfolioChatService.getMandate(portfolioId, req.user._id).catch(() => null)
-                : Promise.resolve(null),
-            portfolioId
-                ? portfolioChatService.getThesis(portfolioId, req.user._id).catch(() => null)
-                : Promise.resolve(null),
-        ])
+            // Carry the mandate forward across turns. During first-time construction there's
+            // no portfolioId yet, so the conversation is persisted to a DRAFT thread keyed by
+            // threadId — that draft's mandate is the durable fallback (survives a reload; the
+            // client re-send is now belt-and-suspenders, not the only source of truth). The
+            // fresh body mandate wins; then the draft; then the stored one (edit/review).
+            const draftThread = (!portfolioId && threadId)
+                ? await threadService.getThread({ threadId, userId: req.user._id }).catch(() => null)
+                : null
 
-        // Carry the mandate forward across turns. During first-time construction there's
-        // no portfolioId yet, so the conversation is persisted to a DRAFT thread keyed by
-        // threadId — that draft's mandate is the durable fallback (survives a reload; the
-        // client re-send is now belt-and-suspenders, not the only source of truth). The
-        // fresh body mandate wins; then the draft; then the stored one (edit/review).
-        const draftThread = (!portfolioId && threadId)
-            ? await threadService.getThread({ threadId, userId: req.user._id }).catch(() => null)
-            : null
+            const bodyMandate = (req.body?.mandate && typeof req.body.mandate === 'object') ? req.body.mandate : null
+            const mandate = bodyMandate ?? draftThread?.mandate ?? storedMandate
 
-        const bodyMandate = (req.body?.mandate && typeof req.body.mandate === 'object') ? req.body.mandate : null
-        const mandate = bodyMandate ?? draftThread?.mandate ?? storedMandate
+            const lastMessage = messages.at(-1)?.content ?? ''
+            const routing = await resolveModel({ routingMode, agent: 'portfolio', phase: currentPhase, model, reasoningEffort, lastMessage })
 
-        const lastMessage = messages.at(-1)?.content ?? ''
-        const routing = await resolveModel({ routingMode, agent: 'portfolio', phase: currentPhase, model, reasoningEffort, lastMessage })
+            const result = await portfolioAgentService.chatStream({
+                messages,
+                ideaAccounts: validatedAccounts,
+                portfolioId:   portfolioId   ?? null,
+                portfolioIdeas: Array.isArray(portfolioIdeas) ? portfolioIdeas : [],
+                portfolioState,
+                lifecycle,
+                mandate,
+                thesis: storedThesis,
+                model:           routing.model,
+                reasoningEffort: routing.reasoningEffort,
+                userId:   req.user._id,
+                signal:   signal,
+                onToken:     (text)   => sendEvent('token',     { text }),
+                onTicker:    (symbol) => sendEvent('ticker',    { symbol }),
+                onPhase:     (phase)  => sendEvent('phase',     { phase }),
+                onToolStart: (tool)   => sendEvent('status',    { tool }),
+                onReasoning: (text)   => sendEvent('reasoning', { text }),
+            })
 
-        const result = await portfolioAgentService.chatStream({
-            messages,
-            ideaAccounts: validatedAccounts,
-            portfolioId:   portfolioId   ?? null,
-            portfolioIdeas: Array.isArray(portfolioIdeas) ? portfolioIdeas : [],
-            portfolioState,
-            lifecycle,
-            mandate,
-            thesis: storedThesis,
-            model:           routing.model,
-            reasoningEffort: routing.reasoningEffort,
-            userId:   req.user._id,
-            signal:   signal,
-            onToken:     (text)   => sendEvent('token',     { text }),
-            onTicker:    (symbol) => sendEvent('ticker',    { symbol }),
-            onPhase:     (phase)  => sendEvent('phase',     { phase }),
-            onToolStart: (tool)   => sendEvent('status',    { tool }),
-            onReasoning: (text)   => sendEvent('reasoning', { text }),
-        })
+            // Post-stream persistence — only when the client is still listening (the
+            // fire-and-forget writes match the previous "after finish, if not aborted" gate).
+            if (signal.aborted) return undefined
 
-        finish()
-        if (!signal.aborted) {
             if (result.mandate && portfolioId) {
                 portfolioChatService.setMandate(portfolioId, req.user._id, result.mandate)
                     .then(r => { if (!r.ok) logger.warn(LOG, 'setMandate returned not-ok, mandate may not be persisted') })
@@ -110,16 +112,10 @@ export async function streamPortfolio(req, res) {
                     subjectType: 'portfolio', mandate: knownMandate ?? null,
                 }).catch(err => logger.warn(LOG, 'construction saveDraft failed', err))
             }
-            sendEvent('done', { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null })
-            res.end()
-        }
-    } catch (err) {
-        finish()
-        if (signal.aborted) return   // client gone — nothing to send
-        logger.error(LOG, 'Portfolio stream failed', err)
-        sendEvent('error', { message: 'Streaming failed' })
-        res.end()
-    }
+
+            return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null }
+        },
+    })
 }
 
 export async function savePortfolioChatState(req, res) {

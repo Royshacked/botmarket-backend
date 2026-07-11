@@ -1,7 +1,6 @@
 import { axlAgentService } from '../../services/axl.agent.service.js'
-import { logger }          from '../../services/logger.service.js'
 import { resolveModel }    from '../../services/modelRouter.service.js'
-import { startSseStream }  from '../_shared/sse.util.js'
+import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages } from '../_shared/parse.util.js'
 
 const LOG = '[axl:controller]'
@@ -16,33 +15,24 @@ export async function streamAxl(req, res) {
     const validated = parseChatMessages(messages)
     if (validated.error) return res.status(400).json({ error: validated.error })
 
-    const { sendEvent, signal, finish } = startSseStream(req, res)
+    await streamAgentResponse(req, res, {
+        log: LOG,
+        handler: async ({ sendEvent, signal }) => {
+            const lastMessage = messages.at(-1)?.content ?? ''
+            const routing = await resolveModel({ routingMode, agent: 'axl', phase: null, model, reasoningEffort, lastMessage })
 
-    try {
-        const lastMessage = messages.at(-1)?.content ?? ''
-        const routing = await resolveModel({ routingMode, agent: 'axl', phase: null, model, reasoningEffort, lastMessage })
+            const result = await axlAgentService.chatStream({
+                messages,
+                model:           routing.model,
+                reasoningEffort: routing.reasoningEffort,
+                userId:  req.user._id,
+                signal:  signal,
+                onToken:     (text) => sendEvent('token',     { text }),
+                onToolStart: (tool) => sendEvent('status',    { tool }),
+                onReasoning: (text) => sendEvent('reasoning', { text }),
+            })
 
-        const result = await axlAgentService.chatStream({
-            messages,
-            model:           routing.model,
-            reasoningEffort: routing.reasoningEffort,
-            userId:  req.user._id,
-            signal:  signal,
-            onToken:     (text) => sendEvent('token',     { text }),
-            onToolStart: (tool) => sendEvent('status',    { tool }),
-            onReasoning: (text) => sendEvent('reasoning', { text }),
-        })
-
-        finish()
-        if (!signal.aborted) {
-            sendEvent('done', { reply: result.reply })
-            res.end()
-        }
-    } catch (err) {
-        finish()
-        if (signal.aborted) return   // client gone — nothing to send
-        logger.error(LOG, 'Axl stream failed', err)
-        sendEvent('error', { message: 'Streaming failed' })
-        res.end()
-    }
+            return { reply: result.reply }
+        },
+    })
 }

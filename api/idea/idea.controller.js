@@ -2,7 +2,7 @@ import { logger }           from '../../services/logger.service.js'
 import { ideaAgentService, emptyAnalysisState } from '../../services/idea.agent.service.js'
 import { brokerService }     from '../broker/broker.service.js'
 import { resolveModel }      from '../../services/modelRouter.service.js'
-import { startSseStream }    from '../_shared/sse.util.js'
+import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
 
 const LOG = '[idea:controller]'
@@ -15,51 +15,42 @@ export async function streamIdea(req, res) {
         return res.status(400).json({ error: parsed.error })
     }
 
-    const { sendEvent, signal, finish } = startSseStream(req, res)
+    await streamAgentResponse(req, res, {
+        log: LOG,
+        handler: async ({ sendEvent, signal }) => {
+            const brokerContext = await _loadBrokerContext(req.user._id)
 
-    try {
-        const brokerContext = await _loadBrokerContext(req.user._id)
+            const { routingMode, currentPhase, model, reasoningEffort } = req.body ?? {}
+            const lastMessage = parsed.messages?.at(-1)?.content ?? parsed.userPrompt ?? ''
+            const routing = await resolveModel({ routingMode, agent: 'idea', phase: currentPhase, model, reasoningEffort, lastMessage })
 
-        const { routingMode, currentPhase, model, reasoningEffort } = req.body ?? {}
-        const lastMessage = parsed.messages?.at(-1)?.content ?? parsed.userPrompt ?? ''
-        const routing = await resolveModel({ routingMode, agent: 'idea', phase: currentPhase, model, reasoningEffort, lastMessage })
+            const result = await ideaAgentService.chatStream({
+                messages:      parsed.messages,
+                userPrompt:    parsed.userPrompt,
+                analysisState: parsed.analysisState ?? emptyAnalysisState(),
+                brokerContext,
+                ideaAccounts:  parsed.ideaAccounts ?? [],
+                model:         routing.model,
+                reasoningEffort: routing.reasoningEffort,
+                userId:        req.user._id,
+                signal:        signal,
+                onToken:       (text)     => sendEvent('token',    { text }),
+                onAsset:       (symbol)   => sendEvent('asset',    { symbol }),
+                onInterval:    (interval) => sendEvent('interval', { interval }),
+                onChart:       (chart)    => sendEvent('chart',    chart),
+                onPhase:       (phase)    => sendEvent('phase',     { phase }),
+                onToolStart:   (tool)     => sendEvent('status',    { tool }),
+                onReasoning:   (text)     => sendEvent('reasoning', { text }),
+            })
 
-        const result = await ideaAgentService.chatStream({
-            messages:      parsed.messages,
-            userPrompt:    parsed.userPrompt,
-            analysisState: parsed.analysisState ?? emptyAnalysisState(),
-            brokerContext,
-            ideaAccounts:  parsed.ideaAccounts ?? [],
-            model:         routing.model,
-            reasoningEffort: routing.reasoningEffort,
-            userId:        req.user._id,
-            signal:        signal,
-            onToken:       (text)     => sendEvent('token',    { text }),
-            onAsset:       (symbol)   => sendEvent('asset',    { symbol }),
-            onInterval:    (interval) => sendEvent('interval', { interval }),
-            onChart:       (chart)    => sendEvent('chart',    chart),
-            onPhase:       (phase)    => sendEvent('phase',     { phase }),
-            onToolStart:   (tool)     => sendEvent('status',    { tool }),
-            onReasoning:   (text)     => sendEvent('reasoning', { text }),
-        })
-
-        finish()
-        if (!signal.aborted) {
-            sendEvent('done', {
+            return {
                 reply:         result.reply,
                 analysisState: result.analysisState,
                 phase:         result.phase ?? null,
                 ...(result.tradeIdea ? { tradeIdea: result.tradeIdea } : {}),
-            })
-            res.end()
-        }
-    } catch (err) {
-        finish()
-        if (signal.aborted) return   // client gone — nothing to send
-        logger.error(LOG, 'Failed to stream idea', err)
-        sendEvent('error', { message: 'Streaming failed' })
-        res.end()
-    }
+            }
+        },
+    })
 }
 
 export async function getIdea(req, res) {

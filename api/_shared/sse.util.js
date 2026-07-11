@@ -8,6 +8,8 @@
 // fully received (Node ≥ ~18), which would abort every stream instantly. res
 // 'close' fires only when the response connection actually closes.
 
+import { logger } from '../../services/logger.service.js'
+
 const HEARTBEAT_MS = 30000
 
 export function startSseStream(req, res) {
@@ -40,4 +42,33 @@ export function startSseStream(req, res) {
     }
 
     return { sendEvent, signal: ac.signal, finish, get finished() { return finished } }
+}
+
+// Run a streaming agent turn with the standard SSE lifecycle every agent controller
+// shares: open the stream, run the handler, and on success `finish()` + emit a `done`
+// (skipped if the client already aborted); on error, `finish()` + emit an `error`
+// (or stay silent if the client is gone). The controller supplies only `handler`,
+// which receives { sendEvent, signal } — it does its own resolveModel + chatStream
+// (wiring token/tool/reasoning events via sendEvent) and RETURNS the `done` payload.
+// Any post-stream side effects belong inside the handler (gate them on !signal.aborted
+// to match the "only when the client is still listening" rule).
+//
+// Body validation that may 4xx must happen in the controller BEFORE calling this — once
+// the SSE headers are flushed we can't send a normal status code.
+export async function streamAgentResponse(req, res, { log, handler }) {
+    const { sendEvent, signal, finish } = startSseStream(req, res)
+    try {
+        const donePayload = await handler({ sendEvent, signal })
+        finish()
+        if (!signal.aborted) {
+            sendEvent('done', donePayload ?? {})
+            res.end()
+        }
+    } catch (err) {
+        finish()
+        if (signal.aborted) return   // client gone — nothing to send
+        logger.error(log, 'stream failed', err)
+        sendEvent('error', { message: 'Streaming failed' })
+        res.end()
+    }
 }
