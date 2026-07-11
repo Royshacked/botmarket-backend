@@ -132,6 +132,35 @@ export async function buildVolumeCtx(id, asset, assetClass, tree, flat, ctx = nu
 // unit in case a source changes. Shared by the structured/touch/volume evaluators.
 export const candleMs = t => (t < 1e12 ? t * 1000 : t)
 
+// ─── Timeout guard ─────────────────────────────────────────────────────────────
+
+// Race a promise against a timeout so a single hung IO call (LLM/vision/price fetch)
+// can't wedge a poll loop forever — without it, an unbounded await keeps `_running`
+// true and every later tick skips. The underlying promise is left to settle on its
+// own (best-effort, not cancellable); the caller just stops waiting. Pure — shared by
+// the Minos and Hermes monitors.
+export function withTimeout(promise, ms) {
+    let t
+    const timeout = new Promise((_, reject) => { t = setTimeout(() => reject(new Error(`check timed out after ${ms}ms`)), ms) })
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(t))
+}
+
+// ─── JSON extraction ───────────────────────────────────────────────────────────
+
+// Walk from the first '{' to its matching '}' and JSON.parse that slice — avoids greedy
+// cross-match bugs when the LLM wraps the object in explanatory prose containing braces.
+// Throws on no-JSON / unclosed (callers catch and retry). Shared by monitor.claude + Hermes.
+export function extractFirstJSON(text) {
+    const start = text.indexOf('{')
+    if (start === -1) throw new Error(`no JSON in response — ${String(text).slice(0, 120)}`)
+    let depth = 0
+    for (let i = start; i < text.length; i++) {
+        if (text[i] === '{') depth++
+        else if (text[i] === '}' && --depth === 0) return JSON.parse(text.slice(start, i + 1))
+    }
+    throw new Error('unclosed JSON object in response')
+}
+
 // ─── LLM yes/no parsing ────────────────────────────────────────────────────────
 
 // Standard lenient parse of an LLM yes/no reply: trim, upper-case, first char 'Y'.

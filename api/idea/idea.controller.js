@@ -15,8 +15,7 @@ export async function streamIdea(req, res) {
         return res.status(400).json({ error: parsed.error })
     }
 
-    const { sendEvent, signal: acSignal, finish } = startSseStream(req, res)
-    const ac = { signal: acSignal }
+    const { sendEvent, signal, finish } = startSseStream(req, res)
 
     try {
         const brokerContext = await _loadBrokerContext(req.user._id)
@@ -34,7 +33,7 @@ export async function streamIdea(req, res) {
             model:         routing.model,
             reasoningEffort: routing.reasoningEffort,
             userId:        req.user._id,
-            signal:        ac.signal,
+            signal:        signal,
             onToken:       (text)     => sendEvent('token',    { text }),
             onAsset:       (symbol)   => sendEvent('asset',    { symbol }),
             onInterval:    (interval) => sendEvent('interval', { interval }),
@@ -45,7 +44,7 @@ export async function streamIdea(req, res) {
         })
 
         finish()
-        if (!ac.signal.aborted) {
+        if (!signal.aborted) {
             sendEvent('done', {
                 reply:         result.reply,
                 analysisState: result.analysisState,
@@ -56,7 +55,7 @@ export async function streamIdea(req, res) {
         }
     } catch (err) {
         finish()
-        if (ac.signal.aborted) return   // client gone — nothing to send
+        if (signal.aborted) return   // client gone — nothing to send
         logger.error(LOG, 'Failed to stream idea', err)
         sendEvent('error', { message: 'Streaming failed' })
         res.end()

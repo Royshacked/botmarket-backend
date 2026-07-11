@@ -79,7 +79,7 @@ services/
                           is `linked` to its artifact (idea/portfolio/scan) on generate.
                           Generalizes portfolio_chats; migrating agents off per-agent chat-state.
 providers/
-  anthropic.provider.js  openai.provider.js            LLMs
+  anthropic.provider.js         LLM chat/streaming (OpenAI SDK is used directly, transcribe only)
   yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / chartImg / ohlcv
   ctrader.provider.js  ctrader.session.provider.js (getTrendbars + trendbarToOHLCV)  ctrader.ws.provider.js
   ibkr.provider.js (retired) / ibkr.gateway.provider.js

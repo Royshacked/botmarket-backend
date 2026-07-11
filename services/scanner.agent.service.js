@@ -1,13 +1,12 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
-import { resolveStreamFn } from './llmModels.js'
 import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
-import { recordUsage }  from './tokenUsage.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, resolveAgentStream } from './agentUtils.js'
+import { buildTagCaptures } from './llmStream.util.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[scannerAgent]'
@@ -161,7 +160,7 @@ export { _normalizeScan, _cleanScore }
 
 async function chatStream({ messages = [], model: requestedModel, editList = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const normalized = _buildMessages(messages)
-    const { model, streamFn, provider } = resolveStreamFn(requestedModel)
+    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
     // Stable cached base + volatile tail: today's date (so "next week" resolves)
     // and, when editing an existing list, that list's current contents so the
@@ -181,8 +180,6 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     let capturedScan  = null
     let capturedPhase = null
 
-    const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
-
     const onScan = (json) => { try { capturedScan = JSON.parse(json) } catch { /* malformed — ignore */ } }
     const onPhaseCapture = (p) => {
         const n = parseInt(p, 10)
@@ -192,20 +189,13 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         }
     }
 
-    // Tag capture set — same tags/order the positional suppressor produced for
-    // this agent: ticker keeps its inner text in the UI; scan_list is captured;
-    // the rest are suppress-only.
-    const tagCaptures = [
-        { open: '<state>',             close: '</state>',             onCapture: null           },
-        { open: '<trade_idea>',        close: '</trade_idea>',        onCapture: null           },
-        { open: '<asset>',             close: '</asset>',             onCapture: null           },
-        { open: '<interval>',          close: '</interval>',          onCapture: null           },
-        { open: '<phase>',             close: '</phase>',             onCapture: onPhaseCapture  },
-        { open: '<ticker>',            close: '</ticker>',            onCapture: onTicker, keepText: true },
-        { open: '<scan_list>',         close: '</scan_list>',         onCapture: onScan         },
-        { open: '<portfolio_mandate>', close: '</portfolio_mandate>', onCapture: null           },
-        { open: '<portfolio_thesis>',  close: '</portfolio_thesis>',  onCapture: null           },
-    ]
+    // All known emit tags suppressed by default; this agent captures phase, ticker
+    // (which keeps its inner text in the UI), and scan_list.
+    const tagCaptures = buildTagCaptures({
+        phase:     onPhaseCapture,
+        ticker:    { onCapture: onTicker, keepText: true },
+        scan_list: onScan,
+    })
 
     const raw = await streamFn({
         model,

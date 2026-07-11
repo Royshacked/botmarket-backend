@@ -14,10 +14,10 @@ export function attach(httpServer) {
     wss = new WebSocketServer({ noServer: true })
 
     httpServer.on('upgrade', (req, socket, head) => {
-        const { pathname, query } = parse(req.url, true)
+        const { pathname } = parse(req.url, true)
         if (pathname !== '/ws/chat') return  // not ours — leave for other upgrade handlers
 
-        const token = _extractToken(req, query)
+        const token = _extractToken(req)
         if (!token) {
             socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
             socket.destroy()
@@ -77,14 +77,13 @@ export function emit(userId, event, data) {
     }
 }
 
-function _extractToken(req, query) {
-    // 1. Cookie (preferred — same name as REST auth middleware: 'token')
+function _extractToken(req) {
+    // Cookie only (same name as REST auth middleware: 'token'). The JWT is NEVER
+    // accepted via a query param — tokens in URLs leak into proxy/access logs,
+    // browser history, and Referer headers. Same-origin WS carries the cookie.
     const cookieHeader = req.headers.cookie ?? ''
     const match = cookieHeader.match(/(?:^|;\s*)token=([^;]+)/)
     if (match) return decodeURIComponent(match[1])
-
-    // 2. Query param fallback (?token=...)
-    if (query?.token) return query.token
 
     return null
 }

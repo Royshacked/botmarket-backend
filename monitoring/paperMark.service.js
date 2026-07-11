@@ -18,7 +18,7 @@
  */
 
 import { getDb }        from '../providers/mongodb.provider.js'
-import { latestMarkPrice,
+import { quoteMapForSymbols,
          dirSign,
          round2 }       from '../api/broker/paperExecution.service.js'
 import { logger }       from '../services/logger.service.js'
@@ -53,8 +53,7 @@ async function _tick() {
         // One price per distinct symbol — many positions can share a symbol. Marking
         // prefers a real-time last quote (equities) and falls back to the candle close,
         // which also seeds the shared quote cache for the client poll + fill engine.
-        const symbols = [...new Set(positions.map(p => p.symbol))]
-        const priceBy = new Map(await Promise.all(symbols.map(async s => [s, await latestMarkPrice(s)])))
+        const priceBy = await quoteMapForSymbols(positions.map(p => p.symbol))
 
         const now  = Date.now()
         const ops  = []

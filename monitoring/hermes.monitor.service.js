@@ -7,6 +7,7 @@ import { userService } from '../api/user/user.service.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry, notifyCallManage } from '../services/tradeNotify.service.js'
+import { withTimeout, extractFirstJSON } from './monitorUtils.js'
 
 // Hermes — the Kairos-call readiness monitor: a self-scheduling readiness loop (KAIROS_PLAN.md,
 // Phase 2). Its own tick, its own collection (`kairos_calls`), sharing NO mutable state with Minos
@@ -52,13 +53,9 @@ function stop() {
     logger.info(LOG, 'Kairos monitor stopped')
 }
 
-// Race a promise against a timeout so a hung await can't wedge the loop. The underlying promise is
-// left to settle on its own (best-effort); the caller just stops waiting on it. Pure — exported for test.
-export function _withTimeout(promise, ms) {
-    let t
-    const timeout = new Promise((_, reject) => { t = setTimeout(() => reject(new Error(`check timed out after ${ms}ms`)), ms) })
-    return Promise.race([promise, timeout]).finally(() => clearTimeout(t))
-}
+// Race a promise against a timeout so a hung await can't wedge the loop. Shared impl lives in
+// monitorUtils (used by Minos too); re-exported here under the historical name for tests.
+export const _withTimeout = withTimeout
 
 // ─── Poll loop ────────────────────────────────────────────────────────────────
 async function _tick() {
@@ -80,6 +77,16 @@ async function _tick() {
         if (!calls.length) return
         logger.info(LOG, `checking ${calls.length} due call(s)`)
         for (const call of calls) {
+            // Claim the call by leasing its next_check_at forward BEFORE assessing. Because
+            // _withTimeout abandons (but can't cancel) a slow _checkCall, a still-running check
+            // whose next_check_at hasn't been persisted yet would otherwise be re-selected by the
+            // next tick and processed a SECOND time concurrently — double-firing readiness/manage
+            // cards. The lease (≥ the check timeout) makes the re-query miss it until the check has
+            // certainly stopped; _checkCall's own _persist overwrites the lease with the real cadence.
+            if (!(await _claimCall(db, call, Date.now()))) {
+                logger.info(LOG, `call ${call.id} already claimed/rescheduled — skipping`)
+                continue
+            }
             try { await _withTimeout(_checkCall(db, call, Date.now(), _deps), CHECK_TIMEOUT_MS) }
             catch (err) { logger.error(LOG, `checkCall failed for ${call.id}:`, err.message) }
         }
@@ -88,6 +95,30 @@ async function _tick() {
     } finally {
         _running = false
     }
+}
+
+// How far forward a claim leases next_check_at. Must be ≥ CHECK_TIMEOUT_MS so a claimed call
+// can't be re-selected until any abandoned (timed-out) check has certainly stopped running.
+const CLAIM_LEASE_MS = CHECK_TIMEOUT_MS
+
+// Atomically claim a due call for this tick by pushing its next_check_at a lease-horizon forward,
+// conditional on it STILL being due (guards against clobbering a fresher schedule). Returns true
+// iff this call won the claim. Idempotent and cheap — one conditional updateOne.
+async function _claimCall(db, call, nowMs) {
+    const nowIso     = new Date(nowMs).toISOString()
+    const leaseUntil = new Date(nowMs + CLAIM_LEASE_MS).toISOString()
+    const res = await db.collection(COLLECTION).updateOne(
+        {
+            id: call.id,
+            status: call.status,
+            $or: [
+                { 'monitor_state.next_check_at': null },
+                { 'monitor_state.next_check_at': { $lte: nowIso } },
+            ],
+        },
+        { $set: { 'monitor_state.next_check_at': leaseUntil } },
+    )
+    return res.modifiedCount === 1
 }
 
 // Orchestrate one call: cheap gate → (only if tripped/expiring) expensive assessment → persist.
@@ -888,7 +919,7 @@ export async function _defaultAssess(call, zone, ctx, _d) {
             messages: [{ role: 'user', content }],
             ...(thinking ?? {}),
         })
-        return _extractJSON(_assessText(msg))
+        return extractFirstJSON(_assessText(msg))
     } catch (err) {
         logger.warn(LOG, `assessment failed for ${call.id}:`, err.message)
         return null
@@ -962,20 +993,10 @@ export async function _defaultAssessPosition(call, ps, ctx, _d) {
             messages: [{ role: 'user', content }],
             ...(thinking ?? {}),
         })
-        return _extractJSON(_assessText(msg))
+        return extractFirstJSON(_assessText(msg))
     } catch (err) {
         logger.warn(LOG, `position assessment failed for ${call.id}:`, err.message)
         return null
     }
 }
 
-function _extractJSON(text) {
-    const start = text.indexOf('{')
-    if (start === -1) throw new Error(`no JSON in assessment — ${text.slice(0, 120)}`)
-    let depth = 0
-    for (let i = start; i < text.length; i++) {
-        if (text[i] === '{') depth++
-        else if (text[i] === '}' && --depth === 0) return JSON.parse(text.slice(start, i + 1))
-    }
-    throw new Error('unclosed JSON in assessment')
-}

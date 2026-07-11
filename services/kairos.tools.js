@@ -1,11 +1,12 @@
-import { getQuote, getTickerAggregates, getEarnings } from '../providers/yahoofinance.provider.js'
-import { fetchChartImage } from '../providers/chartImg.provider.js'
-import { buildStudies } from '../monitoring/evaluators/chart.evaluator.js'
+import { getTickerAggregates } from '../providers/yahoofinance.provider.js'
 import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../monitoring/evaluators/structured.evaluator.js'
 import { sessionStartMs } from './market.service.js'
 import { toolError } from './toolResult.util.js'
-import { COMMON_TOOL_HANDLERS } from './agentUtils.js'
-import { logger } from './logger.service.js'
+import { COMMON_TOOL_HANDLERS, makeToolHandler } from './agentUtils.js'
+import {
+    CANDLE_CFG, aggregateCandles,
+    makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler,
+} from './marketData.tools.js'
 
 // Kairos's market-data toolset. Deliberately its OWN schemas/handlers (not imported from the
 // Idea agent) so Kairos is a self-contained trial with zero blast radius on Idea — but the
@@ -102,60 +103,10 @@ export const KAIROS_TOOLS = [
     },
 ]
 
-// Per timeframe: Yahoo bar spec + candle count + lookback window. `aggregate` (2hr/4hr) fetches
-// native 1hr bars and combines N→1 server-side. Mirrors the Idea agent's proven config.
-const _CANDLE_CFG = {
-    '1min':  { timeSpan: 'minute', multiplier: 1,  count: 60, windowDays: 5   },
-    '5min':  { timeSpan: 'minute', multiplier: 5,  count: 60, windowDays: 10  },
-    '15min': { timeSpan: 'minute', multiplier: 15, count: 50, windowDays: 20  },
-    '30min': { timeSpan: 'minute', multiplier: 30, count: 40, windowDays: 40  },
-    '1hr':   { timeSpan: 'hour',   multiplier: 1,  count: 30, windowDays: 5   },
-    '2hr':   { timeSpan: 'hour',   multiplier: 1,  count: 30, windowDays: 16, aggregate: 2 },
-    '4hr':   { timeSpan: 'hour',   multiplier: 1,  count: 24, windowDays: 24, aggregate: 4 },
-    'day':   { timeSpan: 'day',    multiplier: 1,  count: 40, windowDays: 60  },
-    'week':  { timeSpan: 'week',   multiplier: 1,  count: 24, windowDays: 200 },
-    'month': { timeSpan: 'month',  multiplier: 1,  count: 24, windowDays: 800 },
-}
-
-function _fmtVol(v) {
-    if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M'
-    if (v >= 1_000)     return (v / 1_000).toFixed(0) + 'K'
-    return String(v)
-}
-
-// Aggregate 1hr rows into true 2hr/4hr OHLCV, aligned to end on the newest bar.
-export function _aggregateCandles(rows, groupSize) {
-    if (!Array.isArray(rows) || rows.length === 0) return []
-    const rem     = rows.length % groupSize
-    const aligned = rem ? rows.slice(rem) : rows
-    const out = []
-    for (let i = 0; i < aligned.length; i += groupSize) {
-        const grp = aligned.slice(i, i + groupSize)
-        out.push({
-            timestamp: grp[0].timestamp,
-            open:      grp[0].open,
-            high:      Math.max(...grp.map(c => c.high)),
-            low:       Math.min(...grp.map(c => c.low)),
-            close:     grp[grp.length - 1].close,
-            volume:    grp.reduce((s, c) => s + (c.volume || 0), 0),
-        })
-    }
-    return out
-}
-
-// ─── Chart image cache (paid / rate-limited render) ───────────────────────────
-const _chartCache  = new Map()
-const CHART_TTL_MS = 60 * 1000
-
-async function _cachedChartImage(symbol, timeframe, studies) {
-    const key = `${symbol}|${timeframe}|${studies.map(s => s.name).join(',')}`
-    const hit = _chartCache.get(key)
-    if (hit && Date.now() - hit.at < CHART_TTL_MS) return hit.png
-    const png = await fetchChartImage(symbol, timeframe, studies)
-    if (_chartCache.size > 100) _chartCache.clear()
-    _chartCache.set(key, { at: Date.now(), png })
-    return png
-}
+// Candle config / aggregation / chart caching / the get_quote·candles·earnings·chart
+// handlers are shared with the Idea agent — see services/marketData.tools.js. Kept
+// re-exported under the historical name for any external importer.
+export { aggregateCandles as _aggregateCandles }
 
 // ─── Indicator readout (reuses the monitor's calc*Series math) ─────────────────
 // Parse "ema(20), rsi(14), atr, macd, vwap" → [{ name, period }].
@@ -193,70 +144,32 @@ export function _formatIndicator(name, period, closes, mon, anchorMs = null) {
 }
 
 const _STATIC_HANDLERS = {
-    get_quote: async ({ ticker }) => {
-        try { return await getQuote(ticker) }
-        catch (err) {
-            logger.warn(LOG, `get_quote failed for ${ticker}:`, err.message)
-            return toolError(`Could not fetch quote for ${ticker}: ${err.message}`)
-        }
-    },
+    get_quote:    makeQuoteHandler(LOG),
+    get_candles:  makeCandlesHandler(LOG),
+    get_earnings: makeEarningsHandler(LOG),
 
-    get_candles: async ({ ticker, timeframe }) => {
-        try {
-            const cfg  = _CANDLE_CFG[timeframe] ?? _CANDLE_CFG['day']
-            const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
-            const raw  = await getTickerAggregates(ticker.toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
-            const bars = cfg.aggregate ? _aggregateCandles(raw, cfg.aggregate) : raw
-            const rows = bars.slice(-cfg.count)
-            if (rows.length === 0) return toolError(`No candle data available for ${ticker}`)
+    get_indicators: makeToolHandler('get_indicators', async ({ ticker, timeframe, indicators }) => {
+        const cfg  = CANDLE_CFG[timeframe] ?? CANDLE_CFG['day']
+        const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
+        const raw  = await getTickerAggregates(ticker.toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
+        const bars = cfg.aggregate ? aggregateCandles(raw, cfg.aggregate) : raw
+        if (!bars.length) return toolError(`No candle data available for ${ticker}`)
 
-            const header = `${ticker.toUpperCase()} ${timeframe} — ${rows.length} candles, newest last:\n`
-            const lines  = rows.map(c => {
-                const d = new Date(c.timestamp * 1000).toISOString().slice(0, 16).replace('T', ' ')
-                return `${d}  O:${c.open.toFixed(2)}  H:${c.high.toFixed(2)}  L:${c.low.toFixed(2)}  C:${c.close.toFixed(2)}  V:${_fmtVol(c.volume)}`
-            })
-            return header + lines.join('\n')
-        } catch (err) {
-            logger.warn(LOG, `get_candles failed for ${ticker}:`, err.message)
-            return toolError(`Could not fetch candles for ${ticker}: ${err.message}`)
-        }
-    },
+        const specs = _parseIndicatorSpecs(indicators)
+        if (!specs.length) return toolError('No recognizable indicators. Try "ema(20), rsi(14), atr, vwap, macd".')
 
-    get_earnings: async ({ ticker }) => {
-        try { return await getEarnings(ticker) }
-        catch (err) {
-            logger.warn(LOG, `get_earnings failed for ${ticker}:`, err.message)
-            return toolError(`Could not fetch earnings for ${ticker}: ${err.message}`)
-        }
-    },
+        const closes = bars.map(b => b.close)
+        // Monitor-form candles (t/o/h/l/c/v) for ATR + VWAP; candleMs normalizes the s/ms unit.
+        const mon    = bars.map(b => ({ t: b.timestamp, o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume }))
+        const last   = closes[closes.length - 1]
 
-    get_indicators: async ({ ticker, timeframe, indicators }) => {
-        try {
-            const cfg  = _CANDLE_CFG[timeframe] ?? _CANDLE_CFG['day']
-            const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
-            const raw  = await getTickerAggregates(ticker.toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
-            const bars = cfg.aggregate ? _aggregateCandles(raw, cfg.aggregate) : raw
-            if (!bars.length) return toolError(`No candle data available for ${ticker}`)
-
-            const specs = _parseIndicatorSpecs(indicators)
-            if (!specs.length) return toolError('No recognizable indicators. Try "ema(20), rsi(14), atr, vwap, macd".')
-
-            const closes = bars.map(b => b.close)
-            // Monitor-form candles (t/o/h/l/c/v) for ATR + VWAP; candleMs normalizes the s/ms unit.
-            const mon    = bars.map(b => ({ t: b.timestamp, o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume }))
-            const last   = closes[closes.length - 1]
-
-            // Session-anchored VWAP (equity 09:30 ET, crypto/futures UTC-midnight; class inferred
-            // from the symbol) — same anchor the monitor uses. Intraday-only in effect: on daily+
-            // timeframes the bars pre-date today's session anchor, so VWAP reads n/a.
-            const anchorMs = sessionStartMs(ticker.toUpperCase())
-            const lines = specs.map(s => _formatIndicator(s.name, s.period, closes, mon, anchorMs))
-            return `${ticker.toUpperCase()} ${timeframe} indicators (latest, close ${last != null ? last.toFixed(2) : '—'}):\n${lines.join('\n')}`
-        } catch (err) {
-            logger.warn(LOG, `get_indicators failed for ${ticker}:`, err.message)
-            return toolError(`Could not compute indicators for ${ticker}: ${err.message}`)
-        }
-    },
+        // Session-anchored VWAP (equity 09:30 ET, crypto/futures UTC-midnight; class inferred
+        // from the symbol) — same anchor the monitor uses. Intraday-only in effect: on daily+
+        // timeframes the bars pre-date today's session anchor, so VWAP reads n/a.
+        const anchorMs = sessionStartMs(ticker.toUpperCase())
+        const lines = specs.map(s => _formatIndicator(s.name, s.period, closes, mon, anchorMs))
+        return `${ticker.toUpperCase()} ${timeframe} indicators (latest, close ${last != null ? last.toFixed(2) : '—'}):\n${lines.join('\n')}`
+    }, (err, { ticker }) => `Could not compute indicators for ${ticker}: ${err.message}`, LOG),
 
     ...COMMON_TOOL_HANDLERS,
 }
@@ -267,26 +180,10 @@ const _STATIC_HANDLERS = {
 export function buildKairosToolHandlers(onChart) {
     return {
         ..._STATIC_HANDLERS,
-        get_chart: async ({ ticker, timeframe, indicators = '', show_to_user = false }) => {
-            try {
-                const symbol  = String(ticker || '').toUpperCase()
-                const studies = buildStudies(indicators || '')
-                const png     = await _cachedChartImage(symbol, timeframe, studies)
-
-                if (show_to_user && typeof onChart === 'function') {
-                    try { onChart({ symbol, timeframe, imageBase64: png }) }
-                    catch (err) { logger.warn(LOG, 'onChart emit failed:', err.message) }
-                }
-
-                const studyNames = studies.map(s => s.name).join(', ') || 'EMA20/50'
-                return [
-                    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
-                    { type: 'text',  text: `${symbol} ${timeframe} TradingView chart (studies: ${studyNames}). Read the price structure visually — patterns, false breaks, structure, where price sits vs the overlays.` },
-                ]
-            } catch (err) {
-                logger.warn(LOG, `get_chart failed for ${ticker}/${timeframe}:`, err.message)
-                return toolError(`Could not render chart for ${ticker}: ${err.message}. Use get_candles instead.`)
-            }
-        },
+        get_chart: makeChartHandler({
+            log: LOG,
+            onChart,
+            readText: 'Read the price structure visually — patterns, false breaks, structure, where price sits vs the overlays.',
+        }),
     }
 }

@@ -243,7 +243,8 @@ export class CTraderAdapter extends BrokerAdapter {
     }
 
     /**
-     * Change a working order's price (ProtoOAAmendOrderReq, 2108), keeping its id.
+     * Change a working order's price by CANCEL-then-PLACE (CancelOrder 2108 + NewOrder 2106),
+     * NOT ProtoOAAmendOrderReq — so it returns a NEW orderId (the caller must relink it).
      * Pass exactly one of limitPrice / stopPrice (matching the order's kind).
      */
     async amendOrder(userId, accountId, orderId, { limitPrice, stopPrice } = {}) {
@@ -435,7 +436,7 @@ export class CTraderAdapter extends BrokerAdapter {
     }
 
     /**
-     * Cancel a working (not-yet-filled) order by its orderId (2107) — used to pull a
+     * Cancel a working (not-yet-filled) order by its orderId (CancelOrder, 2108) — used to pull a
      * resting stop-market entry off the book. The broker echoes an ORDER_CANCELLED
      * execution event, which the reconciler ignores (the idea was already parked).
      */

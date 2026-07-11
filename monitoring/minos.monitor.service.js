@@ -27,13 +27,18 @@ import { notifyIdeaEntryConfirm }               from '../services/tradeNotify.se
 import {
     fetchCandles, buildSymbolMap, buildVolumeCtx, brokerCandleCtx,
     hasCumulativeVolume, logCheck, persistConditionStates,
-    resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe,
+    resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe, withTimeout,
 } from './monitorUtils.js'
 
 const LOG        = '[minos.monitor]'
 const COLLECTION = 'ideas'
 
 const POLL_INTERVAL_MS = 60_000
+// A single idea's check awaits provider/LLM/vision IO with no inherent bound. If one
+// hangs, the serial tick loop never returns, `_running` stays true, and the monitor
+// dies silently until restart. Bounding each check lets a hung one reject so the loop
+// recovers on the next tick. Kept under the poll interval so a timeout clears first.
+const CHECK_TIMEOUT_MS = 45_000
 
 // In-memory: ideaId → timestamp of last check (resets on restart — fine for MVP)
 const _lastChecked = new Map()
@@ -84,6 +89,11 @@ async function _tick() {
             return
         }
 
+        // Evict stale check-timers (ideas closed/deleted since the last tick) so
+        // _lastChecked stays bounded over the process lifetime.
+        const liveIds = new Set((ideas ?? []).map(i => i.id))
+        for (const id of _lastChecked.keys()) if (!liveIds.has(id)) _lastChecked.delete(id)
+
         await _marketSweep(db)
         await checkPortfolioReviews().catch(err => logger.error(LOG, 'Portfolio review check failed', err.message))
 
@@ -91,7 +101,8 @@ async function _tick() {
         logger.info(LOG, `Checking ${ideas.length} idea(s) (looking + long + short)`)
 
         for (const idea of ideas) {
-            await _checkIdea(db, idea)
+            try { await withTimeout(_checkIdea(db, idea), CHECK_TIMEOUT_MS) }
+            catch (err) { logger.error(LOG, `Idea check timed out/failed for ${idea.id}:`, err.message) }
         }
     } finally {
         _running = false

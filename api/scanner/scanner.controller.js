@@ -6,6 +6,7 @@ import { resolveModel }        from '../../services/modelRouter.service.js'
 import { startSseStream }      from '../_shared/sse.util.js'
 import { parseChatMessages }   from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
+import { reasonToStatus }      from '../_shared/reason.util.js'
 
 const LOG = '[scanner:controller]'
 
@@ -17,8 +18,7 @@ export async function streamScanner(req, res) {
         return res.status(400).json({ error: validatedMessages.error })
     }
 
-    const { sendEvent, signal: acSignal, finish } = startSseStream(req, res)
-    const ac = { signal: acSignal }
+    const { sendEvent, signal, finish } = startSseStream(req, res)
 
     try {
         const lastMessage = messages.at(-1)?.content ?? ''
@@ -30,7 +30,7 @@ export async function streamScanner(req, res) {
             editList:        editList && typeof editList === 'object' ? editList : null,
             reasoningEffort: routing.reasoningEffort,
             userId:   req.user._id,
-            signal:   ac.signal,
+            signal:   signal,
             onToken:     (text)   => sendEvent('token',     { text }),
             onTicker:    (symbol) => sendEvent('ticker',    { symbol }),
             onPhase:     (phase)  => sendEvent('phase',     { phase }),
@@ -39,13 +39,13 @@ export async function streamScanner(req, res) {
         })
 
         finish()
-        if (!ac.signal.aborted) {
+        if (!signal.aborted) {
             sendEvent('done', { reply: result.reply, scan: result.scan ?? null, phase: result.phase ?? null })
             res.end()
         }
     } catch (err) {
         finish()
-        if (ac.signal.aborted) return   // client gone — nothing to send
+        if (signal.aborted) return   // client gone — nothing to send
         logger.error(LOG, 'Scanner stream failed', err)
         sendEvent('error', { message: 'Streaming failed' })
         res.end()
@@ -84,7 +84,7 @@ export async function updateScan(req, res) {
         const { scan } = req.body ?? {}
         if (!scan || typeof scan !== 'object') return res.status(400).json({ error: 'scan patch is required' })
         const result = await scanService.updateScan(id, scan, req.user._id, req.user.isAdmin)
-        if (!result.ok) return res.status(result.reason === 'forbidden' ? 403 : 404).json({ error: result.reason || 'Failed to update' })
+        if (!result.ok) return res.status(reasonToStatus(result.reason, 404)).json({ error: result.reason || 'Failed to update' })
         res.json({ scan: result.scan })
     } catch (err) {
         logger.error(LOG, 'updateScan failed', err)
@@ -96,7 +96,7 @@ export async function removeScan(req, res) {
     try {
         const { id } = req.params
         const result = await scanService.deleteScan(id, req.user._id, req.user.isAdmin)
-        if (!result.ok) return res.status(result.reason === 'forbidden' ? 403 : 404).json({ error: result.reason || 'Failed to delete' })
+        if (!result.ok) return res.status(reasonToStatus(result.reason, 404)).json({ error: result.reason || 'Failed to delete' })
         res.json({ ok: true })
     } catch (err) {
         logger.error(LOG, 'removeScan failed', err)

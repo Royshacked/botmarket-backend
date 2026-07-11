@@ -85,6 +85,14 @@ export async function latestPrice(symbol) {
     return (await latestQuote(symbol))?.c ?? null
 }
 
+/** Map of symbol → latest mark price for the distinct symbols given (one fetch per symbol).
+ *  Shared by the fill engine, the mark loop, and equity mark-to-market. */
+export async function quoteMapForSymbols(symbols) {
+    const distinct = [...new Set(symbols)]
+    const entries  = await Promise.all(distinct.map(async s => [s, await latestMarkPrice(s)]))
+    return new Map(entries)
+}
+
 // Symbols Yahoo can't price (crypto / futures / forex / broker symbols) — cached with
 // a retry TTL so we don't re-hit Yahoo every mark tick for a symbol it can't resolve,
 // but a transient miss on a real equity re-tries later instead of downgrading forever.
@@ -150,6 +158,7 @@ export async function openPosition({ userId, accountId, symbol, direction, qty, 
 
     setImmediate(() => executionBus.emit('execution', {
         broker:    'paper',
+        simulated: true,   // idealess fills are still captured to trade history (reconciler flag)
         type:      'position.opened',
         userId,
         accountId,
@@ -201,7 +210,7 @@ export async function reducePosition({ userId, positionId, qty, price, reason = 
     if (remaining > 0) {
         await paperBrokerService.updatePosition(userId, positionId, { qty: remaining })
         executionBus.emit('execution', {
-            broker: 'paper', type: 'position.reduced', userId, accountId: pos.accountId,
+            broker: 'paper', simulated: true, type: 'position.reduced', userId, accountId: pos.accountId,
             positionId, ...(orderId != null && { orderId }),
             symbol: pos.symbol, direction: pos.direction,
             quantity: closeQty, price: exitPrice, pnl: round2(net),
@@ -216,7 +225,7 @@ export async function reducePosition({ userId, positionId, qty, price, reason = 
     })
     await _cancelClosingOrders(userId, positionId, orderId)
     executionBus.emit('execution', {
-        broker: 'paper', type: 'position.closed', userId, accountId: pos.accountId,
+        broker: 'paper', simulated: true, type: 'position.closed', userId, accountId: pos.accountId,
         positionId, ...(orderId != null && { orderId }),
         symbol: pos.symbol, direction: pos.direction,
         price: exitPrice, pnl: round2(net),
@@ -250,8 +259,7 @@ export async function computeEquity(userId, accountId) {
     let unrealized = 0
     let marginUsed = 0
     if (positions.length) {
-        const symbols = [...new Set(positions.map(p => p.symbol))]
-        const priceBy = new Map(await Promise.all(symbols.map(async s => [s, await latestMarkPrice(s)])))
+        const priceBy = await quoteMapForSymbols(positions.map(p => p.symbol))
         for (const p of positions) {
             marginUsed += Math.abs(p.avgPrice * p.qty)   // exposure at entry price (live qty)
             // Fall back to the last stored mark so equity doesn't jump when a quote misses.
@@ -286,4 +294,4 @@ async function _cancelClosingOrders(userId, positionId, exceptOrderId = null) {
     }
 }
 
-export const paperExecutionService = { openPosition, reducePosition, computeEquity, latestPrice, latestMarkPrice, applySpread, dirSign, round2 }
+export const paperExecutionService = { openPosition, reducePosition, computeEquity, latestPrice, latestMarkPrice, quoteMapForSymbols, applySpread, dirSign, round2 }

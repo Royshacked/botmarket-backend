@@ -79,15 +79,10 @@ export class ManualAdapter extends PaperAdapter {
         }))
     }
 
-    // Scope to manual positions: when no accountId is given (generic view dispatch), filter
-    // by account mode so paper and manual positions never leak into each other's view.
+    // Manual positions only — the shared core (PaperAdapter) filters by this adapter's mode
+    // so paper and manual positions never leak into each other's view.
     async getPositions(userId, accountId) {
-        const all = await paperBrokerService.listPositions(userId, { status: 'open', accountId })
-        const positions = accountId
-            ? all
-            : all.filter(p => paperBrokerService.accountMode(p.accountId) === MANUAL)
-        const priceBy = await this._priceMap(positions.map(p => p.symbol))
-        return positions.map(p => this._toBrokerPosition(p, priceBy.get(p.symbol)))
+        return this._getPositionsForMode(userId, accountId, MANUAL)
     }
 
     // ── Trading guards — the manual lifecycle is user-confirmed, never broker-placed ──

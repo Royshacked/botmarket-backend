@@ -1,8 +1,7 @@
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { resolveStreamFn } from './llmModels.js'
-import { recordUsage } from './tokenUsage.service.js'
-import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, resolveAgentStream } from './agentUtils.js'
+import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS, buildKairosToolHandlers } from './kairos.tools.js'
 import { kairosService } from '../api/kairos/kairos.service.js'
 import { toBrokerSymbol } from './brokerSymbol.service.js'
@@ -36,20 +35,15 @@ async function chatStream({
     model: requestedModel, reasoningEffort, userId,
     onToken, onChart, onToolStart, onReasoning, onPhase, signal,
 }) {
-    const { model, streamFn, provider } = resolveStreamFn(requestedModel)
+    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
-    // get_chart returns an image tool_result only the Anthropic provider renders — gate the
-    // tool (and its UI emit) to Anthropic, and tell the prompt it's absent otherwise.
-    const isAnthropic  = provider === 'anthropic'
-    const tools        = isAnthropic ? KAIROS_TOOLS : KAIROS_TOOLS.filter(t => t.name !== 'get_chart')
-    const toolHandlers = buildKairosToolHandlers(isAnthropic ? onChart : null)
+    const tools        = KAIROS_TOOLS
+    const toolHandlers = buildKairosToolHandlers(onChart)
 
-    const systemPrompt  = _buildSystemPrompt(chatState, accounts, { hasChartTool: isAnthropic })
+    const systemPrompt  = _buildSystemPrompt(chatState, accounts)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
     logger.info(LOG, 'chatStream start', { userPrompt, messageCount: builtMessages.length, model, provider, accounts: accounts?.length ?? 0 })
-
-    const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
 
     // The model emits <phase>N</phase> (1–5) at the start of each turn; capture it for the UI
     // progress + next-turn model routing. <call> is suppressed from the token stream and parsed
@@ -59,10 +53,9 @@ async function chatStream({
         const n = parseInt(p, 10)
         if (n >= 1 && n <= 5) { capturedPhase = n; onPhase?.(n) }
     }
-    const tagCaptures = [
-        { open: '<phase>', close: '</phase>', onCapture: onPhaseCapture },
-        { open: '<call>',  close: '</call>',  onCapture: null },
-    ]
+    // All known emit tags suppressed by default; this agent captures phase. <call> is
+    // suppressed from the token stream and parsed from `raw` afterward.
+    const tagCaptures = buildTagCaptures({ phase: onPhaseCapture })
 
     const raw = await streamFn({
         model, promptOrMessages: builtMessages, systemPrompt, tools, toolHandlers,
@@ -157,19 +150,15 @@ export async function _finalizeCall(call, { userId = null, accounts = [], mainAc
 }
 
 // ─── Prompt / messages ────────────────────────────────────────────────────────
-function _buildSystemPrompt(chatState, accounts, { hasChartTool = true } = {}) {
+function _buildSystemPrompt(chatState, accounts) {
     const asset = chatState?.active_asset || 'none'
     const draft = chatState?.draft
         ? `\nDraft call so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
         : ''
 
-    const chartNote = hasChartTool
-        ? ''
-        : '\n\nNOTE: get_chart is NOT available this session — do your visual read from get_candles and web_search, and never claim to see a chart image.'
-
     const dynamicContext = `---
 CONVERSATION CONTEXT:
-Active asset: ${asset}${draft}${_buildAccountsSection(accounts)}${chartNote}`
+Active asset: ${asset}${draft}${_buildAccountsSection(accounts)}`
 
     return [
         { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },

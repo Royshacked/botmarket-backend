@@ -6,6 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { logger } from '../services/logger.service.js'
+import { extractFirstJSON } from './monitorUtils.js'
 
 const LOG    = '[monitor.claude]'
 const MODEL  = 'claude-haiku-4-5-20251001'
@@ -23,20 +24,7 @@ export async function claudeJSON(systemPrompt, userMessage) {
         messages:   [{ role: 'user', content: userMessage }],
     })
     const text  = msg.content[0]?.text ?? ''
-    return _extractJSON(text)
-}
-
-// Walk from the first '{' to its matching '}' to avoid greedy cross-match bugs
-// when Claude includes brace characters in surrounding explanation text.
-function _extractJSON(text) {
-    const start = text.indexOf('{')
-    if (start === -1) throw new Error(`claudeJSON: no JSON in response — ${text}`)
-    let depth = 0
-    for (let i = start; i < text.length; i++) {
-        if (text[i] === '{') depth++
-        else if (text[i] === '}' && --depth === 0) return JSON.parse(text.slice(start, i + 1))
-    }
-    throw new Error(`claudeJSON: unclosed JSON object in response — ${text}`)
+    return extractFirstJSON(text)
 }
 
 /**

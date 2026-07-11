@@ -3,8 +3,21 @@ import { getShortInterest, getOptionsContext } from '../providers/yahoofinance.p
 import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError } from './toolResult.util.js'
 import { logger } from './logger.service.js'
+import { resolveStreamFn } from './llmModels.js'
+import { recordUsage } from './tokenUsage.service.js'
 
 const LOG = '[agentUtils]'
+
+// ─── Streaming setup ──────────────────────────────────────────────────────────
+// Resolve a requested model to its provider streaming fn + provider id, and build
+// the standard per-request usage recorder (a no-op when there's no userId). Every
+// streaming agent repeats these two lines verbatim; centralizing them means a new
+// agent (e.g. Axl) can't silently diverge on model routing or usage accounting.
+export function resolveAgentStream(requestedModel, userId) {
+    const { model, streamFn, provider } = resolveStreamFn(requestedModel)
+    const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
+    return { model, streamFn, provider, onUsage }
+}
 
 // ─── Tool handler wrapper ─────────────────────────────────────────────────────
 // Wrap a raw handler `fn` in the standard try/catch shape: on throw, warn-log the
@@ -26,27 +39,21 @@ export function makeToolHandler(name, fn, errorMessage, log = LOG) {
 }
 
 export const COMMON_TOOL_HANDLERS = {
-    get_short_interest: async ({ ticker }) => {
-        try { return await getShortInterest(ticker) }
-        catch (err) {
-            logger.warn(LOG, `get_short_interest failed for ${ticker}:`, err.message)
-            return toolError(`Could not fetch short interest for ${ticker}: ${err.message}`)
-        }
-    },
-    get_options_context: async ({ ticker }) => {
-        try { return await getOptionsContext(ticker) }
-        catch (err) {
-            logger.warn(LOG, `get_options_context failed for ${ticker}:`, err.message)
-            return toolError(`Could not fetch options context for ${ticker}: ${err.message}`)
-        }
-    },
-    get_derivatives_context: async ({ symbol }) => {
-        try { return await getDerivativesContext(symbol) }
-        catch (err) {
-            logger.warn(LOG, `get_derivatives_context failed for ${symbol}:`, err.message)
-            return toolError(`Could not fetch derivatives context for ${symbol}: ${err.message}`)
-        }
-    },
+    get_short_interest: makeToolHandler(
+        'get_short_interest',
+        ({ ticker }) => getShortInterest(ticker),
+        (err, { ticker }) => `Could not fetch short interest for ${ticker}: ${err.message}`,
+    ),
+    get_options_context: makeToolHandler(
+        'get_options_context',
+        ({ ticker }) => getOptionsContext(ticker),
+        (err, { ticker }) => `Could not fetch options context for ${ticker}: ${err.message}`,
+    ),
+    get_derivatives_context: makeToolHandler(
+        'get_derivatives_context',
+        ({ symbol }) => getDerivativesContext(symbol),
+        (err, { symbol }) => `Could not fetch derivatives context for ${symbol}: ${err.message}`,
+    ),
 }
 
 export function normalizeMessages(messages, maxCount) {

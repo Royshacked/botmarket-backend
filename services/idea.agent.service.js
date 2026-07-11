@@ -1,15 +1,12 @@
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { callAnthropicWithTools } from '../providers/anthropic.provider.js'
-import { resolveStreamFn, DEFAULT_MODEL } from './llmModels.js'
-import { recordUsage } from './tokenUsage.service.js'
-import { getQuote, getTickerAggregates, getEarnings } from '../providers/yahoofinance.provider.js'
+import { DEFAULT_MODEL } from './llmModels.js'
 import { getSecFilings } from '../providers/sec.provider.js'
-import { fetchChartImage } from '../providers/chartImg.provider.js'
-import { buildStudies } from '../monitoring/evaluators/chart.evaluator.js'
 import { logger } from './logger.service.js'
-import { toolError } from './toolResult.util.js'
-import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, makeToolHandler, resolveAgentStream } from './agentUtils.js'
+import { buildTagCaptures } from './llmStream.util.js'
+import { makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler } from './marketData.tools.js'
 import { _parseResponse, emptyAnalysisState } from './idea.stateParser.js'
 
 // emptyAnalysisState lives in idea.stateParser.js (with the response parser it
@@ -138,155 +135,31 @@ const TOOLS = [
     },
 ]
 
-// Per timeframe: Yahoo bar spec + how many candles to return + lookback window.
-// `aggregate` (2hr/4hr) means fetch native 1hr bars and combine N→1 server-side,
-// since Yahoo has no native 2hr/4hr. windowDays respects Yahoo's intraday history
-// limits (1min ≤ 7d, 5/15/30min ≤ 60d, 1hr ≤ 730d); extra lookback is just sliced
-// off, so it only needs to be a safe upper bound that captures `count` bars.
-const _CANDLE_CFG = {
-    '1min':  { timeSpan: 'minute', multiplier: 1,  count: 60, windowDays: 5   },
-    '5min':  { timeSpan: 'minute', multiplier: 5,  count: 60, windowDays: 10  },
-    '15min': { timeSpan: 'minute', multiplier: 15, count: 50, windowDays: 20  },
-    '30min': { timeSpan: 'minute', multiplier: 30, count: 40, windowDays: 40  },
-    '1hr':   { timeSpan: 'hour',   multiplier: 1,  count: 30, windowDays: 5   },
-    '2hr':   { timeSpan: 'hour',   multiplier: 1,  count: 30, windowDays: 16, aggregate: 2 },
-    '4hr':   { timeSpan: 'hour',   multiplier: 1,  count: 24, windowDays: 24, aggregate: 4 },
-    'day':   { timeSpan: 'day',    multiplier: 1,  count: 40, windowDays: 60  },
-    'week':  { timeSpan: 'week',   multiplier: 1,  count: 24, windowDays: 200 },
-    'month': { timeSpan: 'month',  multiplier: 1,  count: 24, windowDays: 800 },
-}
-
-function _fmtVol(v) {
-    if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M'
-    if (v >= 1_000)     return (v / 1_000).toFixed(0) + 'K'
-    return String(v)
-}
-
-// Yahoo offers no native 2hr/4hr interval, so get_candles fetches 1hr bars and
-// aggregates them into true 2hr/4hr OHLCV here — deterministic and exact, rather
-// than asking the model to mentally group 1hr rows. Groups are aligned to end
-// on the newest bar (any oldest partial group is dropped).
-function _aggregateCandles(rows, groupSize) {
-    if (!Array.isArray(rows) || rows.length === 0) return []
-    const rem     = rows.length % groupSize
-    const aligned = rem ? rows.slice(rem) : rows
-    const out = []
-    for (let i = 0; i < aligned.length; i += groupSize) {
-        const grp = aligned.slice(i, i + groupSize)
-        out.push({
-            timestamp: grp[0].timestamp,
-            open:      grp[0].open,
-            high:      Math.max(...grp.map(c => c.high)),
-            low:       Math.min(...grp.map(c => c.low)),
-            close:     grp[grp.length - 1].close,
-            volume:    grp.reduce((s, c) => s + (c.volume || 0), 0),
-        })
-    }
-    return out
-}
-
+// Candle config / aggregation / chart caching / the get_quote·candles·earnings·chart
+// handlers are shared with Kairos — see services/marketData.tools.js.
 const TOOL_HANDLERS = {
-    get_quote: async ({ ticker }) => {
-        try {
-            return await getQuote(ticker)
-        } catch (err) {
-            logger.warn(LOG, `get_quote failed for ${ticker}:`, err.message)
-            return toolError(`Could not fetch quote for ${ticker}: ${err.message}`)
-        }
-    },
+    get_quote:    makeQuoteHandler(LOG),
+    get_candles:  makeCandlesHandler(LOG),
+    get_earnings: makeEarningsHandler(LOG),
 
-    get_candles: async ({ ticker, timeframe }) => {
-        try {
-            const cfg  = _CANDLE_CFG[timeframe] ?? _CANDLE_CFG['day']
-            const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
-            const raw  = await getTickerAggregates(ticker.toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
-            // Yahoo has no native 2hr/4hr — fetch 1hr bars and aggregate N→1 here
-            // so the LLM reads real OHLCV, not hand-grouped rows.
-            const bars = cfg.aggregate ? _aggregateCandles(raw, cfg.aggregate) : raw
-            const rows = bars.slice(-cfg.count)
-            if (rows.length === 0) return toolError(`No candle data available for ${ticker}`)
-
-            const header = `${ticker.toUpperCase()} ${timeframe} — ${rows.length} candles, newest last:\n`
-            const lines  = rows.map(c => {
-                const d = new Date(c.timestamp * 1000).toISOString().slice(0, 16).replace('T', ' ')
-                return `${d}  O:${c.open.toFixed(2)}  H:${c.high.toFixed(2)}  L:${c.low.toFixed(2)}  C:${c.close.toFixed(2)}  V:${_fmtVol(c.volume)}`
-            })
-            return header + lines.join('\n')
-        } catch (err) {
-            logger.warn(LOG, `get_candles failed for ${ticker}:`, err.message)
-            return toolError(`Could not fetch candles for ${ticker}: ${err.message}`)
-        }
-    },
-
-    get_earnings: async ({ ticker }) => {
-        try {
-            return await getEarnings(ticker)
-        } catch (err) {
-            logger.warn(LOG, `get_earnings failed for ${ticker}:`, err.message)
-            return toolError(`Could not fetch earnings for ${ticker}: ${err.message}`)
-        }
-    },
-
-    get_sec_filings: async ({ ticker }) => {
-        try {
-            return await getSecFilings(ticker)
-        } catch (err) {
-            logger.warn(LOG, `get_sec_filings failed for ${ticker}:`, err.message)
-            return toolError(`Could not fetch SEC filings for ${ticker}: ${err.message}`)
-        }
-    },
+    get_sec_filings: makeToolHandler(
+        'get_sec_filings',
+        ({ ticker }) => getSecFilings(ticker),
+        (err, { ticker }) => `Could not fetch SEC filings for ${ticker}: ${err.message}`,
+        LOG,
+    ),
 
     ...COMMON_TOOL_HANDLERS,
 }
 
-// ─── Chart image (vision) ─────────────────────────────────────────────────────
-// get_chart renders an actual TradingView chart and hands it to the LLM as an
-// image so the agent can do true visual TA (patterns, structure, indicator
-// geometry) instead of eyeballing OHLCV rows. Renders are cached briefly by
-// symbol+timeframe+studies — chart-img is paid / rate-limited and the agent may
-// request the same view repeatedly (e.g. internal check, then again to show it).
-const _chartCache  = new Map()   // key -> { at, png }
-const CHART_TTL_MS = 60 * 1000   // intraday views go stale fast; 60s is plenty within a chat
-
-async function _cachedChartImage(symbol, timeframe, studies) {
-    const key = `${symbol}|${timeframe}|${studies.map(s => s.name).join(',')}`
-    const hit = _chartCache.get(key)
-    if (hit && Date.now() - hit.at < CHART_TTL_MS) return hit.png
-    const png = await fetchChartImage(symbol, timeframe, studies)
-    if (_chartCache.size > 100) _chartCache.clear()
-    _chartCache.set(key, { at: Date.now(), png })
-    return png
-}
-
-// Build the per-request tool handler map. The static handlers (get_quote /
-// get_candles) are shared; get_chart closes over onChart so it can surface the
-// rendered chart to the user's chat when the agent flags show_to_user. Pass
-// onChart = null (non-stream path or non-Anthropic provider) to keep get_chart
-// model-only — the image still reaches the LLM, it just isn't shown to the user.
+// Build the per-request tool handler map. get_chart closes over onChart so it can
+// surface the rendered chart to the user's chat when the agent flags show_to_user;
+// pass onChart = null (non-stream path) to keep get_chart model-only — the image
+// still reaches the LLM, it just isn't shown to the user.
 function _buildToolHandlers(onChart) {
     return {
         ...TOOL_HANDLERS,
-        get_chart: async ({ ticker, timeframe, indicators = '', show_to_user = false }) => {
-            try {
-                const symbol  = String(ticker || '').toUpperCase()
-                const studies = buildStudies(indicators || '')
-                const png     = await _cachedChartImage(symbol, timeframe, studies)
-
-                if (show_to_user && typeof onChart === 'function') {
-                    try { onChart({ symbol, timeframe, imageBase64: png }) }
-                    catch (err) { logger.warn(LOG, 'onChart emit failed:', err.message) }
-                }
-
-                const studyNames = studies.map(s => s.name).join(', ') || 'EMA20/50'
-                return [
-                    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
-                    { type: 'text',  text: `${symbol} ${timeframe} TradingView chart (studies: ${studyNames}). Analyze the price structure visually.` },
-                ]
-            } catch (err) {
-                logger.warn(LOG, `get_chart failed for ${ticker}/${timeframe}:`, err.message)
-                return toolError(`Could not render chart for ${ticker}: ${err.message}. Use get_candles instead.`)
-            }
-        },
+        get_chart: makeChartHandler({ log: LOG, onChart, readText: 'Analyze the price structure visually.' }),
     }
 }
 
@@ -325,17 +198,12 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
 }
 
 async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, signal }) {
-    const { model, streamFn, provider } = resolveStreamFn(requestedModel)
+    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
-    // get_chart returns an image tool_result, which only the Anthropic provider
-    // renders — gate the tool (and its UI emit) to Anthropic so other providers
-    // never receive an image block they can't handle. The prompt is told the
-    // tool is absent (hasChartTool) so it doesn't instruct the model to call it.
-    const isAnthropic = provider === 'anthropic'
-    const tools        = isAnthropic ? TOOLS : TOOLS.filter(t => t.name !== 'get_chart')
-    const toolHandlers = _buildToolHandlers(isAnthropic ? onChart : null)
+    const tools        = TOOLS
+    const toolHandlers = _buildToolHandlers(onChart)
 
-    const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts, { hasChartTool: isAnthropic })
+    const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts)
     const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
 
     logger.info(LOG, 'chatStream start', {
@@ -345,8 +213,6 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
         model,
         provider,
     })
-
-    const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
 
     let capturedPhase = null
 
@@ -358,18 +224,10 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
         }
     }
 
-    // Tag capture set for the tag suppressor — same tags/order the positional
-    // suppressor produced for this agent (state, trade_idea, asset, interval,
-    // phase, portfolio_mandate, portfolio_thesis — the last two suppress-only).
-    const tagCaptures = [
-        { open: '<state>',             close: '</state>',             onCapture: null           },
-        { open: '<trade_idea>',        close: '</trade_idea>',        onCapture: null           },
-        { open: '<asset>',             close: '</asset>',             onCapture: onAsset        },
-        { open: '<interval>',          close: '</interval>',          onCapture: onInterval     },
-        { open: '<phase>',             close: '</phase>',             onCapture: onPhaseCapture  },
-        { open: '<portfolio_mandate>', close: '</portfolio_mandate>', onCapture: null           },
-        { open: '<portfolio_thesis>',  close: '</portfolio_thesis>',  onCapture: null           },
-    ]
+    // All known emit tags are suppressed by default (buildTagCaptures); this agent
+    // captures asset/interval/phase. Everything else is suppress-only so no stray
+    // tag reaches the UI.
+    const tagCaptures = buildTagCaptures({ asset: onAsset, interval: onInterval, phase: onPhaseCapture })
 
     const raw = await streamFn({
         model,
@@ -398,7 +256,7 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
     return { reply, analysisState: updatedState, phase: capturedPhase, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = [], { hasChartTool = true } = {}) {
+function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = []) {
     const asset   = analysisState?.structured_state?.active_asset || 'none'
     const summary = analysisState?.recent_chat_summary || 'No prior context.'
     const pt      = analysisState?.structured_state?.pending_trade
@@ -409,22 +267,14 @@ function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = [], { h
         ? `\nCurrent pending trade (carry all set fields forward — only update what changed):\n${JSON.stringify(pt, null, 2)}`
         : ''
 
-    // get_chart is only wired on the Anthropic provider; on others it's stripped
-    // from the tool list. Neutralize the base prompt's get_chart instructions
-    // here (volatile tail) so the model isn't told to call a tool it lacks.
-    const chartNote = hasChartTool
-        ? ''
-        : '\n\nNOTE: get_chart is NOT available in this session — ignore every instruction above about rendering or looking at a chart image. Do your visual/structural read from get_candles and web_search instead, and never claim to see a chart.'
-
     // Split into a stable base (the instructions — byte-identical every request)
     // and a volatile context tail. cache_control on the base lets Anthropic cache
     // the tools+instructions prefix across turns (and across users), so only the
-    // short tail is reprocessed each request. Returned as system content blocks;
-    // the OpenAI provider flattens this array back to a plain string.
+    // short tail is reprocessed each request. Returned as system content blocks.
     const dynamicContext = `---
 CONVERSATION CONTEXT:
 ${summary}
-Active asset: ${asset}${stateSection}${_buildBrokerSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts)}${chartNote}`
+Active asset: ${asset}${stateSection}${_buildBrokerSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts)}`
 
     return [
         { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },

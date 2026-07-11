@@ -46,6 +46,9 @@ const PHASE_TABLES = {
         4: { model: SONNET, reasoningEffort: 'low' },  // trigger — price-action patterns
         5: { model: SONNET, reasoningEffort: 'off' },  // size/account + emit call
     },
+    // Axl is a single-mode agent (no phases) — intentionally empty so it resolves to
+    // DEFAULT_ROUTE. Present here so the omission reads as deliberate, not a missing table.
+    axl: {},
 }
 
 const _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -68,7 +71,7 @@ Output format: {"model":"haiku"|"sonnet","reasoning":"off"|"low"}`
  * Resolve model and reasoningEffort for the current turn.
  * @param {object} opts
  * @param {'manual'|'auto'|'classifier'} opts.routingMode
- * @param {'idea'|'portfolio'|'scanner'} opts.agent
+ * @param {'idea'|'portfolio'|'scanner'|'kairos'|'axl'} opts.agent
  * @param {number|null} opts.phase  - phase from the previous turn's response
  * @param {string} [opts.model]     - manual mode: explicit model id
  * @param {string} [opts.reasoningEffort] - manual mode: explicit effort

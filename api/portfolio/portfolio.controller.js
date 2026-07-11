@@ -23,8 +23,7 @@ export async function streamPortfolio(req, res) {
 
     const validatedAccounts = parseIdeaAccounts(ideaAccounts)
 
-    const { sendEvent, signal: acSignal, finish } = startSseStream(req, res)
-    const ac = { signal: acSignal }
+    const { sendEvent, signal, finish } = startSseStream(req, res)
 
     try {
         const isReviewMode = req.body?.reviewMode === true
@@ -73,7 +72,7 @@ export async function streamPortfolio(req, res) {
             model:           routing.model,
             reasoningEffort: routing.reasoningEffort,
             userId:   req.user._id,
-            signal:   ac.signal,
+            signal:   signal,
             onToken:     (text)   => sendEvent('token',     { text }),
             onTicker:    (symbol) => sendEvent('ticker',    { symbol }),
             onPhase:     (phase)  => sendEvent('phase',     { phase }),
@@ -82,7 +81,7 @@ export async function streamPortfolio(req, res) {
         })
 
         finish()
-        if (!ac.signal.aborted) {
+        if (!signal.aborted) {
             if (result.mandate && portfolioId) {
                 portfolioChatService.setMandate(portfolioId, req.user._id, result.mandate)
                     .then(r => { if (!r.ok) logger.warn(LOG, 'setMandate returned not-ok, mandate may not be persisted') })
@@ -116,7 +115,7 @@ export async function streamPortfolio(req, res) {
         }
     } catch (err) {
         finish()
-        if (ac.signal.aborted) return   // client gone — nothing to send
+        if (signal.aborted) return   // client gone — nothing to send
         logger.error(LOG, 'Portfolio stream failed', err)
         sendEvent('error', { message: 'Streaming failed' })
         res.end()

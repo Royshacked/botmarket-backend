@@ -13,7 +13,7 @@ async function filterNews(articles) {
     // Haiku (cheap/fast) on Anthropic, whose billing is active — OpenAI's quota
     // was exhausted, which silently killed the whole feed refresh. News is
     // UX-only for now, so a small classifier model is plenty.
-    const model = 'claude-haiku-4-5'
+    const model = 'claude-haiku-4-5-20251001'   // canonical dated id (matches llmModels / pricing map)
     const systemPrompt = `You filter news articles for a trading dashboard. Return ONLY a valid JSON array — no explanation, no markdown.`
     const userPrompt = `Filter these articles for trading relevance (financial markets, stocks, macro, commodities). Remove irrelevant ones.
 For each kept article add: sentiment ("bullish"|"bearish"|"neutral") and confidence (0–1).

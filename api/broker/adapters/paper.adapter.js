@@ -88,13 +88,19 @@ export class PaperAdapter extends BrokerAdapter {
     // ── Positions ────────────────────────────────────────────────────────────────
 
     async getPositions(userId, accountId) {
-        // Scope to one account when the caller names it (a user may own several paper
-        // accounts); otherwise return every PAPER position — filter by account mode so a
-        // manual position (same store, different mode) never leaks into the paper view.
-        const all       = await paperBrokerService.listPositions(userId, { status: 'open', accountId })
-        const positions = accountId ? all : all.filter(p => paperBrokerService.accountMode(p.accountId) === 'paper')
-        const priceBy   = await this._priceMap(positions.map(p => p.symbol))
-        return positions.map(p => this._toBrokerPosition(p, priceBy.get(p.symbol)))
+        return this._getPositionsForMode(userId, accountId, this.brokerType)
+    }
+
+    // Shared getPositions core (paper + manual). Scope to one account when the caller names
+    // it (a user may own several accounts); otherwise return every open position whose account
+    // is in THIS adapter's mode, so paper and manual positions never leak into each other's
+    // view. Prices and per-account currency are each resolved once.
+    async _getPositionsForMode(userId, accountId, mode) {
+        const all        = await paperBrokerService.listPositions(userId, { status: 'open', accountId })
+        const positions  = accountId ? all : all.filter(p => paperBrokerService.accountMode(p.accountId) === mode)
+        const priceBy    = await this._priceMap(positions.map(p => p.symbol))
+        const currencyBy = await this._currencyMap(userId, positions.map(p => p.accountId))
+        return positions.map(p => this._toBrokerPosition(p, priceBy.get(p.symbol), currencyBy.get(p.accountId)))
     }
 
     /**
@@ -104,8 +110,9 @@ export class PaperAdapter extends BrokerAdapter {
     async findOpenPosition(userId, accountId, positionId) {
         const pos = await paperBrokerService.getPosition(userId, positionId)
         if (!pos || pos.status !== 'open') return null
-        const price = await latestMarkPrice(pos.symbol)
-        return this._toBrokerPosition(pos, price)
+        const price    = await latestMarkPrice(pos.symbol)
+        const currency = (await paperBrokerService.getAccount(userId, pos.accountId))?.currency ?? 'USD'
+        return this._toBrokerPosition(pos, price, currency)
     }
 
     // ── Trading ──────────────────────────────────────────────────────────────────
@@ -241,7 +248,7 @@ export class PaperAdapter extends BrokerAdapter {
         }
     }
 
-    _toBrokerPosition(p, currentPrice = null) {
+    _toBrokerPosition(p, currentPrice = null, currency = 'USD') {
         // Prefer this call's live price; when the fetch missed, fall back to the last
         // mark stamped by the paperMark loop so P&L doesn't blank out between ticks.
         const markPrice = currentPrice ?? p.currentPrice ?? null
@@ -261,7 +268,7 @@ export class PaperAdapter extends BrokerAdapter {
             openedAt:     p.openedAt,
             accountId:    p.accountId,
             accountNo:    p.accountId,
-            currency:     'USD',
+            currency,
         }
     }
 
@@ -270,6 +277,14 @@ export class PaperAdapter extends BrokerAdapter {
     async _priceMap(symbols) {
         const distinct = [...new Set(symbols)]
         const entries  = await Promise.all(distinct.map(async s => [s, await latestMarkPrice(s)]))
+        return new Map(entries)
+    }
+
+    /** Map of accountId → account currency for the distinct accounts given, so a position
+     *  reports its OWN account's currency (a user may hold non-USD virtual accounts). */
+    async _currencyMap(userId, accountIds) {
+        const distinct = [...new Set(accountIds)]
+        const entries  = await Promise.all(distinct.map(async id => [id, (await paperBrokerService.getAccount(userId, id))?.currency ?? 'USD']))
         return new Map(entries)
     }
 }

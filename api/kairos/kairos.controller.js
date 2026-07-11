@@ -4,6 +4,7 @@ import { kairosService }       from './kairos.service.js'
 import { kairosHandoffService } from '../../services/kairos.handoff.service.js'
 import { resolveModel }        from '../../services/modelRouter.service.js'
 import { startSseStream }      from '../_shared/sse.util.js'
+import { reasonToStatus }      from '../_shared/reason.util.js'
 
 const LOG = '[kairos:controller]'
 const MAX_RECENT_CHAT_TURNS = 4
@@ -92,7 +93,7 @@ export async function updateKairosCall(req, res) {
         }
 
         if (!result.ok) {
-            const code = result.reason === 'not_found' ? 404 : result.reason === 'forbidden' ? 403 : 400
+            const code = reasonToStatus(result.reason, 400)
             return res.status(code).send({ error: result.reason ?? 'update_failed' })
         }
         res.send(result.call ?? { ok: true })
@@ -108,23 +109,28 @@ export async function updateKairosCall(req, res) {
 const MANAGE_ACTIONS = ['move_stop', 'take_partial', 'exit_now', 'let_run']
 
 export async function actOnKairosCall(req, res) {
-    const { id }     = req.params
-    const { action } = req.body ?? {}
-    const userId  = req.user._id
-    const isAdmin = req.user.isAdmin === true
+    try {
+        const { id }     = req.params
+        const { action } = req.body ?? {}
+        const userId  = req.user._id
+        const isAdmin = req.user.isAdmin === true
 
-    let result
-    if (action === 'confirm')             result = await kairosHandoffService.confirmCall(id, userId, isAdmin)
-    else if (action === 'edit')           result = await kairosHandoffService.editCall(id, userId, isAdmin)
-    else if (action === 'dismiss')        result = await kairosHandoffService.dismissCall(id, userId, isAdmin)
-    else if (MANAGE_ACTIONS.includes(action)) result = await kairosHandoffService.manageCall(id, userId, action, isAdmin)
-    else return res.status(400).send({ error: 'action must be confirm | edit | dismiss | move_stop | take_partial | exit_now | let_run' })
+        let result
+        if (action === 'confirm')             result = await kairosHandoffService.confirmCall(id, userId, isAdmin)
+        else if (action === 'edit')           result = await kairosHandoffService.editCall(id, userId, isAdmin)
+        else if (action === 'dismiss')        result = await kairosHandoffService.dismissCall(id, userId, isAdmin)
+        else if (MANAGE_ACTIONS.includes(action)) result = await kairosHandoffService.manageCall(id, userId, action, isAdmin)
+        else return res.status(400).send({ error: 'action must be confirm | edit | dismiss | move_stop | take_partial | exit_now | let_run' })
 
-    if (!result.ok) {
-        const code = result.reason === 'not_found' ? 404 : result.reason === 'forbidden' ? 403 : 400
-        return res.status(code).send({ error: result.reason ?? 'action_failed' })
+        if (!result.ok) {
+            const code = reasonToStatus(result.reason, 400)
+            return res.status(code).send({ error: result.reason ?? 'action_failed' })
+        }
+        res.send(result)
+    } catch (err) {
+        logger.error(LOG, 'actOnKairosCall failed:', err.message)
+        res.status(500).send({ error: 'action_failed' })
     }
-    res.send(result)
 }
 
 export async function listKairos(req, res) {
@@ -154,7 +160,7 @@ export async function getKairos(req, res) {
     try {
         const result = await kairosService.getKairosCall(req.params.id, req.user._id, req.user.isAdmin === true)
         if (!result.ok) {
-            const code = result.reason === 'not_found' ? 404 : result.reason === 'forbidden' ? 403 : 500
+            const code = reasonToStatus(result.reason, 500)
             return res.status(code).send({ error: result.reason ?? 'get_failed' })
         }
         res.send(result.call)
@@ -168,7 +174,7 @@ export async function deleteKairos(req, res) {
     try {
         const result = await kairosService.deleteKairosCall(req.params.id, req.user._id, req.user.isAdmin === true)
         if (!result.ok) {
-            const code = result.reason === 'not_found' ? 404 : result.reason === 'forbidden' ? 403 : 400
+            const code = reasonToStatus(result.reason, 400)
             return res.status(code).send({ error: result.reason ?? 'delete_failed' })
         }
         res.send({ ok: true })

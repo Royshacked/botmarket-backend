@@ -1,13 +1,12 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
-import { resolveStreamFn } from './llmModels.js'
 import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }         from './logger.service.js'
-import { recordUsage }   from './tokenUsage.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, resolveAgentStream } from './agentUtils.js'
+import { buildTagCaptures } from './llmStream.util.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[portfolioAgent]'
@@ -143,7 +142,7 @@ export const portfolioAgentService = { chatStream }
 
 async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const normalized   = _buildMessages(messages)
-    const { model, streamFn, provider } = resolveStreamFn(requestedModel)
+    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
     // Stable base (cached) + volatile per-request sections (accounts, edit
     // context). cache_control on the base lets Anthropic cache the
@@ -178,8 +177,6 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     let capturedThesis  = null
     let capturedPhase   = null
 
-    const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
-
     const onPhaseCapture = (p) => {
         const n = parseInt(p, 10)
         if (n >= 1 && n <= 6) {
@@ -191,21 +188,15 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     const onUpdate  = (json) => { try { capturedUpdate  = JSON.parse(json) } catch { /* malformed */ } }
     const onMandate = (json) => { try { capturedMandate = JSON.parse(json) } catch { /* malformed */ } }
 
-    // Tag capture set — same tags/order the positional suppressor produced for
-    // this agent: ticker keeps its inner text in the UI; plan/update/mandate are
-    // captured; state/trade_idea and the null-callback tags are suppress-only.
-    const tagCaptures = [
-        { open: '<state>',             close: '</state>',             onCapture: null           },
-        { open: '<trade_idea>',        close: '</trade_idea>',        onCapture: null           },
-        { open: '<asset>',             close: '</asset>',             onCapture: null           },
-        { open: '<interval>',          close: '</interval>',          onCapture: null           },
-        { open: '<phase>',             close: '</phase>',             onCapture: onPhaseCapture  },
-        { open: '<ticker>',            close: '</ticker>',            onCapture: onTicker, keepText: true },
-        { open: '<portfolio_plan>',    close: '</portfolio_plan>',    onCapture: onPlan         },
-        { open: '<portfolio_update>',  close: '</portfolio_update>',  onCapture: onUpdate       },
-        { open: '<portfolio_mandate>', close: '</portfolio_mandate>', onCapture: onMandate      },
-        { open: '<portfolio_thesis>',  close: '</portfolio_thesis>',  onCapture: null           },
-    ]
+    // All known emit tags suppressed by default; this agent captures phase, ticker
+    // (which keeps its inner text in the UI), and the plan/update/mandate blocks.
+    const tagCaptures = buildTagCaptures({
+        phase:             onPhaseCapture,
+        ticker:            { onCapture: onTicker, keepText: true },
+        portfolio_plan:    onPlan,
+        portfolio_update:  onUpdate,
+        portfolio_mandate: onMandate,
+    })
 
     const raw = await streamFn({
         model,

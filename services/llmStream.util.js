@@ -9,6 +9,31 @@
 // own `captures` array of tag descriptors ({ open, close, onCapture, keepText });
 // the providers forward it verbatim with no agent-specific tag knowledge.
 
+// ─── Emit-tag registry ────────────────────────────────────────────────────────
+// Every emit tag ANY agent may produce. The tag suppressor must know about all of
+// them so a stray tag from one agent never leaks raw into another agent's chat UI.
+// buildTagCaptures() suppresses ALL of these by default; an agent overrides only
+// the few it actually captures. This removes the old footgun where each agent
+// hand-listed its tags and a forgotten entry leaked `<state>`-style JSON to users.
+export const ALL_EMIT_TAGS = [
+    'state', 'trade_idea', 'asset', 'interval', 'phase', 'ticker',
+    'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis',
+    'scan_list', 'call',
+]
+
+// Build the tag-capture descriptor array for a streaming agent. `overrides` maps a
+// tag name to either a capture callback, or `{ onCapture, keepText }` for tags whose
+// inner text should still reach the UI (e.g. <ticker>). Unlisted tags are suppress-only.
+export function buildTagCaptures(overrides = {}) {
+    return ALL_EMIT_TAGS.map(name => {
+        const base = { open: `<${name}>`, close: `</${name}>`, onCapture: null }
+        const ov = overrides[name]
+        if (ov == null) return base
+        if (typeof ov === 'function') return { ...base, onCapture: ov }
+        return { ...base, onCapture: ov.onCapture ?? null, keepText: ov.keepText ?? false }
+    })
+}
+
 export function createTagSuppressor({ onToken, captures = [] }) {
     // onToken is optional: non-streaming callers (e.g. the Axl social-chat reply,
     // which collects the full return value instead of streaming) omit it. Default

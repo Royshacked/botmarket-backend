@@ -17,7 +17,7 @@ import { getDb }                 from '../providers/mongodb.provider.js'
 import { paperBrokerService }    from '../api/broker/paperBroker.service.js'
 import { openPosition,
          reducePosition,
-         latestMarkPrice }       from '../api/broker/paperExecution.service.js'
+         quoteMapForSymbols }    from '../api/broker/paperExecution.service.js'
 import { logger }                from '../services/logger.service.js'
 
 const LOG              = '[paperFill.service]'
@@ -96,8 +96,7 @@ async function _tick() {
         if (!orders.length) return
 
         // One price lookup per distinct symbol (Yahoo last quote / candle-close fallback).
-        const symbols = [...new Set(orders.map(o => o.symbol))]
-        const priceBy = new Map(await Promise.all(symbols.map(async s => [s, await latestMarkPrice(s)])))
+        const priceBy = await quoteMapForSymbols(orders.map(o => o.symbol))
 
         const triggered = orders.filter(o => isTriggered(o, priceBy.get(o.symbol)))
         for (const order of selectFills(triggered)) {
@@ -113,23 +112,36 @@ async function _tick() {
 async function _fill(order, fillPrice) {
     const { userId, accountId, orderId, positionId } = order
 
-    // Mark filled first so a slow tick can't double-fill it.
+    // Mark filled first — this CLAIMS the order so a slow/overlapping tick can't double-fill
+    // it (openPosition isn't idempotent, so re-processing would open a duplicate position).
     await paperBrokerService.updateOrder(userId, orderId, { status: 'filled', filledAt: Date.now(), fillPrice })
 
-    if (positionId != null) {
-        // Closing exit (stop-loss / take-profit) — reduce/close the position.
-        const reason = order.type === 'limit' ? 'tp' : 'stop'
-        await reducePosition({ userId, positionId, qty: order.qty, price: fillPrice, reason, orderId })
-        logger.info(LOG, `Exit filled: ${reason} ${order.qty} ${order.symbol} @ ${fillPrice} (closes ${positionId})`)
-        return
-    }
+    try {
+        if (positionId != null) {
+            // Closing exit (stop-loss / take-profit) — reduce/close the position.
+            const reason = order.type === 'limit' ? 'tp' : 'stop'
+            await reducePosition({ userId, positionId, qty: order.qty, price: fillPrice, reason, orderId })
+            logger.info(LOG, `Exit filled: ${reason} ${order.qty} ${order.symbol} @ ${fillPrice} (closes ${positionId})`)
+            return
+        }
 
-    // Resting entry — open a new position. The position.opened event (carrying orderId)
-    // is what flips the idea resting → long/short in the reconciler.
-    const newPositionId = await openPosition({
-        userId, accountId, symbol: order.symbol,
-        direction: order.direction, qty: order.qty, price: fillPrice, orderId,
-    })
-    await paperBrokerService.updateOrder(userId, orderId, { positionId: newPositionId })
-    logger.info(LOG, `Entry filled: ${order.direction} ${order.qty} ${order.symbol} @ ${fillPrice} → position ${newPositionId}`)
+        // Resting entry — open a new position. The position.opened event (carrying orderId)
+        // is what flips the idea resting → long/short in the reconciler.
+        const newPositionId = await openPosition({
+            userId, accountId, symbol: order.symbol,
+            direction: order.direction, qty: order.qty, price: fillPrice, orderId,
+        })
+        // Position exists now; link the id back onto the order (best-effort — the reconciler
+        // also matches via the position.opened event's orderId, so a miss here isn't fatal).
+        await paperBrokerService.updateOrder(userId, orderId, { positionId: newPositionId })
+            .catch(err => logger.error(LOG, `link positionId failed (order ${orderId}): ${err.message}`))
+        logger.info(LOG, `Entry filled: ${order.direction} ${order.qty} ${order.symbol} @ ${fillPrice} → position ${newPositionId}`)
+    } catch (err) {
+        // The position mutation failed AFTER we claimed the order. Revert the order to 'working'
+        // so the next tick retries it — otherwise it would sit 'filled' with no position change
+        // (a lost entry, or an exit that never closes its position).
+        await paperBrokerService.updateOrder(userId, orderId, { status: 'working', filledAt: null, fillPrice: null })
+            .catch(e => logger.error(LOG, `revert after failed fill also failed (order ${orderId}): ${e.message}`))
+        throw err
+    }
 }

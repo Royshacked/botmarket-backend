@@ -2,6 +2,7 @@ import { logger } from './logger.service.js'
 import { normalizeTimeframe } from './timeframe.service.js'
 import { normalizeTreeNode, firstLeafTimeframe } from './conditionTree.service.js'
 import { cleanConviction } from './conviction.util.js'
+import { stripEmitTags } from './agentUtils.js'
 
 const LOG = '[ideaStateParser]'
 const MAX_RECENT_MESSAGES = 6
@@ -12,8 +13,9 @@ export function _parseResponse(raw, priorState, userPrompt) {
     let updatedState = null
 
 
-    text = text.replace(/<asset>[\s\S]*?<\/asset>/, '').trim()
-    text = text.replace(/<phase>[\s\S]*?<\/phase>/, '').trim()
+    // Strip the UI-emit tags globally (consistent with stripEmitTags used elsewhere) so a
+    // tag emitted more than once never survives into the reply.
+    text = stripEmitTags(text, ['asset', 'phase']).trim()
 
     const tradeMatch = text.match(/<trade_idea>([\s\S]*?)<\/trade_idea>/)
     if (tradeMatch) {

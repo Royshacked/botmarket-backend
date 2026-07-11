@@ -1,9 +1,8 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
-import { resolveStreamFn } from './llmModels.js'
 import { logger }         from './logger.service.js'
-import { recordUsage }    from './tokenUsage.service.js'
-import { normalizeMessages, makePromptLoader } from './agentUtils.js'
+import { normalizeMessages, makePromptLoader, resolveAgentStream } from './agentUtils.js'
+import { buildTagCaptures } from './llmStream.util.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -25,7 +24,7 @@ export const axlAgentService = { chatStream }
 
 async function chatStream({ messages = [], model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, signal } = {}) {
     const normalized = normalizeMessages(messages, MAX_MESSAGES)
-    const { model, streamFn, provider } = resolveStreamFn(requestedModel)
+    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
     // Stable cached base + volatile tail (today's date, so "this week" resolves).
     const today = new Date().toISOString().slice(0, 10)
@@ -36,7 +35,9 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
 
     logger.info(LOG, 'chatStream start', { messageCount: normalized.length, model, provider })
 
-    const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
+    // Axl authors no artifacts, so it captures nothing — but suppress every known
+    // emit tag anyway so a stray one from the model never leaks raw into the chat.
+    const tagCaptures = buildTagCaptures()
 
     const raw = await streamFn({
         model,
@@ -47,6 +48,7 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
         reasoningEffort,
         signal,
         onToken,
+        tagCaptures,
         onToolStart,
         onReasoning,
         onUsage,
