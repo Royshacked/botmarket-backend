@@ -37,7 +37,7 @@ export const kairosService = {
 const PLAN_FIELDS = [
     'asset', 'asset_class', 'trade_type', 'bias', 'thesis', 'timeframe_ladder', 'cadence',
     'entry_zones', 'reference_levels', 'patterns', 'sizing', 'broker', 'accounts',
-    'main_account_id', 'broker_symbol', 'basis_offset', 'valid_until',
+    'main_account_id', 'broker_symbol', 'basis_offset', 'active_from', 'valid_until',
 ]
 
 // ── Performance (Phase 5, slice 4) ────────────────────────────────────────────
@@ -212,6 +212,10 @@ export function normalizeCall(raw, userId = null) {
         main_account_id: raw.main_account_id ?? accounts[0] ?? null,
         broker_symbol:   raw.broker_symbol ?? raw.asset ?? null,   // Phase 1 symbol gate refines this
         basis_offset:    Number(raw.basis_offset) || 0,            // boundary-only, applied at order edge
+        // Time window (both bounds optional, mirrors an idea's `time` condition leaf after/before):
+        // active_from = lower bound → Hermes won't monitor before it (a primary gate, cf. isTimeBlocked);
+        // valid_until = upper bound → expiry review.
+        active_from:     raw.active_from ?? null,
         valid_until:     raw.valid_until ?? null,
 
         // ── monitor_state (written each wake, Phase 2) ──

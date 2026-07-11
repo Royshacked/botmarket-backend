@@ -96,6 +96,21 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
     // Post-confirm: route to the position path (watch the linked idea), not the readiness gate.
     if (POSITION_STATUSES.includes(call.status)) return _checkPosition(db, call, nowMs, deps)
 
+    // Primary time gate: a call whose active_from is still in the future isn't live yet — skip ALL
+    // work (no price, no LLM) and SLEEP until it opens, exactly like the market-closed path. Mirrors
+    // the idea monitor's isTimeBlocked. Runs before the expiry/market/price gates (a not-yet-active
+    // call can't be expiring — active_from precedes valid_until).
+    if (_isPreActive(call, nowMs)) {
+        const patch = _scheduledPatch(call, nowMs)               // also resets a stale 'watching' → 'waiting'
+        // Wake exactly when it goes active. Normalize to a Z-ISO string (like every other next_check_at
+        // write) so the poll loop's lexicographic $lte holds even if active_from carried a UTC offset.
+        const wakeAt = new Date(Date.parse(call.active_from)).toISOString()
+        patch['monitor_state.next_check_at'] = wakeAt
+        const entry = _timelineEntry('pre_active', { nowMs, call, nextAt: wakeAt })
+        await _persist(db, call.id, patch, entry)
+        return { reason: 'pre_active' }
+    }
+
     const expiring = _isExpiring(call, nowMs)
 
     // Market closed for this asset → no entry can happen; skip the check (no price fetch, no LLM)
@@ -467,6 +482,17 @@ export function _zoneGate(call, price) {
     return null
 }
 
+// Before active_from → the call's start time hasn't arrived. A PRIMARY time gate that defers
+// monitoring entirely (no price fetch, no LLM) until then — the Kairos analog of the idea monitor's
+// isTimeBlocked "should I monitor at all" pre-check, and the lower-bound sibling of valid_until.
+// No active_from (or unparseable) → never gated. Pure.
+export function _isPreActive(call, nowMs) {
+    if (!call?.active_from) return false
+    const from = Date.parse(call.active_from)
+    if (!Number.isFinite(from)) return false
+    return nowMs < from
+}
+
 // Within EXPIRY_THRESHOLD of valid_until (or already past) → time for the final expiry review.
 export function _isExpiring(call, nowMs, thresholdMs = EXPIRY_THRESHOLD_MS) {
     if (!call?.valid_until) return false
@@ -682,7 +708,7 @@ function _verdictFallbackNote(raw) {
 }
 
 // Build one compact append-only journal entry for a wake. Pure — `at` derives from nowMs so tests
-// are deterministic. reason ∈ closed | scheduled | zone_trip | expiry_review.
+// are deterministic. reason ∈ pre_active | closed | scheduled | zone_trip | expiry_review.
 export function _timelineEntry(reason, { nowMs, price = null, zone = null, call, raw = null, nextAt = null, fetched = null, failed = false }) {
     const at  = new Date(nowMs).toISOString()
     const gap = _gapMin(nextAt, nowMs)
@@ -690,6 +716,11 @@ export function _timelineEntry(reason, { nowMs, price = null, zone = null, call,
     if (reason === 'closed') {
         return { at, reason, price: null, verdict: null,
             note: `Market's closed for ${call?.asset ?? 'this asset'} — holding. I'll look again at the open.`,
+            next_check_at: nextAt }
+    }
+    if (reason === 'pre_active') {
+        return { at, reason, price: null, verdict: null,
+            note: `Not live yet for ${call?.asset ?? 'this call'} — I start watching at ${call?.active_from ?? '?'}.`,
             next_check_at: nextAt }
     }
     if (reason === 'scheduled') {

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    _zoneGate, _isExpiring, _isPastExpiry, _effectiveVerdict, _computeNextCheckAt, _nextStatus,
+    _zoneGate, _isPreActive, _isExpiring, _isPastExpiry, _effectiveVerdict, _computeNextCheckAt, _nextStatus,
     _snapToReference, _finalizeProposal, _applyAssessment, _scheduledPatch, _checkCall,
     _timelineEntry, _zonesLabel, _withTimeout, _thinkingConfig, _assessText,
     _reconcilePosition, _rMultiple, _checkPosition,
@@ -61,6 +61,19 @@ test('isExpiring: within threshold → true; already past → true', () => {
 test('isExpiring: no / bad valid_until → false', () => {
     assert.equal(_isExpiring(call({ valid_until: null }), NOW), false)
     assert.equal(_isExpiring(call({ valid_until: 'not-a-date' }), NOW), false)
+})
+
+// ── _isPreActive (the lower-bound primary time gate) ──────────────────────────
+test('isPreActive: before active_from → true; at/after → false', () => {
+    const c = call({ active_from: '2026-07-09T16:00:00Z' })   // 1h after NOW (15:00Z)
+    assert.equal(_isPreActive(c, NOW), true)
+    assert.equal(_isPreActive(c, Date.parse('2026-07-09T16:00:00Z')), false)   // exactly at
+    assert.equal(_isPreActive(c, Date.parse('2026-07-09T17:00:00Z')), false)   // after
+})
+test('isPreActive: no / bad active_from → false (never gated)', () => {
+    assert.equal(_isPreActive(call(), NOW), false)                         // field absent
+    assert.equal(_isPreActive(call({ active_from: null }), NOW), false)
+    assert.equal(_isPreActive(call({ active_from: 'nope' }), NOW), false)
 })
 
 // ── _computeNextCheckAt: clamp both ends ──────────────────────────────────
@@ -223,6 +236,33 @@ function fakeDb() {
     return { updates, collection: () => ({ updateOne: async (q, u) => { updates.push({ id: q.id, set: u.$set, push: u.$push }) } }) }
 }
 const pushedEntry = (u) => u.push?.['monitor_state.timeline']?.$each?.[0]
+
+test('checkCall: pre-active (future active_from) → skipped (no price, no assess), sleeps to active_from', async () => {
+    const db = fakeDb()
+    let priced = false, assessed = false
+    const deps = {
+        getPrice: async () => { priced = true; return 248.0 },
+        assess:   async () => { assessed = true; return {} },
+        onCard:   async () => {},
+        isAssetOpen: () => true,
+    }
+    const activeFrom = new Date(NOW + 2 * 3600_000).toISOString()   // 2h out
+    const out = await _checkCall(db, call({ active_from: activeFrom }), NOW, deps)
+    assert.equal(out.reason, 'pre_active')
+    assert.equal(priced, false)                                     // gate short-circuited price fetch
+    assert.equal(assessed, false)                                   // and the LLM
+    assert.equal(db.updates[0].set['monitor_state.next_check_at'], activeFrom)   // wakes exactly when live
+    assert.match(pushedEntry(db.updates[0]).note, /Not live yet/i)
+})
+
+test('checkCall: past active_from → gate is transparent, normal path runs', async () => {
+    const db = fakeDb()
+    let assessed = false
+    const deps = { getPrice: async () => 250, assess: async () => { assessed = true; return {} }, onCard: async () => {}, isAssetOpen: () => true }
+    const out = await _checkCall(db, call({ active_from: new Date(NOW - 3600_000).toISOString() }), NOW, deps)
+    assert.equal(out.reason, 'scheduled')                           // active_from already passed → not gated
+    assert.equal(assessed, false)                                   // 250 in no zone → cheap path (unrelated to the gate)
+})
 
 test('checkCall: no zone + not expiring → cheap scheduled path, no assessment', async () => {
     const db = fakeDb()
