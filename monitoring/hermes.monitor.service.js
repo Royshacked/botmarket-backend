@@ -8,14 +8,15 @@ import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry } from '../services/tradeNotify.service.js'
 
-// Kairos monitor — the self-scheduling readiness loop (KAIROS_PLAN.md, Phase 2). Its own tick,
-// its own collection (`kairos_calls`), sharing NO mutable state with the live idea monitor.
+// Hermes — the Kairos-call readiness monitor: a self-scheduling readiness loop (KAIROS_PLAN.md,
+// Phase 2). Its own tick, its own collection (`kairos_calls`), sharing NO mutable state with Minos
+// (the live idea monitor).
 // Design: a CHEAP arithmetic gate (is price inside a mapped zone?) runs every wake; the EXPENSIVE
 // four-axis LLM assessment fires only when a zone is tripped or the call is near expiry. Each
 // assessment writes back the verdict + a self-chosen next_check_at (clamped to the call's cadence)
 // + a running memo carried across wakes. Pre-entry readiness only — hands off at the enter card.
 
-const LOG          = '[kairos.monitor]'
+const LOG          = '[hermes.monitor]'
 const COLLECTION   = 'kairos_calls'
 const POLL_INTERVAL_MS = 60_000
 // Only these are re-checked by the loop. `expiry_review` is triggered TIME-based on these two
@@ -31,7 +32,7 @@ const CHECK_TIMEOUT_MS = 90_000
 let _timer   = null
 let _running = false
 
-export const kairosMonitorService = { start, stop }
+export const hermesService = { start, stop }
 
 function start() {
     if (_timer) return
@@ -182,6 +183,27 @@ export function _nextStatus(verdict, reason) {
     return reason === 'zone_trip' ? 'watching' : 'waiting'
 }
 
+// Actually past valid_until (not merely within the pre-expiry review window, which _isExpiring covers).
+export function _isPastExpiry(call, nowMs) {
+    if (!call?.valid_until) return false
+    const exp = Date.parse(call.valid_until)
+    return Number.isFinite(exp) && nowMs >= exp
+}
+
+// Reconcile the model's verdict against WHY we assessed + the clock, so two off-menu cases can't
+// misbehave:
+//   • let_expire on a zone trip would terminally kill a call still inside its validity window —
+//     let_expire is only on the menu for an expiry review, so downgrade it to stand_aside.
+//   • an expiry review that's actually PAST valid_until but still won't commit (wait/stand_aside)
+//     would re-queue to 'waiting' and be re-assessed (chart + vision LLM) every cadence forever —
+//     force it to let_expire so the call terminates. Within the pre-expiry window (not yet past),
+//     wait/stand_aside stay legitimate. Pure.
+export function _effectiveVerdict(verdict, reason, pastExpiry) {
+    if (verdict === 'let_expire' && reason !== 'expiry_review') return 'stand_aside'
+    if (reason === 'expiry_review' && pastExpiry && verdict !== 'enter' && verdict !== 'edit') return 'let_expire'
+    return verdict
+}
+
 // Snap a proposed price to the nearest reference level on the correct side of entry, so the
 // stop/TP land on pre-mapped structure rather than a conjured number. No suitable level → keep
 // the proposed price with ref=null.
@@ -246,9 +268,12 @@ export function _finalizeProposal(p, call, zone) {
 
 // Turn a raw assessment into the persisted $set patch (+ whether to fire a card). Pure.
 export function _applyAssessment(call, zone, raw, nowMs, reason) {
+    // Resolve the effective verdict first (guards the two off-menu cases in _effectiveVerdict),
+    // then derive proposal / status / card from it — never from the raw model verdict.
+    const verdict  = _effectiveVerdict(raw.verdict, reason, _isPastExpiry(call, nowMs))
     const nextAt   = _computeNextCheckAt(nowMs, raw.next_check_min, call?.cadence)
-    const proposal = raw.verdict === 'enter' ? _finalizeProposal(raw.proposal, call, zone) : null
-    const status   = _nextStatus(raw.verdict, reason)
+    const proposal = verdict === 'enter' ? _finalizeProposal(raw.proposal, call, zone) : null
+    const status   = _nextStatus(verdict, reason)
     // Running memo: update only when the assessment provides one, else carry the prior note.
     const memo = raw.memo_update != null && raw.memo_update !== ''
         ? String(raw.memo_update)
@@ -264,7 +289,7 @@ export function _applyAssessment(call, zone, raw, nowMs, reason) {
         news:          raw.news ?? null,
         price_action:  raw.price_action ?? null,
         patterns_seen: Array.isArray(raw.patterns_seen) ? raw.patterns_seen : [],
-        verdict:       raw.verdict,
+        verdict,
         ...(proposal ? { proposal } : {}),
         ...(raw.edit_proposal ? { edit_proposal: raw.edit_proposal } : {}),
         next_check_at: nextAt,
@@ -283,7 +308,7 @@ export function _applyAssessment(call, zone, raw, nowMs, reason) {
 
     // 'let_expire' now fires a card too (the expiry notification) — previously it was a silent
     // terminal 'expired'. enter → ready card; edit → re-map card; let_expire → expired card.
-    return { set, fireCard: ['enter', 'edit', 'let_expire'].includes(raw.verdict), lastAssessment }
+    return { set, fireCard: ['enter', 'edit', 'let_expire'].includes(verdict), lastAssessment }
 }
 
 // Cheap-path reschedule (no assessment ran). Idle → check further out (max gap); after a failed
@@ -424,21 +449,45 @@ async function _defaultOnCard(call, assessment) {
 
 // ─── Real four-axis assessment (LLM + vision) — mocked in unit tests ───────────
 const _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-const ASSESS_MODEL = 'claude-sonnet-4-6'
-const ALLOWED_MODELS = new Set(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-8'])
+const ASSESS_MODEL    = 'claude-sonnet-4-6'
+const ALLOWED_MODELS  = new Set(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-8'])
+const ALLOWED_EFFORTS = new Set(['off', 'low', 'high'])
+// The visible reply is a small JSON object, but when thinking is on the hidden reasoning tokens
+// ALSO count toward max_tokens — so give generous headroom to avoid truncating the JSON.
+const ASSESS_MAX_TOKENS          = 900
+const ASSESS_MAX_TOKENS_THINKING = 16_000
 
-// Hermes (this monitor) runs under the user's AI preferences: read their synced `hermesModel`
-// from the account preferences and use it for the readiness assessment. Falls back to Sonnet
-// (the default vision model) when unset, invalid, or unreadable. All allowed models are
+// Map the reasoning-effort knob onto Anthropic adaptive extended thinking — mirrors
+// anthropic.provider.js. 'off'/invalid → null (no thinking block, zero reasoning cost). Adaptive
+// (NOT budget_tokens, which 400s on Opus 4.8) + effort is supported across all allowed models. Pure.
+export function _thinkingConfig(effort) {
+    return (effort === 'low' || effort === 'high')
+        ? { thinking: { type: 'adaptive' }, output_config: { effort } }
+        : null
+}
+
+// Hermes (this monitor) runs under the user's AI preferences: read their synced `hermesModel` +
+// `hermesReasoning` from the account preferences and use them for the readiness assessment. Falls
+// back to Sonnet / no-thinking when unset, invalid, or unreadable. All allowed models are
 // vision-capable, so the chart read is safe whichever the user picks.
-async function _hermesModel(userId) {
-    if (!userId) return ASSESS_MODEL
+async function _hermesRouting(userId) {
+    if (!userId) return { model: ASSESS_MODEL, reasoningEffort: 'off' }
     try {
         const prefs = await userService.getPreferences(userId)
-        return ALLOWED_MODELS.has(prefs?.hermesModel) ? prefs.hermesModel : ASSESS_MODEL
+        return {
+            model:           ALLOWED_MODELS.has(prefs?.hermesModel)      ? prefs.hermesModel     : ASSESS_MODEL,
+            reasoningEffort: ALLOWED_EFFORTS.has(prefs?.hermesReasoning) ? prefs.hermesReasoning : 'off',
+        }
     } catch {
-        return ASSESS_MODEL
+        return { model: ASSESS_MODEL, reasoningEffort: 'off' }
     }
+}
+
+// Pull the first text block from an assessment response. With extended thinking on, content[0] is a
+// thinking block, so a bare content[0].text would miss the JSON — find the text block explicitly. Pure.
+export function _assessText(msg) {
+    const block = (msg?.content ?? []).find(b => b?.type === 'text')
+    return block?.text ?? ''
 }
 
 const _ASSESS_SYSTEM = `You are Kairos, a discretionary day/swing trader running a readiness check on a pre-built trade "call".
@@ -472,11 +521,16 @@ export async function _defaultAssess(call, zone, ctx, _d) {
             ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }, { type: 'text', text: userText }]
             : userText
 
+        const { model, reasoningEffort } = await _hermesRouting(call.user_id)
+        const thinking = _thinkingConfig(reasoningEffort)
         const msg = await _client.messages.create({
-            model: await _hermesModel(call.user_id), max_tokens: 900, system: _ASSESS_SYSTEM,
+            model,
+            max_tokens: thinking ? ASSESS_MAX_TOKENS_THINKING : ASSESS_MAX_TOKENS,
+            system: [{ type: 'text', text: _ASSESS_SYSTEM, cache_control: { type: 'ephemeral' } }],
             messages: [{ role: 'user', content }],
+            ...(thinking ?? {}),
         })
-        return _extractJSON(msg.content[0]?.text ?? '')
+        return _extractJSON(_assessText(msg))
     } catch (err) {
         logger.warn(LOG, `assessment failed for ${call.id}:`, err.message)
         return null

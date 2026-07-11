@@ -7,8 +7,8 @@ against live market data. It runs as a background service inside the Express pro
 
 **Reversibility:** The entire system lives in `monitoring/`. Only two lines in `server.js` reference it:
 ```js
-import { monitorService } from './monitoring/monitor.service.js'
-monitorService.start()
+import { minosService } from './monitoring/minos.monitor.service.js'
+minosService.start()
 ```
 Delete those two lines + the `monitoring/` folder = complete removal.
 
@@ -20,7 +20,7 @@ Delete those two lines + the `monitoring/` folder = complete removal.
 server startup
     │
     ▼
-monitorService.start()
+minosService.start()
     │
     └── setInterval(_tick, 60s)  +  immediate first tick
               │
@@ -160,7 +160,7 @@ answers "is the level held right now?" — reused by both `requireHeld` and the 
 
 ### Arm-time pre-flight (already-satisfied entries)
 
-When an idea is armed (→ `looking`, `tradeIdeas.service.updateIdea`), `monitor.service.preflightEntry(idea)`
+When an idea is armed (→ `looking`, `tradeIdeas.service.updateIdea`), `minos.monitor.service.preflightEntry(idea)`
 runs once (structured-only trees): it compares the **edge** eval (real floor) against the **state**
 eval (`stateLevel`). If the level is already held but the edge won't fire (breakout already past, so
 the idea would sit forever), the update returns `preEntry:{ alreadySatisfied, close }`. The frontend
@@ -559,7 +559,8 @@ Same condition string is only parsed once regardless of how many ideas use it.
 
 ```
 monitoring/
-  monitor.service.js          public API: start() / stop(), poll loop, per-idea dispatch
+  minos.monitor.service.js    Minos — idea monitor public API: start() / stop(), poll loop, per-idea dispatch
+  hermes.monitor.service.js   Hermes — Kairos-call readiness monitor (own tick, kairos_calls)
   monitor.orchestrator.js     AND/OR logic, condition routing, context injection, legacy normalisation
   monitor.claude.js           Claude Haiku client (claudeJSON, claudeText, claudeVision)
 

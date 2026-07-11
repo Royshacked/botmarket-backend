@@ -35,6 +35,13 @@ test('call ready: no assessment proposal → clean copy, no price bits', () => {
     assert.doesNotMatch(c.content, /entry/)
 })
 
+test('call ready: proposal with an unresolved (null) stop → no price bits, never "stop null"', () => {
+    const c = buildCallReady({ id: 'call_5', user_id: 'u2', asset: 'AAPL' }, { proposal: { entry: 190, stop: null } })
+    assert.match(c.content, /is ready to enter\. Open the call/)
+    assert.doesNotMatch(c.content, /stop null/)
+    assert.doesNotMatch(c.content, /entry 190/)
+})
+
 // ── buildCallExpiry ─────────────────────────────────────────────────────────
 test('call expiry (edit): call_expiry card, kind edit, carries why', () => {
     const c = buildCallExpiry({ id: 'call_3', user_id: 'u3', asset: 'TSLA' }, 'edit', 'levels drifted')

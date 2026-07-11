@@ -9,7 +9,7 @@ Supersedes the "thesis" concept.
 Backend:
 - `tradeIdeas.service.js` — idea fields `thesis*` → `invalidation { range:{lower,upper,lowerAnchor,upperAnchor}, conditions:[] }` + `invalidation_status` ('fired'|null) + `invalidation_reason` + `invalidation_edge` ('lower'|'upper'). `_normalizeInvalidation` (`conditions:[]` reserved, stored not monitored).
 - `monitoring/invalidation.monitor.js` (replaced `thesis.monitor.js`) — `checkInvalidation(db, idea, symbolMap, {inPosition})`: one structured candle-close leaf per edge via `evaluateTree`, deterministic, fires on close outside range. Fire-once latch on `invalidation_status`. Drops the old `_aiEval` judge.
-- `monitoring/monitor.service.js` — calls `checkInvalidation` pre-entry (looking, in `_checkEntry`) AND in-position (long/short, after `checkPosition`, reusing the entry-tf `aeCandles`).
+- `monitoring/minos.monitor.service.js` — calls `checkInvalidation` pre-entry (looking, in `_checkEntry`) AND in-position (long/short, after `checkPosition`, reusing the entry-tf `aeCandles`).
 - `idea_system_prompt.md` — `<trade_idea>` + `<state>` schemas carry `invalidation.range`; authoring rules: derive both edges from chart, cite the anchor, never a round number, range null until a structured entry exists.
 
 Frontend (build green):

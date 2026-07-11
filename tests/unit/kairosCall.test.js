@@ -113,8 +113,8 @@ test('normalize: evidence coerces to inferred unless explicitly observed', () =>
 })
 
 test('normalize: cadence defaults by trade_type when omitted', () => {
-    assert.deepEqual(normalizeCall(call({ trade_type: 'swing' })).cadence, { min_gap_min: 60, max_gap_min: 720 })
-    assert.deepEqual(normalizeCall(call({ trade_type: 'day' })).cadence, { min_gap_min: 5, max_gap_min: 60 })
+    assert.deepEqual(normalizeCall(call({ trade_type: 'swing' })).cadence, { min_gap_min: 5, max_gap_min: 30 })
+    assert.deepEqual(normalizeCall(call({ trade_type: 'day' })).cadence, { min_gap_min: 1, max_gap_min: 15 })
 })
 
 test('normalize: explicit cadence is preserved', () => {

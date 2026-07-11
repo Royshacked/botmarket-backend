@@ -85,13 +85,14 @@ providers/
   ibkr.provider.js (retired) / ibkr.gateway.provider.js
   mongodb.provider.js       getDb(), stripId/stripIds
 monitoring/
-  monitor.service.js        the 60s poll loop; preflightEntry (arm-time already-satisfied check)
+  minos.monitor.service.js  Minos — the idea monitor: 60s poll loop; preflightEntry (arm-time already-satisfied check)
   monitor.orchestrator.js   evaluateTree / evaluateConditions → _evalOne (opts: stateLevel, requireHeld)
   evaluators/               touch · structured · indicator · time · volume · news · chart
   execution.reconciler.js   broker-authoritative fill/close → idea status
   invalidation.monitor.js   entry-range watcher (advisory, never executes)
-  kairos.monitor.service.js Kairos "calls" readiness loop (own tick, `kairos_calls`); cheap zone gate →
-                            LLM assessment → verdict; card hook (_defaultOnCard) posts entry_confirm /
+  hermes.monitor.service.js Hermes — the Kairos-call readiness loop (own tick, `kairos_calls`); cheap zone gate →
+                            LLM assessment → verdict; runs under the user's hermesModel + hermesReasoning
+                            prefs (adaptive thinking); card hook (_defaultOnCard) posts entry_confirm /
                             call_expiry via tradeNotify (enter→ready, edit→expiring, let_expire→expired)
   positionMonitor.js  portfolio.monitor.js
   paperFill.service.js  paperEquity.service.js

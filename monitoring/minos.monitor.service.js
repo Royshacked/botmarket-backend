@@ -1,9 +1,9 @@
 /**
- * Monitor service — public interface for the monitoring system.
+ * Minos — the trade-idea monitor (public interface for the idea monitoring system).
  *
  * Usage (server.js):
- *   import { monitorService } from './monitoring/monitor.service.js'
- *   monitorService.start()
+ *   import { minosService } from './monitoring/minos.monitor.service.js'
+ *   minosService.start()
  *
  * Fields added to idea documents (all optional, never destructive):
  *   monitorPhase      'entry' | 'position'
@@ -30,7 +30,7 @@ import {
     resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe,
 } from './monitorUtils.js'
 
-const LOG        = '[monitor.service]'
+const LOG        = '[minos.monitor]'
 const COLLECTION = 'ideas'
 
 const POLL_INTERVAL_MS = 60_000
@@ -43,7 +43,7 @@ let _running = false
 
 // ─── Public interface ─────────────────────────────────────────────────────────
 
-export const monitorService = { start, stop, resetIdea, preflightEntry }
+export const minosService = { start, stop, resetIdea, preflightEntry }
 
 function resetIdea(id) {
     _lastChecked.delete(id)

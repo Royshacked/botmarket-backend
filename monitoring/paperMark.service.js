@@ -14,7 +14,7 @@
  *    fill engine reuse these quotes instead of each hammering the rate-limited provider.
  *
  * Global (not per-account): one loop sweeps every user's open positions, like
- * monitorService / paperFillService. Skips entirely when no positions are open.
+ * minosService / paperFillService. Skips entirely when no positions are open.
  */
 
 import { getDb }        from '../providers/mongodb.provider.js'

@@ -6,16 +6,18 @@ Kairos is a new **discretionary day/swing** agent. Its artifact is a **call** (I
 **patterns** that work for that asset (price-action weighted over indicators). The agent emits a
 **draft call**; the user clicks **Generate** to persist it (nothing auto-saves — mirrors Idea's
 build-then-activate flow). Accounts are marked at the **bank icon** (like Idea/Atlas) and bound
-at Generate. A dedicated self-scheduling monitor then watches the mapped zones and, when price is
-in a zone, runs a four-axis readiness read (market / news / price-action / patterns), and — if the
-read is good — proposes an entry (entry/stop/TP snapped to reference levels, size ≤ user cap) as
-a **decision card**. The user confirms; Kairos's job ends there (pre-entry readiness only).
+at Generate. A dedicated self-scheduling monitor — **Hermes** (`monitoring/hermes.monitor.service.js`),
+running under the user's synced Hermes model + reasoning preferences — then watches the mapped zones
+and, when price is in a zone, runs a four-axis readiness read (market / news / price-action /
+patterns), and — if the read is good — proposes an entry (entry/stop/TP snapped to reference levels,
+size ≤ user cap) as a **decision card**. The user confirms; Kairos's job ends there (pre-entry
+readiness only).
 
 ## Guiding constraints
 - **New agent, new collection, new monitor loop.** Reuse *mechanisms* (chart fetch, vision,
   candles, indicators, cTrader symbol gate), never *schemas*.
-- **Zero blast radius:** `kairos_ideas` collection, own `setInterval`, no writes to `ideas` or
-  `monitor.service.js`. Throwaway if the trial doesn't pan out.
+- **Zero blast radius:** `kairos_calls` collection, own `setInterval`, no writes to `ideas` or
+  `minos.monitor.service.js` (Minos, the idea monitor). Throwaway if the trial doesn't pan out.
 - **Trial scope = pre-entry readiness only.** Kairos gets you into a well-timed entry with a
   static stop/TP attached, then hands off. No in-position management (trailing, adverse-exit,
   scale-out) — that's Phase 5, deferred.
@@ -39,7 +41,10 @@ fields inside a `<call>` block (a draft); `broker`/`accounts`/`broker_symbol`/`b
 bound server-side at Generate from the marked accounts.
 
 - **plan:** `asset`, `asset_class`, `trade_type` (intraday|day|swing), `bias`, `thesis`,
-  `timeframe_ladder` (context→trigger), `cadence.{min_gap_min,max_gap_min}`,
+  `timeframe_ladder` (context→trigger), `cadence.{min_gap_min,max_gap_min}`
+  (defaults by horizon when the call omits them — intraday `1/5`, day `1/15`, swing `5/30` min;
+  the idle poll reschedules at `max_gap`, so these bound Hermes's worst-case blind window between
+  price checks — tightened 2026-07-11 from the original 2/30 · 5/60 · 60/720),
   `entry_zones[]` `{id, side, anchor, lower, upper, kind, note}` (gate; agent authors
   lower/upper as absolute numbers, volatility baked in),
   `reference_levels[]` `{id, kind, price, note}` (NOT gates; stop/TP snap targets),
@@ -93,7 +98,7 @@ bound server-side at Generate from the marked accounts.
 
 ## Phase 2 — Monitor loop (the core invention) ✅ DONE (backend, not live-verified)
 **Goal:** a stored call gets watched, assessed, and produces a verdict — LLM mocked in tests.
-- `monitoring/kairos.monitor.service.js`: own 60s tick; loads `kairos_calls` where
+- `monitoring/hermes.monitor.service.js`: own 60s tick; loads `kairos_calls` where
   `status ∈ {waiting, watching}` AND `next_check_at` null-or-passed. (`expiring` is an
   awaiting-user state after an edit card, OUT of the loop — expiry review is triggered TIME-based
   via `_isExpiring` on waiting/watching calls, so no card spam.)

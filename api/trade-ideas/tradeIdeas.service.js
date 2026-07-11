@@ -1,7 +1,7 @@
 import { randomUUID }       from 'crypto'
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
-import { monitorService }  from '../../monitoring/monitor.service.js'
+import { minosService }     from '../../monitoring/minos.monitor.service.js'
 import { brokerService }   from '../broker/broker.service.js'
 import { buildOrderPlanForIdea, resolveUserAccounts } from '../../services/orderPlan.service.js'
 import { routeExits, currentReferencePrice, detectNativeEntryLevel } from '../../services/protectionPlan.service.js'
@@ -286,7 +286,7 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         patch.monitorPhase     = 'entry'
         patch.entryTriggeredAt = null
         patch.activatedAt      = Date.now()
-        monitorService.resetIdea(id)
+        minosService.resetIdea(id)
     }
 
     if (patch.status === 'hit') {
@@ -333,7 +333,7 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
                 patch.stopMonitorTree = route.stop.monitorTree
                 patch.tpMonitorTree   = route.tp.monitorTree
                 patch.firedExits      = []
-                monitorService.resetIdea(id)
+                minosService.resetIdea(id)
             }
         }
 
@@ -342,7 +342,7 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
             patch.orderState      = null
             patch.brokerOrders    = null
             patch.restingPlacedAt = null
-            monitorService.resetIdea(id)
+            minosService.resetIdea(id)
         }
 
         if (existing.status === 'hit' && patch.status === 'waiting') {
@@ -354,7 +354,7 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
                 patch.triggeredWhileWaiting = false
                 patch.triggerEventAt        = null
             }
-            monitorService.resetIdea(id)
+            minosService.resetIdea(id)
         }
 
         // "Reset" from the arm-time pre-flight prompt: keep the idea 'looking' but
@@ -362,7 +362,7 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         // ignored and only a fresh cross from here on fires.
         if (patch.resetPreEntry) {
             patch.entryFloorAt = Date.now()
-            monitorService.resetIdea(id)
+            minosService.resetIdea(id)
         }
         delete patch.resetPreEntry
 
@@ -382,7 +382,7 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
                 patch.pendingOrder = { plan, builtAt: Date.now() }
                 patch.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
             }
-            monitorService.resetIdea(id)
+            minosService.resetIdea(id)
         }
 
         const updateFilter = isAdmin || !existing.userId
@@ -403,7 +403,7 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         // blocks or fails the update.
         let preEntry
         if (patch.status === 'looking') {
-            preEntry = await monitorService.preflightEntry(result)
+            preEntry = await minosService.preflightEntry(result)
         }
 
         return { ok: true, idea: stripId(result), ...(preEntry && { preEntry }) }

@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    _zoneGate, _isExpiring, _computeNextCheckAt, _nextStatus, _snapToReference,
-    _finalizeProposal, _applyAssessment, _scheduledPatch, _checkCall,
-    _timelineEntry, _zonesLabel, _withTimeout,
-} from '../../monitoring/kairos.monitor.service.js'
+    _zoneGate, _isExpiring, _isPastExpiry, _effectiveVerdict, _computeNextCheckAt, _nextStatus,
+    _snapToReference, _finalizeProposal, _applyAssessment, _scheduledPatch, _checkCall,
+    _timelineEntry, _zonesLabel, _withTimeout, _thinkingConfig, _assessText,
+} from '../../monitoring/hermes.monitor.service.js'
 
 function call(extra = {}) {
     return {
@@ -70,6 +70,37 @@ test('computeNextCheckAt: clamps below min, above max, passes through in-range',
 })
 test('computeNextCheckAt: non-finite request → max gap', () => {
     assert.equal(_computeNextCheckAt(NOW, undefined, { min_gap_min: 5, max_gap_min: 60 }), new Date(NOW + 60 * 60_000).toISOString())
+})
+
+// ── _isPastExpiry ───────────────────────────────────────────────────────────
+test('isPastExpiry: before valid_until → false; at/after → true; bad → false', () => {
+    assert.equal(_isPastExpiry(call(), Date.parse('2026-07-09T19:59:00Z')), false)  // 1m before
+    assert.equal(_isPastExpiry(call(), Date.parse('2026-07-09T20:00:00Z')), true)   // exactly at
+    assert.equal(_isPastExpiry(call(), Date.parse('2026-07-09T21:00:00Z')), true)   // after
+    assert.equal(_isPastExpiry(call({ valid_until: null }), NOW), false)
+    assert.equal(_isPastExpiry(call({ valid_until: 'nope' }), NOW), false)
+})
+
+// ── _effectiveVerdict: two off-menu guards ────────────────────────────────────
+test('effectiveVerdict: let_expire on a zone trip is downgraded (never kill a live call)', () => {
+    assert.equal(_effectiveVerdict('let_expire', 'zone_trip', false), 'stand_aside')
+})
+test('effectiveVerdict: let_expire on an expiry review is honored', () => {
+    assert.equal(_effectiveVerdict('let_expire', 'expiry_review', false), 'let_expire')
+    assert.equal(_effectiveVerdict('let_expire', 'expiry_review', true),  'let_expire')
+})
+test('effectiveVerdict: PAST-expiry review that won\'t commit is forced to let_expire (hard cutoff)', () => {
+    assert.equal(_effectiveVerdict('wait',        'expiry_review', true), 'let_expire')
+    assert.equal(_effectiveVerdict('stand_aside', 'expiry_review', true), 'let_expire')
+})
+test('effectiveVerdict: within the pre-expiry window (not past), wait/stand_aside are preserved', () => {
+    assert.equal(_effectiveVerdict('wait',        'expiry_review', false), 'wait')
+    assert.equal(_effectiveVerdict('stand_aside', 'expiry_review', false), 'stand_aside')
+})
+test('effectiveVerdict: enter/edit always pass through', () => {
+    assert.equal(_effectiveVerdict('enter', 'expiry_review', true), 'enter')
+    assert.equal(_effectiveVerdict('edit',  'expiry_review', true), 'edit')
+    assert.equal(_effectiveVerdict('enter', 'zone_trip',     false), 'enter')
 })
 
 // ── _nextStatus ───────────────────────────────────────────────────────────
@@ -162,6 +193,19 @@ test('applyAssessment: edit → expiring + fires card + carries edit_proposal', 
     assert.equal(set.status, 'expiring')
     assert.equal(fireCard, true)
     assert.deepEqual(lastAssessment.edit_proposal, { why: 'roll', changes: {} })
+})
+test('applyAssessment: let_expire on a zone trip does NOT expire — call keeps watching, no card', () => {
+    const { set, fireCard, lastAssessment } = _applyAssessment(call(), call().entry_zones[0], { verdict: 'let_expire', next_check_min: 15 }, NOW, 'zone_trip')
+    assert.equal(set.status, 'watching')          // downgraded to stand_aside → watching, not expired
+    assert.equal(fireCard, false)                 // no misleading "thesis expired" card
+    assert.equal(lastAssessment.verdict, 'stand_aside')
+})
+test('applyAssessment: PAST-expiry review still on wait → forced expired + fires the expiry card', () => {
+    const PAST = Date.parse('2026-07-09T20:30:00Z')   // 30m past valid_until (20:00Z)
+    const { set, fireCard, lastAssessment } = _applyAssessment(call(), null, { verdict: 'wait', next_check_min: 5 }, PAST, 'expiry_review')
+    assert.equal(set.status, 'expired')           // hard cutoff — no infinite re-assessment loop
+    assert.equal(fireCard, true)
+    assert.equal(lastAssessment.verdict, 'let_expire')
 })
 
 // ── _scheduledPatch ───────────────────────────────────────────────────────
@@ -357,4 +401,30 @@ test('withTimeout: passes a fast resolve straight through', async () => {
 })
 test('withTimeout: a rejecting check surfaces its own error', async () => {
     await assert.rejects(_withTimeout(Promise.reject(new Error('boom')), 1000), /boom/)
+})
+
+// ── _thinkingConfig: reasoning-effort → adaptive thinking ─────────────────
+test('thinkingConfig: off / undefined / invalid → null (no thinking, zero cost)', () => {
+    assert.equal(_thinkingConfig('off'), null)
+    assert.equal(_thinkingConfig(undefined), null)
+    assert.equal(_thinkingConfig('bogus'), null)
+})
+test('thinkingConfig: low/high → adaptive thinking with matching effort (never budget_tokens)', () => {
+    assert.deepEqual(_thinkingConfig('low'),  { thinking: { type: 'adaptive' }, output_config: { effort: 'low' } })
+    assert.deepEqual(_thinkingConfig('high'), { thinking: { type: 'adaptive' }, output_config: { effort: 'high' } })
+    assert.ok(!('budget_tokens' in _thinkingConfig('high').thinking))
+})
+
+// ── _assessText: find the text block even past a thinking block ────────────
+test('assessText: returns the text block when it is first (no thinking)', () => {
+    assert.equal(_assessText({ content: [{ type: 'text', text: '{"verdict":"wait"}' }] }), '{"verdict":"wait"}')
+})
+test('assessText: skips a leading thinking block to find the JSON text', () => {
+    const msg = { content: [{ type: 'thinking', thinking: 'hmm' }, { type: 'text', text: '{"verdict":"enter"}' }] }
+    assert.equal(_assessText(msg), '{"verdict":"enter"}')
+})
+test('assessText: no text block / malformed → empty string (safe for _extractJSON)', () => {
+    assert.equal(_assessText({ content: [{ type: 'thinking', thinking: 'x' }] }), '')
+    assert.equal(_assessText({}), '')
+    assert.equal(_assessText(null), '')
 })

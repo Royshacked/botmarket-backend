@@ -15,7 +15,7 @@ const COLLECTION = 'ideas'
 /**
  * Check both exit legs and any additional entries for an in-position idea.
  * @param {Function} onClose  callback(id, reason) — invoked for alert-only closes
- *                            (no live broker position); provided by monitor.service.js
+ *                            (no live broker position); provided by minos.monitor.service.js
  *                            so it can clean up `_lastChecked`.
  */
 export async function checkPosition(db, idea, stopCandles, tpCandles, aeCandles, onClose) {

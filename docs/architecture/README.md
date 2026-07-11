@@ -25,7 +25,7 @@ Internal services
   newsService         per-symbol news, on-demand (1h cache)
   newsFeedService     broadcast feed, SSE push (30min poll)
   priceService        OHLCV cache-first with incremental sync
-  monitorService      background 60s loop, evaluates active ideas (7 leaf types)
+  minosService        background 60s loop, evaluates active ideas (7 leaf types)
   brokerService       multi-broker orchestration via capability flags
   executionReconciler executionBus → idea status + native exit-order lifecycle
 

@@ -37,8 +37,12 @@ export function buildIdeaEntryConfirm(idea) {
 
 /** Kairos call READY to enter → open the call to confirm. Proposal comes from the fresh assessment. */
 export function buildCallReady(call, assessment = null) {
-    const p    = assessment?.proposal
-    const bits = p ? ` (entry ${p.entry}, stop ${p.stop})` : ''
+    // Only show the price bits when BOTH numbers finalized — _finalizeProposal returns null for
+    // entry/stop it can't resolve, and "entry null, stop null" must never reach the card copy.
+    const p       = assessment?.proposal
+    // NB: Number.isFinite (no coercion) — Number(null) is 0 (finite), which would leak "stop null".
+    const hasNums = p && Number.isFinite(p.entry) && Number.isFinite(p.stop)
+    const bits    = hasNums ? ` (entry ${p.entry}, stop ${p.stop})` : ''
     return {
         userId:  call?.user_id ?? null,
         content: `Kairos — ${call?.asset} is ready to enter${bits}. Open the call to confirm.`,

@@ -39,8 +39,8 @@ import { threadsRoutes }     from './api/threads/threads.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
 import { newsFeedService }  from './api/news-feed/newsFeed.service.js'
-import { monitorService }   from './monitoring/monitor.service.js'
-import { kairosMonitorService } from './monitoring/kairos.monitor.service.js'
+import { minosService }     from './monitoring/minos.monitor.service.js'
+import { hermesService }    from './monitoring/hermes.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
 import { paperEquityService } from './monitoring/paperEquity.service.js'
@@ -111,8 +111,8 @@ ensureKairosIndexes()
 threadService.ensureThreadIndexes()
 
 newsFeedService.start()
-monitorService.start()
-kairosMonitorService.start()
+minosService.start()
+hermesService.start()
 executionReconciler.start()
 paperFillService.start()
 paperEquityService.start()

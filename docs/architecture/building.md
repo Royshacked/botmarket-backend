@@ -193,10 +193,10 @@ Arming is a **status PATCH**, not a new document:
 `PATCH /api/trade-ideas/:id` → `updateTradeIdea` → `ideaService.updateIdea`.
 
 On `status: 'looking'` the service sets `monitorPhase='entry'`, clears `entryTriggeredAt`,
-**stamps `activatedAt = Date.now()`**, and calls `monitorService.resetIdea(id)`.
+**stamps `activatedAt = Date.now()`**, and calls `minosService.resetIdea(id)`.
 `activatedAt` gates the monitor's "triggered while waiting" logic.
 
-**Pre-flight entry check** — after a successful arm, `monitorService.preflightEntry(idea)`
+**Pre-flight entry check** — after a successful arm, `minosService.preflightEntry(idea)`
 runs on structured-only trees. It evaluates the entry tree two ways — will the monitor's
 rising edge fire (`requireHeld:true`) vs. is the level already held right now
 (`stateLevel:true`) — and returns `{ alreadySatisfied, close }` when the level is already

@@ -17,9 +17,9 @@ const BROKERS     = new Set(['ctrader', 'paper', 'manual'])
 // Fallback self-scheduling bounds (minutes) per horizon, used when the call omits cadence.
 // Clamps the monitor's agent-chosen next_check_at so adaptive cadence can't run away (Phase 2).
 const DEFAULT_CADENCE = {
-    intraday: { min: 2,  max: 30  },
-    day:      { min: 5,  max: 60  },
-    swing:    { min: 60, max: 720 },
+    intraday: { min: 1, max: 5  },
+    day:      { min: 1, max: 15 },
+    swing:    { min: 5, max: 30 },
 }
 
 export const kairosService = {

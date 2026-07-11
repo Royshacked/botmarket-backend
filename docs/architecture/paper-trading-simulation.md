@@ -63,7 +63,7 @@ results predictive of live: identical evaluation engine, identical reconciler, i
   (`currency/balance/equity/margin`). Paper `getAccount` returns a synthetic one.
 - **Price feed:** `providers/ohlcv.provider.js:26` `getCandles` (intraday forces live `refresh`).
   Reused by the paper fill engine.
-- **Monitor poll:** `monitoring/monitor.service.js` — `_tick` every 60s over `looking/long/short`.
+- **Monitor poll:** `monitoring/minos.monitor.service.js` — `_tick` every 60s over `looking/long/short`.
   Unchanged.
 - **Per-user broker keying:** connections in `brokerConnections` (`api/broker/brokerConnection.service.js`).
   Paper needs no external connection — presence of the paper account is enough.
