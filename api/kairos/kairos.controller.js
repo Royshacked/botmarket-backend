@@ -72,6 +72,36 @@ export async function generateKairosCall(req, res) {
     }
 }
 
+// Edit in place (the Calls-tab edit pencil → Kairos chat → "Update call"). Two shapes:
+//  • { call, accounts, mainAccountId, chat_state } → re-finalize the plan on the existing call
+//    (venue-resolve → validate → re-normalize → re-arm the monitor). Parity with updateIdea.
+//  • { chat_state } alone → progressive save of the build conversation mid-edit (no plan change).
+export async function updateKairosCall(req, res) {
+    try {
+        const { id } = req.params
+        const { call, accounts, mainAccountId, chat_state } = req.body ?? {}
+        const userId  = req.user._id
+        const isAdmin = req.user.isAdmin === true
+
+        let result
+        if (call && typeof call === 'object' && !Array.isArray(call)) {
+            const acctList = Array.isArray(accounts) ? accounts : []
+            result = await _finalizeCall(call, { userId, accounts: acctList, mainAccountId, updateId: id, chatState: chat_state })
+        } else {
+            result = await kairosService.patchKairosCall(id, { chat_state }, userId, isAdmin)
+        }
+
+        if (!result.ok) {
+            const code = result.reason === 'not_found' ? 404 : result.reason === 'forbidden' ? 403 : 400
+            return res.status(code).send({ error: result.reason ?? 'update_failed' })
+        }
+        res.send(result.call ?? { ok: true })
+    } catch (err) {
+        logger.error(LOG, 'Failed to update kairos call', err)
+        res.status(500).send({ error: 'Failed to update call' })
+    }
+}
+
 // Act on a card. Readiness: confirm | edit | dismiss. In-position management (Phase 5):
 // move_stop | take_partial | exit_now | let_run (accept the pending proposal); dismiss clears an
 // in-position card without terminating the position.

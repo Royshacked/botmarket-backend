@@ -24,11 +24,21 @@ const DEFAULT_CADENCE = {
 
 export const kairosService = {
     saveKairosCall,
+    updateKairosCall,
+    patchKairosCall,
     getKairosCall,
     listKairosCalls,
     deleteKairosCall,
     getKairosPerformance,
 }
+
+// Plan fields re-written on an in-place edit ("Update call"). Identity (id/created_at/user_id),
+// monitor_state history, position_state, and linked_idea_id are PRESERVED (never in the $set).
+const PLAN_FIELDS = [
+    'asset', 'asset_class', 'trade_type', 'bias', 'thesis', 'timeframe_ladder', 'cadence',
+    'entry_zones', 'reference_levels', 'patterns', 'sizing', 'broker', 'accounts',
+    'main_account_id', 'broker_symbol', 'basis_offset', 'valid_until',
+]
 
 // ── Performance (Phase 5, slice 4) ────────────────────────────────────────────
 // Aggregate closed calls' outcomes into a Kairos track record. A "win" is positive realized P&L
@@ -177,6 +187,9 @@ export function normalizeCall(raw, userId = null) {
         user_id:     userId,
         created_at:  new Date().toISOString(),
         savedAt:     Date.now(),
+        // Build conversation (messages + draft) so the Calls-tab edit pencil can reopen the
+        // call in the Kairos chat with its history — mirrors an idea's chat_state.
+        chat_state:  raw.chat_state ?? null,
 
         // ── plan (authored at build, ~immutable) ──
         asset:            raw.asset ?? '',
@@ -230,6 +243,57 @@ async function saveKairosCall(raw, userId) {
         return { ok: true, call: stripId(doc) }
     } catch (err) {
         logger.error(LOG, 'Failed to save call', err)
+        return { ok: false, error: err }
+    }
+}
+
+// In-place plan update (the "Update call" button — parity with updateIdea on an edited idea).
+// Re-validates + re-normalizes the plan exactly like a fresh save, then $sets ONLY the plan fields
+// (+ chat_state) onto the existing doc, RE-ARMING the monitor (status→waiting, next check cleared)
+// so Hermes re-evaluates the new plan from scratch. Identity + monitor history + position_state kept.
+async function updateKairosCall(id, raw, userId, isAdmin = false) {
+    const gate = validateCall(raw)
+    if (!gate.ok) {
+        logger.warn(LOG, 'call update rejected by construction gate', { reason: gate.reason, id })
+        return { ok: false, reason: gate.reason }
+    }
+    try {
+        const db  = await getDb()
+        const cur = await db.collection(COLLECTION).findOne({ id })
+        if (!cur) return { ok: false, reason: 'not_found' }
+        if (cur.user_id && cur.user_id !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+
+        const full = normalizeCall(raw, cur.user_id ?? userId)   // fresh normalized plan (re-ids zones/levels)
+        const $set = { savedAt: Date.now(), chat_state: raw.chat_state ?? cur.chat_state ?? null }
+        for (const k of PLAN_FIELDS) $set[k] = full[k]
+        // Re-arm on the new plan: back to waiting, monitor re-schedules on the next tick.
+        $set.status = 'waiting'
+        $set['monitor_state.next_check_at'] = null
+        $set['monitor_state.armed_zone_id'] = null
+
+        await db.collection(COLLECTION).updateOne({ id }, { $set })
+        const updated = await db.collection(COLLECTION).findOne({ id })
+        logger.info(LOG, 'call updated', { id, asset: $set.asset, trade_type: $set.trade_type })
+        return { ok: true, call: stripId(updated) }
+    } catch (err) {
+        logger.error(LOG, 'Failed to update call', err)
+        return { ok: false, error: err }
+    }
+}
+
+// Lightweight partial patch — progressive chat_state save during an edit session (no re-validation,
+// no plan change). Whitelisted to chat_state so a stray field can't rewrite the plan.
+async function patchKairosCall(id, patch, userId, isAdmin = false) {
+    try {
+        const db  = await getDb()
+        const cur = await db.collection(COLLECTION).findOne({ id }, { projection: { user_id: 1 } })
+        if (!cur) return { ok: false, reason: 'not_found' }
+        if (cur.user_id && cur.user_id !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+        if (!patch || !Object.prototype.hasOwnProperty.call(patch, 'chat_state')) return { ok: true }
+        await db.collection(COLLECTION).updateOne({ id }, { $set: { chat_state: patch.chat_state } })
+        return { ok: true }
+    } catch (err) {
+        logger.error(LOG, 'Failed to patch call', err)
         return { ok: false, error: err }
     }
 }

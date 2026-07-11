@@ -130,10 +130,11 @@ export async function _resolveVenue(broker, userId, accountId, asset, deps = {})
     return { broker_symbol: brokerSymbol, basis_offset }
 }
 
-// Called on Generate. Bind venue from the marked accounts (bank icon), resolve the symbol gate,
-// then validate + persist. Multi-broker forking is deferred — the call binds to the MAIN account's
-// broker for the trial; all marked account ids are stored.
-export async function _finalizeCall(call, { userId = null, accounts = [], mainAccountId = null } = {}) {
+// Called on Generate (and on the "Update call" edit — pass `updateId`). Bind venue from the marked
+// accounts (bank icon), resolve the symbol gate, then validate + persist. Multi-broker forking is
+// deferred — the call binds to the MAIN account's broker for the trial; all marked account ids are
+// stored. `chatState` (build conversation + draft) rides along so an edit can reopen the chat.
+export async function _finalizeCall(call, { userId = null, accounts = [], mainAccountId = null, updateId = null, chatState = undefined } = {}) {
     const list = Array.isArray(accounts) ? accounts.filter(a => a && a.id != null) : []
     const main = list.find(a => String(a.id) === String(mainAccountId)) ?? list[0] ?? null
     const broker = main?.broker ?? null
@@ -147,9 +148,12 @@ export async function _finalizeCall(call, { userId = null, accounts = [], mainAc
         main_account_id: main?.id != null ? String(main.id) : null,
         broker_symbol,
         basis_offset,
+        ...(chatState !== undefined ? { chat_state: chatState } : {}),
     }
 
-    return kairosService.saveKairosCall(merged, userId)
+    return updateId
+        ? kairosService.updateKairosCall(updateId, merged, userId)
+        : kairosService.saveKairosCall(merged, userId)
 }
 
 // ─── Prompt / messages ────────────────────────────────────────────────────────

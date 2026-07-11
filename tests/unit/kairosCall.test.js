@@ -127,6 +127,13 @@ test('normalize: main_account_id defaults to first account', () => {
     assert.equal(normalizeCall(call({ main_account_id: 'paper-main' })).main_account_id, 'paper-main')
 })
 
+test('normalize: chat_state persists (build conversation for the edit pencil), null when absent', () => {
+    assert.equal(normalizeCall(call()).chat_state, null)
+    const cs  = { messages: [{ role: 'user', content: 'NVDA day trade' }], draft: { asset: 'NVDA' } }
+    const doc = normalizeCall(call({ chat_state: cs }))
+    assert.deepEqual(doc.chat_state, cs)
+})
+
 test('normalize: broker_symbol defaults to asset, basis_offset to 0', () => {
     const doc = normalizeCall(call())
     assert.equal(doc.broker_symbol, 'TSLA')

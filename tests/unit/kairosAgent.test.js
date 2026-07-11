@@ -18,6 +18,16 @@ test('parse: extracts the call JSON and strips it from the reply', () => {
     assert.equal(call.entry_zones[0].lower, 247.4)
 })
 
+test('parse: partial worksheet (asset only, no zones) parses and strips', () => {
+    // The call is now a live preview emitted every turn — early on it carries just the asset/bias.
+    const raw = `Locking in TSLA long — mapping zones next.\n<call>{ "asset": "TSLA", "bias": "long", "trade_type": "day" }</call>`
+    const { reply, call } = _parseKairosResponse(raw)
+    assert.equal(reply, 'Locking in TSLA long — mapping zones next.')
+    assert.equal(call.asset, 'TSLA')
+    assert.equal(call.bias, 'long')
+    assert.equal(call.entry_zones, undefined)   // not ready to Generate yet — no zones
+})
+
 test('parse: no block → call null, reply is the whole text', () => {
     const { reply, call } = _parseKairosResponse('Still mapping levels, one sec.')
     assert.equal(call, null)
@@ -83,6 +93,14 @@ test('finalize: no marked account → no_venue (never reaches the DB)', async ()
 test('finalize: incomplete draft (no zone) → no_entry_zone before the DB', async () => {
     const draft = { asset: 'TSLA', trade_type: 'day', entry_zones: [], sizing: { max_size: 100 } }
     const res   = await _finalizeCall(draft, { userId: 'u1', accounts: [{ id: 'paper-u1', broker: 'paper' }] })
+    assert.equal(res.ok, false)
+    assert.equal(res.reason, 'no_entry_zone')
+})
+
+test('finalize (update): updateId routes to the in-place update + still gate-checks before the DB', async () => {
+    // Same validation gate applies on edit — an incomplete draft is rejected before any DB write.
+    const draft = { asset: 'TSLA', trade_type: 'day', entry_zones: [], sizing: { max_size: 100 } }
+    const res   = await _finalizeCall(draft, { userId: 'u1', accounts: [{ id: 'paper-u1', broker: 'paper' }], updateId: 'call_x', chatState: { messages: [] } })
     assert.equal(res.ok, false)
     assert.equal(res.reason, 'no_entry_zone')
 })
