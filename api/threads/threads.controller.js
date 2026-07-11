@@ -9,7 +9,7 @@ import { isSubstantive } from '../../services/thread.util.js'
 import { logger }        from '../../services/logger.service.js'
 
 const LOG    = '[threads:controller]'
-const AGENTS = new Set(['idea', 'portfolio', 'scanner', 'axl'])
+const AGENTS = new Set(['idea', 'portfolio', 'scanner', 'kairos', 'axl'])
 
 export async function saveDraftThread(req, res) {
     try {
