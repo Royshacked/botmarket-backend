@@ -1,13 +1,19 @@
-import { callOpenAI } from '../providers/openai.provider.js'
+import { callAnthropic } from '../providers/anthropic.provider.js'
 import { cleanJSON } from './util.service.js';
 
 export const filterService = {
     filterNews,
 }
 
+// Exported for unit testing (see tests/unit/newsFilter.test.js).
+export { _safeParseJsonArray, _isValidArticle }
+
 
 async function filterNews(articles) {
-    const model = 'gpt-4o-mini'
+    // Haiku (cheap/fast) on Anthropic, whose billing is active — OpenAI's quota
+    // was exhausted, which silently killed the whole feed refresh. News is
+    // UX-only for now, so a small classifier model is plenty.
+    const model = 'claude-haiku-4-5'
     const systemPrompt = `You filter news articles for a trading dashboard. Return ONLY a valid JSON array — no explanation, no markdown.`
     const userPrompt = `Filter these articles for trading relevance (financial markets, stocks, macro, commodities). Remove irrelevant ones.
 For each kept article add: sentiment ("bullish"|"bearish"|"neutral") and confidence (0–1).
@@ -28,7 +34,7 @@ ${JSON.stringify(articles.map(a => ({
     url: a.url,
 })))}`.trim()
 
-    const response = await callOpenAI(model, userPrompt, systemPrompt)
+    const response = await callAnthropic(model, userPrompt, systemPrompt)
 
     const parsed = _safeParseJsonArray(response)
     if (!Array.isArray(parsed)) return []

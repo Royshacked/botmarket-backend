@@ -8,7 +8,7 @@ import { mapGNewsArticle, isValidArticle, articleKey, dedupeArticles } from '../
 const LOG = '[newsFeed]'
 const CACHE_TYPE = 'news-feed'
 const CACHE_NAME = 'feed'
-const INTERVAL_MS    = 30 * 60 * 1000
+const INTERVAL_MS    = 2 * 60 * 60 * 1000
 const WINDOW_MS      = 24 * 60 * 60 * 1000
 const SYMBOL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const SYMBOL_CACHE_TTL_MS = 15 * 60 * 1000   // per-symbol news is cached for 15 min
