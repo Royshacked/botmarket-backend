@@ -7,7 +7,7 @@ import { userService } from '../api/user/user.service.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry, notifyCallManage } from '../services/tradeNotify.service.js'
-import { withTimeout, extractFirstJSON } from './monitorUtils.js'
+import { withTimeout, extractFirstJSON, createPollLoop } from './monitorUtils.js'
 
 // Hermes — the Kairos-call readiness monitor: a self-scheduling readiness loop (KAIROS_PLAN.md,
 // Phase 2). Its own tick, its own collection (`kairos_calls`), sharing NO mutable state with Minos
@@ -34,24 +34,9 @@ const EXPIRY_THRESHOLD_MS = 15 * 60_000   // run the final "expiry review" withi
 // every later tick skips forever. Bounding each check lets a hung one reject so the loop recovers.
 const CHECK_TIMEOUT_MS = 90_000
 
-let _timer   = null
-let _running = false
+const _loop = createPollLoop({ intervalMs: POLL_INTERVAL_MS, tick: _tick, eager: true, log: LOG, name: 'kairos monitor' })
 
-export const hermesService = { start, stop }
-
-function start() {
-    if (_timer) return
-    logger.info(LOG, 'Kairos monitor starting')
-    _tick()
-    _timer = setInterval(_tick, POLL_INTERVAL_MS)
-}
-
-function stop() {
-    if (!_timer) return
-    clearInterval(_timer)
-    _timer = null
-    logger.info(LOG, 'Kairos monitor stopped')
-}
+export const hermesService = { start: _loop.start, stop: _loop.stop }
 
 // Race a promise against a timeout so a hung await can't wedge the loop. Shared impl lives in
 // monitorUtils (used by Minos too); re-exported here under the historical name for tests.
@@ -59,41 +44,33 @@ export const _withTimeout = withTimeout
 
 // ─── Poll loop ────────────────────────────────────────────────────────────────
 async function _tick() {
-    if (_running) { logger.warn(LOG, 'previous tick still running — skipping'); return }
-    _running = true
-    try {
-        const db  = await getDb()
-        const now = new Date().toISOString()
-        // Due = active status AND (never checked OR next_check_at has passed). ISO strings compare
-        // lexicographically for same-format UTC timestamps, so $lte on the string is correct.
-        const calls = await db.collection(COLLECTION).find({
-            status: { $in: [...ACTIVE_STATUSES, ...POSITION_STATUSES] },
-            $or: [
-                { 'monitor_state.next_check_at': null },
-                { 'monitor_state.next_check_at': { $lte: now } },
-            ],
-        }).toArray()
+    const db  = await getDb()
+    const now = new Date().toISOString()
+    // Due = active status AND (never checked OR next_check_at has passed). ISO strings compare
+    // lexicographically for same-format UTC timestamps, so $lte on the string is correct.
+    const calls = await db.collection(COLLECTION).find({
+        status: { $in: [...ACTIVE_STATUSES, ...POSITION_STATUSES] },
+        $or: [
+            { 'monitor_state.next_check_at': null },
+            { 'monitor_state.next_check_at': { $lte: now } },
+        ],
+    }).toArray()
 
-        if (!calls.length) return
-        logger.info(LOG, `checking ${calls.length} due call(s)`)
-        for (const call of calls) {
-            // Claim the call by leasing its next_check_at forward BEFORE assessing. Because
-            // _withTimeout abandons (but can't cancel) a slow _checkCall, a still-running check
-            // whose next_check_at hasn't been persisted yet would otherwise be re-selected by the
-            // next tick and processed a SECOND time concurrently — double-firing readiness/manage
-            // cards. The lease (≥ the check timeout) makes the re-query miss it until the check has
-            // certainly stopped; _checkCall's own _persist overwrites the lease with the real cadence.
-            if (!(await _claimCall(db, call, Date.now()))) {
-                logger.info(LOG, `call ${call.id} already claimed/rescheduled — skipping`)
-                continue
-            }
-            try { await _withTimeout(_checkCall(db, call, Date.now(), _deps), CHECK_TIMEOUT_MS) }
-            catch (err) { logger.error(LOG, `checkCall failed for ${call.id}:`, err.message) }
+    if (!calls.length) return
+    logger.info(LOG, `checking ${calls.length} due call(s)`)
+    for (const call of calls) {
+        // Claim the call by leasing its next_check_at forward BEFORE assessing. Because
+        // _withTimeout abandons (but can't cancel) a slow _checkCall, a still-running check
+        // whose next_check_at hasn't been persisted yet would otherwise be re-selected by the
+        // next tick and processed a SECOND time concurrently — double-firing readiness/manage
+        // cards. The lease (≥ the check timeout) makes the re-query miss it until the check has
+        // certainly stopped; _checkCall's own _persist overwrites the lease with the real cadence.
+        if (!(await _claimCall(db, call, Date.now()))) {
+            logger.info(LOG, `call ${call.id} already claimed/rescheduled — skipping`)
+            continue
         }
-    } catch (err) {
-        logger.error(LOG, 'tick failed:', err.message)
-    } finally {
-        _running = false
+        try { await _withTimeout(_checkCall(db, call, Date.now(), _deps), CHECK_TIMEOUT_MS) }
+        catch (err) { logger.error(LOG, `checkCall failed for ${call.id}:`, err.message) }
     }
 }
 

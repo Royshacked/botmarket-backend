@@ -27,7 +27,7 @@ import { notifyIdeaEntryConfirm }               from '../services/tradeNotify.se
 import {
     fetchCandles, buildSymbolMap, buildVolumeCtx, brokerCandleCtx,
     hasCumulativeVolume, logCheck, persistConditionStates,
-    resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe, withTimeout,
+    resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe, withTimeout, createPollLoop,
 } from './monitorUtils.js'
 
 const LOG        = '[minos.monitor]'
@@ -43,69 +43,45 @@ const CHECK_TIMEOUT_MS = 45_000
 // In-memory: ideaId → timestamp of last check (resets on restart — fine for MVP)
 const _lastChecked = new Map()
 
-let _timer   = null
-let _running = false
+const _loop = createPollLoop({ intervalMs: POLL_INTERVAL_MS, tick: _tick, eager: true, log: LOG, name: 'monitor' })
 
 // ─── Public interface ─────────────────────────────────────────────────────────
 
-export const minosService = { start, stop, resetIdea, preflightEntry }
+export const minosService = { start: _loop.start, stop: _loop.stop, resetIdea, preflightEntry }
 
 function resetIdea(id) {
     _lastChecked.delete(id)
     logger.info(LOG, `Reset check timer for idea ${id}`)
 }
 
-function start() {
-    if (_timer) return
-    logger.info(LOG, 'Monitoring service starting')
-    _tick()
-    _timer = setInterval(_tick, POLL_INTERVAL_MS)
-}
-
-function stop() {
-    if (!_timer) return
-    clearInterval(_timer)
-    _timer = null
-    logger.info(LOG, 'Monitoring service stopped')
-}
-
 // ─── Poll loop ────────────────────────────────────────────────────────────────
 
 async function _tick() {
-    if (_running) {
-        logger.warn(LOG, 'Previous tick still running — skipping')
+    let db, ideas
+    try {
+        db    = await getDb()
+        ideas = await db.collection(COLLECTION)
+            .find({ status: { $in: ['looking', 'long', 'short'] } })
+            .toArray()
+    } catch (err) {
+        logger.error(LOG, 'DB read error in tick:', err.message)
         return
     }
-    _running = true
-    try {
-        let db, ideas
-        try {
-            db    = await getDb()
-            ideas = await db.collection(COLLECTION)
-                .find({ status: { $in: ['looking', 'long', 'short'] } })
-                .toArray()
-        } catch (err) {
-            logger.error(LOG, 'DB read error in tick:', err.message)
-            return
-        }
 
-        // Evict stale check-timers (ideas closed/deleted since the last tick) so
-        // _lastChecked stays bounded over the process lifetime.
-        const liveIds = new Set((ideas ?? []).map(i => i.id))
-        for (const id of _lastChecked.keys()) if (!liveIds.has(id)) _lastChecked.delete(id)
+    // Evict stale check-timers (ideas closed/deleted since the last tick) so
+    // _lastChecked stays bounded over the process lifetime.
+    const liveIds = new Set((ideas ?? []).map(i => i.id))
+    for (const id of _lastChecked.keys()) if (!liveIds.has(id)) _lastChecked.delete(id)
 
-        await _marketSweep(db)
-        await checkPortfolioReviews().catch(err => logger.error(LOG, 'Portfolio review check failed', err.message))
+    await _marketSweep(db)
+    await checkPortfolioReviews().catch(err => logger.error(LOG, 'Portfolio review check failed', err.message))
 
-        if (!ideas || ideas.length === 0) return
-        logger.info(LOG, `Checking ${ideas.length} idea(s) (looking + long + short)`)
+    if (!ideas || ideas.length === 0) return
+    logger.info(LOG, `Checking ${ideas.length} idea(s) (looking + long + short)`)
 
-        for (const idea of ideas) {
-            try { await withTimeout(_checkIdea(db, idea), CHECK_TIMEOUT_MS) }
-            catch (err) { logger.error(LOG, `Idea check timed out/failed for ${idea.id}:`, err.message) }
-        }
-    } finally {
-        _running = false
+    for (const idea of ideas) {
+        try { await withTimeout(_checkIdea(db, idea), CHECK_TIMEOUT_MS) }
+        catch (err) { logger.error(LOG, `Idea check timed out/failed for ${idea.id}:`, err.message) }
     }
 }
 

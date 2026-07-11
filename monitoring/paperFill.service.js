@@ -19,6 +19,7 @@ import { openPosition,
          reducePosition,
          quoteMapForSymbols }    from '../api/broker/paperExecution.service.js'
 import { logger }                from '../services/logger.service.js'
+import { createPollLoop }        from './monitorUtils.js'
 
 const LOG              = '[paperFill.service]'
 const ORDERS           = 'paperOrders'
@@ -29,20 +30,9 @@ const ORDERS           = 'paperOrders'
 // spike that reverts inside the interval can be missed — accepted for a forward sim.
 const POLL_INTERVAL_MS = Number(process.env.PAPER_FILL_INTERVAL_MS) || 3_000
 
-let _timer   = null
-let _running = false
+const _loop = createPollLoop({ intervalMs: POLL_INTERVAL_MS, tick: _tick, log: LOG, name: 'paper fill' })
 
-export const paperFillService = { start, stop, _tick, selectFills }
-
-function start() {
-    if (_timer) return
-    _timer = setInterval(() => { _tick().catch(err => logger.error(LOG, 'tick error:', err.message)) }, POLL_INTERVAL_MS)
-    logger.info(LOG, `Paper fill engine started (every ${POLL_INTERVAL_MS / 1000}s)`)
-}
-
-function stop() {
-    if (_timer) { clearInterval(_timer); _timer = null }
-}
+export const paperFillService = { start: _loop.start, stop: _loop.stop, _tick, selectFills }
 
 /**
  * Whether a resting order is triggered by the latest sampled price.
@@ -88,23 +78,17 @@ export function selectFills(triggered) {
 }
 
 async function _tick() {
-    if (_running) return   // never overlap a slow sweep
-    _running = true
-    try {
-        const db     = await getDb()
-        const orders = await db.collection(ORDERS).find({ status: 'working' }, { projection: { _id: 0 } }).toArray()
-        if (!orders.length) return
+    const db     = await getDb()
+    const orders = await db.collection(ORDERS).find({ status: 'working' }, { projection: { _id: 0 } }).toArray()
+    if (!orders.length) return
 
-        // One price lookup per distinct symbol (Yahoo last quote / candle-close fallback).
-        const priceBy = await quoteMapForSymbols(orders.map(o => o.symbol))
+    // One price lookup per distinct symbol (Yahoo last quote / candle-close fallback).
+    const priceBy = await quoteMapForSymbols(orders.map(o => o.symbol))
 
-        const triggered = orders.filter(o => isTriggered(o, priceBy.get(o.symbol)))
-        for (const order of selectFills(triggered)) {
-            await _fill(order, order.triggerPrice).catch(err =>
-                logger.error(LOG, `fill failed (order ${order.orderId}): ${err.message}`))
-        }
-    } finally {
-        _running = false
+    const triggered = orders.filter(o => isTriggered(o, priceBy.get(o.symbol)))
+    for (const order of selectFills(triggered)) {
+        await _fill(order, order.triggerPrice).catch(err =>
+            logger.error(LOG, `fill failed (order ${order.orderId}): ${err.message}`))
     }
 }
 

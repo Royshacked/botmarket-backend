@@ -13,24 +13,14 @@
 import { paperBrokerService }   from '../api/broker/paperBroker.service.js'
 import { computeEquity }        from '../api/broker/paperExecution.service.js'
 import { logger }               from '../services/logger.service.js'
+import { createPollLoop }        from './monitorUtils.js'
 
 const LOG          = '[paperEquity.service]'
 const INTERVAL_MS  = Number(process.env.PAPER_EQUITY_SNAPSHOT_MS) || 300_000   // 5 min
 
-let _timer   = null
-let _running = false
+const _loop = createPollLoop({ intervalMs: INTERVAL_MS, tick: _tick, log: LOG, name: 'equity snapshot' })
 
-export const paperEquityService = { start, stop, snapshotAccount, _tick }
-
-function start() {
-    if (_timer) return
-    _timer = setInterval(() => { _tick().catch(err => logger.error(LOG, 'tick error:', err.message)) }, INTERVAL_MS)
-    logger.info(LOG, `Equity snapshotter started (every ${INTERVAL_MS / 1000}s)`)
-}
-
-function stop() {
-    if (_timer) { clearInterval(_timer); _timer = null }
-}
+export const paperEquityService = { start: _loop.start, stop: _loop.stop, snapshotAccount, _tick }
 
 /** Snapshot one account's current equity into its curve. */
 async function snapshotAccount(userId, accountId) {
@@ -49,16 +39,10 @@ async function snapshotAccount(userId, accountId) {
 }
 
 async function _tick() {
-    if (_running) return
-    _running = true
-    try {
-        const accounts = await paperBrokerService.listActiveAccounts()
-        for (const { userId, accountId } of accounts) {
-            await snapshotAccount(userId, accountId).catch(err =>
-                logger.error(LOG, `snapshot failed (account ${accountId}): ${err.message}`))
-        }
-        if (accounts.length) logger.info(LOG, `Snapshotted equity for ${accounts.length} active account(s)`)
-    } finally {
-        _running = false
+    const accounts = await paperBrokerService.listActiveAccounts()
+    for (const { userId, accountId } of accounts) {
+        await snapshotAccount(userId, accountId).catch(err =>
+            logger.error(LOG, `snapshot failed (account ${accountId}): ${err.message}`))
     }
+    if (accounts.length) logger.info(LOG, `Snapshotted equity for ${accounts.length} active account(s)`)
 }
