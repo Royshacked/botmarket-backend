@@ -95,7 +95,8 @@ async function _onClosed(exec) {
             if (exec.broker === 'paper') {
                 await tradeCaptureService.captureClose({
                     accountId: exec.accountId, positionId: exec.positionId,
-                    price: exec.price, reason: exec.reason, pnl: exec.pnl, at: exec.at,
+                    price: exec.price, reason: exec.reason, pnl: exec.pnl,
+                    commission: exec.commission, spread: exec.spread, at: exec.at,
                 })
             }
             return
@@ -109,6 +110,7 @@ async function _onClosed(exec) {
 
         await _finalizeClose(db, idea, {
             reason, pnl: exec.pnl, at: exec.at, accountId: exec.accountId, positionId: exec.positionId, price: exec.price,
+            commission: exec.commission, spread: exec.spread,
         })
     })
 }
@@ -162,6 +164,7 @@ async function _onReduced(exec) {
             const reason = matched?.leg ?? exec.reason ?? 'broker'
             await _finalizeClose(db, { ...idea, exitOrders: orders }, {
                 reason, pnl: exec.pnl, at: exec.at, accountId: exec.accountId, positionId: exec.positionId, price: exec.price,
+                commission: exec.commission, spread: exec.spread,
             })
             return
         }
@@ -388,7 +391,7 @@ function _brokerFor(idea, accountId) {
  * cancel EVERY working broker order still bound to the closed position. Shared by the
  * full-close event path and the broker-confirmed full close detected from a reduce.
  */
-async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId, price }) {
+async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId, price, commission, spread }) {
     const patch = { status: 'closed', closedReason: reason, closedAt: at ?? Date.now() }
     if (pnl != null) patch.realizedPnl = pnl
 
@@ -400,7 +403,7 @@ async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId
     if (!result) return false   // someone else closed it first
     logger.info(LOG, `Idea ${result.id} closed by broker (reason=${reason}, pnl=${patch.realizedPnl ?? '·'})`)
 
-    await tradeCaptureService.captureClose({ accountId, positionId, price, reason, pnl, at })
+    await tradeCaptureService.captureClose({ accountId, positionId, price, reason, pnl, commission, spread, at })
     await _cancelExitsForPosition(db, result, accountId, positionId)
     return true
 }

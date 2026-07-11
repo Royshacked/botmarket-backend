@@ -123,6 +123,7 @@ async function saveIdea(tradeIdea, userId) {
         portfolioId:     tradeIdea.portfolioId     ?? undefined,
         portfolioName:   tradeIdea.portfolioName   ?? undefined,
         allocationRatio: tradeIdea.allocationRatio ?? undefined,
+        callId:          tradeIdea.callId           ?? undefined,   // set ⟺ spawned from a Kairos call; flows to the trade's origin block
         conviction:      cleanConviction(tradeIdea.conviction),
     }
 

@@ -38,6 +38,8 @@ export function toExecution(session, p) {
     const positionId = position.positionId ?? deal.positionId ?? order.positionId
     const symbolId   = order.tradeData?.symbolId ?? position.tradeData?.symbolId
     const tradeSide  = position.tradeData?.tradeSide ?? order.tradeData?.tradeSide
+    // Per-fill commission cost (deal.commission is signed integer cents) → absolute amount.
+    const commission = deal.commission != null ? Math.abs(deal.commission / MONEY_SCALE) : undefined
 
     // Reverse the broker symbol back to the app's canonical asset (e.g. US100 →
     // NQ) so the reconciler can match `exec.symbol` to the idea's stored `asset`.
@@ -76,6 +78,7 @@ export function toExecution(session, p) {
                     ...(deal.executionPrice != null && { price: deal.executionPrice }),
                     ...(deal.filledVolume   != null && { quantity: deal.filledVolume }),
                     ...(closeDetail?.profit != null && { pnl: closeDetail.profit / MONEY_SCALE }),
+                    ...(commission != null && { commission }),
                 }
             }
             // A fill that doesn't close → a new/added position.
@@ -86,6 +89,7 @@ export function toExecution(session, p) {
                 ...(deal.filledVolume    != null && { quantity: deal.filledVolume }),
                 ...(position.stopLoss    != null && { stopLoss: position.stopLoss }),
                 ...(position.takeProfit  != null && { takeProfit: position.takeProfit }),
+                ...(commission != null && { commission }),
             }
         }
         default:

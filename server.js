@@ -22,6 +22,7 @@ import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
 import { ensureKairosIndexes } from './api/kairos/kairos.service.js'
+import { ensureTradeIndexes } from './services/tradeCapture.service.js'
 import { threadService } from './services/thread.service.js'
 import { ideaRoutes } from './api/idea/idea.routes.js'
 import { kairosRoutes } from './api/kairos/kairos.routes.js'
@@ -31,6 +32,7 @@ import { authRoutes }   from './api/authentication/authentication.routes.js'
 import { userRoutes }   from './api/user/user.routes.js'
 import { brokerRoutes }      from './api/broker/broker.routes.js'
 import { paperRoutes }       from './api/paper/paper.routes.js'
+import { tradesRoutes }      from './api/trades/trades.routes.js'
 import { transcribeRoutes }  from './api/transcribe/transcribe.routes.js'
 import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
 import { scannerRoutes }     from './api/scanner/scanner.routes.js'
@@ -95,6 +97,7 @@ app.use('/api/auth',        authRoutes)
 app.use('/api/users',       userRoutes)
 app.use('/api/broker',      brokerRoutes)
 app.use('/api/paper',       paperRoutes)
+app.use('/api/trades',      tradesRoutes)
 app.use('/api/portfolio',   portfolioRoutes)
 app.use('/api/scanner',     scannerRoutes)
 app.use('/api/axl',         axlRoutes)
@@ -108,6 +111,7 @@ ensureChatIndexes()
 ensureUserIndexes()
 ensureIdeaIndexes()
 ensureKairosIndexes()
+ensureTradeIndexes()
 threadService.ensureThreadIndexes()
 
 newsFeedService.start()

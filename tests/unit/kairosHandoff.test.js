@@ -61,6 +61,11 @@ test('buildIdeaFromCall: maps proposal → immediate market idea with NATIVE tou
     assert.equal(idea.take_profit, undefined)
     assert.deepEqual(idea.accounts, ['paper-u1'])
     assert.equal(idea.mainAccountId, 'paper-u1')
+    assert.equal(idea.callId, 'call_TSLA_x')   // origin back-reference → survives onto the trade
+})
+test('buildIdeaFromCall: stamps callId even when the call id is the only linkage', () => {
+    const idea = buildIdeaFromCall(readyCall({ id: 'call_abc' }), { stop: 1, take_profit: [{ price: 2 }], size: 1 })
+    assert.equal(idea.callId, 'call_abc')
 })
 test('buildIdeaFromCall: native TP is the FINAL target (intermediates are discretionary)', () => {
     const idea = buildIdeaFromCall(readyCall(), { stop: 245, take_profit: [{ price: 252 }, { price: 256 }, { price: 260 }], size: 10 })

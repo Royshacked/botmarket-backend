@@ -16,6 +16,7 @@ import { logger }                from '../../services/logger.service.js'
 import { routeExits }            from '../../services/protectionPlan.service.js'
 import { openManualPosition, closeManualPosition } from '../broker/manualExecution.service.js'
 import { notifyManualEntry, notifyManualExit, entryLegFromIdea, exitLegFromIdea } from '../../services/manualNotify.service.js'
+import { tradeCaptureService } from '../../services/tradeCapture.service.js'
 
 const LOG        = '[manualIdea]'
 const COLLECTION = 'ideas'
@@ -97,6 +98,15 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId, i
             monitorTp:    monitored && route.tp.hasAny,
         }
         const updated = await db.collection(COLLECTION).findOneAndUpdate({ id }, { $set: set }, { returnDocument: 'after' })
+
+        // Capture into the analytics ledger — manual has no reconciler, so we call the same
+        // capture hook the reconciler uses directly (best-effort; never throws). Reuse means
+        // manual trades inherit the origin block + call-reasoning freezing for free.
+        await tradeCaptureService.captureOpen(updated, {
+            broker: 'manual', accountId, positionId,
+            direction: idea.direction, quantity: qty, price: px, at: now,
+        })
+
         logger.info(LOG, `Manual entry confirmed for ${id}: ${status} ${qty} ${idea.asset} @ ${px}`)
         return { ok: true, idea: stripId(updated) }
     } catch (err) {
@@ -136,6 +146,13 @@ export async function confirmManualExit(id, { price } = {}, userId, isAdmin = fa
             ...(res?.pnl != null && { realizedPnl: res.pnl }),
         }
         const updated = await db.collection(COLLECTION).findOneAndUpdate({ id }, { $set: set }, { returnDocument: 'after' })
+
+        // Patch the open trade to closed in the analytics ledger (best-effort; never throws).
+        await tradeCaptureService.captureClose({
+            accountId: link.accountId, positionId: link.positionId,
+            price: px, reason, pnl: res?.pnl, at: now,
+        })
+
         logger.info(LOG, `Manual exit confirmed for ${id} @ ${px} (${reason}, pnl ${res?.pnl})`)
         return { ok: true, idea: stripId(updated) }
     } catch (err) {

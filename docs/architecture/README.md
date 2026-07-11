@@ -6,6 +6,7 @@
 | [monitoring.md](./monitoring.md) | Background monitoring service; AND/OR condition logic; the 7 leaf evaluators (structured/touch/indicator/chart/news/time/volume) + VWAP + intrabar mechanics; Claude Haiku usage |
 | [broker.md](./broker.md) | Multi-broker adapter pattern + capability flags; cTrader live trading (ProtoOA WS), paper broker, IBKR (IB Gateway, data-only); execution reconciler; OAuth / gateway connections |
 | [paper-trading-simulation.md](./paper-trading-simulation.md) | Virtual per-user account; live-price fill engine; equity snapshots; the `paper` broker adapter |
+| [trades-data.md](./trades-data.md) | The canonical trade entity: the `trades` ledger schema, origin model (idea/call/portfolio), stored-vs-derived metrics, capture path, and gaps to close |
 | [news-feed.md](./news-feed.md) | Two news pipelines: SSE display feed + per-symbol monitoring feed; GNews provider; AI sentiment filter |
 | [ohlcv-price-data.md](./ohlcv-price-data.md) | OHLCV pipeline; Massive/Polygon provider; file cache; priceService; monitoring adapter |
 

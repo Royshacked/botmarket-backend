@@ -159,6 +159,8 @@ export async function openPosition({ userId, accountId, symbol, direction, qty, 
         direction,
         quantity:  qty,
         price:     fillPrice,
+        commission: commissionPerTrade,                          // entry commission (cash cost)
+        spread:     round2(Math.abs(fillPrice - price) * qty),   // entry spread cost (baked into fillPrice)
         at:        Date.now(),
     }))
     logger.info(LOG, `Opened position ${positionId}: ${direction} ${qty} ${symbol} @ ${fillPrice} (mid ${price}, comm ${commissionPerTrade})`)
@@ -189,9 +191,10 @@ export async function reducePosition({ userId, positionId, qty, price, reason = 
     const closeQty  = Math.min(qty, pos.qty)
     // Closing trade side is the opposite of the position: close a long by SELLing (bid),
     // close a short by BUYing (ask). Spread + commission make the P&L honest.
-    const exitPrice = applySpread(price, pos.direction === 'short', spreadBps)
-    const gross     = (exitPrice - pos.avgPrice) * closeQty * dirSign(pos.direction)
-    const net       = gross - commissionPerTrade
+    const exitPrice   = applySpread(price, pos.direction === 'short', spreadBps)
+    const spreadCost  = round2(Math.abs(exitPrice - price) * closeQty)   // exit spread cost (in exitPrice)
+    const gross       = (exitPrice - pos.avgPrice) * closeQty * dirSign(pos.direction)
+    const net         = gross - commissionPerTrade
     await paperBrokerService.adjustBalance(userId, pos.accountId, { cash: net, realizedPnl: net })
 
     const remaining = round8(pos.qty - closeQty)
@@ -201,7 +204,8 @@ export async function reducePosition({ userId, positionId, qty, price, reason = 
             broker: 'paper', type: 'position.reduced', userId, accountId: pos.accountId,
             positionId, ...(orderId != null && { orderId }),
             symbol: pos.symbol, direction: pos.direction,
-            quantity: closeQty, price: exitPrice, pnl: round2(net), reason, at: Date.now(),
+            quantity: closeQty, price: exitPrice, pnl: round2(net),
+            commission: commissionPerTrade, spread: spreadCost, reason, at: Date.now(),
         })
         logger.info(LOG, `Reduced position ${positionId} by ${closeQty} @ ${exitPrice} (net ${round2(net)}), ${remaining} left`)
         return
@@ -215,7 +219,8 @@ export async function reducePosition({ userId, positionId, qty, price, reason = 
         broker: 'paper', type: 'position.closed', userId, accountId: pos.accountId,
         positionId, ...(orderId != null && { orderId }),
         symbol: pos.symbol, direction: pos.direction,
-        price: exitPrice, pnl: round2(net), reason, at: Date.now(),
+        price: exitPrice, pnl: round2(net),
+        commission: commissionPerTrade, spread: spreadCost, reason, at: Date.now(),
     })
     logger.info(LOG, `Closed position ${positionId} @ ${exitPrice} (net ${round2(net)})`)
 }

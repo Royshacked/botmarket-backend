@@ -121,6 +121,10 @@ import { logger }                  from '../../../services/logger.service.js'
  * @property {number} [stopLoss]
  * @property {number} [takeProfit]
  * @property {number} [pnl]         realised pnl on close
+ * @property {number} [commission]  per-fill commission COST (absolute, deposit currency);
+ *                                  the trade ledger accumulates entry + exit into a round-trip total
+ * @property {number} [spread]      per-fill spread COST (absolute) — for venues that bake the
+ *                                  spread into the fill price (paper); omit where not modeled
  * @property {'stop'|'tp'|'manual'|null} [reason]  why a position closed
  * @property {number}            at  unix ms
  */

@@ -47,6 +47,7 @@ export function buildIdeaFromCall(call, proposal, direction) {
         tp_conditions:   finalTp != null        ? [_touch(finalTp)]       : undefined,
         accounts:      Array.isArray(call?.accounts) ? call.accounts : [],
         mainAccountId: call?.main_account_id ?? null,
+        callId:        call?.id ?? null,                          // origin back-reference → survives onto the trade
         notes:         `Kairos call ${call?.id}${proposal?.rationale ? ` — ${proposal.rationale}` : ''}`,
     }
 }
