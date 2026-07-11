@@ -14,6 +14,7 @@
 import { Router }              from 'express'
 import { tradeCaptureService } from '../../services/tradeCapture.service.js'
 import { requireAuth }         from '../../middleware/auth.middleware.js'
+import { log }                 from '../../middleware/logger.middleware.js'
 import { logger }              from '../../services/logger.service.js'
 
 const LOG = '[trades.routes]'
@@ -36,7 +37,7 @@ function _filter(q = {}) {
     return f
 }
 
-tradesRoutes.get('/', requireAuth, async (req, res) => {
+tradesRoutes.get('/', requireAuth, log, async (req, res) => {
     try {
         const trades = await tradeCaptureService.listTrades(req.user._id, _filter(req.query))
         res.json({ trades })
@@ -46,7 +47,7 @@ tradesRoutes.get('/', requireAuth, async (req, res) => {
     }
 })
 
-tradesRoutes.get('/stats', requireAuth, async (req, res) => {
+tradesRoutes.get('/stats', requireAuth, log, async (req, res) => {
     try {
         const stats = await tradeCaptureService.tradeStats(req.user._id, _filter(req.query))
         res.json({ stats })

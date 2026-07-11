@@ -5,6 +5,7 @@ import { kairosHandoffService } from '../../services/kairos.handoff.service.js'
 import { resolveModel }        from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { reasonToStatus }      from '../_shared/reason.util.js'
+import { parseChatMessages }   from '../_shared/parse.util.js'
 
 const LOG = '[kairos:controller]'
 const MAX_RECENT_CHAT_TURNS = 4
@@ -189,14 +190,15 @@ function parseStreamBody(body) {
 
     if (messages !== undefined && messages !== null) {
         if (!Array.isArray(messages)) return { error: 'messages must be an array' }
+        // Empty messages with a userPrompt fallback is allowed here (as on the idea endpoint).
         if (messages.length === 0) {
             if (trimmedPrompt) return { userPrompt: trimmedPrompt, chatState: state, accounts: acctList }
             return { error: 'messages must be a non-empty array' }
         }
-        const trimmed = messages
-            .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
-            .map(({ role, content }) => ({ role, content: content.trim() }))
-            .slice(-MAX_RECENT_CHAT_TURNS * 2)
+        // Use the same strict validator as the idea/portfolio/scanner endpoints (was inlined here).
+        const validated = parseChatMessages(messages)
+        if (validated.error) return { error: validated.error }
+        const trimmed = validated.messages.slice(-MAX_RECENT_CHAT_TURNS * 2)
         return { userPrompt: trimmedPrompt || undefined, messages: trimmed, chatState: state, accounts: acctList }
     }
 
