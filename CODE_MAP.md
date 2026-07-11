@@ -123,6 +123,14 @@ docs/                       architecture design docs
   NOT the Mongo `_id`. Strip Mongo `_id` from responses via `stripId` (providers/mongodb.provider.js).
 - **Consumers branch on capabilities/flags, never on broker name** (only exception: the paper/live
   `mode` tag in tradeCapture).
+- **Error handling:** the global handler in `server.js` formats every error as
+  `res.status(err.status || 500).json({ error: err.message })`. Two controller styles exist and are
+  both fine because they yield the *same* `{ error }` shape:
+  - **Preferred (new controllers):** let the service throw a typed error (`Object.assign(new Error(msg), { status })`)
+    and `catch (err) { next(err) }` — no per-handler status/message duplication (see `user`/`chat`/`authentication`).
+  - **Legacy (still fine):** local `try/catch` returning a specific `res.status(...).json({ error })`. Keep this
+    when a handler needs several **per-reason** codes/messages from a `result.reason` (e.g. `tradeIdeas`,
+    `kairos`) — those don't map cleanly to a single thrown error. Use `reasonToStatus` (`api/_shared`) for the ladder.
 
 ## Where to add things
 
