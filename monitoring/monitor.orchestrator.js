@@ -17,6 +17,7 @@
  */
 
 import { parseCondition }      from './parsers/condition.parser.js'
+import { resolveConditionTree } from '../services/conditionTree.service.js'
 import { evaluate }            from './evaluators/structured.evaluator.js'
 import { evaluateTouch }       from './evaluators/touch.evaluator.js'
 import { evaluateIndicator }   from './evaluators/indicator.evaluator.js'
@@ -161,86 +162,26 @@ function _nodeCost(node) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Evaluate a group of conditions with AND or OR logic.
+ * Evaluate a legacy flat condition array with AND/OR logic. Thin backward-compat shim:
+ * it wraps the array into a group node (resolveConditionTree) and delegates to evaluateTree,
+ * so the flat and tree paths share ONE implementation (cost-ordering, findings accumulation,
+ * triggerAt = latest child, per-leaf `out` states) instead of a near-duplicate. Kept for ideas
+ * that pre-date the tree format.
  *
  * @param {Array<{condition: string, type: string}>} conditions
  * @param {'AND'|'OR'}  logic
  * @param {object}      symbolMap     Map of symbol → Candle[]
  * @param {string}      defaultSymbol The traded asset
  * @param {number|null} floorAt       ms timestamp; only events at/after this count
- * @param {Array|null}  out           when provided, per-leaf { key, pass, at } states
- *                                    are pushed (same shape/semantics as the tree path)
- *                                    so flat-format ideas persist conditionStates too.
+ * @param {Array|null}  out           when provided, per-leaf { key, pass, at } states are pushed
  * @returns {Promise<{ triggered: boolean, which?: string, triggerAt?: number|null }>}
  */
 export async function evaluateConditions(conditions, logic, symbolMap, defaultSymbol, floorAt = null, out = null, opts = {}) {
     if (!Array.isArray(conditions) || conditions.length === 0) {
         return { triggered: false }
     }
-
-    return logic === 'OR'
-        ? _evalOR(conditions, symbolMap, defaultSymbol, floorAt, out, opts)
-        : _evalAND(conditions, symbolMap, defaultSymbol, floorAt, out, opts)
-}
-
-// Record a flat leaf's evaluated state, matching the tree path's out.push exactly:
-// keyed by leafStateKey, pass coerced to bool, `at` = triggerAt (or now) on pass else null.
-function _recordFlat(out, cond, result) {
-    if (!out) return
-    out.push({ key: leafStateKey(cond), pass: !!result.pass, at: result.pass ? (result.triggerAt ?? Date.now()) : null })
-}
-
-// ─── AND: sequential gate-then-verify ─────────────────────────────────────────
-
-async function _evalAND(conditions, symbolMap, defaultSymbol, floorAt, out = null, opts = {}) {
-    const sorted = [...conditions].sort(
-        (a, b) => (COST[a.type] ?? 0) - (COST[b.type] ?? 0)
-    )
-
-    let passed = 0
-    let triggerAt = null
-    const priorFindings = []
-    for (const cond of sorted) {
-        const result = await _evalOne(cond, symbolMap, defaultSymbol, floorAt, priorFindings, null, opts)
-        _recordFlat(out, cond, result)
-        const label  = result.condition?.slice(0, 60) ?? '(malformed)'
-        const type   = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
-
-        if (result.pass) {
-            passed++
-            logger.info(LOG, `  ✓ [${type}] "${label}"`)
-            if (type === 'structured' && result.condition) priorFindings.push(result.condition)
-            if (result.triggerAt != null) triggerAt = triggerAt == null ? result.triggerAt : Math.max(triggerAt, result.triggerAt)
-        } else {
-            logger.info(LOG, `  ✗ [${type}] "${label}" — AND gate failed (${passed}/${sorted.length} passed)`)
-            return { triggered: false }
-        }
-    }
-
-    logger.info(LOG, `  ✅ AND gate passed — all ${sorted.length} condition(s) met`)
-    return { triggered: true, triggerAt }
-}
-
-// ─── OR: sequential, short-circuit on first true ─────────────────────────────
-
-async function _evalOR(conditions, symbolMap, defaultSymbol, floorAt, out = null, opts = {}) {
-    const sorted = [...conditions].sort(
-        (a, b) => (COST[a?.type] ?? 0) - (COST[b?.type] ?? 0)
-    )
-    for (const cond of sorted) {
-        // OR branches are independent — chart gets floorAt but no prior findings
-        const result = await _evalOne(cond, symbolMap, defaultSymbol, floorAt, [], null, opts)
-        _recordFlat(out, cond, result)
-        const type   = typeof cond === 'string' ? 'structured' : (cond?.type ?? 'unknown')
-        const icon   = result.pass ? '✓' : '✗'
-        logger.info(LOG, `  ${icon} [${type}] "${result.condition?.slice(0, 60) ?? '(malformed)'}"`)
-        if (result.pass) {
-            logger.info(LOG, `  ✅ OR gate triggered: "${result.condition?.slice(0, 60)}"`)
-            return { triggered: true, which: result.condition, triggerAt: result.triggerAt ?? null }
-        }
-    }
-    logger.info(LOG, `  💤 OR gate: none of ${conditions.length} condition(s) triggered`)
-    return { triggered: false }
+    const tree = resolveConditionTree(null, conditions, logic ?? 'AND')
+    return evaluateTree(tree, symbolMap, defaultSymbol, floorAt, [], out, null, opts)
 }
 
 // ─── Single condition evaluation ──────────────────────────────────────────────
