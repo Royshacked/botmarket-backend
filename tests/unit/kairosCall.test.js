@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateCall, normalizeCall } from '../../api/kairos/kairos.service.js'
+import { validateCall, normalizeCall, computeKairosPerformance } from '../../api/kairos/kairos.service.js'
 
 // A minimal well-formed call the build agent (Phase 1) would emit, with venue bound (Generate).
 function call(extra = {}) {
@@ -149,4 +149,42 @@ test('normalize: fresh call starts waiting with empty monitor_state', () => {
         check_count: 0, memo: '', last_assessment: null,
     })
     assert.match(doc.id, /^call_TSLA_[0-9a-f]{8}$/)
+})
+
+// ── computeKairosPerformance (Phase 5 slice 4) ───────────────────────────────
+const closedCall = (r, pnl) => ({ status: 'closed', position_state: { outcome: { r_multiple: r, pnl } } })
+
+test('performance: aggregates wins/losses/avg_r/total_pnl from closed calls', () => {
+    const perf = computeKairosPerformance([
+        closedCall(2, 300),
+        closedCall(-1, -110),
+        closedCall(1.5, 180),
+        { status: 'in_position', position_state: { outcome: null } },   // ignored (not closed)
+        { status: 'closed' },                                            // ignored (no outcome)
+    ])
+    assert.equal(perf.closed, 3)
+    assert.equal(perf.wins, 2)
+    assert.equal(perf.losses, 1)
+    assert.equal(perf.win_rate, 0.67)
+    assert.equal(perf.avg_r, 0.83)          // (2 - 1 + 1.5)/3
+    assert.equal(perf.total_pnl, 370)
+    assert.equal(perf.best_r, 2)
+    assert.equal(perf.worst_r, -1)
+})
+
+test('performance: empty → null aggregates, zero counts', () => {
+    const perf = computeKairosPerformance([])
+    assert.equal(perf.closed, 0)
+    assert.equal(perf.wins, 0)
+    assert.equal(perf.win_rate, null)
+    assert.equal(perf.avg_r, null)
+    assert.equal(perf.total_pnl, null)
+})
+
+test('performance: win falls back to R when P&L unknown', () => {
+    const perf = computeKairosPerformance([closedCall(1.2, null), closedCall(-0.5, null)])
+    assert.equal(perf.wins, 1)
+    assert.equal(perf.losses, 1)
+    assert.equal(perf.total_pnl, null)      // no finite P&L
+    assert.equal(perf.avg_r, 0.35)
 })

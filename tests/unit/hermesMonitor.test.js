@@ -4,6 +4,8 @@ import {
     _zoneGate, _isExpiring, _isPastExpiry, _effectiveVerdict, _computeNextCheckAt, _nextStatus,
     _snapToReference, _finalizeProposal, _applyAssessment, _scheduledPatch, _checkCall,
     _timelineEntry, _zonesLabel, _withTimeout, _thinkingConfig, _assessText,
+    _reconcilePosition, _rMultiple, _checkPosition,
+    _computeMetrics, _positionGate, _reviewDue, _finalizePositionProposal, _applyPositionAssessment,
 } from '../../monitoring/hermes.monitor.service.js'
 
 function call(extra = {}) {
@@ -371,7 +373,7 @@ test('checkCall: scheduled heartbeat appends a capped journal entry', async () =
     assert.ok(entry)
     assert.equal(entry.reason, 'scheduled')
     assert.equal(entry.price, 250)
-    assert.equal(db.updates[0].push['monitor_state.timeline'].$slice, -50)   // append-only, capped
+    assert.equal(db.updates[0].push['monitor_state.timeline'].$slice, -80)   // append-only, capped (TIMELINE_MAX)
 })
 
 test('checkCall: assessment wake appends an entry with the verdict + read', async () => {
@@ -427,4 +429,245 @@ test('assessText: no text block / malformed → empty string (safe for _extractJ
     assert.equal(_assessText({ content: [{ type: 'thinking', thinking: 'x' }] }), '')
     assert.equal(_assessText({}), '')
     assert.equal(_assessText(null), '')
+})
+
+// ── Phase 5 slice 1: position lifecycle reconcile ──────────────────────────
+function posCall(status, extra = {}) {
+    return {
+        id: 'call_TSLA_x', asset: 'TSLA', status, linked_idea_id: 'idea1',
+        cadence: { min_gap_min: 5, max_gap_min: 15 },
+        monitor_state: { check_count: 3 },
+        position_state: {
+            linked_idea_id: 'idea1',
+            entry: { fill_price: null, intended: 248.3, fill_at: null, size: 220, direction: 'long', account_id: 'p1' },
+            stop:  { current: 245.2, initial: 245.2, ref: 'rl1' },
+            targets: [], taken: [], phase: 'running', outcome: null,
+        },
+        ...extra,
+    }
+}
+
+test('rMultiple: signed by direction; null unless finite + risk>0', () => {
+    assert.equal(_rMultiple(100, 110, 95, 'long'), 2)     // +10 / 5
+    assert.equal(_rMultiple(100, 90, 105, 'short'), 2)    // short fell: (100-90)/5
+    assert.equal(_rMultiple(100, 110, 100, 'long'), null) // zero risk
+    assert.equal(_rMultiple(100, null, 95, 'long'), null) // non-finite exit
+})
+
+test('reconcile: confirmed + idea still looking → idle reschedule (no promotion)', () => {
+    const { set, entry } = _reconcilePosition(posCall('confirmed'), { id: 'idea1', status: 'looking' }, NOW)
+    assert.equal(set.status, undefined)                  // no status change
+    assert.equal(entry, null)
+    assert.equal(set['monitor_state.check_count'], 4)
+    assert.ok(set['monitor_state.next_check_at'] > new Date(NOW).toISOString())
+})
+
+test('reconcile: confirmed + idea long → promote to in_position, stamp fill, open journal', () => {
+    const idea = { id: 'idea1', status: 'long', direction: 'long', quantity: 220, entryTriggeredAt: NOW }
+    const { set, entry } = _reconcilePosition(posCall('confirmed'), idea, NOW)
+    assert.equal(set.status, 'in_position')
+    assert.equal(set['position_state.entry.fill_price'], 248.3)   // best-effort = intended (slice 1)
+    assert.equal(set['position_state.entry.size'], 220)
+    assert.equal(set['position_state.phase'], 'running')
+    assert.equal(entry.reason, 'entry')
+    assert.equal(entry.phase, 'in_position')
+    assert.match(entry.note, /Filled TSLA at 248.3/)
+})
+
+test('reconcile: promote sources the REAL fill from the trades ledger (not intended)', () => {
+    const idea  = { id: 'idea1', status: 'long', direction: 'long', quantity: 220, entryTriggeredAt: NOW }
+    const { set } = _reconcilePosition(posCall('confirmed'), idea, NOW, { entry: { price: 249.1 } })
+    assert.equal(set['position_state.entry.fill_price'], 249.1)   // ledger fill, not intended 248.3
+})
+
+test('reconcile: close sources exit price + realized P&L + R from the ledger', () => {
+    const ps = posCall('in_position')
+    ps.position_state.entry.fill_price = 248
+    ps.position_state.stop.initial = 245
+    const idea  = { id: 'idea1', status: 'closed', closedReason: 'tp', closedAt: NOW }
+    const trade = { entry: { price: 248 }, exit: { price: 251, realizedPnl: 300, reason: 'tp' } }
+    const { set, entry } = _reconcilePosition(ps, idea, NOW, trade)
+    assert.equal(set.status, 'closed')
+    const o = set['position_state.outcome']
+    assert.equal(o.exit_price, 251)
+    assert.equal(o.pnl, 300)
+    assert.equal(o.r_multiple, 1)          // (251-248)/(248-245)
+    assert.match(entry.note, /\+1R/)
+})
+
+test('reconcile: confirmed + idea already closed → straight to closed with outcome', () => {
+    const idea = { id: 'idea1', status: 'closed', closedReason: 'stop', realizedPnl: -110, closedAt: NOW }
+    const { set, entry } = _reconcilePosition(posCall('confirmed'), idea, NOW)
+    assert.equal(set.status, 'closed')
+    assert.equal(set['position_state.outcome'].reason, 'stop')
+    assert.equal(set['position_state.outcome'].pnl, -110)
+    assert.equal(entry.reason, 'close')
+})
+
+test('reconcile: in_position + idea closed → outcome + close journal (reason from idea)', () => {
+    const idea = { id: 'idea1', status: 'closed', closedReason: 'tp', realizedPnl: 330, closedAt: NOW }
+    const ps = posCall('in_position')
+    ps.position_state.entry.fill_price = 248.3
+    const { set, entry } = _reconcilePosition(ps, idea, NOW)
+    assert.equal(set.status, 'closed')
+    assert.equal(set['position_state.outcome'].reason, 'tp')
+    assert.equal(set['position_state.outcome'].pnl, 330)
+    assert.equal(entry.next_check_at, null)
+    assert.match(entry.note, /closed on TSLA — tp/)
+})
+
+test('reconcile: in_position + idea still long → manage (routes to the brain)', () => {
+    const rec = _reconcilePosition(posCall('in_position'), { id: 'idea1', status: 'long' }, NOW)
+    assert.equal(rec.manage, true)
+    assert.equal(rec.set, undefined)
+})
+
+test('reconcile: linked idea not found → idle reschedule', () => {
+    const { set, entry } = _reconcilePosition(posCall('confirmed'), null, NOW)
+    assert.equal(set.status, undefined)
+    assert.equal(entry, null)
+    assert.equal(set['monitor_state.check_count'], 4)
+})
+
+test('_checkPosition: reads idea via deps.getIdea and persists the reconcile', async () => {
+    const updates = []
+    const db = { collection: () => ({ updateOne: async (_q, u) => updates.push(u) }) }
+    const deps = { getIdea: async () => ({ id: 'idea1', status: 'long', direction: 'long', quantity: 220, entryTriggeredAt: NOW }) }
+    const res = await _checkPosition(db, posCall('confirmed'), NOW, deps)
+    assert.equal(res.status, 'in_position')
+    assert.equal(updates[0].$set.status, 'in_position')
+    assert.ok(updates[0].$push['monitor_state.timeline'])   // journal entry appended
+})
+
+// ── Phase 5 slice 2: in-position management brain ──────────────────────────
+function mgmtCall(psExtra = {}, extra = {}) {
+    return {
+        id: 'call_TSLA_x', asset: 'TSLA', trade_type: 'day', linked_idea_id: 'idea1',
+        cadence: { min_gap_min: 1, max_gap_min: 15 },
+        reference_levels: [
+            { id: 'rl1', kind: 'support', price: 246 },
+            { id: 'rl2', kind: 'entry',   price: 248 },
+            { id: 'rl3', kind: 'target',  price: 252 },
+            { id: 'rl4', kind: 'target',  price: 256 },
+        ],
+        monitor_state: { check_count: 5 }, status: 'in_position',
+        position_state: {
+            entry: { fill_price: 248, intended: 248, fill_at: new Date(NOW - 60 * 60_000).toISOString(), size: 100, direction: 'long' },
+            stop:  { current: 245, initial: 245, ref: 'rl1' },   // risk 3 -> adverse band 0.75
+            targets: [{ id: 'tg1', price: 252, ref: 'rl3', hit_at: null }, { id: 'tg2', price: 256, ref: 'rl4', hit_at: null }],
+            taken: [], metrics: { r_multiple_now: null, mae: null, mfe: null }, phase: 'running',
+            memo: '', pending_action: null, last_management: null, outcome: null,
+            ...psExtra,
+        },
+        ...extra,
+    }
+}
+
+test('computeMetrics: R + carried mae/mfe extremes', () => {
+    const m1 = _computeMetrics(mgmtCall().position_state, 251, NOW)
+    assert.equal(m1.r_multiple_now, 1)          // (251-248)/3
+    assert.equal(m1.mae, 0); assert.equal(m1.mfe, 1)
+    const m2 = _computeMetrics(mgmtCall({ metrics: { mae: 0, mfe: 1 } }).position_state, 246, NOW)
+    assert.equal(m2.r_multiple_now, -0.67)      // (246-248)/3
+    assert.equal(m2.mae, -0.67); assert.equal(m2.mfe, 1)   // adverse deepens, favorable holds
+})
+
+test('positionGate: adverse > scale_out > breakeven; else null', () => {
+    assert.equal(_positionGate(mgmtCall().position_state, 245.5).flag, 'adverse')     // <= stop+band
+    assert.equal(_positionGate(mgmtCall().position_state, 252).flag, 'scale_out')     // target touched
+    assert.equal(_positionGate(mgmtCall().position_state, 251.5).flag, 'breakeven')   // >=+1R, stop unprotected
+    assert.equal(_positionGate(mgmtCall().position_state, 249).flag, null)            // mid-range -> hold
+})
+test('positionGate: breakeven suppressed once stop is at/above entry', () => {
+    assert.equal(_positionGate(mgmtCall({ stop: { current: 248, initial: 245 } }).position_state, 251.5).flag, null)
+})
+
+test('reviewDue: stale/never -> due; recent -> not due', () => {
+    assert.equal(_reviewDue(mgmtCall().position_state, NOW, { max_gap_min: 15 }), true)   // fill 60m ago, no mgmt
+    const recent = mgmtCall({ last_management: { at: new Date(NOW - 5 * 60_000).toISOString() } }).position_state
+    assert.equal(_reviewDue(recent, NOW, { max_gap_min: 15 }), false)
+})
+
+test('finalizePositionProposal: snaps stop/tp, clamps size, handles cancel/exit', () => {
+    const refs = mgmtCall().reference_levels
+    const ms = _finalizePositionProposal('move_stop', { new_stop: 247.3, reason: 'trail' }, refs, true, 251)
+    assert.equal(ms.new_stop, 248); assert.equal(ms.ref, 'rl2')      // nearest ref below price
+    assert.equal(_finalizePositionProposal('take_partial', { size_pct: 150 }, refs, true, 251).size_pct, 100)
+    assert.equal(_finalizePositionProposal('take_partial', {}, refs, true, 251).size_pct, 50)
+    const lr = _finalizePositionProposal('let_run', { new_tp: 257 }, refs, true, 255)
+    assert.equal(lr.new_tp, 256); assert.equal(lr.ref, 'rl4')
+    assert.deepEqual(_finalizePositionProposal('let_run', { cancel_tp: true }, refs, true, 255), { cancel_tp: true, reason: null })
+    assert.deepEqual(_finalizePositionProposal('exit_now', { reason: 'thesis broke' }, refs, true, 249), { reason: 'thesis broke' })
+})
+
+const M = () => _computeMetrics(mgmtCall().position_state, 251, NOW)   // dummy metrics for apply()
+
+test('applyPositionAssessment: hold -> no card, no pending write', () => {
+    const { set, entry, fireCard } = _applyPositionAssessment(mgmtCall(), mgmtCall().position_state, { verdict: 'hold', read: 'working - holding' }, 251, M(), NOW, 'review')
+    assert.equal(fireCard, false)
+    assert.equal('position_state.pending_action' in set, false)
+    assert.equal(entry.verdict, 'hold')
+    assert.match(entry.note, /holding/i)
+})
+test('applyPositionAssessment: move_stop -> sets pending_action + fires card', () => {
+    const { set, fireCard, card } = _applyPositionAssessment(mgmtCall(), mgmtCall().position_state, { verdict: 'move_stop', proposal: { new_stop: 247.3 }, read: 'trailing up' }, 251, M(), NOW, 'breakeven')
+    assert.equal(fireCard, true)
+    assert.equal(set['position_state.pending_action'].verdict, 'move_stop')
+    assert.equal(set['position_state.pending_action'].severity, 3)
+    assert.equal(set['position_state.pending_action'].proposal.new_stop, 248)
+    assert.equal(card.verdict, 'move_stop')
+})
+test('applyPositionAssessment: exit_now ESCALATES over a pending take_partial', () => {
+    const ps = mgmtCall({ pending_action: { verdict: 'take_partial', severity: 2, proposal: {} } }).position_state
+    const { set, fireCard } = _applyPositionAssessment(mgmtCall(), ps, { verdict: 'exit_now', proposal: { reason: 'broke' } }, 244, M(), NOW, 'adverse')
+    assert.equal(fireCard, true)
+    assert.equal(set['position_state.pending_action'].verdict, 'exit_now')
+})
+test('applyPositionAssessment: lower-severity action does NOT replace a pending card (anti-spam)', () => {
+    const ps = mgmtCall({ pending_action: { verdict: 'move_stop', severity: 3, proposal: {} } }).position_state
+    const { set, fireCard } = _applyPositionAssessment(mgmtCall(), ps, { verdict: 'take_partial', proposal: { size_pct: 50 } }, 252, M(), NOW, 'scale_out')
+    assert.equal(fireCard, false)
+    assert.equal('position_state.pending_action' in set, false)   // pending stays as-is
+})
+test('applyPositionAssessment: hold does NOT clear a pending card', () => {
+    const ps = mgmtCall({ pending_action: { verdict: 'exit_now', severity: 4, proposal: {} } }).position_state
+    const { set, fireCard } = _applyPositionAssessment(mgmtCall(), ps, { verdict: 'hold', read: 'still ok' }, 249, M(), NOW, 'review')
+    assert.equal(fireCard, false)
+    assert.equal('position_state.pending_action' in set, false)   // persisted pending untouched
+})
+
+test('_checkPosition: cheap hold (no flag, review not due) -> metrics only, NO LLM, NO journal', async () => {
+    let assessed = 0
+    const updates = []
+    const db = { collection: () => ({ updateOne: async (_q, u) => updates.push(u) }) }
+    const deps = {
+        getIdea: async () => ({ id: 'idea1', status: 'long' }),
+        getPrice: async () => 249,
+        assessPosition: async () => { assessed++; return null },
+        onManageCard: async () => {},
+    }
+    const call = mgmtCall({ last_management: { at: new Date(NOW - 60_000).toISOString() } })
+    const res = await _checkPosition(db, call, NOW, deps)
+    assert.equal(res.reason, 'in_position_idle')
+    assert.equal(assessed, 0)                                   // gate skipped the LLM
+    assert.ok(updates[0].$set['position_state.metrics.r_multiple_now'] != null)
+    assert.equal(updates[0].$push, undefined)                   // no journal spam on a cheap hold
+})
+
+test('_checkPosition: gate trip -> assessment runs, card fired, journal appended', async () => {
+    let carded = 0
+    const updates = []
+    const db = { collection: () => ({ updateOne: async (_q, u) => updates.push(u) }) }
+    const deps = {
+        getIdea: async () => ({ id: 'idea1', status: 'long' }),
+        getPrice: async () => 251.5,                            // breakeven flag
+        assessPosition: async () => ({ verdict: 'move_stop', proposal: { new_stop: 247.3 }, read: 'to breakeven', next_check_min: 5 }),
+        onManageCard: async () => { carded++ },
+    }
+    const res = await _checkPosition(db, mgmtCall(), NOW, deps)
+    assert.equal(res.verdict, 'move_stop')
+    assert.equal(res.fireCard, true)
+    assert.equal(carded, 1)
+    assert.equal(updates[0].$set['position_state.pending_action'].verdict, 'move_stop')
+    assert.ok(updates[0].$push['monitor_state.timeline'])       // journal continued
 })

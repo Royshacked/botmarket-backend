@@ -156,8 +156,97 @@ bound server-side at Generate from the marked accounts.
   the `workspace` from `useWorkspaceMode`.
 - **DONE:** `npm run build` green (438 modules), eslint clean on new files.
 
-## Phase 5 — Deferred (out of trial scope)
-- In-position monitoring after entry (manage / trim / exit / trailing / adverse-exit).
+## Phase 5 — In-position monitoring (Hermes owns the call end-to-end)
+**Goal:** the call no longer dies at confirm. Hermes manages the live position discretionarily —
+readiness → entry → in-position → close — in the call idiom (patterns / thesis / four-axis read /
+memo / one continuous journal). Every management action is PROPOSED as a card the user confirms
+(no auto-execute). Duplication of plumbing is accepted; the ONLY hard requirement is no two-brain
+conflict over the same broker orders.
+
+### The no-conflict boundary (the keystone)
+The confirmed call materializes a REAL idea (Phase 3) that holds the position at the broker. Two
+things could fight over it: Minos (`minos.monitor.service.js`, the deterministic idea brain) and
+`checkInvalidation`. Kill both with ONE ownership flag:
+- At confirm, stamp the linked idea `ownedBy: 'hermes'`.
+- One guard at the top of `minos._checkIdea` skips `ownedBy==='hermes'` (same shape as the
+  `broker===null` skip). `checkInvalidation` is called from inside `_checkIdea`, so the one skip
+  covers it too. A Kairos idea is placed straight to long/short (never 'looking'), so `_checkEntry`
+  never runs on it anyway.
+- The **execution reconciler** (`execution.reconciler.js`) is LEFT UNTOUCHED — it is event-driven
+  (`executionBus`), independent of the Minos poll, and is the shared "hands": it flips the idea to
+  long/short on fill, places the native stop/TP (the hard floor), auto-resizes exits after a partial
+  (`_resyncExits`), finalizes closes, and captures trades. Hermes drives management through the SAME
+  broker primitives; the reconciler does the accounting off the resulting events.
+
+Net: Minos = sole brain for normal ideas; Hermes = sole brain for the call + its position; the
+reconciler = shared hands for both. No shared mutable state (Hermes keeps its own tick / collection
+/ `_running`).
+
+### Lifecycle
+`ready → confirm → confirmed(awaiting fill) → in_position → closed{outcome}`. Confirm is NOT
+instantaneous entry: it places the market order (live/paper) or posts the fill card (manual); the
+real fill arrives later via the reconciler flipping the linked idea to long/short. Hermes's tick
+watches the linked idea: `idea.status ∈ {long,short}` → promote call to `in_position` + stamp the
+fill; `idea.status === 'closed'` (from ANY cause — stop, TP, Hermes exit, external/broker-UI close)
+→ write `outcome` + close the call. Statuses added to the loop: `confirmed`, `in_position` (routed
+to a position path, NOT the zone-gate readiness path).
+
+### `position_state` (new section; parallel to `monitor_state`)
+Initialized at confirm, written each in-position wake. NO timeline of its own — the journal is
+unified (see below).
+- `entry`   `{ fill_price, fill_at, size, direction, account_id }` (fill_price broker-authoritative:
+  `findOpenPosition` entryPrice, fall back to the trades ledger, then the intended entry)
+- `stop`    `{ current, ref, initial }` — `initial` is the R denominator (`risk=|entry−initial|`)
+- `targets` `[{ id, price, ref, size_pct, hit_at }]` — the scale-out ladder. **Hard native bracket =
+  stop + FINAL target; intermediate targets are discretionary Hermes scale-outs.**
+- `taken`   `[{ at, price, size, r_multiple, kind: partial|stop|tp|discretionary }]` — durable ledger
+- `metrics` `{ r_multiple_now, mae, mfe, bars_held }` — computed each wake, never authored
+- `phase`   `running | breakeven | trailing | runner`
+- `memo`    in-position scratchpad · `pending_action` `{ verdict, proposal, fired_at, severity }|null`
+- `last_management` · `outcome` `{ exit_price, r_multiple, pnl, reason, at }|null`
+
+### In-position assessment (the brain — second `_checkCall` path)
+Menu `hold | move_stop | take_partial | exit_now | let_run` (trail = move_stop; `add` deferred).
+Severity for escalation `exit_now > move_stop(tighten) > take_partial > let_run > hold`. Prompt is
+`hold`-biased — *let winners run, cut on thesis-break, don't micro-manage; re-check the ORIGINAL
+thesis/patterns vs current price action.* Reuses the user's `hermesModel`/`hermesReasoning` prefs.
+
+### Cheap gate (in-position) — WAKE-only, never an action rule
+Trip on any: `r_multiple ≥ +1R` & stop below entry (breakeven look) · price touched a remaining
+target (scale-out look) · price within an adverse band (~0.25R) of the stop (pre-stop look) · new
+candle close on the trigger TF. Else idle at `cadence.max_gap`. **Escalation:** the gate keeps
+running even with a card pending; a new card fires only if its severity exceeds
+`pending_action.severity`. Bars-held time-stop DEFERRED to v1.1.
+
+### Handoff (propose-everything, over existing broker primitives)
+`POST /api/kairos/:id/action` gains `move_stop | take_partial | exit_now | let_run | hold | dismiss`:
+- `move_stop` → cancel+replace the native stop at the new level
+- `take_partial` → closing market order for `size_pct`; reconciler `_onReduced` resizes remaining
+  exits + captures the slice (accounting free)
+- `exit_now` → market-close remainder; reconciler `_finalizeClose` closes the idea + cancels resting
+- `let_run` → cancel/replace the native TP
+Three backends, same as entry: live (cTrader), paper (executionBus/paperFill), manual (notify +
+user-reported fill). Broker-authoritative idempotency: if the position is already flat on confirm,
+no-op and reconcile to closed.
+
+### Journal — unified, continued into in-position
+Hermes KEEPS the same `monitor_state.timeline` appending through entry, in-position, and close (no
+separate log, no migration). `_timelineEntry` extended with reasons `entry | in_position | close`
++ a `phase` tag per entry; management wakes carry the in-position `read` as the note. `TIMELINE_MAX`
+bumped 50→~80. The durable factual spine (fill / every action / outcome) lives structurally in
+`position_state` and never rolls off the capped monologue.
+
+### Build slices
+1. **Foundation:** `ownedBy:'hermes'` at confirm + one Minos skip + `position_state` scaffold +
+   Hermes lifecycle reconcile (confirmed→in_position on fill, in_position→closed on close) — NO
+   brain yet. Verify `buildIdeaFromCall` yields NATIVE exits (else exits go dark under the skip).
+2. **Brain:** the in-position assessment path + cheap gate + `pending_action`/escalation + journal
+   continuation.
+3. **Hands:** the handoff actions over broker primitives (+ paper/manual backends) + idempotency.
+4. **Close/perf:** outcome reconcile + Kairos performance off the trades ledger.
+
+### Deferred (v1.1+)
+- `add` (pyramiding) · bars-held time-stop · multi-account in-position (binds MAIN, like build).
 
 ## Known softness (eyes-open, not blockers)
 - **News via browse** is the weakest axis (recency is what web search is worst at).

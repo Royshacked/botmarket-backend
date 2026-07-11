@@ -6,7 +6,7 @@ import { buildStudies } from './evaluators/chart.evaluator.js'
 import { userService } from '../api/user/user.service.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
-import { notifyCallReady, notifyCallExpiry } from '../services/tradeNotify.service.js'
+import { notifyCallReady, notifyCallExpiry, notifyCallManage } from '../services/tradeNotify.service.js'
 
 // Hermes — the Kairos-call readiness monitor: a self-scheduling readiness loop (KAIROS_PLAN.md,
 // Phase 2). Its own tick, its own collection (`kairos_calls`), sharing NO mutable state with Minos
@@ -23,6 +23,10 @@ const POLL_INTERVAL_MS = 60_000
 // (via _isExpiring), so 'expiring' is NOT here — like 'ready', it's an awaiting-user state (an
 // edit card was fired) that Phase 3 re-queues to 'waiting' on accept, preventing card spam.
 const ACTIVE_STATUSES  = ['waiting', 'watching']
+// Post-confirm statuses routed to the position path (NOT the zone-gate readiness path): Hermes
+// watches the linked idea to promote confirmed→in_position on fill and in_position→closed on close
+// (Phase 5). `confirmed` = order placed / awaiting fill; `in_position` = live and managed.
+const POSITION_STATUSES = ['confirmed', 'in_position']
 const EXPIRY_THRESHOLD_MS = 15 * 60_000   // run the final "expiry review" within 15m of valid_until
 // A single check must never wedge the loop. If any IO inside _checkCall (vision assess / chart /
 // price fetch) hangs with no timeout, the awaited call never returns, `_running` stays true, and
@@ -66,7 +70,7 @@ async function _tick() {
         // Due = active status AND (never checked OR next_check_at has passed). ISO strings compare
         // lexicographically for same-format UTC timestamps, so $lte on the string is correct.
         const calls = await db.collection(COLLECTION).find({
-            status: { $in: ACTIVE_STATUSES },
+            status: { $in: [...ACTIVE_STATUSES, ...POSITION_STATUSES] },
             $or: [
                 { 'monitor_state.next_check_at': null },
                 { 'monitor_state.next_check_at': { $lte: now } },
@@ -89,6 +93,9 @@ async function _tick() {
 // Orchestrate one call: cheap gate → (only if tripped/expiring) expensive assessment → persist.
 // `deps` is injectable so tests exercise the branching without real price/LLM/notify IO.
 export async function _checkCall(db, call, nowMs, deps = _deps) {
+    // Post-confirm: route to the position path (watch the linked idea), not the readiness gate.
+    if (POSITION_STATUSES.includes(call.status)) return _checkPosition(db, call, nowMs, deps)
+
     const expiring = _isExpiring(call, nowMs)
 
     // Market closed for this asset → no entry can happen; skip the check (no price fetch, no LLM)
@@ -141,6 +148,309 @@ async function _persist(db, id, set, logEntry = null) {
     const update = { $set: set }
     if (logEntry) update.$push = { 'monitor_state.timeline': { $each: [logEntry], $slice: -TIMELINE_MAX } }
     await db.collection(COLLECTION).updateOne({ id }, update)
+}
+
+// ─── In-position path (Phase 5, slice 1: lifecycle reconcile only — no brain yet) ──────────────
+// A confirmed/in_position call has a linked idea holding the real position. Hermes reads that idea
+// (broker-authoritative, maintained by the event-driven reconciler) and reconciles the call:
+// confirmed→in_position when the idea opens, in_position→closed when it closes. The discretionary
+// management brain (assess → propose → card) is slice 2.
+export async function _checkPosition(db, call, nowMs, deps = _deps) {
+    const idea = await deps.getIdea(call.linked_idea_id)
+    // On a transition (fill or close) source the broker-authoritative trade (real entry/exit price +
+    // realized P&L) from the ledger (slice 4). Not needed on idle-awaiting-fill or the manage path.
+    const needTrade = idea && ['long', 'short', 'closed'].includes(idea.status)
+    const trade = (needTrade && deps.getTrade) ? await deps.getTrade(idea).catch(() => null) : null
+    const rec  = _reconcilePosition(call, idea, nowMs, trade)
+    // in_position + still open → the discretionary management brain (slice 2). All other cases
+    // (promote / close / idle-awaiting-fill) are pure status transitions handled by _reconcilePosition.
+    if (rec.manage) return _managePosition(db, call, idea, nowMs, deps)
+    await _persist(db, call.id, rec.set, rec.entry)
+    return { reason: 'position', status: rec.set.status ?? call.status }
+}
+
+// Pure. Decide the call's next state from the linked idea's status. Returns { set, entry } where
+// `entry` is a journal line to append (or null on an idle wake). The journal is UNIFIED — these
+// entries append to the same monitor_state.timeline as the pre-entry readiness wakes.
+export function _reconcilePosition(call, idea, nowMs, trade = null) {
+    const cadenceMs = (Number(call?.cadence?.max_gap_min) || 15) * 60_000
+    const nextAt    = new Date(nowMs + cadenceMs).toISOString()
+    const bumpCount = (call?.monitor_state?.check_count ?? 0) + 1
+    const idle = { set: { 'monitor_state.next_check_at': nextAt, 'monitor_state.check_count': bumpCount }, entry: null }
+
+    if (!idea) return idle   // linked idea not found yet — look again next cadence
+
+    const inPos = idea.status === 'long' || idea.status === 'short'
+
+    if (call.status === 'confirmed') {
+        if (inPos)                    return _promoteToInPosition(call, idea, nowMs, nextAt, bumpCount, trade)
+        if (idea.status === 'closed') return _closeFromIdea(call, idea, nowMs, bumpCount, trade)   // opened+closed / rejected before we saw
+        return idle   // still awaiting fill (looking / hit / resting)
+    }
+    // in_position
+    if (idea.status === 'closed') return _closeFromIdea(call, idea, nowMs, bumpCount, trade)
+    return { manage: true }   // still open → _checkPosition runs the management brain
+}
+
+// confirmed → in_position: stamp the fill onto the pre-seeded position_state and open the journal
+// for the management era. fill_price is best-effort in slice 1 (the intended entry); broker-
+// authoritative sourcing (findOpenPosition / trades ledger) is a later slice. Pure.
+function _promoteToInPosition(call, idea, nowMs, nextAt, bumpCount, trade = null) {
+    const ps        = call.position_state ?? {}
+    const dir       = idea.direction ?? (idea.status === 'short' ? 'short' : 'long')
+    // Real broker fill from the trades ledger; fall back to the intended entry until it's captured.
+    const fillPrice = _num(trade?.entry?.price) ?? ps.entry?.intended ?? null
+    const fillAtMs  = idea.entryTriggeredAt ?? idea.activatedAt ?? nowMs
+    const set = {
+        status: 'in_position',
+        'position_state.entry.fill_price': fillPrice,
+        'position_state.entry.fill_at':    new Date(fillAtMs).toISOString(),
+        'position_state.entry.size':       idea.quantity ?? ps.entry?.size ?? null,
+        'position_state.entry.direction':  dir,
+        'position_state.phase':            'running',
+        'monitor_state.next_check_at':     nextAt,
+        'monitor_state.check_count':       bumpCount,
+    }
+    const note = `Filled ${call.asset}${fillPrice != null ? ` at ${fillPrice}` : ''} — I'm in. Initial stop ${ps.stop?.initial ?? '?'}; managing from here.`
+    const entry = { at: new Date(nowMs).toISOString(), reason: 'entry', phase: 'in_position', price: _num(fillPrice), verdict: null, note, next_check_at: nextAt }
+    return { set, entry }
+}
+
+// Any status → closed: the reconciler already flipped the idea 'closed' (stop / TP / Hermes exit /
+// external). Write the outcome from what the idea carries (realizedPnl / closedReason / closedAt);
+// exact exit price + R is refined in a later slice (the idea doesn't store the exit fill). Pure.
+function _closeFromIdea(call, idea, nowMs, bumpCount, trade = null) {
+    const ps      = call.position_state ?? {}
+    // Broker-authoritative from the trades ledger (real entry/exit price + realized P&L); fall back
+    // to the stamped fill / idea fields. NOTE: a scaled-out trade's P&L may undercount — the ledger
+    // records only the FINAL close's realizedPnl, not intermediate partials (a ledger-wide gap).
+    const entryPx = ps.entry?.fill_price ?? _num(trade?.entry?.price) ?? ps.entry?.intended ?? null
+    const exitPx  = _num(trade?.exit?.price)
+    const dir     = ps.entry?.direction ?? idea.direction ?? 'long'
+    const reason  = idea.closedReason ?? trade?.exit?.reason ?? 'broker'
+    const r       = _rMultiple(entryPx, exitPx, ps.stop?.initial, dir)   // null exit → null R
+    const outcome = {
+        exit_price: exitPx,
+        r_multiple: r,
+        pnl:        trade?.exit?.realizedPnl ?? idea.realizedPnl ?? null,
+        reason,
+        at:         idea.closedAt ? new Date(idea.closedAt).toISOString() : new Date(nowMs).toISOString(),
+    }
+    const set = {
+        status: 'closed',
+        'position_state.outcome':    outcome,
+        'monitor_state.check_count': bumpCount,
+    }
+    const rTxt   = r != null ? `, ${r > 0 ? '+' : ''}${r}R` : ''
+    const pnlTxt = outcome.pnl != null ? ` (P&L ${outcome.pnl}${rTxt})` : (rTxt ? ` (${rTxt.slice(2)})` : '')
+    const note   = `Position closed on ${call.asset} — ${reason}${pnlTxt}. That's the trade.`
+    const entry  = { at: new Date(nowMs).toISOString(), reason: 'close', phase: 'close', price: exitPx, verdict: null, note, next_check_at: null }
+    return { set, entry }
+}
+
+// R-multiple = signed move / initial risk (|entry − initial stop|). null unless all inputs finite
+// and risk > 0. Pure. `dir` flips the sign so a short that fell is positive.
+export function _rMultiple(entry, exit, initialStop, dir) {
+    if (![entry, exit, initialStop].every(Number.isFinite)) return null
+    const risk = Math.abs(entry - initialStop)
+    if (!(risk > 0)) return null
+    const move = dir === 'short' ? (entry - exit) : (exit - entry)
+    return Math.round((move / risk) * 100) / 100
+}
+
+// ─── In-position management brain (Phase 5, slice 2) ───────────────────────────────────────────
+// A cheap arithmetic gate skips the LLM on obvious holds; a periodic review (every max_gap) keeps a
+// thesis check alive even when price is quiet. When the gate trips or a review is due, the four-axis
+// in-position read runs (LLM+vision) and, if it wants to act, records a PROPOSAL as pending_action
+// (a card). Execution (amending broker orders on user confirm) is slice 3 — slice 2 only proposes.
+
+// Verdict urgency, used to escalate over an already-pending card (a fresh exit_now must fire over a
+// pending take_partial; a same-or-lower action must NOT re-fire and spam).
+const VERDICT_SEVERITY = { hold: 0, let_run: 1, take_partial: 2, move_stop: 3, exit_now: 4 }
+
+function _minGapMs(cadence) { return (Number(cadence?.min_gap_min) || 1)  * 60_000 }
+function _maxGapMs(cadence) { return (Number(cadence?.max_gap_min) || 15) * 60_000 }
+function _entryPx(ps)  { return ps?.entry?.fill_price ?? ps?.entry?.intended ?? null }
+
+// Running trade metrics, recomputed every wake (never authored). mae/mfe are R extremes carried
+// across wakes (adverse ≤ 0, favorable ≥ 0). Pure.
+export function _computeMetrics(ps, price, nowMs) {
+    const r       = _rMultiple(_entryPx(ps), price, ps?.stop?.initial, ps?.entry?.direction ?? 'long')
+    const prevMae = Number.isFinite(ps?.metrics?.mae) ? ps.metrics.mae : null
+    const prevMfe = Number.isFinite(ps?.metrics?.mfe) ? ps.metrics.mfe : null
+    const mae = r == null ? prevMae : (prevMae == null ? Math.min(0, r) : Math.min(prevMae, r))
+    const mfe = r == null ? prevMfe : (prevMfe == null ? Math.max(0, r) : Math.max(prevMfe, r))
+    return { r_multiple_now: r, mae, mfe, updated_at: new Date(nowMs).toISOString() }
+}
+
+function _metricsSet(m) {
+    return {
+        'position_state.metrics.r_multiple_now': m.r_multiple_now,
+        'position_state.metrics.mae':            m.mae,
+        'position_state.metrics.mfe':            m.mfe,
+        'position_state.metrics.updated_at':     m.updated_at,
+    }
+}
+
+// The cheap gate: an arithmetic flag that makes an LLM look worthwhile. Priority adverse > scale_out
+// > breakeven (most urgent first). `null` flag → an obvious hold (skip the LLM). Pure.
+export function _positionGate(ps, price) {
+    if (!Number.isFinite(price)) return { flag: null }
+    const entry       = _entryPx(ps)
+    const initialStop = ps?.stop?.initial
+    const stopCur     = ps?.stop?.current ?? initialStop
+    const isLong      = (ps?.entry?.direction ?? 'long') !== 'short'
+    const risk        = (Number.isFinite(entry) && Number.isFinite(initialStop)) ? Math.abs(entry - initialStop) : null
+    const band        = risk != null ? 0.25 * risk : null
+
+    // adverse — price pressing the working stop
+    if (band != null && Number.isFinite(stopCur)) {
+        if (isLong  && price <= stopCur + band) return { flag: 'adverse' }
+        if (!isLong && price >= stopCur - band) return { flag: 'adverse' }
+    }
+    // scale_out — a remaining (un-hit) target touched
+    const target = (ps?.targets ?? []).find(t => t?.hit_at == null && Number.isFinite(t?.price) && (isLong ? price >= t.price : price <= t.price))
+    if (target) return { flag: 'scale_out', target }
+    // breakeven — ≥ +1R and the stop isn't yet protected past entry
+    const r = _rMultiple(entry, price, initialStop, ps?.entry?.direction ?? 'long')
+    if (r != null && r >= 1) {
+        const protectedBE = isLong ? Number(stopCur) >= entry : Number(stopCur) <= entry
+        if (!protectedBE) return { flag: 'breakeven' }
+    }
+    return { flag: null }
+}
+
+// A periodic thesis review is due when it's been ≥ max_gap since the last management read (or none
+// yet). Keeps the manager honest even while price sits quiet between gate trips. Pure.
+export function _reviewDue(ps, nowMs, cadence) {
+    const lastAt = Date.parse(ps?.last_management?.at ?? ps?.entry?.fill_at ?? '')
+    return !Number.isFinite(lastAt) || (nowMs - lastAt) >= _maxGapMs(cadence)
+}
+
+// Clean a management proposal per verdict: snap stop/TP to reference structure, clamp size. Pure.
+// `refs` = the call's reference_levels (the snap targets); `isLong` = position side.
+export function _finalizePositionProposal(verdict, proposal, refs, isLong, price) {
+    if (!proposal || typeof proposal !== 'object') return null
+    if (verdict === 'move_stop') {
+        const snap = _snapToReference(Number(proposal.new_stop), refs, isLong ? 'below' : 'above', price)
+        return { new_stop: snap.price, ref: snap.ref, reason: proposal.reason ?? null }
+    }
+    if (verdict === 'take_partial') {
+        let pct = Number(proposal.size_pct)
+        if (!Number.isFinite(pct)) pct = 50
+        pct = Math.max(1, Math.min(100, pct))
+        return { size_pct: pct, reason: proposal.reason ?? null }
+    }
+    if (verdict === 'let_run') {
+        if (proposal.cancel_tp) return { cancel_tp: true, reason: proposal.reason ?? null }
+        const snap = _snapToReference(Number(proposal.new_tp), refs, isLong ? 'above' : 'below', price)
+        return { new_tp: snap.price, ref: snap.ref, reason: proposal.reason ?? null }
+    }
+    if (verdict === 'exit_now') return { reason: proposal.reason ?? null }
+    return null
+}
+
+// Turn a raw in-position assessment into the persisted $set (+ journal entry + whether to fire a
+// management card). A non-hold verdict sets pending_action ONLY when it's new or escalates over an
+// already-pending card (severity strictly greater) — anti-spam. A `hold` never clears a pending
+// card (the user hasn't acted; the slice-3 handoff resolves it). No stop/target/phase mutation here
+// — those change on EXECUTION (slice 3); slice 2 only proposes. Pure.
+export function _applyPositionAssessment(call, ps, raw, price, metrics, nowMs, reason) {
+    const at       = new Date(nowMs).toISOString()
+    const verdict  = ['hold', 'move_stop', 'take_partial', 'exit_now', 'let_run'].includes(raw?.verdict) ? raw.verdict : 'hold'
+    const isLong   = (ps?.entry?.direction ?? 'long') !== 'short'
+    const proposal = verdict !== 'hold' ? _finalizePositionProposal(verdict, raw.proposal, call?.reference_levels ?? [], isLong, price) : null
+    const nextAt   = _computeNextCheckAt(nowMs, raw?.next_check_min, call?.cadence)
+    const memo     = raw?.memo_update != null && raw.memo_update !== '' ? String(raw.memo_update) : (ps?.memo ?? '')
+
+    const prior     = ps?.pending_action ?? null
+    const sev       = VERDICT_SEVERITY[verdict] ?? 0
+    const priorSev  = prior ? (VERDICT_SEVERITY[prior.verdict] ?? 0) : -1
+    const setsCard  = verdict !== 'hold' && proposal != null && (!prior || sev > priorSev)
+    const pending   = setsCard ? { verdict, proposal, fired_at: at, severity: sev } : prior
+
+    const lastManagement = {
+        at, reason, verdict,
+        read:          raw?.read ?? null,
+        market:        raw?.market ?? null,
+        news:          raw?.news ?? null,
+        price_action:  raw?.price_action ?? null,
+        patterns_seen: Array.isArray(raw?.patterns_seen) ? raw.patterns_seen : [],
+        ...(proposal ? { proposal } : {}),
+        next_check_at: nextAt,
+        memo_update:   raw?.memo_update ?? null,
+    }
+
+    const set = {
+        ..._metricsSet(metrics),
+        'position_state.memo':            memo,
+        'position_state.last_management': lastManagement,
+        'monitor_state.next_check_at':    nextAt,
+        'monitor_state.check_count':      (call?.monitor_state?.check_count ?? 0) + 1,
+        ...(setsCard ? { 'position_state.pending_action': pending } : {}),
+    }
+
+    const note  = (raw?.read && String(raw.read).trim()) ? String(raw.read).trim() : _managementFallbackNote(verdict)
+    const entry = {
+        at, reason: 'in_position', phase: 'in_position', price: _num(price), verdict,
+        note,
+        axes: { market: raw?.market ?? null, news: raw?.news ?? null, price_action: raw?.price_action ?? null, patterns_seen: Array.isArray(raw?.patterns_seen) ? raw.patterns_seen : [] },
+        next_check_at: nextAt,
+    }
+    return { set, entry, fireCard: setsCard, card: setsCard ? { verdict, proposal, reason, read: raw?.read ?? null } : null }
+}
+
+function _managementFallbackNote(verdict) {
+    switch (verdict) {
+        case 'move_stop':    return 'Tightening my protection — proposing a new stop.'
+        case 'take_partial': return 'Banking part of this into strength — proposing a partial.'
+        case 'exit_now':     return 'The thesis has broken — proposing we get flat now.'
+        case 'let_run':      return 'Momentum is strong — proposing we let it run.'
+        default:             return 'Read the trade; it\'s working as planned — holding.'
+    }
+}
+
+// Orchestrate one in-position wake: metrics (always) → cheap gate → (only if tripped/review-due) the
+// four-axis management read → persist (+ fire card). Injectable IO for tests.
+async function _managePosition(db, call, idea, nowMs, deps) {
+    const ps       = call.position_state ?? {}
+    const price    = await deps.getPrice(call)
+    const metrics  = _computeMetrics(ps, price, nowMs)
+    const gate     = _positionGate(ps, price)
+    const assessNow = !!gate.flag || _reviewDue(ps, nowMs, call.cadence)
+
+    // Cheap hold: nothing material — update metrics, re-check soon (min_gap), no LLM, no journal spam.
+    if (!assessNow) {
+        const nextAt = new Date(nowMs + _minGapMs(call.cadence)).toISOString()
+        await _persist(db, call.id, {
+            ..._metricsSet(metrics),
+            'monitor_state.next_check_at': nextAt,
+            'monitor_state.check_count':   (call?.monitor_state?.check_count ?? 0) + 1,
+        })
+        return { reason: 'in_position_idle' }
+    }
+
+    const reason = gate.flag ?? 'review'
+    const raw = await deps.assessPosition(call, ps, { price, reason, gate, metrics }, deps)
+    if (!raw) {
+        // Assessment failed — retry soon (min gap), keep metrics fresh.
+        const nextAt = new Date(nowMs + _minGapMs(call.cadence)).toISOString()
+        await _persist(db, call.id, {
+            ..._metricsSet(metrics),
+            'monitor_state.next_check_at': nextAt,
+            'monitor_state.check_count':   (call?.monitor_state?.check_count ?? 0) + 1,
+        }, { at: new Date(nowMs).toISOString(), reason: 'in_position', phase: 'in_position', price: _num(price), verdict: null,
+             note: `Went to reassess ${call.asset} but the data/vision call failed — retrying shortly.`, next_check_at: nextAt })
+        return { reason, failed: true }
+    }
+
+    const { set, entry, fireCard, card } = _applyPositionAssessment(call, ps, raw, price, metrics, nowMs, reason)
+    await _persist(db, call.id, set, entry)
+    if (fireCard) {
+        try { await deps.onManageCard(call, card) }
+        catch (err) { logger.warn(LOG, `onManageCard failed for ${call.id}:`, err.message) }
+    }
+    return { reason, verdict: raw.verdict, fireCard }
 }
 
 // ─── Pure decision helpers (unit-tested) ───────────────────────────────────────
@@ -329,7 +639,10 @@ export function _scheduledPatch(call, nowMs, short = false) {
 // An append-only, first-person log of EVERY wake — the "brain" the call pop-out reads. Cheap
 // wakes (closed / not-near-a-zone) get a one-line arithmetic note; a real assessment carries the
 // model's own first-person `read` + the four-axis detail. Kept compact and capped on the doc.
-const TIMELINE_MAX = 50
+// Bumped 50→80 (Phase 5): the journal now spans readiness + entry + the in-position management era,
+// so the rolling monologue needs more room before old idle wakes roll off. The durable factual
+// spine (fill / actions / outcome) lives structurally in position_state and never rolls off.
+const TIMELINE_MAX = 80
 
 function _fmt(n) { return Number.isFinite(Number(n)) ? String(Number(n)) : '?' }
 function _num(n) { return Number.isFinite(Number(n)) ? Number(n) : null }
@@ -415,6 +728,20 @@ const _deps = {
     onCard:      _defaultOnCard,
     isAssetOpen: (asset, assetClass) => isAssetOpen(asset, assetClass),
     nextOpenMs:  (asset, assetClass) => getMarketStatus(asset, assetClass).nextOpenMs,
+    // The linked idea (broker-authoritative, maintained by the execution reconciler) — Hermes reads
+    // it to reconcile the call's position lifecycle (Phase 5). Null id / read failure → null.
+    getIdea:     async (id) => { if (!id) return null; try { return await (await getDb()).collection('ideas').findOne({ id }) } catch { return null } },
+    // The ledger trade for the idea's main position (real entry/exit price + realized P&L) — the
+    // broker-authoritative source for the close outcome (slice 4). Null when not yet captured.
+    getTrade:    async (idea) => {
+        const slot = (idea?.brokerOrders ?? []).find(b => b?.positionId != null)
+        if (!slot) return null
+        try { return await (await getDb()).collection('trades').findOne({ accountId: String(slot.accountId), positionId: String(slot.positionId) }) } catch { return null }
+    },
+    // The in-position four-axis management read (slice 2) and the management-card delivery. onManage
+    // logs for now — real notify + user-confirm execution is slice 3 (mirrors Phase 2→3 for onCard).
+    assessPosition: _defaultAssessPosition,
+    onManageCard:   _defaultOnManageCard,
 }
 
 async function _defaultGetPrice(call) {
@@ -546,6 +873,69 @@ async function _candlesText(asset, tf) {
         const d = new Date(c.timestamp * 1000).toISOString().slice(0, 16).replace('T', ' ')
         return `${d} O:${c.open} H:${c.high} L:${c.low} C:${c.close} V:${c.volume}`
     }).join('\n')
+}
+
+// ─── In-position management assessment (LLM + vision) — mocked in unit tests ───
+// Post the management card to social chat (routes to the call pop-out, where the user accepts or
+// dismisses → the manageCall handoff executes it). Best-effort: a notify failure must never wedge
+// the monitor loop.
+async function _defaultOnManageCard(call, card) {
+    logger.info(LOG, 'MANAGEMENT CARD', { id: call.id, asset: call.asset, verdict: card?.verdict, proposal: card?.proposal })
+    try { await notifyCallManage(call, card) }
+    catch (err) { logger.warn(LOG, `onManageCard notify failed for ${call.id}:`, err.message) }
+}
+
+const _POSITION_SYSTEM = `You are Kairos, a discretionary day/swing trader MANAGING a live position you already entered (not looking for a new one).
+You are given the original call (thesis, patterns, reference levels), the live position (entry fill, working stop, targets, what's been taken, running R-multiple/memo), the current price, a rendered chart, recent candles, and why you were woken.
+Manage it like a pro: LET WINNERS RUN, cut when the THESIS breaks, and do NOT micro-manage. Most checks should be "hold". Re-check the ORIGINAL thesis and mapped patterns against what price is doing NOW; weight price action over indicators.
+Choose ONE verdict:
+- hold: nothing to do (the DEFAULT — bias strongly toward this).
+- move_stop: trail / move the stop to protect (breakeven only after a clear +1R, or up to fresh structure). proposal.new_stop.
+- take_partial: bank part of the position into a target/strength. proposal.size_pct (1-100).
+- exit_now: the thesis is broken or invalidated — get flat now, don't wait for the stop. proposal.reason.
+- let_run: momentum is strong into/through the final target — extend or cancel the take-profit. proposal.new_tp OR proposal.cancel_tp:true.
+Always include "read": ONE short, plain first-person sentence — what you see and what you're doing.
+Output ONLY a JSON object, no prose:
+{"read":"<one first-person sentence>","market":{"read":"...","score":"supportive|neutral|adverse"},"news":{"read":"...","score":"supportive|neutral|adverse|blocking"},"price_action":{"read":"...","strength":"strong|weak|mixed"},"patterns_seen":[{"id":"p1","present":true,"note":"..."}],"verdict":"hold|move_stop|take_partial|exit_now|let_run","proposal":{"new_stop":0,"size_pct":0,"new_tp":0,"cancel_tp":false,"reason":"..."},"next_check_min":15,"memo_update":"..."}
+Include "proposal" only when the verdict is NOT "hold" (only the fields that verdict needs).`
+
+export async function _defaultAssessPosition(call, ps, ctx, _d) {
+    try {
+        const tf = call.timeframe_ladder?.at(-1) ?? '15min'
+        const [png, candlesText] = await Promise.all([
+            fetchChartImage(String(call.asset).toUpperCase(), tf, buildStudies('vwap, ema(50), volume')).catch(() => null),
+            _candlesText(call.asset, tf).catch(() => ''),
+        ])
+
+        const userText = [
+            `CALL: ${JSON.stringify({ asset: call.asset, trade_type: call.trade_type, bias: call.bias, thesis: call.thesis, patterns: call.patterns, reference_levels: call.reference_levels })}`,
+            `POSITION: ${JSON.stringify({ entry: ps.entry, stop: ps.stop, targets: ps.targets, taken: ps.taken, phase: ps.phase })}`,
+            `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
+            `R-MULTIPLE NOW: ${ctx.metrics?.r_multiple_now ?? 'unknown'}`,
+            `REASON WOKEN: ${ctx.reason}`,
+            `PENDING CARD: ${ps.pending_action ? JSON.stringify(ps.pending_action) : '(none)'}`,
+            `PRIOR MEMO: ${ps.memo || '(none)'}`,
+            candlesText ? `RECENT CANDLES (${tf}):\n${candlesText}` : '',
+        ].filter(Boolean).join('\n\n')
+
+        const content = png
+            ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }, { type: 'text', text: userText }]
+            : userText
+
+        const { model, reasoningEffort } = await _hermesRouting(call.user_id)
+        const thinking = _thinkingConfig(reasoningEffort)
+        const msg = await _client.messages.create({
+            model,
+            max_tokens: thinking ? ASSESS_MAX_TOKENS_THINKING : ASSESS_MAX_TOKENS,
+            system: [{ type: 'text', text: _POSITION_SYSTEM, cache_control: { type: 'ephemeral' } }],
+            messages: [{ role: 'user', content }],
+            ...(thinking ?? {}),
+        })
+        return _extractJSON(_assessText(msg))
+    } catch (err) {
+        logger.warn(LOG, `position assessment failed for ${call.id}:`, err.message)
+        return null
+    }
 }
 
 function _extractJSON(text) {

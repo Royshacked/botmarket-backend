@@ -66,6 +66,25 @@ export function buildCallExpiry(call, kind, why = null) {
     }
 }
 
+/** Kairos in-position MANAGEMENT proposal → open the call to accept/dismiss (Phase 5). */
+export function buildCallManage(call, card) {
+    const verb  = card?.verdict
+    const asset = call?.asset
+    const verbCopy = {
+        move_stop:    'move the stop',
+        take_partial: 'bank a partial',
+        exit_now:     'exit now',
+        let_run:      'let it run',
+    }[verb] ?? 'manage the trade'
+    return {
+        userId:  call?.user_id ?? null,
+        content: `Kairos — ${asset}: I want to ${verbCopy}. Open the call to accept or dismiss.`,
+        type:    'call_manage',
+        payload: { callId: call?.id, asset, verdict: verb ?? null, read: card?.read ?? null },
+        botId:   'kairos',
+    }
+}
+
 // ── Thin IO wrappers ────────────────────────────────────────────────────────────
 
 async function _post(card, tag) {
@@ -86,4 +105,8 @@ export async function notifyCallExpiry(call, kind, why = null) {
     return _post(buildCallExpiry(call, kind, why), `Call-expiry card (${kind})`)
 }
 
-export const tradeNotifyService = { notifyIdeaEntryConfirm, notifyCallReady, notifyCallExpiry }
+export async function notifyCallManage(call, card) {
+    return _post(buildCallManage(call, card), `Call-manage card (${card?.verdict})`)
+}
+
+export const tradeNotifyService = { notifyIdeaEntryConfirm, notifyCallReady, notifyCallExpiry, notifyCallManage }

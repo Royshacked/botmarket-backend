@@ -27,6 +27,53 @@ export const kairosService = {
     getKairosCall,
     listKairosCalls,
     deleteKairosCall,
+    getKairosPerformance,
+}
+
+// ── Performance (Phase 5, slice 4) ────────────────────────────────────────────
+// Aggregate closed calls' outcomes into a Kairos track record. A "win" is positive realized P&L
+// when known, else positive R. avg_r doubles as the R-expectancy (mean R per trade). Pure.
+export function computeKairosPerformance(calls) {
+    const outcomes = (Array.isArray(calls) ? calls : [])
+        .filter(c => c?.status === 'closed' && c?.position_state?.outcome)
+        .map(c => c.position_state.outcome)
+
+    // NB: guard `!= null` BEFORE Number() — Number(null) is 0 (finite), which would wrongly treat an
+    // unknown P&L as a known break-even (and count it in total_pnl).
+    const pnlKnown = o => o?.pnl != null && Number.isFinite(Number(o.pnl))
+    const n     = outcomes.length
+    const rs    = outcomes.map(o => o.r_multiple).filter(x => x != null && Number.isFinite(Number(x))).map(Number)
+    const pnls  = outcomes.filter(pnlKnown).map(o => Number(o.pnl))
+    const isWin = o => (pnlKnown(o) ? Number(o.pnl) > 0 : Number(o.r_multiple) > 0)
+    const isLoss= o => (pnlKnown(o) ? Number(o.pnl) < 0 : Number(o.r_multiple) < 0)
+    const sum   = a => a.reduce((s, x) => s + x, 0)
+    const r2    = x => Math.round(x * 100) / 100
+    const wins  = outcomes.filter(isWin).length
+
+    return {
+        closed:    n,
+        wins,
+        losses:    outcomes.filter(isLoss).length,
+        win_rate:  n ? r2(wins / n) : null,          // fraction 0–1
+        avg_r:     rs.length ? r2(sum(rs) / rs.length) : null,   // == R-expectancy
+        total_pnl: pnls.length ? r2(sum(pnls)) : null,
+        best_r:    rs.length ? Math.max(...rs) : null,
+        worst_r:   rs.length ? Math.min(...rs) : null,
+    }
+}
+
+async function getKairosPerformance(userId, isAdmin = false) {
+    try {
+        const db    = await getDb()
+        const query = isAdmin ? { status: 'closed' } : { status: 'closed', user_id: userId }
+        const calls = await db.collection(COLLECTION)
+            .find(query, { projection: { status: 1, position_state: 1 } })
+            .toArray()
+        return { ok: true, performance: computeKairosPerformance(calls) }
+    } catch (err) {
+        logger.error(LOG, 'Failed to compute performance', err)
+        return { ok: false, error: err }
+    }
 }
 
 export async function ensureKairosIndexes() {

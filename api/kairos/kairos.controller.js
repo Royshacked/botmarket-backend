@@ -72,7 +72,11 @@ export async function generateKairosCall(req, res) {
     }
 }
 
-// Act on a readiness card. action ∈ confirm | edit | dismiss.
+// Act on a card. Readiness: confirm | edit | dismiss. In-position management (Phase 5):
+// move_stop | take_partial | exit_now | let_run (accept the pending proposal); dismiss clears an
+// in-position card without terminating the position.
+const MANAGE_ACTIONS = ['move_stop', 'take_partial', 'exit_now', 'let_run']
+
 export async function actOnKairosCall(req, res) {
     const { id }     = req.params
     const { action } = req.body ?? {}
@@ -80,10 +84,11 @@ export async function actOnKairosCall(req, res) {
     const isAdmin = req.user.isAdmin === true
 
     let result
-    if (action === 'confirm')      result = await kairosHandoffService.confirmCall(id, userId, isAdmin)
-    else if (action === 'edit')    result = await kairosHandoffService.editCall(id, userId, isAdmin)
-    else if (action === 'dismiss') result = await kairosHandoffService.dismissCall(id, userId, isAdmin)
-    else return res.status(400).send({ error: 'action must be confirm | edit | dismiss' })
+    if (action === 'confirm')             result = await kairosHandoffService.confirmCall(id, userId, isAdmin)
+    else if (action === 'edit')           result = await kairosHandoffService.editCall(id, userId, isAdmin)
+    else if (action === 'dismiss')        result = await kairosHandoffService.dismissCall(id, userId, isAdmin)
+    else if (MANAGE_ACTIONS.includes(action)) result = await kairosHandoffService.manageCall(id, userId, action, isAdmin)
+    else return res.status(400).send({ error: 'action must be confirm | edit | dismiss | move_stop | take_partial | exit_now | let_run' })
 
     if (!result.ok) {
         const code = result.reason === 'not_found' ? 404 : result.reason === 'forbidden' ? 403 : 400
@@ -99,6 +104,18 @@ export async function listKairos(req, res) {
     } catch (err) {
         logger.error(LOG, 'Failed to list kairos calls', err)
         res.status(500).send({ error: 'Failed to list calls' })
+    }
+}
+
+// Kairos track record — aggregate of closed calls' outcomes (Phase 5, slice 4).
+export async function getKairosPerformance(req, res) {
+    try {
+        const result = await kairosService.getKairosPerformance(req.user._id, req.user.isAdmin === true)
+        if (!result.ok) return res.status(500).send({ error: 'performance_failed' })
+        res.send(result.performance)
+    } catch (err) {
+        logger.error(LOG, 'Failed to get kairos performance', err)
+        res.status(500).send({ error: 'Failed to get performance' })
     }
 }
 
