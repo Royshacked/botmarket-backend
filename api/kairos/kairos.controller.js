@@ -49,13 +49,16 @@ export async function streamKairos(req, res) {
 // runs the construction gate, saves. Returns the saved call or a gate reason.
 export async function generateKairosCall(req, res) {
     try {
-        const { call, accounts, mainAccountId } = req.body ?? {}
+        const { call, accounts, mainAccountId, chat_state } = req.body ?? {}
         if (!call || typeof call !== 'object' || Array.isArray(call)) {
             return res.status(400).send({ error: 'call must be an object' })
         }
         const acctList = Array.isArray(accounts) ? accounts : []
 
-        const result = await _finalizeCall(call, { userId: req.user._id, accounts: acctList, mainAccountId })
+        // Persist the build conversation + draft so the Calls-tab edit pencil can reopen the call in
+        // chat with its history (parity with the update path — without this, a generated call saves
+        // chat_state:null and re-editing it starts a blank chat).
+        const result = await _finalizeCall(call, { userId: req.user._id, accounts: acctList, mainAccountId, chatState: chat_state })
         if (!result.ok) return res.status(400).send({ error: result.reason ?? 'generate_failed' })
 
         res.send(result.call)
