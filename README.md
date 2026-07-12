@@ -91,9 +91,13 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 │                                                                  │
 │  User ──► ideaAgentService.chatStream()                          │
 │             │  model chosen per-request by modelRouter           │
-│             │  Tools: get_quote, get_candles, get_chart,         │
+│             │  Tools: web_search, get_quote, get_candles,        │
+│             │         get_price_action, get_chart,               │
+│             │         get_indicators, get_cycle_analysis,        │
+│             │         get_earnings, get_earnings_calendar,       │
+│             │         get_fundamentals, get_sec_filings,         │
 │             │         get_short_interest, get_options_context,   │
-│             │         get_derivatives_context, web_search        │
+│             │         get_derivatives_context                    │
 │             │                                                    │
 │             └──► streams tokens + <trade_idea> JSON block        │
 └──────────────────────────────┬───────────────────────────────────┘
@@ -210,9 +214,9 @@ A portfolio groups multiple ideas under one AI-planned allocation, with a period
 │  portfolioAgentService.chatStream()                              │
 │    Tools: get_quote, get_quotes, get_correlations,               │
 │           get_risk_metrics, get_fundamentals, get_sec_filings,   │
-│           get_earnings_calendar, get_short_interest,             │
-│           get_options_context, get_derivatives_context,          │
-│           web_search                                             │
+│           get_earnings, get_earnings_calendar,                   │
+│           get_short_interest, get_options_context,               │
+│           get_derivatives_context, web_search                    │
 │                                                                  │
 │  Agent emits  <portfolio_plan> JSON block                        │
 │    → _sizePlan():  normalizes allocation ratios to sum=1,        │
@@ -271,10 +275,10 @@ The scanner agent produces a watchlist of trade candidates for a given timeframe
 │                                                                  │
 │  scannerAgentService.chatStream()                                │
 │    Tools: get_price_action, get_quotes, get_risk_metrics,        │
-│           get_fundamentals, get_earnings_calendar,               │
-│           get_sec_filings, get_short_interest,                   │
-│           get_options_context, get_derivatives_context,          │
-│           web_search                                             │
+│           get_fundamentals, get_cycle_analysis, get_earnings,    │
+│           get_earnings_calendar, get_sec_filings,                │
+│           get_short_interest, get_options_context,               │
+│           get_derivatives_context, web_search                    │
 │                                                                  │
 │  Agent streams tokens + emits <scan_list> JSON block             │
 │    → _normalizeScan(): drops malformed candidates, uppercases    │

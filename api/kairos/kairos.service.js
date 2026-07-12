@@ -2,6 +2,7 @@ import { randomUUID }               from 'crypto'
 import { getDb, stripId }           from '../../providers/mongodb.provider.js'
 import { logger }                   from '../../services/logger.service.js'
 import { buildEventRisk }           from '../../services/eventRisk.service.js'
+import { cleanConviction }          from '../../services/conviction.util.js'
 
 // Kairos = discretionary day/swing agent. Its artifact is a "call" (Idea produces ideas,
 // Kairos produces calls): one document in `kairos_calls` = identity + plan (authored at build,
@@ -39,7 +40,7 @@ const PLAN_FIELDS = [
     'asset', 'asset_class', 'trade_type', 'bias', 'thesis', 'timeframe_ladder', 'cadence',
     'entry_zones', 'reference_levels', 'patterns', 'sizing', 'broker', 'accounts',
     'main_account_id', 'broker_symbol', 'basis_offset', 'active_from', 'valid_until', 'event_risk',
-    'market_sensitivity',
+    'market_sensitivity', 'rr', 'conviction',
 ]
 
 // Broad-market coupling levels. Anything else (or missing) → Hermes treats the tape as immaterial.
@@ -245,6 +246,13 @@ export function normalizeCall(raw, userId = null) {
         // `drivers` are the index/sector/correlated proxies Hermes fetches LIVE at entry; `level` tells
         // it how hard to weight the tape. `low`/absent → Hermes skips the market read (tape immaterial).
         market_sensitivity: _normalizeSensitivity(raw.market_sensitivity),
+        // Reward-to-risk (zone → first target ÷ zone → invalidation) + the agent's conviction in
+        // this call's reasoning — both authored in the Phase 5 pressure-test. Advisory (not gate
+        // inputs); conviction reuses the shared idea/portfolio/scanner normalizer.
+        // rr must be a POSITIVE number — the `> 0` guard also maps an early draft's null / "" /
+        // 0 (Number(null)===0 would otherwise slip through Number.isFinite) back to null.
+        rr:         Number.isFinite(Number(raw.rr)) && Number(raw.rr) > 0 ? Number(raw.rr) : null,
+        conviction: cleanConviction(raw.conviction),
 
         // ── monitor_state (written each wake, Phase 2) ──
         status: 'waiting',

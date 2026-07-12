@@ -1,6 +1,6 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
-import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
+import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis, getEarnings } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
@@ -49,6 +49,15 @@ const TOOLS = [
         input_schema: {
             type: 'object',
             properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_earnings',
+        description: 'For a SINGLE ticker: its next earnings date + EPS estimate, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use it to qualify one scan candidate — is a print imminent (gap risk), and does the name have a track record of beating or missing. For the forward "who reports when" across a period, use get_earnings_calendar. US equities only.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, TSLA' } },
             required: ['ticker'],
         },
     },
@@ -141,6 +150,9 @@ const TOOL_HANDLERS = {
     get_fundamentals: makeToolHandler('get_fundamentals',
         ({ ticker }) => getFundamentals(ticker),
         (err, { ticker }) => `Could not fetch fundamentals for ${ticker}: ${err.message}`, LOG),
+    get_earnings: makeToolHandler('get_earnings',
+        ({ ticker }) => getEarnings(ticker),
+        (err, { ticker }) => `Could not fetch earnings for ${ticker}: ${err.message}`, LOG),
     get_earnings_calendar: makeToolHandler('get_earnings_calendar',
         ({ from, to, symbols }) => getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []),
         (err) => `Could not fetch earnings calendar: ${err.message}`, LOG),

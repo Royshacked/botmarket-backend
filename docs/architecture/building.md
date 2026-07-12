@@ -76,10 +76,15 @@ Prompt `idea_system_prompt.md`. Entry `chatStream` (non-stream `chat`). Tools:
 |---|---|
 | `web_search` | live web lookup |
 | `get_quote` | live price |
+| `get_price_action` | 1d/5d/1m/3m moves + range position + rel volume |
 | `get_candles` | OHLCV (2hr/4hr aggregated server-side) |
-| `get_earnings` | earnings data |
-| `get_sec_filings` | SEC filings |
+| `get_indicators` | exact EMA/SMA/RSI/MACD/ATR/VWAP values — same math the monitor uses (shared `makeIndicatorsHandler`) |
 | `get_chart` | render a TradingView **image** for vision TA (Anthropic-only; shown to UI via `onChart` when `show_to_user`) |
+| `get_cycle_analysis` | price-cycle / seasonal-window modes |
+| `get_earnings` | single-ticker earnings + beat/miss history |
+| `get_earnings_calendar` | forward earnings calendar (who reports when) |
+| `get_fundamentals` | sector / valuation / margins / ROE / growth |
+| `get_sec_filings` | SEC filings |
 | `get_short_interest` | short-interest |
 | `get_options_context` | options positioning |
 | `get_derivatives_context` | crypto perps |
@@ -87,14 +92,24 @@ Prompt `idea_system_prompt.md`. Entry `chatStream` (non-stream `chat`). Tools:
 ### Portfolio agent — `services/portfolio.agent.service.js`
 Prompt `portfolio_system_prompt.md`. Tools add `get_quotes` (batch),
 `get_risk_metrics` (annualized vol + ATR → sizing), `get_correlations` (pairwise matrix →
-diversification), `get_fundamentals`, `get_earnings_calendar` (plus the shared sentiment
-tools).
+diversification), `get_fundamentals`, `get_earnings` (single-ticker + history),
+`get_earnings_calendar` (plus the shared sentiment tools).
 
 ### Scanner agent — `services/scanner.agent.service.js`
 Prompt `scanner_system_prompt.md`. Tools add `get_price_action` (1d/5d/1m/3m moves + range
 position + rel volume), `get_cycle_analysis` (price-cycle / seasonal modes), `get_quotes`,
-`get_risk_metrics`, `get_fundamentals`, `get_earnings_calendar` (plus shared sentiment
-tools).
+`get_risk_metrics`, `get_fundamentals`, `get_earnings` (single-ticker + history),
+`get_earnings_calendar` (plus shared sentiment tools).
+
+### Kairos agent — `services/kairos.agent.service.js` (tools in `services/kairos.tools.js`)
+Prompt `kairos_system_prompt.md`. Discretionary day/swing **call** builder (single asset), a
+self-contained sibling of the Trade agent — it shares the **same 14-tool analysis kit** as Idea
+(reusing the pure providers + shared `marketData.tools.js` factories incl. `makeIndicatorsHandler`).
+Five phases: classify → **analyse & map entry zones** → frame risk → patterns → **validate, size &
+emit**. Emits a `<call>` (entry zones as bands + reference levels + patterns + sizing + `timeframe_ladder`
++ **`rr`/`conviction`**), parsed wholesale then persisted via `normalizeCall` to `kairos_calls`
+(watched by Hermes — see `monitoring.md`). Fundamentals are weighted by horizon (light intraday/day,
+heavy swing); the `timeframe_ladder` is authored deliberately for Hermes to pick a rung from.
 
 ---
 

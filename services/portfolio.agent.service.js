@@ -1,6 +1,6 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
-import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw } from '../providers/yahoofinance.provider.js'
+import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw, getEarnings } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
@@ -98,6 +98,15 @@ const TOOLS = [
         },
     },
     {
+        name: 'get_earnings',
+        description: 'For a SINGLE ticker: its next earnings date + EPS estimate, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use it to judge one holding/candidate — is a print imminent (gap risk), and does the company have a history of beating or missing. For the forward "who reports when" across many names, use get_earnings_calendar. US equities only — no ETFs, crypto, FX or futures.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, TSLA' } },
+            required: ['ticker'],
+        },
+    },
+    {
         name: 'get_earnings_calendar',
         description: 'Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it.',
         input_schema: {
@@ -132,6 +141,9 @@ const TOOL_HANDLERS = {
     get_sec_filings: makeToolHandler('get_sec_filings',
         ({ ticker }) => getSecFilings(ticker),
         (err, { ticker }) => `Could not fetch SEC filings for ${ticker}: ${err.message}`, LOG),
+    get_earnings: makeToolHandler('get_earnings',
+        ({ ticker }) => getEarnings(ticker),
+        (err, { ticker }) => `Could not fetch earnings for ${ticker}: ${err.message}`, LOG),
     get_earnings_calendar: makeToolHandler('get_earnings_calendar',
         ({ from, to, symbols }) => getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []),
         (err) => `Could not fetch earnings calendar: ${err.message}`, LOG),

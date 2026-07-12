@@ -156,7 +156,9 @@ function _buildSystemPrompt(chatState, accounts) {
         ? `\nDraft call so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
         : ''
 
+    const today = new Date().toISOString().slice(0, 10)
     const dynamicContext = `---
+CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar or setting valid_until.
 CONVERSATION CONTEXT:
 Active asset: ${asset}${draft}${_buildAccountsSection(accounts)}`
 

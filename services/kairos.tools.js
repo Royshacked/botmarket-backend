@@ -1,17 +1,16 @@
-import { getTickerAggregates } from '../providers/yahoofinance.provider.js'
-import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../monitoring/evaluators/structured.evaluator.js'
-import { sessionStartMs } from './market.service.js'
-import { toolError } from './toolResult.util.js'
+import { getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
+import { getEarningsCalendar, getFundamentals } from '../providers/fmp.provider.js'
+import { getSecFilings } from '../providers/sec.provider.js'
 import { COMMON_TOOL_HANDLERS, makeToolHandler } from './agentUtils.js'
 import {
-    CANDLE_CFG, aggregateCandles,
-    makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler,
+    makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler, makeIndicatorsHandler,
 } from './marketData.tools.js'
 
-// Kairos's market-data toolset. Deliberately its OWN schemas/handlers (not imported from the
-// Idea agent) so Kairos is a self-contained trial with zero blast radius on Idea — but the
-// heavy lifting reuses the same PURE providers (Yahoo candles/quote, chart-img render,
-// buildStudies, the shared sentiment handlers). See KAIROS_PLAN.md "reuse mechanisms, not schemas".
+// Kairos's market-data toolset. Deliberately its OWN schemas (not imported from the
+// Idea agent) so Kairos is a self-contained trial — but the heavy lifting reuses the
+// same PURE providers and shared handler factories (Yahoo candles/quote/price-action,
+// chart-img render, the shared indicator math, the sentiment handlers). See
+// KAIROS_PLAN.md "reuse mechanisms, not schemas".
 
 const LOG = '[kairosTools]'
 
@@ -43,6 +42,15 @@ export const KAIROS_TOOLS = [
         },
     },
     {
+        name: 'get_price_action',
+        description: 'Momentum/positioning snapshot for a ticker: 1d/5d/1m/3m % moves, position within the 1y range, and relative volume. A fast read on whether the name is moving the way the thesis claims and whether volume backs it — call it early, before drilling into candles.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
+            required: ['ticker'],
+        },
+    },
+    {
         name: 'get_chart',
         description: 'Render an actual TradingView candlestick chart IMAGE (with indicator overlays) and look at it directly, for VISUAL / structural analysis — chart patterns, false breaks, orderblocks, trendlines, where price sits vs moving averages / VWAP. Use this to decide which patterns work for the asset. For EXACT numeric levels prefer get_candles. One asset, setup stage only.',
         input_schema: {
@@ -54,15 +62,6 @@ export const KAIROS_TOOLS = [
                 show_to_user: { type: 'boolean', description: 'Set true when this chart informs the actual playbook (zones/levels/patterns) — the user wants to see what you are reading. Leave false only for a throwaway internal peek.' },
             },
             required: ['ticker', 'timeframe'],
-        },
-    },
-    {
-        name: 'get_earnings',
-        description: 'Upcoming earnings date + EPS estimate for a ticker, plus recent quarterly actuals vs estimates. Use it as a catalyst check — is there an event inside the trade horizon that supports or blocks the setup. US equities only.',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, TSLA' } },
-            required: ['ticker'],
         },
     },
     {
@@ -86,6 +85,70 @@ export const KAIROS_TOOLS = [
         },
     },
     {
+        name: 'get_cycle_analysis',
+        description: 'Detect recurring cycles in a stock\'s price history. Two modes: "price" finds the dominant peak-to-peak / trough-to-trough interval, the current phase, and the next estimated turning point. "calendar" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking. Use "price" for recurring-interval / cyclic-window theses, "calendar" for seasonal / calendar-pattern theses.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' },
+                mode: { type: 'string', enum: ['price', 'calendar'], description: '"price" for recurring interval cycles, "calendar" for seasonal window analysis' },
+                calendar_window: {
+                    type: 'object',
+                    description: 'Required for mode "calendar". Defines the window to analyze each year.',
+                    properties: {
+                        month_start: { type: 'number', description: '1-based month number (Jan=1). Start month of the window.' },
+                        month_end:   { type: 'number', description: '1-based month number. End month — same as month_start for a single month.' },
+                        day_start:   { type: 'number', description: 'Optional. Starting day within month_start (default 1).' },
+                        day_end:     { type: 'number', description: 'Optional. Ending day within month_end (default last day of month).' },
+                    },
+                    required: ['month_start'],
+                },
+                lookback_years: { type: 'number', description: 'Years of history to use (default 4, max 6).' },
+            },
+            required: ['ticker', 'mode'],
+        },
+    },
+    {
+        name: 'get_earnings',
+        description: 'Upcoming earnings date + EPS estimate for a ticker, plus recent quarterly actuals vs estimates. Use it as a catalyst check — is there an event inside the trade horizon that supports or blocks the setup. US equities only.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, TSLA' } },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_earnings_calendar',
+        description: 'Upcoming earnings dates (with EPS/revenue estimates) for ALL companies reporting between two dates (YYYY-MM-DD, window up to ~3 months), optionally narrowed to specific symbols. The forward-looking "who reports when" — use it to scan for an event inside the call horizon, or to check a shortlist for gap risk. For one ticker\'s next date plus its beat/miss history, prefer get_earnings.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                from:    { type: 'string', description: 'start date YYYY-MM-DD' },
+                to:      { type: 'string', description: 'end date YYYY-MM-DD' },
+                symbols: { type: 'array', items: { type: 'string' }, description: 'optional — narrow to these tickers' },
+            },
+            required: ['from', 'to'],
+        },
+    },
+    {
+        name: 'get_fundamentals',
+        description: 'Company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B), quality (margins, ROE, debt/equity), and growth. Weight it by horizon — light for intraday/day calls, heavily for swing calls. ETFs return exposure/profile only.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_sec_filings',
+        description: 'Recent SEC filings for a US-listed equity: latest 8-K (item 2.02 earnings releases), 10-Q and 10-K with dates and links. On-demand deep dive when the thesis hinges on filed numbers or a material event — weight it more for swing horizons. US equities only.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, TSLA' } },
+            required: ['ticker'],
+        },
+    },
+    {
         name: 'get_short_interest',
         description: 'Short interest for a US-listed single stock: short % of float, days-to-cover, month-over-month change. Squeeze potential / crowded-bearish positioning. FINRA data, ~2-week lag.',
         input_schema: { type: 'object', properties: { ticker: { type: 'string', description: 'e.g. GME, TSLA' } }, required: ['ticker'] },
@@ -103,73 +166,37 @@ export const KAIROS_TOOLS = [
     },
 ]
 
-// Candle config / aggregation / chart caching / the get_quote·candles·earnings·chart
-// handlers are shared with the Idea agent — see services/marketData.tools.js. Kept
-// re-exported under the historical name for any external importer.
-export { aggregateCandles as _aggregateCandles }
-
-// ─── Indicator readout (reuses the monitor's calc*Series math) ─────────────────
-// Parse "ema(20), rsi(14), atr, macd, vwap" → [{ name, period }].
-export function _parseIndicatorSpecs(str) {
-    return String(str || '').split(',').map(s => s.trim()).filter(Boolean).map(s => {
-        const m = s.match(/^([a-zA-Z]+)\s*(?:\(\s*(\d+)\s*\))?/)
-        return m ? { name: m[1].toLowerCase(), period: m[2] ? parseInt(m[2], 10) : null } : null
-    }).filter(Boolean)
-}
-
-// Latest value of a series + up to 2 priors for trend.
-function _series3(series) {
-    const vals = (series || []).filter(v => v != null).slice(-3).map(v => Number(v).toFixed(2))
-    if (!vals.length) return 'n/a (not enough data)'
-    const latest = vals[vals.length - 1]
-    const prior  = vals.slice(0, -1)
-    return prior.length ? `${latest} (prev ${prior.join(', ')})` : latest
-}
-
-const _v = (n) => (n == null ? 'n/a' : Number(n).toFixed(2))
-
-export function _formatIndicator(name, period, closes, mon, anchorMs = null) {
-    switch (name) {
-        case 'ema':  { const p = period ?? 20; return `ema(${p}): ${_series3(calcEMASeries(closes, p))}` }
-        case 'sma':  { const p = period ?? 20; return `sma(${p}): ${_series3(calcSMASeries(closes, p))}` }
-        case 'rsi':  { const p = period ?? 14; return `rsi(${p}): ${_series3(calcRSISeries(closes, p))}` }
-        case 'atr':  { const p = period ?? 14; return `atr(${p}): ${_series3(calcATRSeries(mon, p))}` }
-        case 'vwap': return `vwap: ${_series3(calcVWAPSeries(mon, anchorMs))} (${anchorMs != null ? 'session' : 'session-approx'})`
-        case 'macd': {
-            const { line, signal, hist } = calcMACDSeries(closes)
-            return `macd: line ${_v(line.at(-1))} · signal ${_v(signal.at(-1))} · hist ${_v(hist.at(-1))}`
-        }
-        default: return `${name}: unsupported (use ema/sma/rsi/macd/atr/vwap)`
-    }
-}
+// Candle aggregation + the get_quote·candles·earnings·chart·indicators handlers and
+// the indicator-format helpers are shared with the Idea agent — see
+// services/marketData.tools.js. Re-exported here so existing importers/tests
+// (kairosIndicators.test.js) resolve the historical names unchanged.
+export { aggregateCandles as _aggregateCandles, _parseIndicatorSpecs, _formatIndicator } from './marketData.tools.js'
 
 const _STATIC_HANDLERS = {
-    get_quote:    makeQuoteHandler(LOG),
-    get_candles:  makeCandlesHandler(LOG),
-    get_earnings: makeEarningsHandler(LOG),
+    get_quote:        makeQuoteHandler(LOG),
+    get_candles:      makeCandlesHandler(LOG),
+    get_earnings:     makeEarningsHandler(LOG),
+    get_indicators:   makeIndicatorsHandler(LOG),
 
-    get_indicators: makeToolHandler('get_indicators', async ({ ticker, timeframe, indicators }) => {
-        const cfg  = CANDLE_CFG[timeframe] ?? CANDLE_CFG['day']
-        const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
-        const raw  = await getTickerAggregates(ticker.toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
-        const bars = cfg.aggregate ? aggregateCandles(raw, cfg.aggregate) : raw
-        if (!bars.length) return toolError(`No candle data available for ${ticker}`)
+    get_price_action: makeToolHandler('get_price_action',
+        ({ ticker }) => getPriceAction(ticker),
+        (err, { ticker }) => `Could not fetch price action for ${ticker}: ${err.message}`, LOG),
 
-        const specs = _parseIndicatorSpecs(indicators)
-        if (!specs.length) return toolError('No recognizable indicators. Try "ema(20), rsi(14), atr, vwap, macd".')
+    get_cycle_analysis: makeToolHandler('get_cycle_analysis',
+        ({ ticker, mode, calendar_window, lookback_years }) => getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4),
+        (err, { ticker }) => `Could not compute cycle analysis for ${ticker}: ${err.message}`, LOG),
 
-        const closes = bars.map(b => b.close)
-        // Monitor-form candles (t/o/h/l/c/v) for ATR + VWAP; candleMs normalizes the s/ms unit.
-        const mon    = bars.map(b => ({ t: b.timestamp, o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume }))
-        const last   = closes[closes.length - 1]
+    get_earnings_calendar: makeToolHandler('get_earnings_calendar',
+        ({ from, to, symbols }) => getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []),
+        (err) => `Could not fetch earnings calendar: ${err.message}`, LOG),
 
-        // Session-anchored VWAP (equity 09:30 ET, crypto/futures UTC-midnight; class inferred
-        // from the symbol) — same anchor the monitor uses. Intraday-only in effect: on daily+
-        // timeframes the bars pre-date today's session anchor, so VWAP reads n/a.
-        const anchorMs = sessionStartMs(ticker.toUpperCase())
-        const lines = specs.map(s => _formatIndicator(s.name, s.period, closes, mon, anchorMs))
-        return `${ticker.toUpperCase()} ${timeframe} indicators (latest, close ${last != null ? last.toFixed(2) : '—'}):\n${lines.join('\n')}`
-    }, (err, { ticker }) => `Could not compute indicators for ${ticker}: ${err.message}`, LOG),
+    get_fundamentals: makeToolHandler('get_fundamentals',
+        ({ ticker }) => getFundamentals(ticker),
+        (err, { ticker }) => `Could not fetch fundamentals for ${ticker}: ${err.message}`, LOG),
+
+    get_sec_filings: makeToolHandler('get_sec_filings',
+        ({ ticker }) => getSecFilings(ticker),
+        (err, { ticker }) => `Could not fetch SEC filings for ${ticker}: ${err.message}`, LOG),
 
     ...COMMON_TOOL_HANDLERS,
 }

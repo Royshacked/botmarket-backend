@@ -1,6 +1,8 @@
 import { getQuote, getTickerAggregates, getEarnings } from '../providers/yahoofinance.provider.js'
 import { fetchChartImage } from '../providers/chartImg.provider.js'
 import { buildStudies } from '../monitoring/evaluators/chart.evaluator.js'
+import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../monitoring/evaluators/structured.evaluator.js'
+import { sessionStartMs } from './market.service.js'
 import { toolError } from './toolResult.util.js'
 import { makeToolHandler } from './agentUtils.js'
 import { logger } from './logger.service.js'
@@ -150,6 +152,70 @@ export function makeChartHandler({ log, onChart, readText }) {
             ]
         },
         (err, { ticker }) => `Could not render chart for ${ticker}: ${err.message}. Use get_candles instead.`,
+        log,
+    )
+}
+
+// ─── Indicator readout (reuses the monitor's calc*Series math) ─────────────────
+// Shared by Idea and Kairos — the same math the monitor uses, so an agent's read
+// matches what the monitor will evaluate. Parse "ema(20), rsi(14), atr, macd, vwap"
+// → [{ name, period }].
+export function _parseIndicatorSpecs(str) {
+    return String(str || '').split(',').map(s => s.trim()).filter(Boolean).map(s => {
+        const m = s.match(/^([a-zA-Z]+)\s*(?:\(\s*(\d+)\s*\))?/)
+        return m ? { name: m[1].toLowerCase(), period: m[2] ? parseInt(m[2], 10) : null } : null
+    }).filter(Boolean)
+}
+
+// Latest value of a series + up to 2 priors for trend.
+function _series3(series) {
+    const vals = (series || []).filter(v => v != null).slice(-3).map(v => Number(v).toFixed(2))
+    if (!vals.length) return 'n/a (not enough data)'
+    const latest = vals[vals.length - 1]
+    const prior  = vals.slice(0, -1)
+    return prior.length ? `${latest} (prev ${prior.join(', ')})` : latest
+}
+
+const _v = (n) => (n == null ? 'n/a' : Number(n).toFixed(2))
+
+export function _formatIndicator(name, period, closes, mon, anchorMs = null) {
+    switch (name) {
+        case 'ema':  { const p = period ?? 20; return `ema(${p}): ${_series3(calcEMASeries(closes, p))}` }
+        case 'sma':  { const p = period ?? 20; return `sma(${p}): ${_series3(calcSMASeries(closes, p))}` }
+        case 'rsi':  { const p = period ?? 14; return `rsi(${p}): ${_series3(calcRSISeries(closes, p))}` }
+        case 'atr':  { const p = period ?? 14; return `atr(${p}): ${_series3(calcATRSeries(mon, p))}` }
+        case 'vwap': return `vwap: ${_series3(calcVWAPSeries(mon, anchorMs))} (${anchorMs != null ? 'session' : 'session-approx'})`
+        case 'macd': {
+            const { line, signal, hist } = calcMACDSeries(closes)
+            return `macd: line ${_v(line.at(-1))} · signal ${_v(signal.at(-1))} · hist ${_v(hist.at(-1))}`
+        }
+        default: return `${name}: unsupported (use ema/sma/rsi/macd/atr/vwap)`
+    }
+}
+
+export function makeIndicatorsHandler(log) {
+    return makeToolHandler(
+        'get_indicators',
+        async ({ ticker, timeframe, indicators }) => {
+            const { bars } = await _fetchCandleRows(ticker, timeframe)
+            if (!bars.length) return toolError(`No candle data available for ${ticker}`)
+
+            const specs = _parseIndicatorSpecs(indicators)
+            if (!specs.length) return toolError('No recognizable indicators. Try "ema(20), rsi(14), atr, vwap, macd".')
+
+            const closes = bars.map(b => b.close)
+            // Monitor-form candles (t/o/h/l/c/v) for ATR + VWAP.
+            const mon    = bars.map(b => ({ t: b.timestamp, o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume }))
+            const last   = closes[closes.length - 1]
+
+            // Session-anchored VWAP (equity 09:30 ET, crypto/futures UTC-midnight; class inferred
+            // from the symbol) — same anchor the monitor uses. Intraday-only in effect: on daily+
+            // timeframes the bars pre-date today's session anchor, so VWAP reads n/a.
+            const anchorMs = sessionStartMs(ticker.toUpperCase())
+            const lines = specs.map(s => _formatIndicator(s.name, s.period, closes, mon, anchorMs))
+            return `${ticker.toUpperCase()} ${timeframe} indicators (latest, close ${last != null ? last.toFixed(2) : '—'}):\n${lines.join('\n')}`
+        },
+        (err, { ticker }) => `Could not compute indicators for ${ticker}: ${err.message}`,
         log,
     )
 }

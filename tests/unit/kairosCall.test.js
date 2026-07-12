@@ -137,6 +137,31 @@ test('normalize: market_sensitivity carried through the stored doc', () => {
     assert.deepEqual(normalizeCall(call()).market_sensitivity, { level: null, drivers: [], note: null }) // absent
 })
 
+test('normalize: rr coerced to a number, conviction normalized; both null when absent', () => {
+    const doc = normalizeCall(call({ rr: '2.1', conviction: { level: 'medium', score: 0.6, rationale: 'trend aligns; earnings in 2 days' } }))
+    assert.equal(doc.rr, 2.1)                                                            // string coerced
+    assert.deepEqual(doc.conviction, { level: 'medium', score: 0.6, rationale: 'trend aligns; earnings in 2 days' })
+    const bare = normalizeCall(call())
+    assert.equal(bare.rr, null)                                                          // absent → null
+    assert.equal(bare.conviction, null)
+})
+
+test('normalize: rr is a positive number only — non-numeric / null / empty / 0 / negative → null', () => {
+    assert.equal(normalizeCall(call({ rr: 'x' })).rr,  null)   // NaN
+    assert.equal(normalizeCall(call({ rr: null })).rr, null)   // Number(null)===0 must NOT slip through
+    assert.equal(normalizeCall(call({ rr: '' })).rr,   null)   // Number('')===0
+    assert.equal(normalizeCall(call({ rr: 0 })).rr,    null)   // no trade has 0 R:R
+    assert.equal(normalizeCall(call({ rr: -1.5 })).rr, null)   // negative is nonsensical
+    assert.equal(normalizeCall(call({ rr: 2.1 })).rr,  2.1)    // a real positive R:R survives
+})
+
+test('normalize: out-of-enum conviction level dropped to null, score clamped 0..1', () => {
+    assert.deepEqual(
+        normalizeCall(call({ conviction: { level: 'bogus', score: 5, rationale: 'r' } })).conviction,
+        { level: null, score: 1, rationale: 'r' },   // level out-of-enum → null; score clamped 0..1
+    )
+})
+
 test('normalize: cadence defaults by trade_type when omitted', () => {
     assert.deepEqual(normalizeCall(call({ trade_type: 'swing' })).cadence, { min_gap_min: 5, max_gap_min: 30 })
     assert.deepEqual(normalizeCall(call({ trade_type: 'day' })).cadence, { min_gap_min: 1, max_gap_min: 15 })

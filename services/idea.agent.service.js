@@ -3,10 +3,12 @@ import { dirname, join } from 'path'
 import { callAnthropicWithTools } from '../providers/anthropic.provider.js'
 import { DEFAULT_MODEL } from './llmModels.js'
 import { getSecFilings } from '../providers/sec.provider.js'
+import { getEarningsCalendar, getFundamentals } from '../providers/fmp.provider.js'
+import { getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
 import { logger } from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, makeToolHandler, resolveAgentStream } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
-import { makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler } from './marketData.tools.js'
+import { makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler, makeIndicatorsHandler } from './marketData.tools.js'
 import { _parseResponse, emptyAnalysisState } from './idea.stateParser.js'
 
 // emptyAnalysisState lives in idea.stateParser.js (with the response parser it
@@ -57,6 +59,59 @@ const TOOLS = [
         },
     },
     {
+        name: 'get_price_action',
+        description: 'Momentum/positioning snapshot for a ticker: 1d/5d/1m/3m % moves, position within the 1y range, and relative volume. A fast read early in formation on whether the name is actually moving the way the thesis claims and whether volume backs it — before drilling into exact candles.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_indicators',
+        description: 'Compute exact indicator VALUES from recent candles — the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Confirm a read with hard numbers: ATR for volatility-sizing a stop, price vs EMA / VWAP for location, RSI for momentum/divergence, MACD for trend. Price action leads; indicators only confirm.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker:    { type: 'string', description: 'Stock ticker symbol e.g. AAPL, NVDA' },
+                timeframe: {
+                    type: 'string',
+                    enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'],
+                    description: 'Candle timeframe to compute on.',
+                },
+                indicators: {
+                    type: 'string',
+                    description: 'Comma-separated list with optional period, e.g. "ema(20), ema(50), rsi(14), atr(14), macd, vwap". Period is optional (defaults: ema/sma 20, rsi/atr 14). VWAP is session-anchored (intraday).',
+                },
+            },
+            required: ['ticker', 'timeframe', 'indicators'],
+        },
+    },
+    {
+        name: 'get_cycle_analysis',
+        description: 'Detect recurring cycles in a stock\'s price history. Two modes: "price" finds the dominant peak-to-peak / trough-to-trough interval, the current phase, and the next estimated turning point. "calendar" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking. Use "price" for recurring-interval theses, "calendar" for seasonal ones.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' },
+                mode: { type: 'string', enum: ['price', 'calendar'], description: '"price" for recurring interval cycles, "calendar" for seasonal window analysis' },
+                calendar_window: {
+                    type: 'object',
+                    description: 'Required for mode "calendar". Defines the window to analyze each year.',
+                    properties: {
+                        month_start: { type: 'number', description: '1-based month number (Jan=1). Start month of the window.' },
+                        month_end:   { type: 'number', description: '1-based month number. End month — same as month_start for a single month.' },
+                        day_start:   { type: 'number', description: 'Optional. Starting day within month_start (default 1).' },
+                        day_end:     { type: 'number', description: 'Optional. Ending day within month_end (default last day of month).' },
+                    },
+                    required: ['month_start'],
+                },
+                lookback_years: { type: 'number', description: 'Years of history to use (default 4, max 6).' },
+            },
+            required: ['ticker', 'mode'],
+        },
+    },
+    {
         name: 'get_earnings',
         description: 'Upcoming earnings date + EPS estimate for a ticker, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use this in early formation when checking if there is a catalyst coming up, whether to hold through earnings, or whether the company has a history of beating/missing. US equities only — no ETFs, crypto, FX or futures.',
         input_schema: {
@@ -64,6 +119,28 @@ const TOOLS = [
             properties: {
                 ticker: { type: 'string', description: 'e.g. AAPL, NVDA, TSLA' },
             },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_earnings_calendar',
+        description: 'Forward earnings calendar: upcoming earnings dates (with EPS/revenue estimates) for companies reporting between two dates (YYYY-MM-DD, window up to ~3 months); optionally filter to specific symbols. Use it to see what reports when around your setup — is the ticker itself, a sector peer, or an index heavyweight printing inside the trade horizon (gap / catalyst risk). For ONE ticker\'s own date plus its past beat/miss history, use get_earnings instead.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                from:    { type: 'string', description: 'start date YYYY-MM-DD' },
+                to:      { type: 'string', description: 'end date YYYY-MM-DD' },
+                symbols: { type: 'array', items: { type: 'string' }, description: 'optional — narrow to these tickers' },
+            },
+            required: ['from', 'to'],
+        },
+    },
+    {
+        name: 'get_fundamentals',
+        description: 'Company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B), quality (margins, ROE, debt/equity), and growth. Weight it by horizon — light for intraday/day setups, heavily for swing / position trades where fundamentals matter more than price action. ETFs return exposure/profile only.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
             required: ['ticker'],
         },
     },
@@ -138,9 +215,26 @@ const TOOLS = [
 // Candle config / aggregation / chart caching / the get_quote·candles·earnings·chart
 // handlers are shared with Kairos — see services/marketData.tools.js.
 const TOOL_HANDLERS = {
-    get_quote:    makeQuoteHandler(LOG),
-    get_candles:  makeCandlesHandler(LOG),
-    get_earnings: makeEarningsHandler(LOG),
+    get_quote:      makeQuoteHandler(LOG),
+    get_candles:    makeCandlesHandler(LOG),
+    get_earnings:   makeEarningsHandler(LOG),
+    get_indicators: makeIndicatorsHandler(LOG),
+
+    get_price_action: makeToolHandler('get_price_action',
+        ({ ticker }) => getPriceAction(ticker),
+        (err, { ticker }) => `Could not fetch price action for ${ticker}: ${err.message}`, LOG),
+
+    get_cycle_analysis: makeToolHandler('get_cycle_analysis',
+        ({ ticker, mode, calendar_window, lookback_years }) => getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4),
+        (err, { ticker }) => `Could not compute cycle analysis for ${ticker}: ${err.message}`, LOG),
+
+    get_fundamentals: makeToolHandler('get_fundamentals',
+        ({ ticker }) => getFundamentals(ticker),
+        (err, { ticker }) => `Could not fetch fundamentals for ${ticker}: ${err.message}`, LOG),
+
+    get_earnings_calendar: makeToolHandler('get_earnings_calendar',
+        ({ from, to, symbols }) => getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []),
+        (err) => `Could not fetch earnings calendar: ${err.message}`, LOG),
 
     get_sec_filings: makeToolHandler(
         'get_sec_filings',
@@ -271,7 +365,9 @@ function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = []) {
     // and a volatile context tail. cache_control on the base lets Anthropic cache
     // the tools+instructions prefix across turns (and across users), so only the
     // short tail is reprocessed each request. Returned as system content blocks.
+    const today = new Date().toISOString().slice(0, 10)
     const dynamicContext = `---
+CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.
 CONVERSATION CONTEXT:
 ${summary}
 Active asset: ${asset}${stateSection}${_buildBrokerSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts)}`
