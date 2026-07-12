@@ -157,6 +157,9 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
         return { reason, failed: true }
     }
 
+    if (raw.verdict && !_READINESS_VERDICTS.has(raw.verdict)) {
+        logger.warn(LOG, `off-menu readiness verdict "${raw.verdict}" for ${call.id} — treating as wait`)
+    }
     const { set, fireCard, lastAssessment } = _applyAssessment(call, zone, raw, nowMs, reason)
     const entry = _timelineEntry(reason, { nowMs, price, zone, call, raw, nextAt: set['monitor_state.next_check_at'], fetched: _fetchedLabel(call) })
     await _persist(db, call.id, set, entry)
@@ -549,6 +552,21 @@ export function _effectiveVerdict(verdict, reason, pastExpiry) {
     return verdict
 }
 
+// The five verdicts the readiness read may return. An off-menu value (a model typo / hallucination)
+// must not silently route as a wait with no trace — _applyAssessment coerces it to 'wait' and
+// _checkCall logs it. Mirrors the hard whitelist the in-position path already applies.
+const _READINESS_VERDICTS = new Set(['enter', 'wait', 'stand_aside', 'let_expire', 'edit'])
+
+// An 'edit' verdict is only actionable with a proposal describing the re-map — otherwise the edit
+// card fires with an empty why/changes. True only when the model supplied a usable edit_proposal.
+export function _hasEditProposal(raw) {
+    const ep = raw?.edit_proposal
+    if (!ep || typeof ep !== 'object') return false
+    const hasWhy     = typeof ep.why === 'string' && ep.why.trim() !== ''
+    const hasChanges = ep.changes && typeof ep.changes === 'object' && Object.keys(ep.changes).length > 0
+    return Boolean(hasWhy || hasChanges)
+}
+
 // Snap a proposed price to the nearest reference level on the correct side of entry, so the
 // stop/TP land on pre-mapped structure rather than a conjured number. No suitable level → keep
 // the proposed price with ref=null.
@@ -613,9 +631,15 @@ export function _finalizeProposal(p, call, zone) {
 
 // Turn a raw assessment into the persisted $set patch (+ whether to fire a card). Pure.
 export function _applyAssessment(call, zone, raw, nowMs, reason) {
-    // Resolve the effective verdict first (guards the two off-menu cases in _effectiveVerdict),
+    // Output-shape guardrails on the model's raw verdict (parity with the position path's whitelist):
+    //   • an off-menu verdict (typo/hallucination) → safe 'wait' (never mis-route or drop an entry card)
+    //   • an 'edit' with no usable edit_proposal → 'wait' (don't fire a blank re-map card)
+    let rawVerdict = _READINESS_VERDICTS.has(raw?.verdict) ? raw.verdict : 'wait'
+    if (rawVerdict === 'edit' && !_hasEditProposal(raw)) rawVerdict = 'wait'
+
+    // Resolve the effective verdict next (guards the two clock/context cases in _effectiveVerdict),
     // then derive proposal / status / card from it — never from the raw model verdict.
-    const verdict  = _effectiveVerdict(raw.verdict, reason, _isPastExpiry(call, nowMs))
+    const verdict  = _effectiveVerdict(rawVerdict, reason, _isPastExpiry(call, nowMs))
     const nextAt   = _computeNextCheckAt(nowMs, raw.next_check_min, call?.cadence)
     const proposal = verdict === 'enter' ? _finalizeProposal(raw.proposal, call, zone) : null
     const status   = _nextStatus(verdict, reason)

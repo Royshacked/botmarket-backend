@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     _zoneGate, _isPreActive, _isExpiring, _isPastExpiry, _effectiveVerdict, _computeNextCheckAt, _nextStatus,
-    _snapToReference, _finalizeProposal, _applyAssessment, _scheduledPatch, _checkCall,
+    _snapToReference, _finalizeProposal, _applyAssessment, _hasEditProposal, _scheduledPatch, _checkCall,
     _timelineEntry, _zonesLabel, _withTimeout, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock,
     _isMarketSensitive, _applyEntryConfirmation, _allText,
     _reconcilePosition, _rMultiple, _checkPosition,
@@ -209,6 +209,33 @@ test('applyAssessment: edit → expiring + fires card + carries edit_proposal', 
     assert.equal(set.status, 'expiring')
     assert.equal(fireCard, true)
     assert.deepEqual(lastAssessment.edit_proposal, { why: 'roll', changes: {} })
+})
+test('applyAssessment: off-menu verdict → treated as wait (watching on a zone trip, no card)', () => {
+    const raw = { verdict: 'enter_now', next_check_min: 10 }   // typo'd / hallucinated verdict
+    const { set, fireCard, lastAssessment } = _applyAssessment(call(), call().entry_zones[0], raw, NOW, 'zone_trip')
+    assert.equal(set.status, 'watching')
+    assert.equal(fireCard, false)              // never mis-fire an entry card on a garbled verdict
+    assert.equal(lastAssessment.verdict, 'wait')
+})
+test('applyAssessment: edit WITHOUT a usable edit_proposal → wait, no blank re-map card', () => {
+    const { set, fireCard, lastAssessment } = _applyAssessment(call(), null, { verdict: 'edit', next_check_min: 30 }, NOW, 'expiry_review')
+    assert.equal(fireCard, false)              // don't fire an edit card with empty why/changes
+    assert.notEqual(set.status, 'expiring')
+    assert.equal(lastAssessment.verdict, 'wait')
+})
+test('applyAssessment: edit with an empty edit_proposal (blank why, no changes) → wait', () => {
+    const raw = { verdict: 'edit', next_check_min: 30, edit_proposal: { why: '  ', changes: {} } }
+    const { fireCard, lastAssessment } = _applyAssessment(call(), null, raw, NOW, 'expiry_review')
+    assert.equal(fireCard, false)
+    assert.equal(lastAssessment.verdict, 'wait')
+})
+test('hasEditProposal: true only with a non-empty why or at least one change', () => {
+    assert.equal(_hasEditProposal({ edit_proposal: { why: 'roll the zone up' } }), true)
+    assert.equal(_hasEditProposal({ edit_proposal: { changes: { valid_until: 'x' } } }), true)
+    assert.equal(_hasEditProposal({ edit_proposal: { why: '', changes: {} } }), false)
+    assert.equal(_hasEditProposal({ edit_proposal: {} }), false)
+    assert.equal(_hasEditProposal({}), false)
+    assert.equal(_hasEditProposal(null), false)
 })
 test('applyAssessment: let_expire on a zone trip does NOT expire — call keeps watching, no card', () => {
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), call().entry_zones[0], { verdict: 'let_expire', next_check_min: 15 }, NOW, 'zone_trip')
