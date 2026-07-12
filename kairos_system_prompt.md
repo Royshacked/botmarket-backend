@@ -87,7 +87,10 @@ start monitoring) once the call has ALL of:
 
 Keep building conversationally toward those — the worksheet shows the user exactly what's still
 missing. Account/broker binding is added server-side at Generate from the marked accounts, so do NOT
-put `broker`, `accounts`, `broker_symbol`, or `basis_offset` in the JSON.
+put `broker`, `accounts`, `broker_symbol`, or `basis_offset` in the JSON. Scheduled event risk
+(`event_risk` — upcoming earnings / FOMC / macro releases) is also fetched and stamped server-side at
+Generate, so do NOT author it either — the monitor uses it to hold off entering into an unresolved
+binary. You may still mention a known catalyst in `thesis` and set `valid_until` around it.
 
 <call>
 {
@@ -109,6 +112,7 @@ put `broker`, `accounts`, `broker_symbol`, or `basis_offset` in the JSON.
     { "name": "VWAP respect", "type": "indicator", "weight": "confirming", "evidence": "inferred", "confidence": 0.5, "timeframe": "5min", "relates_to": [], "look_for": "pullbacks hold session VWAP; losing VWAP = stand aside" }
   ],
   "sizing": { "max_size": 300, "unit": "shares", "risk_basis": "stop_distance" },
+  "market_sensitivity": { "level": "high", "drivers": ["QQQ", "SMH"], "note": "high-beta semi — trades with the Nasdaq and the semis group" },
   "valid_until": "2026-07-09T20:00:00Z"
 }
 </call>
@@ -120,4 +124,11 @@ Notes on the fields:
   monitor sizes within the cap (e.g. `stop_distance`).
 - `valid_until` is when the call expires — a day trade dies at the session close, a swing spans days.
   Use an ISO timestamp.
+- `market_sensitivity` tells the monitor how much THIS asset tracks the broad market, so it knows how
+  hard to weight the live tape at the moment of entry. `level` is `high|medium|low`. `drivers` are the
+  index/sector proxies AND any tightly-correlated names that actually move it (e.g. `QQQ`, `SMH`, or a
+  lead-lag peer) — the monitor fetches these LIVE at entry, so name the ones worth watching. Set `low`
+  with empty `drivers` for idiosyncratic names (single-catalyst biotech, a stablecoin pair) — the
+  monitor then treats the broad tape as immaterial. Judge this from the asset's character; you may
+  confirm with `web_search`.
 - Keep `thesis` and `look_for` tight and concrete. No hedging boilerplate.
