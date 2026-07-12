@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import {
     _zoneGate, _isPreActive, _isExpiring, _isPastExpiry, _effectiveVerdict, _computeNextCheckAt, _nextStatus,
     _snapToReference, _finalizeProposal, _applyAssessment, _scheduledPatch, _checkCall,
-    _timelineEntry, _zonesLabel, _withTimeout, _thinkingConfig, _assessText,
+    _timelineEntry, _zonesLabel, _withTimeout, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock,
+    _isMarketSensitive, _applyEntryConfirmation, _allText,
     _reconcilePosition, _rMultiple, _checkPosition,
     _computeMetrics, _positionGate, _reviewDue, _finalizePositionProposal, _applyPositionAssessment,
 } from '../../monitoring/hermes.monitor.service.js'
@@ -469,6 +470,122 @@ test('assessText: no text block / malformed → empty string (safe for _extractJ
     assert.equal(_assessText({ content: [{ type: 'thinking', thinking: 'x' }] }), '')
     assert.equal(_assessText({}), '')
     assert.equal(_assessText(null), '')
+})
+
+// ── _formatHeadlines: real news → the block the news axis is scored from ───
+test('formatHeadlines: dates + orders as given, prefixes [YYYY-MM-DD]', () => {
+    const arts = [
+        { datetime: Date.parse('2026-07-11T14:00:00Z') / 1000, headline: 'TSLA beats on deliveries' },
+        { datetime: Date.parse('2026-07-10T09:30:00Z') / 1000, headline: 'Analyst upgrade' },
+    ]
+    assert.equal(_formatHeadlines(arts), '[2026-07-11] TSLA beats on deliveries\n[2026-07-10] Analyst upgrade')
+})
+test('formatHeadlines: no articles / null → empty string (caller stamps the unsourced line)', () => {
+    assert.equal(_formatHeadlines([]), '')
+    assert.equal(_formatHeadlines(null), '')
+    assert.equal(_formatHeadlines(undefined), '')
+})
+test('formatHeadlines: drops entries with no headline, keeps the rest', () => {
+    const arts = [
+        { datetime: 1_800_000_000, headline: '' },
+        { datetime: 1_800_000_000, headline: 'Real one' },
+        { datetime: 1_800_000_000 },
+    ]
+    assert.equal(_formatHeadlines(arts), '[2027-01-15] Real one')
+})
+test('formatHeadlines: NaN/missing datetime → placeholder date, still included', () => {
+    assert.equal(_formatHeadlines([{ datetime: NaN, headline: 'Undated' }]), '[????-??-??] Undated')
+})
+test('formatHeadlines: caps at the 12 newest given (no 13th row)', () => {
+    const arts = Array.from({ length: 20 }, (_, i) => ({ datetime: 1_800_000_000, headline: `H${i}` }))
+    const lines = _formatHeadlines(arts).split('\n')
+    assert.equal(lines.length, 12)
+    assert.ok(lines[0].endsWith('H0'))
+    assert.ok(lines[11].endsWith('H11'))
+})
+
+// ── _marketBlock: sensitivity-gated live broad-market framing ──────────────
+test('marketBlock: low/absent sensitivity → "not material" (ignores any market text)', () => {
+    assert.match(_marketBlock({ market_sensitivity: { level: 'low', drivers: [] } }, 'SPY: $500 (-2%)'), /not material/)
+    assert.match(_marketBlock({}, ''), /not material/)                       // absent → immaterial
+    assert.match(_marketBlock({ market_sensitivity: { level: 'bogus' } }, 'x'), /not material/)
+})
+test('marketBlock: sensitive + live read → presents level, drivers, and the quotes', () => {
+    const call = { market_sensitivity: { level: 'high', drivers: ['QQQ', 'SMH'] } }
+    const out = _marketBlock(call, 'SPY: $500.00 (0.40%)\nQQQ: $440.00 (0.60%)\n^VIX: $14.00 (-3.00%)')
+    assert.match(out, /high-sensitivity/)
+    assert.match(out, /drivers: QQQ, SMH/)
+    assert.match(out, /\^VIX: \$14\.00/)
+})
+test('marketBlock: sensitive but read failed (empty) → explicit unavailable', () => {
+    assert.match(_marketBlock({ market_sensitivity: { level: 'medium', drivers: [] } }, ''), /unavailable/)
+})
+
+// ── Slice 2: browse-confirm second pass (pure pieces) ──────────────────────
+test('isMarketSensitive: high/medium true, low/absent/garbage false', () => {
+    assert.equal(_isMarketSensitive({ market_sensitivity: { level: 'high' } }), true)
+    assert.equal(_isMarketSensitive({ market_sensitivity: { level: 'medium' } }), true)
+    assert.equal(_isMarketSensitive({ market_sensitivity: { level: 'low' } }), false)
+    assert.equal(_isMarketSensitive({}), false)
+    assert.equal(_isMarketSensitive(null), false)
+})
+test('applyEntryConfirmation: confirm=false downgrades enter→wait, carries reason, drops proposal', () => {
+    const raw = { verdict: 'enter', read: 'go', proposal: { entry: 100 }, next_check_min: 20 }
+    const out = _applyEntryConfirmation(raw, { confirm: false, reason: 'SPY -1.8%, VIX spiking' })
+    assert.equal(out.verdict, 'wait')
+    assert.equal(out.proposal, undefined)
+    assert.match(out.read, /Stood aside/)
+    assert.match(out.memo_update, /SPY -1\.8%/)
+    assert.equal(out.next_check_min, 20)            // untouched fields preserved
+})
+test('applyEntryConfirmation: confirm=false with only backdrop → uses backdrop as reason', () => {
+    const out = _applyEntryConfirmation({ verdict: 'enter' }, { confirm: false, backdrop: 'broad risk-off' })
+    assert.match(out.memo_update, /broad risk-off/)
+})
+test('applyEntryConfirmation: fail-open — confirm=true, missing, or unparseable keeps the enter', () => {
+    const raw = { verdict: 'enter', proposal: { entry: 100 } }
+    assert.deepEqual(_applyEntryConfirmation(raw, { confirm: true }), raw)
+    assert.deepEqual(_applyEntryConfirmation(raw, null), raw)             // browse failed → keep enter
+    assert.deepEqual(_applyEntryConfirmation(raw, {}), raw)               // no confirm field → keep
+    assert.deepEqual(_applyEntryConfirmation(raw, { confirm: 'yes' }), raw) // non-false truthy → keep
+})
+test('allText: joins every text block, skips tool_use / web_search_tool_result blocks', () => {
+    const msg = { content: [
+        { type: 'text', text: 'searching…' },
+        { type: 'server_tool_use', id: 't1', name: 'web_search', input: { query: 'SPY today' } },
+        { type: 'web_search_tool_result', tool_use_id: 't1', content: [] },
+        { type: 'text', text: '{"confirm":false,"reason":"risk-off"}' },
+    ] }
+    assert.equal(_allText(msg), 'searching…\n{"confirm":false,"reason":"risk-off"}')
+    assert.equal(_allText({}), '')
+})
+
+// ── _formatEventRisk: frozen scheduled catalysts → the block Hermes weighs ──
+test('formatEventRisk: earnings + macro formatted with when + impact', () => {
+    const events = [
+        { type: 'earnings', label: 'TSLA earnings', date: '2026-07-15', when: 'pre_market', impact: 'high' },
+        { type: 'fomc', label: 'FOMC Rate Decision', date: '2026-07-29', when: 'timed', time: '2:00p', impact: 'high' },
+    ]
+    assert.equal(
+        _formatEventRisk(events),
+        '2026-07-15 — TSLA earnings (pre_market, high impact)\n2026-07-29 — FOMC Rate Decision (2:00p, high impact)',
+    )
+})
+test('formatEventRisk: none / null → empty string (caller stamps the "(none)" line)', () => {
+    assert.equal(_formatEventRisk([]), '')
+    assert.equal(_formatEventRisk(null), '')
+    assert.equal(_formatEventRisk(undefined), '')
+})
+test('formatEventRisk: drops rows missing date or label', () => {
+    const events = [
+        { type: 'macro', label: 'CPI', date: '' },
+        { type: 'macro', date: '2026-07-20' },
+        { type: 'earnings', label: 'AAPL earnings', date: '2026-07-18', when: 'after_hours', impact: 'high' },
+    ]
+    assert.equal(_formatEventRisk(events), '2026-07-18 — AAPL earnings (after_hours, high impact)')
+})
+test('formatEventRisk: timed event with no time → falls back to "timed"', () => {
+    assert.equal(_formatEventRisk([{ label: 'PPI', date: '2026-07-16', when: 'timed', impact: 'medium' }]), '2026-07-16 — PPI (timed, medium impact)')
 })
 
 // ── Phase 5 slice 1: position lifecycle reconcile ──────────────────────────

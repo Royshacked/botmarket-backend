@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateCall, normalizeCall, computeKairosPerformance } from '../../api/kairos/kairos.service.js'
+import { validateCall, normalizeCall, computeKairosPerformance, _normalizeSensitivity } from '../../api/kairos/kairos.service.js'
 
 // A minimal well-formed call the build agent (Phase 1) would emit, with venue bound (Generate).
 function call(extra = {}) {
@@ -110,6 +110,31 @@ test('normalize: evidence coerces to inferred unless explicitly observed', () =>
     const doc = normalizeCall(call())
     assert.equal(doc.patterns[0].evidence, 'observed')  // explicit
     assert.equal(doc.patterns[1].evidence, 'inferred')  // omitted → inferred
+})
+
+test('normalize: event_risk carried through when present, defaults to [] when absent', () => {
+    const events = [{ type: 'earnings', label: 'TSLA earnings', date: '2026-07-15', when: 'pre_market', impact: 'high' }]
+    assert.deepEqual(normalizeCall(call({ event_risk: events })).event_risk, events)
+    assert.deepEqual(normalizeCall(call()).event_risk, [])                       // absent → []
+    assert.deepEqual(normalizeCall(call({ event_risk: 'nope' })).event_risk, []) // non-array → []
+})
+
+test('normalizeSensitivity: valid level + drivers upper-cased/bounded, note stringified', () => {
+    assert.deepEqual(
+        _normalizeSensitivity({ level: 'high', drivers: ['qqq', ' smh ', 'soxx', 'nvda', 'amd'], note: 'semi beta' }),
+        { level: 'high', drivers: ['QQQ', 'SMH', 'SOXX', 'NVDA'], note: 'semi beta' },   // capped at 4
+    )
+})
+test('normalizeSensitivity: unknown/missing level → null, garbage block → safe defaults', () => {
+    assert.deepEqual(_normalizeSensitivity({ level: 'bogus' }), { level: null, drivers: [], note: null })
+    assert.deepEqual(_normalizeSensitivity(undefined),          { level: null, drivers: [], note: null })
+    assert.deepEqual(_normalizeSensitivity('nope'),             { level: null, drivers: [], note: null })
+    assert.deepEqual(_normalizeSensitivity({ drivers: 'QQQ' }), { level: null, drivers: [], note: null }) // non-array drivers
+})
+test('normalize: market_sensitivity carried through the stored doc', () => {
+    const doc = normalizeCall(call({ market_sensitivity: { level: 'medium', drivers: ['spy'], note: 'x' } }))
+    assert.deepEqual(doc.market_sensitivity, { level: 'medium', drivers: ['SPY'], note: 'x' })
+    assert.deepEqual(normalizeCall(call()).market_sensitivity, { level: null, drivers: [], note: null }) // absent
 })
 
 test('normalize: cadence defaults by trade_type when omitted', () => {

@@ -1,6 +1,7 @@
 import { randomUUID }               from 'crypto'
 import { getDb, stripId }           from '../../providers/mongodb.provider.js'
 import { logger }                   from '../../services/logger.service.js'
+import { buildEventRisk }           from '../../services/eventRisk.service.js'
 
 // Kairos = discretionary day/swing agent. Its artifact is a "call" (Idea produces ideas,
 // Kairos produces calls): one document in `kairos_calls` = identity + plan (authored at build,
@@ -37,8 +38,12 @@ export const kairosService = {
 const PLAN_FIELDS = [
     'asset', 'asset_class', 'trade_type', 'bias', 'thesis', 'timeframe_ladder', 'cadence',
     'entry_zones', 'reference_levels', 'patterns', 'sizing', 'broker', 'accounts',
-    'main_account_id', 'broker_symbol', 'basis_offset', 'active_from', 'valid_until',
+    'main_account_id', 'broker_symbol', 'basis_offset', 'active_from', 'valid_until', 'event_risk',
+    'market_sensitivity',
 ]
+
+// Broad-market coupling levels. Anything else (or missing) → Hermes treats the tape as immaterial.
+const SENSITIVITY_LEVELS = new Set(['high', 'medium', 'low'])
 
 // ── Performance (Phase 5, slice 4) ────────────────────────────────────────────
 // Aggregate closed calls' outcomes into a Kairos track record. A "win" is positive realized P&L
@@ -155,6 +160,22 @@ export function normalizeReferenceLevels(rawRefs) {
     return _assignIds(rawRefs, 'rl').map(r => ({ id: r.id, kind: r.kind ?? null, price: Number(r.price), note: r.note ?? null }))
 }
 
+// Coerce the agent-authored market_sensitivity into the stored shape: a known level (else null →
+// "immaterial"), a bounded list of upper-cased driver symbols (the correlated proxies Hermes fetches
+// live), and a free-text note. Pure; tolerates a missing/garbage block. Exported for the edit path.
+export function _normalizeSensitivity(raw) {
+    const ms = raw && typeof raw === 'object' ? raw : {}
+    const drivers = (Array.isArray(ms.drivers) ? ms.drivers : [])
+        .map(d => String(d).toUpperCase().trim())
+        .filter(Boolean)
+        .slice(0, 4)
+    return {
+        level:   SENSITIVITY_LEVELS.has(ms.level) ? ms.level : null,
+        drivers,
+        note:    ms.note != null ? String(ms.note) : null,
+    }
+}
+
 export function normalizeCall(raw, userId = null) {
     const zones           = normalizeZones(raw.entry_zones, raw.bias)
     const referenceLevels = normalizeReferenceLevels(raw.reference_levels)
@@ -217,6 +238,13 @@ export function normalizeCall(raw, userId = null) {
         // valid_until = upper bound → expiry review.
         active_from:     raw.active_from ?? null,
         valid_until:     raw.valid_until ?? null,
+        // Scheduled catalysts (earnings / FOMC / macro) frozen at build by _stampEventRisk — Hermes
+        // reads these to hold off entering into an unresolved binary. Pure copy; the fetch is upstream.
+        event_risk:      Array.isArray(raw.event_risk) ? raw.event_risk : [],
+        // How much this asset tracks the broad market (a stable structural judgment made at build).
+        // `drivers` are the index/sector/correlated proxies Hermes fetches LIVE at entry; `level` tells
+        // it how hard to weight the tape. `low`/absent → Hermes skips the market read (tape immaterial).
+        market_sensitivity: _normalizeSensitivity(raw.market_sensitivity),
 
         // ── monitor_state (written each wake, Phase 2) ──
         status: 'waiting',
@@ -232,6 +260,14 @@ export function normalizeCall(raw, userId = null) {
 }
 
 // ── Persistence ─────────────────────────────────────────────────────────────
+// Fetch the call's scheduled catalysts ONCE and fold them into raw before normalize (which is pure /
+// no-I/O). Never throws — buildEventRisk returns [] on any failure — so calendar downtime can't block
+// a save. Runs on both create and edit so a re-mapped asset/date refreshes the frozen list.
+async function _stampEventRisk(raw) {
+    const event_risk = await buildEventRisk({ asset: raw.asset, assetClass: raw.asset_class })
+    return { ...raw, event_risk }
+}
+
 async function saveKairosCall(raw, userId) {
     const gate = validateCall(raw)
     if (!gate.ok) {
@@ -240,7 +276,7 @@ async function saveKairosCall(raw, userId) {
     }
 
     try {
-        const doc = normalizeCall(raw, userId)
+        const doc = normalizeCall(await _stampEventRisk(raw), userId)
         const db  = await getDb()
         await db.collection(COLLECTION).insertOne(doc)
         logger.info(LOG, 'call saved', { id: doc.id, asset: doc.asset, trade_type: doc.trade_type })
@@ -267,7 +303,7 @@ async function updateKairosCall(id, raw, userId, isAdmin = false) {
         if (!cur) return { ok: false, reason: 'not_found' }
         if (cur.user_id && cur.user_id !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
 
-        const full = normalizeCall(raw, cur.user_id ?? userId)   // fresh normalized plan (re-ids zones/levels)
+        const full = normalizeCall(await _stampEventRisk(raw), cur.user_id ?? userId)   // fresh normalized plan (re-ids zones/levels) + refreshed event_risk
         const $set = { savedAt: Date.now(), chat_state: raw.chat_state ?? cur.chat_state ?? null }
         for (const k of PLAN_FIELDS) $set[k] = full[k]
         // Re-arm on the new plan: back to waiting, monitor re-schedules on the next tick.

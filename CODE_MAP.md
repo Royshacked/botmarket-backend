@@ -66,6 +66,9 @@ services/
   price.service.js  market.service.js  timeframe.service.js  brokerSymbol.service.js
   format.util.js  http.util.js  ttlCache.util.js  priceStats.util.js  cycleAnalysis.service.js
   logger.service.js  tokenUsage.service.js
+  eventRisk.service.js      buildEventRisk({asset,assetClass}) — scheduled catalysts FROZEN onto a Kairos
+                            call at build: earnings (Finnhub, equities) + Fed/macro (FRED), low-impact
+                            dropped, 10d horizon. Never throws. Hermes reads it to hold off pre-event entry
   tradeCapture.service.js   append-only `trades` history (captureOpen / captureOpenBare / captureClose)
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
   tradeNotify.service.js    notify+route cards → social chat: entry_confirm (paper/live idea + Kairos
@@ -94,6 +97,11 @@ monitoring/
                             LLM assessment → verdict; runs under the user's hermesModel + hermesReasoning
                             prefs (adaptive thinking); card hook (_defaultOnCard) posts entry_confirm /
                             call_expiry via tradeNotify (enter→ready, edit→expiring, let_expire→expired)
+  hermes.assess.js          the four-axis assessment (readiness + position mgmt). Fact-sources every axis:
+                            live chart+candles, company news (newsService 1h cache), frozen event_risk,
+                            and a LIVE broad-market read gated by the call's market_sensitivity
+                            (getQuotes SPY/QQQ/VIX + drivers). A tentative ENTER on a market-sensitive
+                            call gets a web_search browse-confirm 2nd pass (downgrades enter→wait, fail-open)
   positionMonitor.js  portfolio.monitor.js
   paperFill.service.js  paperEquity.service.js
   exitOrders.util.js        buildExitOrder (applies +basisOffset → broker price space) / exitOrderRecord / closeSide / orderSymbol

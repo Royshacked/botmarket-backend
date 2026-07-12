@@ -4,11 +4,11 @@ import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry, notifyCallManage } from '../services/tradeNotify.service.js'
 import { withTimeout, createPollLoop } from './monitorUtils.js'
-import { _defaultAssess, _defaultAssessPosition, _thinkingConfig, _assessText } from './hermes.assess.js'
+import { _defaultAssess, _defaultAssessPosition, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText } from './hermes.assess.js'
 
 // The LLM assessment IO lives in hermes.assess.js (wired into _deps below). Re-exported here
 // under their historical names so the existing unit tests import path is unchanged.
-export { _thinkingConfig, _assessText }
+export { _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText }
 
 // Hermes — the Kairos-call readiness monitor: a self-scheduling readiness loop (KAIROS_PLAN.md,
 // Phase 2). Its own tick, its own collection (`kairos_calls`), sharing NO mutable state with Minos

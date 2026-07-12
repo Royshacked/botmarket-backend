@@ -222,6 +222,12 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   brokerOrders, exitOrders, allocationRatio, portfolioId, broker, accounts, `brokerSymbol` (getTicker-resolved),
   `basisOffset` (fork-measured price shift, 0 unless aliased index future), `groupId` (multi-broker fork display)…).
 - `trades` — append-only point-in-time capture of each opened/closed idea (paper + live).
+- `kairos_calls` — the Kairos discretionary "call" (identity + plan + monitor_state), watched by Hermes.
+  Two context fields are **frozen at build** for the monitor to weigh: `event_risk` (upcoming earnings +
+  Fed/macro within ~10d, `buildEventRisk`) so Hermes holds off entering into an unresolved binary; and
+  `market_sensitivity {level, drivers, note}` — how much the asset tracks the broad market. Hermes reads
+  the tape **live** at assessment (gated by `level`; `drivers` are the correlated proxies it pulls), and
+  a tentative entry on a market-sensitive call is web_search-confirmed before it fires.
 - `paperAccounts` / `paperPositions` / `paperOrders` — the virtual broker store.
 - `chat_conversations` / `chat_messages` — social DM + bot notifications; one notify bot per agent
   (`BOT_IDS`, incl. `kairos`). `chat_messages.type`/`payload` drive the typed notification cards
