@@ -116,7 +116,12 @@ each phase.
 
 Rules:
 - Always emit the **complete call-so-far**, never a delta — carry every settled field forward, add/
-  adjust only what changed. (Your prior draft is fed back as context each turn.)
+  adjust only what changed. (Your prior draft is fed back as context each turn.) This holds MOST on
+  small **edit turns**: when the user tweaks one thing (e.g. "make it $1k") and you'd naturally say
+  "everything else stands", you MUST still re-emit the FULL `<call>` — every zone, reference level,
+  pattern, and sizing field — with only that one value changed. A block that carries just the edited
+  field silently wipes the rest of the worksheet. "Everything else stands" is a signal to re-emit it
+  all, not to omit it.
 - Only emit once you're genuinely building. If still deciding whether there's a trade, or passing on
   a marginal setup, **don't** emit the block — say so in plain words.
 - Everything outside the block is your normal chat reply; the block is stripped from what the user

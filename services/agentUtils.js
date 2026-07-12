@@ -58,10 +58,19 @@ export const COMMON_TOOL_HANDLERS = {
 
 export function normalizeMessages(messages, maxCount) {
     if (!Array.isArray(messages)) return []
-    return messages
+    const cleaned = messages
         .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
         .map(({ role, content }) => ({ role, content: content.trim() }))
-        .slice(-maxCount)
+    // Coalesce consecutive same-role turns into one. Kairos threads a single reply across several
+    // display bubbles (one per phase) → several assistant messages in a row; the model API needs
+    // strict user/assistant alternation. A no-op for the agents that already alternate.
+    const merged = []
+    for (const m of cleaned) {
+        const last = merged[merged.length - 1]
+        if (last && last.role === m.role) last.content += `\n\n${m.content}`
+        else merged.push({ ...m })
+    }
+    return merged.slice(-maxCount)
 }
 
 // ─── Prompt hot-reload loader ─────────────────────────────────────────────────

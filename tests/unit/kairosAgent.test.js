@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _parseKairosResponse, _resolveVenue, _finalizeCall } from '../../services/kairos.agent.service.js'
+import { _parseKairosResponse, _mergeCallDraft, _resolveVenue, _finalizeCall } from '../../services/kairos.agent.service.js'
 
 const CALL_JSON = `{
   "asset": "TSLA",
@@ -44,6 +44,44 @@ test('parse: malformed JSON → call null but reply still cleaned', () => {
 test('parse: null/undefined raw → empty reply, null call', () => {
     assert.deepEqual(_parseKairosResponse(null), { reply: '', call: null })
     assert.deepEqual(_parseKairosResponse(undefined), { reply: '', call: null })
+})
+
+// ── _mergeCallDraft (carry-forward on a partial re-emit) ─────────────────
+test('merge: delta re-emit carries omitted prior fields forward (the AXON bug)', () => {
+    // Build turn produced a full call; the edit turn re-emitted ONLY sizing ("everything else stands").
+    const prev  = {
+        asset: 'AXON', trade_type: 'day',
+        entry_zones:      [{ side: 'long', lower: 555, upper: 575 }],
+        reference_levels: [{ kind: 'support', price: 538 }],
+        patterns:         [{ name: 'shelf hold', weight: 'primary' }],
+        sizing:           { max_size: 1000, unit: 'shares', risk_basis: 'stop_distance' },
+    }
+    const delta  = { sizing: { max_size: 1000, unit: 'notional_usd', risk_basis: 'stop_distance' } }
+    const merged = _mergeCallDraft(prev, delta)
+    assert.deepEqual(merged.entry_zones,      prev.entry_zones)       // preserved by omission
+    assert.deepEqual(merged.reference_levels, prev.reference_levels)  // preserved
+    assert.deepEqual(merged.patterns,         prev.patterns)          // preserved
+    assert.equal(merged.sizing.unit, 'notional_usd')                 // the actual edit applied
+})
+
+test('merge: a re-emitted array fully replaces — model can still DROP a zone', () => {
+    const prev   = { entry_zones: [{ lower: 1, upper: 2 }, { lower: 3, upper: 4 }] }
+    const merged = _mergeCallDraft(prev, { entry_zones: [{ lower: 1, upper: 2 }] })
+    assert.equal(merged.entry_zones.length, 1)   // NOT deep-merged — removal is honored
+})
+
+test('merge: explicit null in the new call clears a settled field', () => {
+    assert.equal(_mergeCallDraft({ rr: 2.1 }, { rr: null }).rr, null)
+})
+
+test('merge: no new call this turn → null (client keeps its existing draft)', () => {
+    assert.equal(_mergeCallDraft({ asset: 'AXON' }, null), null)
+    assert.equal(_mergeCallDraft(null, null), null)
+})
+
+test('merge: no prior draft → the new call as-is', () => {
+    assert.deepEqual(_mergeCallDraft(null, { asset: 'AXON' }), { asset: 'AXON' })
+    assert.deepEqual(_mergeCallDraft(undefined, { asset: 'AXON' }), { asset: 'AXON' })
 })
 
 // ── _resolveVenue (symbol gate) ──────────────────────────────────────────

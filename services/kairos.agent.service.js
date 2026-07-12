@@ -51,7 +51,7 @@ async function chatStream({
     let capturedPhase = null
     const onPhaseCapture = (p) => {
         const n = parseInt(p, 10)
-        if (n >= 1 && n <= 5) { capturedPhase = n; onPhase?.(n) }
+        if (n >= 1 && n <= 5) { capturedPhase = n; logger.info(LOG, 'phase', n); onPhase?.(n) }
     }
     // All known emit tags suppressed by default; this agent captures phase. <call> is
     // suppressed from the token stream and parsed from `raw` afterward.
@@ -63,11 +63,44 @@ async function chatStream({
     })
 
     const { reply, call } = _parseKairosResponse(raw)
+    const mergedCall = _mergeCallDraft(chatState?.draft, call)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCall: Boolean(call) })
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCall: Boolean(call), merged: Boolean(mergedCall) })
+
+    // DIAGNOSTIC (temporary): the "content disappears when streaming finishes" symptom traces to
+    // turns where a <call> fragment is present but did NOT parse — a malformed/unclosed block. On
+    // those turns the tag suppressor can swallow trailing narration (flush drops an unclosed block)
+    // and stripEmitTags can leak or over-strip. Dump the shape + tail so we can see the exact emit.
+    const rawStr = String(raw ?? '')
+    const hasCallOpen  = /<call>/i.test(rawStr)
+    const hasCallClose = /<\/call>/i.test(rawStr)
+    if (hasCallOpen && (!call || !hasCallClose)) {
+        logger.warn(LOG, 'malformed <call> emit', {
+            rawLen: rawStr.length, replyLen: reply.length, parsed: Boolean(call),
+            hasClose: hasCallClose,
+            afterClose: hasCallClose ? rawStr.slice(rawStr.lastIndexOf('</call>') + 7).trim().length : null,
+            tail: rawStr.slice(-500),
+        })
+    }
 
     // The call is a DRAFT — returned for preview, NOT saved. The user clicks Generate to persist.
-    return { reply, phase: capturedPhase, ...(call ? { call } : {}) }
+    return { reply, phase: capturedPhase, ...(mergedCall ? { call: mergedCall } : {}) }
+}
+
+// ─── Draft carry-forward (pure) ───────────────────────────────────────────────
+// The model is told to re-emit the COMPLETE call every turn (its prior draft is fed back as
+// context), but on an edit turn it sometimes emits a PARTIAL block — narrating "…everything else
+// stands" while the JSON carries only the changed field. The client replaces its draft wholesale,
+// so that thin block would wipe already-settled parts of the worksheet (zones, levels, patterns).
+// Merge a freshly parsed call onto the prior draft so an OMITTED field carries forward.
+// Shallow BY DESIGN: a re-emitted array/object (entry_zones, sizing…) fully replaces its prior
+// value, so the model can still edit or DROP a zone/pattern, and can clear a field by emitting null
+// — only omission is protected. Returns null when there is no new call this turn (client keeps its
+// existing draft untouched).
+export function _mergeCallDraft(prevDraft, call) {
+    if (!call) return null
+    if (!prevDraft || typeof prevDraft !== 'object' || Array.isArray(prevDraft)) return call
+    return { ...prevDraft, ...call }
 }
 
 // ─── Call extraction (pure) ───────────────────────────────────────────────────
