@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { getTickerAggregates, getQuotes } from '../providers/yahoofinance.provider.js'
 import { fetchChartImage } from '../providers/chartImg.provider.js'
 import { buildStudies } from './evaluators/chart.evaluator.js'
+import { CANDLE_CFG, aggregateCandles } from '../services/marketData.tools.js'
 import { newsService } from '../services/news.service.js'
 import { userService } from '../api/user/user.service.js'
 import { logger } from '../services/logger.service.js'
@@ -66,12 +67,16 @@ export function _allText(msg) {
     return (msg?.content ?? []).filter(b => b?.type === 'text').map(b => b.text).join('\n')
 }
 
+// Recent candles for the assessment's numeric price-action block. Uses the shared CANDLE_CFG so the
+// lookback window + bar count scale with the timeframe (a `day` request pulls ~40 daily bars, not the
+// ~7 a fixed 10-day window used to yield) and 2hr/4hr aggregate from native 1hr bars — same math the
+// agents' get_candles uses. Unknown tf → daily config.
 async function _candlesText(asset, tf) {
-    const spec = tf === 'day' ? { timeSpan: 'day', multiplier: 1 }
-        : tf === '1hr' || tf === '4hr' ? { timeSpan: 'hour', multiplier: 1 }
-        : { timeSpan: 'minute', multiplier: tf === '5min' ? 5 : tf === '30min' ? 30 : 15 }
-    const rows = await getTickerAggregates(String(asset).toUpperCase(), { ...spec, from: Date.now() - 10 * 24 * 60 * 60 * 1000 })
-    return (rows ?? []).slice(-30).map(c => {
+    const cfg  = CANDLE_CFG[tf] ?? CANDLE_CFG['day']
+    const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
+    const raw  = await getTickerAggregates(String(asset).toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
+    const bars = cfg.aggregate ? aggregateCandles(raw, cfg.aggregate) : raw
+    return (bars ?? []).slice(-cfg.count).map(c => {
         const d = new Date(c.timestamp * 1000).toISOString().slice(0, 16).replace('T', ' ')
         return `${d} O:${c.open} H:${c.high} L:${c.low} C:${c.close} V:${c.volume}`
     }).join('\n')
@@ -155,6 +160,59 @@ async function _newsText(asset) {
     return block
 }
 
+// ─── Adaptive timeframe: on-demand chart tool ─────────────────────────────────
+// The read is shown its primary (finest-rung) chart up front, but — like a trader flipping charts —
+// it may pull additional views mid-assessment via get_chart, restricted to THIS call's ladder rungs.
+// Bounded so a tool loop can't run away.
+const MAX_CHART_TOOL_CALLS = 3
+
+// Build the get_chart tool for a call, with the timeframe enum LOCKED to the call's ladder rungs so the
+// model can only request timeframes Kairos actually laddered. Pure.
+export function _chartTool(ladder) {
+    const rungs = Array.isArray(ladder) && ladder.length ? ladder : ['15min']
+    return [{
+        name: 'get_chart',
+        description: "Render a TradingView candlestick chart IMAGE (vwap + ema50 + volume) at one of this call's ladder timeframes and look at it. Use it to check a higher timeframe for structure, or a lower one for the trigger, before you decide — a mapped pattern may live on a different timeframe than the primary view. Optional: skip it when the primary chart is enough.",
+        input_schema: {
+            type: 'object',
+            properties: { timeframe: { type: 'string', enum: rungs, description: "One of the call's timeframe_ladder rungs." } },
+            required: ['timeframe'],
+        },
+    }]
+}
+
+// A requested chart timeframe is honored only if it's one of the call's ladder rungs. Pure.
+export function _validChartTf(requested, ladder) {
+    return (Array.isArray(ladder) ? ladder : []).includes(requested) ? requested : null
+}
+
+// Execute the get_chart tool_use blocks from an assistant turn: fetch each ladder-valid chart and return
+// the matching tool_result blocks (image + label); an invalid rung or a failed render returns an error
+// tool_result so the model can proceed rather than stall. Order/count mirror the requested uses.
+async function _handleChartToolUses(call, assistantContent, ladder) {
+    const uses = (assistantContent ?? []).filter(b => b?.type === 'tool_use' && b.name === 'get_chart')
+    const results = []
+    for (const use of uses) {
+        const tf = _validChartTf(use.input?.timeframe, ladder)
+        if (!tf) {
+            results.push({ type: 'tool_result', tool_use_id: use.id, is_error: true,
+                content: `timeframe must be one of the call's ladder rungs: ${ladder.join(', ')}` })
+            continue
+        }
+        try {
+            const png = await fetchChartImage(String(call.asset).toUpperCase(), tf, buildStudies('vwap, ema(50), volume'))
+            results.push({ type: 'tool_result', tool_use_id: use.id, content: [
+                { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
+                { type: 'text', text: `${String(call.asset).toUpperCase()} ${tf} chart.` },
+            ] })
+        } catch (err) {
+            results.push({ type: 'tool_result', tool_use_id: use.id, is_error: true,
+                content: `could not render the ${tf} chart: ${err.message}` })
+        }
+    }
+    return results
+}
+
 // Shared assessment runner: render chart + candles + recent headlines + (for market-sensitive calls)
 // the live broad-market read for the ladder's finest timeframe, let the caller assemble its user turn
 // (`buildUserText(tf, candlesText, newsText, marketText)`), call the routed model, and parse JSON. Never
@@ -162,7 +220,8 @@ async function _newsText(asset) {
 // independently: a failed chart/candles/news/market read is just omitted.
 async function _runAssessment(call, systemPrompt, buildUserText, label) {
     try {
-        const tf = call.timeframe_ladder?.at(-1) ?? '15min'
+        const ladder = Array.isArray(call.timeframe_ladder) && call.timeframe_ladder.length ? call.timeframe_ladder : ['15min']
+        const tf = ladder[ladder.length - 1]   // primary view + candle timeframe = the ladder's finest rung
         const [png, candlesText, newsText, marketText] = await Promise.all([
             fetchChartImage(String(call.asset).toUpperCase(), tf, buildStudies('vwap, ema(50), volume')).catch(() => null),
             _candlesText(call.asset, tf).catch(() => ''),
@@ -171,20 +230,32 @@ async function _runAssessment(call, systemPrompt, buildUserText, label) {
         ])
 
         const userText = buildUserText(tf, candlesText, newsText, marketText)
-        const content = png
+        const primary = png
             ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }, { type: 'text', text: userText }]
             : userText
 
         const { model, reasoningEffort } = await _hermesRouting(call.user_id)
-        const thinking = _thinkingConfig(reasoningEffort)
-        const msg = await _client.messages.create({
-            model,
-            max_tokens: thinking ? ASSESS_MAX_TOKENS_THINKING : ASSESS_MAX_TOKENS,
-            system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-            messages: [{ role: 'user', content }],
-            ...(thinking ?? {}),
-        })
-        return extractFirstJSON(_assessText(msg))
+        const thinking  = _thinkingConfig(reasoningEffort)
+        const maxTokens = thinking ? ASSESS_MAX_TOKENS_THINKING : ASSESS_MAX_TOKENS
+        const system    = [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
+        const tools     = _chartTool(ladder)
+        const messages  = [{ role: 'user', content: primary }]
+
+        // Adaptive-timeframe loop: the read may pull extra ladder-rung charts via get_chart (bounded).
+        // Most reads call no tool → a single round-trip, exactly as before. On the final allowed round
+        // the tools are dropped so the model is forced to return the JSON rather than request another chart.
+        let msg
+        for (let round = 0; round <= MAX_CHART_TOOL_CALLS; round++) {
+            msg = await _client.messages.create({
+                model, max_tokens: maxTokens, system, messages,
+                ...(round < MAX_CHART_TOOL_CALLS ? { tools } : {}),
+                ...(thinking ?? {}),
+            })
+            if (msg.stop_reason !== 'tool_use') break
+            messages.push({ role: 'assistant', content: msg.content })
+            messages.push({ role: 'user', content: await _handleChartToolUses(call, msg.content, ladder) })
+        }
+        return extractFirstJSON(_allText(msg))
     } catch (err) {
         logger.warn(LOG, `${label} failed for ${call.id}:`, err.message)
         return null
@@ -193,6 +264,7 @@ async function _runAssessment(call, systemPrompt, buildUserText, label) {
 
 const _ASSESS_SYSTEM = `You are Kairos, a discretionary day/swing trader running a readiness check on a pre-built trade "call".
 You are given the call (the THESIS, zones, reference levels, the specific mapped patterns, and the author's conviction), a rendered chart image, recent candles, the current price, and why you were woken.
+You're shown the primary chart at the ladder's finest rung; you MAY call get_chart(timeframe) to pull any other rung of the call's timeframe_ladder — a higher timeframe for structure, a lower one for the trigger, or the timeframe a specific pattern was mapped on — before deciding. Check whatever views you'd want as a trader, or skip it when the primary chart is enough. Set "timeframe_used" to the timeframe your decision leans on.
 Decide if NOW is a good moment to enter around the armed zone. Weight price action over indicators. Be strict — most checks should NOT be "enter".
 Assess four axes: market conditions, news/catalyst, price action (from the chart), and whether the mapped patterns are actually happening. Judge them HOLISTICALLY against the THESIS — the call's reason for being.
 Weight technicals vs fundamentals by horizon, the way the call was built: an intraday/day call is price-action-led (fundamentals a light backdrop); a swing call gives the fundamental/catalyst picture real weight alongside the technicals. The patterns you check are the SPECIFIC ones the plan mapped — evaluate each by its own look_for cue and its own timeframe, and respect its evidence flag (observed vs inferred); confirm or reject THOSE, don't grade generic ones.
@@ -287,6 +359,7 @@ export async function _defaultAssess(call, zone, ctx) {
 
 const _POSITION_SYSTEM = `You are Kairos, a discretionary day/swing trader MANAGING a live position you already entered (not looking for a new one).
 You are given the original call (thesis, patterns, reference levels), the live position (entry fill, working stop, targets, what's been taken, running R-multiple/memo), the current price, a rendered chart, recent candles, and why you were woken.
+You're shown the primary chart at the ladder's finest rung; you MAY call get_chart(timeframe) to pull any other ladder rung (e.g. a higher timeframe for structure) before deciding, or skip it when the primary chart is enough.
 Manage it like a pro: LET WINNERS RUN, cut when the THESIS breaks, and do NOT micro-manage. Most checks should be "hold". Re-check the ORIGINAL thesis and mapped patterns against what price is doing NOW; weight price action over indicators.
 Score the market-conditions axis from the BROAD MARKET block (a LIVE read of SPY/QQQ/VIX + this position's correlated drivers) — not from memory, weighted by the stated sensitivity. For a high-sensitivity position, a sharp risk-off turn in the tape is a reason to protect (move_stop / take_partial); if the block says low-sensitivity/not material, don't let the broad tape drive management.
 Score the news/catalyst axis from the RECENT HEADLINES provided (recent-first, dated) AND the SCHEDULED EVENT RISK block — do not invent news from memory. If no headlines are provided, lean "neutral" and say so. A fresh, material catalyst that breaks the original thesis is "blocking" and argues for exit_now.

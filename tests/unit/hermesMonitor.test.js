@@ -4,7 +4,7 @@ import {
     _zoneGate, _isPreActive, _isExpiring, _isPastExpiry, _effectiveVerdict, _computeNextCheckAt, _nextStatus,
     _snapToReference, _finalizeProposal, _applyAssessment, _hasEditProposal, _scheduledPatch, _checkCall,
     _timelineEntry, _zonesLabel, _withTimeout, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock,
-    _isMarketSensitive, _applyEntryConfirmation, _allText,
+    _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf,
     _reconcilePosition, _rMultiple, _checkPosition,
     _computeMetrics, _positionGate, _reviewDue, _finalizePositionProposal, _applyPositionAssessment,
 } from '../../monitoring/hermes.monitor.service.js'
@@ -236,6 +236,26 @@ test('hasEditProposal: true only with a non-empty why or at least one change', (
     assert.equal(_hasEditProposal({ edit_proposal: {} }), false)
     assert.equal(_hasEditProposal({}), false)
     assert.equal(_hasEditProposal(null), false)
+})
+
+// ── adaptive timeframe (get_chart tool) ───────────────────────────────────────
+test('validChartTf: only a rung in the call ladder is honored, else null', () => {
+    const ladder = ['day', '1hr', '15min']
+    assert.equal(_validChartTf('1hr', ladder), '1hr')
+    assert.equal(_validChartTf('day', ladder), 'day')
+    assert.equal(_validChartTf('5min', ladder), null)   // not laddered
+    assert.equal(_validChartTf('4hr', ladder), null)
+    assert.equal(_validChartTf('1hr', undefined), null) // no ladder
+})
+test('chartTool: builds one get_chart tool with timeframe enum locked to the ladder', () => {
+    const [tool] = _chartTool(['day', '1hr', '15min'])
+    assert.equal(tool.name, 'get_chart')
+    assert.deepEqual(tool.input_schema.properties.timeframe.enum, ['day', '1hr', '15min'])
+    assert.deepEqual(tool.input_schema.required, ['timeframe'])
+})
+test('chartTool: empty / missing ladder falls back to a single 15min rung', () => {
+    assert.deepEqual(_chartTool([]) [0].input_schema.properties.timeframe.enum, ['15min'])
+    assert.deepEqual(_chartTool(undefined)[0].input_schema.properties.timeframe.enum, ['15min'])
 })
 test('applyAssessment: let_expire on a zone trip does NOT expire — call keeps watching, no card', () => {
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), call().entry_zones[0], { verdict: 'let_expire', next_check_min: 15 }, NOW, 'zone_trip')
