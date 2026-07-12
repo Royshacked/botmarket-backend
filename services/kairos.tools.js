@@ -1,4 +1,4 @@
-import { getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
+import { getPriceAction, getCycleAnalysis, getCorrelations } from '../providers/yahoofinance.provider.js'
 import { getEarningsCalendar, getFundamentals } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { COMMON_TOOL_HANDLERS, makeToolHandler } from './agentUtils.js'
@@ -48,6 +48,15 @@ export const KAIROS_TOOLS = [
             type: 'object',
             properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
             required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_correlations',
+        description: 'Pairwise correlation matrix (1y daily returns) for a set of tickers. Use it in the Phase 2 correlation read: include the traded asset alongside the names you suspect drive it — its sector/industry ETF, close peers, an index (SPY/QQQ), or a lead-lag driver (e.g. SMH for a chip name, BTC for a high-beta alt, a crude proxy for an E&P) — to measure how tightly it actually moves with each, beyond eyeballing charts. The numbers ground the market_sensitivity level + drivers you emit.',
+        input_schema: {
+            type: 'object',
+            properties: { tickers: { type: 'array', items: { type: 'string' }, description: 'two or more tickers — the asset PLUS its suspected drivers, e.g. ["NVDA","SMH","QQQ"]' } },
+            required: ['tickers'],
         },
     },
     {
@@ -181,6 +190,10 @@ const _STATIC_HANDLERS = {
     get_price_action: makeToolHandler('get_price_action',
         ({ ticker }) => getPriceAction(ticker),
         (err, { ticker }) => `Could not fetch price action for ${ticker}: ${err.message}`, LOG),
+
+    get_correlations: makeToolHandler('get_correlations',
+        ({ tickers }) => getCorrelations(tickers),
+        (err) => `Could not compute correlations: ${err.message}`, LOG),
 
     get_cycle_analysis: makeToolHandler('get_cycle_analysis',
         ({ ticker, mode, calendar_window, lookback_years }) => getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4),

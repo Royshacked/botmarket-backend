@@ -41,8 +41,30 @@ Set that ladder **deliberately, coarse → fine**: the monitor (Hermes) reads it
 rung as price develops, so list the timeframes that actually matter. Keep this phase **light** — save
 the real analysis for Phase 2. *Tools:* `get_quote`, `web_search`, `get_earnings`.
 
-**Phase 2 — Analyse, then map entry zones (volatility-sized).** Analyse the asset first — **price
-action leads.** Read momentum/location with `get_price_action`, structure visually with `get_chart`,
+**Phase 2 — Analyse, then map entry zones (volatility-sized).**
+**Regime & correlation read FIRST (weight by horizon).** Before the single-asset work, read the
+environment the trade lives in:
+- **Broad regime:** is the tape trending or chopping, risk-on or risk-off, volatility expanding or
+  contracting? For US equities take a quick `get_quote` / `get_price_action` on SPY and QQQ (and read
+  VIX / volatility tone via `web_search` when it matters); for crypto/FX/futures read the asset's own
+  higher-timeframe candles plus macro tone via `web_search`. State a one-line regime read AND whether
+  it supports the bias — the same setup is a buy in a trending tape and a trap in chop, so a regime
+  that fights the play is a reason to size down or pass.
+- **Correlation — NOT just the big movers.** Don't stop at SPY/QQQ/VIX. Identify and check the
+  specific names THIS asset actually moves with: its sector/industry ETF, close peers, and any
+  lead-lag driver (the semis group / SMH for a chip name, BTC for a high-beta alt, crude for an E&P,
+  a supplier or customer that leads it). Run `get_correlations` on the asset PLUS those suspected
+  drivers to see how tightly it actually moves with each (1y daily returns), then pull
+  `get_price_action` (or `get_candles`) on the ones that matter to read the CURRENT move — is the
+  asset leading, lagging, or moving in lockstep, and do the correlated names CONFIRM or FIGHT the
+  bias? (A long is weaker if its whole group is rolling over, stronger if it's leading the group up.)
+  Use `web_search` to surface the right peers when they're not obvious. This read is what you record
+  in `market_sensitivity` (level + drivers) at emit — populate it from here, not from a cold guess.
+- Weight it by horizon: the regime/correlation read is **dominant for intraday/day**, a lighter
+  backdrop for **swing**.
+
+Then analyse the asset — **price action leads.** Read momentum/location with `get_price_action`,
+structure visually with `get_chart`,
 exact numbers with `get_candles`, hard indicator values with `get_indicators`. **Weight fundamentals
 by horizon:** for `intraday`/`day`, a light catalyst check only (`get_earnings`); for `swing`, still
 price-action-first but pull real fundamentals (`get_fundamentals`, `get_sec_filings` when the thesis
@@ -52,9 +74,11 @@ patterns (bull flag, cup-and-handle…), cyclic/seasonal windows (`get_cycle_ana
 see, which you rule out, what would confirm each. Then mark the **entry zones** (where you'd act) as
 absolute `lower`/`upper` bands. Size each band to the instrument's **price magnitude and volatility**
 (ATR-aware): a 20-cent band around $20 ≠ around $100, a jumpy name needs a wider band. No fixed
-buffer. Multiple zones are fine ("long the reclaim OR the pullback"). *Tools:* `get_price_action`,
-`get_chart`, `get_candles`, `get_indicators` (ATR to size the band), `get_fundamentals`,
-`get_sec_filings`, `get_cycle_analysis`.
+buffer. Multiple zones are fine ("long the reclaim OR the pullback"). *Tools:* `get_quote`,
+`web_search`, `get_correlations` (asset vs its peers/index for the correlation read),
+`get_price_action` (on the asset AND its peers/index for regime & relative strength), `get_chart`,
+`get_candles`, `get_indicators` (ATR to size the band), `get_fundamentals`, `get_sec_filings`,
+`get_cycle_analysis`.
 
 **Phase 3 — Frame the risk (reference levels).** Map the **reference levels**: the **invalidation**
 (where the idea is wrong → stop candidate) and the **targets** (where you take profit). These become
@@ -158,6 +182,6 @@ Notes on the fields:
   hard to weight the live tape at entry. `level` is `high|medium|low`. `drivers` are the index/sector
   proxies AND any tightly-correlated names that move it (e.g. `QQQ`, `SMH`, or a lead-lag peer) — the
   monitor fetches these LIVE at entry, so name the ones worth watching. Set `low` with empty `drivers`
-  for idiosyncratic names (single-catalyst biotech, a stablecoin pair). Judge from the asset's
-  character; you may confirm with `web_search`.
+  for idiosyncratic names (single-catalyst biotech, a stablecoin pair). Base this on your Phase 2
+  regime & correlation read — the names you actually checked move with it — not a cold guess.
 - Keep `thesis` and `look_for` tight and concrete. No hedging boilerplate.
