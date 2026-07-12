@@ -32,16 +32,21 @@ export async function checkPosition(db, idea, stopCandles, tpCandles, aeCandles,
     const tpTf    = resolveTpTimeframe(idea)
     const entryTf = resolveEntryTimeframe(idea)
 
+    // Per-tick manual-exit alert guard, tracked EXPLICITLY (not via a mutation on the shared
+    // `idea` object) so it fires once across all exit legs/slices this tick even if the idea
+    // ref stops being shared in a future refactor. Cross-tick is the persisted orderState above.
+    const exitCtx = { alerted: false }
+
     const stopFired = await _evaluateExit(db, idea, {
         phase: 'stop', candles: stopCandles, timeframe: stopTf,
         reason: 'stop', label: 'Stop', emoji: '🛑', native: idea.monitorStop,
-    }, onClose)
+    }, onClose, exitCtx)
     if (stopFired) return
 
     const tpFired = await _evaluateExit(db, idea, {
         phase: 'tp', candles: tpCandles, timeframe: tpTf,
         reason: 'tp', label: 'TP', emoji: '🎯', native: idea.monitorTp,
-    }, onClose)
+    }, onClose, exitCtx)
     if (tpFired) return
 
     logger.info(LOG, `💤 No exit triggered for idea ${id} (${asset}) — still in position`)
@@ -49,7 +54,7 @@ export async function checkPosition(db, idea, stopCandles, tpCandles, aeCandles,
     await _checkAdditionalEntries(db, idea, aeCandles, entryTf)
 }
 
-async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, label, emoji, native }, onClose) {
+async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, label, emoji, native }, onClose, exitCtx) {
     const { id, asset } = idea
 
     if (native === false) {
@@ -66,7 +71,7 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
     const volCtx     = await buildVolumeCtx(id, asset, idea.asset_class, tree, conditions, brokerCandleCtx(idea))
 
     if (residual) {
-        return _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji, volCtx }, onClose)
+        return _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji, volCtx }, onClose, exitCtx)
     }
 
     let triggered = false
@@ -87,13 +92,13 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
 
     if (triggered) {
         logger.info(LOG, `${emoji} ${label} triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
-        await _exitNow(db, idea, { leg: phase, reason, quantity: null }, onClose)
+        await _exitNow(db, idea, { leg: phase, reason, quantity: null }, onClose, exitCtx)
         return true
     }
     return false
 }
 
-async function _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji, volCtx }, onClose) {
+async function _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji, volCtx }, onClose, exitCtx) {
     const children = Array.isArray(residual.children) ? residual.children : []
     const fired    = new Set(idea.firedExits ?? [])
     let any = false
@@ -108,19 +113,21 @@ async function _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, 
 
         const qty = Number(child.quantity) || null
         logger.info(LOG, `${emoji} ${label} slice ${i} triggered for idea ${idea.id}: "${(which ?? child.condition ?? '').slice(0, 60)}" (qty ${qty ?? 'full'})`)
-        await _exitNow(db, idea, { leg: phase, reason, quantity: qty, tag }, onClose)
+        await _exitNow(db, idea, { leg: phase, reason, quantity: qty, tag }, onClose, exitCtx)
         any = true
     }
     return any
 }
 
-async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose) {
+async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose, exitCtx = { alerted: false }) {
     // Manual (broker-less): don't close through a broker — alert the user to close at their
-    // broker and report the exit price (confirmManualExit books it). Park awaiting_manual_close
-    // + guard in-memory so we alert ONCE, not every poll / every residual slice this tick.
+    // broker and report the exit price (confirmManualExit books it). Alert ONCE, not every poll /
+    // every residual slice this tick: `exitCtx.alerted` is the same-tick guard (explicit, so it
+    // holds even if the idea ref stops being shared); the persisted orderState guards later ticks.
     if (idea.broker === 'manual') {
-        if (idea.orderState === 'awaiting_manual_close') return
-        idea.orderState = 'awaiting_manual_close'   // in-tick guard (same idea ref across calls)
+        if (exitCtx.alerted || idea.orderState === 'awaiting_manual_close') return
+        exitCtx.alerted     = true
+        idea.orderState     = 'awaiting_manual_close'   // keep the in-memory doc consistent with the DB write
         await db.collection(COLLECTION).updateOne({ id: idea.id }, { $set: { orderState: 'awaiting_manual_close', pendingCloseReason: reason } })
         await notifyManualExit(idea.userId, { legs: [exitLegFromIdea(idea)], reason })
         logger.info(LOG, `[${idea.id}] Manual exit alert sent (${reason}) — awaiting user close`)
