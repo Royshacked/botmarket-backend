@@ -23,7 +23,6 @@ import { paperBrokerService } from '../paperBroker.service.js'
 import { openPosition,
          reducePosition,
          computeEquity,
-         latestPrice,
          latestMarkPrice,
          dirSign, round2 }    from '../paperExecution.service.js'
 import { logger }             from '../../../services/logger.service.js'
@@ -154,7 +153,11 @@ export class PaperAdapter extends BrokerAdapter {
         const orderId = randomUUID()
 
         if (order.type === 'market') {
-            const price = await latestPrice(order.symbol)
+            // Fill at the real-time mark (Yahoo last-traded, candle-close fallback) — a
+            // market order should hit the live price, and the candle-only feed blanks out
+            // on a transient empty fetch (e.g. an equity with no fresh 1-min bar), which
+            // would spuriously reject an order for a symbol Yahoo can price fine.
+            const price = await latestMarkPrice(order.symbol)
             if (price == null) throw new Error(`paper: no price for ${order.symbol}`)
 
             // Closing market order (monitor close / reduce) → apply against the position.
@@ -218,7 +221,7 @@ export class PaperAdapter extends BrokerAdapter {
     async closePosition(userId, accountId, positionId, opts = {}) {
         const pos = await paperBrokerService.getPosition(userId, positionId)
         if (!pos || pos.status !== 'open') throw new Error(`paper: position ${positionId} not open`)
-        const price = await latestPrice(pos.symbol)
+        const price = await latestMarkPrice(pos.symbol)
         if (price == null) throw new Error(`paper: no price for ${pos.symbol}`)
         await reducePosition({ userId, positionId, qty: opts.quantity ?? pos.qty, price, reason: opts.reason ?? 'manual' })
     }
