@@ -1,5 +1,5 @@
 import { getQuote, getTickerAggregates, getEarnings } from '../providers/yahoofinance.provider.js'
-import { fetchChartImage } from '../providers/chartImg.provider.js'
+import { cachedChartImage } from './chartImgCache.service.js'
 import { buildStudies } from '../monitoring/evaluators/chart.evaluator.js'
 import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../monitoring/evaluators/structured.evaluator.js'
 import { sessionStartMs } from './market.service.js'
@@ -69,22 +69,9 @@ async function _fetchCandleRows(ticker, timeframe) {
     return { cfg, bars }
 }
 
-// ─── Chart image (vision) ─────────────────────────────────────────────────────
-// Renders are cached briefly by symbol+timeframe+studies — chart-img is paid /
-// rate-limited and an agent may request the same view repeatedly (internal check,
-// then again to show it). One cache shared across agents.
-const _chartCache  = new Map()   // key -> { at, png }
-const CHART_TTL_MS = 60 * 1000   // intraday views go stale fast; 60s is plenty within a chat
-
-export async function cachedChartImage(symbol, timeframe, studies) {
-    const key = `${symbol}|${timeframe}|${studies.map(s => s.name).join(',')}`
-    const hit = _chartCache.get(key)
-    if (hit && Date.now() - hit.at < CHART_TTL_MS) return hit.png
-    const png = await fetchChartImage(symbol, timeframe, studies)
-    if (_chartCache.size > 100) _chartCache.clear()
-    _chartCache.set(key, { at: Date.now(), png })
-    return png
-}
+// The chart-image cache (cachedChartImage) moved to ./chartImgCache.service.js so the monitor's
+// chart.evaluator can share it without an import cycle. Re-exported here for existing importers.
+export { cachedChartImage }
 
 // ─── Handler factories ────────────────────────────────────────────────────────
 // Each returns a tool handler wrapped in the standard makeToolHandler try/catch so
@@ -137,7 +124,10 @@ export function makeChartHandler({ log, onChart, readText }) {
         'get_chart',
         async ({ ticker, timeframe, indicators = '', show_to_user = false }) => {
             const symbol  = String(ticker || '').toUpperCase()
-            const studies = buildStudies(indicators || '')
+            // Plain candles by default — draw ONLY the overlays the agent explicitly named, so its
+            // visual read is anchored to price structure (orderblocks, sweeps, false breaks) rather
+            // than primed by moving averages / VWAP. The agent adds an overlay only to confirm a read.
+            const studies = buildStudies(indicators || '', { fillDefaults: false })
             const png     = await cachedChartImage(symbol, timeframe, studies)
 
             if (show_to_user && typeof onChart === 'function') {
@@ -145,7 +135,7 @@ export function makeChartHandler({ log, onChart, readText }) {
                 catch (err) { logger.warn(log, 'onChart emit failed:', err.message) }
             }
 
-            const studyNames = studies.map(s => s.name).join(', ') || 'EMA20/50'
+            const studyNames = studies.map(s => s.name).join(', ') || 'price only, no overlays'
             return [
                 { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
                 { type: 'text',  text: `${symbol} ${timeframe} TradingView chart (studies: ${studyNames}). ${readText}` },

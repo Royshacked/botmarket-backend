@@ -44,16 +44,18 @@ export async function claudeText(systemPrompt, userMessage) {
 
 /**
  * Call Claude Sonnet with a chart image + text prompt.
- * Used by the chart evaluator for visual pattern recognition.
+ * Used by the chart evaluator for visual pattern recognition (YES/NO, default 64 tokens)
+ * and by the price-structure tools for a richer structured read (pass a larger maxTokens).
  * @param {string} systemPrompt
  * @param {string} userMessage
  * @param {string} imageBase64  base64-encoded PNG bytes of the chart
+ * @param {{ maxTokens?: number }} [opts]
  * @returns {Promise<string>}
  */
-export async function claudeVision(systemPrompt, userMessage, imageBase64) {
+export async function claudeVision(systemPrompt, userMessage, imageBase64, { maxTokens = 64 } = {}) {
     const msg = await client.messages.create({
         model:      'claude-sonnet-4-6',
-        max_tokens: 64,
+        max_tokens: maxTokens,
         system:     systemPrompt,
         messages:   [{
             role:    'user',

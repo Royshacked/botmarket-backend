@@ -13,6 +13,8 @@ import {
     cycleStats as _cycleStats,
     tdToCalDays as _tdToCalDays,
     addCalDays as _addCalDays,
+    fmtDuration as _fmtDuration,
+    fmtDateTimeUTC as _fmtDateTimeUTC,
 } from '../services/cycleAnalysis.service.js'
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] })
@@ -299,6 +301,78 @@ export async function getPriceAction(ticker) {
 
 // --- Cycle analysis -----------------------------------------------------------
 
+// Intraday price-cycle fetch spec per rung: how far back to pull, and each bar's wall-clock minutes
+// (to render bar-counts as approximate spans). Only these rungs run an intraday cycle; ≥ 2hr uses the
+// daily path. Windows respect Yahoo's intraday history limits (1m ~ days, 5–30m ~ weeks, 1h ~ months).
+// Windows sit safely INSIDE Yahoo's intraday history caps (1m ≤ 7d, 2–90m ≤ 60d, 1h ≤ 730d) —
+// a request at the exact boundary is rejected, so stay a few days under.
+const INTRADAY_CYCLE_CFG = {
+    '1min':  { timeSpan: 'minute', multiplier: 1,  windowDays: 6,   barMinutes: 1 },
+    '5min':  { timeSpan: 'minute', multiplier: 5,  windowDays: 55,  barMinutes: 5 },
+    '15min': { timeSpan: 'minute', multiplier: 15, windowDays: 55,  barMinutes: 15 },
+    '30min': { timeSpan: 'minute', multiplier: 30, windowDays: 55,  barMinutes: 30 },
+    '1hr':   { timeSpan: 'hour',   multiplier: 1,  windowDays: 180, barMinutes: 60 },
+}
+
+// Intraday price cycle: run the SAME extrema/interval math as the daily path, but measured in BARS of
+// the requested rung and rendered as approximate wall-clock spans + timestamps. A session-scale rhythm,
+// not a multi-day swing. Never throws upward beyond the provider's normal fetch errors.
+async function _intradayPriceCycle(sym, timeframe) {
+    const cfg  = INTRADAY_CYCLE_CFG[timeframe]
+    const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
+    const candles = await getTickerAggregates(sym, { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from, to: Date.now() })
+    if (!candles || candles.length < 40) return `${sym}: not enough ${timeframe} history for an intraday cycle read.`
+
+    const closes = candles.map(c => c.close)
+    const { peaks, troughs } = _findExtrema(closes)
+    const troughStats = _cycleStats(troughs)
+    const peakStats   = _cycleStats(peaks)
+
+    const lines = [`${sym} — intraday cycle analysis (${timeframe} bars):`]
+    if (!troughStats && !peakStats) {
+        lines.push('No clear repeating intraday cycle detected in the available history.')
+        return lines.join('\n')
+    }
+
+    const useTrough   = Boolean(troughStats)
+    const stats       = troughStats ?? peakStats
+    const anchors     = useTrough ? troughs : peaks
+    const anchorLabel = useTrough ? 'trough' : 'peak'
+    const label       = useTrough ? 'trough-to-trough' : 'peak-to-peak'
+    const span        = n => _fmtDuration(n * cfg.barMinutes)
+    const project     = n => _fmtDateTimeUTC(Date.now() + n * cfg.barMinutes * 60 * 1000)
+
+    lines.push(`\nDominant intraday cycle (${label}):`)
+    lines.push(`Cycle length: ~${stats.mean} bars (~${span(stats.mean)})`)
+    lines.push(`Consistency: ${Math.round(stats.consistency * 100)}% of cycles within ±35% of mean (${stats.count} cycles observed)`)
+
+    const lastIdx    = anchors[anchors.length - 1]
+    const barsSince  = closes.length - 1 - lastIdx
+    lines.push(`Last ${anchorLabel}: ${_fmtDateTimeUTC(candles[lastIdx].timestamp * 1000)} at $${closes[lastIdx].toFixed(2)}`)
+    lines.push(`Bars since last ${anchorLabel}: ${barsSince} (~${span(barsSince)})`)
+
+    const half = Math.round(stats.mean / 2)
+    if (barsSince < half) {
+        lines.push(`Current phase: UPSWING — ${barsSince}/${half} bars through`)
+        lines.push(`Estimated peak: ~${project(half - barsSince)} (±${span(stats.std)})`)
+    } else if (barsSince < stats.mean) {
+        lines.push(`Current phase: DOWNSWING — ${barsSince - half} bars into the down leg`)
+        lines.push(`Estimated next ${anchorLabel}: ~${project(stats.mean - barsSince)} (±${span(stats.std)})`)
+    } else {
+        lines.push(`Current phase: EXTENDED — ${barsSince} bars since last ${anchorLabel} (cycle avg is ${stats.mean}). Possible cycle break or low-volatility drift.`)
+    }
+
+    if (stats.consistency >= 0.7) {
+        lines.push(`Cycle reliability: STRONG (${Math.round(stats.consistency * 100)}% hit rate) — usable as an intraday timing signal.`)
+    } else if (stats.consistency >= 0.5) {
+        lines.push(`Cycle reliability: MODERATE (${Math.round(stats.consistency * 100)}% hit rate) — treat as context, not a precise timer.`)
+    } else {
+        lines.push(`Cycle reliability: WEAK (${Math.round(stats.consistency * 100)}% hit rate) — irregular pattern, use with caution.`)
+    }
+    lines.push(`\n(Timed on ${timeframe} bars over ~${cfg.windowDays}d — a session-scale rhythm; wall-clock spans are approximate as they ignore overnight gaps.)`)
+    return lines.join('\n')
+}
+
 /**
  * Detect recurring price cycles or calendar-window seasonality for a ticker.
  *
@@ -310,10 +384,20 @@ export async function getPriceAction(ticker) {
  *   month_start/month_end are 1-based (Jan=1). day_start/day_end optional (defaults: 1/last day).
  *
  * lookbackYears: how many years of history to use (default 4).
+ *
+ * timeframe: the resolution the cycle is measured on. Sub-hourly-to-hourly rungs (1min–1hr) run a
+ *   PRICE cycle on intraday bars (a session-scale rhythm). Everything ≥ 2hr — and calendar mode —
+ *   runs on daily history (multi-day swing / yearly seasonality), the original behavior.
  */
-export async function getCycleAnalysis(ticker, mode, calendarWindow = null, lookbackYears = 4) {
+export async function getCycleAnalysis(ticker, mode, calendarWindow = null, lookbackYears = 4, timeframe = 'day') {
     const sym = String(ticker || '').toUpperCase().trim()
     if (!sym) return 'No ticker provided.'
+
+    // Intraday price cycle: only for a price read on a sub-hourly-to-hourly rung. Calendar
+    // seasonality is inherently daily/yearly, so it always uses the daily path below.
+    if (mode === 'price' && INTRADAY_CYCLE_CFG[timeframe]) {
+        return _intradayPriceCycle(sym, timeframe)
+    }
 
     const calDaysNeeded = mode === 'calendar'
         ? (lookbackYears + 1) * 365 + 60

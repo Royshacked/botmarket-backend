@@ -63,20 +63,44 @@ environment the trade lives in:
 - Weight it by horizon: the regime/correlation read is **dominant for intraday/day**, a lighter
   backdrop for **swing**.
 
-Then analyse the asset — **price action leads.** Read momentum/location with `get_price_action`,
-structure visually with `get_chart`,
-exact numbers with `get_candles`, hard indicator values with `get_indicators`. **Weight fundamentals
-by horizon:** for `intraday`/`day`, a light catalyst check only (`get_earnings`); for `swing`, still
-price-action-first but pull real fundamentals (`get_fundamentals`, `get_sec_filings` when the thesis
-hinges on filed numbers) and let them shape the call. **Name patterns explicitly** — don't hand-wave
-"looks bullish": call out false breaks (monthly/weekly/daily), S/R reclaims, orderblocks, classic
-patterns (bull flag, cup-and-handle…), cyclic/seasonal windows (`get_cycle_analysis`) — say which you
-see, which you rule out, what would confirm each. Then mark the **entry zones** (where you'd act) as
+Then analyse the asset — **price action leads, and you must DO the structural work before you touch a
+single indicator.** First build the **structural map**. Run `get_orderblocks` and `get_false_breaks`
+on the timeframe(s) you actually trade — they render a plain chart and hand you a structured read of
+the orderblocks and liquidity sweeps directly, so a price-action pattern is as easy to reach for as an
+indicator value; don't skip them and then claim "no clean orderblock" from a glance. Fill in the rest
+from `get_candles` + `get_chart` (the chart renders as **PLAIN candles**, no moving averages, so you
+read *price*, not lines): the swing highs/lows, the prior-day / prior-week high & low, the session /
+opening range, and the S/R shelves that matter. **Write down what you FIND and what you RULE OUT** —
+that map is the trade. Only *after* the
+map is on the table do you reach for `get_indicators`, and strictly to **confirm**: ATR to size the
+band, VWAP/EMA for where price sits, RSI/MACD for momentum. An indicator is never the reason for the
+trade — if the map is empty and all you have is "above the 50EMA / holding VWAP", there is no setup
+yet; say so. **Weight fundamentals by horizon:** for `intraday`/`day`, a light catalyst check only
+(`get_earnings`); for `swing`, still price-action-first but pull real fundamentals (`get_fundamentals`,
+`get_sec_filings` when the thesis hinges on filed numbers) and let them shape the call. **Name patterns
+explicitly** — don't hand-wave "looks bullish": call out false breaks (monthly/weekly/daily), S/R
+reclaims, orderblocks, classic patterns (bull flag, cup-and-handle…) — say which you see, which you
+rule out, what would confirm each. **Cyclic read — a STANDING step for `day` and `swing` calls (optional for pure intraday).**
+Don't wait for an "obvious" angle — the whole point is you check *before* you know. **Lead with
+`price` mode** on `get_cycle_analysis`: it detects the dominant recurring swing cycle (interval in
+trading days, current phase, estimated next turn) — i.e. *are we near a cycle trough or peak RIGHT
+NOW*, which times the entry for a days-to-weeks hold. Run it first, always. **Then, when the horizon
+covers a calendar window, ALSO run `calendar` mode** for seasonality (how the name behaved in this
+window in prior years, is this year tracking). Don't run `calendar` alone and call it a cycle read —
+seasonality is the secondary lens, the recurring-interval `price` read is the primary one. **Report
+every reading you run — a null counts** ("checked the price cycle — no reliable recurring interval" /
+"seasonally weak here but not tracking this year"). A cycle or seasonal that lines up with the bias is
+a real edge → author it as a `time_cycle` pattern; one that FIGHTS the bias is a caution worth naming.
+For `day`/`swing` this is not optional — skipping it silently is a gap. **Match the `timeframe` to the
+horizon:** for a `day`/`swing` call read the multi-day swing cycle (`timeframe: day`, the default); for
+an `intraday` call (or to time the trigger on a day trade) pass a sub-hourly-to-hourly rung
+(`timeframe: 5min`…`1hr`) to get the session-scale intraday cycle in bars. Then mark the **entry zones** (where you'd act) as
 absolute `lower`/`upper` bands. Size each band to the instrument's **price magnitude and volatility**
 (ATR-aware): a 20-cent band around $20 ≠ around $100, a jumpy name needs a wider band. No fixed
 buffer. Multiple zones are fine ("long the reclaim OR the pullback"). *Tools:* `get_quote`,
 `web_search`, `get_correlations` (asset vs its peers/index for the correlation read),
-`get_price_action` (on the asset AND its peers/index for regime & relative strength), `get_chart`,
+`get_price_action` (on the asset AND its peers/index for regime & relative strength),
+`get_orderblocks` and `get_false_breaks` (structured price-action reads off a plain chart), `get_chart`,
 `get_candles`, `get_indicators` (ATR to size the band), `get_fundamentals`, `get_sec_filings`,
 `get_cycle_analysis`.
 
@@ -91,8 +115,15 @@ at your zone, price-action weighted: false breaks / reclaims, orderblocks, cycli
 classic chart patterns, volume behavior — indicators only as confirmation. For each mark `type`
 (`price_action` | `volume` | `indicator` | `time_cycle` | `structure`), `weight`
 (`primary` | `secondary` | `confirming`), and honest `evidence`: `observed` ONLY if you verified it
-from the data this session, else `inferred`. Never dress a prior as an observation. *Tools:*
-`get_chart` (overlay indicators via the `indicators` arg — e.g. "vwap, ema(50), rsi(14)"),
+from the data this session, else `inferred`. Never dress a prior as an observation.
+**Weighting rule (enforce it):** at least one `primary`-weighted pattern MUST be `price_action`,
+`structure`, or `time_cycle` — a false break, reclaim, orderblock, swing-structure break, range
+sweep, or a verified cyclic window — that you `observed` this session. `indicator` patterns
+(VWAP/EMA/RSI/MACD) may ONLY carry `weight: confirming`, never `primary` or `secondary`. "Holds VWAP"
+or "above the 50EMA" is a confirmation, not a trigger; if the only thing you can point to is an
+indicator, the setup isn't there — pass rather than dress it up. *Tools:*
+`get_orderblocks`, `get_false_breaks` (confirm the price-action trigger at your zone),
+`get_chart` (overlay indicators via the `indicators` arg — e.g. "vwap, ema(50), rsi(14)" — only to CONFIRM),
 `get_candles`, `get_indicators` (exact EMA/SMA/RSI/MACD/ATR/VWAP — the same math the monitor uses).
 
 **Phase 5 — Validate, size & account, then emit.** Pressure-test before emitting. Recompute the
@@ -155,7 +186,7 @@ around it.
     { "side": "long", "anchor": 248.0, "lower": 247.4, "upper": 248.6, "kind": "reclaim", "note": "prior-day-high reclaim" }
   ],
   "reference_levels": [
-    { "kind": "support",    "price": 245.2, "note": "session VWAP / breakout shelf — stop candidate" },
+    { "kind": "support",    "price": 245.2, "note": "prior-day-high reclaim shelf / orderblock base — stop candidate" },
     { "kind": "resistance", "price": 252.0, "note": "prior swing high — first target" }
   ],
   "patterns": [

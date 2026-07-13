@@ -42,3 +42,21 @@ export function addCalDays(date, days) {
     d.setDate(d.getDate() + days)
     return d.toISOString().slice(0, 10)
 }
+
+// ── Intraday cycle formatting (bars → wall-clock) ─────────────────────────────
+// Intraday cycles are measured in BARS, not trading days. Render a bar-count as an approximate
+// wall-clock span (the projection is fuzzy across sessions since it ignores overnight gaps — the
+// caller flags it as approximate). Pure.
+export function fmtDuration(minutes) {
+    const m = Math.max(0, Math.round(minutes))
+    if (m < 60) return `${m}m`
+    const h = Math.floor(m / 60), remM = m % 60
+    if (h < 24) return remM ? `${h}h ${remM}m` : `${h}h`
+    const d = Math.floor(h / 24), remH = h % 24
+    return remH ? `${d}d ${remH}h` : `${d}d`
+}
+
+// ms → "yyyy-mm-dd hh:mm" (UTC), matching the daily path's ISO-slice date style. Pure.
+export function fmtDateTimeUTC(ms) {
+    return new Date(ms).toISOString().slice(0, 16).replace('T', ' ')
+}

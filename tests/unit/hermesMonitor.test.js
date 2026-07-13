@@ -4,7 +4,7 @@ import {
     _zoneGate, _isPreActive, _isExpiring, _isPastExpiry, _effectiveVerdict, _computeNextCheckAt, _nextStatus,
     _snapToReference, _finalizeProposal, _applyAssessment, _hasEditProposal, _scheduledPatch, _checkCall,
     _timelineEntry, _zonesLabel, _withTimeout, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock,
-    _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf,
+    _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _handleAssessToolUses,
     _reconcilePosition, _rMultiple, _checkPosition,
     _computeMetrics, _positionGate, _reviewDue, _finalizePositionProposal, _applyPositionAssessment,
 } from '../../monitoring/hermes.monitor.service.js'
@@ -256,6 +256,65 @@ test('chartTool: builds one get_chart tool with timeframe enum locked to the lad
 test('chartTool: empty / missing ladder falls back to a single 15min rung', () => {
     assert.deepEqual(_chartTool([]) [0].input_schema.properties.timeframe.enum, ['15min'])
     assert.deepEqual(_chartTool(undefined)[0].input_schema.properties.timeframe.enum, ['15min'])
+})
+
+// ── structure tools (get_orderblocks / get_false_breaks) in the assess loop ────
+test('structureTools: builds OB + false-break + cycle tools with timeframe enum locked to the ladder', () => {
+    const tools = _structureTools(['day', '1hr'])
+    assert.deepEqual(tools.map(t => t.name), ['get_orderblocks', 'get_false_breaks', 'get_cycle_analysis'])
+    for (const t of tools) {
+        assert.deepEqual(t.input_schema.properties.timeframe.enum, ['day', '1hr'])
+        assert.deepEqual(t.input_schema.required, ['timeframe'])
+    }
+})
+test('structureTools: empty / missing ladder falls back to a single 15min rung', () => {
+    assert.deepEqual(_structureTools([])[0].input_schema.properties.timeframe.enum, ['15min'])
+    assert.deepEqual(_structureTools(undefined)[1].input_schema.properties.timeframe.enum, ['15min'])
+})
+
+test('handleAssessToolUses: dispatches a structure read on a ladder-valid rung', async () => {
+    const assistant = [{ type: 'tool_use', id: 'u1', name: 'get_orderblocks', input: { timeframe: '15min' } }]
+    const seen = []
+    const results = await _handleAssessToolUses(call(), assistant, ['15min'], {
+        readStructure: async ({ symbol, timeframe, kind }) => { seen.push({ symbol, timeframe, kind }); return { text: 'OB READ' } },
+        renderChart: async () => 'NOPE',
+    })
+    assert.deepEqual(seen, [{ symbol: 'TSLA', timeframe: '15min', kind: 'orderblocks' }])
+    assert.equal(results[0].tool_use_id, 'u1')
+    assert.equal(results[0].content, 'OB READ')
+    assert.ok(!results[0].is_error)
+})
+
+test('handleAssessToolUses: an off-ladder rung errors back instead of rendering', async () => {
+    const assistant = [{ type: 'tool_use', id: 'u2', name: 'get_false_breaks', input: { timeframe: '4hr' } }]
+    let called = false
+    const results = await _handleAssessToolUses(call(), assistant, ['15min'], {
+        readStructure: async () => { called = true; return { text: 'x' } },
+    })
+    assert.equal(called, false)                       // never ran the vision read
+    assert.equal(results[0].is_error, true)
+    assert.match(results[0].content, /ladder rungs/)
+})
+
+test('handleAssessToolUses: get_chart still renders the overlaid chart image', async () => {
+    const assistant = [{ type: 'tool_use', id: 'u3', name: 'get_chart', input: { timeframe: '15min' } }]
+    const results = await _handleAssessToolUses(call(), assistant, ['15min'], {
+        renderChart: async () => 'PNG',
+        readStructure: async () => { throw new Error('should not be called for get_chart') },
+    })
+    assert.equal(results[0].content[0].type, 'image')
+    assert.equal(results[0].content[0].source.data, 'PNG')
+})
+
+test('handleAssessToolUses: get_cycle_analysis runs a price read on the ladder rung', async () => {
+    const assistant = [{ type: 'tool_use', id: 'u4', name: 'get_cycle_analysis', input: { timeframe: '15min' } }]
+    const seen = []
+    const results = await _handleAssessToolUses(call(), assistant, ['15min'], {
+        getCycleAnalysis: async (sym, mode, cw, ly, tf) => { seen.push({ sym, mode, tf }); return 'CYCLE READ' },
+    })
+    assert.deepEqual(seen, [{ sym: 'TSLA', mode: 'price', tf: '15min' }])
+    assert.equal(results[0].content, 'CYCLE READ')
+    assert.ok(!results[0].is_error)
 })
 test('applyAssessment: let_expire on a zone trip does NOT expire — call keeps watching, no card', () => {
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), call().entry_zones[0], { verdict: 'let_expire', next_check_min: 15 }, NOW, 'zone_trip')

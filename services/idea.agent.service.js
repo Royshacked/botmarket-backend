@@ -9,6 +9,7 @@ import { logger } from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, makeToolHandler, resolveAgentStream } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler, makeIndicatorsHandler } from './marketData.tools.js'
+import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
 import { _parseResponse, emptyAnalysisState } from './idea.stateParser.js'
 
 // emptyAnalysisState lives in idea.stateParser.js (with the response parser it
@@ -68,6 +69,32 @@ const TOOLS = [
         },
     },
     {
+        name: 'get_orderblocks',
+        description: 'Detect ORDER BLOCKS on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: the last opposing candle/cluster before an impulsive structure break (bullish OB = last down-candle before a rally; bearish OB = last up-candle before a selloff), whether each is fresh/untested or mitigated, and its zone vs current price. Reach for this when mapping the setup to find price-action entry zones and triggers — as easily as you would an indicator value. Levels are approximate; confirm exact prices with get_candles.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker:       { type: 'string', description: 'Ticker symbol e.g. AAPL, NVDA, BTCUSDT' },
+                timeframe:    { type: 'string', enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'], description: 'Chart timeframe — read the orderblocks on the timeframe(s) you trade on.' },
+                show_to_user: { type: 'boolean', description: 'Set true to render the analyzed chart in the user\'s chat (the plain chart the read is based on). Leave false for an internal read.' },
+            },
+            required: ['ticker', 'timeframe'],
+        },
+    },
+    {
+        name: 'get_false_breaks',
+        description: 'Detect FALSE BREAKS / liquidity sweeps on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Reach for this when mapping the setup to find price-action triggers. Levels are approximate; confirm exact prices with get_candles.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker:       { type: 'string', description: 'Ticker symbol e.g. AAPL, NVDA, BTCUSDT' },
+                timeframe:    { type: 'string', enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'], description: 'Chart timeframe — read the sweeps on the timeframe(s) you trade on.' },
+                show_to_user: { type: 'boolean', description: 'Set true to render the analyzed chart in the user\'s chat. Leave false for an internal read.' },
+            },
+            required: ['ticker', 'timeframe'],
+        },
+    },
+    {
         name: 'get_indicators',
         description: 'Compute exact indicator VALUES from recent candles — the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Confirm a read with hard numbers: ATR for volatility-sizing a stop, price vs EMA / VWAP for location, RSI for momentum/divergence, MACD for trend. Price action leads; indicators only confirm.',
         input_schema: {
@@ -89,12 +116,13 @@ const TOOLS = [
     },
     {
         name: 'get_cycle_analysis',
-        description: 'Detect recurring cycles in a stock\'s price history. Two modes: "price" finds the dominant peak-to-peak / trough-to-trough interval, the current phase, and the next estimated turning point. "calendar" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking. Use "price" for recurring-interval theses, "calendar" for seasonal ones.',
+        description: 'Detect recurring cycles in a stock\'s price history. Two modes: "price" finds the dominant peak-to-peak / trough-to-trough interval, the current phase, and the next estimated turning point. "calendar" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking. Use "price" for recurring-interval theses, "calendar" for seasonal ones. Pass `timeframe` on a "price" read: a sub-hourly-to-hourly rung (1min–1hr) times a session-scale INTRADAY cycle (in bars); day/week/month (the default) times the multi-day swing cycle.',
         input_schema: {
             type: 'object',
             properties: {
                 ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' },
                 mode: { type: 'string', enum: ['price', 'calendar'], description: '"price" for recurring interval cycles, "calendar" for seasonal window analysis' },
+                timeframe: { type: 'string', enum: ['1min', '5min', '15min', '30min', '1hr', 'day', 'week', 'month'], description: 'For "price" mode: the cycle resolution. 1min–1hr = intraday cycle (bars); day (default)/week/month = multi-day swing cycle. Ignored for "calendar".' },
                 calendar_window: {
                     type: 'object',
                     description: 'Required for mode "calendar". Defines the window to analyze each year.',
@@ -172,7 +200,7 @@ const TOOLS = [
                 },
                 indicators: {
                     type: 'string',
-                    description: 'Optional free-text indicators to overlay, e.g. "rsi(14), ema(50), volume, vwap". Leave empty for sensible defaults (EMA 20/50).',
+                    description: 'Optional free-text indicators to overlay, e.g. "rsi(14), ema(50), volume, vwap". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it.',
                 },
                 show_to_user: {
                     type: 'boolean',
@@ -225,7 +253,7 @@ const TOOL_HANDLERS = {
         (err, { ticker }) => `Could not fetch price action for ${ticker}: ${err.message}`, LOG),
 
     get_cycle_analysis: makeToolHandler('get_cycle_analysis',
-        ({ ticker, mode, calendar_window, lookback_years }) => getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4),
+        ({ ticker, mode, calendar_window, lookback_years, timeframe }) => getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4, timeframe ?? 'day'),
         (err, { ticker }) => `Could not compute cycle analysis for ${ticker}: ${err.message}`, LOG),
 
     get_fundamentals: makeToolHandler('get_fundamentals',
@@ -253,7 +281,10 @@ const TOOL_HANDLERS = {
 function _buildToolHandlers(onChart) {
     return {
         ...TOOL_HANDLERS,
-        get_chart: makeChartHandler({ log: LOG, onChart, readText: 'Analyze the price structure visually.' }),
+        get_chart: makeChartHandler({ log: LOG, onChart, readText: 'Analyze the price structure visually — patterns, S/R, orderblocks, false breaks first; indicators only confirm.' }),
+        // Vision-backed price-action tools — need onChart to (optionally) surface the analyzed chart.
+        get_orderblocks:  makeStructureVisionHandler({ log: LOG, kind: 'orderblocks',  vision: OB_VISION, onChart }),
+        get_false_breaks: makeStructureVisionHandler({ log: LOG, kind: 'false_breaks', vision: FB_VISION, onChart }),
     }
 }
 

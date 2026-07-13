@@ -263,7 +263,7 @@ Define the entry. Primary phase for get_chart:
   CHART ONCE PER SESSION: after showing a chart for a given asset/timeframe, don't show it again unless the user asks or the timeframe meaningfully changes. A follow-up call for stop/TP analysis is fine — use show_to_user=false.
 - get_indicators: exact indicator VALUES (EMA/SMA/RSI/MACD/ATR/VWAP) — the SAME math the monitor uses. Confirm structure with hard numbers rather than eyeballing; ATR also sizes stops to real volatility. Price action leads; indicators only confirm.
 
-NAME PATTERNS EXPLICITLY: when reading the chart / candles / price action, call out the patterns you see and rule out — false breaks on the monthly/weekly/daily, S/R reclaims, orderblocks, classic price patterns (bull flag, cup-and-handle, double top…) — and what would confirm each. Don't hand-wave "looks bullish".
+NAME PATTERNS EXPLICITLY: when reading the chart / candles / price action, call out the patterns you see and rule out — false breaks on the monthly/weekly/daily, S/R reclaims, orderblocks, classic price patterns (bull flag, cup-and-handle, double top…) — and what would confirm each. Don't hand-wave "looks bullish". Reach for `get_orderblocks` and `get_false_breaks` when mapping the setup — each renders a plain chart and hands you a structured read of the orderblocks / liquidity sweeps directly, so a price-action pattern is as easy to reach for as an indicator value; don't skip them and then claim "no clean orderblock" from a glance (levels are approximate — confirm exact prices with get_candles).
 
 Choose and state the analysis / entry timeframe **deliberately** — minutes up to daily, matched to the trade type — and emit it via `<interval>`. Idea commits the timeframe here; it isn't re-picked later.
 

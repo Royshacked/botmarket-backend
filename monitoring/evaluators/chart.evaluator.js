@@ -7,8 +7,8 @@
  * Env var required: CHART_IMG_API_KEY
  */
 
-import { claudeVision }   from '../monitor.claude.js'
-import { fetchChartImage } from '../../providers/chartImg.provider.js'
+import { claudeVision }    from '../monitor.claude.js'
+import { cachedChartImage } from '../../services/chartImgCache.service.js'
 import { logger }          from '../../services/logger.service.js'
 import { parseYesNo }      from '../monitorUtils.js'
 import { parseIndicators } from '../parsers/indicators.parser.js'
@@ -30,11 +30,13 @@ Respond with a single word only: YES or NO.`
  * @returns {Promise<boolean>}
  */
 export async function evaluateChart(condition, symbol, timeframe, floorAt = null, priorFindings = []) {
-    const studies = _buildStudies(condition)
+    // Plain chart: draw ONLY the indicators this condition explicitly names. A chart-pattern
+    // condition (false break, orderblock, flag) reads best on bare candles.
+    const studies = _buildStudies(condition, { fillDefaults: false })
 
     let imageBase64
     try {
-        imageBase64 = await fetchChartImage(symbol, timeframe, studies)
+        imageBase64 = await cachedChartImage(symbol, timeframe, studies)
     } catch (err) {
         logger.error(LOG, `Chart fetch failed for ${symbol}/${timeframe}:`, err.message)
         return false
@@ -86,7 +88,11 @@ function _timeframeMs(tf) {
 
 const MAX_STUDIES = 3
 
-function _buildStudies(condition) {
+// `fillDefaults` (default true) tops the chart off with EMA20/50 as generic price context when
+// the caller named no overlays of its own. Pass `{ fillDefaults: false }` for a PLAIN chart — only
+// the indicators the condition/agent explicitly references get drawn. Price-action reads (patterns,
+// orderblocks, false breaks) want bare candles so the read isn't primed toward moving averages.
+function _buildStudies(condition, { fillDefaults = true } = {}) {
     const studies = []
     const added   = new Set()
 
@@ -140,9 +146,13 @@ function _buildStudies(condition) {
         if (family === 'sma') add({ name: 'Moving Average', input: { in_0: period }, forceOverlay: true }, `sma${period}`)
     }
 
-    // Fill remaining slots with EMA(20) / EMA(50) as price context
-    add({ name: 'Moving Average Exponential', input: { in_0: 20 }, forceOverlay: true }, 'ema20')
-    add({ name: 'Moving Average Exponential', input: { in_0: 50 }, forceOverlay: true }, 'ema50')
+    // Fill remaining slots with EMA(20) / EMA(50) as generic price context — only when the caller
+    // didn't ask for a plain chart. A price-action read renders bare candles so the model looks at
+    // structure (orderblocks, sweeps, false breaks) instead of narrating moving averages.
+    if (fillDefaults) {
+        add({ name: 'Moving Average Exponential', input: { in_0: 20 }, forceOverlay: true }, 'ema20')
+        add({ name: 'Moving Average Exponential', input: { in_0: 50 }, forceOverlay: true }, 'ema50')
+    }
 
     return studies
 }

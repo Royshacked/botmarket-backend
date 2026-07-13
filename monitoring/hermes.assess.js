@@ -5,10 +5,11 @@
 // with adaptive thinking, and parse the first JSON object out of the reply.
 
 import Anthropic from '@anthropic-ai/sdk'
-import { getTickerAggregates, getQuotes } from '../providers/yahoofinance.provider.js'
-import { fetchChartImage } from '../providers/chartImg.provider.js'
+import { getTickerAggregates, getQuotes, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
 import { buildStudies } from './evaluators/chart.evaluator.js'
 import { CANDLE_CFG, aggregateCandles } from '../services/marketData.tools.js'
+import { cachedChartImage } from '../services/chartImgCache.service.js'
+import { readStructure, STRUCTURE_VISIONS } from '../services/priceStructure.tools.js'
 import { newsService } from '../services/news.service.js'
 import { userService } from '../api/user/user.service.js'
 import { logger } from '../services/logger.service.js'
@@ -160,11 +161,12 @@ async function _newsText(asset) {
     return block
 }
 
-// ─── Adaptive timeframe: on-demand chart tool ─────────────────────────────────
+// ─── Adaptive timeframe: on-demand chart + structure tools ────────────────────
 // The read is shown its primary (finest-rung) chart up front, but — like a trader flipping charts —
-// it may pull additional views mid-assessment via get_chart, restricted to THIS call's ladder rungs.
-// Bounded so a tool loop can't run away.
-const MAX_CHART_TOOL_CALLS = 3
+// it may pull additional views mid-assessment (get_chart) or structured price-action reads
+// (get_orderblocks / get_false_breaks), restricted to THIS call's ladder rungs. Bounded so the tool
+// loop can't run away (each structure read costs an extra vision call, so keep the ceiling tight).
+const MAX_ASSESS_TOOL_CALLS = 3
 
 // Build the get_chart tool for a call, with the timeframe enum LOCKED to the call's ladder rungs so the
 // model can only request timeframes Kairos actually laddered. Pure.
@@ -181,16 +183,50 @@ export function _chartTool(ladder) {
     }]
 }
 
+// The price-action structure tools (get_orderblocks / get_false_breaks), timeframe LOCKED to the
+// call's ladder rungs. Each renders a PLAIN chart at the chosen rung and returns a structured read —
+// the same tools the build agents use, so Hermes confirms the price-action trigger with the same
+// lens the plan was built on. Optional (the model calls them only when the chart alone is ambiguous).
+export function _structureTools(ladder) {
+    const rungs = Array.isArray(ladder) && ladder.length ? ladder : ['15min']
+    const timeframe = { type: 'string', enum: rungs, description: "One of the call's timeframe_ladder rungs." }
+    return [
+        {
+            name: 'get_orderblocks',
+            description: "Render a PLAIN chart at one of this call's ladder timeframes and get a structured read of the ORDER BLOCKS near current price (last opposing candle/cluster before an impulsive structure break) — fresh/untested vs mitigated, zone vs price. Use it to check whether a price-action orderblock actually backs entering here. Optional.",
+            input_schema: { type: 'object', properties: { timeframe }, required: ['timeframe'] },
+        },
+        {
+            name: 'get_false_breaks',
+            description: "Render a PLAIN chart at one of this call's ladder timeframes and get a structured read of recent FALSE BREAKS / liquidity sweeps (price pushed beyond a prior high/low, failed, and closed back inside). Use it to confirm a sweep-and-reclaim trigger at the zone. Optional.",
+            input_schema: { type: 'object', properties: { timeframe }, required: ['timeframe'] },
+        },
+        {
+            name: 'get_cycle_analysis',
+            description: "Read the dominant recurring PRICE cycle (trough-to-trough / peak-to-peak) at one of this call's ladder timeframes — where price sits in the cycle now and the estimated next turn — to time the entry against it (is a turn due?). A sub-hourly-to-hourly rung reads the intraday cycle; a daily rung the multi-day swing. Optional.",
+            input_schema: { type: 'object', properties: { timeframe }, required: ['timeframe'] },
+        },
+    ]
+}
+
 // A requested chart timeframe is honored only if it's one of the call's ladder rungs. Pure.
 export function _validChartTf(requested, ladder) {
     return (Array.isArray(ladder) ? ladder : []).includes(requested) ? requested : null
 }
 
-// Execute the get_chart tool_use blocks from an assistant turn: fetch each ladder-valid chart and return
-// the matching tool_result blocks (image + label); an invalid rung or a failed render returns an error
-// tool_result so the model can proceed rather than stall. Order/count mirror the requested uses.
-async function _handleChartToolUses(call, assistantContent, ladder) {
-    const uses = (assistantContent ?? []).filter(b => b?.type === 'tool_use' && b.name === 'get_chart')
+// Execute the assessment tool_use blocks from an assistant turn — get_chart (indicator-overlaid
+// chart image) and the plain-chart structure reads get_orderblocks / get_false_breaks — and return
+// the matching tool_result blocks. Every rung is validated against the call's ladder; an invalid rung
+// or a failed render/read returns an error tool_result so the model can proceed rather than stall.
+// Order/count mirror the requested uses. Deps injectable for tests (no network / no model call).
+export async function _handleAssessToolUses(call, assistantContent, ladder, deps = {}) {
+    const {
+        renderChart:      _renderChart      = cachedChartImage,
+        readStructure:    _readStructure    = readStructure,
+        getCycleAnalysis: _getCycleAnalysis = getCycleAnalysis,
+    } = deps
+    const symbol = String(call.asset).toUpperCase()
+    const uses = (assistantContent ?? []).filter(b => b?.type === 'tool_use')
     const results = []
     for (const use of uses) {
         const tf = _validChartTf(use.input?.timeframe, ladder)
@@ -200,14 +236,24 @@ async function _handleChartToolUses(call, assistantContent, ladder) {
             continue
         }
         try {
-            const png = await fetchChartImage(String(call.asset).toUpperCase(), tf, buildStudies('vwap, ema(50), volume'))
-            results.push({ type: 'tool_result', tool_use_id: use.id, content: [
-                { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
-                { type: 'text', text: `${String(call.asset).toUpperCase()} ${tf} chart.` },
-            ] })
+            if (use.name === 'get_orderblocks' || use.name === 'get_false_breaks') {
+                const kind = use.name === 'get_orderblocks' ? 'orderblocks' : 'false_breaks'
+                const { text } = await _readStructure({ symbol, timeframe: tf, kind, vision: STRUCTURE_VISIONS[kind] })
+                results.push({ type: 'tool_result', tool_use_id: use.id, content: text })
+            } else if (use.name === 'get_cycle_analysis') {
+                const text = await _getCycleAnalysis(symbol, 'price', null, 4, tf)
+                results.push({ type: 'tool_result', tool_use_id: use.id, content: String(text) })
+            } else {
+                // get_chart (default): the indicator-overlaid chart image
+                const png = await _renderChart(symbol, tf, buildStudies('vwap, ema(50), volume', { fillDefaults: false }))
+                results.push({ type: 'tool_result', tool_use_id: use.id, content: [
+                    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
+                    { type: 'text', text: `${symbol} ${tf} chart.` },
+                ] })
+            }
         } catch (err) {
             results.push({ type: 'tool_result', tool_use_id: use.id, is_error: true,
-                content: `could not render the ${tf} chart: ${err.message}` })
+                content: `could not run ${use.name} on the ${tf} chart: ${err.message}` })
         }
     }
     return results
@@ -223,7 +269,7 @@ async function _runAssessment(call, systemPrompt, buildUserText, label) {
         const ladder = Array.isArray(call.timeframe_ladder) && call.timeframe_ladder.length ? call.timeframe_ladder : ['15min']
         const tf = ladder[ladder.length - 1]   // primary view + candle timeframe = the ladder's finest rung
         const [png, candlesText, newsText, marketText] = await Promise.all([
-            fetchChartImage(String(call.asset).toUpperCase(), tf, buildStudies('vwap, ema(50), volume')).catch(() => null),
+            cachedChartImage(String(call.asset).toUpperCase(), tf, buildStudies('vwap, ema(50), volume', { fillDefaults: false })).catch(() => null),
             _candlesText(call.asset, tf).catch(() => ''),
             _newsText(call.asset).catch(() => ''),
             _marketText(call).catch(() => ''),
@@ -238,22 +284,23 @@ async function _runAssessment(call, systemPrompt, buildUserText, label) {
         const thinking  = _thinkingConfig(reasoningEffort)
         const maxTokens = thinking ? ASSESS_MAX_TOKENS_THINKING : ASSESS_MAX_TOKENS
         const system    = [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
-        const tools     = _chartTool(ladder)
+        const tools     = [..._chartTool(ladder), ..._structureTools(ladder)]
         const messages  = [{ role: 'user', content: primary }]
 
-        // Adaptive-timeframe loop: the read may pull extra ladder-rung charts via get_chart (bounded).
-        // Most reads call no tool → a single round-trip, exactly as before. On the final allowed round
-        // the tools are dropped so the model is forced to return the JSON rather than request another chart.
+        // Adaptive-timeframe loop: the read may pull extra ladder-rung charts (get_chart) or structured
+        // price-action reads (get_orderblocks / get_false_breaks), bounded. Most reads call no tool → a
+        // single round-trip, exactly as before. On the final allowed round the tools are dropped so the
+        // model is forced to return the JSON rather than request another read.
         let msg
-        for (let round = 0; round <= MAX_CHART_TOOL_CALLS; round++) {
+        for (let round = 0; round <= MAX_ASSESS_TOOL_CALLS; round++) {
             msg = await _client.messages.create({
                 model, max_tokens: maxTokens, system, messages,
-                ...(round < MAX_CHART_TOOL_CALLS ? { tools } : {}),
+                ...(round < MAX_ASSESS_TOOL_CALLS ? { tools } : {}),
                 ...(thinking ?? {}),
             })
             if (msg.stop_reason !== 'tool_use') break
             messages.push({ role: 'assistant', content: msg.content })
-            messages.push({ role: 'user', content: await _handleChartToolUses(call, msg.content, ladder) })
+            messages.push({ role: 'user', content: await _handleAssessToolUses(call, msg.content, ladder) })
         }
         return extractFirstJSON(_allText(msg))
     } catch (err) {
@@ -264,7 +311,7 @@ async function _runAssessment(call, systemPrompt, buildUserText, label) {
 
 const _ASSESS_SYSTEM = `You are Kairos, a discretionary day/swing trader running a readiness check on a pre-built trade "call".
 You are given the call (the THESIS, zones, reference levels, the specific mapped patterns, and the author's conviction), a rendered chart image, recent candles, the current price, and why you were woken.
-You're shown the primary chart at the ladder's finest rung; you MAY call get_chart(timeframe) to pull any other rung of the call's timeframe_ladder — a higher timeframe for structure, a lower one for the trigger, or the timeframe a specific pattern was mapped on — before deciding. Check whatever views you'd want as a trader, or skip it when the primary chart is enough. Set "timeframe_used" to the timeframe your decision leans on.
+You're shown the primary chart at the ladder's finest rung; you MAY call get_chart(timeframe) to pull any other rung of the call's timeframe_ladder — a higher timeframe for structure, a lower one for the trigger, or the timeframe a specific pattern was mapped on — before deciding. You may also call get_orderblocks(timeframe) or get_false_breaks(timeframe) on any ladder rung for a structured price-action read (fresh orderblocks near price / recent liquidity sweeps) when the chart alone leaves the trigger ambiguous, and get_cycle_analysis(timeframe) to time the entry against the dominant recurring price cycle (is a turn due on this rung?) — all the same lenses the call was built on. These tools are OPTIONAL — use them only when they'd change your decision; skip them when the primary chart is enough. Check whatever views you'd want as a trader. Set "timeframe_used" to the timeframe your decision leans on.
 Decide if NOW is a good moment to enter around the armed zone. Weight price action over indicators. Be strict — most checks should NOT be "enter".
 Assess four axes: market conditions, news/catalyst, price action (from the chart), and whether the mapped patterns are actually happening. Judge them HOLISTICALLY against the THESIS — the call's reason for being.
 Weight technicals vs fundamentals by horizon, the way the call was built: an intraday/day call is price-action-led (fundamentals a light backdrop); a swing call gives the fundamental/catalyst picture real weight alongside the technicals. The patterns you check are the SPECIFIC ones the plan mapped — evaluate each by its own look_for cue and its own timeframe, and respect its evidence flag (observed vs inferred); confirm or reject THOSE, don't grade generic ones.
