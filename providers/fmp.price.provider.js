@@ -31,14 +31,44 @@ export function normalizeFmpQuote(row) {
     if (!row || typeof row !== 'object') return null
     const price = Number(row.price)
     if (!Number.isFinite(price) || price <= 0) return null
+    const num = v => (Number.isFinite(Number(v)) ? Number(v) : null)
     const h = Number(row.dayHigh)
     const l = Number(row.dayLow)
     return {
+        symbol:  typeof row.symbol === 'string' ? row.symbol : null,
+        name:    typeof row.name === 'string' ? row.name : null,
         price,
         dayHigh: Number.isFinite(h) && h > 0 ? h : price,
         dayLow:  Number.isFinite(l) && l > 0 ? l : price,
-        name:    typeof row.name === 'string' ? row.name : null,
+        open:          num(row.open),
+        previousClose: num(row.previousClose),
+        changePercent: num(row.changePercentage),
+        tsSec:         num(row.timestamp),   // epoch SECONDS
     }
+}
+
+/**
+ * Adapt a normalised FMP quote to the yahoo-finance `yf.quote` field names, so the Yahoo
+ * provider's quote functions read FMP data unchanged. Pure — exported for testing.
+ */
+export function toYfQuote(q) {
+    if (!q) return null
+    return {
+        symbol:                      q.symbol,
+        shortName:                   q.name,
+        regularMarketPrice:          q.price,
+        regularMarketOpen:           q.open,
+        regularMarketDayHigh:        q.dayHigh,
+        regularMarketDayLow:         q.dayLow,
+        regularMarketPreviousClose:  q.previousClose,
+        regularMarketChangePercent:  q.changePercent,
+        regularMarketTime:           q.tsSec,   // epoch seconds (yahoo convention)
+    }
+}
+
+/** yf.quote-compatible real-time quote from FMP, or null when FMP can't price the symbol. */
+export async function getFmpQuoteYf(symbol) {
+    return toYfQuote(await getFmpQuoteFull(symbol))
 }
 
 /**

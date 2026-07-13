@@ -230,6 +230,51 @@ export async function getEarningsCalendarRaw(from, to, symbols = []) {
         .sort((a, b) => a.date.localeCompare(b.date))
 }
 
+// ─── Per-ticker earnings (next date + recent actual-vs-estimate) ────────────
+// `/stable/earnings?symbol=` returns upcoming rows (epsActual null) AND historical quarters
+// (epsActual populated), newest first — so one call covers both halves the LLM string needs.
+const EARN_ROW_TTL_MS = 6 * 60 * 60 * 1000
+const _earnRowCache = createTtlCache({ ttlMs: EARN_ROW_TTL_MS, max: 300 }) // SYMBOL -> text
+
+/** Earnings summary for a ticker (next date + last 4 quarters actual vs estimate), LLM-ready. */
+export async function getEarnings(ticker) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    if (!sym) return 'No ticker provided.'
+
+    const hit = _earnRowCache.get(sym)
+    if (hit) return hit
+
+    let rows
+    try {
+        const arr = await _fmpGet(`/earnings?symbol=${sym}&limit=8`)
+        rows = Array.isArray(arr) ? arr : []
+    } catch (err) {
+        return `No earnings data for ${sym}: ${err.message}`
+    }
+    if (!rows.length) return `No earnings data for ${sym}.`
+
+    const today    = new Date().toISOString().slice(0, 10)
+    const upcoming = rows.filter(r => r.date && r.date >= today && r.epsActual == null).sort((a, b) => a.date.localeCompare(b.date))
+    const past     = rows.filter(r => r.epsActual != null).sort((a, b) => b.date.localeCompare(a.date))
+
+    const lines = [`${sym} — earnings:`]
+    const next  = upcoming[0]
+    if (next) lines.push(`Next earnings: ${next.date}${next.epsEstimated != null ? ` (est EPS ${num(next.epsEstimated)})` : ''}`)
+    if (past.length) {
+        lines.push('Recent quarters (actual vs estimate):')
+        for (const q of past.slice(0, 4)) {
+            const a = num(q.epsActual), e = num(q.epsEstimated)
+            const surp = (q.epsActual != null && q.epsEstimated != null && Number(q.epsEstimated) !== 0)
+                ? ` (${(((q.epsActual - q.epsEstimated) / Math.abs(q.epsEstimated)) * 100).toFixed(1)}% surprise)`
+                : ''
+            lines.push(`  ${q.date}: actual ${a ?? 'n/a'} vs est ${e ?? 'n/a'}${surp}`)
+        }
+    }
+    const text = lines.join('\n')
+    _earnRowCache.set(sym, text)
+    return text
+}
+
 /**
  * Fundamentals for a ticker as an LLM-ready string. Profile is fetched first and
  * its `isEtf`/`isFund` flag decides the shape: stocks get valuation/quality/

@@ -16,6 +16,10 @@ import {
     fmtDuration as _fmtDuration,
     fmtDateTimeUTC as _fmtDateTimeUTC,
 } from '../services/cycleAnalysis.service.js'
+// FMP-first data sourcing for quotes + analytics candles (with Yahoo fallback). fmp.price is a
+// leaf module, so importing it here is cycle-free — unlike candles.provider, which imports
+// massive → this module. See reference_fmp_pricing.
+import { getFmpQuoteYf, getFmpCandles } from './fmp.price.provider.js'
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] })
 
@@ -30,7 +34,11 @@ async function _quote(ticker) {
     const symbol = String(ticker).toUpperCase()
     const hit = _quoteCache.get(symbol)
     if (hit) return hit
-    const data = await yf.quote(symbol)
+    // FMP real-time quote (mapped to yf field names); fall back to Yahoo for symbols FMP can't
+    // price (some futures / index CFDs) or on a provider error.
+    let data = null
+    try { data = await getFmpQuoteYf(symbol) } catch { /* fall back */ }
+    if (!data) data = await yf.quote(symbol)
     _quoteCache.set(symbol, data)
     return data
 }
@@ -132,10 +140,21 @@ export async function getQuotes(tickers = []) {
 
 const TRADING_DAYS = 252
 
+// FMP-first candle fetch for the analytics functions (risk / correlation / price-action /
+// cycle). FMP daily is verified-aligned with the current provider (ET-midnight); fall back to
+// the local Yahoo aggregates for symbols/timeframes FMP doesn't serve.
+async function _candles(sym, opts) {
+    try {
+        const fmp = await getFmpCandles(sym, opts)
+        if (Array.isArray(fmp) && fmp.length) return fmp
+    } catch { /* fall through to Yahoo */ }
+    return getTickerAggregates(sym, opts)
+}
+
 // Fetch ~`days` calendar days of daily OHLC for a ticker.
 async function _dailyCandles(ticker, days = 365) {
     const from = Date.now() - days * 24 * 60 * 60 * 1000
-    return getTickerAggregates(ticker, { timeSpan: 'day', multiplier: 1, from, to: Date.now() })
+    return _candles(ticker, { timeSpan: 'day', multiplier: 1, from, to: Date.now() })
 }
 
 /**
@@ -320,7 +339,7 @@ const INTRADAY_CYCLE_CFG = {
 async function _intradayPriceCycle(sym, timeframe) {
     const cfg  = INTRADAY_CYCLE_CFG[timeframe]
     const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
-    const candles = await getTickerAggregates(sym, { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from, to: Date.now() })
+    const candles = await _candles(sym, { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from, to: Date.now() })
     if (!candles || candles.length < 40) return `${sym}: not enough ${timeframe} history for an intraday cycle read.`
 
     const closes = candles.map(c => c.close)

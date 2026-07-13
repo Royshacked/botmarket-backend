@@ -1,5 +1,6 @@
-import { getQuote, getEarnings } from '../providers/yahoofinance.provider.js'
-import { getTickerAggregates }   from '../providers/candles.provider.js'
+import { getQuote }             from '../providers/yahoofinance.provider.js'
+import { getTickerAggregates }  from '../providers/candles.provider.js'
+import { getEarnings }          from '../providers/fmp.provider.js'
 import { cachedChartImage } from './chartImgCache.service.js'
 import { buildStudies } from '../monitoring/evaluators/chart.evaluator.js'
 import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../monitoring/evaluators/structured.evaluator.js'

@@ -1,22 +1,41 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeFmpQuote } from '../../providers/fmp.price.provider.js'
+import { normalizeFmpQuote, toYfQuote } from '../../providers/fmp.price.provider.js'
 
 // normalizeFmpQuote maps an FMP /quote row → { price, dayHigh, dayLow, name }. This is the
 // piece the paper mark/fill path relies on to replace the stale-day-candle price that
 // caused a false TP fill (project_timestamp_ideas Issue 1). Network fetch isn't unit-tested.
 
-test('valid row → price + day high/low + name', () => {
-    const q = normalizeFmpQuote({ symbol: 'SNDK', name: 'Sandisk Corporation', price: 1672.8, dayHigh: 1800, dayLow: 1658.2 })
-    assert.deepEqual(q, { price: 1672.8, dayHigh: 1800, dayLow: 1658.2, name: 'Sandisk Corporation' })
+test('full row → all fields mapped', () => {
+    const q = normalizeFmpQuote({
+        symbol: 'AAPL', name: 'Apple Inc.', price: 317.31, dayHigh: 323.45, dayLow: 315.78,
+        open: 317.015, previousClose: 315.32, changePercentage: 0.6311, timestamp: 1783972801,
+    })
+    assert.deepEqual(q, {
+        symbol: 'AAPL', name: 'Apple Inc.', price: 317.31, dayHigh: 323.45, dayLow: 315.78,
+        open: 317.015, previousClose: 315.32, changePercent: 0.6311, tsSec: 1783972801,
+    })
 })
 
-test('missing/degenerate high-low fall back to price', () => {
+test('missing fields → null (except h/l default to price)', () => {
     const q = normalizeFmpQuote({ price: 100 })
-    assert.deepEqual(q, { price: 100, dayHigh: 100, dayLow: 100, name: null })
+    assert.deepEqual(q, { symbol: null, name: null, price: 100, dayHigh: 100, dayLow: 100, open: null, previousClose: null, changePercent: null, tsSec: null })
     const q2 = normalizeFmpQuote({ price: 100, dayHigh: 0, dayLow: -5 })
     assert.equal(q2.dayHigh, 100)
     assert.equal(q2.dayLow, 100)
+})
+
+test('toYfQuote maps to yahoo field names (tsSec kept as epoch seconds)', () => {
+    const yf = toYfQuote(normalizeFmpQuote({ symbol: 'AAPL', name: 'Apple Inc.', price: 317.31, dayHigh: 323.45, dayLow: 315.78, open: 317, previousClose: 315.32, changePercentage: 0.63, timestamp: 1783972801 }))
+    assert.equal(yf.symbol, 'AAPL')
+    assert.equal(yf.shortName, 'Apple Inc.')
+    assert.equal(yf.regularMarketPrice, 317.31)
+    assert.equal(yf.regularMarketOpen, 317)
+    assert.equal(yf.regularMarketDayHigh, 323.45)
+    assert.equal(yf.regularMarketPreviousClose, 315.32)
+    assert.equal(yf.regularMarketChangePercent, 0.63)
+    assert.equal(yf.regularMarketTime, 1783972801)
+    assert.equal(toYfQuote(null), null)
 })
 
 test('no usable price → null (never a false 0 that could trigger a fill)', () => {
