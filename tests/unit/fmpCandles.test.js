@@ -21,8 +21,11 @@ test('accepts a T separator too', () => {
     assert.equal(fmpDateToEpochSec('2026-07-13T14:50:00'), fmpDateToEpochSec('2026-07-13 14:50:00'))
 })
 
-test('date-only (EOD) → UTC midnight of the day', () => {
-    assert.equal(fmpDateToEpochSec('2026-07-13'), Math.floor(Date.UTC(2026, 6, 13) / 1000))
+test('date-only (EOD) → ET midnight (matches Massive daily convention: 04:00Z EDT)', () => {
+    // 2026-07-13 ET midnight in July (EDT, −4h) → 04:00 UTC
+    assert.equal(fmpDateToEpochSec('2026-07-13'), Math.floor(Date.UTC(2026, 6, 13, 4, 0, 0) / 1000))
+    // winter day (EST, −5h) → 05:00 UTC
+    assert.equal(fmpDateToEpochSec('2026-01-15'), Math.floor(Date.UTC(2026, 0, 15, 5, 0, 0) / 1000))
 })
 
 test('unparseable input → null', () => {

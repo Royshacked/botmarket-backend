@@ -84,9 +84,10 @@ function _etOffsetMs(instant) {
 /**
  * Parse an FMP date into UTC epoch seconds. Pure — exported for testing.
  *   "YYYY-MM-DD HH:mm:ss" → an ET wall-clock instant → UTC epoch (intraday bars).
- *   "YYYY-MM-DD"          → UTC midnight of the day (EOD bars; the exact daily convention
- *                            is confirmed against Massive/Yahoo by the Stage-2 parity diff).
- * Returns null for anything unparseable.
+ *   "YYYY-MM-DD"          → ET MIDNIGHT of that market day → UTC epoch (EOD bars).
+ * Both resolve against ET so daily bars land on the SAME instant Massive uses (04:00Z EDT /
+ * 05:00Z EST) — verified by the Stage-2 parity diff (intraday matched to the second; daily
+ * had a clean −4h offset that this ET convention closes). Returns null for unparseable input.
  */
 export function fmpDateToEpochSec(dateStr) {
     if (typeof dateStr !== 'string') return null
@@ -96,11 +97,11 @@ export function fmpDateToEpochSec(dateStr) {
     // Reject impossible components — Date.UTC silently rolls over (month 13 → next year), which
     // would yield a plausible-but-wrong epoch and corrupt the monitor. A bad row is dropped instead.
     if (+mo < 1 || +mo > 12 || +d < 1 || +d > 31) return null
-    if (hh == null) return Math.floor(Date.UTC(+y, +mo - 1, +d) / 1000)   // date-only → UTC midnight
-    if (+hh > 23 || +mi > 59 || +(ss ?? 0) > 59) return null
-    // ET wall-clock components: guess the epoch as if they were UTC, then correct by the ET
-    // offset at that instant (UTC = ET_wallclock − offset; offset is negative west of UTC).
-    const asIfUtc = Date.UTC(+y, +mo - 1, +d, +hh, +mi, +(ss ?? 0))
+    if (hh != null && (+hh > 23 || +mi > 59 || +(ss ?? 0) > 59)) return null
+    // Interpret the components as ET wall-clock (date-only → 00:00 ET), then correct by the ET
+    // offset at that instant to get true UTC (UTC = ET_wallclock − offset; offset is negative
+    // west of UTC). date-only → ET midnight matches Massive's daily-bar convention.
+    const asIfUtc = Date.UTC(+y, +mo - 1, +d, +(hh ?? 0), +(mi ?? 0), +(ss ?? 0))
     return Math.floor((asIfUtc - _etOffsetMs(asIfUtc)) / 1000)
 }
 
