@@ -73,7 +73,8 @@ services/
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
   tradeNotify.service.js    notify+route cards → social chat: entry_confirm (paper/live idea + Kairos
                             ready call) + call_expiry (Kairos thesis edit/expired). Pure builders +
-                            thin sendBotMessage wrappers; card is the alert, existing UI is the destination
+                            thin sendBotMessage wrappers; card is the alert, existing UI is the destination.
+                            entry_confirm carries a `note` (passed_earlier | off_hours | null) for scheduled entries
   thread.service.js  thread.util.js   unified subject-bound conversation threads
                           (`threads` collection). A conversation gets a threadId at the
                           start (subject-independent), is saved as a `draft` once it crosses
@@ -88,7 +89,9 @@ providers/
   ibkr.provider.js (retired) / ibkr.gateway.provider.js
   mongodb.provider.js       getDb(), stripId/stripIds
 monitoring/
-  minos.monitor.service.js  Minos — the idea monitor: 60s poll loop; preflightEntry (arm-time already-satisfied check)
+  minos.monitor.service.js  Minos — the idea monitor: 60s poll loop; preflightEntry (arm-time already-satisfied check);
+                            _entryTimeGate (scheduled/time-only entry: exempt from market-closed skip; _marketSweep
+                            surfaces deferred entries + notifies at market open)
   monitor.orchestrator.js   evaluateTree / evaluateConditions → _evalOne (opts: stateLevel, requireHeld)
   evaluators/               touch · structured · indicator · time · volume · news · chart
   execution.reconciler.js   broker-authoritative fill/close → idea status

@@ -34,7 +34,8 @@ minosService.start()
               │       └── yes → skip
               │
               ├── market closed + intraday equity?  →  skip
-              │   (crypto USDT/USDC pairs run 24/7 — always evaluated)
+              │   (crypto USDT/USDC pairs run 24/7 — always evaluated;
+              │    a PURE time-only entry is exempt — see §6 Time)
               │
               ├── getCandles(asset, timeframe, 300)   ← ohlcv.provider → priceService
               │   (separate timeframes for entry / stop / TP)
@@ -463,6 +464,26 @@ pass = (after  == null || now >= after)
   optimisation: `isTimeBlocked` evaluates the tree optimistically (every non-time leaf
   assumed true, time leaves use the real clock); if the tree is still false, only the clock
   is to blame, so the monitor **skips fetching candles that tick** (`_canPassOnTime`).
+
+#### Scheduled (timestamp) entries
+
+A **timestamp idea** — a regular idea whose entry is a `time` leaf — schedules a market
+entry for a wall-clock instant. It is **not** an immediate trade: it starts `waiting`, is
+armed to `looking` like any idea, and fires when the clock passes `after`. Key rules:
+
+- **Never immediate.** `saveIdea` treats `immediate:true` as real only when there is *no*
+  gating entry condition (`resolveImmediate` / `hasEntryConditions`). A `time` (or any) entry
+  leaf makes the idea conditional, so it can't be turned into a save-time market order.
+- **Timezone.** The idea agent receives the browser's `clientNow` / `clientTz`
+  (`_formatClientTime`) and converts a user's local clock time to an absolute-UTC
+  `after` / `before`. Without a timezone it asks rather than guessing.
+- **Off-hours determinism.** `_entryTimeGate(idea).allTime` marks a *pure* time entry;
+  such an entry is **exempt from the market-closed skip**, so it fires on schedule even
+  overnight, flips to `hit`, and the order defers as `awaiting_market`. When the market
+  re-opens, `_marketSweep` surfaces it and posts the entry-confirm card (note `off_hours`).
+- **Notification note.** The entry-confirm card carries a `note`: `passed_earlier` when the
+  scheduled time was already past at arm-time (`after <= activatedAt`), `off_hours` when it
+  surfaced at market open, else `null`. See the paper/live entry-confirm flow.
 
 ### 7. Volume (`type: 'volume'`)
 

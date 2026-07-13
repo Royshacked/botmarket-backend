@@ -48,6 +48,13 @@ waiting ──► looking ──► hit ──► long / short ──► closed
   position survived (`findOpenPosition`) before mutating idea state — it never closes an idea on a
   transient/unknown result.
 - **Delete lock:** live ideas (`hit`/`long`/`short`) cannot be deleted (409 `reason:'in_position'`).
+- **Scheduled (timestamp) entries.** A regular idea whose entry is a `time` leaf enters on a
+  wall-clock schedule — **not** an immediate trade: `saveIdea` only honours `immediate` when
+  there is *no* gating entry condition (`resolveImmediate`). The agent converts the user's local
+  clock time (browser `clientTz`) to absolute-UTC `after`/`before`. A pure time entry stays
+  monitored even when the market is closed and defers as `awaiting_market`, surfacing the
+  entry-confirm card at the next open (`_marketSweep`, note `off_hours`). `updateIdea` refuses to
+  revive a `closed` idea (`isClosedIdeaFrozen` → 409 `already_closed`).
 
 ---
 
@@ -63,7 +70,7 @@ Entry / stop / TP are **condition trees**: AND/OR group nodes over typed leaves.
 | `touch` | price trading **at** a level, intrabar | direction-agnostic; becomes a native broker order for entries/exits |
 | `structured` | a deterministic threshold at candle **close** | pure math, no LLM; subjects: price/volume + RSI/EMA/SMA/MACD/ATR/VWAP vs a number |
 | `indicator` | a qualitative TA judgment (e.g. "bullish engulfing") | Haiku YES/NO over the candle+indicator table; `parsers/indicators.parser.js` supplies the shared `family(N)` grammar |
-| `time` | a wall-clock `after`/`before` window | cheapest leaf; can skip the candle fetch |
+| `time` | a wall-clock `after`/`before` window | cheapest leaf; can skip the candle fetch; a pure time entry = a **scheduled (timestamp) entry** (see Rules) |
 | `volume` | bar or cumulative volume threshold | `bar` = candle close; `cumulative` = intraday, session-anchored, ~1-min poll |
 | `news` | an LLM judgment over recent news | Haiku YES/NO (`parseYesNo`) |
 | `chart` | an LLM vision judgment over a chart image | Sonnet vision; most expensive |
