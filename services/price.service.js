@@ -1,4 +1,4 @@
-import { getTickerAggregates } from '../providers/massive.provider.js'
+import { getTickerAggregates } from '../providers/candles.provider.js'
 import { isCacheFresh, loadCandlesFromFile, saveCandlesToFile } from './util.service.js'
 import { barDurationSeconds } from './timeframe.service.js'
 
