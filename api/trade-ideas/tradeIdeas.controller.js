@@ -244,6 +244,7 @@ export async function updateTradeIdea(req, res) {
             if (result.reason === 'not_found')      return res.status(404).send({ error: 'Idea not found' })
             if (result.reason === 'forbidden')      return res.status(403).send({ error: 'Forbidden' })
             if (result.reason === 'invalid_status') return res.status(400).send({ error: 'Invalid status value' })
+            if (result.reason === 'already_closed')  return res.status(409).send({ error: 'Idea is closed', reason: 'already_closed' })
             // Resting (broker-native stop-market) entry activation failures
             if (result.reason === 'not_resting')      return res.status(400).send({ error: 'Idea is not a resting entry' })
             if (result.reason === 'already_placed')   return res.status(409).send({ error: 'Order already placed' })

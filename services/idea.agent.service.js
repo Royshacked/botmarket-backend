@@ -293,8 +293,8 @@ export const ideaAgentService = {
     chatStream,
 }
 
-async function chat({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null }) {
-    const systemPrompt = _buildSystemPrompt(analysisState, brokerContext)
+async function chat({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, clientTime = null }) {
+    const systemPrompt = _buildSystemPrompt(analysisState, brokerContext, [], clientTime)
     const builtMessages = _buildMessages({ messages, userPrompt, analysisState })
 
     logger.info(LOG, 'chat start', {
@@ -322,13 +322,13 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], clientTime = null, model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, signal }) {
     const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
     const tools        = TOOLS
     const toolHandlers = _buildToolHandlers(onChart)
 
-    const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts)
+    const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts, clientTime)
     const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
 
     logger.info(LOG, 'chatStream start', {
@@ -381,7 +381,7 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
     return { reply, analysisState: updatedState, phase: capturedPhase, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = []) {
+function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = [], clientTime = null) {
     const asset   = analysisState?.structured_state?.active_asset || 'none'
     const summary = analysisState?.recent_chat_summary || 'No prior context.'
     const pt      = analysisState?.structured_state?.pending_trade
@@ -399,6 +399,7 @@ function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = []) {
     const today = new Date().toISOString().slice(0, 10)
     const dynamicContext = `---
 CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.
+${_buildTimeSection(clientTime)}
 CONVERSATION CONTEXT:
 ${summary}
 Active asset: ${asset}${stateSection}${_buildBrokerSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts)}`
@@ -407,6 +408,38 @@ Active asset: ${asset}${stateSection}${_buildBrokerSection(brokerContext)}${_bui
         { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamicContext },
     ]
+}
+
+// Timezone guidance for time-condition authoring. The browser sends its instant + IANA
+// zone; render the user's local wall-clock + UTC offset so the agent converts clock/date
+// times against the USER's timezone and stores after/before as absolute UTC. When the zone
+// is missing/invalid, tell the agent to ask rather than guess. See project_timestamp_ideas.
+function _buildTimeSection(clientTime) {
+    const local = _formatClientTime(clientTime)
+    return local
+        ? `USER LOCAL TIME: ${local}. Interpret any clock time or date the user gives WITHOUT an explicit timezone in THIS timezone, and resolve relative dates (today, tomorrow, next week) against the user's local date. For a time condition, always store after/before as absolute UTC (ISO-8601 …Z).`
+        : `USER LOCAL TIMEZONE: unknown. If the user gives a clock time or date for a time condition, ask which timezone (or confirm UTC) before converting — never guess — then store after/before as absolute UTC (ISO-8601 …Z).`
+}
+
+// Format the browser instant in its IANA zone as "Mon, 07/13/2026, 19:24 Asia/Jerusalem
+// (GMT+03:00)". Returns null when the zone is absent or invalid (bad IANA string throws in
+// Intl). Exported for unit testing.
+export function _formatClientTime(clientTime) {
+    const tz  = typeof clientTime?.clientTz === 'string' ? clientTime.clientTz.trim() : ''
+    const now = Number.isFinite(clientTime?.clientNow) ? clientTime.clientNow : Date.now()
+    if (!tz) return null
+    try {
+        const d     = new Date(now)
+        const local = d.toLocaleString('en-US', {
+            timeZone: tz, weekday: 'short', year: 'numeric', month: '2-digit',
+            day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+        })
+        const offset = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' })
+            .formatToParts(d).find(p => p.type === 'timeZoneName')?.value ?? ''
+        return `${local} ${tz}${offset ? ` (${offset})` : ''}`
+    } catch {
+        return null   // invalid IANA timezone
+    }
 }
 
 function _buildBrokerSection(brokerContext) {

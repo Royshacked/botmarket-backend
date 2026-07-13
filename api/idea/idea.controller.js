@@ -30,6 +30,7 @@ export async function streamIdea(req, res) {
                 analysisState: parsed.analysisState ?? emptyAnalysisState(),
                 brokerContext,
                 ideaAccounts:  parsed.ideaAccounts ?? [],
+                clientTime:    parsed.clientTime ?? null,
                 model:         routing.model,
                 reasoningEffort: routing.reasoningEffort,
                 userId:        req.user._id,
@@ -67,6 +68,7 @@ export async function getIdea(req, res) {
             userPrompt:    parsed.userPrompt,
             analysisState: parsed.analysisState ?? emptyAnalysisState(),
             brokerContext,
+            clientTime:    parsed.clientTime ?? null,
         })
 
         res.send(result)
@@ -79,6 +81,7 @@ export async function getIdea(req, res) {
 function parseIdeaBody(body) {
     const { messages, userPrompt, analysisState, ideaAccounts } = body ?? {}
     const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
+    const clientTime = parseClientTime(body)
 
     let priorState = null
     if (analysisState !== undefined && analysisState !== null) {
@@ -96,7 +99,7 @@ function parseIdeaBody(body) {
         // shared validator, which treats empty as an error).
         if (messages.length === 0) {
             if (trimmedPrompt) {
-                return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: parseIdeaAccounts(ideaAccounts) }
+                return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: parseIdeaAccounts(ideaAccounts), clientTime }
             }
             return { error: 'messages must be a non-empty array' }
         }
@@ -110,12 +113,26 @@ function parseIdeaBody(body) {
             messages:      trimmed,
             analysisState: priorState,
             ideaAccounts:  parseIdeaAccounts(ideaAccounts),
+            clientTime,
         }
     }
 
     if (trimmedPrompt) {
-        return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: parseIdeaAccounts(ideaAccounts) }
+        return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: parseIdeaAccounts(ideaAccounts), clientTime }
     }
 
     return { error: 'Request must include messages or userPrompt' }
+}
+
+// Browser-supplied local time context ({ clientNow: ms, clientTz: IANA string }) used to
+// resolve clock/date times against the user's timezone. Both fields optional and
+// individually validated — a bad value is dropped, never fatal. Returns null when neither
+// usable field is present.
+function parseClientTime(body) {
+    const now = Number(body?.clientNow)
+    const tz  = typeof body?.clientTz === 'string' ? body.clientTz.trim() : ''
+    const clientTime = {}
+    if (Number.isFinite(now) && now > 0) clientTime.clientNow = now
+    if (tz) clientTime.clientTz = tz
+    return (clientTime.clientNow || clientTime.clientTz) ? clientTime : null
 }

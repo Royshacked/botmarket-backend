@@ -18,7 +18,7 @@ import { logger } from '../../services/logger.service.js'
 const LOG = '[time.evaluator]'
 
 /** Parse an ISO-8601 string or epoch (ms or s) into epoch ms, or null when empty/invalid. */
-function toMs(v) {
+export function toMs(v) {
     if (v == null || v === '') return null
     if (typeof v === 'number') return v < 1e12 ? v * 1000 : v   // tolerate seconds
     const t = Date.parse(v)

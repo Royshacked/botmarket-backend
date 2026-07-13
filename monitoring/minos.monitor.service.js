@@ -18,7 +18,8 @@ import { logger }                               from '../services/logger.service
 import { isAssetOpen }                          from '../services/market.service.js'
 import { buildOrderPlanForIdea }                from '../services/orderPlan.service.js'
 import { getCheckGap, isIntradayTimeframe }     from '../services/timeframe.service.js'
-import { collectSymbols, resolveConditionTree } from '../services/conditionTree.service.js'
+import { collectSymbols, resolveConditionTree, extractLeaves } from '../services/conditionTree.service.js'
+import { toMs } from './evaluators/time.evaluator.js'
 import { checkInvalidation }                    from './invalidation.monitor.js'
 import { checkPortfolioReviews }               from './portfolio.monitor.js'
 import { checkPosition }                        from './positionMonitor.js'
@@ -103,6 +104,32 @@ async function _marketSweep(db) {
     logger.info(LOG, `Surfacing ${surface.length} deferred order(s)`)
     for (const idea of surface) {
         await _patch(db, idea.id, { orderState: 'awaiting_confirm' })
+        // Close the notification hole: an entry that triggered while the market was closed
+        // parked silently as awaiting_market — now that it's open, surface the confirm card.
+        // A scheduled/time entry is marked 'off_hours' so the copy reflects why it's late.
+        const note = _entryTimeGate(idea).timeGated ? 'off_hours' : null
+        try { await notifyIdeaEntryConfirm(idea, note) }
+        catch (err) { logger.warn(LOG, `[${idea.id}] deferred-surface notify failed:`, err.message) }
+    }
+}
+
+// Inspect an idea's entry tree for time gating.
+//   timeGated — at least one `time` leaf gates entry
+//   allTime   — EVERY entry leaf is a `time` leaf (a pure scheduled entry: needs no market
+//               data, so it's monitored regardless of market hours)
+//   after     — the governing (latest) `after` bound in ms, or null
+// Used for the market-closed-skip exemption and the entry-confirm note. See
+// project_timestamp_ideas (Phase 4). Exported for unit testing.
+export function _entryTimeGate(idea) {
+    const tree   = resolveConditionTree(idea?.entry_condition_tree, idea?.entry_conditions, idea?.entry_logic ?? 'AND')
+    const leaves = extractLeaves(tree)
+    const timeLeaves = leaves.filter(l => l?.type === 'time')
+    if (timeLeaves.length === 0) return { timeGated: false, allTime: false, after: null }
+    const afters = timeLeaves.map(l => toMs(l?.after)).filter(v => v != null)
+    return {
+        timeGated: true,
+        allTime:   timeLeaves.length === leaves.length,
+        after:     afters.length ? Math.max(...afters) : null,
     }
 }
 
@@ -148,7 +175,12 @@ async function _checkIdea(db, idea) {
     const fastestTf = isPosition
         ? [stopTf, tpTf, entryTf].reduce((a, b) => getCheckGap(a) <= getCheckGap(b) ? a : b)
         : entryTf
-    if ((isIntradayTimeframe(fastestTf) || cumVol) && !isAssetOpen(asset, idea.asset_class)) {
+    // A pure scheduled (time-only) entry needs no live market data — the wall-clock gate
+    // fires and the order defers via awaiting_market until the market re-opens (surfaced by
+    // _marketSweep). So it stays monitored when the market is closed, regardless of timeframe;
+    // this makes off-hours behavior deterministic rather than dependent on a stray entry TF.
+    if ((isIntradayTimeframe(fastestTf) || cumVol) && !isAssetOpen(asset, idea.asset_class)
+        && !(!isPosition && _entryTimeGate(idea).allTime)) {
         logger.info(LOG, `[${id}] Market closed — skipping ${cumVol ? 'cumulative-volume' : 'intraday'} check (${asset}/${fastestTf})`)
         return
     }
@@ -272,7 +304,14 @@ async function _checkEntry(db, idea, candles) {
         // confirmation (open market); 'awaiting_market' defers silently and 'no accounts'
         // has nothing to confirm. Fires once — the idea is now 'hit', so _checkEntry won't run again.
         if (patch.orderState === 'awaiting_confirm') {
-            await notifyIdeaEntryConfirm(idea)
+            // Mark the card when the scheduled time was already in the past when the user armed
+            // the idea (after <= activation) — the entry fires on the first check, so it reads
+            // as "already passed" rather than a fresh trigger. Off-hours triggers never reach
+            // here (they defer to awaiting_market and _marketSweep marks them 'off_hours').
+            const tg     = _entryTimeGate(idea)
+            const armAt  = idea.activatedAt ?? idea.savedAt ?? 0
+            const note   = tg.timeGated && tg.after != null && tg.after <= armAt ? 'passed_earlier' : null
+            await notifyIdeaEntryConfirm(idea, note)
         }
     } else {
         logger.info(LOG, `⏳ Entry not triggered yet for idea ${id} (${asset})`)

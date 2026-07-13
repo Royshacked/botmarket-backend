@@ -23,14 +23,23 @@ const LOG = '[tradeNotify]'
 
 // ── Pure card builders ─────────────────────────────────────────────────────────
 
-/** Paper/live idea entry triggered → confirm to place the order (routes to OrderConfirmDialog). */
-export function buildIdeaEntryConfirm(idea) {
-    const dir = String(idea?.direction || '').toUpperCase()
+/**
+ * Paper/live idea entry triggered → confirm to place the order (routes to OrderConfirmDialog).
+ * `note` marks WHY it surfaced now, so the card can label itself and lead-in copy matches:
+ *   'passed_earlier' — armed after a time condition had already elapsed
+ *   'off_hours'      — a scheduled time fired while the market was closed; surfaced at open
+ *   null             — a normal live trigger
+ */
+export function buildIdeaEntryConfirm(idea, note = null) {
+    const dir  = String(idea?.direction || '').toUpperCase()
+    const lead = note === 'passed_earlier' ? `Scheduled time already passed — ${dir} ${idea?.asset}.`
+        :        note === 'off_hours'      ? `Scheduled time reached while the market was closed — ${dir} ${idea?.asset}.`
+        :                                    `Entry triggered — ${dir} ${idea?.asset}.`
     return {
         userId:  idea?.userId ?? null,
-        content: `Entry triggered — ${dir} ${idea?.asset}. Confirm to place your order.`,
+        content: `${lead} Confirm to place your order.`,
         type:    'entry_confirm',
-        payload: { kind: 'idea', ideaId: idea?.id, asset: idea?.asset, direction: idea?.direction ?? null },
+        payload: { kind: 'idea', ideaId: idea?.id, asset: idea?.asset, direction: idea?.direction ?? null, note: note ?? null },
         botId:   'idea',
     }
 }
@@ -93,8 +102,8 @@ async function _post(card, tag) {
     return sendBotMessage(card.userId, card.content, card.type, card.payload, card.botId)
 }
 
-export async function notifyIdeaEntryConfirm(idea) {
-    return _post(buildIdeaEntryConfirm(idea), 'Entry-confirm card')
+export async function notifyIdeaEntryConfirm(idea, note = null) {
+    return _post(buildIdeaEntryConfirm(idea, note), 'Entry-confirm card')
 }
 
 export async function notifyCallReady(call, assessment = null) {

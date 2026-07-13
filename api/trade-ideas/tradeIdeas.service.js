@@ -58,6 +58,31 @@ function _trimChatState(chatState) {
     return { ...chatState, messages: msgs.slice(-MAX_PERSISTED_MESSAGES) }
 }
 
+// True when an entry tree carries any gating leaf (price, indicator, TIME, news, …).
+// resolveConditionTree returns null when there are truly no entry conditions, so a
+// non-null tree always yields ≥1 leaf — but count leaves directly to stay correct
+// under any future nesting change.
+export function hasEntryConditions(tree) {
+    return extractLeaves(tree).length > 0
+}
+
+// `immediate` means "fire a market order now, no entry conditions". A gating entry
+// condition (a price level, an indicator, or a scheduled TIME leaf) makes the idea
+// conditional by definition, so immediate only truly applies when the entry tree is
+// empty. Backstops an agent that mislabels a scheduled/gated entry as immediate — which
+// would otherwise bypass the monitor and enter at save time. See project_timestamp_ideas.
+export function resolveImmediate(immediateFlag, entryTree) {
+    return immediateFlag === true && !hasEntryConditions(entryTree)
+}
+
+// A 'closed' idea is terminal — a later status patch must never resurrect it. Guards against a
+// stale write reverting a closed idea (e.g. Dismiss on an entry-confirm card that lingered in
+// social chat and was clicked after the idea had already entered and closed, which would leave a
+// mangled waiting-but-closed doc). See project_timestamp_ideas (Issue 2).
+export function isClosedIdeaFrozen(existingStatus, patchStatus) {
+    return existingStatus === 'closed' && patchStatus != null && patchStatus !== 'closed'
+}
+
 async function saveIdea(tradeIdea, userId) {
     const entryTree = resolveConditionTree(tradeIdea.entry_condition,  tradeIdea.entry_conditions, tradeIdea.entry_logic ?? 'AND')
     const stopTree  = resolveConditionTree(tradeIdea.stop_loss,        tradeIdea.stop_conditions,  tradeIdea.stop_logic  ?? 'OR')
@@ -75,7 +100,12 @@ async function saveIdea(tradeIdea, userId) {
         }
     })
 
-    const isImmediate = tradeIdea.immediate === true
+    // Explicit "go in now" (shouldMarketEnterOnUpdate) is a separate, deliberate user
+    // gesture and is not affected by this — only the agent-emitted save path is guarded.
+    const isImmediate = resolveImmediate(tradeIdea.immediate, entryTree)
+    if (tradeIdea.immediate === true && !isImmediate) {
+        logger.warn(LOG, 'immediate:true ignored — idea has gating entry conditions; saving as monitored', { asset: tradeIdea.asset ?? tradeIdea.ticker })
+    }
 
     const enriched = {
         id:              randomUUID(),
@@ -303,6 +333,11 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         )
         if (!existing) return { ok: false, reason: 'not_found' }
         if (existing.userId && existing.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+
+        if (isClosedIdeaFrozen(existing.status, patch.status)) {
+            logger.info(LOG, `[${id}] Ignoring status→${patch.status} on a closed idea (terminal)`)
+            return { ok: false, reason: 'already_closed', idea: null }
+        }
 
         const inPosition = existing.status === 'long' || existing.status === 'short'
         if (inPosition && patch.status !== 'closed') {

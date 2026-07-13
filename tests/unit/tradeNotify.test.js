@@ -9,8 +9,26 @@ test('idea entry-confirm: entry_confirm card attributed to the Idea bot with ide
     assert.equal(c.type, 'entry_confirm')
     assert.equal(c.botId, 'idea')
     assert.equal(c.userId, 'u1')
-    assert.deepEqual(c.payload, { kind: 'idea', ideaId: 'idea_1', asset: 'NQ', direction: 'long' })
+    assert.deepEqual(c.payload, { kind: 'idea', ideaId: 'idea_1', asset: 'NQ', direction: 'long', note: null })
     assert.match(c.content, /Entry triggered — LONG NQ/)
+})
+
+test('idea entry-confirm: note marks WHY it surfaced (payload + lead-in copy)', () => {
+    const idea = { id: 'idea_9', userId: 'u1', asset: 'NQ', direction: 'long' }
+
+    const passed = buildIdeaEntryConfirm(idea, 'passed_earlier')
+    assert.equal(passed.payload.note, 'passed_earlier')
+    assert.match(passed.content, /Scheduled time already passed — LONG NQ/)
+    assert.match(passed.content, /Confirm to place your order\./)
+
+    const offHours = buildIdeaEntryConfirm(idea, 'off_hours')
+    assert.equal(offHours.payload.note, 'off_hours')
+    assert.match(offHours.content, /market was closed/)
+
+    // An unknown note falls back to the normal lead-in and passes through as-is.
+    const weird = buildIdeaEntryConfirm(idea, 'whatever')
+    assert.match(weird.content, /Entry triggered — LONG NQ/)
+    assert.equal(weird.payload.note, 'whatever')
 })
 
 test('idea entry-confirm: no userId → wrapper would no-op (builder still yields null userId)', () => {
