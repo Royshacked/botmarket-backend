@@ -1,5 +1,6 @@
 import { getDb } from '../providers/mongodb.provider.js'
-import { getQuote, getTickerAggregates } from '../providers/yahoofinance.provider.js'
+import { getQuote }              from '../providers/yahoofinance.provider.js'
+import { getTickerAggregates }   from '../providers/candles.provider.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry, notifyCallManage } from '../services/tradeNotify.service.js'

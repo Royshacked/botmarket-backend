@@ -5,7 +5,8 @@
 // with adaptive thinking, and parse the first JSON object out of the reply.
 
 import Anthropic from '@anthropic-ai/sdk'
-import { getTickerAggregates, getQuotes, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
+import { getQuotes, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
+import { getTickerAggregates }         from '../providers/candles.provider.js'
 import { buildStudies } from './evaluators/chart.evaluator.js'
 import { CANDLE_CFG, aggregateCandles } from '../services/marketData.tools.js'
 import { cachedChartImage } from '../services/chartImgCache.service.js'
