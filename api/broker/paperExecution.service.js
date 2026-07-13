@@ -13,7 +13,7 @@
 import { randomUUID }        from 'crypto'
 import { paperBrokerService } from './paperBroker.service.js'
 import { getCandles }         from '../../providers/ohlcv.provider.js'
-import { getNumericQuoteFast } from '../../providers/yahoofinance.provider.js'
+import { getFmpQuote }        from '../../providers/fmp.price.provider.js'
 import { executionBus }       from '../../services/executionBus.js'
 import { logger }             from '../../services/logger.service.js'
 
@@ -93,33 +93,42 @@ export async function quoteMapForSymbols(symbols) {
     return new Map(entries)
 }
 
-// Symbols Yahoo can't price (crypto / futures / forex / broker symbols) — cached with
-// a retry TTL so we don't re-hit Yahoo every mark tick for a symbol it can't resolve,
-// but a transient miss on a real equity re-tries later instead of downgrading forever.
-const _noYahooUntil  = new Map()   // symbol → ts to retry Yahoo after
-const NO_YAHOO_TTL_MS = 10 * 60_000
+// Symbols FMP can't price (some futures / index CFDs / broker symbols) — cached with a
+// retry TTL so we don't re-hit FMP every mark tick for a symbol it can't resolve, but a
+// transient miss on a real equity re-tries later instead of downgrading forever.
+const _noFmpUntil   = new Map()   // symbol → ts to retry FMP after
+const NO_FMP_TTL_MS = 10 * 60_000
 
 /**
  * Best price for MARKING open-position P&L AND for touch-fill detection. Prefers a
- * real-time last-traded quote (Yahoo regularMarketPrice — equities / ETFs / indices, on
- * the fast 3s cache) over the 1-min candle close, so both P&L and touch triggers track
- * price sub-minute. Falls back to the candle close for anything Yahoo can't price
- * (crypto / futures / forex / broker symbols) — for those, touch detection is only as
- * granular as the candle feed.
+ * real-time last quote (FMP `/quote` — equities / ETFs / crypto / forex, on the fast
+ * ~3s cache), falling back to the latest INTRADAY (1-min) candle close for anything FMP
+ * can't price. It deliberately does NOT fall back to a *day* candle: a coarse, stale day
+ * close would false-trigger a touch fill — a TP/stop firing against a level the live price
+ * never reached (see project_timestamp_ideas Issue 1). No live-enough price → null, and
+ * both callers degrade safely (the mark loop keeps the last mark; the fill loop doesn't
+ * trigger that tick).
  */
 export async function latestMarkPrice(symbol) {
-    const retryAfter = _noYahooUntil.get(symbol)
+    const retryAfter = _noFmpUntil.get(symbol)
     if (retryAfter == null || Date.now() > retryAfter) {
         try {
-            const { price } = await getNumericQuoteFast(symbol)
+            const price = await getFmpQuote(symbol)
             if (price != null && Number.isFinite(price) && price > 0) {
-                _noYahooUntil.delete(symbol)
+                _noFmpUntil.delete(symbol)
                 return price
             }
-        } catch { /* unresolved symbol / provider error — fall back to the candle */ }
-        _noYahooUntil.set(symbol, Date.now() + NO_YAHOO_TTL_MS)
+        } catch { /* provider error — fall back to an intraday candle */ }
+        _noFmpUntil.set(symbol, Date.now() + NO_FMP_TTL_MS)
     }
-    return latestPrice(symbol)
+    // Intraday (1-min) candle close ONLY — never a day candle (see above).
+    try {
+        const candles = await getCandles(symbol, '1min', 1)
+        const c = candles?.at(-1)?.c
+        return c != null && Number.isFinite(c) ? c : null
+    } catch {
+        return null
+    }
 }
 
 /**

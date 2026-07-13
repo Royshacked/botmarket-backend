@@ -25,9 +25,10 @@ const LOG              = '[paperFill.service]'
 const ORDERS           = 'paperOrders'
 // Paper stop/limit entries and stop-loss/take-profit exits don't rest on a real venue —
 // this loop IS the matching engine, so it re-checks the live price every few seconds via
-// latestMarkPrice (Yahoo last quote on a 3s cache; candle-close fallback for symbols
-// Yahoo can't price). A touched level fills at the next sweep. Point-sampling means a
-// spike that reverts inside the interval can be missed — accepted for a forward sim.
+// latestMarkPrice (FMP real-time /quote on a ~3s cache; intraday-candle fallback for
+// symbols FMP can't price — never a stale day candle). A touched level fills at the next
+// sweep. Point-sampling means a spike that reverts inside the interval can be missed —
+// accepted for a forward sim.
 const POLL_INTERVAL_MS = Number(process.env.PAPER_FILL_INTERVAL_MS) || 3_000
 
 const _loop = createPollLoop({ intervalMs: POLL_INTERVAL_MS, tick: _tick, log: LOG, name: 'paper fill' })
