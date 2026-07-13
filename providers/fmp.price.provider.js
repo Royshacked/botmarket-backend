@@ -66,3 +66,135 @@ export async function getFmpQuoteFull(symbol) {
 export async function getFmpQuote(symbol) {
     return (await getFmpQuoteFull(symbol))?.price ?? null
 }
+
+// ─── Candles ──────────────────────────────────────────────────────────────────
+// FMP intraday (`/historical-chart/{interval}`) dates are US/Eastern wall-clock strings;
+// EOD (`/historical-price-eod/full`) dates are calendar days. The rest of the system speaks
+// UTC epoch SECONDS (both Massive and Yahoo emit `q.date.getTime()/1000`), so every FMP row
+// must be converted the same way — a wrong offset shifts every intraday bar and would make
+// the monitor misfire. See reference_fmp_pricing / the Stage-2 plan.
+
+/** ET America/New_York offset (ms) from UTC at an instant — negative west of UTC. */
+function _etOffsetMs(instant) {
+    const asEt  = new Date(new Date(instant).toLocaleString('en-US', { timeZone: 'America/New_York' }))
+    const asUtc = new Date(new Date(instant).toLocaleString('en-US', { timeZone: 'UTC' }))
+    return asEt.getTime() - asUtc.getTime()
+}
+
+/**
+ * Parse an FMP date into UTC epoch seconds. Pure — exported for testing.
+ *   "YYYY-MM-DD HH:mm:ss" → an ET wall-clock instant → UTC epoch (intraday bars).
+ *   "YYYY-MM-DD"          → UTC midnight of the day (EOD bars; the exact daily convention
+ *                            is confirmed against Massive/Yahoo by the Stage-2 parity diff).
+ * Returns null for anything unparseable.
+ */
+export function fmpDateToEpochSec(dateStr) {
+    if (typeof dateStr !== 'string') return null
+    const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/)
+    if (!m) return null
+    const [, y, mo, d, hh, mi, ss] = m
+    // Reject impossible components — Date.UTC silently rolls over (month 13 → next year), which
+    // would yield a plausible-but-wrong epoch and corrupt the monitor. A bad row is dropped instead.
+    if (+mo < 1 || +mo > 12 || +d < 1 || +d > 31) return null
+    if (hh == null) return Math.floor(Date.UTC(+y, +mo - 1, +d) / 1000)   // date-only → UTC midnight
+    if (+hh > 23 || +mi > 59 || +(ss ?? 0) > 59) return null
+    // ET wall-clock components: guess the epoch as if they were UTC, then correct by the ET
+    // offset at that instant (UTC = ET_wallclock − offset; offset is negative west of UTC).
+    const asIfUtc = Date.UTC(+y, +mo - 1, +d, +hh, +mi, +(ss ?? 0))
+    return Math.floor((asIfUtc - _etOffsetMs(asIfUtc)) / 1000)
+}
+
+/**
+ * Aggregate ascending OHLCV rows into fixed-size groups (e.g. 1hr → 2hr). Groups align to
+ * END on the newest bar; an oldest partial group is dropped. Pure — mirrors
+ * marketData.tools.aggregateCandles (inlined to keep this provider dependency-free /
+ * cycle-proof). Exported for testing.
+ */
+export function aggregateOhlc(rows, groupSize) {
+    if (!Array.isArray(rows) || rows.length === 0 || groupSize <= 1) return rows
+    const rem     = rows.length % groupSize
+    const aligned = rem ? rows.slice(rem) : rows
+    const out = []
+    for (let i = 0; i < aligned.length; i += groupSize) {
+        const grp = aligned.slice(i, i + groupSize)
+        out.push({
+            timestamp: grp[0].timestamp,
+            open:      grp[0].open,
+            high:      Math.max(...grp.map(c => c.high)),
+            low:       Math.min(...grp.map(c => c.low)),
+            close:     grp[grp.length - 1].close,
+            volume:    grp.reduce((s, c) => s + (c.volume || 0), 0),
+        })
+    }
+    return out
+}
+
+/**
+ * Map a { timeSpan, multiplier } bar spec to an FMP fetch plan, or null when FMP should NOT
+ * serve it (week/month and odd multipliers → the caller falls back to Massive/Yahoo, which
+ * have native weekly/monthly and cover futures/index). Pure — exported for testing.
+ *   { kind:'intraday', interval } | { kind:'eod' }  with `aggregate` group size (1 = none).
+ */
+export function fmpCandleSpec(timeSpan, multiplier = 1) {
+    if (timeSpan === 'minute') {
+        return [1, 5, 15, 30].includes(multiplier) ? { kind: 'intraday', interval: `${multiplier}min`, aggregate: 1 } : null
+    }
+    if (timeSpan === 'hour') {
+        if (multiplier === 1) return { kind: 'intraday', interval: '1hour', aggregate: 1 }
+        if (multiplier === 4) return { kind: 'intraday', interval: '4hour', aggregate: 1 }   // FMP native 4h
+        if (multiplier === 2) return { kind: 'intraday', interval: '1hour', aggregate: 2 }   // aggregate 1h → 2h
+        return null
+    }
+    if (timeSpan === 'day' && multiplier === 1) return { kind: 'eod', aggregate: 1 }
+    return null   // week / month / unsupported → fallback provider
+}
+
+/** Map an FMP candle row → the canonical { timestamp, open, high, low, close, volume } or null. */
+function _normalizeFmpCandle(r) {
+    const t = fmpDateToEpochSec(r?.date)
+    const o = Number(r?.open), c = Number(r?.close)
+    if (t == null || !Number.isFinite(o) || !Number.isFinite(c)) return null
+    const h = Number(r?.high), l = Number(r?.low), v = Number(r?.volume)
+    return {
+        timestamp: t,
+        open:  o,
+        high:  Number.isFinite(h) ? h : Math.max(o, c),
+        low:   Number.isFinite(l) ? l : Math.min(o, c),
+        close: c,
+        volume: Number.isFinite(v) ? v : 0,
+    }
+}
+
+/**
+ * OHLCV candles from FMP as the canonical CandleObject[] (drop-in for
+ * massive.getTickerAggregates). Returns null when FMP shouldn't serve this bar spec
+ * (week/month/odd multiplier) so the caller can fall back. `from`/`to` are epoch ms.
+ *
+ * @param {string} ticker
+ * @param {{ timeSpan?: string, multiplier?: number, from?: number, to?: number }} options
+ * @returns {Promise<Array<{timestamp,open,high,low,close,volume}> | null>}
+ */
+export async function getFmpCandles(ticker, options = {}) {
+    const { timeSpan = 'day', multiplier = 1, from, to } = options
+    const spec = fmpCandleSpec(timeSpan, multiplier)
+    if (!spec) return null
+
+    const sym = String(ticker || '').toUpperCase().trim()
+    if (!sym) return null
+    if (!API_KEY) throw new Error('FMP_API_KEY is not set')
+
+    const dateStr = (ms) => new Date(ms).toISOString().slice(0, 10)
+    const parts = [`symbol=${encodeURIComponent(sym)}`]
+    if (from != null) parts.push(`from=${dateStr(from)}`)
+    if (to   != null) parts.push(`to=${dateStr(to)}`)
+    const qs   = `${parts.join('&')}&apikey=${API_KEY}`
+    const path = spec.kind === 'intraday' ? `/historical-chart/${spec.interval}?${qs}` : `/historical-price-eod/full?${qs}`
+
+    const rows   = await getJson(`${BASE}${path}`, { label: `FMP candles ${sym}/${timeSpan}x${multiplier}` })
+    const mapped = (Array.isArray(rows) ? rows : [])
+        .map(_normalizeFmpCandle)
+        .filter(Boolean)
+        .sort((a, b) => a.timestamp - b.timestamp)   // ascending — aggregation + downstream expect it
+
+    return spec.aggregate > 1 ? aggregateOhlc(mapped, spec.aggregate) : mapped
+}
