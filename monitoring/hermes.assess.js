@@ -23,7 +23,11 @@ const ALLOWED_MODELS  = new Set(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6
 const ALLOWED_EFFORTS = new Set(['off', 'low', 'high'])
 // The visible reply is a small JSON object, but when thinking is on the hidden reasoning tokens
 // ALSO count toward max_tokens — so give generous headroom to avoid truncating the JSON.
-const ASSESS_MAX_TOKENS          = 900
+// Non-thinking cap bumped 900→2500: the thesis-anchored prompt now fills each axis `read` +
+// `patterns_seen` + `proposal`/`memo_update` with real prose, and 900 was truncating the JSON on
+// essentially every wake (stop_reason=max_tokens → unclosed-JSON → null assessment). Mirrors the
+// browse-confirm pass, which already carries CONFIRM_MAX_TOKENS headroom for the same reason.
+const ASSESS_MAX_TOKENS          = 2_500
 const ASSESS_MAX_TOKENS_THINKING = 16_000
 // The browse-confirm pass narrates its searches before the JSON, so it needs more room than the
 // terse first-pass reply to avoid truncating the trailing JSON object.
@@ -302,10 +306,19 @@ async function _runAssessment(call, systemPrompt, buildUserText, label) {
             messages.push({ role: 'assistant', content: msg.content })
             messages.push({ role: 'user', content: await _handleAssessToolUses(call, msg.content, ladder) })
         }
-        return extractFirstJSON(_allText(msg))
+        // The model replied, but the JSON may be truncated (stop_reason=max_tokens) or malformed.
+        // Return a typed failure marker so the caller's journal note can be honest about WHY it
+        // failed (a bad reply, not a failed data/vision fetch). Never let the parse error escape as io.
+        try {
+            return extractFirstJSON(_allText(msg))
+        } catch (parseErr) {
+            const truncated = msg?.stop_reason === 'max_tokens'
+            logger.warn(LOG, `${label} reply unparseable for ${call.id} (stop_reason=${msg?.stop_reason}):`, parseErr.message)
+            return { _failReason: truncated ? 'truncated' : 'malformed' }
+        }
     } catch (err) {
         logger.warn(LOG, `${label} failed for ${call.id}:`, err.message)
-        return null
+        return { _failReason: 'io' }
     }
 }
 

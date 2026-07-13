@@ -505,10 +505,15 @@ test('timelineEntry: assessment with no read → verdict fallback note', () => {
     assert.match(e.note, /standing aside/i)
 })
 
-test('timelineEntry: failed assessment → retry note, no verdict', () => {
-    const e = _timelineEntry('zone_trip', { nowMs: NOW, price: 248, call: call(), failed: true, nextAt: null })
-    assert.match(e.note, /failed/i)
-    assert.equal(e.verdict, null)
+test('timelineEntry: failed assessment → honest retry note, no verdict', () => {
+    // Default/io failure: the read itself didn't complete.
+    const io = _timelineEntry('zone_trip', { nowMs: NOW, price: 248, call: call(), failed: true, nextAt: null })
+    assert.match(io.note, /didn't complete — retrying/i)
+    assert.equal(io.verdict, null)
+    // Unparseable-reply failure (truncated/malformed): honest that the reply was bad, not a fetch failure.
+    const bad = _timelineEntry('zone_trip', { nowMs: NOW, price: 248, call: call(), failed: true, failReason: 'truncated', nextAt: null })
+    assert.match(bad.note, /reply came back malformed — retrying/i)
+    assert.equal(bad.verdict, null)
 })
 
 // ── _checkCall appends a journal entry on EVERY wake ──────────────────────

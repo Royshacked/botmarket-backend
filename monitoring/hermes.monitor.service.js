@@ -149,10 +149,10 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
 
     // Expensive path: the four-axis readiness read (LLM + vision).
     const raw = await deps.assess(call, zone, { reason, price }, deps)
-    if (!raw) {
+    if (!raw || raw._failReason) {
         // Assessment failed — retry soon (min cadence) rather than dropping the call.
         const patch = _scheduledPatch(call, nowMs, true)
-        const entry = _timelineEntry(reason, { nowMs, price, call, nextAt: patch['monitor_state.next_check_at'], failed: true })
+        const entry = _timelineEntry(reason, { nowMs, price, call, nextAt: patch['monitor_state.next_check_at'], failed: true, failReason: raw?._failReason })
         await _persist(db, call.id, patch, entry)
         return { reason, failed: true }
     }
@@ -459,7 +459,7 @@ async function _managePosition(db, call, idea, nowMs, deps) {
 
     const reason = gate.flag ?? 'review'
     const raw = await deps.assessPosition(call, ps, { price, reason, gate, metrics }, deps)
-    if (!raw) {
+    if (!raw || raw._failReason) {
         // Assessment failed — retry soon (min gap), keep metrics fresh.
         const nextAt = new Date(nowMs + _minGapMs(call.cadence)).toISOString()
         await _persist(db, call.id, {
@@ -467,7 +467,7 @@ async function _managePosition(db, call, idea, nowMs, deps) {
             'monitor_state.next_check_at': nextAt,
             'monitor_state.check_count':   (call?.monitor_state?.check_count ?? 0) + 1,
         }, { at: new Date(nowMs).toISOString(), reason: 'in_position', phase: 'in_position', price: _num(price), verdict: null,
-             note: `Went to reassess ${call.asset} but the data/vision call failed — retrying shortly.`, next_check_at: nextAt })
+             note: _failNote('reassess', call.asset, raw?._failReason), next_check_at: nextAt })
         return { reason, failed: true }
     }
 
@@ -740,9 +740,19 @@ function _verdictFallbackNote(raw) {
     }
 }
 
+// Honest one-line note for a failed wake, by failure kind. 'truncated'/'malformed' = the model
+// replied but we couldn't parse it (a bad reply, not a data/vision fetch failure); 'io'/unknown =
+// the read itself couldn't complete. Shared by the readiness and in-position failure paths. Pure.
+export function _failNote(verb, asset, failReason) {
+    const who = asset ?? 'the chart'
+    return (failReason === 'truncated' || failReason === 'malformed')
+        ? `Went to ${verb} ${who} but its reply came back malformed — retrying shortly.`
+        : `Went to ${verb} ${who} but the read didn't complete — retrying shortly.`
+}
+
 // Build one compact append-only journal entry for a wake. Pure — `at` derives from nowMs so tests
 // are deterministic. reason ∈ pre_active | closed | scheduled | zone_trip | expiry_review.
-export function _timelineEntry(reason, { nowMs, price = null, zone = null, call, raw = null, nextAt = null, fetched = null, failed = false }) {
+export function _timelineEntry(reason, { nowMs, price = null, zone = null, call, raw = null, nextAt = null, fetched = null, failed = false, failReason = null }) {
     const at  = new Date(nowMs).toISOString()
     const gap = _gapMin(nextAt, nowMs)
 
@@ -764,7 +774,7 @@ export function _timelineEntry(reason, { nowMs, price = null, zone = null, call,
     }
     if (failed) {
         return { at, reason, price: _num(price), verdict: null,
-            note: `Went to read ${call?.asset ?? 'the chart'} but the data/vision call failed — retrying shortly.`,
+            note: _failNote('read', call?.asset, failReason),
             next_check_at: nextAt }
     }
     // A real assessment (zone tripped or expiry review) — the model's own read + four-axis detail.
