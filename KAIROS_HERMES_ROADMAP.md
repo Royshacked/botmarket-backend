@@ -219,8 +219,9 @@ one holistic input** (agent-decides, no hardcoded rules).
 
 ## Still open — the rest of the 14 gaps (not in this doc's scope)
 
-Highest-leverage remaining:
-- ⬜ **Kairos #1 ↔ Hermes #3 — planned exits / scaling.** Author a scale/trail ladder in Kairos
+⏸️ **DEFERRED (2026-07-16) — exits / scaling. User owns the design decision first** (pre-planned ladder
+vs discretionary; how much intent Kairos hands Hermes vs Hermes improvises). Do NOT build until specified:
+- ⏸️ **Kairos #1 ↔ Hermes #3 — planned exits / scaling.** Author a scale/trail ladder in Kairos
   (`size_pct` currently null on every target), execute it in Hermes (today it improvises the whole exit).
 
 ⏸️ **DEFERRED (2026-07-16) — the whole risk & sizing cluster. User owns the design decision first**
