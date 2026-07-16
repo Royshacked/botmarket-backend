@@ -121,15 +121,16 @@ Also add `'monitor_state.pulse_anchor_px': price` to the in-zone expensive-path 
 
 ---
 
-## Priority 2 — Re-entry via social-chat prompt  ✅ backend built (uncommitted; FE card pending)  (closes Kairos #6)
+## Priority 2 — Re-entry via social-chat prompt  ✅ built (backend + FE, committed)  (closes Kairos #6)
 
-> **Status 2026-07-16:** backend built + 11 tests (513/513 suite). Monitor detects a stop-out
-> (`_isStopOut`) → one-shot `_defaultAssessReentry` thesis check → intact fires `call_reentry` card
-> (`notifyCallReentry`) + `position_state.reentry` marker; broken/failed → journal, no card. Actions:
-> `reviveCall` (`reentry` action → revive to `waiting`, clear position, re-seed pulse anchor, extend
-> valid_until, bump `reentry_count`) + `declineReentry` (`decline_reentry` → keep closed). **REMAINING
-> = FE:** render `call_reentry` message + [Re-enter]/[Close] buttons in the call pop-out wired to the
-> two actions. Deferred: optional `thesis_invalidation` reference kind.
+> **Status 2026-07-16:** backend built + 11 tests (513/513 suite); FE shipped. Monitor detects a
+> stop-out (`_isStopOut`) → one-shot `_defaultAssessReentry` thesis check → intact fires `call_reentry`
+> card (`notifyCallReentry`) + `position_state.reentry` marker; broken/failed → journal, no card.
+> Actions: `reviveCall` (`reentry` → revive to `waiting`, clear position, re-seed pulse anchor, extend
+> valid_until, bump `reentry_count`) + `declineReentry` (`decline_reentry` → keep closed). FE (frontend
+> repo, branch `hermes-discretionary-upgrades`): `CallReentryBubble` in ChatWindow + [Re-enter]/[Close]
+> block in CallPage. NOT live-verified. Deferred: optional `thesis_invalidation` reference kind; FE
+> production-bundle rebuild is a separate step.
 
 **Gap:** Kairos maps ONE `invalidation` = the stop, and every stop-out is terminal for the call. A pro
 distinguishes a *trade* stop (thesis intact → hunt the re-entry) from a *thesis* stop (idea dead →
@@ -169,7 +170,7 @@ schema add, not a rule. Take or leave.
 - [x] `reviveCall` on [Re-enter] (→ `waiting`, clear position, re-seed pulse, extend valid_until, `reentry_count++`); `declineReentry` on [Close]; controller actions `reentry`/`decline_reentry`.
 - [ ] (Optional/deferred) `thesis_invalidation` reference kind in Kairos schema + prompt.
 - [x] Tests (11): stop vs tp/manual; intact → card + marker; broken → no card + stand-down journal; read-fail → no card; revive/decline guards; validity horizon.
-- [ ] **FE:** render `call_reentry` message + surface `position_state.reentry` in the call pop-out with [Re-enter]/[Close] wired to the `reentry`/`decline_reentry` actions.
+- [x] **FE:** `CallReentryBubble` (ChatWindow, notify+route) + [Re-enter]/[Close] block on a closed call in CallPage, wired to `reentry`/`decline_reentry` via `actOnCall`. ESLint clean. (Frontend repo, branch `hermes-discretionary-upgrades`; production bundle rebuild still owed.)
 
 ---
 
