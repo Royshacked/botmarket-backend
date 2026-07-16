@@ -80,6 +80,9 @@ services/
                               klinecharts built-ins); paneId 'candle_pane' for overlays.
     studyTranslate.js         studiesToIndicators/translateStudy — _buildStudies TradingView study
                               objects → klinecharts indicator descriptors (overlay vs own-pane split).
+    NB: the FRONTEND popup chart mirrors this — botmarket-frontend cmps/TradeIdeas/chartOverlay.js
+    (textToIndicators = FE port of _buildStudies+studyTranslate) + cmps/PriceChart/PriceChart.jsx
+    (VWAP/ATR registerIndicator templates + tradeLevel overlay). Keep the ported logic in sync.
   eventRisk.service.js      buildEventRisk({asset,assetClass}) — scheduled catalysts FROZEN onto a Kairos
                             call at build: earnings (Finnhub, equities) + Fed/macro (FRED), low-impact
                             dropped, 10d horizon. Never throws. Hermes reads it to hold off pre-event entry
