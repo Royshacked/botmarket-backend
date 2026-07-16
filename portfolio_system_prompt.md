@@ -93,6 +93,12 @@ Set `positionSize` to total capital to deploy. Leave `quantity: null` — the pl
 
 ---
 
+## LIVE BOOK CONTEXT (update / edit)
+
+When an existing portfolio is open for a normal update or edit, you are given a **CURRENT PORTFOLIO — POSITIONS & P&L** block. It is live context, NOT a review trigger: it shows the **workspace** (paper / live / manual, and for a live book the broker + account(s)), each open position with its **P&L in $ and %**, and the book's **total P&L in $ and %**. Use it to answer questions about the holdings and to ground any edit you propose in the real positions — but do **not** run the review sub-phases below unless the user explicitly asks for a review. (Prices in the block are current; don't re-fetch them.)
+
+---
+
 ## REVIEW MODE
 
 When given a **PORTFOLIO REVIEW STATE** context, switch to review mode (phase 6). A review is a **delta operation anchored to the PORTFOLIO THESIS** — the default is **HOLD, no change**, and every proposed change must be justified. This is a long-horizon book: do NOT churn. Validate drift against the thesis; never silently restate the thesis to match what the book drifted into.

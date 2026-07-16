@@ -42,6 +42,7 @@ export async function streamPortfolio(req, res) {
                 portfolioId:   portfolioId   ?? null,
                 portfolioIdeas: Array.isArray(portfolioIdeas) ? portfolioIdeas : [],
                 portfolioState,
+                isReviewMode,
                 lifecycle,
                 mandate,
                 thesis: storedThesis,

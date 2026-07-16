@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, resolveAgentStream } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveAgentStream } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS, buildKairosToolHandlers } from './kairos.tools.js'
 import { kairosService } from '../api/kairos/kairos.service.js'
@@ -31,7 +31,7 @@ export const kairosAgentService = {
 }
 
 async function chatStream({
-    messages, userPrompt, chatState = emptyKairosState(), accounts = [],
+    messages, userPrompt, chatState = emptyKairosState(), accounts = [], brokerContext = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onChart, onToolStart, onReasoning, onPhase, signal,
 }) {
@@ -40,7 +40,7 @@ async function chatStream({
     const tools        = KAIROS_TOOLS
     const toolHandlers = buildKairosToolHandlers(onChart)
 
-    const systemPrompt  = _buildSystemPrompt(chatState, accounts)
+    const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
     logger.info(LOG, 'chatStream start', { userPrompt, messageCount: builtMessages.length, model, provider, accounts: accounts?.length ?? 0 })
@@ -183,7 +183,7 @@ export async function _finalizeCall(call, { userId = null, accounts = [], mainAc
 }
 
 // ─── Prompt / messages ────────────────────────────────────────────────────────
-function _buildSystemPrompt(chatState, accounts) {
+function _buildSystemPrompt(chatState, accounts, brokerContext = null) {
     const asset = chatState?.active_asset || 'none'
     const draft = chatState?.draft
         ? `\nDraft call so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
@@ -193,7 +193,7 @@ function _buildSystemPrompt(chatState, accounts) {
     const dynamicContext = `---
 CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar or setting valid_until.
 CONVERSATION CONTEXT:
-Active asset: ${asset}${draft}${_buildAccountsSection(accounts)}`
+Active asset: ${asset}${draft}${buildPositionsSection(brokerContext)}${_buildAccountsSection(accounts)}`
 
     return [
         { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },

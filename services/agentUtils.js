@@ -5,6 +5,7 @@ import { toolError } from './toolResult.util.js'
 import { logger } from './logger.service.js'
 import { resolveStreamFn } from './llmModels.js'
 import { recordUsage } from './tokenUsage.service.js'
+import { _deriveMode, formatWorkspaceLine, BROKER_LABELS } from '../api/portfolio/portfolioMode.util.js'
 
 const LOG = '[agentUtils]'
 
@@ -110,6 +111,83 @@ export function buildAccountLines(accounts) {
         if (a.equity  != null) parts.push(`equity: ${formatMoney(a.equity)}`)
         return `  - ${parts.join(', ')}`
     })
+}
+
+// ─── Open positions + P&L (shared "live book" context) ────────────────────────
+// The user's open positions as prompt text, shared by the Idea and Kairos agents so both see
+// what Atlas sees: for every connected broker (paper / live / manual) a workspace line
+// (mode + broker + account), each open position with P&L in $ AND %, and that book's total P&L
+// in $ and %. `brokerContext` is brokerService.loadContext(userId) output — { [brokerType]:
+// { account, positions } } — one entry per connected broker.
+
+// Per-position P&L% off entry — mirrors computePortfolioState's per-idea formula (price move
+// entry→current, sign-flipped for shorts). The raw BrokerPosition carries no pnlPct.
+export function positionPnlPct(p) {
+    const entry = Number(p?.entryPrice), cur = Number(p?.currentPrice)
+    if (!Number.isFinite(entry) || entry === 0 || !Number.isFinite(cur)) return null
+    return ((cur - entry) / entry) * 100 * (p.direction === 'short' ? -1 : 1)
+}
+
+// Signed $ (+$1,234 / -$56) and signed % (+1.2% / -0.3%) — the P&L convention Atlas's block uses.
+const _signedMoney = (v) => (v == null || !Number.isFinite(Number(v))) ? '—'
+    : `${Number(v) >= 0 ? '+' : '-'}$${Math.abs(Number(v)).toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+const _signedPct = (v) => (v == null || !Number.isFinite(Number(v))) ? '—'
+    : `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(1)}%`
+
+export function buildPositionsSection(brokerContext) {
+    if (!brokerContext || typeof brokerContext !== 'object') return ''
+    const entries = Object.entries(brokerContext).filter(([, d]) => d?.account)
+    if (!entries.length) return ''
+
+    const blocks = entries.map(([type, { account, positions }]) => {
+        const mode = _deriveMode(type, account.id ?? account.login ?? null)
+        const brokerLabel = mode === 'live' ? (BROKER_LABELS[type] ?? type) : null
+        const pos = Array.isArray(positions) ? positions : []
+
+        // Human label + dedupe key for one account. Live shows the recognisable login/number
+        // (fix #4 — never an internal id); paper/manual show the mode word + a short id suffix so
+        // several accounts of the same mode stay distinct (loadContext gives one `account` per
+        // broker, but getPositions spans every account of that mode — fix #1).
+        const acctNumber = (a) => a?.accountNo ?? a?.login ?? a?.id ?? a?.accountId
+        const acctKey    = (a) => String(acctNumber(a) ?? '')
+        const acctLabel  = (a) => {
+            if (mode === 'live') return `${brokerLabel} #${acctNumber(a) ?? '—'}`
+            const word = mode === 'paper' ? 'Paper' : 'Manual'
+            const id   = a?.id ?? a?.accountId ?? a?.accountNo ?? a?.login
+            const suffix = id ? String(id).split('-').pop() : null
+            return suffix ? `${word} #${suffix}` : word
+        }
+
+        // Distinct accounts = the header account + every account referenced by a position.
+        const accts = new Map()
+        const addAcct = (a) => { const k = acctKey(a); if (k && !accts.has(k)) accts.set(k, a) }
+        addAcct(account)
+        for (const p of pos) addAcct({ accountNo: p.accountNo, accountId: p.accountId })
+        const multiAcct = accts.size > 1
+
+        const wsLine = formatWorkspaceLine({
+            mode,
+            brokerLabel,
+            accounts: [...accts.values()].map((a, i) => ({ id: i, label: acctLabel(a) })),
+        })
+        const bal = `Balance ${formatMoney(account.balance)} | Equity ${formatMoney(account.equity)} | Free margin ${formatMoney(account.freeMargin)}`
+
+        if (!pos.length) return `${wsLine}\n${bal}\nNo open positions`
+
+        let totalPnl = 0, costBasis = 0
+        const posLines = pos.map(p => {
+            totalPnl  += Number(p.pnl) || 0
+            costBasis += (Number(p.entryPrice) || 0) * (Number(p.volume) || 0)
+            const price = p.currentPrice != null ? ` → ${p.currentPrice}` : ''
+            // Only tag the account when the book spans more than one — no noise on a single-account book.
+            const acct  = multiAcct && (p.accountNo ?? p.accountId) != null ? ` [acct ${p.accountNo ?? p.accountId}]` : ''
+            return `  - ${p.symbol} ${p.direction} ${p.volume ?? '?'} @ ${p.entryPrice ?? '?'}${price}  P&L ${_signedMoney(p.pnl)} (${_signedPct(positionPnlPct(p))})${acct}`
+        })
+        const totalPct = costBasis > 0 ? (totalPnl / costBasis) * 100 : null
+        return `${wsLine}\n${bal}\nOpen positions:\n${posLines.join('\n')}\nTotal P&L: ${_signedMoney(totalPnl)} (${_signedPct(totalPct)})`
+    })
+
+    return `\n\nCURRENT POSITIONS & P&L — the user's live book (workspace + per-position and total P&L; prices current, don't re-fetch):\n${blocks.join('\n\n')}`
 }
 
 // ─── Emit-tag cleanup ─────────────────────────────────────────────────────────

@@ -1,9 +1,13 @@
 import { getDb, stripId }   from '../../providers/mongodb.provider.js'
 import { logger }  from '../../services/logger.service.js'
-import { paperBrokerService } from '../broker/paperBroker.service.js'
 import { getPortfolioStateCached } from '../../services/portfolioState.service.js'
 import { threadService } from '../../services/thread.service.js'
 import { isSubstantive } from '../../services/thread.util.js'
+// Mode/account helpers live in a shared util (portfolioState needs them too, and importing
+// them from here would be circular). Re-exported below so existing importers/tests keep working.
+import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames } from './portfolioMode.util.js'
+
+export { _firstAccountId, _deriveMode, _accountLabel }
 
 const LOG        = '[portfolioChat]'
 const COLLECTION = 'portfolio_chats'
@@ -35,7 +39,12 @@ export const portfolioChatService = {
  */
 async function loadStreamContext({ userId, portfolioId, threadId, isReviewMode, bodyMandate }) {
     const [portfolioState, lifecycle, storedMandate, storedThesis] = await Promise.all([
-        (isReviewMode && portfolioId) ? getPortfolioStateCached(portfolioId, userId).catch(() => null) : Promise.resolve(null),
+        // Position/P&L + workspace state is loaded whenever an EXISTING portfolio is open — a
+        // scheduled review OR a normal update/edit — so Atlas can always see the live book it's
+        // managing (mode, broker/account, per-position and total P&L). Construction (no portfolioId)
+        // has no positions yet, so it stays null. The block's TITLE (review vs update) is what tells
+        // the model whether to run the review sub-phases — see _buildPortfolioStateSection.
+        portfolioId ? getPortfolioStateCached(portfolioId, userId).catch(() => null) : Promise.resolve(null),
         portfolioId ? getPortfolioLifecycle(portfolioId, userId).catch(() => null) : Promise.resolve(null),
         portfolioId ? getMandate(portfolioId, userId).catch(() => null) : Promise.resolve(null),
         portfolioId ? getThesis(portfolioId, userId).catch(() => null) : Promise.resolve(null),
@@ -268,49 +277,6 @@ async function getPendingReviews(userId) {
         logger.error(LOG, 'Failed to get pending reviews', err)
         return []
     }
-}
-
-// ── Mode/account derivation (mirrors the frontend ideaWorkspace deriver) ────────
-// Exported for unit testing; the pure logic mirrors tradeIdea.utils.ideaWorkspace.
-// An idea's account can be a bare id string or a { id } object; take the first.
-export function _firstAccountId(accounts) {
-    const a = (accounts ?? [])[0]
-    if (a == null) return null
-    return typeof a === 'object' ? a.id : a
-}
-
-// 'paper' | 'manual' | 'live'. The top-level broker stamped at save time is primary;
-// the virtual-account prefix (paper-/manual-) is the fallback for legacy ideas.
-export function _deriveMode(broker, accountId) {
-    if (broker === 'paper' || broker === 'manual') return broker
-    return paperBrokerService.accountMode(accountId) ?? 'live'
-}
-
-// Batch-resolve virtual-account display names, one listAccounts per distinct user.
-// Best-effort: a failed lookup just leaves the account unresolved (label falls back).
-async function _virtualAccountNames(userIds) {
-    const uniq = [...new Set(userIds.filter(Boolean))]
-    const map  = {}
-    await Promise.all(uniq.map(async uid => {
-        try {
-            const accts = await paperBrokerService.listAccounts(uid)
-            for (const a of accts) map[a.accountId] = a.name
-        } catch { /* leave unresolved */ }
-    }))
-    return map
-}
-
-// Display names for the live brokers (raw keys are lowercase).
-const BROKER_LABELS = { ctrader: 'cTrader', ibkr: 'IBKR' }
-
-// A human-friendly account label for the review notification. Virtual accounts show
-// their user name; live accounts show "<Broker> #<login>" (the broker login IS the id).
-export function _accountLabel(mode, accountId, nameByAccount, broker = null) {
-    const fallback = mode === 'manual' ? 'Manual' : mode === 'paper' ? 'Paper' : 'Live account'
-    if (!accountId) return fallback
-    if (mode === 'paper' || mode === 'manual') return nameByAccount[accountId] ?? fallback
-    const brokerLabel = BROKER_LABELS[broker] ?? (broker ? String(broker) : 'Live')
-    return `${brokerLabel} #${accountId}`
 }
 
 // ─── Portfolio thesis ─────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ import { getSecFilings } from '../providers/sec.provider.js'
 import { getEarningsCalendar, getFundamentals } from '../providers/fmp.provider.js'
 import { getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
 import { logger } from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, makeToolHandler, resolveAgentStream } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, buildPositionsSection, makeToolHandler, resolveAgentStream } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler, makeIndicatorsHandler } from './marketData.tools.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
@@ -402,7 +402,7 @@ CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this mont
 ${_buildTimeSection(clientTime)}
 CONVERSATION CONTEXT:
 ${summary}
-Active asset: ${asset}${stateSection}${_buildBrokerSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts)}`
+Active asset: ${asset}${stateSection}${buildPositionsSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts)}`
 
     return [
         { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },
@@ -440,32 +440,6 @@ export function _formatClientTime(clientTime) {
     } catch {
         return null   // invalid IANA timezone
     }
-}
-
-function _buildBrokerSection(brokerContext) {
-    if (!brokerContext || typeof brokerContext !== 'object') return ''
-    const entries = Object.entries(brokerContext).filter(([, d]) => d?.account)
-    if (entries.length === 0) return ''
-
-    const lines = entries.map(([type, { account, positions }]) => {
-        const cur  = account.currency || ''
-        const fmt  = (v) => v != null ? `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'
-        const pct  = (v) => v != null ? `${Number(v).toFixed(0)}%` : '—'
-        let line = `${type} (${cur}): Balance ${fmt(account.balance)} | Equity ${fmt(account.equity)} | Free margin ${fmt(account.freeMargin)} | Margin level ${pct(account.marginLevel)}`
-
-        if (Array.isArray(positions) && positions.length > 0) {
-            const pos = positions.map(p => {
-                const pnl = p.pnl != null ? ` P&L: ${p.pnl >= 0 ? '+' : ''}${fmt(p.pnl)}` : ''
-                return `  - ${p.symbol} ${p.direction} ${p.volume ?? '?'} @ ${p.entryPrice ?? '?'}${pnl}`
-            }).join('\n')
-            line += `\n  Open positions:\n${pos}`
-        } else {
-            line += '\n  No open positions'
-        }
-        return line
-    })
-
-    return `\n\nBROKER ACCOUNT:\n${lines.join('\n\n')}`
 }
 
 function _buildIdeaAccountsSection(accounts) {

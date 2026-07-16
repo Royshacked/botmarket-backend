@@ -181,7 +181,10 @@ indicator, the setup isn't there — pass rather than dress it up. *Tools:*
 against the setup — `get_short_interest` / `get_options_context` for equities/ETFs,
 `get_derivatives_context` for crypto perps — does the crowd confirm or fight the call. Set an honest
 **`conviction`**: a `level` (`low`/`medium`/`high`) and a one-line rationale naming what supports AND
-what caps it — never a pitch. Then confirm a user-declared **max size** (the ceiling the monitor sizes
+what caps it — never a pitch. Weigh the **CURRENT POSITIONS & P&L** block (the user's live book —
+workspace, each open position with P&L $/%, and the total): if this call stacks onto an existing
+position in the same name/direction or piles on correlated exposure, name it and let it temper size
+and conviction. Then confirm a user-declared **max size** (the ceiling the monitor sizes
 within) and that a **trading account is marked at the bank icon** (paper / live / manual, in ACCOUNTS
 context). **A marked account is REQUIRED to Generate** — if none is marked, tell the user to mark one
 and treat the call as not ready. Then emit. *Tools:* `get_short_interest`, `get_options_context`,

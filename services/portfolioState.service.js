@@ -2,6 +2,7 @@ import { getDb }                             from '../providers/mongodb.provider
 import { brokerService }                     from '../api/broker/broker.service.js'
 import { getEarningsCalendarRaw, getSectorRaw } from '../providers/fmp.provider.js'
 import { logger }                            from './logger.service.js'
+import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames, BROKER_LABELS } from '../api/portfolio/portfolioMode.util.js'
 
 const LOG = '[portfolioState]'
 
@@ -55,7 +56,7 @@ export async function computePortfolioState(portfolioId, userId) {
     const db    = await getDb()
     const ideas = await db.collection('ideas')
         .find({ portfolioId, userId })
-        .project({ id: 1, asset: 1, direction: 1, allocationRatio: 1, conviction: 1, notes: 1, status: 1, type: 1, activatedAt: 1, brokerOrders: 1, portfolioName: 1 })
+        .project({ id: 1, asset: 1, direction: 1, allocationRatio: 1, conviction: 1, notes: 1, status: 1, type: 1, activatedAt: 1, brokerOrders: 1, portfolioName: 1, broker: 1, mainAccountId: 1, accounts: 1 })
         .toArray()
 
     if (!ideas.length) return null
@@ -231,17 +232,56 @@ export async function computePortfolioState(portfolioId, userId) {
     const costBasis = totalNotional - totalPnl
     const totalPnlPct = costBasis > 0 ? (totalPnl / costBasis) * 100 : 0
 
-    logger.info(LOG, 'computed', { portfolioId, live: liveStates.length, pending: pendingStates.length, totalNotional })
+    const workspace = await _deriveWorkspace(ideas, userId)
+
+    logger.info(LOG, 'computed', { portfolioId, live: liveStates.length, pending: pendingStates.length, totalNotional, mode: workspace.mode })
 
     return {
         portfolioId,
         portfolioName,
         computedAt:    Date.now(),
+        workspace,
         totalNotional,
         totalPnl,
         totalPnlPct,
         ideas:         allStates,
         sectors,
+    }
+}
+
+/**
+ * Where this book trades — the mode (paper/live/manual), the broker (live only), and the
+ * distinct account(s) across the portfolio's ideas. Mode is a uniform per-batch property
+ * (stamped at save time), so the first idea carrying a broker/account speaks for the batch;
+ * accounts are unioned so a multi-account book shows every account.
+ *
+ * @returns {Promise<{ mode: string, broker: string|null, brokerLabel: string|null, accounts: {id:string,label:string}[] }>}
+ */
+async function _deriveWorkspace(ideas, userId) {
+    const primaryBroker    = ideas.find(i => i.broker)?.broker ?? null
+    const primaryAccountId = ideas.find(i => i.mainAccountId)?.mainAccountId
+        ?? _firstAccountId(ideas.find(i => (i.accounts ?? []).length)?.accounts)
+        ?? null
+    const mode = _deriveMode(primaryBroker, primaryAccountId)
+
+    // Union of every account id the portfolio's ideas reference (mainAccountId + accounts[]).
+    const accountIds = new Set()
+    for (const idea of ideas) {
+        if (idea.mainAccountId) accountIds.add(String(idea.mainAccountId))
+        for (const a of (idea.accounts ?? [])) {
+            const id = a && typeof a === 'object' ? a.id : a
+            if (id) accountIds.add(String(id))
+        }
+    }
+
+    const nameByAccount = await _virtualAccountNames([userId])
+    const accounts = [...accountIds].map(id => ({ id, label: _accountLabel(mode, id, nameByAccount, primaryBroker) }))
+
+    return {
+        mode,
+        broker:      mode === 'live' ? primaryBroker : null,
+        brokerLabel: mode === 'live' ? (BROKER_LABELS[primaryBroker] ?? primaryBroker ?? 'Live') : null,
+        accounts,
     }
 }
 

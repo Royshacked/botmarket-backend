@@ -4,6 +4,7 @@ import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, 
 import { getFundamentals, getEarningsCalendar, getEarnings } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
+import { formatWorkspaceLine } from '../api/portfolio/portfolioMode.util.js'
 import { logger }         from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, resolveAgentStream } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
@@ -152,7 +153,7 @@ const TOOL_HANDLERS = {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const normalized   = _buildMessages(messages)
     const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
@@ -167,7 +168,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     if (mandate)    dynamicSections.push(_buildMandateSection(mandate))
     if (thesis)     dynamicSections.push(_buildThesisSection(thesis))
     if (lifecycle)  dynamicSections.push(_buildLifecycleSection(lifecycle))
-    if (portfolioState) dynamicSections.push(_buildPortfolioStateSection(portfolioState))
+    if (portfolioState) dynamicSections.push(_buildPortfolioStateSection(portfolioState, isReviewMode))
 
     // Two cache breakpoints: the static instructions, and the dynamic context
     // tail. The tail (date + accounts + mandate + lifecycle + snapshotted
@@ -396,7 +397,7 @@ function _buildLifecycleSection(lifecycle) {
     return lines.join('\n')
 }
 
-function _buildPortfolioStateSection(state) {
+function _buildPortfolioStateSection(state, isReviewMode = false) {
     const fmtMoney = (n) => {
         if (n == null) return '—'
         const abs = Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
@@ -414,10 +415,16 @@ function _buildPortfolioStateSection(state) {
     }
 
     const date = new Date(state.computedAt).toISOString().slice(0, 10)
+    // Title decides behaviour: "PORTFOLIO REVIEW STATE" triggers the review sub-phases (prompt);
+    // "CURRENT PORTFOLIO" is live context during a normal update/edit — same data, no review.
+    const title = isReviewMode
+        ? `PORTFOLIO REVIEW STATE — computed ${date}`
+        : `CURRENT PORTFOLIO — POSITIONS & P&L — as of ${date}`
     const header = [
-        `PORTFOLIO REVIEW STATE — computed ${date}`,
-        `Total notional: $${Math.round(state.totalNotional).toLocaleString('en-US')} | P&L: ${fmtMoney(state.totalPnl)} (${fmtPct(state.totalPnlPct)})`,
-    ].join('\n')
+        title,
+        formatWorkspaceLine(state.workspace),
+        `Total notional: $${Math.round(state.totalNotional).toLocaleString('en-US')} | Total P&L: ${fmtMoney(state.totalPnl)} (${fmtPct(state.totalPnlPct)})`,
+    ].filter(Boolean).join('\n')
 
     const live    = state.ideas.filter(s => s.actualWeight != null)
     const pending = state.ideas.filter(s => s.actualWeight == null)
@@ -461,7 +468,9 @@ function _buildPortfolioStateSection(state) {
         sections.push(`Sector weights:\n${sectorLines.join('\n')}`)
     }
 
-    sections.push('Use this data as the starting point for the review. Do not call get_quotes for tickers already shown above — prices are current. Propose specific actions (rebalance, trim, add, exit, swap) where the data warrants it.')
+    sections.push(isReviewMode
+        ? 'Use this data as the starting point for the review. Do not call get_quotes for tickers already shown above — prices are current. Propose specific actions (rebalance, trim, add, exit, swap) where the data warrants it.'
+        : 'This is the live book you are helping with — the workspace, open positions, and per-position + total P&L are current. Do not call get_quotes for tickers already shown above. Ground any answer or proposed edit in these actual positions and P&L; do NOT run a full scheduled review unless the user asks for one.')
 
     return sections.join('\n\n')
 }
