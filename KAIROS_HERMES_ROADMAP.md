@@ -219,14 +219,19 @@ one holistic input** (agent-decides, no hardcoded rules).
 
 ## Still open — the rest of the 14 gaps (not in this doc's scope)
 
-Highest-leverage remaining = two **mirror-pairs**:
+Highest-leverage remaining:
 - ⬜ **Kairos #1 ↔ Hermes #3 — planned exits / scaling.** Author a scale/trail ladder in Kairos
   (`size_pct` currently null on every target), execute it in Hermes (today it improvises the whole exit).
-- ⬜ **Kairos #2 ↔ Hermes #6 — conviction-scaled sizing.** Enter proposal has no `size` field →
-  everything fills to the `max_size` cap; `conviction` is decorative. One field + a sizing rule.
 
-Lower tier:
-- ⬜ **Kairos #3** — book/heat awareness (each call built in isolation; no cross-call correlation).
+⏸️ **DEFERRED (2026-07-16) — the whole risk & sizing cluster. User owns the design decision first**
+(risk budget, conviction multiplier, whether book-heat lives in Kairos or Atlas). Do NOT build until the
+user specifies the shape. Covers:
+- ⏸️ **Kairos #2 ↔ Hermes #6 — conviction-scaled sizing.** Enter proposal has no `size` field →
+  everything fills to the `max_size` cap; `conviction` is decorative. Wants: `size = risk_budget ×
+  conviction / stop_distance`, capped at `max_size` (the `risk_basis:'stop_distance'` intent is already
+  in the schema, just unexecuted).
+- ⏸️ **Kairos #3 — book/heat awareness.** Each call built in isolation; no cross-call correlation or
+  total-open-risk check. Natural extension of the sizing engine (correlation-discount + heat-clamp).
 - ⬜ **Kairos #4** — thin thesis/edge (no "why the inefficiency / who's on the other side").
 - ⬜ **Kairos #5** — liquidity/tradability gate (spread / ADV).
 - ⬜ **Hermes #5** — company news is cached headlines, not live at decision time.
