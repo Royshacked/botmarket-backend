@@ -3,9 +3,9 @@ import { getQuote }              from '../providers/yahoofinance.provider.js'
 import { getTickerAggregates }   from '../providers/candles.provider.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
-import { notifyCallReady, notifyCallExpiry, notifyCallManage } from '../services/tradeNotify.service.js'
+import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../services/tradeNotify.service.js'
 import { withTimeout, createPollLoop } from './monitorUtils.js'
-import { _defaultAssess, _defaultAssessPosition, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _handleAssessToolUses } from './hermes.assess.js'
+import { _defaultAssess, _defaultAssessPosition, _defaultAssessReentry, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _handleAssessToolUses } from './hermes.assess.js'
 
 // The LLM assessment IO lives in hermes.assess.js (wired into _deps below). Re-exported here
 // under their historical names so the existing unit tests import path is unchanged.
@@ -140,9 +140,54 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
 
     const reason = expiring ? 'expiry_review' : (zone ? 'zone_trip' : 'scheduled')
 
-    // Cheap path: not near a zone and not expiring → no LLM, just reschedule further out.
+    // Not near a zone and not expiring. Three outcomes, cheapest-first:
+    //   1) anchor not seeded yet → seed it to the current price (no LLM), reschedule.
+    //   2) price has moved materially AWAY from every zone (throttled) → ONE full visual "momentum
+    //      pulse" read that can re-map the call (Tier 2) — catches a break the plan never mapped.
+    //   3) otherwise → the cheap proximity-aware reschedule (no LLM).
     if (reason === 'scheduled') {
-        const patch = _scheduledPatch(call, nowMs)
+        const anchored = Number.isFinite(Number(call?.monitor_state?.pulse_anchor_px))
+        if (!anchored && Number.isFinite(price)) {
+            const patch = _scheduledPatch(call, nowMs, false, price)
+            patch['monitor_state.pulse_anchor_px'] = price   // seed the pulse anchor on first sight
+            const entry = _timelineEntry('scheduled', { nowMs, price, call, nextAt: patch['monitor_state.next_check_at'] })
+            await _persist(db, call.id, patch, entry)
+            return { reason }
+        }
+
+        if (_shouldPulse(call, price, nowMs)) {
+            const raw = await deps.assess(call, null, { reason: 'momentum_pulse', price }, deps)
+            // Re-anchor + stamp the throttle on EVERY pulse (success or fail) so it can't re-fire until
+            // price makes a fresh move and the time floor passes.
+            const stamp = (set) => {
+                set['monitor_state.pulse_anchor_px'] = price
+                set['monitor_state.last_pulse_at']   = new Date(nowMs).toISOString()
+                return set
+            }
+            if (!raw || raw._failReason) {
+                const patch = stamp(_scheduledPatch(call, nowMs, false, price))
+                const entry = _timelineEntry('momentum_pulse', { nowMs, price, call, nextAt: patch['monitor_state.next_check_at'], failed: true, failReason: raw?._failReason })
+                await _persist(db, call.id, patch, entry)
+                return { reason: 'momentum_pulse', failed: true }
+            }
+            if (raw.verdict && !_READINESS_VERDICTS.has(raw.verdict)) {
+                logger.warn(LOG, `off-menu pulse verdict "${raw.verdict}" for ${call.id} — treating as wait`)
+            }
+            // v1: a pulse may ONLY re-map (edit) or do nothing — never a direct enter (its proposed
+            // levels aren't in the call yet, so _finalizeProposal would snap to stale reference_levels).
+            const coerced = (raw.verdict === 'edit' && _hasEditProposal(raw)) ? raw : { ...raw, verdict: 'wait' }
+            const { set, fireCard, lastAssessment } = _applyAssessment(call, null, coerced, nowMs, 'momentum_pulse')
+            stamp(set)
+            const entry = _timelineEntry('momentum_pulse', { nowMs, price, zone: null, call, raw: coerced, nextAt: set['monitor_state.next_check_at'], fetched: _fetchedLabel(call) })
+            await _persist(db, call.id, set, entry)
+            if (fireCard) {
+                try { await deps.onCard(call, lastAssessment) }
+                catch (err) { logger.warn(LOG, `onCard (pulse) failed for ${call.id}:`, err.message) }
+            }
+            return { reason: 'momentum_pulse', verdict: coerced.verdict, fireCard }
+        }
+
+        const patch = _scheduledPatch(call, nowMs, false, price)
         const entry = _timelineEntry('scheduled', { nowMs, price, call, nextAt: patch['monitor_state.next_check_at'] })
         await _persist(db, call.id, patch, entry)
         return { reason }
@@ -162,6 +207,7 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
         logger.warn(LOG, `off-menu readiness verdict "${raw.verdict}" for ${call.id} — treating as wait`)
     }
     const { set, fireCard, lastAssessment } = _applyAssessment(call, zone, raw, nowMs, reason)
+    if (Number.isFinite(price)) set['monitor_state.pulse_anchor_px'] = price   // re-anchor the pulse: we just had eyes in a zone
     const entry = _timelineEntry(reason, { nowMs, price, zone, call, raw, nextAt: set['monitor_state.next_check_at'], fetched: _fetchedLabel(call) })
     await _persist(db, call.id, set, entry)
     if (fireCard) {
@@ -194,7 +240,51 @@ export async function _checkPosition(db, call, nowMs, deps = _deps) {
     // (promote / close / idle-awaiting-fill) are pure status transitions handled by _reconcilePosition.
     if (rec.manage) return _managePosition(db, call, idea, nowMs, deps)
     await _persist(db, call.id, rec.set, rec.entry)
+    // P2: a STOP-out (not a TP / manual exit) may leave the THESIS intact → offer a discretionary
+    // re-entry. A TP means the trade worked (no offer); a manual/Hermes exit is a deliberate close.
+    if (rec.set?.status === 'closed' && _isStopOut(rec.set['position_state.outcome'])) {
+        await _maybeOfferReentry(db, call, rec.set['position_state.outcome'], nowMs, deps)
+    }
     return { reason: 'position', status: rec.set.status ?? call.status }
+}
+
+// Was this close a STOP-out (trade invalidation hit), i.e. a candidate for a re-entry offer? A `tp`
+// close means the trade worked; a `manual` exit was deliberate — neither offers re-entry. An unlabeled
+// broker close that was clearly adverse (negative R) is treated as a stop. Pure.
+export function _isStopOut(outcome) {
+    const reason = String(outcome?.reason ?? '').toLowerCase()
+    if (reason === 'stop') return true
+    if ((reason === 'broker' || reason === '') && Number(outcome?.r_multiple) < 0) return true
+    return false
+}
+
+// Run the one-shot re-entry thesis check at a stop-out and, if the thesis is INTACT, fire the
+// re-entry card (Kairos-voiced, to social chat) + stamp a marker. If the thesis is broken (or the read
+// fails), just journal and leave the call closed. The user makes the actual re-enter/close decision;
+// there is no coded re-entry budget — a human tap is the budget. Never throws (best-effort IO).
+async function _maybeOfferReentry(db, call, outcome, nowMs, deps) {
+    const at = new Date(nowMs).toISOString()
+    let read = null
+    try { read = await deps.assessReentry(call, outcome, { nowMs }) }
+    catch (err) { logger.warn(LOG, `reentry read failed for ${call.id}:`, err.message); read = null }
+
+    if (!read || read._failReason || read.thesis_alive !== true) {
+        const note = read?.thesis_alive === false
+            ? `Stopped out on ${call.asset} and the thesis looks broken too — standing down, not re-entering.`
+            : `Stopped out on ${call.asset}; couldn't assess a re-entry — leaving it closed.`
+        await _persist(db, call.id,
+            { 'position_state.reentry': { offered: false, at, thesis_alive: read?.thesis_alive ?? null } },
+            { at, reason: 'reentry', phase: 'close', verdict: null, note, next_check_at: null })
+        return { offered: false }
+    }
+
+    await _persist(db, call.id,
+        { 'position_state.reentry': { offered: true, at, why: read.why ?? null } },
+        { at, reason: 'reentry', phase: 'close', verdict: null,
+          note: `Stopped on ${call.asset}, but the thesis still looks intact — offering a re-entry.`, next_check_at: null })
+    try { await deps.onReentry(call, read, outcome) }
+    catch (err) { logger.warn(LOG, `onReentry notify failed for ${call.id}:`, err.message) }
+    return { offered: true }
 }
 
 // Pure. Decide the call's next state from the linked idea's status. Returns { set, entry } where
@@ -683,9 +773,15 @@ export function _applyAssessment(call, zone, raw, nowMs, reason) {
 
 // Cheap-path reschedule (no assessment ran). Idle → check further out (max gap); after a failed
 // assessment → retry soon (min gap). Bumps the check counter. Pure $set patch.
-export function _scheduledPatch(call, nowMs, short = false) {
+export function _scheduledPatch(call, nowMs, short = false, price = null) {
     const cadence = call?.cadence ?? {}
-    const gap = short ? (Number(cadence.min_gap_min) || 1) : (Number(cadence.max_gap_min) || 60)
+    const lo = Number(cadence.min_gap_min) || 1
+    const hi = Number(cadence.max_gap_min) || 60
+    // `short` (assessment-failure retry) always uses the min cadence. Otherwise the gap is
+    // proximity-aware: tighten toward min as price nears a mapped zone so a fast approach/breakout
+    // isn't sampled over by the slow far-from-zone cadence (a narrow above-price breakout band can be
+    // jumped between 60-min polls). No live price (pre-active / market-closed / feed miss) → max cadence.
+    const gap = short ? lo : _proximityGapMin(call, price, lo, hi)
     return {
         // No zone tripped (or market closed) → the call isn't actively being assessed, so a stale
         // 'watching' returns to 'waiting'. Keeps 'watching' meaning exactly "price in a zone now".
@@ -693,6 +789,76 @@ export function _scheduledPatch(call, nowMs, short = false) {
         'monitor_state.check_count':   (call?.monitor_state?.check_count ?? 0) + 1,
         'monitor_state.next_check_at': new Date(nowMs + gap * 60_000).toISOString(),
     }
+}
+
+// Graded scheduled cadence: how soon to re-check based on how close price is to the NEAREST mapped
+// zone, measured in multiples of that zone's own band width. The band is ATR-sized by the build agent,
+// so its width already encodes the instrument's volatility — this scales with volatility WITHOUT an
+// extra ATR fetch on the cheap (LLM-free) scheduled path. Within NEAR_BANDS of an edge → min cadence
+// (catch a fast approach/break); beyond FAR_BANDS → max cadence; linear in between. Non-finite price,
+// no zones, or no usable band → max cadence (nothing to close in on). Pure.
+const NEAR_BANDS = 2    // ≤ 2 band-widths from an edge → poll at the min cadence
+const FAR_BANDS  = 10   // ≥ 10 band-widths away → poll at the max cadence
+export function _proximityGapMin(call, price, minGap, maxGap) {
+    if (!Number.isFinite(price)) return maxGap
+    const zones = Array.isArray(call?.entry_zones) ? call.entry_zones : []
+    let best = Infinity
+    for (const z of zones) {
+        const lo = Number(z?.lower), hi = Number(z?.upper)
+        if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) continue
+        const w = hi - lo
+        const dist = price < lo ? (lo - price) : price > hi ? (price - hi) : 0
+        const ratio = dist / w
+        if (ratio < best) best = ratio
+    }
+    if (!Number.isFinite(best)) return maxGap
+    if (best <= NEAR_BANDS)    return minGap
+    if (best >= FAR_BANDS)     return maxGap
+    const t = (best - NEAR_BANDS) / (FAR_BANDS - NEAR_BANDS)
+    return Math.round(minGap + (maxGap - minGap) * t)
+}
+
+// ─── Out-of-zone momentum pulse (Tier 2) ───────────────────────────────────────
+// Between builds, price can develop a setup at a level Kairos never mapped. The cheap arithmetic gate
+// would never wake the LLM there. `_shouldPulse` is the middle gate: on a scheduled (out-of-zone) wake,
+// a MATERIAL, THROTTLED move away from every zone earns ONE full visual read that can re-map the call.
+// Material = ≥ PULSE_MOVE_BANDS × the nearest zone's band width from the last "eyes-on" anchor (the band
+// is ATR-sized → a free volatility yardstick). Throttled by the anchor reset (each pulse re-anchors, so
+// it needs a fresh full increment to fire again) plus a time floor, so a trending name that keeps making
+// new highs doesn't fire a read on every bar.
+const PULSE_MOVE_BANDS  = 4     // material move = 4× the nearest band width from the anchor
+const PULSE_MIN_GAP_MIN = 20    // never pulse more than ~once / 20 min / call
+
+// Band width of the zone whose band price is NEAREST to (null if no usable band). Pure.
+export function _nearestZoneWidth(call, price) {
+    const zones = Array.isArray(call?.entry_zones) ? call.entry_zones : []
+    let width = null, bestDist = Infinity
+    for (const z of zones) {
+        const lo = Number(z?.lower), hi = Number(z?.upper)
+        if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) continue
+        const dist = price < lo ? (lo - price) : price > hi ? (price - hi) : 0
+        if (dist < bestDist) { bestDist = dist; width = hi - lo }
+    }
+    return width
+}
+
+// Should this scheduled (out-of-zone) wake escalate to a full visual pulse read? Pure — all inputs
+// come from the call + live price + clock. Guards, cheapest-first: finite price; resting pre-entry
+// ('waiting', so no enter/edit card is pending); NOT in a zone (that's Tier 1); anchor seeded; a real
+// volatility yardstick; a material move from the anchor; and the time throttle.
+export function _shouldPulse(call, price, nowMs) {
+    if (!Number.isFinite(price)) return false
+    if (call?.status !== 'waiting') return false
+    if (_zoneGate(call, price)) return false
+    const ms     = call?.monitor_state ?? {}
+    const anchor = Number(ms.pulse_anchor_px)
+    if (!Number.isFinite(anchor)) return false
+    const w = _nearestZoneWidth(call, price)
+    if (!Number.isFinite(w) || w <= 0) return false
+    if (Math.abs(price - anchor) < PULSE_MOVE_BANDS * w) return false
+    const lastAt = Date.parse(ms.last_pulse_at ?? '')
+    if (Number.isFinite(lastAt) && (nowMs - lastAt) < PULSE_MIN_GAP_MIN * 60_000) return false
+    return true
 }
 
 // ─── Timeline / monologue (the monitor journal) ────────────────────────────────
@@ -817,6 +983,9 @@ const _deps = {
     // logs for now — real notify + user-confirm execution is slice 3 (mirrors Phase 2→3 for onCard).
     assessPosition: _defaultAssessPosition,
     onManageCard:   _defaultOnManageCard,
+    // The one-shot re-entry thesis check at a stop-out + its card delivery (P2).
+    assessReentry:  _defaultAssessReentry,
+    onReentry:      _defaultOnReentry,
 }
 
 async function _defaultGetPrice(call) {
@@ -857,5 +1026,15 @@ async function _defaultOnManageCard(call, card) {
     logger.info(LOG, 'MANAGEMENT CARD', { id: call.id, asset: call.asset, verdict: card?.verdict, proposal: card?.proposal })
     try { await notifyCallManage(call, card) }
     catch (err) { logger.warn(LOG, `onManageCard notify failed for ${call.id}:`, err.message) }
+}
+
+// ─── Re-entry card (P2) ─────────────────────────────────────────────────────────
+// Post the stop-out re-entry offer to social chat (Kairos-voiced; routes to the call pop-out, where
+// the user picks Re-enter → reviveCall / Close → leave terminal). Best-effort: a notify failure must
+// never wedge the monitor loop.
+async function _defaultOnReentry(call, read, outcome) {
+    logger.info(LOG, 'REENTRY CARD', { id: call.id, asset: call.asset, thesis_alive: read?.thesis_alive })
+    try { await notifyCallReentry(call, read, outcome) }
+    catch (err) { logger.warn(LOG, `onReentry notify failed for ${call.id}:`, err.message) }
 }
 

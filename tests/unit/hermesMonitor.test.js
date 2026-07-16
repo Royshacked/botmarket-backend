@@ -2,10 +2,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     _zoneGate, _isPreActive, _isExpiring, _isPastExpiry, _effectiveVerdict, _computeNextCheckAt, _nextStatus,
-    _snapToReference, _finalizeProposal, _applyAssessment, _hasEditProposal, _scheduledPatch, _checkCall,
+    _snapToReference, _finalizeProposal, _applyAssessment, _hasEditProposal, _scheduledPatch, _proximityGapMin,
+    _nearestZoneWidth, _shouldPulse, _checkCall,
     _timelineEntry, _zonesLabel, _withTimeout, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock,
     _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _handleAssessToolUses,
-    _reconcilePosition, _rMultiple, _checkPosition,
+    _reconcilePosition, _rMultiple, _checkPosition, _isStopOut,
     _computeMetrics, _positionGate, _reviewDue, _finalizePositionProposal, _applyPositionAssessment,
 } from '../../monitoring/hermes.monitor.service.js'
 
@@ -331,10 +332,128 @@ test('applyAssessment: PAST-expiry review still on wait → forced expired + fir
 })
 
 // ── _scheduledPatch ───────────────────────────────────────────────────────
-test('scheduledPatch: idle reschedules at max gap; failure retries at min gap', () => {
+test('scheduledPatch: idle (no price) reschedules at max gap; failure retries at min gap', () => {
     assert.equal(_scheduledPatch(call(), NOW)['monitor_state.next_check_at'], new Date(NOW + 60 * 60_000).toISOString())
     assert.equal(_scheduledPatch(call(), NOW, true)['monitor_state.next_check_at'], new Date(NOW + 5 * 60_000).toISOString())
     assert.equal(_scheduledPatch(call(), NOW)['monitor_state.check_count'], 3)
+})
+test('scheduledPatch: proximity tightens the gap when a live price nears a zone', () => {
+    const c = call({ cadence: { min_gap_min: 1, max_gap_min: 61 }, entry_zones: [{ id: 'b', lower: 100, upper: 110 }] })
+    assert.equal(_scheduledPatch(c, NOW, false, 105)['monitor_state.next_check_at'], new Date(NOW + 1  * 60_000).toISOString()) // near → min
+    assert.equal(_scheduledPatch(c, NOW, false, 0)['monitor_state.next_check_at'],   new Date(NOW + 61 * 60_000).toISOString()) // far → max
+    assert.equal(_scheduledPatch(c, NOW, false)['monitor_state.next_check_at'],      new Date(NOW + 61 * 60_000).toISOString()) // no price → max
+})
+
+// ── _proximityGapMin: graded cadence by distance to the nearest zone ───────
+test('proximityGapMin: near a band → min gap, far → max gap, graded between (breakout side symmetric)', () => {
+    const c = call({ cadence: { min_gap_min: 1, max_gap_min: 61 },
+        entry_zones: [{ id: 'b', lower: 100, upper: 110 }] })   // width 10 → NEAR=2 bands (20), FAR=10 bands (100)
+    assert.equal(_proximityGapMin(c, 105, 1, 61), 1)    // inside the band → min
+    assert.equal(_proximityGapMin(c, 90,  1, 61), 1)    // 1 band below → min
+    assert.equal(_proximityGapMin(c, 80,  1, 61), 1)    // exactly 2 bands (NEAR) → min
+    assert.equal(_proximityGapMin(c, 40,  1, 61), 31)   // 6 bands → midpoint
+    assert.equal(_proximityGapMin(c, 0,   1, 61), 61)   // exactly 10 bands (FAR) → max
+    assert.equal(_proximityGapMin(c, 130, 1, 61), 1)    // 2 bands ABOVE the band → min (approach-from-below/above symmetric)
+    assert.equal(_proximityGapMin(c, 210, 1, 61), 61)   // 10 bands above → max
+})
+test('proximityGapMin: uses the NEAREST of multiple zones', () => {
+    const c = call({ cadence: { min_gap_min: 1, max_gap_min: 61 }, entry_zones: [
+        { id: 'far',  lower: 100, upper: 110 },   // above by 95 → far
+        { id: 'near', lower: 195, upper: 200 },   // above by 5 (1 band) → near wins
+    ] })
+    assert.equal(_proximityGapMin(c, 205, 1, 61), 1)
+})
+test('proximityGapMin: non-finite price / no zones / zero-width band → max gap', () => {
+    assert.equal(_proximityGapMin(call(), NaN, 1, 61), 61)
+    assert.equal(_proximityGapMin(call({ entry_zones: [] }), 100, 1, 61), 61)
+    assert.equal(_proximityGapMin(call({ entry_zones: [{ lower: 100, upper: 100 }] }), 100, 1, 61), 61)
+})
+
+// ── Out-of-zone momentum pulse (Tier 2) ───────────────────────────────────
+test('nearestZoneWidth: nearest usable band width; null when none', () => {
+    const c = call({ entry_zones: [{ lower: 100, upper: 110 }, { lower: 195, upper: 200 }] })
+    assert.equal(_nearestZoneWidth(c, 205), 5)     // nearest band is [195,200]
+    assert.equal(_nearestZoneWidth(c, 90),  10)    // nearest band is [100,110]
+    assert.equal(_nearestZoneWidth(call({ entry_zones: [] }), 100), null)
+    assert.equal(_nearestZoneWidth(call({ entry_zones: [{ lower: 100, upper: 100 }] }), 100), null) // zero width skipped
+})
+test('shouldPulse: trips only on a material, throttle-clear, out-of-zone move while waiting + seeded', () => {
+    const base = { check_count: 2, memo: '', armed_zone_id: null, pulse_anchor_px: 100, last_pulse_at: null }
+    const mk = (extra = {}, ms = {}) => call({ status: 'waiting', entry_zones: [{ id: 'z', lower: 100, upper: 110 }],
+        monitor_state: { ...base, ...ms }, ...extra })
+    assert.equal(_shouldPulse(mk(), 150, NOW), true)                        // 5 band-widths from anchor, outside → pulse
+    assert.equal(_shouldPulse(mk(), 125, NOW), false)                       // 2.5 bands < 4 → no
+    assert.equal(_shouldPulse(mk(), 105, NOW), false)                       // inside the band → Tier 1's job
+    assert.equal(_shouldPulse(mk({ status: 'ready' }), 150, NOW), false)    // a card is pending → no
+    assert.equal(_shouldPulse(mk({}, { pulse_anchor_px: undefined }), 150, NOW), false) // not seeded → no
+    assert.equal(_shouldPulse(mk({}, { last_pulse_at: new Date(NOW - 5  * 60_000).toISOString() }), 150, NOW), false) // throttled (<20m)
+    assert.equal(_shouldPulse(mk({}, { last_pulse_at: new Date(NOW - 25 * 60_000).toISOString() }), 150, NOW), true)  // throttle cleared
+    assert.equal(_shouldPulse(mk(), NaN, NOW), false)                       // non-finite price
+    assert.equal(_shouldPulse(mk({ entry_zones: [{ lower: 100, upper: 100 }] }), 150, NOW), false) // no yardstick
+})
+
+const pulseCall = (extra = {}) => call({ status: 'waiting', entry_zones: [{ id: 'z', lower: 100, upper: 110 }],
+    monitor_state: { check_count: 2, memo: '', armed_zone_id: null, pulse_anchor_px: 100, last_pulse_at: null }, ...extra })
+
+test('checkCall: first out-of-zone wake seeds the pulse anchor (no assess)', async () => {
+    const db = fakeDb()
+    let assessed = false
+    const deps = { getPrice: async () => 270, assess: async () => { assessed = true; return {} }, onCard: async () => {}, isAssetOpen: () => true }
+    const out = await _checkCall(db, call({ status: 'waiting' }), NOW, deps)   // call() has no pulse_anchor_px
+    assert.equal(out.reason, 'scheduled')
+    assert.equal(assessed, false)
+    assert.equal(db.updates[0].set['monitor_state.pulse_anchor_px'], 270)      // seeded, no pulse this wake
+})
+test('checkCall: material out-of-zone move → momentum pulse; edit re-maps and fires a card', async () => {
+    const db = fakeDb()
+    let carded = null, assessArgs = null
+    const deps = {
+        getPrice: async () => 150,   // 5 band-widths above the zone → material
+        assess:   async (c, zone, ctx) => { assessArgs = { zone, ctx }; return {
+            verdict: 'edit', timeframe_used: '15min', next_check_min: 15, read: 'broke out above the range',
+            edit_proposal: { why: 'clean breakout the plan did not map', changes: { entry_zones: [{ id: 'z2', lower: 148, upper: 152 }] } },
+            memo_update: 're-mapped to the breakout' } },
+        onCard:   async (c, a) => { carded = a },
+        isAssetOpen: () => true,
+    }
+    const out = await _checkCall(db, pulseCall(), NOW, deps)
+    assert.equal(out.reason, 'momentum_pulse')
+    assert.equal(out.verdict, 'edit')
+    assert.equal(assessArgs.zone, null)                        // pulse assesses with NO armed zone
+    assert.equal(assessArgs.ctx.reason, 'momentum_pulse')
+    assert.equal(db.updates[0].set.status, 'expiring')         // edit card flow
+    assert.equal(db.updates[0].set['monitor_state.pulse_anchor_px'], 150)                 // re-anchored to the move
+    assert.equal(db.updates[0].set['monitor_state.last_pulse_at'], new Date(NOW).toISOString())
+    assert.equal(carded.verdict, 'edit')
+})
+test('checkCall: material move but pulse says noise → wait, no card, still re-anchored (throttle)', async () => {
+    const db = fakeDb()
+    let carded = false
+    const deps = { getPrice: async () => 150, assess: async () => ({ verdict: 'wait', read: 'just noise', next_check_min: 15 }), onCard: async () => { carded = true }, isAssetOpen: () => true }
+    const out = await _checkCall(db, pulseCall(), NOW, deps)
+    assert.equal(out.reason, 'momentum_pulse')
+    assert.equal(out.verdict, 'wait')
+    assert.equal(out.fireCard, false)
+    assert.equal(carded, false)
+    assert.equal(db.updates[0].set['monitor_state.pulse_anchor_px'], 150)
+    assert.equal(db.updates[0].set['monitor_state.last_pulse_at'], new Date(NOW).toISOString())
+})
+test('checkCall: a pulse returning enter is coerced to wait (no direct entry, no card)', async () => {
+    const db = fakeDb()
+    let carded = false
+    const deps = { getPrice: async () => 150, assess: async () => ({ verdict: 'enter', proposal: { entry: 150, stop: 145, take_profit: [{ price: 160 }] }, next_check_min: 15 }), onCard: async () => { carded = true }, isAssetOpen: () => true }
+    const out = await _checkCall(db, pulseCall(), NOW, deps)
+    assert.equal(out.verdict, 'wait')                          // enter coerced away
+    assert.notEqual(db.updates[0].set.status, 'ready')
+    assert.equal(carded, false)
+})
+test('checkCall: sub-threshold out-of-zone move → cheap reschedule, no pulse', async () => {
+    const db = fakeDb()
+    let assessed = false
+    const deps = { getPrice: async () => 125, assess: async () => { assessed = true; return {} }, onCard: async () => {}, isAssetOpen: () => true }
+    const out = await _checkCall(db, pulseCall(), NOW, deps)
+    assert.equal(out.reason, 'scheduled')
+    assert.equal(assessed, false)
 })
 
 // ── _checkCall orchestration (injected IO, no DB/LLM) ─────────────────────
@@ -374,11 +493,11 @@ test('checkCall: past active_from → gate is transparent, normal path runs', as
 test('checkCall: no zone + not expiring → cheap scheduled path, no assessment', async () => {
     const db = fakeDb()
     let assessed = false
-    const deps = { getPrice: async () => 250, assess: async () => { assessed = true; return {} }, onCard: async () => {}, isAssetOpen: () => true }
+    const deps = { getPrice: async () => 270, assess: async () => { assessed = true; return {} }, onCard: async () => {}, isAssetOpen: () => true }
     const out = await _checkCall(db, call(), NOW, deps)
     assert.equal(out.reason, 'scheduled')
     assert.equal(assessed, false)                                   // gate short-circuited the LLM
-    assert.equal(db.updates[0].set['monitor_state.next_check_at'], new Date(NOW + 60 * 60_000).toISOString())
+    assert.equal(db.updates[0].set['monitor_state.next_check_at'], new Date(NOW + 60 * 60_000).toISOString()) // 270 is >10 band-widths from every zone → max gap
 })
 
 test('checkCall: price in a zone → assessment runs, verdict persisted, card fired on enter', async () => {
@@ -805,6 +924,77 @@ test('_checkPosition: reads idea via deps.getIdea and persists the reconcile', a
     assert.equal(res.status, 'in_position')
     assert.equal(updates[0].$set.status, 'in_position')
     assert.ok(updates[0].$push['monitor_state.timeline'])   // journal entry appended
+})
+
+// ── P2: re-entry offer at a stop-out ──────────────────────────────────────
+test('isStopOut: stop / adverse-broker close only (tp + manual do not offer re-entry)', () => {
+    assert.equal(_isStopOut({ reason: 'stop' }), true)
+    assert.equal(_isStopOut({ reason: 'tp' }), false)
+    assert.equal(_isStopOut({ reason: 'manual' }), false)
+    assert.equal(_isStopOut({ reason: 'broker', r_multiple: -0.8 }), true)   // unlabeled adverse close
+    assert.equal(_isStopOut({ reason: 'broker', r_multiple: 1.2 }), false)
+    assert.equal(_isStopOut(null), false)
+})
+test('_checkPosition: stop-out with thesis intact → re-entry card fired + marker set', async () => {
+    const updates = []
+    const db = { collection: () => ({ updateOne: async (_q, u) => updates.push(u) }) }
+    let reentryArgs = null, seenOutcome = null
+    const deps = {
+        getIdea:       async () => ({ id: 'idea1', status: 'closed', closedReason: 'stop', realizedPnl: -110, closedAt: NOW }),
+        assessReentry: async (c, outcome) => { seenOutcome = outcome; return { thesis_alive: true, why: 'structure intact, just a stop run', read: 'stopped but the trend holds' } },
+        onReentry:     async (c, read, outcome) => { reentryArgs = { read, outcome } },
+    }
+    const res = await _checkPosition(db, posCall('in_position'), NOW, deps)
+    assert.equal(res.status, 'closed')
+    assert.equal(seenOutcome.reason, 'stop')
+    const u = updates.find(x => x.$set['position_state.reentry'])
+    assert.equal(u.$set['position_state.reentry'].offered, true)
+    assert.match(u.$push['monitor_state.timeline'].$each[0].note, /thesis still looks intact/)
+    assert.equal(reentryArgs.read.thesis_alive, true)
+})
+test('_checkPosition: stop-out with thesis broken → no card, journals standing down', async () => {
+    const updates = []
+    const db = { collection: () => ({ updateOne: async (_q, u) => updates.push(u) }) }
+    let carded = false
+    const deps = {
+        getIdea:       async () => ({ id: 'idea1', status: 'closed', closedReason: 'stop', realizedPnl: -110, closedAt: NOW }),
+        assessReentry: async () => ({ thesis_alive: false, why: 'lost the range and the trend' }),
+        onReentry:     async () => { carded = true },
+    }
+    await _checkPosition(db, posCall('in_position'), NOW, deps)
+    assert.equal(carded, false)
+    const u = updates.find(x => x.$set['position_state.reentry'])
+    assert.equal(u.$set['position_state.reentry'].offered, false)
+    assert.match(u.$push['monitor_state.timeline'].$each[0].note, /standing down/)
+})
+test('_checkPosition: TP close → no re-entry offer (trade worked)', async () => {
+    const updates = []
+    const db = { collection: () => ({ updateOne: async (_q, u) => updates.push(u) }) }
+    let assessed = false
+    const deps = {
+        getIdea:       async () => ({ id: 'idea1', status: 'closed', closedReason: 'tp', realizedPnl: 330, closedAt: NOW }),
+        assessReentry: async () => { assessed = true; return { thesis_alive: true } },
+        onReentry:     async () => {},
+    }
+    const res = await _checkPosition(db, posCall('in_position'), NOW, deps)
+    assert.equal(res.status, 'closed')
+    assert.equal(assessed, false)                                            // TP → _isStopOut false → never assessed
+    assert.equal(updates.find(x => x.$set['position_state.reentry']), undefined)
+})
+test('_checkPosition: stop-out but re-entry read fails → no card, leaves it closed', async () => {
+    const updates = []
+    const db = { collection: () => ({ updateOne: async (_q, u) => updates.push(u) }) }
+    let carded = false
+    const deps = {
+        getIdea:       async () => ({ id: 'idea1', status: 'closed', closedReason: 'stop', closedAt: NOW }),
+        assessReentry: async () => { throw new Error('llm down') },
+        onReentry:     async () => { carded = true },
+    }
+    await _checkPosition(db, posCall('in_position'), NOW, deps)
+    assert.equal(carded, false)
+    const u = updates.find(x => x.$set['position_state.reentry'])
+    assert.equal(u.$set['position_state.reentry'].offered, false)
+    assert.match(u.$push['monitor_state.timeline'].$each[0].note, /couldn't assess/)
 })
 
 // ── Phase 5 slice 2: in-position management brain ──────────────────────────

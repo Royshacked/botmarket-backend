@@ -201,6 +201,59 @@ export async function dismissCall(id, userId, isAdmin = false, deps = _deps) {
     return { ok: true }
 }
 
+// ── Re-entry after a stop-out (P2) ─────────────────────────────────────────────
+// A fresh validity window for a revived call, keyed off its horizon so a just-revived call isn't
+// immediately expired by the monitor. Pure (nowMs injectable for tests).
+export function _reentryValidUntil(call, nowMs = Date.now()) {
+    const days = call?.trade_type === 'swing' ? 14 : call?.trade_type === 'day' ? 3 : 1
+    return new Date(nowMs + days * 24 * 60 * 60 * 1000).toISOString()
+}
+
+// [Re-enter] on a stop-out re-entry offer: revive the CLOSED call to a pre-entry armed state so the
+// monitor watches the ORIGINAL plan again. The finished position is cleared (a new entry mints a fresh
+// idea); the pulse anchor re-seeds; valid_until is extended so it isn't instantly expired. There is no
+// coded re-entry budget — the human tap is the budget — but reentry_count is bumped for observability.
+export async function reviveCall(id, userId, isAdmin = false, deps = _deps) {
+    const db = await deps.getDb()
+    const { call, err } = await _loadOwned(db, id, userId, isAdmin)
+    if (err) return { ok: false, reason: err }
+    if (call.status !== 'closed')                        return { ok: false, reason: 'not_closed' }
+    if (call.position_state?.reentry?.offered !== true)  return { ok: false, reason: 'no_reentry_offer' }
+
+    const set = {
+        status:         'waiting',
+        valid_until:    _reentryValidUntil(call),
+        linked_idea_id: null,
+        position_state: null,
+        confirmed_at:   null,
+        'monitor_state.armed_zone_id':   null,
+        'monitor_state.last_assessment': null,
+        'monitor_state.next_check_at':   null,   // due on the next tick
+        'monitor_state.pulse_anchor_px': null,   // re-seed the out-of-zone pulse anchor
+        'monitor_state.last_pulse_at':   null,
+    }
+    await db.collection(COLLECTION).updateOne({ id }, { $set: set, $inc: { reentry_count: 1 } })
+    const count = (call.reentry_count ?? 0) + 1
+    logger.info(LOG, `call ${id} revived on re-entry → waiting (re-entry #${count})`)
+    return { ok: true, reentry_count: count }
+}
+
+// [Close] on a re-entry offer: keep the call terminal-closed, just record the decline + clear the
+// offer (so the card doesn't re-surface). NOT `dismiss` — that would flip status 'closed' → 'dismissed'
+// and lose the trade outcome.
+export async function declineReentry(id, userId, isAdmin = false, deps = _deps) {
+    const db = await deps.getDb()
+    const { call, err } = await _loadOwned(db, id, userId, isAdmin, { user_id: 1, status: 1 })
+    if (err) return { ok: false, reason: err }
+    if (call.status !== 'closed') return { ok: false, reason: 'not_closed' }
+    await db.collection(COLLECTION).updateOne({ id }, { $set: {
+        'position_state.reentry.offered':     false,
+        'position_state.reentry.declined_at': new Date().toISOString(),
+    } })
+    logger.info(LOG, `call ${id} re-entry declined`)
+    return { ok: true }
+}
+
 // ── In-position management (Phase 5, slice 3 — the hands) ──────────────────────
 // The user accepts a management card (or dismisses it). Accept EXECUTES the pending proposal against
 // the linked idea's broker position via the shared primitives (amend stop/TP, partial/full close);
@@ -372,4 +425,4 @@ export async function manageCall(id, userId, verb, isAdmin = false, deps = _mdep
     return { ok: true, verb }
 }
 
-export const kairosHandoffService = { confirmCall, editCall, dismissCall, manageCall }
+export const kairosHandoffService = { confirmCall, editCall, dismissCall, manageCall, reviveCall, declineReentry }

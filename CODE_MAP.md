@@ -115,15 +115,24 @@ monitoring/
   evaluators/               touch · structured · indicator · time · volume · news · chart
   execution.reconciler.js   broker-authoritative fill/close → idea status
   invalidation.monitor.js   entry-range watcher (advisory, never executes)
-  hermes.monitor.service.js Hermes — the Kairos-call readiness loop (own tick, `kairos_calls`); cheap zone gate →
-                            LLM assessment → verdict; runs under the user's hermesModel + hermesReasoning
-                            prefs (adaptive thinking); card hook (_defaultOnCard) posts entry_confirm /
-                            call_expiry via tradeNotify (enter→ready, edit→expiring, let_expire→expired)
-  hermes.assess.js          the four-axis assessment (readiness + position mgmt). Fact-sources every axis:
-                            live chart+candles, company news (newsService 1h cache), frozen event_risk,
-                            and a LIVE broad-market read gated by the call's market_sensitivity
-                            (getQuotes SPY/QQQ/VIX + drivers). A tentative ENTER on a market-sensitive
-                            call gets a web_search browse-confirm 2nd pass (downgrades enter→wait, fail-open)
+  hermes.monitor.service.js Hermes — the Kairos-call readiness loop (own tick, `kairos_calls`). THREE-TIER
+                            out-of-zone cascade (all cheapest-first): (1) arithmetic zone gate; (1.5) proximity
+                            polling (_proximityGapMin: poll faster the nearer price is to a zone) + a momentum-
+                            pulse filter (_shouldPulse: a material, throttled move AWAY from every zone —
+                            pulse_anchor_px/last_pulse_at) → (2) one full visual read that can RE-MAP via
+                            edit/edit_proposal (closes the "blind outside mapped zones" gap). In-zone/expiry →
+                            the LLM assessment → verdict. Runs under hermesModel + hermesReasoning prefs;
+                            card hook (_defaultOnCard) posts entry_confirm / call_expiry via tradeNotify
+                            (enter→ready, edit→expiring, let_expire→expired). At a STOP-out (_isStopOut, not
+                            tp/manual) _maybeOfferReentry runs a one-shot thesis check → intact fires a
+                            call_reentry card ([Re-enter]=reviveCall → waiting / [Close]=declineReentry)
+  hermes.assess.js          the four-axis assessment (readiness + position mgmt) + the momentum-pulse and
+                            re-entry reads. Fact-sources every axis: live chart+candles, company news
+                            (newsService 1h cache), frozen event_risk, a LIVE broad-market read gated by the
+                            call's market_sensitivity (getQuotes SPY/QQQ/VIX + drivers), and a SESSION-OF-DAY
+                            phase (market.service sessionPhase, asset-class-aware; crypto/FX=24h) weighted as a
+                            lens. A tentative ENTER on a market-sensitive call gets a web_search browse-confirm
+                            2nd pass (downgrades enter→wait, fail-open)
   positionMonitor.js  portfolio.monitor.js
   paperFill.service.js  paperEquity.service.js
   exitOrders.util.js        buildExitOrder (applies +basisOffset → broker price space) / exitOrderRecord / closeSide / orderSymbol

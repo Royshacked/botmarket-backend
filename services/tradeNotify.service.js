@@ -94,6 +94,25 @@ export function buildCallManage(call, card) {
     }
 }
 
+/**
+ * Kairos position STOPPED OUT but the thesis still looks intact → offer a re-entry. Routes to the
+ * call pop-out, where the user picks Re-enter (revive the call, re-arm the plan) or Close (leave it
+ * terminal). `read` carries the thesis-check rationale; `outcome` the stop-out (exit price / R).
+ */
+export function buildCallReentry(call, read = null, outcome = null) {
+    const asset   = call?.asset
+    const px      = outcome?.exit_price
+    const stopBit = Number.isFinite(px) ? ` at ${px}` : ''
+    const why     = read?.why ? ` ${read.why}` : ''
+    return {
+        userId:  call?.user_id ?? null,
+        content: `Kairos — ${asset} stopped out${stopBit}, but the thesis still looks intact.${why} Re-enter or close it out?`,
+        type:    'call_reentry',
+        payload: { callId: call?.id, asset, exit_price: Number.isFinite(px) ? px : null, why: read?.why ?? null },
+        botId:   'kairos',
+    }
+}
+
 // ── Thin IO wrappers ────────────────────────────────────────────────────────────
 
 async function _post(card, tag) {
@@ -118,4 +137,8 @@ export async function notifyCallManage(call, card) {
     return _post(buildCallManage(call, card), `Call-manage card (${card?.verdict})`)
 }
 
-export const tradeNotifyService = { notifyIdeaEntryConfirm, notifyCallReady, notifyCallExpiry, notifyCallManage }
+export async function notifyCallReentry(call, read = null, outcome = null) {
+    return _post(buildCallReentry(call, read, outcome), 'Call-reentry card')
+}
+
+export const tradeNotifyService = { notifyIdeaEntryConfirm, notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry }

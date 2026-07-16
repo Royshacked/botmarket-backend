@@ -9,6 +9,7 @@ import { getQuotes, getCycleAnalysis } from '../providers/yahoofinance.provider.
 import { getTickerAggregates }         from '../providers/candles.provider.js'
 import { buildStudies } from './evaluators/chart.evaluator.js'
 import { CANDLE_CFG, aggregateCandles } from '../services/marketData.tools.js'
+import { sessionPhase } from '../services/market.service.js'
 import { cachedChartImage } from '../services/chartImgCache.service.js'
 import { readStructure, STRUCTURE_VISIONS } from '../services/priceStructure.tools.js'
 import { newsService } from '../services/news.service.js'
@@ -333,6 +334,7 @@ The plan is your primary lens, not a rigid checklist. You are a discretionary tr
 Score the market-conditions axis from the BROAD MARKET block (a LIVE read of SPY/QQQ/VIX + this asset's correlated drivers) — not from memory. Weight it by the stated sensitivity: a high-sensitivity asset into a risk-off tape (indices down, VIX spiking) scores "adverse"; if the block says the asset is low-sensitivity/not material, treat market conditions as neutral and do NOT let the broad tape veto the trade.
 Score the news/catalyst axis from the RECENT HEADLINES provided (recent-first, dated) AND the SCHEDULED EVENT RISK block — do not invent news from memory. If no headlines are provided, the realized-news read is unsourced: lean "neutral" and say so. A fresh, material catalyst that cuts against the trade is "blocking".
 SCHEDULED EVENT RISK lists known upcoming catalysts (earnings, FOMC, CPI) with timing, frozen at build. Weigh them like a discretionary trader: if a high-impact event lands BEFORE this trade's expected exit (judge from trade_type + valid_until) and the thesis is NOT explicitly an event play, strongly prefer verdict "wait" or "stand_aside" — do NOT enter into an unresolved binary just because price tagged the zone. An imminent, unresolved high-impact event scores the news axis "adverse" or "blocking".
+Weight the SESSION-OF-DAY phase (given as SESSION NOW) into the ENTRY timing like a discretionary trader: the opening range and power hour deserve more weight; a breakout in the lunch lull is suspect (thin, fakeout-prone); do NOT initiate a fresh intraday entry when it is "into-close". This is a lens, not a veto — and for a "24h" asset (crypto/FX, SESSION NOW = 24h) session texture is immaterial, so ignore it there.
 On an expiry_review, choose enter (it finally looks good), edit (re-map/roll — provide edit_proposal), or let_expire.
 Always include "read": ONE short, plain first-person sentence — what you see right now and what you're doing about it (e.g. "Price is coiling just under the zone, no trigger yet — I'll keep waiting."). This is your live monologue, so keep it human and specific.
 Output ONLY a JSON object, no prose:
@@ -399,22 +401,31 @@ async function _confirmEntryWithBrowse(call, zone, raw) {
     }
 }
 
+// Momentum-pulse mandate: appended to the user turn when the monitor woke Hermes on a material move
+// AWAY from every mapped zone (no zone armed). It reframes the read as "re-map or ignore", never "enter"
+// — a bare enter has no mapped level/risk frame to snap to, so the pulse proposes a fresh map instead.
+const _PULSE_MANDATE = `MOMENTUM PULSE — price has moved materially AWAY from every mapped zone, so you were woken to look even though NO zone is armed. Decide like a discretionary trader: is this a real development the plan did not map (a genuine breakout/breakdown worth trading), or just noise? If it is REAL, RE-MAP the call — return verdict "edit" with an edit_proposal whose changes give a fresh entry zone PLUS a new invalidation and target(s), so the trade has a complete risk frame. If it is noise, or taking it now would be chasing an already-extended move, return "wait" and say why. Do NOT return "enter" here — there is no mapped level to enter against yet; propose the re-map instead.`
+
 export async function _defaultAssess(call, zone, ctx) {
+    const isPulse = ctx.reason === 'momentum_pulse'
     const raw = await _runAssessment(call, _ASSESS_SYSTEM, (tf, candlesText, newsText, marketText) => [
         `CALL: ${JSON.stringify({ asset: call.asset, trade_type: call.trade_type, bias: call.bias, thesis: call.thesis, conviction: call.conviction, entry_zones: call.entry_zones, reference_levels: call.reference_levels, patterns: call.patterns, timeframe_ladder: call.timeframe_ladder, valid_until: call.valid_until })}`,
-        `ARMED ZONE: ${zone ? JSON.stringify(zone) : 'none (expiry review)'}`,
+        `ARMED ZONE: ${zone ? JSON.stringify(zone) : (isPulse ? 'none — price is OUTSIDE all mapped zones' : 'none (expiry review)')}`,
         `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
+        `SESSION NOW: ${sessionPhase(call.asset, call.asset_class)}`,
         `REASON WOKEN: ${ctx.reason}`,
+        isPulse ? _PULSE_MANDATE : '',
         `PRIOR MEMO: ${call.monitor_state?.memo || '(none)'}`,
         candlesText ? `RECENT CANDLES (${tf}):\n${candlesText}` : '',
         newsText ? `RECENT HEADLINES (newest first):\n${newsText}` : 'RECENT HEADLINES: (none available — news axis unsourced)',
         _marketBlock(call, marketText),
         _eventRiskBlock(call),
-    ].filter(Boolean).join('\n\n'), 'assessment')
+    ].filter(Boolean).join('\n\n'), isPulse ? 'momentum pulse' : 'assessment')
 
     // Hybrid market read, Slice 2: a tentative ENTER on a market-sensitive call is confirmed against a
     // LIVE browse of the tape before it fires. Only the enter path pays the extra call (rare, decisive).
-    if (raw?.verdict === 'enter' && _isMarketSensitive(call)) return _confirmEntryWithBrowse(call, zone, raw)
+    // A pulse never enters (it re-maps), so it skips the browse-confirm.
+    if (!isPulse && raw?.verdict === 'enter' && _isMarketSensitive(call)) return _confirmEntryWithBrowse(call, zone, raw)
     return raw
 }
 
@@ -425,6 +436,7 @@ Manage it like a pro: LET WINNERS RUN, cut when the THESIS breaks, and do NOT mi
 Score the market-conditions axis from the BROAD MARKET block (a LIVE read of SPY/QQQ/VIX + this position's correlated drivers) — not from memory, weighted by the stated sensitivity. For a high-sensitivity position, a sharp risk-off turn in the tape is a reason to protect (move_stop / take_partial); if the block says low-sensitivity/not material, don't let the broad tape drive management.
 Score the news/catalyst axis from the RECENT HEADLINES provided (recent-first, dated) AND the SCHEDULED EVENT RISK block — do not invent news from memory. If no headlines are provided, lean "neutral" and say so. A fresh, material catalyst that breaks the original thesis is "blocking" and argues for exit_now.
 SCHEDULED EVENT RISK lists known upcoming catalysts (earnings, FOMC, CPI), frozen at build. A looming high-impact event you'd be holding THROUGH is real risk: prefer take_partial or move_stop (tighten) ahead of it rather than carrying full size into an unresolved binary — unless carrying the event is the explicit thesis.
+Factor the SESSION-OF-DAY phase (given as SESSION NOW): power hour / "into-close" is when to bank or protect an intraday ahead of the bell; the lunch lull usually just chops, so don't over-manage. For a "24h" asset (SESSION NOW = 24h) session texture is immaterial.
 Choose ONE verdict:
 - hold: nothing to do (the DEFAULT — bias strongly toward this).
 - move_stop: trail / move the stop to protect (breakeven only after a clear +1R, or up to fresh structure). proposal.new_stop.
@@ -442,6 +454,7 @@ export async function _defaultAssessPosition(call, ps, ctx) {
         `POSITION: ${JSON.stringify({ entry: ps.entry, stop: ps.stop, targets: ps.targets, taken: ps.taken, phase: ps.phase })}`,
         `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
         `R-MULTIPLE NOW: ${ctx.metrics?.r_multiple_now ?? 'unknown'}`,
+        `SESSION NOW: ${sessionPhase(call.asset, call.asset_class)}`,
         `REASON WOKEN: ${ctx.reason}`,
         `PENDING CARD: ${ps.pending_action ? JSON.stringify(ps.pending_action) : '(none)'}`,
         `PRIOR MEMO: ${ps.memo || '(none)'}`,
@@ -450,4 +463,28 @@ export async function _defaultAssessPosition(call, ps, ctx) {
         _marketBlock(call, marketText),
         _eventRiskBlock(call),
     ].filter(Boolean).join('\n\n'), 'position assessment')
+}
+
+// ─── Re-entry thesis check (fires once, at a stop-out) ──────────────────────────
+// A stop-out closed the position — but a TRADE-level stop hitting does NOT mean the IDEA is dead.
+// This read decides, like a pro deciding whether to re-enter: is the THESIS still intact (the stop was
+// just this entry failing, worth taking again around the plan) or BROKEN (structure/character/catalyst
+// changed → stand down). Output is deliberately tiny — the user makes the actual re-enter/close call.
+const _REENTRY_SYSTEM = `You are Kairos, a discretionary trader who was JUST STOPPED OUT of a position. The trade-level stop hit — but that alone does NOT mean the IDEA is dead; getting stopped and re-entering the same thesis 2–3 times is normal.
+Decide, honestly, like a pro weighing a re-entry: is the THESIS still INTACT (the stop was just this particular entry failing, and you would take the trade again around the plan), or is it BROKEN (the structure, character, or catalyst has changed and you should stand down)?
+You are given the original call (thesis, patterns, reference_levels, entry_zones), the stop-out outcome (exit price, R), a chart, recent candles, headlines, and the market backdrop. Weight price action over indicators. A stop-out is a real cost — only call the thesis alive if you genuinely would re-enter; do not be reflexively optimistic.
+Output ONLY a JSON object, no prose:
+{"read":"<one short first-person sentence>","thesis_alive":true|false,"why":"<one line: what keeps the thesis alive, or what broke it>"}`
+
+export async function _defaultAssessReentry(call, outcome, ctx = {}) {
+    return _runAssessment(call, _REENTRY_SYSTEM, (tf, candlesText, newsText, marketText) => [
+        `CALL: ${JSON.stringify({ asset: call.asset, trade_type: call.trade_type, bias: call.bias, thesis: call.thesis, patterns: call.patterns, reference_levels: call.reference_levels, entry_zones: call.entry_zones, timeframe_ladder: call.timeframe_ladder })}`,
+        `STOP-OUT: ${JSON.stringify({ exit_price: outcome?.exit_price ?? null, r_multiple: outcome?.r_multiple ?? null, reason: outcome?.reason ?? null })}`,
+        `CURRENT PRICE: ${ctx?.price ?? 'unknown'}`,
+        `PRIOR MEMO: ${call.monitor_state?.memo || '(none)'}`,
+        candlesText ? `RECENT CANDLES (${tf}):\n${candlesText}` : '',
+        newsText ? `RECENT HEADLINES (newest first):\n${newsText}` : 'RECENT HEADLINES: (none available — news axis unsourced)',
+        _marketBlock(call, marketText),
+        _eventRiskBlock(call),
+    ].filter(Boolean).join('\n\n'), 'reentry')
 }

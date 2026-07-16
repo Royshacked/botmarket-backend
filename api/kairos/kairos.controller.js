@@ -114,8 +114,10 @@ export async function actOnKairosCall(req, res) {
         if (action === 'confirm')             result = await kairosHandoffService.confirmCall(id, userId, isAdmin)
         else if (action === 'edit')           result = await kairosHandoffService.editCall(id, userId, isAdmin)
         else if (action === 'dismiss')        result = await kairosHandoffService.dismissCall(id, userId, isAdmin)
+        else if (action === 'reentry')        result = await kairosHandoffService.reviveCall(id, userId, isAdmin)
+        else if (action === 'decline_reentry') result = await kairosHandoffService.declineReentry(id, userId, isAdmin)
         else if (MANAGE_ACTIONS.includes(action)) result = await kairosHandoffService.manageCall(id, userId, action, isAdmin)
-        else return res.status(400).send({ error: 'action must be confirm | edit | dismiss | move_stop | take_partial | exit_now | let_run' })
+        else return res.status(400).send({ error: 'action must be confirm | edit | dismiss | reentry | decline_reentry | move_stop | take_partial | exit_now | let_run' })
 
         if (!result.ok) {
             const code = reasonToStatus(result.reason, 400)

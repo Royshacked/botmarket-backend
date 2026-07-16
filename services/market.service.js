@@ -250,6 +250,36 @@ export function getMarketStatus(symbol, assetClass) {
 }
 
 /**
+ * Coarse SESSION-OF-DAY phase, for weighting an intraday entry/management decision (Hermes P3).
+ * Asset-class-aware: crypto/forex are ~24h → '24h' (session texture immaterial); index futures use the
+ * equity cash-session texture during RTH and 'overnight' outside it; equities get the RTH phase plus
+ * pre/after-market and weekend. ET-based (DST-correct via _etWall). This is a LABEL the assessment
+ * prompt interprets like a discretionary trader — not a hard rule. Pure (date injectable for tests).
+ * @returns {'24h'|'overnight'|'closed'|'pre-market'|'after-hours'|'opening'|'mid'|'lunch'|'power'|'into-close'}
+ */
+export function sessionPhase(symbol, assetClass, date = new Date()) {
+    const session = _sessionForClass(assetClass) ?? _sessionForSymbol(symbol)
+    if (session === 'crypto' || session === 'forex') return '24h'
+
+    const et  = _etWall(date)
+    const day = et.getDay()
+    if (day === 0 || day === 6) return session === 'futures' ? 'overnight' : 'closed'
+    const mins = et.getHours() * 60 + et.getMinutes()
+
+    // Outside equity RTH: index futures still trade (thin 'overnight'); equities are pre/after-market.
+    if (mins < OPEN)   return session === 'futures' ? 'overnight' : 'pre-market'
+    if (mins >= CLOSE) return session === 'futures' ? 'overnight' : 'after-hours'
+
+    // Within the RTH cash session — the texture that matters for equities AND index futures.
+    if (mins < 10 * 60)          return 'opening'     // 09:30–10:00
+    if (mins < 11 * 60 + 30)     return 'mid'         // 10:00–11:30
+    if (mins < 13 * 60 + 30)     return 'lunch'       // 11:30–13:30 (thin, chop-prone)
+    if (mins < 15 * 60)          return 'mid'         // 13:30–15:00
+    if (mins < 15 * 60 + 50)     return 'power'       // 15:00–15:50 (power hour)
+    return 'into-close'                               // 15:50–16:00
+}
+
+/**
  * Epoch ms of the start of the current trading "day" for an asset — the boundary a
  * cumulative-volume condition sums from (see [[project_intrabar_cumulative_volume]]).
  *   • equity → today's RTH open, 09:30 ET (pre/post-market ignored for now).

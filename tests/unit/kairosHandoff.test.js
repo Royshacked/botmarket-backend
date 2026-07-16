@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
     deriveMode, buildIdeaFromCall, buildPositionState, applyEditPatch, confirmCall, editCall, dismissCall,
     manageCall, _resolveMainLink, _workingExit, _partialQty,
+    reviveCall, declineReentry, _reentryValidUntil,
 } from '../../services/kairos.handoff.service.js'
 
 function readyCall(extra = {}) {
@@ -330,4 +331,57 @@ test('manage: manual mode → notifies instruction, no broker execution, records
 test('manage: bad verb → bad_action', async () => {
     const res = await manageCall('call_TSLA_x', 'u1', 'frobnicate', false, mDeps(mgmtDb(inPosCall())))
     assert.deepEqual(res, { ok: false, reason: 'bad_action' })
+})
+
+// ── P2: re-entry after a stop-out ──────────────────────────────────────────
+function closedReentryCall(extra = {}) {
+    return {
+        id: 'call_TSLA_x', user_id: 'u1', asset: 'TSLA', trade_type: 'day', bias: 'long',
+        status: 'closed', reentry_count: 0, linked_idea_id: 'idea1',
+        position_state: { reentry: { offered: true, why: 'trend intact' }, outcome: { reason: 'stop' } },
+        monitor_state: { pulse_anchor_px: 250, last_pulse_at: '2026-07-16T10:00:00Z' },
+        ...extra,
+    }
+}
+
+test('_reentryValidUntil: horizon by trade_type', () => {
+    const T = Date.parse('2026-07-16T00:00:00Z')
+    assert.equal(_reentryValidUntil({ trade_type: 'intraday' }, T), new Date(T + 1  * 864e5).toISOString())
+    assert.equal(_reentryValidUntil({ trade_type: 'day' },      T), new Date(T + 3  * 864e5).toISOString())
+    assert.equal(_reentryValidUntil({ trade_type: 'swing' },    T), new Date(T + 14 * 864e5).toISOString())
+})
+
+test('reviveCall: closed + offered → revives to waiting, clears position, re-seeds, bumps count', async () => {
+    const db  = fakeDb(closedReentryCall())
+    const res = await reviveCall('call_TSLA_x', 'u1', false, baseDeps(db))
+    assert.equal(res.ok, true)
+    assert.equal(res.reentry_count, 1)
+    const set = db.updates[0]
+    assert.equal(set.status, 'waiting')
+    assert.equal(set.position_state, null)
+    assert.equal(set.linked_idea_id, null)
+    assert.equal(set['monitor_state.armed_zone_id'], null)
+    assert.equal(set['monitor_state.pulse_anchor_px'], null)     // re-seed the pulse anchor
+    assert.equal(set['monitor_state.next_check_at'], null)       // due next tick
+    assert.ok(typeof set.valid_until === 'string' && set.valid_until > new Date().toISOString())
+})
+test('reviveCall: not closed → not_closed', async () => {
+    const res = await reviveCall('call_TSLA_x', 'u1', false, baseDeps(fakeDb(closedReentryCall({ status: 'waiting' }))))
+    assert.deepEqual(res, { ok: false, reason: 'not_closed' })
+})
+test('reviveCall: no offer → no_reentry_offer', async () => {
+    const res = await reviveCall('call_TSLA_x', 'u1', false, baseDeps(fakeDb(closedReentryCall({ position_state: { reentry: { offered: false } } }))))
+    assert.deepEqual(res, { ok: false, reason: 'no_reentry_offer' })
+})
+test('reviveCall: other user → forbidden', async () => {
+    const res = await reviveCall('call_TSLA_x', 'u2', false, baseDeps(fakeDb(closedReentryCall())))
+    assert.deepEqual(res, { ok: false, reason: 'forbidden' })
+})
+test('declineReentry: closed → clears offer + stamps declined_at, status stays closed', async () => {
+    const db  = fakeDb(closedReentryCall())
+    const res = await declineReentry('call_TSLA_x', 'u1', false, baseDeps(db))
+    assert.equal(res.ok, true)
+    assert.equal(db.updates[0]['position_state.reentry.offered'], false)
+    assert.ok(db.updates[0]['position_state.reentry.declined_at'])
+    assert.equal(db.updates[0].status, undefined)               // NOT flipped to 'dismissed'
 })
