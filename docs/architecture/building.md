@@ -79,7 +79,7 @@ Prompt `idea_system_prompt.md`. Entry `chatStream` (non-stream `chat`). Tools:
 | `get_price_action` | 1d/5d/1m/3m moves + range position + rel volume |
 | `get_candles` | OHLCV (2hr/4hr aggregated server-side) |
 | `get_indicators` | exact EMA/SMA/RSI/MACD/ATR/VWAP values — same math the monitor uses (shared `makeIndicatorsHandler`) |
-| `get_chart` | render a TradingView **image** for vision TA (Anthropic-only; shown to UI via `onChart` when `show_to_user`) |
+| `get_chart` | render a chart **image** for vision TA — own KLineCharts headless render (our FMP candles), chart-img/TradingView as fallback; Anthropic-only; shown to UI via `onChart` when `show_to_user` |
 | `get_cycle_analysis` | price-cycle / seasonal-window modes |
 | `get_earnings` | single-ticker earnings + beat/miss history |
 | `get_earnings_calendar` | forward earnings calendar (who reports when) |

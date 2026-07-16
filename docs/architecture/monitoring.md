@@ -358,7 +358,8 @@ activatedAt    (ms timestamp)
 priorFindings  (structured conditions that passed before this in AND gate)
     │
     ▼
-Chart screenshot via chart-img.com (symbol + timeframe + auto-selected studies)
+Chart image (symbol + timeframe + auto-selected studies) — own KLineCharts headless
+render of our FMP candles, chart-img.com fallback (cachedChartImage, OWN_CHART_RENDER)
     │
     ▼
 Time constraint injected into prompt:

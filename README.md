@@ -17,7 +17,9 @@ chat into monitored trade ideas, then route confirmed entries and exits to a rea
 - **Auth:** JWT in an httpOnly cookie (`requireAuth` middleware)
 
 ### Market / data providers
-Massive, Yahoo Finance, Finnhub, FMP, SEC (EDGAR), GNews, chart-img, Binance (crypto derivatives).
+Massive, Yahoo Finance, Finnhub, FMP, SEC (EDGAR), GNews, Binance (crypto derivatives).
+Chart images for vision TA are rendered in-house (KLineCharts headless via Playwright, from our
+FMP candles), with chart-img (TradingView) as the fallback.
 
 ### External env vars
 ```
@@ -40,6 +42,9 @@ CLIENT_URL
 
 # optional tuning
 PORT (3030)   NODE_ENV   PAPER_FILL_INTERVAL_MS (30s)   PAPER_EQUITY_SNAPSHOT_MS (5m)
+OWN_CHART_RENDER (on)   OWN_CHART_RENDER_TIMEOUT_MS (8s)   OWN_CHART_RENDER_PAGE_TIMEOUT_MS (10s)
+#   own-chart vision render (KLineCharts headless via Playwright). Set OWN_CHART_RENDER=false to
+#   force chart-img. Prod host must run `npx playwright install chromium` or renders fall back.
 ```
 
 ### Run

@@ -1,6 +1,5 @@
 import { getMarketStatus } from '../../services/market.service.js'
-import { getFmpCandles } from '../../providers/fmp.price.provider.js'
-import { getTickerAggregates } from '../../providers/candles.provider.js'
+import { fetchMarketCandles } from '../../services/candleFetch.service.js'
 import { createTtlCache } from '../../services/ttlCache.util.js'
 import { parseChartInterval, defaultLookbackDays } from '../../services/candleInterval.util.js'
 import { logger } from '../../services/logger.service.js'
@@ -43,18 +42,6 @@ function _parseWhenMs(v) {
     return Number.isFinite(d) ? d : undefined
 }
 
-/** Providers emit epoch SECONDS; the chart (KLineCharts) wants milliseconds. Guarded convert. */
-function _toMsCandles(candles) {
-    return (Array.isArray(candles) ? candles : []).map(c => ({
-        timestamp: c.timestamp < 1e12 ? c.timestamp * 1000 : c.timestamp,
-        open:  c.open,
-        high:  c.high,
-        low:   c.low,
-        close: c.close,
-        volume: c.volume ?? 0,
-    }))
-}
-
 export async function getCandles(req, res) {
     try {
         const symbol = String(req.query.symbol ?? '').toUpperCase().trim()
@@ -80,19 +67,10 @@ export async function getCandles(req, res) {
         const cached = cache.get(cacheKey)
         if (cached) return res.send(cached)
 
-        // FMP-first (real-time intraday). null → week/month/odd multiplier; [] → uncovered
-        // symbol (futures/index/broker) — either way fall back to the unified router.
-        let raw = null
-        try {
-            raw = await getFmpCandles(symbol, { timeSpan, multiplier, from, to })
-        } catch (err) {
-            logger.warn(LOG, `FMP candles failed for ${symbol} (${timeSpan}x${multiplier}) — falling back: ${err.message}`)
-        }
-        if (!Array.isArray(raw) || raw.length === 0) {
-            raw = await getTickerAggregates(symbol, { timeSpan, multiplier, from, to })
-        }
+        // FMP-first (real-time intraday) with the unified router as fallback — see candleFetch.service.
+        const candles = await fetchMarketCandles(symbol, { timeSpan, multiplier, from, to })
 
-        const payload = { symbol, interval: intervalRaw, timeSpan, multiplier, candles: _toMsCandles(raw) }
+        const payload = { symbol, interval: intervalRaw, timeSpan, multiplier, candles }
         cache.set(cacheKey, payload)
         res.send(payload)
     } catch (err) {

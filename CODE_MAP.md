@@ -66,6 +66,20 @@ services/
   price.service.js  market.service.js  timeframe.service.js  brokerSymbol.service.js
   format.util.js  http.util.js  ttlCache.util.js  priceStats.util.js  cycleAnalysis.service.js
   logger.service.js  tokenUsage.service.js
+  candleFetch.service.js    fetchMarketCandles(symbol,{timeSpan,multiplier,from,to}) + toMsCandles — shared
+                            FMP-first→Massive/Yahoo fallback→sec-to-ms pipeline. One code path for the
+                            /api/market/candles endpoint AND the chart renderer (same data the monitor sees).
+                            (Named distinctly from monitorUtils.fetchCandles, the monitor's broker-candle router.)
+  chartImgCache.service.js  cachedChartImage(symbol,timeframe,studies) — 60s shared chart-PNG cache.
+                            FALLBACK-FIRST: own KLineCharts render first (OWN_CHART_RENDER, default on),
+                            chart-img (TradingView) on any error/timeout. base64-PNG contract unchanged.
+  chartRender/
+    klineRender.provider.js   renderChartImage(symbol,timeframe,studies) → base64 PNG via headless
+                              Chromium (Playwright). Warm single browser + serialised render chain +
+                              closeRenderer() shutdown hook. Registers custom VWAP/ATR in-page (not
+                              klinecharts built-ins); paneId 'candle_pane' for overlays.
+    studyTranslate.js         studiesToIndicators/translateStudy — _buildStudies TradingView study
+                              objects → klinecharts indicator descriptors (overlay vs own-pane split).
   eventRisk.service.js      buildEventRisk({asset,assetClass}) — scheduled catalysts FROZEN onto a Kairos
                             call at build: earnings (Finnhub, equities) + Fed/macro (FRED), low-impact
                             dropped, 10d horizon. Never throws. Hermes reads it to hold off pre-event entry
@@ -84,7 +98,9 @@ services/
                           Generalizes portfolio_chats; migrating agents off per-agent chat-state.
 providers/
   anthropic.provider.js         LLM chat/streaming (OpenAI SDK is used directly, transcribe only)
-  yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / chartImg / ohlcv
+  yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / ohlcv
+  chartImg.provider.js          chart-img (TradingView) PNG — now the FALLBACK behind the own-chart
+                                renderer (services/chartRender); still primary when OWN_CHART_RENDER=false
   ctrader.provider.js  ctrader.session.provider.js (getTrendbars + trendbarToOHLCV)  ctrader.ws.provider.js
   ibkr.provider.js (retired) / ibkr.gateway.provider.js
   mongodb.provider.js       getDb(), stripId/stripIds

@@ -27,8 +27,10 @@
         "dotenv": "^17.4.2",
         "express": "^4.17.1",
         "jsonwebtoken": "^9.0.3",
+        "klinecharts": "^10.0.0",
         "mongodb": "^6.6.2",
         "openai": "^6.35.0",
+        "playwright": "^1.61.1",
         "ws": "^8.21.0",
         "yahoo-finance2": "^3.15.2"
     },

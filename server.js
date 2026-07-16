@@ -48,6 +48,7 @@ import { paperFillService }  from './monitoring/paperFill.service.js'
 import { paperEquityService } from './monitoring/paperEquity.service.js'
 import { paperMarkService }   from './monitoring/paperMark.service.js'
 import { logger }           from './services/logger.service.js'
+import { closeRenderer }    from './services/chartRender/klineRender.provider.js'
 
 const app = express()
 const server = http.createServer(app)
@@ -158,7 +159,8 @@ function shutdown(signal) {
     if (shuttingDown) return
     shuttingDown = true
 
-    server.close((err) => {
+    server.close(async (err) => {
+        await closeRenderer().catch(() => {})   // shut the headless Chromium down cleanly
         if (err) {
             logger.error(`Error closing server (${signal}):`, err)
             process.exit(1)
