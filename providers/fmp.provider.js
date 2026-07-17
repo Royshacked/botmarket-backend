@@ -1,16 +1,21 @@
-// Financial Modeling Prep (FMP) fundamentals provider.
+// Financial Modeling Prep (FMP) fundamental & market-data provider.
 //
-// Used by the portfolio agent's `get_fundamentals` tool to ground instrument
-// selection in real company data (margins, valuation, growth, sector) instead
-// of model memory. Fundamentals change quarterly, so results are heavily cached.
+// Grounds the portfolio agent (Atlas) in real data instead of model memory:
+//  - get_fundamentals  → per-ticker fundamentals: sector, valuation, quality,
+//    growth, AND (Starter plan) forward analyst consensus + valuation-plus
+//    (EV/EBITDA, FCF yield) for stocks / sector look-through for ETFs.
+//  - screen_candidates → cross-universe discovery (company-screener).
+//  - get_macro_snapshot→ hard macro read: treasury curve, key economic
+//    indicators, and today's sector rotation.
+// Slow-moving data (fundamentals) is heavily cached; discovery/macro use short TTLs.
 //
-// DEV / FREE-PLAN NOTES:
-//  - The free "Basic" plan is fundamentals-only, ~250 calls/day, US-centric.
-//  - It cannot screen/discover tickers — this is a per-ticker LOOKUP. The agent
-//    generates candidates itself, then calls this to qualify them.
-//  - ETFs have no company statements; only the /profile (exposure) is useful.
-//  - Production use displaying this data to users needs a paid plan + FMP's
-//    Data Display & Licensing agreement. Keep that in mind before shipping.
+// PLAN NOTES (current key = Starter):
+//  - Screener, analyst estimates/targets/grades, economic/treasury/sector data,
+//    and ETF sector weightings are all unlocked (verified against the live key).
+//  - Still Premium-locked (HTTP 402): full ETF constituent holdings, 13F
+//    institutional ownership — don't build on those.
+//  - Production use displaying this data to users needs FMP's Data Display &
+//    Licensing agreement. Keep that in mind before shipping.
 
 import { getDb } from './mongodb.provider.js'
 import { logger } from '../services/logger.service.js'
@@ -75,21 +80,60 @@ const pct  = (v, d = 1) => (Number.isFinite(Number(v)) ? `${(Number(v) * 100).to
 const money = compactMoney
 const line = (label, val) => (val != null ? `${label}: ${val}` : null)
 
-function _formatEtf(symbol, p) {
-    // FMP's sector/industry for funds is unreliable (e.g. SPY → "Financial
-    // Services"), so we don't surface it. ETFs carry no company statements.
+/**
+ * Top sector sleeves of an ETF as LLM-ready lines, e.g. "Technology 32.1%".
+ * `weightPercentage` from FMP is ALREADY a percent number (e.g. 9.92), not a
+ * ratio — display as-is. Pure — exported for testing.
+ */
+export function formatEtfSectorWeights(weights, topN = 6) {
+    const rows = (Array.isArray(weights) ? weights : [])
+        .map(w => ({ sector: w?.sector, pct: Number(w?.weightPercentage) }))
+        .filter(w => w.sector && Number.isFinite(w.pct))
+        .sort((a, b) => b.pct - a.pct)
+        .slice(0, topN)
+    if (!rows.length) return []
+    return ['— Sector exposure (look-through) —', ...rows.map(r => `${r.sector}: ${r.pct.toFixed(1)}%`)]
+}
+
+function _formatEtf(symbol, p, sectorWeights = []) {
+    // FMP's top-level sector/industry for funds is unreliable (e.g. SPY →
+    // "Financial Services"), so we surface the real look-through weights instead.
     return [
         `${symbol} — ${p.companyName || 'ETF'} (ETF / fund)`,
         line('Exchange', p.exchange || p.exchangeFullName),
         line('AUM (market cap)', money(p.marketCap)),
         line('Beta', num(p.beta)),
         line('Price', money(p.price)),
+        ...formatEtfSectorWeights(sectorWeights),
         'Note: ETFs have no company financial statements; this is exposure/profile data only.',
         p.description ? `About: ${String(p.description).slice(0, 280)}` : null,
     ].filter(Boolean).join('\n')
 }
 
-function _formatStock(symbol, p, ratios = {}, growth = {}) {
+/**
+ * Forward analyst view as LLM-ready lines: consensus price target (+ upside vs
+ * the given price) and the buy/hold/sell rating split. Both inputs optional —
+ * returns only the lines it can build. Pure — exported for testing.
+ */
+export function formatAnalystBlock(price, ptc, grades) {
+    const out = []
+    const tgt = Number(ptc?.targetConsensus)
+    if (Number.isFinite(tgt) && tgt > 0) {
+        const px = Number(price)
+        const up = Number.isFinite(px) && px > 0 ? (tgt - px) / px : null
+        out.push(`Price target (consensus): ${money(tgt)}${up != null ? ` (${up >= 0 ? '+' : ''}${(up * 100).toFixed(0)}% vs price)` : ''}`)
+    }
+    if (grades) {
+        const buy  = (Number(grades.strongBuy) || 0) + (Number(grades.buy) || 0)
+        const hold = Number(grades.hold) || 0
+        const sell = (Number(grades.sell) || 0) + (Number(grades.strongSell) || 0)
+        const total = buy + hold + sell
+        if (total > 0) out.push(`Analyst ratings: ${grades.consensus || '—'} (${buy} buy / ${hold} hold / ${sell} sell, ${total} analysts)`)
+    }
+    return out.length ? ['— Analyst view (forward) —', ...out] : []
+}
+
+function _formatStock(symbol, p, ratios = {}, growth = {}, km = {}, ptc = null, grades = null) {
     // FMP stable has no direct ROE in ratios-ttm; derive it from per-share figures.
     const roe = (Number(ratios.netIncomePerShareTTM) > 0 && Number(ratios.bookValuePerShareTTM) > 0)
         ? Number(ratios.netIncomePerShareTTM) / Number(ratios.bookValuePerShareTTM)
@@ -105,6 +149,12 @@ function _formatStock(symbol, p, ratios = {}, growth = {}) {
         line('Price/Book', num(ratios.priceToBookRatioTTM)),
         line('Price/Sales', num(ratios.priceToSalesRatioTTM)),
         line('Dividend yield', pct(ratios.dividendYieldTTM)),
+        line('EV/EBITDA', num(km.evToEBITDATTM)),
+        line('EV/Sales', num(km.evToSalesTTM)),
+        line('FCF yield', pct(km.freeCashFlowYieldTTM)),
+        line('Earnings yield', pct(km.earningsYieldTTM)),
+        line('ROIC', pct(km.returnOnInvestedCapitalTTM)),
+        line('Net debt/EBITDA', num(km.netDebtToEBITDATTM)),
         '— Quality (TTM) —',
         line('Gross margin', pct(ratios.grossProfitMarginTTM)),
         line('Operating margin', pct(ratios.operatingProfitMarginTTM)),
@@ -118,6 +168,7 @@ function _formatStock(symbol, p, ratios = {}, growth = {}) {
         line('Net income growth (latest FY)', pct(growth.netIncomeGrowth)),
         line('Revenue/share 3y', pct(growth.threeYRevenueGrowthPerShare)),
         line('Revenue/share 5y', pct(growth.fiveYRevenueGrowthPerShare)),
+        ...formatAnalystBlock(p.price, ptc, grades),
         p.description ? `About: ${String(p.description).slice(0, 280)}` : null,
     ].filter(Boolean).join('\n')
 }
@@ -294,20 +345,197 @@ export async function getFundamentals(ticker) {
 
     let text
     if (p.isEtf || p.isFund) {
-        text = _formatEtf(symbol, p)
+        // Sector look-through is the useful extra for funds; tolerate its absence.
+        const weightsArr = await _fmpGet(`/etf/sector-weightings?symbol=${symbol}`).catch(e => { logger.warn(LOG, `etf weights ${symbol}`, e.message); return [] })
+        text = _formatEtf(symbol, p, Array.isArray(weightsArr) ? weightsArr : [])
     } else {
-        // Two extra calls only for company stocks; tolerate partial failure.
-        const [ratiosArr, growthArr] = await Promise.all([
+        // Extra calls only for company stocks; each tolerates partial failure so a
+        // single locked/empty endpoint never sinks the whole fundamentals lookup.
+        const [ratiosArr, growthArr, kmArr, ptcArr, gradesArr] = await Promise.all([
             _fmpGet(`/ratios-ttm?symbol=${symbol}`).catch(e => { logger.warn(LOG, `ratios ${symbol}`, e.message); return [] }),
             _fmpGet(`/financial-growth?symbol=${symbol}&limit=1`).catch(e => { logger.warn(LOG, `growth ${symbol}`, e.message); return [] }),
+            _fmpGet(`/key-metrics-ttm?symbol=${symbol}`).catch(e => { logger.warn(LOG, `keymetrics ${symbol}`, e.message); return [] }),
+            _fmpGet(`/price-target-consensus?symbol=${symbol}`).catch(() => []),
+            _fmpGet(`/grades-consensus?symbol=${symbol}`).catch(() => []),
         ])
-        const ratios = Array.isArray(ratiosArr) ? ratiosArr[0] : ratiosArr
-        const growth = Array.isArray(growthArr) ? growthArr[0] : growthArr
-        text = _formatStock(symbol, p, ratios || {}, growth || {})
+        const first  = a => (Array.isArray(a) ? a[0] : a)
+        text = _formatStock(symbol, p, first(ratiosArr) || {}, first(growthArr) || {}, first(kmArr) || {}, first(ptcArr) || null, first(gradesArr) || null)
     }
 
     const asOf = new Date().toISOString()
     await _writeCache(symbol, { text, asOf, fetchedAt: Date.now() })
     logger.info(LOG, 'fundamentals fetched', { symbol, isEtf: !!(p.isEtf || p.isFund) })
+    return text
+}
+
+// ─── Screener (cross-universe discovery) ────────────────────────────────────
+// company-screener: the agent's Phase-4 discovery leg — find names that fit the
+// mandate's shape (sector, size, quality proxies) instead of recalling tickers
+// from memory. Short TTL keyed by the normalized filter set; the same screen run
+// twice in a construction session shouldn't re-burn a call.
+const SCREEN_TTL_MS = 30 * 60 * 1000
+const _screenCache  = createTtlCache({ ttlMs: SCREEN_TTL_MS, max: 50 })
+
+// Whitelisted screener params → their FMP query keys. Anything not here is
+// ignored, so a hallucinated filter can't reach the API.
+const SCREEN_PARAMS = {
+    sector: 'sector', industry: 'industry', country: 'country', exchange: 'exchange',
+    marketCapMoreThan: 'marketCapMoreThan', marketCapLowerThan: 'marketCapLowerThan',
+    priceMoreThan: 'priceMoreThan', priceLowerThan: 'priceLowerThan',
+    betaMoreThan: 'betaMoreThan', betaLowerThan: 'betaLowerThan',
+    dividendMoreThan: 'dividendMoreThan', volumeMoreThan: 'volumeMoreThan',
+    isEtf: 'isEtf',
+}
+
+/** One-line " (Technology, mcap>$10B)" suffix describing the applied filters. */
+function _describeFilters(f) {
+    const parts = []
+    if (f.sector)   parts.push(f.sector)
+    if (f.industry) parts.push(f.industry)
+    if (f.country)  parts.push(f.country)
+    if (f.marketCapMoreThan)  parts.push(`mcap>${money(f.marketCapMoreThan)}`)
+    if (f.marketCapLowerThan) parts.push(`mcap<${money(f.marketCapLowerThan)}`)
+    if (f.dividendMoreThan)   parts.push(`div>${f.dividendMoreThan}`)
+    if (f.isEtf === true || f.isEtf === 'true') parts.push('ETFs')
+    return parts.length ? ` (${parts.join(', ')})` : ''
+}
+
+/** Screener rows → LLM-ready list, one compact line per name. Pure — exported for testing. */
+export function formatScreenerRows(rows, filters = {}) {
+    const list = Array.isArray(rows) ? rows : []
+    if (!list.length) return `No stocks matched the screen${_describeFilters(filters)}.`
+    const lines = list.map(r => {
+        const kind = r.isEtf ? 'ETF' : r.isFund ? 'Fund' : null
+        const si   = [r.sector, r.industry].filter(Boolean).join(' / ')
+        const px   = Number(r.price)
+        const dv   = Number(r.lastAnnualDividend)
+        const bits = [
+            `${String(r.symbol || '?').padEnd(6)} ${r.companyName || ''}`.trim(),
+            kind || null,
+            si || null,
+            money(r.marketCap) ? `mcap ${money(r.marketCap)}` : null,
+            Number.isFinite(Number(r.beta)) ? `β ${num(r.beta)}` : null,
+            Number.isFinite(px) && px > 0 ? `$${num(px)}` : null,
+            dv > 0 && px > 0 ? `div ${pct(dv / px)}` : null,
+        ].filter(Boolean)
+        return `  ${bits.join(' | ')}`
+    })
+    return [`Screen results${_describeFilters(filters)} — ${list.length} match${list.length === 1 ? '' : 'es'}:`, ...lines].join('\n')
+}
+
+/**
+ * Screen the US universe by the whitelisted filters and return an LLM-ready list.
+ * `filters` may include any SCREEN_PARAMS key plus `limit` (1–50, default 25).
+ * Discovery only — the agent still qualifies each hit with get_fundamentals.
+ */
+export async function screenCandidates(filters = {}) {
+    const f = filters && typeof filters === 'object' ? filters : {}
+    const parts = []
+    for (const [k, apiKey] of Object.entries(SCREEN_PARAMS)) {
+        const v = f[k]
+        if (v == null || v === '') continue
+        parts.push(`${apiKey}=${encodeURIComponent(v)}`)
+    }
+    const limit = Math.min(Math.max(parseInt(f.limit, 10) || 25, 1), 50)
+    parts.push(`limit=${limit}`)
+    parts.push('isActivelyTrading=true')
+    const qs  = parts.sort().join('&')   // sorted → stable cache key regardless of input order
+    const hit = _screenCache.get(qs)
+    if (hit) return hit
+
+    const rows = await _fmpGet(`/company-screener?${qs}`)
+    const text = formatScreenerRows(rows, f)
+    _screenCache.set(qs, text)
+    logger.info(LOG, 'screen', { filters: _describeFilters(f).trim(), matches: Array.isArray(rows) ? rows.length : 0 })
+    return text
+}
+
+// ─── Macro snapshot (hard regime data) ──────────────────────────────────────
+// Bundles the treasury curve, key economic indicators, and today's sector
+// rotation into one LLM-ready read for Phase 2. One tool call, one cache entry —
+// this is context that barely moves intraday, so a 1h TTL is plenty.
+const MACRO_TTL_MS = 60 * 60 * 1000
+const _macroCache  = createTtlCache({ ttlMs: MACRO_TTL_MS, max: 4 })
+const ECON_INDICATORS = [
+    ['Real GDP',           'realGDP'],
+    ['CPI',                'CPI'],
+    ['Inflation (YoY)',    'inflationRate'],
+    ['Unemployment',       'unemploymentRate'],
+    ['Fed funds rate',     'federalFunds'],
+    ['Consumer sentiment', 'consumerSentiment'],
+]
+
+/** Assembled macro parts → LLM-ready snapshot. Pure — exported for testing. */
+export function formatMacroSnapshot({ treasury = [], sectors = [], indicators = [] } = {}) {
+    const sections = []
+
+    const t = [...(Array.isArray(treasury) ? treasury : [])]
+        .filter(r => r?.date)
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]
+    if (t) {
+        const g = k => (Number.isFinite(Number(t[k])) ? Number(t[k]) : null)
+        const y2 = g('year2'), y10 = g('year10')
+        const spread = (y2 != null && y10 != null) ? y10 - y2 : null
+        const curve = [
+            g('month3') != null ? `3M ${g('month3').toFixed(2)}%` : null,
+            y2  != null ? `2Y ${y2.toFixed(2)}%`   : null,
+            y10 != null ? `10Y ${y10.toFixed(2)}%` : null,
+            g('year30') != null ? `30Y ${g('year30').toFixed(2)}%` : null,
+        ].filter(Boolean).join('  ')
+        const spreadLine = spread != null
+            ? `  | 2s10s ${spread >= 0 ? '+' : ''}${(spread * 100).toFixed(0)}bp${spread < 0 ? ' (INVERTED)' : ''}`
+            : ''
+        sections.push(`Treasury curve (${t.date}): ${curve}${spreadLine}`)
+    }
+
+    const inds = (Array.isArray(indicators) ? indicators : []).filter(x => x && x.label)
+    if (inds.length) {
+        const fmtVal = (label, v) => {
+            const n = Number(v)
+            if (!Number.isFinite(n)) return String(v)
+            return /rate|inflation|unemployment|fed/i.test(label)
+                ? `${n.toFixed(2)}%`
+                : n.toLocaleString('en-US', { maximumFractionDigits: 1 })
+        }
+        sections.push(`Key indicators:\n${inds.map(x => `  ${x.label}: ${fmtVal(x.label, x.value)}${x.date ? ` (as of ${x.date})` : ''}`).join('\n')}`)
+    }
+
+    const secs = (Array.isArray(sectors) ? sectors : [])
+        .filter(s => s?.sector && Number.isFinite(Number(s.averageChange)))
+        .sort((a, b) => Number(b.averageChange) - Number(a.averageChange))
+    if (secs.length) {
+        const fmt = s => `${s.sector} ${Number(s.averageChange) >= 0 ? '+' : ''}${Number(s.averageChange).toFixed(2)}%`
+        const exch = secs[0]?.exchange ? `${secs[0].exchange}, today` : 'today'
+        sections.push(`Sector move (${exch}) — leaders: ${secs.slice(0, 3).map(fmt).join(', ')}; laggards: ${secs.slice(-3).reverse().map(fmt).join(', ')}`)
+    }
+
+    if (!sections.length) return 'Macro snapshot unavailable right now — fall back to web_search.'
+    return ['MACRO SNAPSHOT (hard data — pair with web_search for the narrative):', ...sections].join('\n')
+}
+
+/** Treasury curve + key economic indicators + today's sector rotation, LLM-ready. Cached 1h. */
+export async function getMacroSnapshot() {
+    const hit = _macroCache.get('snap')
+    if (hit) return hit
+
+    const today = new Date().toISOString().slice(0, 10)
+    const from  = new Date(Date.now() - 10 * 864e5).toISOString().slice(0, 10)
+    const [treasuryArr, sectorArr, ...indArrs] = await Promise.all([
+        _fmpGet(`/treasury-rates?from=${from}&to=${today}`).catch(e => { logger.warn(LOG, 'treasury', e.message); return [] }),
+        _fmpGet(`/sector-performance-snapshot?date=${today}`).catch(e => { logger.warn(LOG, 'sector snapshot', e.message); return [] }),
+        ...ECON_INDICATORS.map(([, name]) => _fmpGet(`/economic-indicators?name=${name}`).catch(() => [])),
+    ])
+    const indicators = ECON_INDICATORS.map(([label], i) => {
+        const row = Array.isArray(indArrs[i]) ? indArrs[i][0] : null
+        return row ? { label, value: row.value, date: row.date } : null
+    }).filter(Boolean)
+
+    const text = formatMacroSnapshot({
+        treasury:  Array.isArray(treasuryArr) ? treasuryArr : [],
+        sectors:   Array.isArray(sectorArr)   ? sectorArr   : [],
+        indicators,
+    })
+    _macroCache.set('snap', text)
+    logger.info(LOG, 'macro snapshot', { indicators: indicators.length, hasTreasury: Array.isArray(treasuryArr) && treasuryArr.length > 0 })
     return text
 }

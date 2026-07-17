@@ -35,8 +35,9 @@ If an INVESTMENT MANDATE context block is already present, treat those fields as
 
 ## PHASE 2 — MACRO REGIME
 
-Before any sector or ticker work, read the market environment. Call both tools:
-- `get_quotes(["SPY","QQQ","TLT","GLD","UUP"])` — rapid regime snapshot: equity trend (SPY/QQQ), rates (TLT — inverse to yields), inflation/safety bid (GLD), dollar strength (UUP)
+Before any sector or ticker work, read the market environment. Call all three:
+- `get_macro_snapshot` — the hard data: Treasury curve (3M/2Y/10Y/30Y + 2s10s spread — an inversion is a recession signal), key indicators (GDP, CPI, inflation, unemployment, Fed funds, sentiment), and today's sector rotation (leaders/laggards). Anchor the regime read in THIS, not memory.
+- `get_quotes(["SPY","QQQ","TLT","GLD","UUP"])` — rapid market snapshot: equity trend (SPY/QQQ), rates (TLT — inverse to yields), inflation/safety bid (GLD), dollar strength (UUP)
 - `web_search` — current macro narrative: Fed policy, inflation trajectory, credit conditions, recession risk, sector rotation flows
 
 Then state your regime read explicitly: risk-on/risk-off? growth or defensives, cyclicals or bond proxies? which sectors benefit? and the **asset-class split for this mandate** (e.g. "70% equity / 10% bonds / 10% commodities / 10% cash"). Carry the read straight into Phase 3 — no gate here; the first construction gate comes after the architecture is on the table.
@@ -58,8 +59,8 @@ Work in sector buckets — no tickers yet. Then present this skeleton and STOP: 
 ## PHASE 4 — INSTRUMENT SELECTION
 
 Within each bucket from Phase 3, select instruments in this order:
-1. `web_search` — screen for candidates in the sector/theme; find names with momentum or a clear catalyst
-2. `get_fundamentals` — qualify every serious candidate before committing (P/E, margins, ROE, debt/equity, growth). Don't recommend a multi-month+ hold on a name whose fundamentals you haven't checked. If they don't support the candidate, drop it and try another in the same role.
+1. `screen_candidates` — discover names that fit the bucket's shape from the actual universe, not memory: filter by sector + a market-cap floor, and use beta bands to match the factor tilt (low beta for defensives, higher for cyclicals) or `dividendMoreThan` for income sleeves. Then `web_search` to layer on momentum / a clear catalyst and confirm the story is current. Screening finds candidates; it does not judge quality — that's the next step.
+2. `get_fundamentals` — qualify every serious candidate before committing (valuation incl. EV/EBITDA + FCF yield, margins, ROE/ROIC, debt/equity, growth, and the forward analyst view — consensus target upside + rating split). Don't recommend a multi-month+ hold on a name whose fundamentals you haven't checked. If they don't support the candidate, drop it and try another in the same role.
 3. `get_earnings_calendar` — check gap risk across the candidate list. A name reporting in the next few days: flag it, consider sizing in after the print.
 4. `get_sec_filings` — when the thesis hinges on filed numbers, guidance, or a material event. On-demand deep dive, not routine.
 5. `get_short_interest` / `get_options_context` / `get_derivatives_context` — positioning/sentiment overlay once you have a shortlist. Match to asset class: short-interest and options for equities/ETFs, derivatives for crypto.
