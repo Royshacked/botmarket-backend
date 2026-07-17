@@ -118,13 +118,8 @@ export async function streamAnthropicWithTools({
 
         if (turnUsage) onUsage?.(turnUsage)
 
-        // Finalise tool blocks (merge partial JSON) — covers both tool_use and server_tool_use
-        for (const block of contentBlocks) {
-            if (block && block._json) {
-                try { block.input = JSON.parse(block._json) } catch { block.input = {} }
-                delete block._json
-            }
-        }
+        // Finalise tool blocks (merge streamed partial JSON into `input`, strip the scratch field).
+        _finalizeToolBlocks(contentBlocks)
 
         const validBlocks = contentBlocks.filter(Boolean)
         const fullText    = validBlocks.filter(b => b.type === 'text').map(b => b.text || '').join('')
@@ -243,6 +238,23 @@ async function _runTool(toolHandlers, block) {
 
 function _errorResult(toolUseId, message) {
     return { type: 'tool_result', tool_use_id: toolUseId, content: `ERROR: ${message}`, is_error: true }
+}
+
+// Finalise streamed tool_use / server_tool_use blocks: merge the accumulated partial-JSON scratch
+// field (`_json`) into `input`, then ALWAYS strip `_json` once it exists — even when it's the empty
+// string. A no-argument tool (e.g. get_macro_snapshot) streams an empty input_json_delta, so `_json`
+// ends up `''`; a truthiness check would skip the delete and leave `_json: ''` on the block, which the
+// API rejects when the block is echoed back on the next tool round ("tool_use._json: Extra inputs are
+// not permitted"). An empty `_json` keeps the block's initial `input` ({} from content_block_start).
+// Mutates in place. Pure over its input; exported for testing.
+export function _finalizeToolBlocks(contentBlocks) {
+    for (const block of (contentBlocks ?? [])) {
+        if (!block || !('_json' in block)) continue
+        try { block.input = block._json ? JSON.parse(block._json) : (block.input ?? {}) }
+        catch { block.input = {} }
+        delete block._json
+    }
+    return contentBlocks
 }
 
 function _normalizeMessages(promptOrMessages) {
