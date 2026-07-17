@@ -8,9 +8,11 @@
  * forward via completeReview).
  *
  * Bot notification payload shape (type: 'portfolio_review'):
- *   { portfolioId, portfolioName, mode, account, reviewCadence, lastReviewAt }
+ *   { portfolioId, portfolioName, mode, account, reviewCadence, lastReviewAt, triggers }
  *   - mode:    'live' | 'paper' | 'manual' (the workspace the portfolio is bound to)
  *   - account: human-friendly account label (virtual name, or live login id)
+ *   - triggers: [{ kind, severity, label }] — the pre-check's reasons to look (may be empty on a
+ *               quiet cycle). NON-LLM; the full memo is generated when the user opens the review.
  */
 
 import { portfolioChatService } from '../api/portfolio/portfolioChat.service.js'
@@ -44,9 +46,16 @@ async function _notify(review) {
         return
     }
 
+    // Cheap NON-LLM pre-check: what changed since the fingerprint that's worth a look. The full
+    // memo is still generated when the user opens the review (the "pre-check only" model).
+    const { triggers } = await portfolioChatService.computeReviewSignals(portfolioId, userId).catch(() => ({ triggers: [] }))
+    const flagged = triggers.length
+        ? `Flagged: ${triggers.slice(0, 4).map(t => t.label).join('; ')}.`
+        : 'Nothing jumped out on a quick check — a look to confirm the thesis still holds.'
+
     const modeLabel = mode ? mode.charAt(0).toUpperCase() + mode.slice(1) : ''
     const scope     = [modeLabel, account].filter(Boolean).join(' · ')
-    const content = `Time to review your portfolio "${portfolioName}"${scope ? ` (${scope})` : ''} — check if the thesis and allocations still fit your goals.`
+    const content = `Time to review your portfolio "${portfolioName}"${scope ? ` (${scope})` : ''}. ${flagged}`
     await sendBotMessage(userId, content, 'portfolio_review', {
         portfolioId,
         portfolioName,
@@ -54,6 +63,7 @@ async function _notify(review) {
         account: account ?? null,
         reviewCadence,
         lastReviewAt: lastReviewAt ?? null,
+        triggers,
     }, 'portfolio')   // portfolio reviews are Atlas's — post under the Atlas (portfolio) bot
 
     // Mark as notified so we don't spam on every tick.

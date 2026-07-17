@@ -559,7 +559,13 @@ export async function getMacroRaw() {
     const t = [...parts.treasury].filter(r => r?.date).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]
     const g = k => (t && Number.isFinite(Number(t[k])) ? Number(t[k]) : null)
     const y2 = g('year2'), y10 = g('year10')
-    const ind = label => { const x = parts.indicators.find(i => i.label === label); return x && Number.isFinite(Number(x.value)) ? Number(x.value) : null }
+    // Look up by the stable FMP indicator name, resolved to its display label via ECON_INDICATORS —
+    // so renaming a display label there can't silently null these out.
+    const labelFor = fmpName => ECON_INDICATORS.find(([, name]) => name === fmpName)?.[0]
+    const ind = fmpName => {
+        const x = parts.indicators.find(i => i.label === labelFor(fmpName))
+        return x && Number.isFinite(Number(x.value)) ? Number(x.value) : null
+    }
     const leaders = [...parts.sectors]
         .filter(s => s?.sector && Number.isFinite(Number(s.averageChange)))
         .sort((a, b) => Number(b.averageChange) - Number(a.averageChange))
@@ -567,8 +573,8 @@ export async function getMacroRaw() {
     return {
         asOf:        t?.date ?? null,
         spread2s10s: (y2 != null && y10 != null) ? Number((y10 - y2).toFixed(2)) : null,
-        fedFunds:    ind('Fed funds rate'),
-        inflation:   ind('Inflation (YoY)'),
+        fedFunds:    ind('federalFunds'),
+        inflation:   ind('inflationRate'),
         leaders,
     }
 }

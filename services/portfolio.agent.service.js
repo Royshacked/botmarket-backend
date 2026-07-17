@@ -186,7 +186,7 @@ const TOOL_HANDLERS = {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const normalized   = _buildMessages(messages)
     const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
@@ -201,7 +201,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     if (mandate)    dynamicSections.push(_buildMandateSection(mandate))
     if (thesis)     dynamicSections.push(_buildThesisSection(thesis))
     if (lifecycle)  dynamicSections.push(_buildLifecycleSection(lifecycle))
-    if (portfolioState) dynamicSections.push(_buildPortfolioStateSection(portfolioState, isReviewMode))
+    if (portfolioState) dynamicSections.push(_buildPortfolioStateSection(portfolioState, isReviewMode, reviewDelta))
 
     // Two cache breakpoints: the static instructions, and the dynamic context
     // tail. The tail (date + accounts + mandate + lifecycle + snapshotted
@@ -430,7 +430,44 @@ function _buildLifecycleSection(lifecycle) {
     return lines.join('\n')
 }
 
-function _buildPortfolioStateSection(state, isReviewMode = false) {
+/**
+ * Render the review-window delta (benchmark-relative performance + regime then→now) as a
+ * compact block for the Scoreboard. Returns null when nothing is resolvable (first review).
+ */
+export function _formatReviewDelta(d) {
+    if (!d) return null
+    const lines = []
+
+    if (d.benchmark) {
+        const b   = d.benchmark
+        const sgn = n => `${n >= 0 ? '+' : ''}${n.toFixed(1)}`
+        const win = d.windowDays != null ? `, ${d.windowDays}d` : ''
+        const book = b.bookDeltaPnlPct == null ? 'book n/a' : `book ${sgn(b.bookDeltaPnlPct)}% (Δ unrealized P&L)`
+        const rel  = b.relativePct == null ? ''
+            : ` → book ${b.relativePct >= 0 ? 'AHEAD' : 'BEHIND'} by ${Math.abs(b.relativePct).toFixed(1)}pt`
+        lines.push(`Performance vs ${b.ticker} (since last review${win}): ${b.ticker} ${sgn(b.returnPct)}% | ${book}${rel}`)
+    }
+
+    if (d.regime) {
+        const r = d.regime
+        const pair = (label, then, now, unit = '') => (then != null && now != null) ? `${label} ${then}${unit}→${now}${unit}` : null
+        const parts = [
+            pair('2s10s', r.spread2s10s.then, r.spread2s10s.now),
+            pair('Fed funds', r.fedFunds.then, r.fedFunds.now, '%'),
+            pair('inflation', r.inflation.then, r.inflation.now, '%'),
+        ].filter(Boolean)
+        let line = `Regime shift since last review: ${parts.length ? parts.join(', ') : 'n/a'}`
+        if (r.inversionFlip) line += ' ⚠ yield-curve inversion FLIPPED'
+        if (r.rotatedIn.length || r.rotatedOut.length) {
+            line += ` | sector leaders ${r.rotatedIn.length ? `+[${r.rotatedIn.join(', ')}]` : ''}${r.rotatedOut.length ? ` −[${r.rotatedOut.join(', ')}]` : ''}`.trimEnd()
+        }
+        lines.push(line)
+    }
+
+    return lines.length ? lines.join('\n') : null
+}
+
+function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = null) {
     const fmtMoney = (n) => {
         if (n == null) return '—'
         const abs = Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
@@ -487,6 +524,8 @@ function _buildPortfolioStateSection(state, isReviewMode = false) {
     })
 
     const sections = [header]
+    const deltaBlock = isReviewMode ? _formatReviewDelta(reviewDelta) : null
+    if (deltaBlock) sections.push(deltaBlock)
     if (liveLines.length)    sections.push(`Live positions:\n${liveLines.join('\n')}`)
     if (pendingLines.length) sections.push(`Pending (awaiting entry):\n${pendingLines.join('\n')}`)
 

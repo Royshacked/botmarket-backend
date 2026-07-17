@@ -29,7 +29,7 @@ export async function streamPortfolio(req, res) {
             const bodyMandate  = (req.body?.mandate && typeof req.body.mandate === 'object') ? req.body.mandate : null
 
             // Pre-stream context load + mandate carry-forward (business logic → service).
-            const { portfolioState, lifecycle, mandate, storedThesis } = await portfolioChatService.loadStreamContext({
+            const { portfolioState, lifecycle, mandate, storedThesis, reviewDelta } = await portfolioChatService.loadStreamContext({
                 userId: req.user._id, portfolioId, threadId, isReviewMode, bodyMandate,
             })
 
@@ -43,6 +43,7 @@ export async function streamPortfolio(req, res) {
                 portfolioIdeas: Array.isArray(portfolioIdeas) ? portfolioIdeas : [],
                 portfolioState,
                 isReviewMode,
+                reviewDelta,
                 lifecycle,
                 mandate,
                 thesis: storedThesis,

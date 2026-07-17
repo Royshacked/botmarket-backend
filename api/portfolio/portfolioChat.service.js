@@ -3,7 +3,7 @@ import { logger }  from '../../services/logger.service.js'
 import { getPortfolioStateCached } from '../../services/portfolioState.service.js'
 import { threadService } from '../../services/thread.service.js'
 import { isSubstantive } from '../../services/thread.util.js'
-import { buildFingerprint, benchmarkTicker } from '../../services/portfolioReview.util.js'
+import { buildFingerprint, benchmarkTicker, computeReviewDelta, computeReviewTriggers } from '../../services/portfolioReview.util.js'
 import { getMacroRaw } from '../../providers/fmp.provider.js'
 import { getFmpQuote } from '../../providers/fmp.price.provider.js'
 // Mode/account helpers live in a shared util (portfolioState needs them too, and importing
@@ -31,6 +31,7 @@ export const portfolioChatService = {
     setThesis,
     completeReview,
     captureFingerprint,
+    computeReviewSignals,
     loadStreamContext,
     persistStreamOutcome,
 }
@@ -59,7 +60,48 @@ async function loadStreamContext({ userId, portfolioId, threadId, isReviewMode, 
         : null
 
     const mandate = bodyMandate ?? draftThread?.mandate ?? storedMandate
-    return { portfolioState, lifecycle, mandate, storedThesis }
+
+    // In review mode, resolve the review-window delta (benchmark-relative return + regime shift)
+    // against the stored fingerprint. Best-effort — a first review (no fingerprint) yields null.
+    const reviewDelta = (isReviewMode && lifecycle?.lastFingerprint)
+        ? await buildReviewDelta(lifecycle.lastFingerprint, portfolioState).catch(() => null)
+        : null
+
+    return { portfolioState, lifecycle, mandate, storedThesis, reviewDelta }
+}
+
+/**
+ * Cheap pre-check for the scheduled-review nudge (S3, "pre-check only" model): compute the
+ * review triggers for a due portfolio without running the LLM. Used by the monitor to enrich the
+ * notification. Best-effort — returns empty triggers on any failure.
+ *
+ * @returns {Promise<{ triggers: Array }>}
+ */
+async function computeReviewSignals(portfolioId, userId) {
+    try {
+        const [state, lifecycle] = await Promise.all([
+            getPortfolioStateCached(portfolioId, userId).catch(() => null),
+            getPortfolioLifecycle(portfolioId, userId).catch(() => null),
+        ])
+        const fingerprint = lifecycle?.lastFingerprint ?? null
+        const delta = fingerprint ? await buildReviewDelta(fingerprint, state).catch(() => null) : null
+        return { triggers: computeReviewTriggers({ state, fingerprint, delta }) }
+    } catch (err) {
+        logger.warn(LOG, 'computeReviewSignals failed', err.message)
+        return { triggers: [] }
+    }
+}
+
+/**
+ * Resolve the current benchmark price + macro read and diff them against a stored fingerprint.
+ * Both fetches are cached (benchmark ~3s, macro 1h) and best-effort. Returns a reviewDelta or null.
+ */
+async function buildReviewDelta(fingerprint, state) {
+    const [benchmarkNowPrice, macroNow] = await Promise.all([
+        fingerprint.benchmark?.ticker ? getFmpQuote(fingerprint.benchmark.ticker).catch(() => null) : Promise.resolve(null),
+        getMacroRaw().catch(() => null),
+    ])
+    return computeReviewDelta({ fingerprint, state, benchmarkNowPrice, macroNow })
 }
 
 /**
@@ -131,7 +173,9 @@ async function deleteChatState(portfolioId, userId) {
 async function getChatState(portfolioId, userId) {
     try {
         const db  = await getDb()
-        const doc = await db.collection(COLLECTION).findOne({ portfolioId, userId })
+        // Exclude lastFingerprint: it's internal review-delta state (carries per-holding
+        // conviction.score, which is never surfaced to the client) — not for the chat-state payload.
+        const doc = await db.collection(COLLECTION).findOne({ portfolioId, userId }, { projection: { lastFingerprint: 0 } })
         if (!doc) return null
         return stripId(doc)
     } catch (err) {
@@ -294,11 +338,11 @@ async function getPendingReviews(userId) {
  */
 async function captureFingerprint(portfolioId, userId, reason) {
     try {
-        const [state, mandate] = await Promise.all([
+        const [state, mandate, macroRaw] = await Promise.all([
             getPortfolioStateCached(portfolioId, userId).catch(() => null),
             getMandate(portfolioId, userId).catch(() => null),
+            getMacroRaw().catch(() => null),
         ])
-        const macroRaw = await getMacroRaw().catch(() => null)
 
         let benchmark = null
         const tk = benchmarkTicker(mandate?.benchmark)

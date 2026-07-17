@@ -134,14 +134,24 @@ Authored by the **Portfolio Agent** (`POST /api/portfolio/stream`), which emits 
 Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/batch`.
 
 - Portfolio ideas start `waiting` with no entry conditions and carry `allocationRatio`.
+- **Data tools (FMP Starter):** beyond quotes/risk/correlation, Atlas grounds decisions in `screen_candidates`
+  (cross-universe discovery), `get_macro_snapshot` (Treasury curve + 2s10s, key economic indicators, sector
+  rotation), and an enriched `get_fundamentals` (EV/EBITDA + FCF/earnings yield + ROIC and the forward analyst
+  view — consensus target + buy/hold/sell split; ETF sector look-through). Used in both construction and review.
 - **Construction** is gated at two decision points (lock mandate → present regime + architecture →
   then selection/sizing/plan flow); sizing enforces the mandate's hard constraints (max-position /
   sector caps, and the cash floor via a reduced `positionSize`, since `_sizePlan` re-normalizes ratios to 1.0).
 - **Review** runs in two modes on the same `reviewMode` stream: **in-position** (live P&L/drift →
   scoreboard + rebalance memo) and **pre-activation** (all-pending book, `~$0` notional — a pre-flight
-  check before *Activate all*, no scoreboard). The scheduled cadence (`reviewCadence`, `nextReviewAt`,
-  60s monitor) only **notifies** via a social-chat bubble; the review itself is user-initiated (the
-  bubble, the portfolio-row review action, or the *Activate all* pre-activation gate). Endpoints:
+  check before *Activate all*, no scoreboard). It is **thesis-anchored and data-grounded**: a **fingerprint**
+  (`lastFingerprint` — book value, benchmark price, regime, per-holding weight+conviction) is captured at
+  construction and each review close, so the review computes a **benchmark-relative scoreboard** (book vs its
+  benchmark over the window) and a **regime then→now delta** (rendered into the review-state block by the
+  server, not estimated by the model). The scheduled cadence (`reviewCadence`, `nextReviewAt`, 60s monitor)
+  **notifies only** — but the notification carries a cheap non-LLM **pre-check** (`computeReviewSignals` →
+  `triggers[]`: conviction fell / regime shift / drift / benchmark lag / imminent earnings); the full memo is
+  generated only when the user opens the review (user-initiated via the bubble, the portfolio-row review
+  action, or the *Activate all* gate). Nothing auto-executes — changes stay Accept-gated. Endpoints:
   `GET /pending-reviews`, `POST /:portfolioId/rebalance`, `POST /:portfolioId/complete-review`.
 - Portfolio holdings are governed by the scheduled review, **not** the intrabar invalidation watcher.
 

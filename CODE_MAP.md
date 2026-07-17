@@ -57,6 +57,12 @@ api/
 services/
   idea.agent.service.js   + idea.stateParser.js (response/state machine)
   portfolio.agent.service.js  scanner.agent.service.js
+                          Atlas tools: screen_candidates + get_macro_snapshot + enriched get_fundamentals
+                          (FMP Starter); review-state block renders benchmark-relative perf + regime delta
+                          (_formatReviewDelta) from the fingerprint
+  portfolioReview.util.js   PURE review-lifecycle helpers (no I/O): benchmarkTicker (mandate text→ETF proxy),
+                            buildFingerprint (the "then" snapshot), computeReviewDelta (benchmark return +
+                            regime then→now), computeReviewTriggers (the non-LLM pre-check signals)
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue
   llmStream.util.js       createTagSuppressor({ onToken, captures })
@@ -102,6 +108,9 @@ services/
 providers/
   anthropic.provider.js         LLM chat/streaming (OpenAI SDK is used directly, transcribe only)
   yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / ohlcv
+  fmp.provider.js               Starter plan: getFundamentals (valuation+analyst+ETF look-through), getEarnings(Calendar),
+                                screenCandidates (company-screener), getMacroSnapshot + getMacroRaw (treasury/econ/sector);
+                                getSectorRaw. fmp.price.provider.js = live quote + candles (paper feed)
   chartImg.provider.js          chart-img (TradingView) PNG — now the FALLBACK behind the own-chart
                                 renderer (services/chartRender); still primary when OWN_CHART_RENDER=false
   ctrader.provider.js  ctrader.session.provider.js (getTrendbars + trendbarToOHLCV)  ctrader.ws.provider.js
@@ -133,7 +142,8 @@ monitoring/
                             phase (market.service sessionPhase, asset-class-aware; crypto/FX=24h) weighted as a
                             lens. A tentative ENTER on a market-sensitive call gets a web_search browse-confirm
                             2nd pass (downgrades enter→wait, fail-open)
-  positionMonitor.js  portfolio.monitor.js
+  positionMonitor.js  portfolio.monitor.js   (portfolio.monitor: due-review NOTIFY-only; runs the non-LLM
+                            pre-check computeReviewSignals → enriches the bubble + payload with triggers[])
   paperFill.service.js  paperEquity.service.js
   exitOrders.util.js        buildExitOrder (applies +basisOffset → broker price space) / exitOrderRecord / closeSide / orderSymbol
   monitorUtils.js           candleMs, parseYesNo, round, remainingForAccount, timeframe resolvers;
