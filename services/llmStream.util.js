@@ -18,7 +18,7 @@
 export const ALL_EMIT_TAGS = [
     'state', 'trade_idea', 'asset', 'interval', 'phase', 'ticker',
     'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis',
-    'scan_list', 'call',
+    'scan_list', 'call', 'scan_request', 'kairos_pick',
 ]
 
 // Build the tag-capture descriptor array for a streaming agent. `overrides` maps a

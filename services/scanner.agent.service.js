@@ -5,7 +5,7 @@ import { getFundamentals, getEarningsCalendar, getEarnings } from '../providers/
 import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, resolveAgentStream } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, resolveAgentStream, TRADE_HORIZONS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
@@ -170,7 +170,12 @@ export const scannerAgentService = { chatStream }
 // Exported for unit tests (scanner scorecard normalization + ranking).
 export { _normalizeScan, _cleanScore }
 
-async function chatStream({ messages = [], model: requestedModel, editList = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
+// Injected into the volatile context when Argus is invoked as a Kairos discovery hand-off: it flips
+// Argus from "build a watchlist" to "find ONE ticker + emit <kairos_pick>" (see the prompt's
+// KAIROS HAND-OFF MODE section). The bias/horizon ride in the seeded opening message.
+const HANDOFF_CONTEXT = 'KAIROS HAND-OFF MODE: the user was sent here by Kairos to find ONE ticker for a single call. Follow the KAIROS HAND-OFF MODE section — converge to a single best pick, do NOT ask whether they are ready for Kairos, and end with a <kairos_pick> block (not a <scan_list>).'
+
+async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const normalized = _buildMessages(messages)
     const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
@@ -181,6 +186,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     const dynamic = [`CURRENT DATE: ${today}. Resolve all relative timeframes (today, next week, this month) against this date.`]
     const editSection = _buildEditSection(editList)
     if (editSection) dynamic.push(editSection)
+    if (handoff) dynamic.push(HANDOFF_CONTEXT)
 
     const systemPrompt = [
         { type: 'text', text: _systemPrompt(), cache_control: { type: 'ephemeral' } },
@@ -191,8 +197,10 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
 
     let capturedScan  = null
     let capturedPhase = null
+    let capturedPick  = null
 
     const onScan = (json) => { try { capturedScan = JSON.parse(json) } catch { /* malformed — ignore */ } }
+    const onPick = (json) => { try { capturedPick = JSON.parse(json) } catch { /* malformed — ignore */ } }
     const onPhaseCapture = (p) => {
         const n = parseInt(p, 10)
         if (n >= 1 && n <= 4) {
@@ -202,11 +210,12 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     }
 
     // All known emit tags suppressed by default; this agent captures phase, ticker
-    // (which keeps its inner text in the UI), and scan_list.
+    // (which keeps its inner text in the UI), scan_list, and — in hand-off mode — kairos_pick.
     const tagCaptures = buildTagCaptures({
-        phase:     onPhaseCapture,
-        ticker:    { onCapture: onTicker, keepText: true },
-        scan_list: onScan,
+        phase:       onPhaseCapture,
+        ticker:      { onCapture: onTicker, keepText: true },
+        scan_list:   onScan,
+        kairos_pick: onPick,
     })
 
     const raw = await streamFn({
@@ -227,13 +236,27 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     const reply = stripEmitTags(
         // <ticker> keeps its inner text in the reply (unwrap, don't strip).
         raw.replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1'),
-        ['scan_list', 'phase'],
+        ['scan_list', 'phase', 'kairos_pick'],
     ).trim()
 
     const scan = _normalizeScan(capturedScan, editList)
+    const pick = _normalizeKairosPick(capturedPick)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, phase: capturedPhase })
-    return { reply, scan, phase: capturedPhase }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, phase: capturedPhase })
+    return { reply, scan, phase: capturedPhase, ...(pick ? { pick } : {}) }
+}
+
+// Normalize a captured <kairos_pick> (hand-off mode) — the single ticker Argus recommends back to
+// Kairos. Pure: null when there's no usable ticker, else a clean {ticker, direction, thesis, analysis}
+// (direction defaults long; the analysis seeds Kairos's Phase 2). Exported for tests.
+export function _normalizeKairosPick(p) {
+    if (!p || typeof p !== 'object' || typeof p.ticker !== 'string' || !p.ticker.trim()) return null
+    return {
+        ticker:    p.ticker.toUpperCase().trim(),
+        direction: p.direction === 'short' ? 'short' : 'long',
+        thesis:    typeof p.thesis === 'string' ? p.thesis : '',
+        analysis:  typeof p.analysis === 'string' ? p.analysis : '',
+    }
 }
 
 /**
@@ -246,6 +269,9 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
  * analysis/signals/sources (saves premium output and avoids regeneration drift).
  * We rehydrate those from editList — the full prior record we already hold.
  */
+// Trade-horizon vocabulary — the shared cross-agent constant (Idea/Kairos/Atlas holdings).
+const SCAN_STYLES = TRADE_HORIZONS
+
 function _normalizeScan(scan, editList = null) {
     if (!scan || typeof scan !== 'object') return null
     const priorByTicker = _editListByTicker(editList)
@@ -268,6 +294,9 @@ function _normalizeScan(scan, editList = null) {
         },
         thesis:     typeof scan.thesis === 'string' ? scan.thesis : 'Scan',
         direction:  ['long', 'short', 'mixed'].includes(scan.direction) ? scan.direction : 'mixed',
+        // Shared trade-horizon vocabulary (matches Idea/Kairos/Atlas holdings) — travels
+        // with the list so a handed-off candidate carries its horizon. null when unstated.
+        style:      SCAN_STYLES.includes(scan.style) ? scan.style : null,
         candidates: clean,
     }
 }

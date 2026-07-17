@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _normalizeScan, _cleanScore } from '../../services/scanner.agent.service.js'
+import { _normalizeScan, _cleanScore, _normalizeKairosPick } from '../../services/scanner.agent.service.js'
 
 // A minimal well-formed candidate the model might emit.
 function cand(ticker, total, extra = {}) {
@@ -56,4 +56,39 @@ test('normalizeScan: clean candidate carries the normalized score through', () =
     const scan = { thesis: 's', direction: 'long', candidates: [cand('AAA', 88)] }
     const out = _normalizeScan(scan)
     assert.deepEqual(out.candidates[0].score, { total: 88, catalyst: 80, technical: 70, relativeStrength: 60, liquidity: 90 })
+})
+
+// ── _normalizeScan style (shared trade-horizon vocabulary) ──────────────
+test('normalizeScan: a valid style is carried through', () => {
+    for (const style of ['intraday', 'day', 'swing', 'long term']) {
+        const scan = { thesis: 's', direction: 'long', style, candidates: [cand('AAA', 80)] }
+        assert.equal(_normalizeScan(scan).style, style)
+    }
+})
+
+test('normalizeScan: an off-vocabulary style is dropped to null (no "scalp")', () => {
+    const scan = { thesis: 's', direction: 'long', style: 'scalp', candidates: [cand('AAA', 80)] }
+    assert.equal(_normalizeScan(scan).style, null)
+})
+
+test('normalizeScan: a missing style defaults to null', () => {
+    const scan = { thesis: 's', direction: 'long', candidates: [cand('AAA', 80)] }
+    assert.equal(_normalizeScan(scan).style, null)
+})
+
+// ── _normalizeKairosPick (hand-off single pick) ─────────────────────────
+test('kairosPick: clean pick uppercases ticker, keeps direction + text', () => {
+    const p = _normalizeKairosPick({ ticker: 'nvda', direction: 'long', thesis: 't', analysis: 'a' })
+    assert.deepEqual(p, { ticker: 'NVDA', direction: 'long', thesis: 't', analysis: 'a' })
+})
+
+test('kairosPick: direction defaults long; missing text → empty strings', () => {
+    assert.deepEqual(_normalizeKairosPick({ ticker: 'AAPL' }), { ticker: 'AAPL', direction: 'long', thesis: '', analysis: '' })
+    assert.equal(_normalizeKairosPick({ ticker: 'TSLA', direction: 'short' }).direction, 'short')
+})
+
+test('kairosPick: no/empty ticker → null', () => {
+    assert.equal(_normalizeKairosPick(null), null)
+    assert.equal(_normalizeKairosPick({}), null)
+    assert.equal(_normalizeKairosPick({ ticker: '   ' }), null)
 })

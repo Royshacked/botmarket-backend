@@ -190,6 +190,12 @@ export function buildPositionsSection(brokerContext) {
     return `\n\nCURRENT POSITIONS & P&L — the user's live book (workspace + per-position and total P&L; prices current, don't re-fetch):\n${blocks.join('\n\n')}`
 }
 
+// Canonical trade-horizon vocabulary, shared across every agent (Idea/Kairos/Atlas holdings/
+// Scanner). The fault line between intraday and day is OVERNIGHT: intraday is flat by the session
+// close, day carries 1–few days. Kairos trades a subset (no long term), but all agents validate
+// against this same list so a horizon round-trips between them (e.g. a Kairos↔Argus scan) unchanged.
+export const TRADE_HORIZONS = ['intraday', 'day', 'swing', 'long term']
+
 // ─── Emit-tag cleanup ─────────────────────────────────────────────────────────
 // Strip the given emit blocks (<name>…</name>) from a raw model reply. Each name
 // is removed globally, matching the per-agent hand-written `.replace(...)` chains.

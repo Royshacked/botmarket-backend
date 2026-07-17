@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveAgentStream } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveAgentStream, TRADE_HORIZONS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS, buildKairosToolHandlers } from './kairos.tools.js'
 import { kairosService } from '../api/kairos/kairos.service.js'
@@ -64,8 +64,11 @@ async function chatStream({
 
     const { reply, call } = _parseKairosResponse(raw)
     const mergedCall = _mergeCallDraft(chatState?.draft, call)
+    // Discovery hand-off: on a "find me a ticker" turn the model emits <scan_request> (bias + horizon
+    // constraints) INSTEAD of a <call> — the client uses it to route the user to Argus (the scanner).
+    const scanRequest = _parseScanRequest(raw)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCall: Boolean(call), merged: Boolean(mergedCall) })
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCall: Boolean(call), merged: Boolean(mergedCall), scanRequest: Boolean(scanRequest) })
 
     // DIAGNOSTIC (temporary): the "content disappears when streaming finishes" symptom traces to
     // turns where a <call> fragment is present but did NOT parse — a malformed/unclosed block. On
@@ -84,7 +87,7 @@ async function chatStream({
     }
 
     // The call is a DRAFT — returned for preview, NOT saved. The user clicks Generate to persist.
-    return { reply, phase: capturedPhase, ...(mergedCall ? { call: mergedCall } : {}) }
+    return { reply, phase: capturedPhase, ...(mergedCall ? { call: mergedCall } : {}), ...(scanRequest ? { scanRequest } : {}) }
 }
 
 // ─── Draft carry-forward (pure) ───────────────────────────────────────────────
@@ -108,7 +111,7 @@ export function _mergeCallDraft(prevDraft, call) {
 // (block stripped) plus the parsed draft call object (null if absent or malformed).
 export function _parseKairosResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['call', 'phase']).trim()
+    const reply = stripEmitTags(text, ['call', 'phase', 'scan_request']).trim()
 
     const m = text.match(/<call>([\s\S]*?)<\/call>/)
     if (!m) return { reply, call: null }
@@ -118,6 +121,32 @@ export function _parseKairosResponse(raw) {
     } catch (err) {
         logger.warn(LOG, 'call JSON parse failed:', err.message)
         return { reply, call: null }
+    }
+}
+
+// ─── Scan-request extraction (pure) ────────────────────────────────────────────
+// Pull the <scan_request> block a "find me a ticker" turn emits. Kairos owns the bias + horizon and
+// passes them to Argus as scan constraints (the ticker comes back, so they round-trip unchanged).
+// A scan needs at least a direction to constrain, so a block without a valid long/short → null.
+// `style` is validated against the shared TRADE_HORIZONS; the rest are free-text hints for the seed.
+export function _parseScanRequest(raw) {
+    const m = (raw ?? '').match(/<scan_request>([\s\S]*?)<\/scan_request>/)
+    if (!m) return null
+    let obj
+    try {
+        obj = JSON.parse(m[1].trim())
+    } catch (err) {
+        logger.warn(LOG, 'scan_request JSON parse failed:', err.message)
+        return null
+    }
+    const direction = obj?.direction === 'short' ? 'short' : obj?.direction === 'long' ? 'long' : null
+    if (!direction) return null
+    return {
+        direction,
+        style:       TRADE_HORIZONS.includes(obj?.style) ? obj.style : null,
+        period_hint: typeof obj?.period_hint === 'string' ? obj.period_hint : null,
+        angle_hint:  typeof obj?.angle_hint  === 'string' ? obj.angle_hint  : null,
+        note:        typeof obj?.note        === 'string' ? obj.note        : null,
     }
 }
 

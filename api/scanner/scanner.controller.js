@@ -11,7 +11,7 @@ import { reasonToStatus }      from '../_shared/reason.util.js'
 const LOG = '[scanner:controller]'
 
 export async function streamScanner(req, res) {
-    const { messages, model, editList, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
+    const { messages, model, editList, handoff, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
 
     const validatedMessages = parseChatMessages(messages)
     if (validatedMessages.error) {
@@ -28,6 +28,7 @@ export async function streamScanner(req, res) {
                 messages,
                 model:           routing.model,
                 editList:        editList && typeof editList === 'object' ? editList : null,
+                handoff:         handoff === true,
                 reasoningEffort: routing.reasoningEffort,
                 userId:   req.user._id,
                 signal:   signal,
@@ -38,7 +39,8 @@ export async function streamScanner(req, res) {
                 onReasoning: (text)   => sendEvent('reasoning', { text }),
             })
 
-            return { reply: result.reply, scan: result.scan ?? null, phase: result.phase ?? null }
+            // `kairos_pick` (hand-off mode) → the single ticker Argus recommends back to Kairos.
+            return { reply: result.reply, scan: result.scan ?? null, phase: result.phase ?? null, ...(result.pick ? { kairos_pick: result.pick } : {}) }
         },
     })
 }

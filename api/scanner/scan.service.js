@@ -20,6 +20,7 @@ async function saveScan(scan, userId) {
             period:     scan.period     ?? { label: '', start: null, end: null },
             thesis:     scan.thesis     ?? 'Scan',
             direction:  scan.direction  ?? 'mixed',
+            style:      scan.style       ?? null,
             candidates: Array.isArray(scan.candidates) ? scan.candidates : [],
             // The scanner conversation that produced this list — lets the user
             // click the thesis to return to that chat.
@@ -75,6 +76,7 @@ async function updateScan(id, patch, userId, isAdmin = false) {
         if (patch.period    !== undefined)   set.period     = patch.period
         if (patch.thesis    !== undefined)   set.thesis     = patch.thesis
         if (patch.direction !== undefined)   set.direction  = patch.direction
+        if (patch.style     !== undefined)   set.style      = patch.style
         if (Array.isArray(patch.candidates)) {
             set.candidates = patch.candidates
             await enrichWithProfiles(set.candidates, { key: 'ticker', overwriteName: false })

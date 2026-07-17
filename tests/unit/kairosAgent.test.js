@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _parseKairosResponse, _mergeCallDraft, _resolveVenue, _finalizeCall } from '../../services/kairos.agent.service.js'
+import { _parseKairosResponse, _mergeCallDraft, _resolveVenue, _finalizeCall, _parseScanRequest } from '../../services/kairos.agent.service.js'
 
 const CALL_JSON = `{
   "asset": "TSLA",
@@ -44,6 +44,40 @@ test('parse: malformed JSON → call null but reply still cleaned', () => {
 test('parse: null/undefined raw → empty reply, null call', () => {
     assert.deepEqual(_parseKairosResponse(null), { reply: '', call: null })
     assert.deepEqual(_parseKairosResponse(undefined), { reply: '', call: null })
+})
+
+test('parse: <scan_request> block is stripped from the visible reply', () => {
+    const raw = `I'll send you to Argus to find a long swing setup.\n<scan_request>{ "direction": "long", "style": "swing" }</scan_request>`
+    const { reply, call } = _parseKairosResponse(raw)
+    assert.equal(reply, "I'll send you to Argus to find a long swing setup.")
+    assert.equal(call, null)   // a scan-request turn carries no call
+})
+
+// ── _parseScanRequest (discovery hand-off to Argus) ──────────────────────
+test('scanRequest: parses direction + validated style + hints', () => {
+    const raw = `Sending you to Argus.\n<scan_request>{ "direction": "long", "style": "swing", "period_hint": "next week", "angle_hint": "momentum breakouts", "note": "large-cap swings" }</scan_request>`
+    assert.deepEqual(_parseScanRequest(raw), {
+        direction: 'long', style: 'swing', period_hint: 'next week', angle_hint: 'momentum breakouts', note: 'large-cap swings',
+    })
+})
+
+test('scanRequest: no block → null', () => {
+    assert.equal(_parseScanRequest('Just chatting, no scan.'), null)
+    assert.equal(_parseScanRequest(null), null)
+})
+
+test('scanRequest: a block without a valid direction → null (a scan needs a bias to constrain)', () => {
+    assert.equal(_parseScanRequest('<scan_request>{ "style": "swing" }</scan_request>'), null)
+    assert.equal(_parseScanRequest('<scan_request>{ "direction": "sideways" }</scan_request>'), null)
+})
+
+test('scanRequest: off-vocabulary style drops to null, hints default to null', () => {
+    const out = _parseScanRequest('<scan_request>{ "direction": "short", "style": "scalp" }</scan_request>')
+    assert.deepEqual(out, { direction: 'short', style: null, period_hint: null, angle_hint: null, note: null })
+})
+
+test('scanRequest: malformed JSON → null', () => {
+    assert.equal(_parseScanRequest('<scan_request>{ not json )</scan_request>'), null)
 })
 
 // ── _mergeCallDraft (carry-forward on a partial re-emit) ─────────────────

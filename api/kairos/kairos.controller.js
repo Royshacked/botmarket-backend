@@ -46,7 +46,13 @@ export async function streamKairos(req, res) {
             })
 
             // `call` here is a DRAFT for preview — the client shows it and lets the user Generate.
-            return { reply: result.reply, phase: result.phase ?? null, ...(result.call ? { call: result.call } : {}) }
+            // `scan_request` (bias + horizon constraints) routes the user to Argus to find a ticker.
+            return {
+                reply: result.reply,
+                phase: result.phase ?? null,
+                ...(result.call ? { call: result.call } : {}),
+                ...(result.scanRequest ? { scan_request: result.scanRequest } : {}),
+            }
         },
     })
 }
