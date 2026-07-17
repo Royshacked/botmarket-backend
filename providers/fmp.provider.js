@@ -513,9 +513,13 @@ export function formatMacroSnapshot({ treasury = [], sectors = [], indicators = 
     return ['MACRO SNAPSHOT (hard data — pair with web_search for the narrative):', ...sections].join('\n')
 }
 
-/** Treasury curve + key economic indicators + today's sector rotation, LLM-ready. Cached 1h. */
-export async function getMacroSnapshot() {
-    const hit = _macroCache.get('snap')
+/**
+ * Fetch + assemble the raw macro parts { treasury, sectors, indicators } once, cached 1h.
+ * Both the LLM snapshot (getMacroSnapshot) and the structured read (getMacroRaw) format
+ * from these same parts, so they share a single set of FMP round-trips.
+ */
+async function _macroParts() {
+    const hit = _macroCache.get('parts')
     if (hit) return hit
 
     const today = new Date().toISOString().slice(0, 10)
@@ -530,12 +534,41 @@ export async function getMacroSnapshot() {
         return row ? { label, value: row.value, date: row.date } : null
     }).filter(Boolean)
 
-    const text = formatMacroSnapshot({
+    const parts = {
         treasury:  Array.isArray(treasuryArr) ? treasuryArr : [],
         sectors:   Array.isArray(sectorArr)   ? sectorArr   : [],
         indicators,
-    })
-    _macroCache.set('snap', text)
-    logger.info(LOG, 'macro snapshot', { indicators: indicators.length, hasTreasury: Array.isArray(treasuryArr) && treasuryArr.length > 0 })
-    return text
+    }
+    _macroCache.set('parts', parts)
+    logger.info(LOG, 'macro parts', { indicators: indicators.length, hasTreasury: parts.treasury.length > 0 })
+    return parts
+}
+
+/** Treasury curve + key economic indicators + today's sector rotation, LLM-ready. Cached 1h. */
+export async function getMacroSnapshot() {
+    return formatMacroSnapshot(await _macroParts())
+}
+
+/**
+ * Structured macro read for fingerprinting / trigger comparison (not LLM-formatted):
+ * { asOf, spread2s10s, fedFunds, inflation, leaders[] }. Numbers are percent points;
+ * leaders is today's top-3 sectors by move. Shares the getMacroSnapshot cache.
+ */
+export async function getMacroRaw() {
+    const parts = await _macroParts()
+    const t = [...parts.treasury].filter(r => r?.date).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]
+    const g = k => (t && Number.isFinite(Number(t[k])) ? Number(t[k]) : null)
+    const y2 = g('year2'), y10 = g('year10')
+    const ind = label => { const x = parts.indicators.find(i => i.label === label); return x && Number.isFinite(Number(x.value)) ? Number(x.value) : null }
+    const leaders = [...parts.sectors]
+        .filter(s => s?.sector && Number.isFinite(Number(s.averageChange)))
+        .sort((a, b) => Number(b.averageChange) - Number(a.averageChange))
+        .slice(0, 3).map(s => s.sector)
+    return {
+        asOf:        t?.date ?? null,
+        spread2s10s: (y2 != null && y10 != null) ? Number((y10 - y2).toFixed(2)) : null,
+        fedFunds:    ind('Fed funds rate'),
+        inflation:   ind('Inflation (YoY)'),
+        leaders,
+    }
 }

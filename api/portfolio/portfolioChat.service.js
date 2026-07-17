@@ -3,6 +3,9 @@ import { logger }  from '../../services/logger.service.js'
 import { getPortfolioStateCached } from '../../services/portfolioState.service.js'
 import { threadService } from '../../services/thread.service.js'
 import { isSubstantive } from '../../services/thread.util.js'
+import { buildFingerprint, benchmarkTicker } from '../../services/portfolioReview.util.js'
+import { getMacroRaw } from '../../providers/fmp.provider.js'
+import { getFmpQuote } from '../../providers/fmp.price.provider.js'
 // Mode/account helpers live in a shared util (portfolioState needs them too, and importing
 // them from here would be circular). Re-exported below so existing importers/tests keep working.
 import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames } from './portfolioMode.util.js'
@@ -27,6 +30,7 @@ export const portfolioChatService = {
     getThesis,
     setThesis,
     completeReview,
+    captureFingerprint,
     loadStreamContext,
     persistStreamOutcome,
 }
@@ -141,14 +145,15 @@ async function getPortfolioLifecycle(portfolioId, userId) {
         const db  = await getDb()
         const doc = await db.collection(COLLECTION).findOne(
             { portfolioId, userId },
-            { projection: { reviewCadence: 1, nextReviewAt: 1, lastReviewAt: 1, reviewHistory: 1 } }
+            { projection: { reviewCadence: 1, nextReviewAt: 1, lastReviewAt: 1, reviewHistory: 1, lastFingerprint: 1 } }
         )
         if (!doc) return null
         return {
-            reviewCadence: doc.reviewCadence ?? 'monthly',
-            nextReviewAt:  doc.nextReviewAt  ?? null,
-            lastReviewAt:  doc.lastReviewAt  ?? null,
-            reviewHistory: doc.reviewHistory ?? [],
+            reviewCadence:   doc.reviewCadence ?? 'monthly',
+            nextReviewAt:    doc.nextReviewAt  ?? null,
+            lastReviewAt:    doc.lastReviewAt  ?? null,
+            reviewHistory:   doc.reviewHistory ?? [],
+            lastFingerprint: doc.lastFingerprint ?? null,
         }
     } catch (err) {
         logger.error(LOG, 'Failed to get portfolio lifecycle', err)
@@ -279,6 +284,39 @@ async function getPendingReviews(userId) {
     }
 }
 
+/**
+ * Capture the portfolio's compact "then" fingerprint (book value, benchmark price, regime,
+ * per-holding weight+conviction) and store it as `lastFingerprint`. Read by the next review to
+ * compute deltas (benchmark-relative return, regime shift). Best-effort — never throws; a failed
+ * capture just means the next review has no baseline. Called at construction and review completion.
+ *
+ * @param {'construction'|'review'} reason
+ */
+async function captureFingerprint(portfolioId, userId, reason) {
+    try {
+        const [state, mandate] = await Promise.all([
+            getPortfolioStateCached(portfolioId, userId).catch(() => null),
+            getMandate(portfolioId, userId).catch(() => null),
+        ])
+        const macroRaw = await getMacroRaw().catch(() => null)
+
+        let benchmark = null
+        const tk = benchmarkTicker(mandate?.benchmark)
+        if (tk) {
+            const price = await getFmpQuote(tk).catch(() => null)
+            benchmark = { ticker: tk, price: Number.isFinite(price) ? price : null }
+        }
+
+        const fingerprint = buildFingerprint({ reason, state, macroRaw, benchmark })
+        await setPortfolioLifecycle(portfolioId, userId, { lastFingerprint: fingerprint })
+        logger.info(LOG, 'fingerprint captured', { portfolioId, reason, benchmark: tk ?? null, bookValue: fingerprint.bookValue })
+        return fingerprint
+    } catch (err) {
+        logger.warn(LOG, 'captureFingerprint failed', err.message)
+        return null
+    }
+}
+
 // ─── Portfolio thesis ─────────────────────────────────────────────────────────
 // The explicit portfolio-level intent the weekly review validates drift against:
 // strategy rationale + target exposures. Mandate stays its own field; the thesis
@@ -321,6 +359,9 @@ async function setThesis(portfolioId, userId, thesis, reason = 'construction') {
             { upsert: true }
         )
         logger.info(LOG, 'Thesis updated', { portfolioId, version: next.version, reason })
+        // At construction, seed the baseline fingerprint so the FIRST review has a "then" to
+        // delta against (regime + benchmark + target weights). Fire-and-forget.
+        if (reason === 'construction') captureFingerprint(portfolioId, userId, 'construction').catch(() => {})
         return { ok: true, thesis: next }
     } catch (err) {
         logger.error(LOG, 'Failed to set thesis', err)
@@ -345,6 +386,9 @@ async function completeReview(portfolioId, userId) {
             { $set: { lastReviewAt: now, nextReviewAt: next, notifiedAt: null } }
         )
         logger.info(LOG, 'Review completed', { portfolioId, nextReviewAt: next })
+        // Snapshot the book AS OF this review — the "then" the NEXT review deltas against.
+        // Fire-and-forget so review completion stays snappy.
+        captureFingerprint(portfolioId, userId, 'review').catch(() => {})
         return { ok: true, nextReviewAt: next }
     } catch (err) {
         logger.error(LOG, 'Failed to complete review', err)

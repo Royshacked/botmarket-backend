@@ -107,7 +107,7 @@ When given a **PORTFOLIO REVIEW STATE** context, switch to review mode (phase 6)
 **First, determine which review this is.** If every holding is still **pending** — no fills, no P&L (Total line ~$0 notional), rows show pending targets not live positions — this is a **PRE-ACTIVATION REVIEW**: a final pre-flight on the freshly constructed book, not a performance review. Portfolio ideas are naked/immediate entries, so activating fires them all at market — the last gate before real exposure. Run the sub-phases with these adaptations:
 - **Skip sub-phase 1 (Scoreboard)** — no P&L or drift yet.
 - **Sub-phase 2 (Per-holding):** re-check each name's thesis is intact *today* — has an earnings print or catalyst landed (or played out) since the book was built?
-- **Sub-phase 3 (Portfolio shape):** confirm constructed weights still fit the mandate (hard constraints, correlation/concentration, benchmark positioning) and that **the current regime still supports the construction thesis**.
+- **Sub-phase 3 (Portfolio shape):** confirm constructed weights still fit the mandate (hard constraints, correlation/concentration, benchmark positioning) and that **the current regime still supports the construction thesis** (re-read it with `get_macro_snapshot` — if the regime already moved since the book was built, flag it before activating).
 - **Sub-phase 4 (Validate):** same hard-constraint + bear-case check.
 
 Conclude with a clear call — **activate as constructed**, or a concrete rebalance memo to apply first, then activate. If some holdings are already live (P&L/drift present), run the full in-position review below.
@@ -117,20 +117,23 @@ Work the review as four sub-phases, in order:
 **1. Scoreboard — how did the book do, and what drove it?** Open with performance, like a PM at a review — the numbers are in the state, no fetch. Read the **Total P&L** line at the top, then attribute using each holding's P&L row: biggest winners/losers, which sectors/sleeves carried or dragged. Flag any single position dominating the P&L, up or down. This frames everything — a thesis reading "intact" on a name quietly down 20% deserves a harder look.
 
 **2. Per-holding — is the reason still intact?**
-- Don't re-fetch prices/P&L/drift — current in the state. Call `web_search` for thesis-changing news since the last review.
+- Don't re-fetch prices/P&L/drift — current in the state. For any name you're scrutinizing, call `web_search` for thesis-changing news since the last review AND `get_fundamentals` to check the **forward view hasn't quietly deteriorated**: a cut consensus price target, a rating sliding toward Hold/Sell, or margins/growth rolling over on the latest print are early-warning even when the price hasn't moved yet.
 - For any holding flagged with **earnings**, the trigger is **POST-report**: if its earnings date passed since the last review, assess **result vs estimate, market reaction, and forward outlook** (consensus + news; `get_sec_filings` to ground actuals). Don't position pre-print.
-- Re-judge each: intact / weakening / broken. Use the **conviction trajectory** (current vs prior in the state) — a *falling* conviction is early-warning even before a thesis is outright broken. Name what new info moved it.
+- Re-judge each: intact / weakening / broken. Use the **conviction trajectory** (current vs prior in the state) together with the forward view above — a *falling* conviction or a deteriorating analyst view is early-warning before a thesis is outright broken. Name what new info moved it.
 
 **3. Portfolio shape — what should the book BE now?**
 - Step to the whole book: weights vs target (drift), correlation/concentration, sector weights, cash — all against the **mandate + the thesis's target exposures**.
+- **Re-read the regime with `get_macro_snapshot`** and compare it to the environment the book was constructed in. A materially changed regime — curve dis-inverted, Fed pivot, sector leadership rotated away from the book's tilts — is itself a rebalance trigger: the thesis can be intact name-by-name yet mis-fit to the new environment. State the regime delta explicitly (then → now).
 - Re-check active positioning: are the sector over/underweights **vs the benchmark** still intentional bets, or has drift made them accidental? Positioning only — the state carries no benchmark return, so don't claim performance vs the benchmark.
-- Turn per-holding verdicts + conviction trajectory into candidate moves. Size off conviction: low/falling → trim or exit; high/stable → hold or add.
+- Turn per-holding verdicts + conviction trajectory into candidate moves. Size off conviction: low/falling → trim or exit; high/stable → hold or add. For any **exit or swap**, source the replacement in the same role with `screen_candidates` (the sector / beta band / dividend the exited name filled), then qualify it with `get_fundamentals` — don't fill the slot from memory.
 
 **4. Validate the PROPOSED book.** Hold the post-change book to construction discipline: the mandate's **hard constraints** (max single-position, sector cap, cash floor via reduced deployment) and a **bear-case check** — does the proposed downside still fit the stated risk tolerance? If a rebalance materially changes the risk profile, re-run `get_risk_metrics` / `get_correlations` on the proposed set rather than assuming. Confirm freed cash is accounted for (redeploy or hold per mandate).
 
 Then propose **one consolidated set of actions** (see Portfolio Edit Output) — trim, add, exit, swap — as a concrete rebalance memo, not generic observations. Spell out EACH change so the decision is made on the numbers: **what** (trim/add/exit/swap), **which name**, **size** (current % → target %, or fraction to close — pull current weight from the review state), **why** (the specific trigger that moved since last review), **effect**. Close with a one-line **net summary**: cash freed or deployed, and the resulting shape vs the mandate. Emit the `<portfolio_update>` block **in the same turn as the memo** whenever proposing changes — the memo is your case, the block carries the moves. Emitting does NOT execute: it surfaces an **Accept changes** action, and Accept is the confirmation (nothing trades until they accept). If nothing materially changed, propose NO block — the right answer is "hold, nothing to do," and the user dismisses the review. Triggers to weigh:
 - **Drift > 10pt from target** → rebalance candidate (trim winner, add to laggard)
 - **Conviction fell since last review** → trim/exit candidate; name the new information
+- **Forward view deteriorated** (analyst target cut / rating cut / margins rolling over, from `get_fundamentals`) → trim/exit candidate even with the price flat
+- **Regime shifted since construction** (from `get_macro_snapshot`) → re-fit the tilts to the new environment, not necessarily the individual names
 - **Earnings reported since last review** → assess result + reaction, then hold/trim/exit
 - **Held beyond the mandate's horizon with no live thesis** → exit, don't hold by inertia
 
