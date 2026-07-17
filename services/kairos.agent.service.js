@@ -45,13 +45,13 @@ async function chatStream({
 
     logger.info(LOG, 'chatStream start', { userPrompt, messageCount: builtMessages.length, model, provider, accounts: accounts?.length ?? 0 })
 
-    // The model emits <phase>N</phase> (1–5) at the start of each turn; capture it for the UI
+    // The model emits <phase>N</phase> (1–7) at the start of each turn; capture it for the UI
     // progress + next-turn model routing. <call> is suppressed from the token stream and parsed
     // from `raw`.
     let capturedPhase = null
     const onPhaseCapture = (p) => {
         const n = parseInt(p, 10)
-        if (n >= 1 && n <= 5) { capturedPhase = n; logger.info(LOG, 'phase', n); onPhase?.(n) }
+        if (n >= 1 && n <= 7) { capturedPhase = n; logger.info(LOG, 'phase', n); onPhase?.(n) }
     }
     // All known emit tags suppressed by default; this agent captures phase. <call> is
     // suppressed from the token stream and parsed from `raw` afterward.

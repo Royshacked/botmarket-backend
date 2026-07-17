@@ -5,12 +5,60 @@ import {
     formatMacroSnapshot,
     formatAnalystBlock,
     formatEtfSectorWeights,
+    formatPeers,
+    formatLiquidityFloat,
 } from '../../providers/fmp.provider.js'
 
 // Pure formatters behind Atlas's Starter-plan tools (screen_candidates,
 // get_macro_snapshot) and the enriched get_fundamentals. Network fetch isn't
 // unit-tested — these lock the LLM-facing shape and the risky arithmetic
 // (dividend yield, target upside, 2s10s spread, decimal-vs-percent).
+
+// ─── formatPeers (get_peers — the correlation-read cohort) ──────────────────
+test('peers: rows → one line, self excluded, capped', () => {
+    const rows = [
+        { symbol: 'NVDA', companyName: 'NVIDIA' },   // self — dropped
+        { symbol: 'avgo', companyName: 'Broadcom' }, // lowercased → uppercased
+        { symbol: 'AMD' },                            // no name
+    ]
+    const out = formatPeers('NVDA', rows)
+    assert.ok(!out.includes('NVDA (') && !/\bNVDA\b,/.test(out))   // self not listed as a peer
+    assert.ok(out.includes('AVGO (Broadcom)'))
+    assert.ok(out.includes('AMD'))
+})
+
+test('peers: caps at topN', () => {
+    const rows = Array.from({ length: 15 }, (_, i) => ({ symbol: `P${i}` }))
+    const out = formatPeers('X', rows, 5)
+    assert.equal((out.match(/P\d+/g) || []).length, 5)
+})
+
+test('peers: empty / non-array → explicit "no peers" line', () => {
+    assert.ok(formatPeers('AAPL', []).includes('No fundamental peers'))
+    assert.ok(formatPeers('AAPL', null).includes('No fundamental peers'))
+})
+
+// ─── formatLiquidityFloat (Phase-3 risk/sizing) ─────────────────────────────
+test('liquidityFloat: avg volume + derived avg $ volume + free float %', () => {
+    const out = formatLiquidityFloat({ price: 100, averageVolume: 2_000_000 }, { freeFloat: 88.5, floatShares: 23_225_466_000 })
+    const s = out.join('\n')
+    assert.ok(s.includes('Avg volume: 2,000,000'))
+    assert.ok(s.includes('Avg $ volume: $200'))     // 100 * 2M = $200M (compactMoney)
+    assert.ok(s.includes('Free float: 88.5%'))
+    assert.ok(s.includes('Float shares: 23.2B'))
+})
+
+test('liquidityFloat: low free float flags squeeze/gap risk', () => {
+    const out = formatLiquidityFloat({ price: 12, averageVolume: 500000 }, { freeFloat: 14.2 }).join('\n')
+    assert.ok(/Free float: 14\.2% — LOW float/.test(out))
+})
+
+test('liquidityFloat: missing data → only the lines it can build (never throws)', () => {
+    assert.deepEqual(formatLiquidityFloat({}, null), [])
+    assert.deepEqual(formatLiquidityFloat(null, null), [])
+    const onlyVol = formatLiquidityFloat({ averageVolume: 1000 }, null)   // no price → no $ vol; no float
+    assert.deepEqual(onlyVol, ['Avg volume: 1,000'])
+})
 
 // ─── formatScreenerRows ─────────────────────────────────────────────────────
 test('screener: row → compact line with derived dividend yield', () => {

@@ -242,6 +242,10 @@ async function getIdeas(userId, isAdmin = false) {
     try {
         const db = await getDb()
         const query = isAdmin ? {} : { userId }
+        // Exclude Kairos-owned ideas: a confirmed call materializes an idea stamped ownedBy:'hermes'
+        // as its execution vehicle. It's surfaced as the Call row (Calls tab) + its live position, so
+        // it must NOT also appear as a standalone idea. ($ne also matches ideas with no ownedBy.)
+        query.ownedBy = { $ne: 'hermes' }
         const items = await db.collection(COLLECTION).find(query).sort({ savedAt: -1 }).toArray()
         return items.map(stripId)
     } catch (err) {

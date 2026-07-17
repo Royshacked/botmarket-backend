@@ -1,5 +1,5 @@
 import { getPriceAction, getCycleAnalysis, getCorrelations } from '../providers/yahoofinance.provider.js'
-import { getEarningsCalendar, getFundamentals } from '../providers/fmp.provider.js'
+import { getEarningsCalendar, getFundamentals, getStockPeers, getMacroSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { COMMON_TOOL_HANDLERS, makeToolHandler } from './agentUtils.js'
 import {
@@ -52,8 +52,22 @@ export const KAIROS_TOOLS = [
         },
     },
     {
+        name: 'get_peers',
+        description: 'Fetch the fundamental PEER SET for a ticker (same sector/size cohort) — the candidate names it may move with. Use it in the Phase 2 correlation read to STOP GUESSING peers: pull the set, pick the ones that matter (close competitors, the sector/industry ETF, a lead-lag driver), then feed those into get_correlations to measure how tightly the asset ACTUALLY tracks each. US-listed equities/ETFs.',
+        input_schema: {
+            type: 'object',
+            properties: { ticker: { type: 'string', description: 'e.g. NVDA, AAPL, XOM' } },
+            required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_macro_snapshot',
+        description: 'Hard macro read for the Phase 2 regime call: the current Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today\'s sector rotation (leaders/laggards). The DATA half of the regime read — pair it with web_search for the narrative. Weight by horizon: real weight for swing, a lighter backdrop for intraday/day. No arguments.',
+        input_schema: { type: 'object', properties: {} },
+    },
+    {
         name: 'get_correlations',
-        description: 'Pairwise correlation matrix (1y daily returns) for a set of tickers. Use it in the Phase 2 correlation read: include the traded asset alongside the names you suspect drive it — its sector/industry ETF, close peers, an index (SPY/QQQ), or a lead-lag driver (e.g. SMH for a chip name, BTC for a high-beta alt, a crude proxy for an E&P) — to measure how tightly it actually moves with each, beyond eyeballing charts. The numbers ground the market_sensitivity level + drivers you emit.',
+        description: 'Pairwise correlation matrix (1y daily returns) for a set of tickers. Use it in the Phase 2 correlation read: include the traded asset alongside the names you suspect drive it — its sector/industry ETF, close peers (from get_peers), an index (SPY/QQQ), or a lead-lag driver (e.g. SMH for a chip name, BTC for a high-beta alt, a crude proxy for an E&P) — to measure how tightly it actually moves with each, beyond eyeballing charts. The numbers ground the market_sensitivity level + drivers you emit.',
         input_schema: {
             type: 'object',
             properties: { tickers: { type: 'array', items: { type: 'string' }, description: 'two or more tickers — the asset PLUS its suspected drivers, e.g. ["NVDA","SMH","QQQ"]' } },
@@ -218,6 +232,14 @@ const _STATIC_HANDLERS = {
     get_price_action: makeToolHandler('get_price_action',
         ({ ticker }) => getPriceAction(ticker),
         (err, { ticker }) => `Could not fetch price action for ${ticker}: ${err.message}`, LOG),
+
+    get_peers: makeToolHandler('get_peers',
+        ({ ticker }) => getStockPeers(ticker),
+        (err, { ticker }) => `Could not fetch peers for ${ticker}: ${err.message}`, LOG),
+
+    get_macro_snapshot: makeToolHandler('get_macro_snapshot',
+        () => getMacroSnapshot(),
+        (err) => `Could not fetch macro snapshot: ${err.message}`, LOG),
 
     get_correlations: makeToolHandler('get_correlations',
         ({ tickers }) => getCorrelations(tickers),

@@ -133,17 +133,44 @@ export function formatAnalystBlock(price, ptc, grades) {
     return out.length ? ['— Analyst view (forward) —', ...out] : []
 }
 
-function _formatStock(symbol, p, ratios = {}, growth = {}, km = {}, ptc = null, grades = null) {
+/**
+ * Liquidity + float lines for the risk/sizing read (Phase 3). `freeFloat` from FMP
+ * is a PERCENT number (95.9 = 95.9%), not a ratio. Returns an array of lines (may be
+ * empty). Pure — exported for testing.
+ */
+export function formatLiquidityFloat(profile = {}, floatRow = null) {
+    const px   = Number(profile?.price)
+    const avgV = Number(profile?.averageVolume)
+    const out  = []
+    if (Number.isFinite(avgV) && avgV > 0) {
+        out.push(line('Avg volume', avgV.toLocaleString('en-US')))
+        if (Number.isFinite(px) && px > 0) out.push(line('Avg $ volume', money(px * avgV)))
+    }
+    const ff = Number(floatRow?.freeFloat)
+    if (Number.isFinite(ff)) {
+        out.push(line('Free float', `${ff.toFixed(1)}%${ff < 25 ? ' — LOW float, elevated squeeze/gap risk; size down' : ''}`))
+    }
+    const fs = Number(floatRow?.floatShares)
+    if (Number.isFinite(fs) && fs > 0) {
+        const compact = fs >= 1e9 ? `${(fs / 1e9).toFixed(1)}B` : fs >= 1e6 ? `${(fs / 1e6).toFixed(0)}M` : fs.toLocaleString('en-US')
+        out.push(line('Float shares', compact))
+    }
+    return out.filter(Boolean)
+}
+
+function _formatStock(symbol, p, ratios = {}, growth = {}, km = {}, ptc = null, grades = null, floatRow = null) {
     // FMP stable has no direct ROE in ratios-ttm; derive it from per-share figures.
     const roe = (Number(ratios.netIncomePerShareTTM) > 0 && Number(ratios.bookValuePerShareTTM) > 0)
         ? Number(ratios.netIncomePerShareTTM) / Number(ratios.bookValuePerShareTTM)
         : null
+    const liq = formatLiquidityFloat(p, floatRow)
     return [
         `${symbol} — ${p.companyName || symbol}`,
         line('Sector / industry', [p.sector, p.industry].filter(Boolean).join(' / ') || null),
         line('Exchange', p.exchange || p.exchangeFullName),
         line('Market cap', money(p.marketCap)),
         line('Beta', num(p.beta)),
+        ...(liq.length ? ['— Liquidity & float (risk / sizing) —', ...liq] : []),
         '— Valuation (TTM) —',
         line('P/E', num(ratios.priceToEarningsRatioTTM)),
         line('Price/Book', num(ratios.priceToBookRatioTTM)),
@@ -351,15 +378,16 @@ export async function getFundamentals(ticker) {
     } else {
         // Extra calls only for company stocks; each tolerates partial failure so a
         // single locked/empty endpoint never sinks the whole fundamentals lookup.
-        const [ratiosArr, growthArr, kmArr, ptcArr, gradesArr] = await Promise.all([
+        const [ratiosArr, growthArr, kmArr, ptcArr, gradesArr, floatArr] = await Promise.all([
             _fmpGet(`/ratios-ttm?symbol=${symbol}`).catch(e => { logger.warn(LOG, `ratios ${symbol}`, e.message); return [] }),
             _fmpGet(`/financial-growth?symbol=${symbol}&limit=1`).catch(e => { logger.warn(LOG, `growth ${symbol}`, e.message); return [] }),
             _fmpGet(`/key-metrics-ttm?symbol=${symbol}`).catch(e => { logger.warn(LOG, `keymetrics ${symbol}`, e.message); return [] }),
             _fmpGet(`/price-target-consensus?symbol=${symbol}`).catch(() => []),
             _fmpGet(`/grades-consensus?symbol=${symbol}`).catch(() => []),
+            _fmpGet(`/shares-float?symbol=${symbol}`).catch(e => { logger.warn(LOG, `float ${symbol}`, e.message); return [] }),
         ])
         const first  = a => (Array.isArray(a) ? a[0] : a)
-        text = _formatStock(symbol, p, first(ratiosArr) || {}, first(growthArr) || {}, first(kmArr) || {}, first(ptcArr) || null, first(gradesArr) || null)
+        text = _formatStock(symbol, p, first(ratiosArr) || {}, first(growthArr) || {}, first(kmArr) || {}, first(ptcArr) || null, first(gradesArr) || null, first(floatArr) || null)
     }
 
     const asOf = new Date().toISOString()
@@ -547,6 +575,44 @@ async function _macroParts() {
 /** Treasury curve + key economic indicators + today's sector rotation, LLM-ready. Cached 1h. */
 export async function getMacroSnapshot() {
     return formatMacroSnapshot(await _macroParts())
+}
+
+// ─── Stock peers (the correlation-read peer set) ────────────────────────────
+// FMP /stock-peers = the fundamental peer cohort (same sector / size). The value
+// is the SYMBOL SET: the agent feeds the ones that matter into get_correlations
+// to measure what the asset actually tracks — instead of guessing peers via search.
+const PEERS_TTL_MS = 12 * 60 * 60 * 1000   // 12h — peer sets barely move
+const _peersCache  = createTtlCache({ ttlMs: PEERS_TTL_MS, max: 300 })
+
+/** Fundamental peer set for a ticker, LLM-ready. FMP /stock-peers. Cached 12h. */
+export async function getStockPeers(ticker) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    if (!sym) return 'No ticker provided.'
+
+    const hit = _peersCache.get(sym)
+    if (hit) return hit
+
+    let rows
+    try {
+        const arr = await _fmpGet(`/stock-peers?symbol=${sym}`)
+        rows = Array.isArray(arr) ? arr : []
+    } catch (err) {
+        return `No peer data for ${sym}: ${err.message}`
+    }
+    const text = formatPeers(sym, rows)
+    _peersCache.set(sym, text)
+    return text
+}
+
+/** Peer rows → one LLM-ready line (self excluded, capped). Pure — exported for testing. */
+export function formatPeers(symbol, rows, topN = 10) {
+    const sym   = String(symbol || '').toUpperCase().trim()
+    const peers = (Array.isArray(rows) ? rows : [])
+        .filter(r => r?.symbol && String(r.symbol).toUpperCase().trim() !== sym)
+        .slice(0, topN)
+    if (!peers.length) return `No fundamental peers found for ${sym}.`
+    const list = peers.map(r => `${String(r.symbol).toUpperCase().trim()}${r.companyName ? ` (${r.companyName})` : ''}`).join(', ')
+    return `${sym} fundamental peers (same sector/size cohort — feed the ones that matter into get_correlations to measure what it ACTUALLY tracks):\n${list}`
 }
 
 /**
