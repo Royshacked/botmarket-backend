@@ -7,6 +7,9 @@
 //  - screen_candidates → cross-universe discovery (company-screener).
 //  - get_macro_snapshot→ hard macro read: treasury curve, key economic
 //    indicators, and today's sector rotation.
+//  - getSectorSnapshot / getMarketMovers / getAnalystActions → the scanner's
+//    (Argus) grounded discovery feeds: sector rotation, biggest gainers/losers/
+//    most-active, and recent analyst upgrades/downgrades.
 // Slow-moving data (fundamentals) is heavily cached; discovery/macro use short TTLs.
 //
 // PLAN NOTES (current key = Starter):
@@ -493,6 +496,18 @@ const ECON_INDICATORS = [
     ['Consumer sentiment', 'consumerSentiment'],
 ]
 
+// The sector snapshot is pinned to a trading date; on weekends/holidays `date=today`
+// returns 0 rows, so walk back up to a few days to the last day that actually has data.
+// On a trading day back=0 hits immediately (one fetch); off-hours it finds Friday's close.
+async function _fetchSectorSnapshot() {
+    for (let back = 0; back <= 5; back++) {
+        const d = new Date(Date.now() - back * 864e5).toISOString().slice(0, 10)
+        const arr = await _fmpGet(`/sector-performance-snapshot?date=${d}`).catch(e => { logger.warn(LOG, 'sector snapshot', e.message); return [] })
+        if (Array.isArray(arr) && arr.length) return arr
+    }
+    return []
+}
+
 /** Assembled macro parts → LLM-ready snapshot. Pure — exported for testing. */
 export function formatMacroSnapshot({ treasury = [], sectors = [], indicators = [] } = {}) {
     const sections = []
@@ -533,7 +548,8 @@ export function formatMacroSnapshot({ treasury = [], sectors = [], indicators = 
         .sort((a, b) => Number(b.averageChange) - Number(a.averageChange))
     if (secs.length) {
         const fmt = s => `${s.sector} ${Number(s.averageChange) >= 0 ? '+' : ''}${Number(s.averageChange).toFixed(2)}%`
-        const exch = secs[0]?.exchange ? `${secs[0].exchange}, today` : 'today'
+        const when = secs[0]?.date || 'today'
+        const exch = secs[0]?.exchange ? `${secs[0].exchange}, ${when}` : when
         sections.push(`Sector move (${exch}) — leaders: ${secs.slice(0, 3).map(fmt).join(', ')}; laggards: ${secs.slice(-3).reverse().map(fmt).join(', ')}`)
     }
 
@@ -554,7 +570,7 @@ async function _macroParts() {
     const from  = new Date(Date.now() - 10 * 864e5).toISOString().slice(0, 10)
     const [treasuryArr, sectorArr, ...indArrs] = await Promise.all([
         _fmpGet(`/treasury-rates?from=${from}&to=${today}`).catch(e => { logger.warn(LOG, 'treasury', e.message); return [] }),
-        _fmpGet(`/sector-performance-snapshot?date=${today}`).catch(e => { logger.warn(LOG, 'sector snapshot', e.message); return [] }),
+        _fetchSectorSnapshot(),
         ...ECON_INDICATORS.map(([, name]) => _fmpGet(`/economic-indicators?name=${name}`).catch(() => [])),
     ])
     const indicators = ECON_INDICATORS.map(([label], i) => {
@@ -575,6 +591,151 @@ async function _macroParts() {
 /** Treasury curve + key economic indicators + today's sector rotation, LLM-ready. Cached 1h. */
 export async function getMacroSnapshot() {
     return formatMacroSnapshot(await _macroParts())
+}
+
+// ─── Sector snapshot (rotation discovery) ───────────────────────────────────
+// Just today's sector rotation, leaders→laggards — the discovery read for the
+// scanner's sector-rotation angle (screen inside the leading groups) and the
+// sector leg of its relative-strength check. Reuses the macro parts cache, so it
+// costs nothing extra when get_macro_snapshot already ran this hour.
+
+/** Sector rows → leaders-first rotation list, LLM-ready. Pure — exported for testing. */
+export function formatSectorSnapshot(sectors = []) {
+    const secs = (Array.isArray(sectors) ? sectors : [])
+        .filter(s => s?.sector && Number.isFinite(Number(s.averageChange)))
+        .sort((a, b) => Number(b.averageChange) - Number(a.averageChange))
+    if (!secs.length) return 'Sector snapshot unavailable right now — fall back to get_quotes on the sector ETFs (XLK/XLE/XLF/XLV/XLY…).'
+    const fmt  = s => `  ${String(s.sector).padEnd(24)} ${Number(s.averageChange) >= 0 ? '+' : ''}${Number(s.averageChange).toFixed(2)}%`
+    const when = secs[0]?.date || 'today'
+    const exch = secs[0]?.exchange ? `${secs[0].exchange}, ${when}` : when
+    return [`Sector rotation (${exch}) — leaders first; screen inside the groups aligned with your thesis:`, ...secs.map(fmt)].join('\n')
+}
+
+/** Today's sector rotation (all sectors, leaders→laggards), LLM-ready. Cached 1h (shares the macro parts cache). */
+export async function getSectorSnapshot() {
+    const { sectors } = await _macroParts()
+    return formatSectorSnapshot(sectors)
+}
+
+// ─── Market movers (momentum discovery) ─────────────────────────────────────
+// biggest-gainers / biggest-losers / most-actives — the momentum / gap / "what's
+// moving" starting pool for the scanner's Phase-2 discovery. These shift through
+// the session, so a short TTL; one cache entry per kind.
+const MOVERS_TTL_MS = 5 * 60 * 1000
+const _moversCache  = createTtlCache({ ttlMs: MOVERS_TTL_MS, max: 6 })
+const MOVER_KINDS = {
+    gainers: ['biggest-gainers', 'Top gainers'],
+    losers:  ['biggest-losers',  'Top losers'],
+    active:  ['most-actives',    'Most active'],
+}
+
+/** Mover rows → compact LLM-ready list. Pure — exported for testing. */
+export function formatMovers(kind, rows, limit = 20) {
+    const label = MOVER_KINDS[kind]?.[1] || 'Movers'
+    const list  = (Array.isArray(rows) ? rows : []).slice(0, Math.max(1, limit))
+    if (!list.length) return `No ${label.toLowerCase()} available right now.`
+    const lines = list.map(r => {
+        const px   = Number(r.price)
+        const chgP = Number(r.changesPercentage)
+        const bits = [
+            `${String(r.symbol || '?').padEnd(6)} ${r.name || ''}`.trim(),
+            r.exchange || null,
+            Number.isFinite(px) && px > 0 ? `$${num(px)}` : null,
+            Number.isFinite(chgP) ? `${chgP >= 0 ? '+' : ''}${chgP.toFixed(2)}%` : null,
+        ].filter(Boolean)
+        return `  ${bits.join(' | ')}`
+    })
+    return [`${label} (US, today) — top ${list.length}:`, ...lines].join('\n')
+}
+
+/**
+ * Market movers for one kind ('gainers' | 'losers' | 'active'), LLM-ready. Cached 5m.
+ * Discovery only — the raw momentum pool; the agent still qualifies each name.
+ */
+export async function getMarketMovers(kind = 'gainers', limit = 20) {
+    const k = MOVER_KINDS[kind] ? kind : 'gainers'
+    const n = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50)
+    let rows = _moversCache.get(k)
+    if (!rows) {
+        const arr = await _fmpGet(`/${MOVER_KINDS[k][0]}`)
+        rows = Array.isArray(arr) ? arr : []
+        _moversCache.set(k, rows)
+    }
+    return formatMovers(k, rows, n)
+}
+
+// ─── Analyst actions (rating-change discovery) ──────────────────────────────
+// Recent upgrades / downgrades — a catalyst pool beyond earnings. With no symbols,
+// the market-wide latest-changes feed (grades-latest-news) for "who moved" discovery;
+// with symbols, each name's recent actions (grades) to validate a shortlist. Short
+// TTL — ratings land through the day.
+const GRADES_TTL_MS = 30 * 60 * 1000
+const _gradesCache  = createTtlCache({ ttlMs: GRADES_TTL_MS, max: 60 })
+const _actionTag = a => {
+    const s = String(a || '').toLowerCase()
+    if (s.includes('up'))   return '▲ upgrade'
+    if (s.includes('down')) return '▼ downgrade'
+    if (s.includes('init') || s.includes('coverage')) return '＋ initiate'
+    return a ? String(a) : 'maintain'
+}
+const _gradeMove = r => (r.previousGrade && r.newGrade) ? ` (${r.previousGrade}→${r.newGrade})` : (r.newGrade ? ` (→${r.newGrade})` : '')
+
+/** Bulk recent rating changes (grades-latest-news) → LLM-ready. Pure — exported for testing. */
+export function formatAnalystActionsBulk(rows, limit = 25) {
+    const list = (Array.isArray(rows) ? rows : [])
+        .filter(r => r?.symbol)
+        .sort((a, b) => String(b.publishedDate || '').localeCompare(String(a.publishedDate || '')))
+        .slice(0, Math.max(1, limit))
+    if (!list.length) return 'No recent analyst rating changes available.'
+    const lines = list.map(r => `  ${String(r.publishedDate || '').slice(0, 10)}  ${String(r.symbol).padEnd(6)} ${_actionTag(r.action)} by ${r.gradingCompany || '—'}${_gradeMove(r)}`)
+    return ['Recent analyst rating changes (market-wide, newest first) — a catalyst pool; qualify each name before listing:', ...lines].join('\n')
+}
+
+/** Per-symbol recent rating actions (grades) → LLM-ready. Pure — exported for testing. */
+export function formatAnalystActionsForSymbols(bySymbol = {}) {
+    const entries = Object.entries(bySymbol).filter(([, rows]) => Array.isArray(rows) && rows.length)
+    if (!entries.length) return 'No recent analyst rating actions for those symbols.'
+    const blocks = entries.map(([sym, rows]) => {
+        const recent = rows.slice(0, 4).map(r => `    ${r.date || '—'}  ${_actionTag(r.action)} by ${r.gradingCompany || '—'}${_gradeMove(r)}`)
+        return [`  ${sym}:`, ...recent].join('\n')
+    })
+    return ['Analyst rating actions (recent, per name):', ...blocks].join('\n')
+}
+
+/**
+ * Recent analyst rating changes. No symbols → the market-wide latest-changes feed
+ * (discovery). Symbols → each name's recent actions (validation), capped to 12 names.
+ * Cached 30m per key.
+ */
+export async function getAnalystActions(symbols = [], limit = 25) {
+    const wanted = (Array.isArray(symbols) ? symbols : [])
+        .map(s => String(s).toUpperCase().trim()).filter(Boolean)
+
+    if (wanted.length) {
+        const bySymbol = {}
+        await Promise.all(wanted.slice(0, 12).map(async sym => {
+            let rows = _gradesCache.get(`sym:${sym}`)
+            if (!rows) {
+                const arr = await _fmpGet(`/grades?symbol=${sym}`).catch(() => [])
+                rows = (Array.isArray(arr) ? arr : [])
+                    .filter(r => r?.date)
+                    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+                    .slice(0, 8)
+                _gradesCache.set(`sym:${sym}`, rows)
+            }
+            bySymbol[sym] = rows
+        }))
+        return formatAnalystActionsForSymbols(bySymbol)
+    }
+
+    const n = Math.min(Math.max(parseInt(limit, 10) || 25, 1), 50)
+    let rows = _gradesCache.get('bulk')
+    if (!rows) {
+        const arr = await _fmpGet('/grades-latest-news?page=0&limit=100').catch(() => [])
+        rows = Array.isArray(arr) ? arr : []
+        _gradesCache.set('bulk', rows)
+    }
+    return formatAnalystActionsBulk(rows, n)
 }
 
 // ─── Stock peers (the correlation-read peer set) ────────────────────────────

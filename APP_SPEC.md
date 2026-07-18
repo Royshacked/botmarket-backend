@@ -159,11 +159,19 @@ Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/b
 
 ## 4. Scans
 
-The **Scanner Agent** (`POST /api/scanner/stream`) emits a `<scan_list>` (normalized:
+The **Scanner Agent** ("Argus", `POST /api/scanner/stream`) emits a `<scan_list>` (normalized:
 uppercased tickers, guaranteed period/thesis/direction/signals). A scan is a watchlist of
 candidates (`{ ticker, direction, thesis, analysis, signals, conviction, sources }`), not ideas.
 CRUD at `/api/scanner/scans` (`PUT` to update). A user promotes a candidate into the Trade Agent
 to become a real idea.
+
+Argus runs a **systematic-discovery funnel** — candidates come from grounded sources, never
+model memory. Phase 2 casts a wide net (`screen_candidates`, `get_market_movers`,
+`get_sector_snapshot`, `get_analyst_actions`, `web_search`) then coarse-triages via
+`get_price_action`; Phase 3 narrows survivors with a `get_candles`/`get_indicators` baseline plus
+angle-triggered tools (fundamentals, positioning, cycle, `get_orderblocks`/`get_false_breaks`) and
+`get_chart` (KLineChart image, model-only) reserved for the top shortlist; Phase 4 emits the ranked
+list. Via the Kairos hand-off the same funnel converges to a single `<kairos_pick>`.
 
 ---
 

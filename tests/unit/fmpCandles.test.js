@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { fmpDateToEpochSec, aggregateOhlc, fmpCandleSpec } from '../../providers/fmp.price.provider.js'
+import { fmpDateToEpochSec, aggregateOhlc, fmpCandleSpec, groupOhlcByPeriod } from '../../providers/fmp.price.provider.js'
 
 // Stage 2 build-step 1 (reference_fmp_pricing): the pure pieces of the FMP candle provider.
 // The timezone conversion is the critical one — FMP intraday dates are ET wall-clock, but the
@@ -75,8 +75,54 @@ test('hours: 1h/4h native, 2h aggregated from 1h', () => {
     assert.equal(fmpCandleSpec('hour', 3), null)
 })
 
-test('day → EOD; week/month → null (fallback keeps native weekly/monthly)', () => {
-    assert.deepEqual(fmpCandleSpec('day', 1), { kind: 'eod', aggregate: 1 })
-    assert.equal(fmpCandleSpec('week', 1), null)
-    assert.equal(fmpCandleSpec('month', 1), null)
+test('day → EOD; week/month → EOD grouped by calendar (built from daily)', () => {
+    assert.deepEqual(fmpCandleSpec('day', 1),   { kind: 'eod', aggregate: 1 })
+    assert.deepEqual(fmpCandleSpec('week', 1),  { kind: 'eod', aggregate: 1, groupBy: 'week' })
+    assert.deepEqual(fmpCandleSpec('month', 1), { kind: 'eod', aggregate: 1, groupBy: 'month' })
+    assert.equal(fmpCandleSpec('week', 2), null)   // odd multiplier still falls back
+})
+
+// ── groupOhlcByPeriod (daily EOD → weekly / monthly, since FMP has no native endpoint) ──
+// Use real EOD timestamps (ET midnight) so the calendar bucketing is exercised end-to-end.
+const eod = (dateStr, o, h, l, c, v) => bar(fmpDateToEpochSec(dateStr), o, h, l, c, v)
+
+test('weekly: Mon–Fri collapse to one bar (first open, last close, extremes, sum vol)', () => {
+    // Week of Mon 2026-07-13 … Fri 2026-07-17
+    const week1 = [
+        eod('2026-07-13', 10, 12, 9,  11, 100),
+        eod('2026-07-14', 11, 15, 10, 14, 200),
+        eod('2026-07-17', 14, 16, 13, 13, 150),
+    ]
+    // Next week starts Mon 2026-07-20 — must be a separate bucket
+    const week2 = [eod('2026-07-20', 13, 14, 12, 13, 90)]
+    const out = groupOhlcByPeriod([...week1, ...week2], 'week')
+    assert.equal(out.length, 2)
+    assert.deepEqual(
+        { o: out[0].open, h: out[0].high, l: out[0].low, c: out[0].close, v: out[0].volume },
+        { o: 10, h: 16, l: 9, c: 13, v: 450 },
+    )
+    assert.equal(out[0].timestamp, fmpDateToEpochSec('2026-07-13'))   // Monday's bar opens the week
+    assert.equal(out[1].close, 13)
+})
+
+test('weekly: a Sunday-dated bar keys to the PRIOR Monday, not a new week', () => {
+    // Fri 07-17 and (hypothetical) Sun 07-19 share the week of Mon 07-13
+    const out = groupOhlcByPeriod([eod('2026-07-17', 1, 1, 1, 1, 1), eod('2026-07-19', 2, 2, 2, 2, 2)], 'week')
+    assert.equal(out.length, 1)
+})
+
+test('monthly: same calendar month collapses; new month splits', () => {
+    const out = groupOhlcByPeriod([
+        eod('2026-07-13', 10, 12, 9,  11, 100),
+        eod('2026-07-31', 11, 20, 8,  18, 200),
+        eod('2026-08-03', 18, 19, 17, 17, 50),
+    ], 'month')
+    assert.equal(out.length, 2)
+    assert.deepEqual({ o: out[0].open, h: out[0].high, l: out[0].low, c: out[0].close, v: out[0].volume }, { o: 10, h: 20, l: 8, c: 18, v: 300 })
+    assert.equal(out[1].open, 18)
+})
+
+test('groupOhlcByPeriod: empty / non-array → passthrough', () => {
+    assert.deepEqual(groupOhlcByPeriod([], 'week'), [])
+    assert.equal(groupOhlcByPeriod(null, 'month'), null)
 })

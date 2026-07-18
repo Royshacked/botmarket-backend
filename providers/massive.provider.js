@@ -29,14 +29,21 @@ export async function getTickerAggregates(ticker, options = {}) {
         return getYahooAggregates(ticker, options)
     }
 
+    // Default the window bounds so a caller that omits `to` (or `from`) can't crash
+    // `_toDateStr(undefined)` with "Invalid time value". Callers on the FMP-first router
+    // reach here only for symbols FMP doesn't serve (futures / index / broker), and some
+    // (the Hermes monitor's candle read) pass `from` only — cover them all.
+    const toMs   = Number.isFinite(to)   ? to   : Date.now()
+    const fromMs = Number.isFinite(from) ? from : toMs - 60 * 24 * 60 * 60 * 1000
+
   try {
         const response = await rest.getStocksAggregates(
         {
             stocksTicker: ticker,
             multiplier: multiplier,
             timespan: timeSpan,
-            from: _toDateStr(from),
-            to: _toDateStr(to),
+            from: _toDateStr(fromMs),
+            to: _toDateStr(toMs),
             adjusted: "true",
             sort: "desc",
             limit: "50000"

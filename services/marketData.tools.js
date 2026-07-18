@@ -66,7 +66,12 @@ export function aggregateCandles(rows, groupSize) {
 async function _fetchCandleRows(ticker, timeframe) {
     const cfg  = CANDLE_CFG[timeframe] ?? CANDLE_CFG['day']
     const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
-    const raw  = await getTickerAggregates(ticker.toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
+    // Pass an explicit `to` (now). The Massive provider builds `new Date(to)` and
+    // throws "Invalid time value" on undefined; the FMP path only adds `to` when
+    // present, so this is a no-op there but makes the Massive fallback (futures /
+    // week+month bars / uncovered symbols) robust regardless of USE_FMP_CANDLES.
+    const to   = Date.now()
+    const raw  = await getTickerAggregates(ticker.toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from, to })
     const bars = cfg.aggregate ? aggregateCandles(raw, cfg.aggregate) : raw
     return { cfg, bars }
 }

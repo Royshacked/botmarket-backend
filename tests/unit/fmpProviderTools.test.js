@@ -7,6 +7,10 @@ import {
     formatEtfSectorWeights,
     formatPeers,
     formatLiquidityFloat,
+    formatSectorSnapshot,
+    formatMovers,
+    formatAnalystActionsBulk,
+    formatAnalystActionsForSymbols,
 } from '../../providers/fmp.provider.js'
 
 // Pure formatters behind Atlas's Starter-plan tools (screen_candidates,
@@ -160,4 +164,85 @@ test('macro: sector leaders/laggards ranked', () => {
 
 test('macro: nothing available → web_search fallback line', () => {
     assert.equal(formatMacroSnapshot({}), 'Macro snapshot unavailable right now — fall back to web_search.')
+})
+
+// ─── formatSectorSnapshot (scanner rotation discovery) ──────────────────────
+test('sectorSnapshot: every sector ranked leaders→laggards, signed %', () => {
+    const out = formatSectorSnapshot([
+        { sector: 'Energy',     averageChange: -2.0, exchange: 'NASDAQ' },
+        { sector: 'Technology', averageChange: 1.5,  exchange: 'NASDAQ' },
+        { sector: 'Utilities',  averageChange: 0.3,  exchange: 'NASDAQ' },
+    ])
+    const lines = out.split('\n')
+    assert.match(lines[0], /Sector rotation \(NASDAQ, today\)/)
+    // leaders first: Technology before Utilities before Energy
+    assert.ok(out.indexOf('Technology') < out.indexOf('Utilities'))
+    assert.ok(out.indexOf('Utilities') < out.indexOf('Energy'))
+    assert.match(out, /Technology\s+\+1\.50%/)
+    assert.match(out, /Energy\s+-2\.00%/)
+})
+
+test('sectorSnapshot: empty / bad rows → ETF fallback line, never throws', () => {
+    assert.match(formatSectorSnapshot([]), /Sector snapshot unavailable/)
+    assert.match(formatSectorSnapshot(null), /Sector snapshot unavailable/)
+    assert.match(formatSectorSnapshot([{ sector: 'X', averageChange: 'n/a' }]), /Sector snapshot unavailable/)
+})
+
+// ─── formatMovers (scanner momentum discovery) ──────────────────────────────
+test('movers: gainers row → symbol, exchange, price, signed % ; kind label', () => {
+    const out = formatMovers('gainers', [
+        { symbol: 'SDOT', name: 'Sadot Group Inc.', price: 25.3, change: 11.05, changesPercentage: 77.54386, exchange: 'NASDAQ' },
+    ])
+    assert.match(out, /^Top gainers \(US, today\) — top 1:/)
+    assert.match(out, /SDOT/)
+    assert.match(out, /NASDAQ/)
+    assert.match(out, /\$25\.30/)
+    assert.match(out, /\+77\.54%/)
+})
+
+test('movers: losers keep the negative sign; label switches by kind', () => {
+    const out = formatMovers('losers', [
+        { symbol: 'VIVK', name: 'Vivakor', price: 2.26, changesPercentage: -46.94836, exchange: 'NASDAQ' },
+    ])
+    assert.match(out, /^Top losers/)
+    assert.match(out, /-46\.95%/)
+})
+
+test('movers: limit caps rows; empty → explicit line', () => {
+    const rows = Array.from({ length: 40 }, (_, i) => ({ symbol: `M${i}`, price: 10, changesPercentage: 1 }))
+    const out = formatMovers('active', rows, 5)
+    assert.equal((out.match(/M\d+/g) || []).length, 5)
+    assert.match(formatMovers('gainers', []), /No top gainers available/)
+    assert.match(formatMovers('gainers', null), /No top gainers available/)
+})
+
+// ─── formatAnalystActions (scanner ratings catalyst) ────────────────────────
+test('analystActions bulk: newest first, action tag + grade move', () => {
+    const out = formatAnalystActionsBulk([
+        { symbol: 'CLNE', publishedDate: '2026-07-17T20:40:09.000Z', action: 'downgrade', newGrade: 'Neutral', previousGrade: 'Buy', gradingCompany: 'UBS' },
+        { symbol: 'NVDA', publishedDate: '2026-07-18T09:00:00.000Z', action: 'upgrade',   newGrade: 'Buy',     previousGrade: 'Hold', gradingCompany: 'Morgan Stanley' },
+    ])
+    // NVDA (07-18) sorts before CLNE (07-17) despite input order
+    assert.ok(out.indexOf('NVDA') < out.indexOf('CLNE'))
+    assert.match(out, /2026-07-18\s+NVDA\s+▲ upgrade by Morgan Stanley \(Hold→Buy\)/)
+    assert.match(out, /2026-07-17\s+CLNE\s+▼ downgrade by UBS \(Buy→Neutral\)/)
+})
+
+test('analystActions bulk: empty → explicit line', () => {
+    assert.match(formatAnalystActionsBulk([]), /No recent analyst rating changes/)
+    assert.match(formatAnalystActionsBulk(null), /No recent analyst rating changes/)
+})
+
+test('analystActions per-symbol: grouped blocks, capped at 4 each; empty → line', () => {
+    const out = formatAnalystActionsForSymbols({
+        AAPL: [
+            { date: '2026-07-14', action: 'downgrade', previousGrade: 'Sector Weight', newGrade: 'Underweight', gradingCompany: 'Keybanc' },
+            { date: '2026-07-01', action: 'maintain',  newGrade: 'Buy', gradingCompany: 'Citi' },
+        ],
+        TSLA: [],   // dropped — no rows
+    })
+    assert.match(out, /AAPL:/)
+    assert.ok(!out.includes('TSLA'))
+    assert.match(out, /2026-07-14\s+▼ downgrade by Keybanc \(Sector Weight→Underweight\)/)
+    assert.match(formatAnalystActionsForSymbols({}), /No recent analyst rating actions/)
 })

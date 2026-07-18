@@ -162,9 +162,11 @@ export function aggregateOhlc(rows, groupSize) {
 
 /**
  * Map a { timeSpan, multiplier } bar spec to an FMP fetch plan, or null when FMP should NOT
- * serve it (week/month and odd multipliers → the caller falls back to Massive/Yahoo, which
- * have native weekly/monthly and cover futures/index). Pure — exported for testing.
- *   { kind:'intraday', interval } | { kind:'eod' }  with `aggregate` group size (1 = none).
+ * serve it (odd multipliers → the caller falls back to Massive/Yahoo). FMP has no native
+ * weekly/monthly endpoint, so those fetch daily EOD and group by calendar boundary
+ * (`groupBy`). Futures / index / broker symbols still fall back (FMP returns empty → Massive).
+ * Pure — exported for testing.
+ *   { kind:'intraday', interval } | { kind:'eod', groupBy? }  with `aggregate` group size (1 = none).
  */
 export function fmpCandleSpec(timeSpan, multiplier = 1) {
     if (timeSpan === 'minute') {
@@ -176,8 +178,46 @@ export function fmpCandleSpec(timeSpan, multiplier = 1) {
         if (multiplier === 2) return { kind: 'intraday', interval: '1hour', aggregate: 2 }   // aggregate 1h → 2h
         return null
     }
-    if (timeSpan === 'day' && multiplier === 1) return { kind: 'eod', aggregate: 1 }
-    return null   // week / month / unsupported → fallback provider
+    if (timeSpan === 'day'   && multiplier === 1) return { kind: 'eod', aggregate: 1 }
+    if (timeSpan === 'week'  && multiplier === 1) return { kind: 'eod', aggregate: 1, groupBy: 'week' }   // built from daily EOD
+    if (timeSpan === 'month' && multiplier === 1) return { kind: 'eod', aggregate: 1, groupBy: 'month' }  // built from daily EOD
+    return null   // odd multipliers / unsupported → fallback provider
+}
+
+// Calendar-period key for a daily bar's timestamp. Daily EOD bars are timestamped at ET
+// midnight (04:00/05:00Z), so their UTC calendar date equals the ET trading date — UTC getters
+// are safe here. Week → the Monday (ISO week start) date; month → YYYY-MM.
+function _periodKey(tsSec, unit) {
+    const dt = new Date(tsSec * 1000)
+    const y = dt.getUTCFullYear(), m = dt.getUTCMonth(), d = dt.getUTCDate()
+    if (unit === 'month') return `${y}-${String(m + 1).padStart(2, '0')}`
+    const dow = dt.getUTCDay()                    // 0=Sun … 6=Sat
+    const backToMon = dow === 0 ? 6 : dow - 1     // days back to Monday
+    return new Date(Date.UTC(y, m, d - backToMon)).toISOString().slice(0, 10)
+}
+
+/**
+ * Group ascending daily OHLCV rows into weekly / monthly bars by calendar boundary — FMP has
+ * no native week/month endpoint, so we build them from daily EOD. Each period bar: open = its
+ * first day, close = its last day, high/low = the extremes, volume = the sum, timestamp = the
+ * period's first bar (its open). Pure — exported for testing.
+ */
+export function groupOhlcByPeriod(rows, unit) {
+    if (!Array.isArray(rows) || rows.length === 0) return rows
+    const byKey = new Map()
+    for (const r of rows) {                       // ascending — first row of each key sets open/timestamp
+        const key = _periodKey(r.timestamp, unit)
+        const cur = byKey.get(key)
+        if (!cur) {
+            byKey.set(key, { timestamp: r.timestamp, open: r.open, high: r.high, low: r.low, close: r.close, volume: r.volume || 0 })
+        } else {
+            cur.high    = Math.max(cur.high, r.high)
+            cur.low     = Math.min(cur.low, r.low)
+            cur.close   = r.close
+            cur.volume += r.volume || 0
+        }
+    }
+    return [...byKey.values()].sort((a, b) => a.timestamp - b.timestamp)
 }
 
 /** Map an FMP candle row → the canonical { timestamp, open, high, low, close, volume } or null. */
@@ -227,5 +267,6 @@ export async function getFmpCandles(ticker, options = {}) {
         .filter(Boolean)
         .sort((a, b) => a.timestamp - b.timestamp)   // ascending — aggregation + downstream expect it
 
+    if (spec.groupBy) return groupOhlcByPeriod(mapped, spec.groupBy)   // week/month built from daily EOD
     return spec.aggregate > 1 ? aggregateOhlc(mapped, spec.aggregate) : mapped
 }

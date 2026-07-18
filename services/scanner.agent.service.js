@@ -1,8 +1,10 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
-import { getFundamentals, getEarningsCalendar, getEarnings } from '../providers/fmp.provider.js'
+import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMarketMovers, getAnalystActions, getSectorSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
+import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from './marketData.tools.js'
+import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, resolveAgentStream, TRADE_HORIZONS } from './agentUtils.js'
@@ -16,6 +18,56 @@ const MAX_MESSAGES = 10
 
 const TOOLS = [
     { type: 'web_search_20250305', name: 'web_search' },
+    {
+        name: 'screen_candidates',
+        description: 'Screen the US universe for names that fit the scan\'s shape — the grounded discovery leg (Phase 2). Filter by sector, market cap, price, beta, dividend, and a liquidity floor (volume). NOTE: this is a FUNDAMENTAL & liquidity screen — it CANNOT filter for chart setups (52-week-high, base, RSI). For a technical angle, use it to define a liquid, in-sector universe, then confirm the setup per-name with get_candles/get_indicators. Returns a compact list; qualify each hit before listing it.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                sector:            { type: 'string', description: 'e.g. Technology, Healthcare, Energy, Financial Services, Utilities' },
+                industry:          { type: 'string', description: 'optional finer bucket, e.g. Semiconductors' },
+                marketCapMoreThan: { type: 'number', description: 'min market cap in USD, e.g. 10000000000 for $10B+' },
+                marketCapLowerThan:{ type: 'number', description: 'max market cap in USD, e.g. 2000000000 for small-cap' },
+                priceMoreThan:     { type: 'number', description: 'min share price (a tradability floor — e.g. 5 to drop penny names)' },
+                priceLowerThan:    { type: 'number', description: 'max share price' },
+                betaMoreThan:      { type: 'number', description: 'min beta (higher = more cyclical/volatile)' },
+                betaLowerThan:     { type: 'number', description: 'max beta (lower = more defensive)' },
+                dividendMoreThan:  { type: 'number', description: 'min annual dividend per share in USD' },
+                volumeMoreThan:    { type: 'number', description: 'min average volume — the liquidity floor; set it for tradability' },
+                country:           { type: 'string', description: 'e.g. US (default universe is US)' },
+                isEtf:             { type: 'boolean', description: 'true to screen ETFs instead of single stocks' },
+                limit:             { type: 'number', description: 'max results 1–50 (default 25)' },
+            },
+        },
+    },
+    {
+        name: 'get_market_movers',
+        description: 'Today\'s biggest movers — the momentum / gap / "what\'s moving" starting pool for Phase-2 discovery. kind="gainers" (biggest % up), "losers" (biggest % down — short pool), or "active" (highest volume). Grounded discovery, not a watchlist: qualify every name (relative strength, tradability, a real catalyst) before it makes the list. US-listed.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                kind:  { type: 'string', enum: ['gainers', 'losers', 'active'], description: 'gainers = biggest % up, losers = biggest % down, active = most traded by volume' },
+                limit: { type: 'number', description: 'how many to return, 1–50 (default 20)' },
+            },
+            required: ['kind'],
+        },
+    },
+    {
+        name: 'get_sector_snapshot',
+        description: 'Today\'s sector rotation — every sector ranked leaders→laggards by average move. Use it in Phase 2 for a sector-rotation angle (find the leading/lagging groups, then screen_candidates INSIDE them), and in Phase 3 as the sector leg of the relative-strength check (is the name\'s sector leading?). No arguments.',
+        input_schema: { type: 'object', properties: {} },
+    },
+    {
+        name: 'get_analyst_actions',
+        description: 'Recent analyst rating changes — a catalyst pool beyond earnings. With NO symbols: the market-wide latest upgrades/downgrades feed (Phase-2 discovery of ratings-driven names). With symbols: each name\'s recent rating actions (Phase-3 validation of a shortlist — is a fresh upgrade/downgrade backing the move?). US-listed equities.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                symbols: { type: 'array', items: { type: 'string' }, description: 'optional — narrow to these tickers for a per-name read; omit for the market-wide discovery feed' },
+                limit:   { type: 'number', description: 'max rows for the market-wide feed, 1–50 (default 25)' },
+            },
+        },
+    },
     {
         name: 'get_price_action',
         description: 'Recent price-action summary for a ticker: 1d/5d/1m/3m moves, position within the 1y range, and relative volume. Use it to confirm a name is actually moving the way your thesis claims.',
@@ -41,6 +93,79 @@ const TOOLS = [
             type: 'object',
             properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
             required: ['ticker'],
+        },
+    },
+    {
+        name: 'get_candles',
+        description: 'Fetch recent OHLCV candles for a ticker + timeframe — the exact price structure to name the setup and run the structure-respect check (swing highs/lows, prior-day levels, breakout shelves, base/range). Baseline Phase-3 tool: read the structure from the candles before you score `technical`. Always call it before committing to a named setup or a level.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker:    { type: 'string', description: 'e.g. AAPL, NVDA, SPY' },
+                timeframe: {
+                    type: 'string',
+                    enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'],
+                    description: 'Candle timeframe. 2hr/4hr are aggregated from native 1hr bars; every other resolution is native. Match it to the scan\'s trade style — intraday/day → minutes/hours, swing → day, long term → day/week.',
+                },
+            },
+            required: ['ticker', 'timeframe'],
+        },
+    },
+    {
+        name: 'get_indicators',
+        description: 'Compute exact indicator VALUES from recent candles — the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Use it to CONFIRM the technical read with hard numbers: price vs EMA/VWAP for location, RSI for momentum/divergence, MACD for trend, ATR for how violent the name is. Price action / structure (get_candles) leads; indicators only confirm — a name clean on price with soft indicators is a lower `technical` score, not a reject.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker:    { type: 'string', description: 'e.g. AAPL, NVDA' },
+                timeframe: {
+                    type: 'string',
+                    enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'],
+                    description: 'Candle timeframe to compute on.',
+                },
+                indicators: {
+                    type: 'string',
+                    description: 'Comma-separated list with optional period, e.g. "ema(20), ema(50), rsi(14), atr(14), macd, vwap". Period is optional (defaults: ema/sma 20, rsi/atr 14). VWAP is session-anchored (intraday).',
+                },
+            },
+            required: ['ticker', 'timeframe', 'indicators'],
+        },
+    },
+    {
+        name: 'get_chart',
+        description: 'Render an actual candlestick chart IMAGE (KLineCharts, optional indicator overlays) and look at it directly for VISUAL / structural analysis — chart patterns, trend, where price sits vs moving averages / VWAP, base/breakout geometry. Use it to CONFIRM the named setup on the strongest names. EXPENSIVE (image render + vision) — reserve it for the top shortlist and the Kairos single-pick, NOT every candidate. For exact numeric levels prefer get_candles.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker:     { type: 'string', description: 'Ticker symbol e.g. AAPL, NVDA' },
+                timeframe:  { type: 'string', enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'], description: 'Chart timeframe — match the scan\'s trade style.' },
+                indicators: { type: 'string', description: 'Optional overlays, e.g. "ema(50), vwap, volume". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure without moving-average clutter.' },
+            },
+            required: ['ticker', 'timeframe'],
+        },
+    },
+    {
+        name: 'get_orderblocks',
+        description: 'Detect ORDER BLOCKS on a plain candlestick chart (one ticker + timeframe): the last opposing candle/cluster before an impulsive structure break, whether it is fresh/untested or mitigated, and its zone vs current price. Angle-triggered — reach for it when the scan angle is structure / supply-demand / entry-zone hunting. Levels are approximate; confirm exact prices with get_candles.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker:    { type: 'string', description: 'Ticker symbol e.g. AAPL, NVDA' },
+                timeframe: { type: 'string', enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'], description: 'Chart timeframe to read the orderblocks on.' },
+            },
+            required: ['ticker', 'timeframe'],
+        },
+    },
+    {
+        name: 'get_false_breaks',
+        description: 'Detect FALSE BREAKS / liquidity sweeps on a plain candlestick chart (one ticker + timeframe): where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Angle-triggered — reach for it for a failed-breakout / reversal / squeeze angle. Levels are approximate; confirm exact prices with get_candles.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker:    { type: 'string', description: 'Ticker symbol e.g. AAPL, NVDA' },
+                timeframe: { type: 'string', enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'], description: 'Chart timeframe to read the sweeps on.' },
+            },
+            required: ['ticker', 'timeframe'],
         },
     },
     {
@@ -138,6 +263,27 @@ const TOOLS = [
 ]
 
 const TOOL_HANDLERS = {
+    screen_candidates: makeToolHandler('screen_candidates',
+        (filters) => screenCandidates(filters || {}),
+        (err) => `Could not run screen: ${err.message}`, LOG),
+    get_market_movers: makeToolHandler('get_market_movers',
+        ({ kind, limit }) => getMarketMovers(kind, limit),
+        (err) => `Could not fetch market movers: ${err.message}`, LOG),
+    get_sector_snapshot: makeToolHandler('get_sector_snapshot',
+        () => getSectorSnapshot(),
+        (err) => `Could not fetch sector snapshot: ${err.message}`, LOG),
+    get_analyst_actions: makeToolHandler('get_analyst_actions',
+        ({ symbols, limit }) => getAnalystActions(Array.isArray(symbols) ? symbols : [], limit),
+        (err) => `Could not fetch analyst actions: ${err.message}`, LOG),
+    get_candles:    makeCandlesHandler(LOG),
+    get_indicators: makeIndicatorsHandler(LOG),
+    // Vision tools (KLineCharts render + visual read). onChart: null → the image goes to
+    // the LLM only, not the scan UI (Level A). Wire onChart through the controller/SSE +
+    // ScannerPanel later to also surface the chart to the user.
+    get_chart:        makeChartHandler({ log: LOG, onChart: null, readText: 'Read the price STRUCTURE visually — trend, base/breakout geometry, S/R, where price sits vs any overlays. Confirm the named setup; indicators only confirm, never lead.' }),
+    get_orderblocks:  makeStructureVisionHandler({ log: LOG, kind: 'orderblocks',  vision: OB_VISION, onChart: null }),
+    get_false_breaks: makeStructureVisionHandler({ log: LOG, kind: 'false_breaks', vision: FB_VISION, onChart: null }),
+
     get_price_action: makeToolHandler('get_price_action',
         ({ ticker }) => getPriceAction(ticker),
         (err, { ticker }) => `Could not fetch price action for ${ticker}: ${err.message}`, LOG),

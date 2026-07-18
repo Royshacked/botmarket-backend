@@ -60,6 +60,10 @@ services/
                           Atlas tools: screen_candidates + get_macro_snapshot + enriched get_fundamentals
                           (FMP Starter); review-state block renders benchmark-relative perf + regime delta
                           (_formatReviewDelta) from the fingerprint
+                          Argus (scanner) systematic-discovery funnel: Phase-2 grounded sources
+                          screen_candidates + get_market_movers + get_sector_snapshot + get_analyst_actions
+                          (no memory-recall); Phase-3 get_candles/get_indicators baseline + get_chart/
+                          get_orderblocks/get_false_breaks vision (KLineCharts, onChart:null = model-only)
   portfolioReview.util.js   PURE review-lifecycle helpers (no I/O): benchmarkTicker (mandate text→ETF proxy),
                             buildFingerprint (the "then" snapshot), computeReviewDelta (benchmark return +
                             regime then→now), computeReviewTriggers (the non-LLM pre-check signals)
@@ -73,7 +77,8 @@ services/
   format.util.js  http.util.js  ttlCache.util.js  priceStats.util.js  cycleAnalysis.service.js
   logger.service.js  tokenUsage.service.js
   candleFetch.service.js    fetchMarketCandles(symbol,{timeSpan,multiplier,from,to}) + toMsCandles — shared
-                            FMP-first→Massive/Yahoo fallback→sec-to-ms pipeline. One code path for the
+                            FMP-first (USE_FMP_CANDLES) → Massive/Yahoo fallback (futures/index/broker symbols
+                            only) → sec-to-ms pipeline. Massive defaults missing from/to to avoid a crash. One code path for the
                             /api/market/candles endpoint AND the chart renderer (same data the monitor sees).
                             (Named distinctly from monitorUtils.fetchCandles, the monitor's broker-candle router.)
   chartImgCache.service.js  cachedChartImage(symbol,timeframe,studies) — 60s shared chart-PNG cache.
@@ -110,7 +115,9 @@ providers/
   yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / ohlcv
   fmp.provider.js               Starter plan: getFundamentals (valuation+analyst+ETF look-through), getEarnings(Calendar),
                                 screenCandidates (company-screener), getMacroSnapshot + getMacroRaw (treasury/econ/sector);
-                                getSectorRaw. fmp.price.provider.js = live quote + candles (paper feed)
+                                getSectorSnapshot / getMarketMovers / getAnalystActions (Argus discovery feeds);
+                                getSectorRaw. fmp.price.provider.js = live quote + candles (paper feed); week/month
+                                aggregated from daily EOD via groupOhlcByPeriod (FMP has no native week/month endpoint)
   chartImg.provider.js          chart-img (TradingView) PNG — now the FALLBACK behind the own-chart
                                 renderer (services/chartRender); still primary when OWN_CHART_RENDER=false
   ctrader.provider.js  ctrader.session.provider.js (getTrendbars + trendbarToOHLCV)  ctrader.ws.provider.js
