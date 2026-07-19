@@ -163,7 +163,17 @@ export async function postUserMessage(conversationId, senderId, content, aiPref 
     const conv = await db.collection(CONVS).findOne({ id: conversationId })
     if (conv) {
         const recipientId = conv.participants.find(p => p !== String(senderId))
-        if (recipientId) await _tryEmit(recipientId, 'new_message', msg)
+        if (recipientId && !isBot(recipientId)) {
+            // Attach the sender's display name so the recipient's incoming-message toast can show
+            // who it's from — the stored message only carries senderId. Emit-only (not persisted);
+            // only for human recipients (bots have no WS client + resolve senders from agent meta).
+            const sender = await db.collection('users').findOne(
+                { id: String(senderId) }, { projection: { fullname: 1, username: 1 } })
+            const senderName = sender?.fullname || sender?.username || null
+            await _tryEmit(recipientId, 'new_message', { ...msg, senderName })
+        } else if (recipientId) {
+            await _tryEmit(recipientId, 'new_message', msg)
+        }
         // If the message is to Axl, generate + push a reply (fire-and-forget so the POST
         // returns immediately; Axl's answer arrives over WS when ready).
         if (recipientId === BOT_USER_ID) {
