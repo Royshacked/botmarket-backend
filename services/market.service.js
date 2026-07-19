@@ -214,13 +214,14 @@ function _sessionForSymbol(symbol) {
  * back to a symbol heuristic for ideas saved before the class field existed.
  * @param {string} symbol
  * @param {string} [assetClass]
+ * @param {Date}   [date]  instant to evaluate (defaults to now; injectable for tests)
  */
-export function isAssetOpen(symbol, assetClass) {
+export function isAssetOpen(symbol, assetClass, date = new Date()) {
     switch (_sessionForClass(assetClass) ?? _sessionForSymbol(symbol)) {
         case 'crypto':  return true
-        case 'forex':   return isForexOpen()
-        case 'futures': return isFuturesOpen()
-        default:        return isMarketOpen()
+        case 'forex':   return isForexOpen(date)
+        case 'futures': return isFuturesOpen(date)
+        default:        return isMarketOpen(date)
     }
 }
 

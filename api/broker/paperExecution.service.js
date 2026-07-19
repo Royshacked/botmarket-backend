@@ -15,6 +15,7 @@ import { paperBrokerService } from './paperBroker.service.js'
 import { getCandles }         from '../../providers/ohlcv.provider.js'
 import { getFmpQuote }        from '../../providers/fmp.price.provider.js'
 import { executionBus }       from '../../services/executionBus.js'
+import { isAssetOpen }        from '../../services/market.service.js'
 import { logger }             from '../../services/logger.service.js'
 
 const LOG = '[paperExecution]'
@@ -58,7 +59,11 @@ export async function latestQuote(symbol) {
     const cached = _quoteCache.get(symbol)
     if (cached && Date.now() - cached.at < QUOTE_TTL_MS) return cached.quote
 
-    for (const tf of ['1min', 'day']) {
+    // Skip the intraday (1-min) fetch when the asset's session is closed: there are no fresh
+    // 1-min bars (market closed / weekend), so it just returns empty and logs provider noise.
+    // The day candle still marks the position against its last close. Crypto is 24h → keeps 1-min.
+    const timeframes = isAssetOpen(symbol) ? ['1min', 'day'] : ['day']
+    for (const tf of timeframes) {
         try {
             const candles = await getCandles(symbol, tf, 1)
             const last    = candles?.at(-1)
@@ -121,7 +126,10 @@ export async function latestMarkPrice(symbol) {
         } catch { /* provider error — fall back to an intraday candle */ }
         _noFmpUntil.set(symbol, Date.now() + NO_FMP_TTL_MS)
     }
-    // Intraday (1-min) candle close ONLY — never a day candle (see above).
+    // Intraday (1-min) candle close ONLY — never a day candle (see above). Skip entirely when
+    // the session is closed: no fresh intraday bars exist, so the fetch only returns empty and
+    // logs noise, and the caller degrades safely on null (the fill loop simply doesn't trigger).
+    if (!isAssetOpen(symbol)) return null
     try {
         const candles = await getCandles(symbol, '1min', 1)
         const c = candles?.at(-1)?.c
