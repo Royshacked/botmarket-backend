@@ -32,6 +32,7 @@ export const ideaService = {
     saveBatchIdeas,
     getIdeas,
     getAssetClassMap,
+    getCallPositionMap,
     getIdeaById,
     deleteIdea,
     updateIdea,
@@ -265,6 +266,36 @@ async function getAssetClassMap(userId) {
         return map
     } catch (err) {
         logger.warn(LOG, 'getAssetClassMap failed', err.message)
+        return {}
+    }
+}
+
+/**
+ * Map of `broker:accountId:positionId` → callId for call-originated open positions. A confirmed
+ * Kairos call materializes an execution idea stamped ownedBy:'hermes' (hidden from the ideas list,
+ * see getIdeas) carrying its origin callId; that idea's brokerOrders link the live broker position.
+ * The Positions tab resolves a row's owner through the visible ideas list, so a call's position has
+ * no resolvable owner and clicking it is a dead no-op. This lets the /positions route stamp the
+ * owning callId onto the position → the client opens the Call pop-out instead. Keyed to match the
+ * broker/account/positionId the client already carries on each position.
+ */
+async function getCallPositionMap(userId) {
+    try {
+        const db = await getDb()
+        const rows = await db.collection(COLLECTION)
+            .find({ userId, ownedBy: 'hermes', callId: { $ne: null } },
+                  { projection: { callId: 1, brokerOrders: 1 } })
+            .toArray()
+        const map = {}
+        for (const r of rows) {
+            for (const bo of r.brokerOrders ?? []) {
+                if (bo?.positionId == null) continue
+                map[`${bo.broker}:${bo.accountId}:${bo.positionId}`] = r.callId
+            }
+        }
+        return map
+    } catch (err) {
+        logger.warn(LOG, 'getCallPositionMap failed', err.message)
         return {}
     }
 }

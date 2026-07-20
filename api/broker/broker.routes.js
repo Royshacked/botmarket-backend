@@ -164,13 +164,18 @@ brokerRoutes.get('/:type/positions', requireAuth, async (req, res) => {
         // that symbol) so the client's market-hours gate is exact rather than relying
         // on the symbol heuristic — which can't tell a forex pair from a stock. Falls
         // back to null (→ heuristic) for positions with no matching idea.
-        const [positions, classMap] = await Promise.all([
+        // Also stamp the owning callId for call-originated positions (whose execution idea is
+        // hidden from the ideas list) so the client can open the Call pop-out instead of a dead
+        // click. Keyed broker:accountId:positionId — `type` is this broker, matching brokerOrders.
+        const [positions, classMap, callMap] = await Promise.all([
             brokerService.getPositions(req.params.type, req.user._id),
             ideaService.getAssetClassMap(req.user._id),
+            ideaService.getCallPositionMap(req.user._id),
         ])
         const enriched = positions.map(p => ({
             ...p,
             assetClass: p.assetClass ?? (p.symbol ? classMap[normSymbol(p.symbol)] ?? null : null),
+            callId: callMap[`${req.params.type}:${p.accountId}:${p.id}`] ?? null,
         }))
         res.json({ positions: enriched })
     } catch (err) {

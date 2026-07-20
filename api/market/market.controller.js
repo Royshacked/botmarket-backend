@@ -1,5 +1,6 @@
 import { getMarketStatus } from '../../services/market.service.js'
 import { fetchMarketCandles } from '../../services/candleFetch.service.js'
+import { getFmpQuoteFull } from '../../providers/fmp.price.provider.js'
 import { createTtlCache } from '../../services/ttlCache.util.js'
 import { parseChartInterval, defaultLookbackDays } from '../../services/candleInterval.util.js'
 import { logger } from '../../services/logger.service.js'
@@ -40,6 +41,26 @@ function _parseWhenMs(v) {
     if (Number.isFinite(n) && n > 0) return n < 1e12 ? n * 1000 : n   // treat < 1e12 as seconds
     const d = Date.parse(v)
     return Number.isFinite(d) ? d : undefined
+}
+
+// ─── Real-time quote ─────────────────────────────────────────────────────────────
+// GET /api/market/quote?symbol=AAPL
+// The live last price for the chart's current-bar tick. Historical candles alone freeze the
+// price until a bar closes (all session on a daily/4h chart), so the chart patches the current
+// bar's close from this. FMP `/quote` is ~3s-fresh and covers equities/ETF/crypto/forex; it
+// returns null for what it can't price (futures/index) — the client then keeps candle-only.
+// Soft-fails to { price: null } so a transient upstream blip is a skipped tick, not a 500 storm.
+export async function getQuote(req, res) {
+    const symbol = String(req.query.symbol ?? '').toUpperCase().trim()
+    if (!symbol) return res.status(400).send({ error: 'symbol is required' })
+    try {
+        const q = await getFmpQuoteFull(symbol)
+        if (!q) return res.send({ symbol, price: null })
+        res.send({ symbol, price: q.price, dayHigh: q.dayHigh, dayLow: q.dayLow, tsSec: q.tsSec })
+    } catch (err) {
+        logger.warn(LOG, `getQuote soft-fail for ${symbol}: ${err.message}`)
+        res.send({ symbol, price: null })
+    }
 }
 
 export async function getCandles(req, res) {
