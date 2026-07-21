@@ -11,15 +11,15 @@
  * See docs/architecture/manual-mode.md.
  */
 
-import { getDb, stripId }        from '../../providers/mongodb.provider.js'
+import { stripId }               from '../../providers/mongodb.provider.js'
 import { logger }                from '../../services/logger.service.js'
 import { routeExits }            from '../../services/protectionPlan.service.js'
 import { openManualPosition, closeManualPosition } from '../broker/manualExecution.service.js'
 import { notifyManualEntry, notifyManualExit, entryLegFromIdea, exitLegFromIdea } from '../../services/manualNotify.service.js'
 import { tradeCaptureService } from '../../services/tradeCapture.service.js'
+import { entityRepo }          from '../../services/entity/entityRepo.service.js'
 
-const LOG        = '[manualIdea]'
-const COLLECTION = 'ideas'
+const LOG = '[manualIdea]'
 
 // Statuses from which a manual leg can still be activated into an entry (not already in a
 // position or done).
@@ -42,8 +42,7 @@ function _accountId(idea) {
  */
 export async function confirmManualEntry(id, { price, quantity } = {}, userId, isAdmin = false) {
     try {
-        const db   = await getDb()
-        const idea = await db.collection(COLLECTION).findOne({ id })
+        const idea = await entityRepo.getById(id)
         if (!idea)                                     return { ok: false, reason: 'not_found' }
         if (!_own(idea, userId, isAdmin))              return { ok: false, reason: 'forbidden' }
         if (idea.broker !== 'manual')                  return { ok: false, reason: 'not_manual' }
@@ -60,10 +59,7 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId, i
 
         // Atomic claim so a double-submit can't open two positions: only the first caller
         // flips awaiting_manual_fill → manual_filling and proceeds to open.
-        const claimed = await db.collection(COLLECTION).findOneAndUpdate(
-            { id, broker: 'manual', orderState: 'awaiting_manual_fill' },
-            { $set: { orderState: 'manual_filling' } },
-        )
+        const claimed = await entityRepo.claimIf(id, { broker: 'manual', orderState: 'awaiting_manual_fill' }, { orderState: 'manual_filling' })
         if (!claimed) return { ok: false, reason: 'not_awaiting_fill' }
 
         let positionId
@@ -78,7 +74,7 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId, i
             })
         } catch (err) {
             // Open failed — release the claim so the user can retry.
-            await db.collection(COLLECTION).updateOne({ id }, { $set: { orderState: 'awaiting_manual_fill' } })
+            await entityRepo.patch(id, { orderState: 'awaiting_manual_fill' })
             throw err
         }
 
@@ -97,7 +93,7 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId, i
             monitorStop:  monitored && route.stop.hasAny,
             monitorTp:    monitored && route.tp.hasAny,
         }
-        const updated = await db.collection(COLLECTION).findOneAndUpdate({ id }, { $set: set }, { returnDocument: 'after' })
+        const updated = await entityRepo.patchAndGet(id, set)
 
         // Capture into the analytics ledger — manual has no reconciler, so we call the same
         // capture hook the reconciler uses directly (best-effort; never throws). Reuse means
@@ -123,8 +119,7 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId, i
  */
 export async function confirmManualExit(id, { price } = {}, userId, isAdmin = false) {
     try {
-        const db   = await getDb()
-        const idea = await db.collection(COLLECTION).findOne({ id })
+        const idea = await entityRepo.getById(id)
         if (!idea)                        return { ok: false, reason: 'not_found' }
         if (!_own(idea, userId, isAdmin)) return { ok: false, reason: 'forbidden' }
         if (idea.broker !== 'manual')     return { ok: false, reason: 'not_manual' }
@@ -145,7 +140,7 @@ export async function confirmManualExit(id, { price } = {}, userId, isAdmin = fa
             chat_state: null,
             ...(res?.pnl != null && { realizedPnl: res.pnl }),
         }
-        const updated = await db.collection(COLLECTION).findOneAndUpdate({ id }, { $set: set }, { returnDocument: 'after' })
+        const updated = await entityRepo.patchAndGet(id, set)
 
         // Patch the open trade to closed in the analytics ledger (best-effort; never throws).
         await tradeCaptureService.captureClose({
@@ -169,18 +164,16 @@ export async function confirmManualExit(id, { price } = {}, userId, isAdmin = fa
  */
 export async function activateManualPortfolio(portfolioId, userId, isAdmin = false) {
     try {
-        const db    = await getDb()
-        const query = isAdmin ? { portfolioId } : { portfolioId, userId }
-        const legs  = await db.collection(COLLECTION).find(query).toArray()
+        const legs = await entityRepo.listByPortfolio(portfolioId, isAdmin ? null : userId)
         if (!legs.length) return { ok: false, reason: 'not_found' }
 
         const pending = legs.filter(l => l.broker === 'manual' && !l.ordersPlacedAt && ACTIVATABLE.has(l.status))
         if (!pending.length) return { ok: false, reason: 'nothing_to_activate' }
 
         const now = Date.now()
-        await db.collection(COLLECTION).updateMany(
-            { id: { $in: pending.map(l => l.id) } },
-            { $set: { status: 'hit', entryTriggeredAt: now, orderState: 'awaiting_manual_fill' } }
+        await entityRepo.patchMany(
+            pending.map(l => l.id),
+            { status: 'hit', entryTriggeredAt: now, orderState: 'awaiting_manual_fill' },
         )
 
         await notifyManualEntry(pending[0].userId, {
@@ -205,9 +198,7 @@ export async function activateManualPortfolio(portfolioId, userId, isAdmin = fal
  */
 export async function requestManualPortfolioExit(portfolioId, userId, isAdmin = false) {
     try {
-        const db    = await getDb()
-        const query = isAdmin ? { portfolioId } : { portfolioId, userId }
-        const legs  = await db.collection(COLLECTION).find(query).toArray()
+        const legs = await entityRepo.listByPortfolio(portfolioId, isAdmin ? null : userId)
         if (!legs.length) return { ok: false, reason: 'not_found' }
 
         const open = legs.filter(l => l.broker === 'manual' && (l.status === 'long' || l.status === 'short'))

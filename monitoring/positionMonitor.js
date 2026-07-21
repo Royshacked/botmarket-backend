@@ -8,9 +8,9 @@ import {
 } from './monitorUtils.js'
 import { buildExitOrder, exitOrderRecord } from './exitOrders.util.js'
 import { notifyManualExit, exitLegFromIdea } from '../services/manualNotify.service.js'
+import { entityRepo }                       from '../services/entity/entityRepo.service.js'
 
-const LOG        = '[positionMonitor]'
-const COLLECTION = 'ideas'
+const LOG = '[positionMonitor]'
 
 /**
  * Check both exit legs and any additional entries for an in-position idea.
@@ -88,7 +88,7 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
         return false
     }
 
-    await persistConditionStates(db, idea, phase, states, COLLECTION)
+    await persistConditionStates(db, idea, phase, states)
 
     if (triggered) {
         logger.info(LOG, `${emoji} ${label} triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
@@ -128,7 +128,7 @@ async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose, exitC
         if (exitCtx.alerted || idea.orderState === 'awaiting_manual_close') return
         exitCtx.alerted     = true
         idea.orderState     = 'awaiting_manual_close'   // keep the in-memory doc consistent with the DB write
-        await db.collection(COLLECTION).updateOne({ id: idea.id }, { $set: { orderState: 'awaiting_manual_close', pendingCloseReason: reason } })
+        await entityRepo.patch(idea.id, { orderState: 'awaiting_manual_close', pendingCloseReason: reason })
         await notifyManualExit(idea.userId, { legs: [exitLegFromIdea(idea)], reason })
         logger.info(LOG, `[${idea.id}] Manual exit alert sent (${reason}) — awaiting user close`)
         return
@@ -152,7 +152,7 @@ async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose, exitC
         }
         const update = { $set: { pendingCloseReason: reason } }
         if (tag) update.$addToSet = { firedExits: tag }
-        await db.collection(COLLECTION).updateOne({ id: idea.id }, update)
+        await entityRepo.update(idea.id, update)
         return
     }
 
@@ -185,7 +185,7 @@ async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose, exitC
     const update = {}
     if (newOrders.length) update.$push     = { exitOrders: { $each: newOrders } }
     if (tag)              update.$addToSet = { firedExits: tag }
-    if (Object.keys(update).length) await db.collection(COLLECTION).updateOne({ id: idea.id }, update)
+    if (Object.keys(update).length) await entityRepo.update(idea.id, update)
 }
 
 async function _checkAdditionalEntries(db, idea, candles, entryTf) {
@@ -212,10 +212,7 @@ async function _checkAdditionalEntries(db, idea, candles, entryTf) {
 
         if (triggered) {
             logger.info(LOG, `📈 Additional entry ${i + 1} triggered for idea ${idea.id} — qty: ${ae.quantity}`)
-            await db.collection(COLLECTION).updateOne(
-                { id: idea.id },
-                { $set: { [`additional_entries.${i}.triggeredAt`]: Date.now() } }
-            )
+            await entityRepo.patch(idea.id, { [`additional_entries.${i}.triggeredAt`]: Date.now() })
         }
         break
     }

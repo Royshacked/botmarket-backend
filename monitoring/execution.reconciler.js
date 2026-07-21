@@ -42,11 +42,23 @@ import { brokerService } from '../api/broker/broker.service.js'
 import { tradeCaptureService } from '../services/tradeCapture.service.js'
 import { round, remainingForAccount } from './monitorUtils.js'
 import { buildExitOrder, exitOrderRecord } from './exitOrders.util.js'
+import { entityRepo }    from '../services/entity/entityRepo.service.js'
 
 const LOG        = '[execution.reconciler]'
-const COLLECTION = 'ideas'
 const ACTIVE     = ['long', 'short']
 const EPS        = 1e-6   // quantity comparison slack
+
+// Injection seam (matches the Hermes monitor's `_deps` pattern). Defaults ARE the real
+// singletons, so production behavior is byte-identical — the seam is inert unless a test
+// overrides it. Enables the regression harness to drive the reconciler against fakes without
+// real IO. See ENTITY_MODEL.md P1b.
+const _deps = { getDb, brokerService, tradeCaptureService, entityRepo }
+/** Test-only: override IO deps. Returns a restore fn. */
+export function _setDeps(overrides) {
+    const prev = { ..._deps }
+    Object.assign(_deps, overrides)
+    return () => Object.assign(_deps, prev)
+}
 
 let _started = false
 
@@ -86,7 +98,7 @@ async function handleExecution(exec) {
 async function _onClosed(exec) {
     if (exec.positionId == null) return
     await _withLock(exec.accountId, exec.positionId, async () => {
-        const db   = await getDb()
+        const db   = await _deps.getDb()
         const idea = await _findActiveByPosition(db, exec.accountId, exec.positionId)
         if (!idea) {
             logger.info(LOG, `No active idea matched closed position ${exec.accountId}/${exec.positionId}`)
@@ -95,7 +107,7 @@ async function _onClosed(exec) {
             // _onOpened). Branch on the event's `simulated` flag, not a broker name, so the
             // reconciler stays broker-agnostic (a second sim/backtest venue works unchanged).
             if (exec.simulated) {
-                await tradeCaptureService.captureClose({
+                await _deps.tradeCaptureService.captureClose({
                     accountId: exec.accountId, positionId: exec.positionId,
                     price: exec.price, reason: exec.reason, pnl: exec.pnl,
                     commission: exec.commission, spread: exec.spread, at: exec.at,
@@ -120,7 +132,7 @@ async function _onClosed(exec) {
 async function _onReduced(exec) {
     if (exec.positionId == null) return
     await _withLock(exec.accountId, exec.positionId, async () => {
-        const db   = await getDb()
+        const db   = await _deps.getDb()
         const idea = await _findActiveByPosition(db, exec.accountId, exec.positionId)
         if (!idea) return
 
@@ -139,7 +151,7 @@ async function _onReduced(exec) {
         if (idx >= 0) {
             orders[idx] = { ...orders[idx], status: 'filled', filledAt: exec.at ?? Date.now() }
             matched = orders[idx]
-            await db.collection(COLLECTION).updateOne({ id: idea.id }, { $set: { exitOrders: orders } })
+            await _deps.entityRepo.setExitOrders(idea.id, orders)
             logger.info(LOG, `Idea ${idea.id}: exit slice filled — ${matched.leg} ${matched.quantity} @ ${matched.price ?? 'mkt'}`)
         } else {
             logger.info(LOG, `Idea ${idea.id}: closing fill on ${exec.accountId}/${exec.positionId} (order ${exec.orderId}) not tracked — asking broker if the position survived`)
@@ -153,7 +165,7 @@ async function _onReduced(exec) {
         let position
         try {
             position = broker
-                ? await brokerService.findOpenPosition(broker, idea.userId, exec.accountId, exec.positionId)
+                ? await _deps.brokerService.findOpenPosition(broker, idea.userId, exec.accountId, exec.positionId)
                 : undefined   // unknown broker linkage — fall back to tracked-size resync
         } catch (err) {
             logger.warn(LOG, `Idea ${idea.id}: position check failed (${err.message}) — deferring to next event`)
@@ -184,7 +196,7 @@ async function _onReduced(exec) {
 
 async function _onOpened(exec) {
     if (exec.positionId == null) return
-    const db = await getDb()
+    const db = await _deps.getDb()
 
     // Resting entry filled: a broker-native stop-market entry the idea was holding
     // as a working order (status 'resting', orderId linked, positionId not yet set).
@@ -192,28 +204,16 @@ async function _onOpened(exec) {
     // later close reconciles. Matched on accountId + orderId (the resting linkage).
     if (exec.orderId != null) {
         const direction = exec.direction === 'short' ? 'short' : 'long'
-        const resting = await db.collection(COLLECTION).findOneAndUpdate(
-            {
-                status: 'resting',
-                brokerOrders: { $elemMatch: { accountId: String(exec.accountId), orderId: String(exec.orderId) } },
-            },
-            {
-                $set: {
-                    status:         direction,
-                    orderState:     'placed',
-                    ordersPlacedAt: exec.at ?? Date.now(),
-                    activatedAt:    exec.at ?? Date.now(),
-                    'brokerOrders.$[slot].positionId': String(exec.positionId),
-                },
-            },
-            {
-                arrayFilters:   [{ 'slot.accountId': String(exec.accountId), 'slot.orderId': String(exec.orderId) }],
-                returnDocument: 'after',
-            },
-        )
+        const resting = await _deps.entityRepo.claimRestingFill(exec.accountId, exec.orderId, {
+            status:         direction,
+            orderState:     'placed',
+            ordersPlacedAt: exec.at ?? Date.now(),
+            activatedAt:    exec.at ?? Date.now(),
+            'brokerOrders.$[slot].positionId': String(exec.positionId),
+        })
         if (resting) {
             logger.info(LOG, `Resting entry filled → idea ${resting.id} now ${direction} (position ${exec.positionId})`)
-            await tradeCaptureService.captureOpen(resting, exec)
+            await _deps.tradeCaptureService.captureOpen(resting, exec)
             await _withLock(exec.accountId, exec.positionId, () => placeExits(db, resting, exec.accountId))
             return
         }
@@ -221,39 +221,24 @@ async function _onOpened(exec) {
 
     // Already linked? Then the position was stamped inline (a market/immediate entry) or
     // this is a re-delivery — nothing to backfill, but capture the open (idempotent).
-    const linked = await db.collection(COLLECTION).findOne(
-        { brokerOrders: { $elemMatch: { accountId: String(exec.accountId), positionId: String(exec.positionId) } } },
-    )
+    const linked = await _deps.entityRepo.findLinkedByPosition(exec.accountId, exec.positionId)
     if (linked) {
-        await tradeCaptureService.captureOpen(linked, exec)
+        await _deps.tradeCaptureService.captureOpen(linked, exec)
         return
     }
 
     // Find an active idea on this account+symbol with an unlinked order slot and
     // stamp the positionId onto it (positional $ + arrayFilters target one element).
-    const filter = {
-        status: { $in: ACTIVE },
-        brokerOrders: { $elemMatch: { accountId: String(exec.accountId), positionId: null } },
-    }
-    if (exec.symbol) filter.asset = exec.symbol
-
-    const result = await db.collection(COLLECTION).findOneAndUpdate(
-        filter,
-        { $set: { 'brokerOrders.$[slot].positionId': String(exec.positionId) } },
-        {
-            arrayFilters:   [{ 'slot.accountId': String(exec.accountId), 'slot.positionId': null }],
-            returnDocument: 'after',
-        },
-    )
+    const result = await _deps.entityRepo.backfillPositionId(exec.accountId, exec.positionId, exec.symbol)
     if (!result) {
         // No idea linkage at all — for a simulated venue, still record the open so the
         // trade appears in history (idealess; idempotent with the idea path above). Flag,
         // not broker name (see _onClosed).
-        if (exec.simulated) await tradeCaptureService.captureOpenBare(exec)
+        if (exec.simulated) await _deps.tradeCaptureService.captureOpenBare(exec)
         return
     }
     logger.info(LOG, `Backfilled positionId ${exec.positionId} onto idea ${result.id}`)
-    await tradeCaptureService.captureOpen(result, exec)
+    await _deps.tradeCaptureService.captureOpen(result, exec)
 
     // Position is open — place this account's native exit orders (once).
     await _withLock(exec.accountId, exec.positionId, () => placeExits(db, result, exec.accountId))
@@ -277,11 +262,8 @@ async function placeExits(db, idea, accountId) {
         // both pass (neither had seen the other's write yet) and place the stops/TPs
         // twice. `$addToSet` under a `$ne` filter is atomic: only the first caller
         // matches (modifiedCount 1) and proceeds; the loser no-ops here.
-        const claim = await db.collection(COLLECTION).updateOne(
-            { id: idea.id, exitPlacedAccounts: { $ne: acct } },
-            { $addToSet: { exitPlacedAccounts: acct } },
-        )
-        if (claim.modifiedCount === 0) return   // already claimed / placed by another caller
+        const claimed = await _deps.entityRepo.claimExitAccount(idea.id, acct)
+        if (!claimed) return   // already claimed / placed by another caller
 
         const native     = idea.nativeExit
         const slot       = (idea.brokerOrders ?? []).find(b => String(b.accountId) === acct)
@@ -316,10 +298,7 @@ async function placeExits(db, idea, accountId) {
         // repeat open/fill event doesn't re-attempt); only the placed orders remain
         // to record.
         if (newOrders.length) {
-            await db.collection(COLLECTION).updateOne(
-                { id: idea.id },
-                { $push: { exitOrders: { $each: newOrders } } },
-            )
+            await _deps.entityRepo.pushExitOrders(idea.id, newOrders)
         }
     } catch (err) {
         logger.error(LOG, `Idea ${idea.id}: placeExits error: ${err.message}`)
@@ -346,7 +325,7 @@ async function _resyncExits(db, idea, accountId, remainingOverride) {
         if (Number(o.quantity) <= remaining + EPS) continue   // still safe
 
         try {
-            await brokerService.cancelOrder(o.broker, idea.userId, acct, o.orderId)
+            await _deps.brokerService.cancelOrder(o.broker, idea.userId, acct, o.orderId)
         } catch (err) {
             logger.warn(LOG, `Idea ${idea.id}: resync cancel failed (order ${o.orderId}): ${err.message}`)
             continue   // leave it; we'll retry on the next reduction
@@ -368,17 +347,14 @@ async function _resyncExits(db, idea, accountId, remainingOverride) {
         changed = true
     }
 
-    if (changed) await db.collection(COLLECTION).updateOne({ id: idea.id }, { $set: { exitOrders: orders } })
+    if (changed) await _deps.entityRepo.setExitOrders(idea.id, orders)
 }
 
 // ─── Close finalisation ───────────────────────────────────────────────────────
 
 /** The active idea (long/short) holding this account+position in its entry linkage. */
 function _findActiveByPosition(db, accountId, positionId) {
-    return db.collection(COLLECTION).findOne({
-        status: { $in: ACTIVE },
-        brokerOrders: { $elemMatch: { accountId: String(accountId), positionId: String(positionId) } },
-    })
+    return _deps.entityRepo.findActiveByPosition(accountId, positionId)
 }
 
 /** The broker that holds this account's orders for an idea (entry linkage, then exits). */
@@ -398,15 +374,11 @@ async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId
     const patch = { status: 'closed', closedReason: reason, closedAt: at ?? Date.now() }
     if (pnl != null) patch.realizedPnl = pnl
 
-    const result = await db.collection(COLLECTION).findOneAndUpdate(
-        { id: idea.id, status: { $in: ACTIVE } },
-        { $set: patch },
-        { returnDocument: 'after' },
-    )
+    const result = await _deps.entityRepo.finalizeClose(idea.id, patch)
     if (!result) return false   // someone else closed it first
     logger.info(LOG, `Idea ${result.id} closed by broker (reason=${reason}, pnl=${patch.realizedPnl ?? '·'})`)
 
-    await tradeCaptureService.captureClose({ accountId, positionId, price, reason, pnl, commission, spread, at })
+    await _deps.tradeCaptureService.captureClose({ accountId, positionId, price, reason, pnl, commission, spread, at })
     await _cancelExitsForPosition(db, result, accountId, positionId)
     return true
 }
@@ -426,11 +398,11 @@ async function _cancelExitsForPosition(db, idea, accountId, positionId) {
     let brokerCancelled = false
     if (broker && positionId != null) {
         try {
-            const working = await brokerService.listOrders(broker, idea.userId, acct)
+            const working = await _deps.brokerService.listOrders(broker, idea.userId, acct)
             const mine    = (working ?? []).filter(o => String(o.positionId) === String(positionId))
             for (const o of mine) {
                 try {
-                    await brokerService.cancelOrder(broker, idea.userId, acct, o.orderId)
+                    await _deps.brokerService.cancelOrder(broker, idea.userId, acct, o.orderId)
                     logger.info(LOG, `Idea ${idea.id}: broker exit cancelled (order ${o.orderId}, pos ${positionId})`)
                 } catch (err) {
                     logger.warn(LOG, `Idea ${idea.id}: broker exit cancel failed (order ${o.orderId}): ${err.message}`)
@@ -456,7 +428,7 @@ async function _cancelExitsForPosition(db, idea, accountId, positionId) {
         orders[i] = { ...o, status: 'cancelled', cancelledAt: Date.now() }
         changed = true
     }
-    if (changed) await db.collection(COLLECTION).updateOne({ id: idea.id }, { $set: { exitOrders: orders } })
+    if (changed) await _deps.entityRepo.setExitOrders(idea.id, orders)
 }
 
 /** Cancel every still-working exit order for an account (tracked-only fallback). */
@@ -468,7 +440,7 @@ async function _cancelWorkingExits(db, idea, accountId) {
         const o = orders[i]
         if (o.status !== 'working' || String(o.accountId) !== acct || !o.orderId) continue
         try {
-            await brokerService.cancelOrder(o.broker, idea.userId, acct, o.orderId)
+            await _deps.brokerService.cancelOrder(o.broker, idea.userId, acct, o.orderId)
             logger.info(LOG, `Idea ${idea.id}: leftover exit order cancelled (${o.leg} @ ${o.price ?? 'mkt'})`)
         } catch (err) {
             logger.warn(LOG, `Idea ${idea.id}: leftover exit cancel failed (order ${o.orderId}): ${err.message}`)
@@ -477,7 +449,7 @@ async function _cancelWorkingExits(db, idea, accountId) {
         orders[i] = { ...o, status: 'cancelled', cancelledAt: Date.now() }
         changed = true
     }
-    if (changed) await db.collection(COLLECTION).updateOne({ id: idea.id }, { $set: { exitOrders: orders } })
+    if (changed) await _deps.entityRepo.setExitOrders(idea.id, orders)
 }
 
 /** Place a single exit order as a CLOSING order (close side, tied to positionId). */
@@ -489,7 +461,7 @@ async function _placeOneExit(idea, accountId, broker, leg, level, qty, positionI
         positionId,
         referenceQuote: idea.nativeExit?.referenceQuote ?? null,
     })
-    const res = await brokerService.placeOrder(broker, idea.userId, accountId, order)
+    const res = await _deps.brokerService.placeOrder(broker, idea.userId, accountId, order)
     return { orderId: res?.orderId != null ? String(res.orderId) : null }
 }
 
@@ -511,15 +483,9 @@ function _withLock(accountId, positionId, fn) {
 // ─── Resume feeds after a restart ─────────────────────────────────────────────
 
 async function _resumeFeeds() {
-    const db = await getDb()
-    const ideas = await db.collection(COLLECTION)
-        .find(
-            // 'resting' included: a working stop entry must keep its feed so the fill
-            // (resting → long/short) reconciles even if it happens across a restart.
-            { status: { $in: [...ACTIVE, 'resting'] }, brokerOrders: { $exists: true, $ne: [] } },
-            { projection: { userId: 1, brokerOrders: 1 } },
-        )
-        .toArray()
+    // 'resting' included: a working stop entry must keep its feed so the fill
+    // (resting → long/short) reconciles even if it happens across a restart.
+    const ideas = await _deps.entityRepo.activeWithBrokerLinks()
 
     // Distinct (broker, userId, accountId) so we open each account feed once.
     const seen = new Set()
@@ -530,7 +496,7 @@ async function _resumeFeeds() {
             if (seen.has(key) || !idea.userId || !link.broker || !link.accountId) continue
             seen.add(key)
             try {
-                const ok = await brokerService.startExecutionFeed(link.broker, idea.userId, link.accountId)
+                const ok = await _deps.brokerService.startExecutionFeed(link.broker, idea.userId, link.accountId)
                 if (ok) count++
             } catch (err) {
                 logger.warn(LOG, `resume feed failed (${key}):`, err.message)

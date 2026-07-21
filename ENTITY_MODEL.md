@@ -142,6 +142,51 @@ Hard coupling (P1b / P2–P4 — the real work):
 - casing: idea camelCase vs call snake_case — absorbed ONLY if read via toEnvelope
 ```
 
+## P1b design — `entityRepo` persistence facade (behavior-preserving indirection)
+
+```
+GOAL: funnel EVERY execution-path db.collection('ideas') access through one kind-blind
+module, so P2 = flip one collection name (+ run migration) and every exec site follows.
+P1b changes NO behavior and does NOT flip the target — collection stays 'ideas'.
+
+WHY separate from entityStore: entityStore.COLLECTION='entities' (the FUTURE store).
+entityRepo.EXEC_COLLECTION='ideas' (the CURRENT backing store, strangler window: calls
+execute via an idea shadow, holdings ARE ideas). They are different collections DURING
+the transition; P2 points entityRepo at 'entities' after migrating data. ACTIVE stays
+idea-vocab ['long','short'] because everything physically in 'ideas' uses it (P3 generalizes).
+Lookups return RAW docs (no stripId) — the reconciler operates on raw docs today; match it.
+```
+
+Surface (each method = the EXACT audited inline op; String() coercion moves inside):
+```
+broker-linkage lookups (kind-blind — match on brokerOrders/exitOrders shape):
+  findActiveByPosition(acct, pos)      findOne {status:$in ACTIVE, brokerOrders elemMatch{acct,pos}}
+  findLinkedByPosition(acct, pos)      findOne {brokerOrders elemMatch{acct,pos}}
+  claimRestingFill(acct, orderId, set) findOneAndUpdate resting→live (+ $[slot] arrayFilter, after)
+  backfillPositionId(acct, pos, sym)   findOneAndUpdate unlinked-slot → stamp positionId
+  activeWithBrokerLinks()              find active+resting w/ links, projection{userId,brokerOrders}
+by-id lifecycle writes:
+  getById(id) · patch(id,fields)       updateOne {id} $set
+  finalizeClose(id, patch)             findOneAndUpdate {id, status:$in ACTIVE} $set → doc (guard)
+  claimExitAccount(id, acct)→bool      updateOne {id, exitPlacedAccounts:$ne acct} $addToSet (atomic)
+  pushExitOrders(id, orders)           updateOne {id} $push{exitOrders:$each}
+  setExitOrders(id, orders)            updateOne {id} $set{exitOrders}
+```
+
+Migration order (each step behavior-preserving, tested before the next):
+```
+1. entityRepo module + faithfulness tests (spy coll: each method issues the identical
+   filter/update/options it replaces)                                          ← THIS STEP
+2. Regression HARNESS: replay a canonical exec-event sequence (open → partial reduce →
+   resync → full close, multi-account) through the reconciler against an in-memory Mongo
+   double; snapshot entity docs + captured trades + broker calls; assert deep-equal
+   BEFORE vs AFTER the entityRepo swap.                                        ← safety net, BEFORE any reconciler edit
+3. Migrate execution.reconciler.js → entityRepo (highest risk, most self-contained). Run
+   reconciler tests + harness.
+4. Migrate ideaExecution / manualIdea / positionMonitor collection writes → entityRepo.
+5. Fold exitOrders.util → envelope.execution while those call sites are open.
+```
+
 ## 8. Invariants (hold across all phases)
 
 ```

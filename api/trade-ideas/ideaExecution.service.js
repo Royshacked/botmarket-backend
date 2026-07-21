@@ -8,9 +8,9 @@ import { toBrokerSymbol }       from '../../services/brokerSymbol.service.js'
 import { executionReconciler }  from '../../monitoring/execution.reconciler.js'
 import { orderSymbol }          from '../../monitoring/exitOrders.util.js'
 import { armExitsInPosition, exitFields, basisReferenceQuote } from './exitOrders.service.js'
+import { entityRepo }          from '../../services/entity/entityRepo.service.js'
 
-const LOG        = '[ideaExecution]'
-const COLLECTION = 'ideas'
+const LOG = '[ideaExecution]'
 
 const ORDER_EXEC_TYPES = new Set(['market', 'limit', 'stop'])
 const toExecType = t => (ORDER_EXEC_TYPES.has(t) ? t : 'market')
@@ -21,8 +21,8 @@ const toExecType = t => (ORDER_EXEC_TYPES.has(t) ? t : 'market')
  */
 export async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
     try {
-        const db   = await getDb()
-        const idea = await db.collection(COLLECTION).findOne({ id })
+        const db   = await getDb()   // retained solely for executionReconciler.placeExits(db, …)
+        const idea = await entityRepo.getById(id)
         if (!idea) return { ok: false, reason: 'not_found' }
         if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
         if (idea.status !== 'hit')  return { ok: false, reason: 'not_hit' }
@@ -68,18 +68,14 @@ export async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
             brokerSymbol: idea.brokerSymbol,
             ...(await exitFields(idea, route)),
         }
-        let updated = await db.collection(COLLECTION).findOneAndUpdate(
-            { id },
-            { $set: set },
-            { returnDocument: 'after' }
-        )
+        let updated = await entityRepo.patchAndGet(id, set)
 
         if (updated?.nativeExit) {
             const exitAccts = [...new Set(brokerOrders.filter(b => b.positionId != null).map(b => String(b.accountId)))]
             for (const acct of exitAccts) {
                 await executionReconciler.placeExits(db, updated, acct)
             }
-            if (exitAccts.length) updated = await db.collection(COLLECTION).findOne({ id })
+            if (exitAccts.length) updated = await entityRepo.getById(id)
         }
 
         for (const { broker, accountId } of brokerOrders) {
@@ -105,8 +101,7 @@ export async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
  */
 export async function triggerEntryNow(id, userId, isAdmin = false) {
     try {
-        const db   = await getDb()
-        const idea = await db.collection(COLLECTION).findOne({ id })
+        const idea = await entityRepo.getById(id)
         if (!idea) return { ok: false, reason: 'not_found' }
         if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
         if (idea.status !== 'looking') return { ok: false, reason: 'not_looking' }
@@ -121,7 +116,7 @@ export async function triggerEntryNow(id, userId, isAdmin = false) {
             patch.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
         }
 
-        const updated = await db.collection(COLLECTION).findOneAndUpdate({ id }, { $set: patch }, { returnDocument: 'after' })
+        const updated = await entityRepo.patchAndGet(id, patch)
         logger.info(LOG, 'Entry force-triggered (buy now)', { id, orderState: patch.orderState ?? 'none' })
         return { ok: true, idea: stripId(updated) }
     } catch (err) {
@@ -136,8 +131,7 @@ export async function triggerEntryNow(id, userId, isAdmin = false) {
  */
 export async function placeRestingEntryForIdea(id, userId, isAdmin = false) {
     try {
-        const db   = await getDb()
-        const idea = await db.collection(COLLECTION).findOne({ id })
+        const idea = await entityRepo.getById(id)
         if (!idea) return { ok: false, reason: 'not_found' }
         if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
         if (idea.entryOrderType !== 'stop')              return { ok: false, reason: 'not_resting' }
@@ -197,7 +191,7 @@ export async function placeRestingEntryForIdea(id, userId, isAdmin = false) {
             brokerSymbol:      idea.brokerSymbol,
             ...(await exitFields(idea, route, referenceQuote)),
         }
-        const updated = await db.collection(COLLECTION).findOneAndUpdate({ id }, { $set: set }, { returnDocument: 'after' })
+        const updated = await entityRepo.patchAndGet(id, set)
 
         for (const { broker, accountId } of brokerOrders) {
             brokerService.startExecutionFeed(broker, userId, accountId)

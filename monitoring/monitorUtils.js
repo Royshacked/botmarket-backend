@@ -4,6 +4,7 @@ import { logger }              from '../services/logger.service.js'
 import { sessionStartMs }      from '../services/market.service.js'
 import { brokerService }       from '../api/broker/broker.service.js'
 import { normSymbol }          from '../services/brokerSymbol.service.js'
+import { entityRepo }          from '../services/entity/entityRepo.service.js'
 
 const LOG        = '[monitorUtils]'
 const CANDLE_COUNT = 300
@@ -246,6 +247,8 @@ export const resolveTpTimeframe    = idea => resolvePhaseTimeframe(idea, 'tp',  
 
 // ─── Condition state persistence ──────────────────────────────────────────────
 
+// `db`/`collection` are vestigial (kept so existing monitor callers need no change); the write
+// now funnels through the kind-blind entityRepo. See ENTITY_MODEL.md P1b.
 export async function persistConditionStates(db, idea, phase, results, collection) {
     if (!Array.isArray(results) || results.length === 0) return
     const prev = idea.conditionStates?.[phase] ?? {}
@@ -256,6 +259,6 @@ export async function persistConditionStates(db, idea, phase, results, collectio
         else delete next[r.key]
     }
     if (JSON.stringify(next) === JSON.stringify(prev)) return
-    await db.collection(collection).updateOne({ id: idea.id }, { $set: { [`conditionStates.${phase}`]: next } })
+    await entityRepo.patch(idea.id, { [`conditionStates.${phase}`]: next })
     idea.conditionStates = { ...(idea.conditionStates ?? {}), [phase]: next }
 }
