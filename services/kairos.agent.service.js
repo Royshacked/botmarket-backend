@@ -2,7 +2,8 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveAgentStream, TRADE_HORIZONS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
-import { KAIROS_TOOLS, buildKairosToolHandlers } from './kairos.tools.js'
+import { KAIROS_TOOLS_FOR_MODE, buildKairosToolHandlers } from './kairos.tools.js'
+import { normalizeMode } from './kairos.modes.js'
 import { kairosService } from '../api/kairos/kairos.service.js'
 import { toBrokerSymbol } from './brokerSymbol.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
@@ -23,7 +24,7 @@ const MAX_RECENT_MESSAGES = 8
 const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 
 export function emptyKairosState() {
-    return { active_asset: '', draft: null }
+    return { active_asset: '', draft: null, mode: normalizeMode() }
 }
 
 export const kairosAgentService = {
@@ -37,10 +38,11 @@ async function chatStream({
 }) {
     const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
-    const tools        = KAIROS_TOOLS
+    const mode         = normalizeMode(chatState?.mode)   // build-time lens (KAIROS_MODES.md)
+    const tools        = KAIROS_TOOLS_FOR_MODE(mode)
     const toolHandlers = buildKairosToolHandlers(onChart)
 
-    const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext)
+    const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext, mode)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
     logger.info(LOG, 'chatStream start', { userPrompt, messageCount: builtMessages.length, model, provider, accounts: accounts?.length ?? 0 })
@@ -64,6 +66,7 @@ async function chatStream({
 
     const { reply, call } = _parseKairosResponse(raw)
     const mergedCall = _mergeCallDraft(chatState?.draft, call)
+    if (mergedCall) mergedCall.mode = mode   // carry the build lens onto the draft/call (persisted by normalizeCall)
     // Discovery hand-off: on a "find me a ticker" turn the model emits <scan_request> (bias + horizon
     // constraints) INSTEAD of a <call> — the client uses it to route the user to Argus (the scanner).
     const scanRequest = _parseScanRequest(raw)
@@ -212,15 +215,19 @@ export async function _finalizeCall(call, { userId = null, accounts = [], mainAc
 }
 
 // ─── Prompt / messages ────────────────────────────────────────────────────────
-function _buildSystemPrompt(chatState, accounts, brokerContext = null) {
+function _buildSystemPrompt(chatState, accounts, brokerContext = null, mode = normalizeMode()) {
     const asset = chatState?.active_asset || 'none'
     const draft = chatState?.draft
         ? `\nDraft call so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
         : ''
 
     const today = new Date().toISOString().slice(0, 10)
+    // The MODE section (the per-mode lens profile) is injected here — the shared spine is the cached
+    // base prompt; the mode module lives in the volatile block. K1 declares the mode; K1-step2 fills
+    // the full per-mode profile (analysis lens + phase weighting + fit signal). See KAIROS_MODES.md.
     const dynamicContext = `---
 CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar or setting valid_until.
+ACTIVE MODE: ${mode} — build this call THROUGH the ${mode} lens (committed; do not switch lenses mid-build).
 CONVERSATION CONTEXT:
 Active asset: ${asset}${draft}${buildPositionsSection(brokerContext)}${_buildAccountsSection(accounts)}`
 

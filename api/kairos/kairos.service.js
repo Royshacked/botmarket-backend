@@ -4,6 +4,7 @@ import { logger }                   from '../../services/logger.service.js'
 import { buildEventRisk }           from '../../services/eventRisk.service.js'
 import { cleanConviction }          from '../../services/conviction.util.js'
 import { ENTITIES }                 from '../../services/entity/entityCollection.js'
+import { normalizeMode }            from '../../services/kairos.modes.js'
 
 // Kairos = discretionary day/swing agent. Its artifact is a "call" (Idea produces ideas,
 // Kairos produces calls): one document in `kairos_calls` = identity + plan (authored at build,
@@ -39,6 +40,7 @@ export const kairosService = {
 // Plan fields re-written on an in-place edit ("Update call"). Identity (id/created_at/user_id),
 // monitor_state history, position_state, and linked_idea_id are PRESERVED (never in the $set).
 const PLAN_FIELDS = [
+    'mode',
     'asset', 'asset_class', 'trade_type', 'bias', 'thesis', 'timeframe_ladder', 'cadence',
     'entry_zones', 'reference_levels', 'patterns', 'sizing', 'broker', 'accounts',
     'main_account_id', 'broker_symbol', 'basis_offset', 'active_from', 'valid_until', 'event_risk',
@@ -210,6 +212,7 @@ export function normalizeCall(raw, userId = null) {
         kind:        'call',   // entity discriminator (P3) — a call is its own kind in `entities`
         parentId:    null,
         strategy:    'kairos',
+        mode:        normalizeMode(raw.mode),   // build lens (KAIROS_MODES.md) — persisted so edit reopens in-mode
         user_id:     userId,
         created_at:  new Date().toISOString(),
         savedAt:     Date.now(),

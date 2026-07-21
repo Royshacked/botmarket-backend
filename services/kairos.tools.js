@@ -6,6 +6,7 @@ import {
     makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler, makeIndicatorsHandler,
 } from './marketData.tools.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
+import { DEFAULT_MODE } from './kairos.modes.js'
 
 // Kairos's market-data toolset. Deliberately its OWN schemas (not imported from the
 // Idea agent) so Kairos is a self-contained trial — but the heavy lifting reuses the
@@ -262,6 +263,31 @@ const _STATIC_HANDLERS = {
         (err, { ticker }) => `Could not fetch SEC filings for ${ticker}: ${err.message}`, LOG),
 
     ...COMMON_TOOL_HANDLERS,
+}
+
+// ── Per-mode tool subsets (KAIROS_MODES.md tool allocation) ────────────────────
+// The model only sees the tool LIST, so subsetting the list is what gates a mode's toolset;
+// the handler map can stay full (extra handlers are never reached). UNIVERSAL tools are shared
+// by all modes (DRY). NEW numeric SMC tools (K2) + get_sector_snapshot/get_rs_chart join later.
+const UNIVERSAL = ['web_search', 'get_quote', 'get_candles', 'get_chart']
+// K1-step1: discretionary keeps the FULL toolset (the live default path — its prompt still references
+// order-blocks etc.). It narrows to classical-minus-order-blocks in K1-step2, TOGETHER with its prompt
+// profile (subset + prompt are coupled — narrowing one without the other creates a prompt/tool mismatch).
+// smc/institutional are scaffolded here but not live until their prompt profiles + the FE mode selector.
+const MODE_TOOLS = {
+    discretionary: KAIROS_TOOLS.map(t => t.name),   // full for now; narrows in K1-step2 with the profile
+    // strict smart-money, chart-core; no macro/fundamentals. (+ K2 numeric FVG/structure/liquidity.)
+    smc: [...UNIVERSAL, 'get_price_action', 'get_orderblocks', 'get_false_breaks', 'get_indicators'],
+    // macro/regime + relative-strength + positioning, chart-light; no order-blocks/false-breaks.
+    institutional: [...UNIVERSAL, 'get_macro_snapshot', 'get_correlations', 'get_peers',
+        'get_short_interest', 'get_options_context', 'get_derivatives_context', 'get_fundamentals',
+        'get_sec_filings', 'get_earnings', 'get_earnings_calendar', 'get_cycle_analysis', 'get_price_action'],
+}
+
+/** The tool LIST for a mode (subset of KAIROS_TOOLS by name). Unknown mode → discretionary. */
+export function KAIROS_TOOLS_FOR_MODE(mode) {
+    const allowed = MODE_TOOLS[mode] ?? MODE_TOOLS[DEFAULT_MODE]
+    return KAIROS_TOOLS.filter(t => allowed.includes(t.name))
 }
 
 // Build the per-request handler map. get_chart closes over onChart so it can surface the
