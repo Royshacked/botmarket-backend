@@ -23,9 +23,9 @@ test('normalizeMode coerces to a known mode; unknown/absent → discretionary', 
 // ── KAIROS_TOOLS_FOR_MODE (tool subsets) ─────────────────────────────────────
 const names = mode => KAIROS_TOOLS_FOR_MODE(mode).map(t => t.name)
 
-test('every mode gets the UNIVERSAL tools', () => {
+test('every mode gets the UNIVERSAL tools (incl. get_trading_context)', () => {
     for (const m of MODES) {
-        for (const u of ['web_search', 'get_quote', 'get_candles', 'get_chart']) {
+        for (const u of ['web_search', 'get_quote', 'get_candles', 'get_chart', 'get_trading_context']) {
             assert.ok(names(m).includes(u), `${m} missing ${u}`)
         }
     }
@@ -47,9 +47,10 @@ test('smc: structure tools, NO macro/fundamentals', () => {
     assert.ok(!t.includes('get_fundamentals'))
 })
 
-test('institutional: macro/positioning, NO structure-vision tools', () => {
+test('institutional: macro/positioning + sector snapshot, NO structure-vision tools', () => {
     const t = names('institutional')
     assert.ok(t.includes('get_macro_snapshot'))
+    assert.ok(t.includes('get_sector_snapshot'))   // wired from scanner for the RS/rotation read
     assert.ok(t.includes('get_correlations'))
     assert.ok(t.includes('get_short_interest'))
     assert.ok(!t.includes('get_orderblocks'))

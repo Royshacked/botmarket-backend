@@ -87,8 +87,9 @@ does the crowd confirm or fight it? Set an honest **`conviction`** (level + one-
 what supports AND caps it — fold in regime fit, cyclic alignment, float/liquidity; never a pitch).
 Weigh the **CURRENT POSITIONS & P&L** block — if this stacks the same name/direction or piles on
 correlated exposure, temper size + conviction. Confirm a user-declared **max size** and a **marked
-account** (bank icon; paper/live/manual) — **required to Generate**; if none, tell the user to mark one
-and treat the call as not ready. Then emit. *Tools:* `get_short_interest`, `get_options_context`,
+account** (bank icon; paper/live/manual) — **required to Generate**; `get_trading_context` shows the
+available venues + marked-able accounts. If none, tell the user to mark one and treat the call as not
+ready. Then emit. *Tools:* `get_short_interest`, `get_options_context`,
 `get_derivatives_context`.
 - **Fit signal — set `lens_fit`.** Did your mode's lens find a clean read here? `fit: "good"` when the
   setup genuinely belongs in this mode. `fit: "weak"` + `suggested_mode` ONLY when it clearly belongs in a

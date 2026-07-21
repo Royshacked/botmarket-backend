@@ -48,7 +48,7 @@ async function chatStream({
 
     const mode         = normalizeMode(chatState?.mode)   // build-time lens (KAIROS_MODES.md)
     const tools        = KAIROS_TOOLS_FOR_MODE(mode)
-    const toolHandlers = buildKairosToolHandlers(onChart)
+    const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext, mode)
     const builtMessages = _buildMessages({ messages, userPrompt })
