@@ -1,4 +1,5 @@
 import { getDb } from '../providers/mongodb.provider.js'
+import { ENTITIES } from './entity/entityCollection.js'
 import { ideaService } from '../api/trade-ideas/tradeIdeas.service.js'
 import { placeOrdersForIdea } from '../api/trade-ideas/ideaExecution.service.js'
 import { notifyManualEntry, entryLegFromIdea } from './manualNotify.service.js'
@@ -106,7 +107,7 @@ const _deps = {
     entryLegFromIdea,
     // Flag the linked idea Hermes-owned so Minos + checkInvalidation stand down (Phase 5): Hermes
     // is the sole in-position brain; the event-driven reconciler stays the shared hands.
-    markIdeaOwned:      async (ideaId) => { const db = await getDb(); await db.collection('ideas').updateOne({ id: ideaId }, { $set: { ownedBy: 'hermes' } }) },
+    markIdeaOwned:      async (ideaId) => { const db = await getDb(); await db.collection(ENTITIES).updateOne({ id: ideaId }, { $set: { ownedBy: 'hermes' } }) },
 }
 
 async function _loadOwned(db, id, userId, isAdmin, projection = {}) {
@@ -265,7 +266,7 @@ const MANAGE_VERBS = new Set(['move_stop', 'take_partial', 'exit_now', 'let_run'
 
 const _mdeps = {
     getDb,
-    getIdea:          async (id)                              => { if (!id) return null; const db = await getDb(); return db.collection('ideas').findOne({ id }) },
+    getIdea:          async (id)                              => { if (!id) return null; const db = await getDb(); return db.collection(ENTITIES).findOne({ id }) },
     findOpenPosition: (broker, userId, acct, positionId)      => brokerService.findOpenPosition(broker, userId, acct, positionId),
     closePosition:    (broker, userId, acct, positionId, opts)=> brokerService.closePosition(broker, userId, acct, positionId, opts),
     amendOrder:       (broker, userId, acct, orderId, fields) => brokerService.amendOrder(broker, userId, acct, orderId, fields),
@@ -280,7 +281,7 @@ const _mdeps = {
         if (patch?.status  != null) set['exitOrders.$[e].status']  = patch.status
         if (!Object.keys(set).length) return
         const db = await getDb()
-        await db.collection('ideas').updateOne({ id: ideaId }, { $set: set },
+        await db.collection(ENTITIES).updateOne({ id: ideaId }, { $set: set },
             { arrayFilters: [{ 'e.accountId': String(accountId), 'e.leg': leg, 'e.status': 'working' }] })
     },
 }

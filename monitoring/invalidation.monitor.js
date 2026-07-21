@@ -40,6 +40,7 @@ import { evaluateTree }                     from './monitor.orchestrator.js'
 import { sendBotMessage }                   from '../api/chat/chat.service.js'
 import { resolveEntryTimeframe }            from './monitorUtils.js'
 import { logger }                           from '../services/logger.service.js'
+import { ENTITIES }                         from '../services/entity/entityCollection.js'
 
 const LOG = '[invalidation.monitor]'
 
@@ -82,7 +83,7 @@ export async function checkInvalidation(db, idea, symbolMap, { inPosition = fals
     const hasFullEnvelope = lower != null && upper != null
     if (!inPosition && hasFullEnvelope && !idea.invalidation_armed) {
         if (closedInZone(symbolMap[asset], lower, upper)) {
-            await db.collection('ideas').updateOne({ id }, { $set: { invalidation_armed: true } })
+            await db.collection(ENTITIES).updateOne({ id }, { $set: { invalidation_armed: true } })
             logger.info(LOG, `[${id}] Invalidation armed — price entered entry zone [${lower}, ${upper}]`)
             return   // the envelope takes over from the next tick
         }
@@ -113,7 +114,7 @@ export async function checkInvalidation(db, idea, symbolMap, { inPosition = fals
         const reason = _reason(edge, level, anchor, inPosition)
         logger.info(LOG, `[${id}] ⚠️ Invalidation fired (${edge} edge @ ${level}): ${reason}`)
 
-        await db.collection('ideas').updateOne(
+        await db.collection(ENTITIES).updateOne(
             { id },
             { $set: { invalidation_status: 'fired', invalidation_edge: edge, invalidation_reason: reason } },
         )
@@ -161,7 +162,7 @@ async function _checkApproach(db, idea, symbolMap, { range, tf, floorAt }) {
         const reason = _driftReason(edge, level, anchor)
         logger.info(LOG, `[${id}] ⚠️ Invalidation drifting (${edge} edge @ ${level}): ${reason}`)
 
-        await db.collection('ideas').updateOne(
+        await db.collection(ENTITIES).updateOne(
             { id },
             { $set: { invalidation_status: 'drifting', invalidation_edge: edge, invalidation_reason: reason } },
         )

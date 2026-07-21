@@ -28,9 +28,10 @@ import { brokerService }            from '../broker/broker.service.js'
 import { portfolioChatService }     from './portfolioChat.service.js'
 import { invalidatePortfolioState } from '../../services/portfolioState.service.js'
 import { notifyManualExit, exitLegFromIdea } from '../../services/manualNotify.service.js'
+import { ENTITIES }               from '../../services/entity/entityCollection.js'
 
 const LOG        = '[portfolio:rebalance]'
-const COLLECTION = 'ideas'
+const COLLECTION = ENTITIES
 const LIVE       = new Set(['hit', 'long', 'short'])
 
 export async function applyRebalance(portfolioId, userId, update, isAdmin = false) {

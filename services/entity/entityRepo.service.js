@@ -13,9 +13,10 @@
 // transition these are two different physical collections.
 
 import { getDb } from '../../providers/mongodb.provider.js'
+import { ENTITIES } from './entityCollection.js'
 
-/** ← P2 cutover flips this to 'entities' (after the idea→entities migration). */
-export const EXEC_COLLECTION = 'ideas'
+/** The kind-blind entity store (P2 cutover done — was 'ideas'). */
+export const EXEC_COLLECTION = ENTITIES
 /** Idea-lifecycle "in a live position" set. P3 generalizes per kind. */
 export const ACTIVE_STATUSES = ['long', 'short']
 

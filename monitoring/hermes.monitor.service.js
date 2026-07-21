@@ -1,4 +1,5 @@
 import { getDb } from '../providers/mongodb.provider.js'
+import { ENTITIES } from '../services/entity/entityCollection.js'
 import { getQuote }              from '../providers/yahoofinance.provider.js'
 import { getTickerAggregates }   from '../providers/candles.provider.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
@@ -971,7 +972,7 @@ const _deps = {
     nextOpenMs:  (asset, assetClass) => getMarketStatus(asset, assetClass).nextOpenMs,
     // The linked idea (broker-authoritative, maintained by the execution reconciler) — Hermes reads
     // it to reconcile the call's position lifecycle (Phase 5). Null id / read failure → null.
-    getIdea:     async (id) => { if (!id) return null; try { return await (await getDb()).collection('ideas').findOne({ id }) } catch { return null } },
+    getIdea:     async (id) => { if (!id) return null; try { return await (await getDb()).collection(ENTITIES).findOne({ id }) } catch { return null } },
     // The ledger trade for the idea's main position (real entry/exit price + realized P&L) — the
     // broker-authoritative source for the close outcome (slice 4). Null when not yet captured.
     getTrade:    async (idea) => {

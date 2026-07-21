@@ -1,4 +1,5 @@
 import { getDb, stripId }   from '../../providers/mongodb.provider.js'
+import { ENTITIES }         from '../../services/entity/entityCollection.js'
 import { logger }  from '../../services/logger.service.js'
 import { getPortfolioStateCached } from '../../services/portfolioState.service.js'
 import { threadService } from '../../services/thread.service.js'
@@ -286,7 +287,7 @@ async function getPendingReviews(userId) {
         const ideaMatch = userId
             ? { portfolioId: { $in: portfolioIds }, userId }
             : { portfolioId: { $in: portfolioIds } }
-        const metaRows = await db.collection('ideas')
+        const metaRows = await db.collection(ENTITIES)
             .aggregate([
                 { $match: ideaMatch },
                 { $sort:  { createdAt: 1 } },

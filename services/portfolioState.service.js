@@ -1,4 +1,5 @@
 import { getDb }                             from '../providers/mongodb.provider.js'
+import { ENTITIES }                          from './entity/entityCollection.js'
 import { brokerService }                     from '../api/broker/broker.service.js'
 import { getEarningsCalendarRaw, getSectorRaw } from '../providers/fmp.provider.js'
 import { logger }                            from './logger.service.js'
@@ -54,7 +55,7 @@ export function invalidatePortfolioState(portfolioId, userId) {
  */
 export async function computePortfolioState(portfolioId, userId) {
     const db    = await getDb()
-    const ideas = await db.collection('ideas')
+    const ideas = await db.collection(ENTITIES)
         .find({ portfolioId, userId })
         .project({ id: 1, asset: 1, direction: 1, allocationRatio: 1, conviction: 1, notes: 1, status: 1, type: 1, activatedAt: 1, brokerOrders: 1, portfolioName: 1, broker: 1, mainAccountId: 1, accounts: 1 })
         .toArray()

@@ -14,9 +14,10 @@ import { placeOrdersForIdea, placeRestingEntryForIdea, triggerEntryNow } from '.
 import { armExitsInPosition } from './exitOrders.service.js'
 import { entityRepo }         from '../../services/entity/entityRepo.service.js'
 import { kindForDoc }         from '../../services/entity/envelope.js'
+import { ENTITIES }           from '../../services/entity/entityCollection.js'
 
 const LOG = '[idea]'
-const COLLECTION = 'ideas'
+const COLLECTION = ENTITIES
 
 const LOCKED_DELETE_STATUSES = new Set(['long', 'short'])
 const VALID_STATUSES = new Set(['waiting', 'looking', 'resting', 'hit', 'long', 'short', 'closed'])
