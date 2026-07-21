@@ -39,10 +39,13 @@ test('discretionary: classical + false-breaks + correlation, NO order-blocks', (
     assert.ok(!t.includes('get_orderblocks'))   // order-blocks moved to smc (coupled with the prompt profile)
 })
 
-test('smc: structure tools, NO macro/fundamentals', () => {
+test('smc: structure tools (vision + K2 numeric), NO macro/fundamentals', () => {
     const t = names('smc')
     assert.ok(t.includes('get_orderblocks'))
     assert.ok(t.includes('get_false_breaks'))
+    assert.ok(t.includes('get_fvg'))         // K2 numeric SMC engine
+    assert.ok(t.includes('get_structure'))
+    assert.ok(t.includes('get_liquidity'))
     assert.ok(!t.includes('get_macro_snapshot'))
     assert.ok(!t.includes('get_fundamentals'))
 })

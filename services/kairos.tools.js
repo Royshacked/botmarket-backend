@@ -7,6 +7,7 @@ import {
     makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler, makeIndicatorsHandler,
 } from './marketData.tools.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
+import { SMC_TOOLS, SMC_TOOL_HANDLERS } from './smc.tools.js'
 import { DEFAULT_MODE } from './kairos.modes.js'
 
 // Kairos's market-data toolset. Deliberately its OWN schemas (not imported from the
@@ -227,6 +228,7 @@ export const KAIROS_TOOLS = [
         input_schema: { type: 'object', properties: { symbol: { type: 'string', description: 'e.g. BTC, ETH, SOL' } }, required: ['symbol'] },
         cache_control: { type: 'ephemeral' },
     },
+    ...SMC_TOOLS,   // K2 numeric SMC: get_fvg, get_structure, get_liquidity
 ]
 
 // Candle aggregation + the get_quote·candles·earnings·chart·indicators handlers and
@@ -277,6 +279,7 @@ const _STATIC_HANDLERS = {
         ({ ticker }) => getSecFilings(ticker),
         (err, { ticker }) => `Could not fetch SEC filings for ${ticker}: ${err.message}`, LOG),
 
+    ...SMC_TOOL_HANDLERS,
     ...COMMON_TOOL_HANDLERS,
 }
 
@@ -288,8 +291,9 @@ const UNIVERSAL = ['web_search', 'get_quote', 'get_candles', 'get_chart', 'get_t
 const MODE_TOOLS = {
     // classical PA + false-breaks + correlation/positioning context; NO order-blocks (moved to smc).
     discretionary: KAIROS_TOOLS.map(t => t.name).filter(n => n !== 'get_orderblocks'),
-    // strict smart-money, chart-core; no macro/fundamentals. (+ K2 numeric FVG/structure/liquidity.)
-    smc: [...UNIVERSAL, 'get_price_action', 'get_orderblocks', 'get_false_breaks', 'get_indicators'],
+    // strict smart-money, chart-core: vision OB/sweeps + K2 numeric FVG/structure/liquidity (exact levels).
+    smc: [...UNIVERSAL, 'get_price_action', 'get_orderblocks', 'get_false_breaks', 'get_indicators',
+        'get_fvg', 'get_structure', 'get_liquidity'],
     // macro/regime + relative-strength + positioning, chart-light; no order-blocks/false-breaks.
     institutional: [...UNIVERSAL, 'get_macro_snapshot', 'get_sector_snapshot', 'get_correlations', 'get_peers',
         'get_short_interest', 'get_options_context', 'get_derivatives_context', 'get_fundamentals',

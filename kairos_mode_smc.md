@@ -22,14 +22,15 @@ you read STRUCTURE-based smart-money (price footprints), not true tape — don't
   (avoid the unresolved binary). Otherwise: "pure structural." That's the whole phase.
 
 **Phase 4 — Smart-money map & triggers** (your core).
-- **Structure:** mark the last BOS/CHoCH on the trading rung — is the trend intact or did structure just
-  shift? Read via `get_chart`/`get_candles`.
-- **Liquidity:** where are the equal highs/lows and session highs/lows (buy/sell-side pools)? Has price
-  SWEPT a pool and reversed? `get_false_breaks` reads sweeps/false-breaks — reach for it. The setup is
-  usually: sweep liquidity → shift structure (CHoCH) → enter on the return.
-- **Order-blocks / FVG:** `get_orderblocks` (last down/up candle before the impulsive move, fresh vs
-  mitigated). Note any FVG (3-candle imbalance) the move left — unfilled gaps are draws + entries. (Numeric
-  FVG/BOS/premium-discount tools arrive in K2; until then read them on the chart.)
+- **Structure:** `get_structure` — EXACT trend + last BOS (continuation) / CHoCH (reversal) with the
+  broken level + the premium/discount split of the dealing range. This is your first reach — numeric,
+  not eyeballed. Confirm visually on `get_chart` if needed.
+- **Liquidity:** `get_liquidity` — exact equal-high (buy-side, above) / equal-low (sell-side, below) pools
+  where stops cluster. `get_false_breaks` confirms whether price SWEPT a pool and reversed. The setup is
+  usually: sweep liquidity → shift structure (CHoCH, from get_structure) → enter on the return.
+- **FVG / order-blocks:** `get_fvg` — exact unfilled fair-value-gap ranges (draws + entries). `get_orderblocks`
+  (vision) — the last down/up candle before the impulse, fresh vs mitigated. Anchor entries to an unfilled
+  FVG or order-block in discount (longs) / premium (shorts).
 - **Entry logic:** anchor entry zones to the **order-block / FVG in discount (for longs) or premium (for
   shorts)** after a liquidity sweep + structure shift — not a classical S/R bounce. Invalidation = the
   structural point that would break the read (below the order-block / the swept low for a long).
