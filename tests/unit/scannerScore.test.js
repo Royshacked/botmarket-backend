@@ -77,14 +77,15 @@ test('normalizeScan: a missing style defaults to null', () => {
 })
 
 // ── _normalizeKairosPick (hand-off single pick) ─────────────────────────
-test('kairosPick: clean pick uppercases ticker, keeps direction + text', () => {
-    const p = _normalizeKairosPick({ ticker: 'nvda', direction: 'long', thesis: 't', analysis: 'a' })
-    assert.deepEqual(p, { ticker: 'NVDA', direction: 'long', thesis: 't', analysis: 'a' })
+test('kairosPick: clean pick uppercases ticker, keeps direction + text + recommended_mode', () => {
+    const p = _normalizeKairosPick({ ticker: 'nvda', direction: 'long', thesis: 't', analysis: 'a', recommended_mode: 'smc' })
+    assert.deepEqual(p, { ticker: 'NVDA', direction: 'long', thesis: 't', analysis: 'a', recommended_mode: 'smc' })
 })
 
-test('kairosPick: direction defaults long; missing text → empty strings', () => {
-    assert.deepEqual(_normalizeKairosPick({ ticker: 'AAPL' }), { ticker: 'AAPL', direction: 'long', thesis: '', analysis: '' })
+test('kairosPick: direction defaults long; missing text → empty; unknown/absent mode → null', () => {
+    assert.deepEqual(_normalizeKairosPick({ ticker: 'AAPL' }), { ticker: 'AAPL', direction: 'long', thesis: '', analysis: '', recommended_mode: null })
     assert.equal(_normalizeKairosPick({ ticker: 'TSLA', direction: 'short' }).direction, 'short')
+    assert.equal(_normalizeKairosPick({ ticker: 'TSLA', recommended_mode: 'bogus' }).recommended_mode, null)
 })
 
 test('kairosPick: no/empty ticker → null', () => {

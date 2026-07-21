@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { MODES, DEFAULT_MODE, normalizeMode, isMode } from '../../services/kairos.modes.js'
 import { KAIROS_TOOLS_FOR_MODE } from '../../services/kairos.tools.js'
 import { normalizeCall } from '../../api/kairos/kairos.service.js'
+import { _sanitizeSeed } from '../../api/kairos/kairos.controller.js'
 
 // K1: Kairos mode scaffolding (KAIROS_MODES.md) — mode field + per-mode tool subsets.
 
@@ -73,6 +74,18 @@ const rawCall = (over = {}) => ({
     sizing: { max_size: 10 }, broker: 'paper', accounts: ['paper-u1'],
     entry_zones: [{ side: 'long', lower: 1, upper: 2 }], reference_levels: [], patterns: [],
     ...over,
+})
+
+// ── K3: Argus candidate seed ─────────────────────────────────────────────────
+test('_sanitizeSeed: uppercases ticker, keeps string fields, requires a ticker', () => {
+    assert.deepEqual(
+        _sanitizeSeed({ ticker: 'nvda', direction: 'long', thesis: 'AI leader', analysis: 'clean base' }),
+        { ticker: 'NVDA', direction: 'long', thesis: 'AI leader', analysis: 'clean base' })
+    assert.deepEqual(_sanitizeSeed({ ticker: 'aapl' }), { ticker: 'AAPL', direction: null, thesis: null, analysis: null })
+    assert.equal(_sanitizeSeed({ thesis: 'no ticker' }), null)   // ticker required
+    assert.equal(_sanitizeSeed(null), null)
+    assert.equal(_sanitizeSeed('nope'), null)
+    assert.equal(_sanitizeSeed({ ticker: '   ' }), null)         // blank ticker
 })
 
 test('normalizeCall stamps mode (default discretionary; coerces unknown)', () => {

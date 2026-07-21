@@ -4,6 +4,7 @@ import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../
 import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMarketMovers, getAnalystActions, getSectorSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from './marketData.tools.js'
+import { isMode } from './kairos.modes.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
@@ -402,6 +403,9 @@ export function _normalizeKairosPick(p) {
         direction: p.direction === 'short' ? 'short' : 'long',
         thesis:    typeof p.thesis === 'string' ? p.thesis : '',
         analysis:  typeof p.analysis === 'string' ? p.analysis : '',
+        // K3: Argus's recommended Kairos lens from the dominant driver (feasibility-filtered). null =
+        // no recommendation → the FE keeps the user's current mode chip. See KAIROS_MODES.md.
+        recommended_mode: isMode(p.recommended_mode) ? p.recommended_mode : null,
     }
 }
 

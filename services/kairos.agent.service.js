@@ -40,7 +40,7 @@ export const kairosAgentService = {
 }
 
 async function chatStream({
-    messages, userPrompt, chatState = emptyKairosState(), accounts = [], brokerContext = null,
+    messages, userPrompt, chatState = emptyKairosState(), accounts = [], seed = null, brokerContext = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onChart, onToolStart, onReasoning, onPhase, signal,
 }) {
@@ -50,7 +50,7 @@ async function chatStream({
     const tools        = KAIROS_TOOLS_FOR_MODE(mode)
     const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
-    const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext, mode)
+    const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext, mode, seed)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
     logger.info(LOG, 'chatStream start', { userPrompt, messageCount: builtMessages.length, model, provider, accounts: accounts?.length ?? 0 })
@@ -223,10 +223,17 @@ export async function _finalizeCall(call, { userId = null, accounts = [], mainAc
 }
 
 // ─── Prompt / messages ────────────────────────────────────────────────────────
-function _buildSystemPrompt(chatState, accounts, brokerContext = null, mode = normalizeMode()) {
+function _buildSystemPrompt(chatState, accounts, brokerContext = null, mode = normalizeMode(), seed = null) {
     const asset = chatState?.active_asset || 'none'
     const draft = chatState?.draft
         ? `\nDraft call so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
+        : ''
+    // K3: a structured Argus candidate seed (scan hand-off or scan-list click) — the ticker + Argus's
+    // read arrive as fields, not free text. Start at Phase 1 with this ticker; fold `analysis` into
+    // Phase 2 as the provisional thesis (verify it, don't take it on faith).
+    const seedBlock = seed?.ticker
+        ? `\nARGUS SEED (build this candidate): ticker=${seed.ticker}${seed.direction ? `, direction=${seed.direction}` : ''}`
+            + `${seed.thesis ? `\n  thesis: ${seed.thesis}` : ''}${seed.analysis ? `\n  Argus's read: ${seed.analysis}` : ''}`
         : ''
 
     const today = new Date().toISOString().slice(0, 10)
@@ -237,7 +244,7 @@ function _buildSystemPrompt(chatState, accounts, brokerContext = null, mode = no
 CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar or setting valid_until.
 ACTIVE MODE: ${mode} — build this call THROUGH the ${mode} lens (committed; do not switch lenses mid-build).
 CONVERSATION CONTEXT:
-Active asset: ${asset}${draft}${buildPositionsSection(brokerContext)}${_buildAccountsSection(accounts)}`
+Active asset: ${asset}${seedBlock}${draft}${buildPositionsSection(brokerContext)}${_buildAccountsSection(accounts)}`
 
     const modeModule = (_modePrompt[mode] ?? _modePrompt.discretionary)()
     return [

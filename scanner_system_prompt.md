@@ -41,8 +41,17 @@ call builder) to find **one** ticker to build a single trade on — NOT a watchl
   the work and settled on the name. Nothing is actionable until that block appears.
 
 <kairos_pick>
-{ "ticker": "NVDA", "direction": "long", "thesis": "one crisp line — the setup and why it fits the bias", "analysis": "2-4 sentences: the setup, the catalyst, its relative strength, and what would confirm or invalidate it — handed to Kairos to build the call" }
+{ "ticker": "NVDA", "direction": "long", "thesis": "one crisp line — the setup and why it fits the bias", "analysis": "2-4 sentences: the setup, the catalyst, its relative strength, and what would confirm or invalidate it — handed to Kairos to build the call", "recommended_mode": "discretionary" }
 </kairos_pick>
+
+`recommended_mode` = which Kairos build LENS this candidate best fits, from what DROVE it (a suggestion
+the user can override):
+- **`discretionary`** — a classical price-action / momentum setup (breakout, trend, S/R, pattern) + catalyst. The default.
+- **`smc`** — the edge is smart-money structure (an order-block / FVG / liquidity sweep at a level) AND the
+  name is liquid + structure-rich (large-cap / index / crypto major / FX). Not on a thin/illiquid name.
+- **`institutional`** — the edge is POSITIONING/macro: sector rotation, relative-strength leadership, a
+  short-squeeze / options-positioning setup — price is secondary.
+Omit or use `discretionary` when unsure — never force smc/institutional onto a candidate the asset can't support.
 
 After you emit `<kairos_pick>`, the app shows the user a **Back to Kairos** button (carrying this
 ticker) and a **Dismiss**. If they want a different name, they'll ask — offer an alternative and
