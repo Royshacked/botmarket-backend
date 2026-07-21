@@ -269,9 +269,10 @@ async function getIdeas(userId, isAdmin = false) {
     try {
         const db = await getDb()
         const query = isAdmin ? {} : { userId }
-        // Exclude Kairos-owned ideas: a confirmed call materializes an idea stamped ownedBy:'hermes'
-        // as its execution vehicle. It's surfaced as the Call row (Calls tab) + its live position, so
-        // it must NOT also appear as a standalone idea. ($ne also matches ideas with no ownedBy.)
+        // Exclude Kairos calls: a call is surfaced on the Calls tab (+ its live position), never as a
+        // standalone idea. Kind-derived now (calls are kind:'call'); the ownedBy:$ne guard is kept
+        // transitionally to also hide pre-cutover idea shadows (kind:'idea', ownedBy:'hermes').
+        query.kind    = { $ne: 'call' }
         query.ownedBy = { $ne: 'hermes' }
         const items = await db.collection(COLLECTION).find(query).sort({ savedAt: -1 }).toArray()
         return items.map(stripId)
@@ -298,18 +299,17 @@ async function getAssetClassMap(userId) {
 
 /**
  * Map of `broker:accountId:positionId` → callId for call-originated open positions. A confirmed
- * Kairos call materializes an execution idea stamped ownedBy:'hermes' (hidden from the ideas list,
- * see getIdeas) carrying its origin callId; that idea's brokerOrders link the live broker position.
- * The Positions tab resolves a row's owner through the visible ideas list, so a call's position has
- * no resolvable owner and clicking it is a dead no-op. This lets the /positions route stamp the
- * owning callId onto the position → the client opens the Call pop-out instead. Keyed to match the
- * broker/account/positionId the client already carries on each position.
+ * Kairos call carries its own execution (kind:'call', self-origin callId) whose brokerOrders link
+ * the live broker position (P3b). The Positions tab resolves a row's owner through the visible ideas
+ * list, so a call's position has no resolvable owner and clicking it is a dead no-op. This lets the
+ * /positions route stamp the owning callId onto the position → the client opens the Call pop-out.
+ * The ownedBy branch covers pre-cutover calls that still execute via an idea shadow (transitional).
  */
 async function getCallPositionMap(userId) {
     try {
         const db = await getDb()
         const rows = await db.collection(COLLECTION)
-            .find({ userId, ownedBy: 'hermes', callId: { $ne: null } },
+            .find({ userId, callId: { $ne: null }, $or: [{ kind: 'call' }, { ownedBy: 'hermes' }] },
                   { projection: { callId: 1, brokerOrders: 1 } })
             .toArray()
         const map = {}

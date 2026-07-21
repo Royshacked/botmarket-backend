@@ -146,8 +146,9 @@ export async function confirmCall(id, userId, isAdmin = false, deps = _deps) {
             ...exec,                                       // status:'hit', condition trees, brokerSymbol,
                                                            // basisOffset, broker, direction, quantity, pendingOrder…
             callId:         id,                            // self-origin → tradeCapture origin.type='call'
-            ownedBy:        'hermes',                      // Minos + checkInvalidation stand down (as the shadow did)
             linked_idea_id: id,                            // self — getIdea(self) returns this call
+            // No ownedBy flag: kind:'call' IS the ownership (Minos/getIdeas/getCallPositionMap are
+            // kind-aware). ownerForKind('call')==='hermes'.
             confirmed_at:   new Date().toISOString(),
             position_state: buildPositionState(call, proposal, direction, id),
             'monitor_state.next_check_at': null,           // check for the fill on the next tick

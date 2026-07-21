@@ -139,7 +139,7 @@ test('confirm: paper → merges execution onto the call (self-shadow), places, s
     assert.equal(notified, 0)
     const set = db.updates[0]
     assert.equal(set.status, 'hit')                                  // converged execution vocab
-    assert.equal(set.ownedBy, 'hermes')                              // Minos stands down (as the shadow did)
+    assert.equal(set.ownedBy, undefined)                             // kind:'call' IS ownership (no flag)
     assert.equal(set.callId, 'call_TSLA_x')                          // self-origin → tradeCapture origin='call'
     assert.equal(set.linked_idea_id, 'call_TSLA_x')                  // self-link
     assert.equal(set.position_state.linked_idea_id, 'call_TSLA_x')   // position_state seeded onto the call

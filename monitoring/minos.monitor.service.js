@@ -145,13 +145,13 @@ async function _checkIdea(db, idea) {
         return
     }
 
-    // Hermes-owned position (a confirmed Kairos call): Hermes is the sole in-position brain and
-    // drives exits through the reconciler's hands. Minos — and checkInvalidation, called from
-    // within this function — stand down so two brains can't fight the same broker orders. The
-    // native stop/TP still rest at the broker (placed by the reconciler) and Hermes amends them.
-    // (KAIROS_PLAN.md Phase 5.)
-    if (idea.ownedBy === 'hermes') {
-        logger.info(LOG, `[${id}] Owned by Hermes — Minos standing down`)
+    // Hermes-owned position (a Kairos call): Hermes is the sole in-position brain and drives exits
+    // through the reconciler's hands. Minos — and checkInvalidation, called from within this
+    // function — stand down so two brains can't fight the same broker orders. Ownership is now
+    // KIND-DERIVED (a call is Hermes's, ownerForKind('call')==='hermes'); the `ownedBy` flag is kept
+    // only transitionally for calls confirmed BEFORE the P3b cutover (idea shadows, kind:'idea').
+    if (idea.kind === 'call' || idea.ownedBy === 'hermes') {
+        logger.info(LOG, `[${id}] Hermes-owned — Minos standing down`)
         return
     }
 
