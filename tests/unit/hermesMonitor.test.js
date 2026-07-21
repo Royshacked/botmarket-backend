@@ -849,11 +849,12 @@ test('reconcile: confirmed + idea still looking → idle reschedule (no promotio
     assert.ok(set['monitor_state.next_check_at'] > new Date(NOW).toISOString())
 })
 
-test('reconcile: confirmed + idea long → promote to in_position, stamp fill, open journal', () => {
+test('reconcile: idea long, not yet promoted (no fill_at) → promote, stamp fill, open journal', () => {
     const idea = { id: 'idea1', status: 'long', direction: 'long', quantity: 220, entryTriggeredAt: NOW }
-    const { set, entry } = _reconcilePosition(posCall('confirmed'), idea, NOW)
-    assert.equal(set.status, 'in_position')
-    assert.equal(set['position_state.entry.fill_price'], 248.3)   // best-effort = intended (slice 1)
+    const { set, entry } = _reconcilePosition(posCall('long'), idea, NOW)
+    assert.equal(set.status, undefined)                          // P3b: converged status stays 'long', not overwritten
+    assert.equal(set['position_state.entry.fill_price'], 248.3)  // best-effort = intended (slice 1)
+    assert.ok(set['position_state.entry.fill_at'] != null)       // promotion is RECORDED by fill_at
     assert.equal(set['position_state.entry.size'], 220)
     assert.equal(set['position_state.phase'], 'running')
     assert.equal(entry.reason, 'entry')
@@ -903,8 +904,10 @@ test('reconcile: in_position + idea closed → outcome + close journal (reason f
     assert.match(entry.note, /closed on TSLA — tp/)
 })
 
-test('reconcile: in_position + idea still long → manage (routes to the brain)', () => {
-    const rec = _reconcilePosition(posCall('in_position'), { id: 'idea1', status: 'long' }, NOW)
+test('reconcile: idea long, already promoted (fill_at set) → manage (routes to the brain)', () => {
+    const ps = posCall('long')
+    ps.position_state.entry.fill_at = new Date(NOW).toISOString()
+    const rec = _reconcilePosition(ps, { id: 'idea1', status: 'long' }, NOW)
     assert.equal(rec.manage, true)
     assert.equal(rec.set, undefined)
 })
@@ -916,14 +919,14 @@ test('reconcile: linked idea not found → idle reschedule', () => {
     assert.equal(set['monitor_state.check_count'], 4)
 })
 
-test('_checkPosition: reads idea via deps.getIdea and persists the reconcile', async () => {
+test('_checkPosition: reads the (self) call via deps.getIdea and persists the reconcile', async () => {
     const updates = []
     const db = { collection: () => ({ updateOne: async (_q, u) => updates.push(u) }) }
     const deps = { getIdea: async () => ({ id: 'idea1', status: 'long', direction: 'long', quantity: 220, entryTriggeredAt: NOW }) }
-    const res = await _checkPosition(db, posCall('confirmed'), NOW, deps)
-    assert.equal(res.status, 'in_position')
-    assert.equal(updates[0].$set.status, 'in_position')
-    assert.ok(updates[0].$push['monitor_state.timeline'])   // journal entry appended
+    const res = await _checkPosition(db, posCall('long'), NOW, deps)
+    assert.equal(res.status, 'long')                                     // converged status unchanged by promote
+    assert.ok(updates[0].$set['position_state.entry.fill_at'] != null)   // promotion stamped
+    assert.ok(updates[0].$push['monitor_state.timeline'])                // journal entry appended
 })
 
 // ── P2: re-entry offer at a stop-out ──────────────────────────────────────

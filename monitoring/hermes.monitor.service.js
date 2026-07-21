@@ -28,10 +28,13 @@ const POLL_INTERVAL_MS = 60_000
 // (via _isExpiring), so 'expiring' is NOT here — like 'ready', it's an awaiting-user state (an
 // edit card was fired) that Phase 3 re-queues to 'waiting' on accept, preventing card spam.
 const ACTIVE_STATUSES  = ['waiting', 'watching']
-// Post-confirm statuses routed to the position path (NOT the zone-gate readiness path): Hermes
-// watches the linked idea to promote confirmed→in_position on fill and in_position→closed on close
-// (Phase 5). `confirmed` = order placed / awaiting fill; `in_position` = live and managed.
-const POSITION_STATUSES = ['confirmed', 'in_position']
+// Post-confirm statuses routed to the position path (NOT the zone-gate readiness path). P3b: the
+// call carries its own execution, so its status CONVERGES to the execution vocab after confirm —
+// 'hit' = order placed / awaiting fill; 'long'/'short' = live (reconciler-set on fill) and managed.
+// Promotion (awaiting→in-position) is detected by position_state.entry.fill_at, not a status name.
+// 'confirmed'/'in_position' are kept transitionally so calls confirmed BEFORE the P3b cutover (which
+// still link to an idea shadow) keep being managed; they never collide with idea statuses.
+const POSITION_STATUSES = ['hit', 'long', 'short', 'confirmed', 'in_position']
 const EXPIRY_THRESHOLD_MS = 15 * 60_000   // run the final "expiry review" within 15m of valid_until
 // A single check must never wedge the loop. If any IO inside _checkCall (vision assess / chart /
 // price fetch) hangs with no timeout, the awaited call never returns, `_running` stays true, and
@@ -299,18 +302,19 @@ export function _reconcilePosition(call, idea, nowMs, trade = null) {
     const bumpCount = (call?.monitor_state?.check_count ?? 0) + 1
     const idle = { set: { 'monitor_state.next_check_at': nextAt, 'monitor_state.check_count': bumpCount }, entry: null }
 
-    if (!idea) return idle   // linked idea not found yet — look again next cadence
+    if (!idea) return idle   // self-lookup empty (shouldn't happen post-confirm) — look again next cadence
+
+    // P3b: call === idea (self-linked), so `status` is the ONE converged field. Promotion
+    // (awaiting-fill → in-position) is detected by the stamped fill_at, not a status name.
+    if (idea.status === 'closed') return _closeFromIdea(call, idea, nowMs, bumpCount, trade)
 
     const inPos = idea.status === 'long' || idea.status === 'short'
-
-    if (call.status === 'confirmed') {
-        if (inPos)                    return _promoteToInPosition(call, idea, nowMs, nextAt, bumpCount, trade)
-        if (idea.status === 'closed') return _closeFromIdea(call, idea, nowMs, bumpCount, trade)   // opened+closed / rejected before we saw
-        return idle   // still awaiting fill (looking / hit / resting)
+    if (inPos) {
+        const promoted = call.position_state?.entry?.fill_at != null
+        if (!promoted) return _promoteToInPosition(call, idea, nowMs, nextAt, bumpCount, trade)
+        return { manage: true }   // already in position → the management brain
     }
-    // in_position
-    if (idea.status === 'closed') return _closeFromIdea(call, idea, nowMs, bumpCount, trade)
-    return { manage: true }   // still open → _checkPosition runs the management brain
+    return idle   // 'hit' / awaiting fill
 }
 
 // confirmed → in_position: stamp the fill onto the pre-seeded position_state and open the journal
@@ -323,7 +327,8 @@ function _promoteToInPosition(call, idea, nowMs, nextAt, bumpCount, trade = null
     const fillPrice = _num(trade?.entry?.price) ?? ps.entry?.intended ?? null
     const fillAtMs  = idea.entryTriggeredAt ?? idea.activatedAt ?? nowMs
     const set = {
-        status: 'in_position',
+        // P3b: no status write — the converged status stays 'long'/'short' (set by the reconciler).
+        // Promotion is recorded by position_state.entry.fill_at below (the _reconcilePosition gate).
         'position_state.entry.fill_price': fillPrice,
         'position_state.entry.fill_at':    new Date(fillAtMs).toISOString(),
         'position_state.entry.size':       idea.quantity ?? ps.entry?.size ?? null,
