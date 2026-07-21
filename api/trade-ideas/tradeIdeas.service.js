@@ -12,6 +12,7 @@ import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } 
 import { cleanConviction } from '../../services/conviction.util.js'
 import { placeOrdersForIdea, placeRestingEntryForIdea, triggerEntryNow } from './ideaExecution.service.js'
 import { armExitsInPosition } from './exitOrders.service.js'
+import { entityRepo }         from '../../services/entity/entityRepo.service.js'
 
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
@@ -446,7 +447,7 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         if (shouldMarketEnterOnUpdate(patch, existing.status)) {
             patch.status           = 'hit'
             patch.entryTriggeredAt = Date.now()
-            const merged = { ...(await db.collection(COLLECTION).findOne({ id })), ...patch }
+            const merged = { ...(await entityRepo.getById(id)), ...patch }
             const plan   = await buildOrderPlanForIdea(merged)
             if (plan.length > 0) {
                 const open = isAssetOpen(merged.asset, merged.asset_class)
@@ -456,15 +457,11 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
             minosService.resetIdea(id)
         }
 
-        const updateFilter = isAdmin || !existing.userId
-            ? { id }
-            : { id, userId }
+        // Ownership guard: non-admins may only patch their own idea (admins / legacy ownerless
+        // ideas pass an empty guard). The write funnels through entityRepo (P1b).
+        const ownerGuard = isAdmin || !existing.userId ? {} : { userId }
 
-        const result = await db.collection(COLLECTION).findOneAndUpdate(
-            updateFilter,
-            { $set: patch },
-            { returnDocument: 'after' }
-        )
+        const result = await entityRepo.patchAndGet(id, patch, ownerGuard)
         if (!result) return { ok: false, reason: 'not_found' }
         logger.info(LOG, 'Idea updated', { id, patch })
 

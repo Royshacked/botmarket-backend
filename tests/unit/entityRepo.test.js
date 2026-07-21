@@ -119,12 +119,29 @@ test('pushExitOrders / setExitOrders → correct $push / $set', async () => {
 })
 
 // ── methods added for the ideaExecution / manualIdea / positionMonitor migration ─────────────
-test('patchAndGet → findOneAndUpdate {id} $set returnDocument after', async () => {
+test('patchAndGet → findOneAndUpdate {id} $set returnDocument after (no guard)', async () => {
     const { coll, repo } = spyColl({ findOneAndUpdate: { id: 'i1', status: 'long' } })
     const out = await repo.patchAndGet('i1', { status: 'long', orderState: 'placed' })
     assert.deepEqual(out, { id: 'i1', status: 'long' })
     assert.deepEqual(coll.calls[0], ['findOneAndUpdate',
         { id: 'i1' }, { $set: { status: 'long', orderState: 'placed' } }, { returnDocument: 'after' }])
+})
+
+test('patchAndGet with an ownership guard → {id, ...guard} in the filter', async () => {
+    const { coll, repo } = spyColl({ findOneAndUpdate: { id: 'i1' } })
+    await repo.patchAndGet('i1', { notes: 'x' }, { userId: 'u1' })
+    assert.deepEqual(coll.calls[0], ['findOneAndUpdate',
+        { id: 'i1', userId: 'u1' }, { $set: { notes: 'x' } }, { returnDocument: 'after' }])
+})
+
+test('listByStatus / listByOrderState → find with the right filter', async () => {
+    const byStatus = spyColl({ find: [{ id: 'a' }] })
+    await byStatus.repo.listByStatus(['looking', 'long', 'short'])
+    assert.deepEqual(byStatus.coll.calls[0], ['find', { status: { $in: ['looking', 'long', 'short'] } }])
+
+    const byOrder = spyColl({ find: [] })
+    await byOrder.repo.listByOrderState('awaiting_market')
+    assert.deepEqual(byOrder.coll.calls[0], ['find', { orderState: 'awaiting_market' }])
 })
 
 test('claimIf → guarded findOneAndUpdate {id, ...guard} $set (default returnDocument)', async () => {

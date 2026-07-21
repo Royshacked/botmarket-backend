@@ -111,10 +111,25 @@ export function makeEntityRepo({ coll = _defaultColl } = {}) {
             return c.updateOne({ id }, { $set: fields })
         },
 
-        /** {id} $set, returning the UPDATED doc (returnDocument:'after'). */
-        async patchAndGet(id, fields) {
+        /**
+         * {id, ...guard} $set, returning the UPDATED doc (returnDocument:'after'). `guard` adds
+         * extra filter fields (e.g. an ownership `{userId}`) — an empty guard is a plain {id} patch.
+         */
+        async patchAndGet(id, fields, guard = {}) {
             const c = await coll()
-            return c.findOneAndUpdate({ id }, { $set: fields }, { returnDocument: 'after' })
+            return c.findOneAndUpdate({ id, ...guard }, { $set: fields }, { returnDocument: 'after' })
+        },
+
+        /** All entities whose status ∈ statuses (the monitor's poll query). Raw docs. */
+        async listByStatus(statuses) {
+            const c = await coll()
+            return c.find({ status: { $in: statuses } }).toArray()
+        },
+
+        /** All entities in a given orderState (the deferred-order market sweep). Raw docs. */
+        async listByOrderState(orderState) {
+            const c = await coll()
+            return c.find({ orderState }).toArray()
         },
 
         /**

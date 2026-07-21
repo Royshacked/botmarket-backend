@@ -25,14 +25,14 @@ import { checkPortfolioReviews }               from './portfolio.monitor.js'
 import { checkPosition }                        from './positionMonitor.js'
 import { notifyManualEntry, entryLegFromIdea }  from '../services/manualNotify.service.js'
 import { notifyIdeaEntryConfirm }               from '../services/tradeNotify.service.js'
+import { entityRepo }                           from '../services/entity/entityRepo.service.js'
 import {
     fetchCandles, buildSymbolMap, buildVolumeCtx, brokerCandleCtx,
     hasCumulativeVolume, logCheck, persistConditionStates,
     resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe, withTimeout, createPollLoop,
 } from './monitorUtils.js'
 
-const LOG        = '[minos.monitor]'
-const COLLECTION = 'ideas'
+const LOG = '[minos.monitor]'
 
 const POLL_INTERVAL_MS = 60_000
 // A single idea's check awaits provider/LLM/vision IO with no inherent bound. If one
@@ -61,9 +61,7 @@ async function _tick() {
     let db, ideas
     try {
         db    = await getDb()
-        ideas = await db.collection(COLLECTION)
-            .find({ status: { $in: ['looking', 'long', 'short'] } })
-            .toArray()
+        ideas = await entityRepo.listByStatus(['looking', 'long', 'short'])
     } catch (err) {
         logger.error(LOG, 'DB read error in tick:', err.message)
         return
@@ -91,7 +89,7 @@ async function _tick() {
 async function _marketSweep(db) {
     let deferred
     try {
-        deferred = await db.collection(COLLECTION).find({ orderState: 'awaiting_market' }).toArray()
+        deferred = await entityRepo.listByOrderState('awaiting_market')
     } catch (err) {
         logger.error(LOG, 'Market sweep read error:', err.message)
         return
@@ -263,7 +261,7 @@ async function _checkEntry(db, idea, candles) {
         return
     }
 
-    await persistConditionStates(db, idea, 'entry', entryStates, COLLECTION)
+    await persistConditionStates(db, idea, 'entry', entryStates)
 
     if (triggered) {
         const triggeredWhileWaiting = triggerAt != null && idea.activatedAt != null && triggerAt < idea.activatedAt
@@ -396,6 +394,6 @@ async function _close(db, id, reason) {
 }
 
 async function _patch(db, id, fields) {
-    await db.collection(COLLECTION).updateOne({ id }, { $set: fields })
+    await entityRepo.patch(id, fields)   // `db` vestigial — write funnels through entityRepo (P1b)
     logger.info(LOG, `Patched idea ${id}:`, fields)
 }
