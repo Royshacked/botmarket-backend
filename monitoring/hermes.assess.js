@@ -12,6 +12,7 @@ import { CANDLE_CFG, aggregateCandles } from '../services/marketData.tools.js'
 import { sessionPhase } from '../services/market.service.js'
 import { cachedChartImage } from '../services/chartImgCache.service.js'
 import { readStructure, STRUCTURE_VISIONS } from '../services/priceStructure.tools.js'
+import { smcReadText, smcBars, SMC_TOOL_NAMES } from '../services/smc.tools.js'
 import { newsService } from '../services/news.service.js'
 import { userService } from '../api/user/user.service.js'
 import { logger } from '../services/logger.service.js'
@@ -215,6 +216,20 @@ export function _structureTools(ladder) {
     ]
 }
 
+// NUMERIC SMC tools (get_structure / get_fvg / get_liquidity), timeframe LOCKED to the call's ladder.
+// Added ONLY for smc-mode calls (call.mode==='smc') so Hermes monitors an SMC call with the SAME exact
+// levels it was built on (the shared smc.engine). See KAIROS_MODES.md K2.
+export function _smcTools(ladder) {
+    const rungs = Array.isArray(ladder) && ladder.length ? ladder : ['15min']
+    const timeframe = { type: 'string', enum: rungs, description: "One of the call's timeframe_ladder rungs." }
+    const schema = { type: 'object', properties: { timeframe }, required: ['timeframe'] }
+    return [
+        { name: 'get_structure', description: "Exact market structure from OHLCV at one of this call's ladder rungs — trend, last BOS/CHoCH + level, swing high/low, premium/discount, fresh order-blocks. Confirm the SMC call's structural trigger. Optional.", input_schema: schema },
+        { name: 'get_fvg',       description: "Exact unfilled fair-value-gaps from OHLCV at one of this call's ladder rungs — is the FVG the call anchors to still open / being filled? Optional.", input_schema: schema },
+        { name: 'get_liquidity', description: "Exact liquidity pools (equal highs/lows) from OHLCV at one of this call's ladder rungs — has a pool been swept? Optional.", input_schema: schema },
+    ]
+}
+
 // A requested chart timeframe is honored only if it's one of the call's ladder rungs. Pure.
 export function _validChartTf(requested, ladder) {
     return (Array.isArray(ladder) ? ladder : []).includes(requested) ? requested : null
@@ -230,6 +245,7 @@ export async function _handleAssessToolUses(call, assistantContent, ladder, deps
         renderChart:      _renderChart      = cachedChartImage,
         readStructure:    _readStructure    = readStructure,
         getCycleAnalysis: _getCycleAnalysis = getCycleAnalysis,
+        smcBars:          _smcBars          = smcBars,
     } = deps
     const symbol = String(call.asset).toUpperCase()
     const uses = (assistantContent ?? []).filter(b => b?.type === 'tool_use')
@@ -245,6 +261,10 @@ export async function _handleAssessToolUses(call, assistantContent, ladder, deps
             if (use.name === 'get_orderblocks' || use.name === 'get_false_breaks') {
                 const kind = use.name === 'get_orderblocks' ? 'orderblocks' : 'false_breaks'
                 const { text } = await _readStructure({ symbol, timeframe: tf, kind, vision: STRUCTURE_VISIONS[kind] })
+                results.push({ type: 'tool_result', tool_use_id: use.id, content: text })
+            } else if (SMC_TOOL_NAMES.includes(use.name)) {
+                // Numeric SMC read (smc-mode calls) — the SAME engine the call was built on.
+                const text = smcReadText(use.name, symbol, tf, await _smcBars(symbol, tf))
                 results.push({ type: 'tool_result', tool_use_id: use.id, content: text })
             } else if (use.name === 'get_cycle_analysis') {
                 const text = await _getCycleAnalysis(symbol, 'price', null, 4, tf)
@@ -290,7 +310,8 @@ async function _runAssessment(call, systemPrompt, buildUserText, label) {
         const thinking  = _thinkingConfig(reasoningEffort)
         const maxTokens = thinking ? ASSESS_MAX_TOKENS_THINKING : ASSESS_MAX_TOKENS
         const system    = [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
-        const tools     = [..._chartTool(ladder), ..._structureTools(ladder)]
+        const tools     = [..._chartTool(ladder), ..._structureTools(ladder),
+            ...(call.mode === 'smc' ? _smcTools(ladder) : [])]   // exact SMC levels for smc-mode calls
         const messages  = [{ role: 'user', content: primary }]
 
         // Adaptive-timeframe loop: the read may pull extra ladder-rung charts (get_chart) or structured

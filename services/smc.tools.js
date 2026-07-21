@@ -1,6 +1,7 @@
 // Numeric SMC tools (K2) — expose the deterministic smc.engine primitives as agent tools that fetch
-// OHLCV, compute EXACT levels, and hand them back as text. SHARED (reusable by Argus/Hermes); wired
-// into the Kairos SMC mode. Reuses the one candle-fetch path from marketData.tools (DRY).
+// OHLCV, compute EXACT levels, and hand them back as text. The compute+format is a PURE function
+// (smcReadText) shared by the Kairos build handlers AND Hermes's assessor (DRY) — so the monitor reads
+// SMC calls through the same exact-level lens they were built on. Reusable by Argus too.
 
 import { makeToolHandler } from './agentUtils.js'
 import { _fetchCandleRows } from './marketData.tools.js'
@@ -10,9 +11,54 @@ const LOG = '[smcTools]'
 const TF_DESC = 'timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day'
 const fmt = n => (n == null ? '?' : Number(n).toFixed(2))
 
-async function _bars(ticker, timeframe) {
+export const SMC_TOOL_NAMES = ['get_fvg', 'get_structure', 'get_liquidity', 'get_key_levels']
+
+// Fetch the recent bars for a ticker/timeframe (reuses the one candle-fetch path).
+export async function smcBars(ticker, timeframe) {
     const { bars, cfg } = await _fetchCandleRows(ticker, timeframe)
     return bars.slice(-cfg.count)
+}
+
+/**
+ * PURE compute + format for one SMC tool from bars. Shared by the build handlers + Hermes's assessor.
+ * @returns {string} the text the model reads.
+ */
+export function smcReadText(name, ticker, timeframe, bars) {
+    const T = String(ticker).toUpperCase()
+    if (name === 'get_fvg') {
+        const gaps = detectFVG(bars)
+        if (!gaps.length) return `${T} ${timeframe}: no fair-value gaps found.`
+        const open = gaps.filter(g => !g.mitigated).slice(0, 8)
+        const line = g => `${g.type} FVG ${fmt(g.bottom)}–${fmt(g.top)}${g.mitigated ? ' (mitigated)' : ''}`
+        return `${T} ${timeframe} — ${open.length} unfilled FVG(s), newest first:\n`
+            + (open.length ? open.map(line).join('\n') : gaps.slice(0, 6).map(line).join('\n'))
+    }
+    if (name === 'get_structure') {
+        const s   = detectStructure(bars)
+        const pd  = premiumDiscount(bars)
+        const obs = detectOrderBlocks(bars).filter(o => !o.mitigated).slice(0, 5)
+        const ev  = s.event ? `${s.event.type} ${s.event.direction} @ ${fmt(s.event.level)}` : 'no fresh break'
+        const pdTxt = pd ? `range ${fmt(pd.low)}–${fmt(pd.high)}, eq ${fmt(pd.equilibrium)} → ${pd.zone}` : 'no clean range'
+        const obTxt = obs.length ? obs.map(o => `${o.type} OB ${fmt(o.bottom)}–${fmt(o.top)}`).join(', ') : 'none fresh'
+        return `${T} ${timeframe} — structure:\n`
+            + `trend: ${s.trend}\nlast event: ${ev}\n`
+            + `last swing high: ${fmt(s.lastSwingHigh)} · last swing low: ${fmt(s.lastSwingLow)}\n`
+            + `premium/discount: ${pdTxt}\norder blocks (fresh): ${obTxt}`
+    }
+    if (name === 'get_liquidity') {
+        const liq  = detectLiquidity(bars)
+        const pool = p => `${fmt(p.price)} (${p.count}×)`
+        const bs = liq.buyside.length  ? liq.buyside.map(pool).join(', ')  : 'none'
+        const ss = liq.sellside.length ? liq.sellside.map(pool).join(', ') : 'none'
+        return `${T} ${timeframe} — liquidity pools:\nbuy-side (equal highs, above): ${bs}\nsell-side (equal lows, below): ${ss}`
+    }
+    if (name === 'get_key_levels') {
+        const lv = priorLevels(bars)
+        return `${T} ${timeframe} — key levels:\n`
+            + `prior-day: H ${fmt(lv.priorDayHigh)} · L ${fmt(lv.priorDayLow)}\n`
+            + `current-day: H ${fmt(lv.currentDayHigh)} · L ${fmt(lv.currentDayLow)}`
+    }
+    return `unknown SMC tool: ${name}`
 }
 
 const _schema = { type: 'object', properties: {
@@ -27,43 +73,11 @@ export const SMC_TOOLS = [
     { name: 'get_key_levels', description: 'Exact prior-day and current-day high/low from OHLCV — the session "draw on liquidity" references (PDH/PDL). Useful in BOTH discretionary (prior-day levels) and SMC (session liquidity). Best on an intraday/day timeframe.', input_schema: _schema },
 ]
 
-export const SMC_TOOL_HANDLERS = {
-    get_fvg: makeToolHandler('get_fvg', async ({ ticker, timeframe }) => {
-        const gaps = detectFVG(await _bars(ticker, timeframe))
-        const open = gaps.filter(g => !g.mitigated).slice(0, 8)
-        if (gaps.length === 0) return `${ticker.toUpperCase()} ${timeframe}: no fair-value gaps found.`
-        const line = g => `${g.type} FVG ${fmt(g.bottom)}–${fmt(g.top)}${g.mitigated ? ' (mitigated)' : ''}`
-        return `${ticker.toUpperCase()} ${timeframe} — ${open.length} unfilled FVG(s), newest first:\n`
-            + (open.length ? open.map(line).join('\n') : gaps.slice(0, 6).map(line).join('\n'))
-    }, (err, { ticker }) => `Could not compute FVGs for ${ticker}: ${err.message}`, LOG),
-
-    get_structure: makeToolHandler('get_structure', async ({ ticker, timeframe }) => {
-        const bars = await _bars(ticker, timeframe)
-        const s  = detectStructure(bars)
-        const pd = premiumDiscount(bars)
-        const obs = detectOrderBlocks(bars).filter(o => !o.mitigated).slice(0, 5)
-        const ev = s.event ? `${s.event.type} ${s.event.direction} @ ${fmt(s.event.level)}` : 'no fresh break'
-        const pdTxt = pd ? `range ${fmt(pd.low)}–${fmt(pd.high)}, eq ${fmt(pd.equilibrium)} → ${pd.zone}` : 'no clean range'
-        const obTxt = obs.length ? obs.map(o => `${o.type} OB ${fmt(o.bottom)}–${fmt(o.top)}`).join(', ') : 'none fresh'
-        return `${ticker.toUpperCase()} ${timeframe} — structure:\n`
-            + `trend: ${s.trend}\nlast event: ${ev}\n`
-            + `last swing high: ${fmt(s.lastSwingHigh)} · last swing low: ${fmt(s.lastSwingLow)}\n`
-            + `premium/discount: ${pdTxt}\norder blocks (fresh): ${obTxt}`
-    }, (err, { ticker }) => `Could not compute structure for ${ticker}: ${err.message}`, LOG),
-
-    get_key_levels: makeToolHandler('get_key_levels', async ({ ticker, timeframe }) => {
-        const lv = priorLevels(await _bars(ticker, timeframe))
-        return `${ticker.toUpperCase()} ${timeframe} — key levels:\n`
-            + `prior-day: H ${fmt(lv.priorDayHigh)} · L ${fmt(lv.priorDayLow)}\n`
-            + `current-day: H ${fmt(lv.currentDayHigh)} · L ${fmt(lv.currentDayLow)}`
-    }, (err, { ticker }) => `Could not compute key levels for ${ticker}: ${err.message}`, LOG),
-
-    get_liquidity: makeToolHandler('get_liquidity', async ({ ticker, timeframe }) => {
-        const liq = detectLiquidity(await _bars(ticker, timeframe))
-        const pool = p => `${fmt(p.price)} (${p.count}×)`
-        const bs = liq.buyside.length  ? liq.buyside.map(pool).join(', ')  : 'none'
-        const ss = liq.sellside.length ? liq.sellside.map(pool).join(', ') : 'none'
-        return `${ticker.toUpperCase()} ${timeframe} — liquidity pools:\n`
-            + `buy-side (equal highs, above): ${bs}\nsell-side (equal lows, below): ${ss}`
-    }, (err, { ticker }) => `Could not compute liquidity for ${ticker}: ${err.message}`, LOG),
-}
+// Thin build-agent handlers: fetch bars → the shared pure formatter.
+const _handler = (name) => makeToolHandler(
+    name,
+    async ({ ticker, timeframe }) => smcReadText(name, ticker, timeframe, await smcBars(ticker, timeframe)),
+    (err, { ticker }) => `Could not compute ${name} for ${ticker}: ${err.message}`,
+    LOG,
+)
+export const SMC_TOOL_HANDLERS = Object.fromEntries(SMC_TOOL_NAMES.map(n => [n, _handler(n)]))

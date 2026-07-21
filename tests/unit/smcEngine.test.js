@@ -2,6 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { swings, detectFVG, detectLiquidity, detectStructure, premiumDiscount, detectOrderBlocks, priorLevels } from '../../services/smc.engine.js'
+import { smcReadText } from '../../services/smc.tools.js'
+import { _smcTools, _handleAssessToolUses } from '../../monitoring/hermes.assess.js'
 
 // K2: the deterministic SMC engine (KAIROS_MODES.md). Pure OHLCV → exact monitorable levels.
 const mk = (o, h, l, c, t = 0) => ({ open: o, high: h, low: l, close: c, volume: 100, timestamp: t })
@@ -95,6 +97,19 @@ test('priorLevels: prior-day vs current-day high/low by UTC date', () => {
     ]
     const lv = priorLevels(bars)
     assert.deepEqual(lv, { priorDayHigh: 12, priorDayLow: 7, currentDayHigh: 15, currentDayLow: 11 })
+})
+
+test('smcReadText: pure formatter renders each SMC read from bars (the wiring)', () => {
+    assert.match(smcReadText('get_structure', 'AAPL', '5min', UPTREND), /AAPL 5min — structure:[\s\S]*trend:[\s\S]*premium\/discount:/)
+    assert.match(smcReadText('get_liquidity', 'AAPL', '5min', UPTREND), /liquidity pools:/)
+    assert.match(smcReadText('get_key_levels', 'AAPL', '5min', UPTREND), /key levels:[\s\S]*prior-day:/)
+})
+
+test('Hermes shares the SMC engine: _smcTools + dispatch (smc calls, no network)', async () => {
+    assert.deepEqual(_smcTools(['5min']).map(t => t.name), ['get_structure', 'get_fvg', 'get_liquidity'])
+    const content = [{ type: 'tool_use', id: 'x', name: 'get_structure', input: { timeframe: '5min' } }]
+    const res = await _handleAssessToolUses({ asset: 'AAPL', mode: 'smc' }, content, ['5min'], { smcBars: async () => UPTREND })
+    assert.match(String(res[0].content), /AAPL 5min — structure:/)   // same engine the call was built on
 })
 
 test('detectLiquidity: two near-equal swing highs → a buy-side pool', () => {
