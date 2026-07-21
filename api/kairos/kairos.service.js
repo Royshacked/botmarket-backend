@@ -3,6 +3,7 @@ import { getDb, stripId }           from '../../providers/mongodb.provider.js'
 import { logger }                   from '../../services/logger.service.js'
 import { buildEventRisk }           from '../../services/eventRisk.service.js'
 import { cleanConviction }          from '../../services/conviction.util.js'
+import { ENTITIES }                 from '../../services/entity/entityCollection.js'
 
 // Kairos = discretionary day/swing agent. Its artifact is a "call" (Idea produces ideas,
 // Kairos produces calls): one document in `kairos_calls` = identity + plan (authored at build,
@@ -11,7 +12,8 @@ import { cleanConviction }          from '../../services/conviction.util.js'
 // self-contained trial (see KAIROS_PLAN.md).
 
 const LOG        = '[kairos]'
-const COLLECTION = 'kairos_calls'
+const COLLECTION = ENTITIES   // calls live in the shared entities collection as kind:'call'
+const KIND_CALL  = 'call'
 
 const TRADE_TYPES = new Set(['intraday', 'day', 'swing'])
 const BROKERS     = new Set(['ctrader', 'paper', 'manual'])
@@ -81,7 +83,7 @@ export function computeKairosPerformance(calls) {
 async function getKairosPerformance(userId, isAdmin = false) {
     try {
         const db    = await getDb()
-        const query = isAdmin ? { status: 'closed' } : { status: 'closed', user_id: userId }
+        const query = isAdmin ? { kind: KIND_CALL, status: 'closed' } : { kind: KIND_CALL, status: 'closed', user_id: userId }
         const calls = await db.collection(COLLECTION)
             .find(query, { projection: { status: 1, position_state: 1 } })
             .toArray()
@@ -205,6 +207,8 @@ export function normalizeCall(raw, userId = null) {
     return {
         // ── identity ──
         id:          `call_${String(raw.asset || 'x').replace(/[^A-Za-z0-9]/g, '')}_${randomUUID().slice(0, 8)}`,
+        kind:        'call',   // entity discriminator (P3) — a call is its own kind in `entities`
+        parentId:    null,
         strategy:    'kairos',
         user_id:     userId,
         created_at:  new Date().toISOString(),
@@ -362,7 +366,7 @@ async function getKairosCall(id, userId, isAdmin = false) {
 async function listKairosCalls(userId, isAdmin = false) {
     try {
         const db    = await getDb()
-        const query = isAdmin ? {} : { user_id: userId }
+        const query = isAdmin ? { kind: KIND_CALL } : { kind: KIND_CALL, user_id: userId }
         const items = await db.collection(COLLECTION).find(query).sort({ savedAt: -1 }).toArray()
         return items.map(stripId)
     } catch (err) {

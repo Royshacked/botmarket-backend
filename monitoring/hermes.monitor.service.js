@@ -21,7 +21,8 @@ export { _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _mark
 // + a running memo carried across wakes. Pre-entry readiness only — hands off at the enter card.
 
 const LOG          = '[hermes.monitor]'
-const COLLECTION   = 'kairos_calls'
+const COLLECTION   = ENTITIES   // calls now live in the shared entities collection as kind:'call'
+const KIND_CALL    = 'call'
 const POLL_INTERVAL_MS = 60_000
 // Only these are re-checked by the loop. `expiry_review` is triggered TIME-based on these two
 // (via _isExpiring), so 'expiring' is NOT here — like 'ready', it's an awaiting-user state (an
@@ -52,6 +53,7 @@ async function _tick() {
     // Due = active status AND (never checked OR next_check_at has passed). ISO strings compare
     // lexicographically for same-format UTC timestamps, so $lte on the string is correct.
     const calls = await db.collection(COLLECTION).find({
+        kind: KIND_CALL,   // entities holds ideas too; a missing monitor_state would else match waiting ideas
         status: { $in: [...ACTIVE_STATUSES, ...POSITION_STATUSES] },
         $or: [
             { 'monitor_state.next_check_at': null },

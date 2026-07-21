@@ -14,7 +14,7 @@ import { logger } from './logger.service.js'
 // (status 'confirmed'). Mode (live/paper/manual) is DERIVED from the call's broker.
 
 const LOG        = '[kairos.handoff]'
-const COLLECTION = 'kairos_calls'
+const COLLECTION = ENTITIES   // calls live in entities as kind:'call' (all ops here are {id}-scoped)
 
 // ── Pure helpers (unit-tested) ─────────────────────────────────────────────────
 export function deriveMode(broker) {

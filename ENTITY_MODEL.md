@@ -224,6 +224,47 @@ P2b (the cutover — separate commit; run migration FIRST):
   - keep `ideas` renamed (reversible) until verified, then it's gone
 ```
 
+## P3 plan — split `call` into its own kind (audit-grounded)
+
+```
+TODAY: a call = TWO docs. The call (kairos_calls: plan + position_state + monitor_state,
+snake_case) + an IDEA SHADOW (entities kind:'idea', callId set, ownedBy:'hermes') that carries
+ALL execution (brokerOrders/exitOrders/nativeExit/direction/quantity/status). confirmCall →
+saveIdea(buildIdeaFromCall) mints the shadow; the reconciler reconciles it kind-blindly; Hermes
+reads it back via getIdea(call.linked_idea_id). Minos stands down via ownedBy:'hermes'.
+
+KEY INSIGHT: the reconciler is ALREADY kind-blind (matches status∈[long,short]+brokerOrders,
+never reads callId/kind). Call statuses (waiting/watching/ready/confirmed/in_position/closed) do
+NOT overlap Minos's poll (looking/long/short) — so calls can live in `entities` without Minos
+scooping them up. The shadow, not the call, holds the position link.
+```
+
+Split into two slices (P3b is the risky one):
+```
+P3a (SAFE, behavior-preserving — like P2): move calls INTO entities as kind:'call', KEEP the shadow.
+  - migrate kairos_calls → entities (stamp kind:'call', parentId:null); keep kairos_calls backup
+  - repoint kind:'call'-scoped: kairos.service CRUD, kairos.handoff _loadOwned+updates,
+    hermes.monitor _tick/_claimCall/_persist, tradeCapture call-reasoning read
+  - Hermes polls entities {kind:'call'}; reconciler/Minos unaffected (call statuses don't collide)
+  - shadow mechanism UNCHANGED → zero execution-behavior change. Retires the kairos_calls collection.
+
+P3b (RISKY — drop the shadow; needs a harness like P1b):
+  - call entity carries the FLAT camelCase execution block on entry (brokerOrders/exitOrders/
+    nativeExit/direction/quantity/brokerSymbol/basisOffset/broker/status + condition-tree touch
+    leaves) — stamped where confirmCall now builds the shadow
+  - retarget shadow reads/writes → the call itself: manageCall getIdea/_resolveMainLink/_workingExit/
+    syncIdeaExit; Hermes _reconcilePosition/_promoteToInPosition/_closeFromIdea; tradeCapture origin;
+    getCallPositionMap; getIdeas filter
+  - kill ownedBy:'hermes' → owner DERIVED from kind:'call' (ownerForKind already returns 'hermes')
+  - Minos poll excludes kind:'call'
+  DECISIONS P3b needs:
+    (1) STATUS VOCAB COLLISION — call vocab vs execution vocab (looking/hit/long/short). Map call→
+        idea status on entry, OR carry a separate execution-status field, OR per-kind status sets.
+    (2) bias:'both' → concrete flat direction stamped from the armed-zone side at entry.
+    (3) casing at rest — execution path reads RAW camelCase (NOT via adapter), so brokerOrders/
+        brokerSymbol/direction/quantity/status MUST exist camelCase on the call entity.
+```
+
 ## 8. Invariants (hold across all phases)
 
 ```
