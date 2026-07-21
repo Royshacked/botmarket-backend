@@ -257,12 +257,27 @@ P3b (RISKY — drop the shadow; needs a harness like P1b):
     getCallPositionMap; getIdeas filter
   - kill ownedBy:'hermes' → owner DERIVED from kind:'call' (ownerForKind already returns 'hermes')
   - Minos poll excludes kind:'call'
-  DECISIONS P3b needs:
-    (1) STATUS VOCAB COLLISION — call vocab vs execution vocab (looking/hit/long/short). Map call→
-        idea status on entry, OR carry a separate execution-status field, OR per-kind status sets.
-    (2) bias:'both' → concrete flat direction stamped from the armed-zone side at entry.
-    (3) casing at rest — execution path reads RAW camelCase (NOT via adapter), so brokerOrders/
-        brokerSymbol/direction/quantity/status MUST exist camelCase on the call entity.
+  DECISION (made): STATUS VOCAB = **CONVERGE IN-POSITION**. One status field: PRE-position stays
+  kind-specific (call: watching/ready); ON ENTRY it converges to execution vocab (hit→long/short→
+  closed) — exactly what the shadow does today. Reconciler stays kind-blind on [long,short]; Minos
+  excludes kind:'call'; Hermes reads the call's own long/short post-entry. position_state keeps the
+  phase/scaling nuance.
+  Also: (2) bias:'both' → concrete flat direction stamped from armed-zone side at entry.
+        (3) execution path reads RAW camelCase (NOT via adapter) → brokerOrders/brokerSymbol/
+            direction/quantity/status MUST exist camelCase on the call entity.
+
+  P3b implementation slices (all money-path — needs a call-entry→reconcile→close harness like P1b):
+    1. Minos poll excludes kind:'call' (listByStatus/listByOrderState) — calls will be long/short.
+    2. ENTRY: confirmCall STAMPS the flat execution block onto the CALL (merge buildIdeaFromCall's
+       fields: direction from armed zone, quantity, userId, mainAccountId, brokerSymbol, basisOffset,
+       broker, accounts, status:'hit', immediate, entry/stop/tp touch-trees, callId=self) then
+       placeOrdersForIdea(call.id) — drop the separate saveIdea(shadow) + markIdeaOwned.
+    3. Hermes reads the CALL itself: _checkPosition getIdea(linked_idea_id)→getById(call.id);
+       _reconcilePosition/_promote/_close read call.status/direction/quantity/closedReason.
+    4. manageCall reads/writes the CALL's brokerOrders/exitOrders (drop _resolveMainLink via shadow).
+    5. tradeCapture origin.type='call' from kind (not callId); getCallPositionMap query kind:'call';
+       getIdeas filter kind:'idea' (drop ownedBy:'hermes').
+    6. Retire buildIdeaFromCall/markIdeaOwned/linked_idea_id; owner = ownerForKind('call').
 ```
 
 ## 8. Invariants (hold across all phases)

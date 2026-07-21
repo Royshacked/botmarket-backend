@@ -32,6 +32,7 @@ export function shouldMarketEnterOnUpdate(patch, existingStatus) {
 
 export const ideaService = {
     saveIdea,
+    buildIdeaChildren,
     saveBatchIdeas,
     getIdeas,
     getAssetClassMap,
@@ -87,7 +88,14 @@ export function isClosedIdeaFrozen(existingStatus, patchStatus) {
     return existingStatus === 'closed' && patchStatus != null && patchStatus !== 'closed'
 }
 
-async function saveIdea(tradeIdea, userId) {
+/**
+ * Enrich + broker-partition an idea input into its child doc(s) — WITHOUT inserting. This is the
+ * idea-creation engine (condition trees, brokerSymbol resolution, basisOffset, immediate plan)
+ * shared by saveIdea (which inserts) and the Kairos handoff (P3b: merges the single child's
+ * execution fields onto the call entity instead of minting a shadow). Returns
+ * { ok, children, forked } or { ok:false, reason?, error }.
+ */
+async function buildIdeaChildren(tradeIdea, userId) {
     const entryTree = resolveConditionTree(tradeIdea.entry_condition,  tradeIdea.entry_conditions, tradeIdea.entry_logic ?? 'AND')
     const stopTree  = resolveConditionTree(tradeIdea.stop_loss,        tradeIdea.stop_conditions,  tradeIdea.stop_logic  ?? 'OR')
     const tpTree    = resolveConditionTree(tradeIdea.take_profit,      tradeIdea.tp_conditions,    tradeIdea.tp_logic    ?? 'OR')
@@ -212,9 +220,21 @@ async function saveIdea(tradeIdea, userId) {
             children.push(child)
         }
 
+        return { ok: true, children, forked }
+    } catch (err) {
+        logger.error(LOG, 'Failed to build idea children', err)
+        return { ok: false, error: err }
+    }
+}
+
+async function saveIdea(tradeIdea, userId) {
+    const built = await buildIdeaChildren(tradeIdea, userId)
+    if (!built.ok) return built
+    try {
+        const { children } = built
         const db = await getDb()
         await db.collection(COLLECTION).insertMany(children)
-        logger.info(LOG, 'Idea saved', { id: enriched.id, asset: enriched.asset, immediate: isImmediate, forked, children: children.length })
+        logger.info(LOG, 'Idea saved', { id: children[0].id, asset: children[0].asset, forked: built.forked, children: children.length })
 
         return { ok: true, idea: stripId(children[0]), ideas: children.map(stripId) }
     } catch (err) {
