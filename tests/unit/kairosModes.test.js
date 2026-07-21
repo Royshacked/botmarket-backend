@@ -31,12 +31,15 @@ test('every mode gets the UNIVERSAL tools (incl. get_trading_context)', () => {
     }
 })
 
-test('discretionary: classical + false-breaks + correlation, NO order-blocks', () => {
+test('discretionary: classical + false-breaks + key-levels, NOT the SMC-lens tools', () => {
     const t = names('discretionary')
     assert.ok(t.includes('get_false_breaks'))
     assert.ok(t.includes('get_indicators'))
     assert.ok(t.includes('get_correlations'))   // discretionary keeps its Phase-2 correlation read
-    assert.ok(!t.includes('get_orderblocks'))   // order-blocks moved to smc (coupled with the prompt profile)
+    assert.ok(t.includes('get_key_levels'))     // prior-day levels are classical too (shared)
+    assert.ok(!t.includes('get_orderblocks'))   // SMC-lens tools excluded
+    assert.ok(!t.includes('get_fvg'))
+    assert.ok(!t.includes('get_structure'))
 })
 
 test('smc: structure tools (vision + K2 numeric), NO macro/fundamentals', () => {

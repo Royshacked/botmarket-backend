@@ -101,6 +101,53 @@ export function detectStructure(bars, { lookback = 2 } = {}) {
 }
 
 /**
+ * Order blocks: the last OPPOSITE-color candle before an impulsive move that left an FVG — the origin
+ * of the displacement (bullish OB = last bearish candle before a bullish FVG; bearish = last bullish
+ * before a bearish FVG). Zone = that candle's [low, high]. `mitigated` inherits the FVG's. Newest first.
+ * @returns {Array<{type:'bullish'|'bearish', top:number, bottom:number, at:number, mitigated:boolean}>}
+ */
+export function detectOrderBlocks(bars) {
+    const obs = []
+    const seen = new Set()
+    for (const g of detectFVG(bars)) {          // most-recent-first
+        const i = bars.findIndex(b => b.timestamp === g.at)   // FVG middle (impulse) candle
+        if (i < 1) continue
+        const isBull = g.type === 'bullish'
+        let k = i - 1
+        while (k >= 0 && (isBull ? bars[k].close >= bars[k].open : bars[k].close <= bars[k].open)) k--
+        if (k < 0 || seen.has(bars[k].timestamp)) continue
+        seen.add(bars[k].timestamp)
+        obs.push({ type: g.type, top: bars[k].high, bottom: bars[k].low, at: bars[k].timestamp, mitigated: g.mitigated })
+    }
+    return obs
+}
+
+/**
+ * Prior/current session levels (the "draw on liquidity" references): prior-day + current-day high/low,
+ * grouping bars by UTC date. Works at any timeframe (daily → prior bar; intraday → prior day's range).
+ * Useful to SMC (session liquidity) AND classical (prior-day levels).
+ * @returns {{ priorDayHigh, priorDayLow, currentDayHigh, currentDayLow }}
+ */
+export function priorLevels(bars) {
+    const byDay = new Map()
+    for (const b of bars) {
+        const day = new Date(b.timestamp * 1000).toISOString().slice(0, 10)
+        const g = byDay.get(day) ?? { high: -Infinity, low: Infinity }
+        g.high = Math.max(g.high, b.high)
+        g.low  = Math.min(g.low, b.low)
+        byDay.set(day, g)
+    }
+    const days = [...byDay.keys()].sort()
+    const cur = days.at(-1), prev = days.at(-2)
+    return {
+        priorDayHigh:   prev ? byDay.get(prev).high : null,
+        priorDayLow:    prev ? byDay.get(prev).low  : null,
+        currentDayHigh: cur  ? byDay.get(cur).high  : null,
+        currentDayLow:  cur  ? byDay.get(cur).low   : null,
+    }
+}
+
+/**
  * Premium/discount: the dealing range (last swing high ↔ low) split at equilibrium (50%). Price above
  * eq = PREMIUM (favor shorts), below = DISCOUNT (favor longs). Null when there's no clean range.
  * @returns {{ high:number, low:number, equilibrium:number, price:number|null, zone:'premium'|'discount'|null }|null}

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { swings, detectFVG, detectLiquidity, detectStructure, premiumDiscount } from '../../services/smc.engine.js'
+import { swings, detectFVG, detectLiquidity, detectStructure, premiumDiscount, detectOrderBlocks, priorLevels } from '../../services/smc.engine.js'
 
 // K2: the deterministic SMC engine (KAIROS_MODES.md). Pure OHLCV → exact monitorable levels.
 const mk = (o, h, l, c, t = 0) => ({ open: o, high: h, low: l, close: c, volume: 100, timestamp: t })
@@ -76,6 +76,25 @@ test('detectFVG: bearish gap (high[i+1] < low[i-1])', () => {
     assert.equal(g.type, 'bearish')
     assert.equal(g.top, 8)       // prev.low
     assert.equal(g.bottom, 7)    // next.high
+})
+
+test('detectOrderBlocks: last bearish candle before a bullish FVG → bullish OB', () => {
+    const bars = [mk(10, 10, 8, 8, 1), mk(9, 14, 11, 13, 2), mk(12, 16, 12, 15, 3)]   // i0 bearish, i1 impulse
+    const [ob] = detectOrderBlocks(bars)
+    assert.equal(ob.type, 'bullish')
+    assert.equal(ob.top, 10)      // the origin candle's range
+    assert.equal(ob.bottom, 8)
+    assert.equal(ob.mitigated, false)
+})
+
+test('priorLevels: prior-day vs current-day high/low by UTC date', () => {
+    const D1 = 1609459200, D2 = 1609545600   // 2021-01-01, 2021-01-02 (UTC)
+    const bars = [
+        mk(9, 10, 8, 9, D1), mk(9, 12, 7, 11, D1 + 3600),        // prior day: H12 L7
+        mk(10, 15, 11, 13, D2), mk(12, 14, 12, 13, D2 + 3600),   // current day: H15 L11
+    ]
+    const lv = priorLevels(bars)
+    assert.deepEqual(lv, { priorDayHigh: 12, priorDayLow: 7, currentDayHigh: 15, currentDayLow: 11 })
 })
 
 test('detectLiquidity: two near-equal swing highs → a buy-side pool', () => {

@@ -288,12 +288,14 @@ const _STATIC_HANDLERS = {
 // the handler map can stay full (extra handlers are never reached). UNIVERSAL tools are shared
 // by all modes (DRY). NEW numeric SMC tools (K2) + get_sector_snapshot/get_rs_chart join later.
 const UNIVERSAL = ['web_search', 'get_quote', 'get_candles', 'get_chart', 'get_trading_context']
+// SMC-lens numeric tools (smc only). get_key_levels is SHARED (classical prior-day levels + SMC session liquidity).
+const SMC_ONLY = ['get_orderblocks', 'get_fvg', 'get_structure', 'get_liquidity']
 const MODE_TOOLS = {
-    // classical PA + false-breaks + correlation/positioning context; NO order-blocks (moved to smc).
-    discretionary: KAIROS_TOOLS.map(t => t.name).filter(n => n !== 'get_orderblocks'),
+    // classical PA + false-breaks + correlation/positioning + prior-day key levels; NOT the SMC-lens tools.
+    discretionary: KAIROS_TOOLS.map(t => t.name).filter(n => !SMC_ONLY.includes(n)),
     // strict smart-money, chart-core: vision OB/sweeps + K2 numeric FVG/structure/liquidity (exact levels).
     smc: [...UNIVERSAL, 'get_price_action', 'get_orderblocks', 'get_false_breaks', 'get_indicators',
-        'get_fvg', 'get_structure', 'get_liquidity'],
+        'get_fvg', 'get_structure', 'get_liquidity', 'get_key_levels'],
     // macro/regime + relative-strength + positioning, chart-light; no order-blocks/false-breaks.
     institutional: [...UNIVERSAL, 'get_macro_snapshot', 'get_sector_snapshot', 'get_correlations', 'get_peers',
         'get_short_interest', 'get_options_context', 'get_derivatives_context', 'get_fundamentals',
