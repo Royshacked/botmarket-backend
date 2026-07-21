@@ -31,6 +31,15 @@ export function isKind(kind) {
     return Object.values(KINDS).includes(kind)
 }
 
+/**
+ * Derive an entity's kind from a legacy idea doc: a holding (carries portfolioId) is a
+ * portfolio_item; everything else is an idea. The single rule used by the migration, insert-time
+ * stamping, and the toEnvelope adapter — keep them in sync.
+ */
+export function kindForDoc(doc) {
+    return doc?.portfolioId != null ? KINDS.PORTFOLIO_ITEM : KINDS.IDEA
+}
+
 /** A fresh, empty monitor_state — the single shape carried by every kind (open-decision #4). */
 export function blankMonitorState() {
     return { nextCheckAt: null, checkCount: 0, memo: null, timeline: [] }

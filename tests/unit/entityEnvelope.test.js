@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { KINDS, ownerForKind, isKind, blankMonitorState, blankExecution } from '../../services/entity/envelope.js'
+import { KINDS, ownerForKind, isKind, kindForDoc, blankMonitorState, blankExecution } from '../../services/entity/envelope.js'
 import { ideaToEnvelope, callToEnvelope, toEnvelope } from '../../services/entity/toEnvelope.js'
 import { buildFilter, makeEntityStore } from '../../services/entity/entityStore.service.js'
 
@@ -21,6 +21,13 @@ test('isKind guards the discriminator', () => {
     assert.equal(isKind('idea'), true)
     assert.equal(isKind('portfolio_item'), true)
     assert.equal(isKind('book'), false)
+})
+
+test('kindForDoc: a holding (portfolioId) → portfolio_item, else idea', () => {
+    assert.equal(kindForDoc({ portfolioId: 'bk1' }), KINDS.PORTFOLIO_ITEM)
+    assert.equal(kindForDoc({ portfolioId: null }), KINDS.IDEA)
+    assert.equal(kindForDoc({}), KINDS.IDEA)
+    assert.equal(kindForDoc(undefined), KINDS.IDEA)   // migration-safe on sparse input
 })
 
 test('blank helpers are fresh (not shared references)', () => {

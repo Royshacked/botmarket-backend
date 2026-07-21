@@ -187,6 +187,43 @@ Migration order (each step behavior-preserving, tested before the next):
 5. Fold exitOrders.util → envelope.execution while those call sites are open.
 ```
 
+## P2 plan — cutover to the `entities` collection (DECIDED: flat + kind)
+
+```
+STORED SHAPE = FLAT (today's idea layout) + `kind` + `parentId`. The envelope stays a
+LOGICAL adapter view (ideaToEnvelope), NOT a storage format. So NO flat-read rewrites —
+reconciler/positionMonitor/ideaExecution/tradeCapture keep reading idea.brokerOrders etc.
+kind is derived: portfolioId != null ? 'portfolio_item' : 'idea'; parentId = portfolioId ?? null.
+At P2 `entities` holds only idea + portfolio_item (migrated from `ideas`); calls join at P3.
+NO kind-filtering needed at P2 (entities set == old ideas set) — kind filters land at P3.
+```
+
+Flip surface (every physical `ideas` reference — from audit):
+```
+services/entity/entityRepo.service.js   EXEC_COLLECTION       (execution facade)
+api/trade-ideas/tradeIdeas.service.js   COLLECTION            (idea CRUD)
+api/portfolio/portfolioRebalance.service.js  COLLECTION
+api/portfolio/portfolioChat.service.js  db.collection('ideas')  (meta rows)
+services/portfolioState.service.js      db.collection('ideas')  (computePortfolioState)
+monitoring/invalidation.monitor.js      db.collection('ideas') ×3
+monitoring/hermes.monitor.service.js    getIdea dep  (reads linked idea shadow)
+services/kairos.handoff.service.js      ×3  (markIdeaOwned / getIdea / update shadow)
+```
+
+Phases:
+```
+P2a (safe, additive — commit alone):
+  - services/entity/entityCollection.js: ENTITIES='entities' (single source of truth) + kindForDoc()
+  - scripts/migrate-ideas-to-entities.mjs: idempotent — updateMany add kind/parentId to all `ideas`,
+    then rename `ideas`→`entities` (skip if `entities` exists), create indexes
+    (id unique, userId, status, kind, parentId, orderState)
+  - stamp kind/parentId on NEW inserts (saveIdea, kairos buildIdeaFromCall shadow) — harmless now
+P2b (the cutover — separate commit; run migration FIRST):
+  - repoint all 8 flip-surface references 'ideas'→ENTITIES
+  - verify (unit tests use injected fakes → unaffected; smoke-test execution + CRUD on entities)
+  - keep `ideas` renamed (reversible) until verified, then it's gone
+```
+
 ## 8. Invariants (hold across all phases)
 
 ```

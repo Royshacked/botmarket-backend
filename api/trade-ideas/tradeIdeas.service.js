@@ -13,6 +13,7 @@ import { cleanConviction } from '../../services/conviction.util.js'
 import { placeOrdersForIdea, placeRestingEntryForIdea, triggerEntryNow } from './ideaExecution.service.js'
 import { armExitsInPosition } from './exitOrders.service.js'
 import { entityRepo }         from '../../services/entity/entityRepo.service.js'
+import { kindForDoc }         from '../../services/entity/envelope.js'
 
 const LOG = '[idea]'
 const COLLECTION = 'ideas'
@@ -111,6 +112,9 @@ async function saveIdea(tradeIdea, userId) {
 
     const enriched = {
         id:              randomUUID(),
+        // Entity discriminator (P2): a holding (carries portfolioId) is a portfolio_item, else an idea.
+        kind:            kindForDoc(tradeIdea),
+        parentId:        tradeIdea.portfolioId ?? null,
         savedAt:         Date.now(),
         status:          isImmediate ? 'hit' : 'waiting',
         entryTriggeredAt: isImmediate ? Date.now() : undefined,
