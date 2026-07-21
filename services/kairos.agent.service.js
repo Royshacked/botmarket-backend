@@ -23,6 +23,14 @@ const MAX_RECENT_MESSAGES = 8
 
 const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 
+// Per-mode lens module (phases 2–4). The base is the shared SPINE; the mode module is injected as its
+// own cached block — one agent, three profiles (KAIROS_MODES.md). Loaders are keyed by mode name.
+const _modePrompt = {
+    discretionary: makePromptLoader(join(__dirname, '../kairos_mode_discretionary.md'), LOG),
+    smc:           makePromptLoader(join(__dirname, '../kairos_mode_smc.md'), LOG),
+    institutional: makePromptLoader(join(__dirname, '../kairos_mode_institutional.md'), LOG),
+}
+
 export function emptyKairosState() {
     return { active_asset: '', draft: null, mode: normalizeMode() }
 }
@@ -231,8 +239,10 @@ ACTIVE MODE: ${mode} — build this call THROUGH the ${mode} lens (committed; do
 CONVERSATION CONTEXT:
 Active asset: ${asset}${draft}${buildPositionsSection(brokerContext)}${_buildAccountsSection(accounts)}`
 
+    const modeModule = (_modePrompt[mode] ?? _modePrompt.discretionary)()
     return [
         { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: modeModule, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamicContext },
     ]
 }

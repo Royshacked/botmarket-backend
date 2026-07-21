@@ -270,12 +270,9 @@ const _STATIC_HANDLERS = {
 // the handler map can stay full (extra handlers are never reached). UNIVERSAL tools are shared
 // by all modes (DRY). NEW numeric SMC tools (K2) + get_sector_snapshot/get_rs_chart join later.
 const UNIVERSAL = ['web_search', 'get_quote', 'get_candles', 'get_chart']
-// K1-step1: discretionary keeps the FULL toolset (the live default path — its prompt still references
-// order-blocks etc.). It narrows to classical-minus-order-blocks in K1-step2, TOGETHER with its prompt
-// profile (subset + prompt are coupled — narrowing one without the other creates a prompt/tool mismatch).
-// smc/institutional are scaffolded here but not live until their prompt profiles + the FE mode selector.
 const MODE_TOOLS = {
-    discretionary: KAIROS_TOOLS.map(t => t.name),   // full for now; narrows in K1-step2 with the profile
+    // classical PA + false-breaks + correlation/positioning context; NO order-blocks (moved to smc).
+    discretionary: KAIROS_TOOLS.map(t => t.name).filter(n => n !== 'get_orderblocks'),
     // strict smart-money, chart-core; no macro/fundamentals. (+ K2 numeric FVG/structure/liquidity.)
     smc: [...UNIVERSAL, 'get_price_action', 'get_orderblocks', 'get_false_breaks', 'get_indicators'],
     // macro/regime + relative-strength + positioning, chart-light; no order-blocks/false-breaks.

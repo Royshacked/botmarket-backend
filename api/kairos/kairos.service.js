@@ -4,7 +4,7 @@ import { logger }                   from '../../services/logger.service.js'
 import { buildEventRisk }           from '../../services/eventRisk.service.js'
 import { cleanConviction }          from '../../services/conviction.util.js'
 import { ENTITIES }                 from '../../services/entity/entityCollection.js'
-import { normalizeMode }            from '../../services/kairos.modes.js'
+import { normalizeMode, isMode }    from '../../services/kairos.modes.js'
 
 // Kairos = discretionary day/swing agent. Its artifact is a "call" (Idea produces ideas,
 // Kairos produces calls): one document in `kairos_calls` = identity + plan (authored at build,
@@ -44,7 +44,7 @@ const PLAN_FIELDS = [
     'asset', 'asset_class', 'trade_type', 'bias', 'thesis', 'timeframe_ladder', 'cadence',
     'entry_zones', 'reference_levels', 'patterns', 'sizing', 'broker', 'accounts',
     'main_account_id', 'broker_symbol', 'basis_offset', 'active_from', 'valid_until', 'event_risk',
-    'market_sensitivity', 'rr', 'conviction',
+    'market_sensitivity', 'rr', 'conviction', 'lens_fit',
 ]
 
 // Broad-market coupling levels. Anything else (or missing) → Hermes treats the tape as immaterial.
@@ -260,6 +260,12 @@ export function normalizeCall(raw, userId = null) {
         // 0 (Number(null)===0 would otherwise slip through Number.isFinite) back to null.
         rr:         Number.isFinite(Number(raw.rr)) && Number(raw.rr) > 0 ? Number(raw.rr) : null,
         conviction: cleanConviction(raw.conviction),
+        // Fit signal (K1): does the setup suit the build mode? 'weak' + suggested_mode flags a switch
+        // (the user decides whether to rebuild). Advisory — never gates the call.
+        lens_fit: {
+            fit:            raw.lens_fit?.fit === 'weak' ? 'weak' : 'good',
+            suggested_mode: (raw.lens_fit?.fit === 'weak' && isMode(raw.lens_fit?.suggested_mode)) ? raw.lens_fit.suggested_mode : null,
+        },
 
         // ── monitor_state (written each wake, Phase 2) ──
         status: 'waiting',
