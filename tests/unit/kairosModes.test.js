@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import { MODES, DEFAULT_MODE, normalizeMode, isMode } from '../../services/kairos.modes.js'
 import { KAIROS_TOOLS_FOR_MODE } from '../../services/kairos.tools.js'
-import { normalizeCall } from '../../api/kairos/kairos.service.js'
+import { normalizeCall, _buildEditSet } from '../../api/kairos/kairos.service.js'
 import { _sanitizeSeed } from '../../api/kairos/kairos.controller.js'
 
 // K1: Kairos mode scaffolding (KAIROS_MODES.md) — mode field + per-mode tool subsets.
@@ -74,6 +74,30 @@ const rawCall = (over = {}) => ({
     sizing: { max_size: 10 }, broker: 'paper', accounts: ['paper-u1'],
     entry_zones: [{ side: 'long', lower: 1, upper: 2 }], reference_levels: [], patterns: [],
     ...over,
+})
+
+// ── K4: light in-position edit vs pre-position re-arm ────────────────────────
+test('_buildEditSet: pre-position (watching) → full re-map + re-arm', () => {
+    const full = { asset: 'X', entry_zones: [{ id: 'z' }], sizing: { max_size: 1 }, thesis: 't' }
+    const { $set, inPosition } = _buildEditSet({ status: 'watching', chat_state: null }, full, null)
+    assert.equal(inPosition, false)
+    assert.equal($set.status, 'waiting')                       // re-armed
+    assert.equal($set['monitor_state.next_check_at'], null)
+    assert.equal($set['monitor_state.armed_zone_id'], null)
+    assert.ok('entry_zones' in $set)                           // full plan re-mapped
+    assert.ok('sizing' in $set)
+})
+
+test('_buildEditSet: in-position (long) → LIGHT edit, NO re-arm, NO entry/execution change', () => {
+    const full = { thesis: 'new', reference_levels: [{ id: 'r' }], conviction: { level: 'high' }, entry_zones: [{}], sizing: {} }
+    const { $set, inPosition } = _buildEditSet({ status: 'long', chat_state: null }, full, null)
+    assert.equal(inPosition, true)
+    assert.equal($set.thesis, 'new')                           // context updated
+    assert.ok('reference_levels' in $set)
+    assert.equal('status' in $set, false)                      // never re-arm a live call
+    assert.equal('monitor_state.next_check_at' in $set, false)
+    assert.equal('entry_zones' in $set, false)                 // entry already happened
+    assert.equal('sizing' in $set, false)                      // no execution change
 })
 
 // ── K3: Argus candidate seed ─────────────────────────────────────────────────

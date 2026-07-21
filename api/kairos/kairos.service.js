@@ -47,6 +47,34 @@ const PLAN_FIELDS = [
     'market_sensitivity', 'rr', 'conviction', 'lens_fit',
 ]
 
+// K4 — a call already in a live position gets a LIGHT edit: only the discretionary CONTEXT fields
+// (thesis / levels / patterns / conviction / horizon), NEVER entry_zones / sizing / venue / status /
+// execution, and NO monitor re-arm. Hermes keeps managing the live position; a stop/target MOVE goes
+// through the manage card, not a plan rewrite. Statuses that mean "past entry" (self-shadow execution
+// vocab hit/long/short + the transitional confirmed/in_position).
+const POSITION_STATUSES = new Set(['hit', 'long', 'short', 'confirmed', 'in_position'])
+const LIGHT_FIELDS = [
+    'thesis', 'timeframe_ladder', 'cadence', 'reference_levels', 'patterns',
+    'valid_until', 'market_sensitivity', 'rr', 'conviction', 'lens_fit',
+]
+
+/**
+ * Pure: build the $set for an in-place call edit. IN-POSITION → LIGHT_FIELDS only + NO re-arm (never
+ * flip a live call back to 'waiting' — that would orphan the reconciler's position match). PRE-position
+ * → full PLAN_FIELDS re-map + re-arm (status→waiting, next check + armed zone cleared).
+ */
+export function _buildEditSet(cur, full, chatState) {
+    const inPosition = POSITION_STATUSES.has(cur?.status)
+    const $set = { chat_state: chatState ?? cur?.chat_state ?? null }
+    for (const k of (inPosition ? LIGHT_FIELDS : PLAN_FIELDS)) $set[k] = full[k]
+    if (!inPosition) {
+        $set.status = 'waiting'
+        $set['monitor_state.next_check_at'] = null
+        $set['monitor_state.armed_zone_id'] = null
+    }
+    return { $set, inPosition }
+}
+
 // Broad-market coupling levels. Anything else (or missing) → Hermes treats the tape as immaterial.
 const SENSITIVITY_LEVELS = new Set(['high', 'medium', 'low'])
 
@@ -325,16 +353,12 @@ async function updateKairosCall(id, raw, userId, isAdmin = false) {
         if (cur.user_id && cur.user_id !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
 
         const full = normalizeCall(await _stampEventRisk(raw), cur.user_id ?? userId)   // fresh normalized plan (re-ids zones/levels) + refreshed event_risk
-        const $set = { savedAt: Date.now(), chat_state: raw.chat_state ?? cur.chat_state ?? null }
-        for (const k of PLAN_FIELDS) $set[k] = full[k]
-        // Re-arm on the new plan: back to waiting, monitor re-schedules on the next tick.
-        $set.status = 'waiting'
-        $set['monitor_state.next_check_at'] = null
-        $set['monitor_state.armed_zone_id'] = null
+        const { $set, inPosition } = _buildEditSet(cur, full, raw.chat_state)   // in-position → LIGHT edit, no re-arm
+        $set.savedAt = Date.now()
 
         await db.collection(COLLECTION).updateOne({ id }, { $set })
         const updated = await db.collection(COLLECTION).findOne({ id })
-        logger.info(LOG, 'call updated', { id, asset: $set.asset, trade_type: $set.trade_type })
+        logger.info(LOG, 'call updated', { id, asset: updated.asset, inPosition, mode: inPosition ? 'light' : 're-arm' })
         return { ok: true, call: stripId(updated) }
     } catch (err) {
         logger.error(LOG, 'Failed to update call', err)
