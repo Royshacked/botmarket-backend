@@ -281,8 +281,8 @@ const TOOL_HANDLERS = {
     get_candles:    makeCandlesHandler(LOG),
     get_indicators: makeIndicatorsHandler(LOG),
     // Vision tools (KLineCharts render + visual read). onChart: null → the image goes to
-    // the LLM only, not the scan UI (Level A). Wire onChart through the controller/SSE +
-    // ScannerPanel later to also surface the chart to the user.
+    // the LLM only, not the scan UI. This is DELIBERATE: the scanner does not surface charts
+    // to the user (decided 2026-07-22) — the render is an internal vision read, not a deliverable.
     get_chart:        makeChartHandler({ log: LOG, onChart: null, readText: 'Read the price STRUCTURE visually — trend, base/breakout geometry, S/R, where price sits vs any overlays. Confirm the named setup; indicators only confirm, never lead.' }),
     get_orderblocks:  makeStructureVisionHandler({ log: LOG, kind: 'orderblocks',  vision: OB_VISION, onChart: null }),
     get_false_breaks: makeStructureVisionHandler({ log: LOG, kind: 'false_breaks', vision: FB_VISION, onChart: null }),
@@ -528,7 +528,22 @@ function _editListByTicker(editList) {
     return map
 }
 
+// Liquidity floor below which smc/institutional aren't feasible lenses (#4, B).
+const MODE_LIQUIDITY_FLOOR = 60
+
+// Light feasibility guard (#4, A1): smc/institutional need a liquid, structure-rich
+// name. If the model recommends one but scored `liquidity` below the floor, downgrade
+// the SUGGESTION to discretionary (the universal-safe default). Warn-never-block — this
+// only sanitizes the pre-fill; the user can still pick any mode. discretionary/null and
+// an absent/unscored liquidity axis pass through unchanged (never downgrade on missing data).
+function _feasibleMode(mode, score) {
+    if (mode !== 'smc' && mode !== 'institutional') return mode
+    const liq = score?.liquidity
+    return (Number.isFinite(liq) && liq < MODE_LIQUIDITY_FLOOR) ? 'discretionary' : mode
+}
+
 function _cleanCandidate(c, style = null) {
+    const score = _cleanScore(c.score, style)
     return {
         ticker:    c.ticker.toUpperCase().trim(),
         name:      typeof c.name === 'string' ? c.name : null,
@@ -536,9 +551,13 @@ function _cleanCandidate(c, style = null) {
         thesis:    typeof c.thesis === 'string' ? c.thesis : '',
         analysis:  typeof c.analysis === 'string' ? c.analysis : '',
         signals:   (c.signals && typeof c.signals === 'object') ? c.signals : {},
-        score:     _cleanScore(c.score, style),
+        score,
         conviction: cleanConviction(c.conviction),
         sources:   Array.isArray(c.sources) ? c.sources.filter(s => s && s.url) : [],
+        // K3/#4: Argus's recommended Kairos lens for this name (isMode-validated, then
+        // feasibility-guarded against the liquidity axis). null = no recommendation → the
+        // trade-idea builder keeps the user's current mode chip.
+        recommended_mode: _feasibleMode(isMode(c.recommended_mode) ? c.recommended_mode : null, score),
         // Grounding provenance (scanner.grounding.js). null on the no-ledger path;
         // callers stamp 'sourced' | 'validated' | 'kept' when a ledger is present.
         grounding: null,

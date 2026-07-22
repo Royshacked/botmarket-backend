@@ -140,6 +140,8 @@ export function _parseKairosResponse(raw) {
 // passes them to Argus as scan constraints (the ticker comes back, so they round-trip unchanged).
 // A scan needs at least a direction to constrain, so a block without a valid long/short → null.
 // `style` is validated against the shared TRADE_HORIZONS; the rest are free-text hints for the seed.
+// `ticker` (optional) flips Argus into VALIDATE-A-NAME mode: when the user already has a name, Kairos
+// hands it to Argus for the feasibility + lens gate (Pipeline-B "B1") instead of open discovery.
 export function _parseScanRequest(raw) {
     const m = (raw ?? '').match(/<scan_request>([\s\S]*?)<\/scan_request>/)
     if (!m) return null
@@ -154,6 +156,7 @@ export function _parseScanRequest(raw) {
     if (!direction) return null
     return {
         direction,
+        ticker:      (typeof obj?.ticker === 'string' && obj.ticker.trim()) ? obj.ticker.toUpperCase().trim() : null,
         style:       TRADE_HORIZONS.includes(obj?.style) ? obj.style : null,
         period_hint: typeof obj?.period_hint === 'string' ? obj.period_hint : null,
         angle_hint:  typeof obj?.angle_hint  === 'string' ? obj.angle_hint  : null,

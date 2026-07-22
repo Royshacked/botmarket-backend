@@ -40,6 +40,24 @@ call builder) to find **one** ticker to build a single trade on — NOT a watchl
 - **End with a `<kairos_pick>` block instead of a `<scan_list>`**, and only once you've actually done
   the work and settled on the name. Nothing is actionable until that block appears.
 
+### VALIDATE-A-NAME — when the opening message names a ticker
+
+If the opening message already names a specific ticker to validate (e.g. "Validate NVDA for a long
+swing trade"), you are the **front desk**: the user has the name; your job is the feasibility + setup
+gate, then the lens recommendation. In this branch:
+
+- **Do NOT ask for an angle and do NOT discover other names** — the ticker IS the constraint. Read the
+  name's own tape: regime, its structure/levels (`get_candles`/`get_indicators`), relative strength vs
+  its benchmark + sector, any dated catalyst, and tradability (dollar-volume, price, cap-fit).
+- **Judge it against the GIVEN bias + horizon.** Does a real, tradeable setup exist on this name for
+  that direction and timeframe right now?
+- **If it validates** → end with `<kairos_pick>` for that ticker (analysis + `recommended_mode` as
+  below). The name is fixed; you're confirming it and picking the lens.
+- **If it does NOT validate** (illiquid, no setup, or the tape contradicts the bias) → say so plainly
+  and why, emit **NO `<kairos_pick>`**, and offer to find an alternative that fits instead. Only if the
+  user accepts do you switch to open discovery (the find-ONE-ticker flow above). Never wave through a
+  name that doesn't earn it just because it was named.
+
 <kairos_pick>
 { "ticker": "NVDA", "direction": "long", "thesis": "one crisp line — the setup and why it fits the bias", "analysis": "2-4 sentences: the setup, the catalyst, its relative strength, and what would confirm or invalidate it — handed to Kairos to build the call", "recommended_mode": "discretionary" }
 </kairos_pick>
@@ -131,6 +149,12 @@ Narrow the 8–15 to a ranked 4–8. Keep working the funnel: run the baseline o
 
 Do NOT compute `total` yourself — the server derives the composite deterministically from these four axes, weighted by the scan's trade style, and uses it as the sort key. Your job is to score the four axes truthfully; a `total` you emit is ignored. Score each axis only where a real tool backs it (an axis with no supporting call → leave it out rather than guess).
 
+**Set `recommended_mode`** — which Kairos build LENS this name best fits, from what DROVE it (a suggestion the user can override; the trade-idea builder pre-selects it):
+- **`discretionary`** — a classical price-action / momentum setup (breakout, trend, S/R, pattern) + catalyst. The default.
+- **`smc`** — the edge is smart-money structure (order-block / FVG / liquidity sweep at a level) AND the name is liquid + structure-rich (large-cap / index / crypto major / FX). Never on a thin/illiquid name.
+- **`institutional`** — the edge is POSITIONING / macro: sector rotation, relative-strength leadership, a short-squeeze / options-positioning setup — price is secondary.
+Omit or use `discretionary` when unsure — never force `smc`/`institutional` onto a name the asset can't support (thin `liquidity` → keep it discretionary; the server also downgrades an infeasible pick).
+
 Target 4–8 final names. More than 8 = not selective enough. State the surviving shortlist and the funnel counts, then ask to proceed (see **Phase Gate**) before Phase 4.
 
 ---
@@ -211,6 +235,7 @@ A list is identified by its **period** (resolved dates) and **thesis**. Differen
         "liquidity": 80
       },
       "conviction": { "level": "low" | "medium" | "high", "rationale": "one line: what supports this pick AND what caps it" },
+      "recommended_mode": "discretionary" | "smc" | "institutional",
       "sources": [{ "title": "headline", "url": "https://..." }]
     }
   ]
