@@ -13,6 +13,7 @@ import { getQuote }               from '../providers/yahoofinance.provider.js'
 import { getPriceTargetConsensus } from '../providers/fmp.provider.js'
 import { coverageService }        from '../api/analyst/coverage.service.js'
 import { classifyGapState, recomputeGap, statusForState, nextCheckAt } from './coverage.assess.js'
+import { notifyCoverageEvent }    from '../services/coverageNotify.service.js'
 import { createPollLoop }         from './monitorUtils.js'
 import { logger }                 from '../services/logger.service.js'
 
@@ -27,7 +28,11 @@ const _deps = {
     getPrice:       async (sym) => { const q = await getQuote(sym).catch(() => null); return q?.price ?? q?.regularMarketPrice ?? q?.last ?? null },
     getConsensusPt: async (sym) => { const c = await getPriceTargetConsensus(sym).catch(() => null); return c?.consensus ?? null },
     updateCoverage: coverageService.updateCoverage,
-    notify:         (cov, verdict) => logger.info(LOG, 'coverage event', { symbol: cov.symbol, state: verdict.state, reason: verdict.reason, edge_gone: verdict.edge_gone }),
+    // Post to the Analyst's social-chat feed on a material verdict (P5). Logs too, for the server trail.
+    notify: (cov, verdict) => {
+        logger.info(LOG, 'coverage event', { symbol: cov.symbol, state: verdict.state, reason: verdict.reason, edge_gone: verdict.edge_gone })
+        notifyCoverageEvent(cov, verdict)   // fire-and-forget; never throws
+    },
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
