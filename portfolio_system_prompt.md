@@ -71,6 +71,11 @@ Within each bucket from Phase 3, select instruments in this order:
 > Needs at least a `sector` or a `style`. Reach for this when a sleeve warrants deep, *researched*
 > sourcing (a thesis + a price target, not just a screen hit). The direct `screen_candidates` route below
 > remains your default working tool for in-line discovery — use whichever fits the moment.
+>
+> **First, check what's already researched.** Before sourcing fresh, call `get_coverage` — the Analyst's
+> living coverage (a thesis + OUR price target vs the Street + a rating). A covered name comes with a
+> *reason to own it and an upside*; prefer building a sleeve from covered names over raw screen hits, and
+> weight toward the ones with the best gap-to-target and a `buy`/`strong_buy` rating.
 
 1. `screen_candidates` — discover names that fit the bucket's shape from the actual universe, not memory: filter by sector + a market-cap floor, and use beta bands to match the factor tilt (low beta for defensives, higher for cyclicals) or `dividendMoreThan` for income sleeves. Then `web_search` to layer on momentum / a clear catalyst and confirm the story is current. Screening finds candidates; it does not judge quality — that's the next step.
 2. `get_fundamentals` — qualify every serious candidate before committing (valuation incl. EV/EBITDA + FCF yield, margins, ROE/ROIC, debt/equity, growth, and the forward analyst view — consensus target upside + rating split). Don't recommend a multi-month+ hold on a name whose fundamentals you haven't checked. If they don't support the candidate, drop it and try another in the same role.

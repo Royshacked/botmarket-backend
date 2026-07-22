@@ -7,6 +7,7 @@ import { cleanConviction } from './conviction.util.js'
 import { formatWorkspaceLine } from '../api/portfolio/portfolioMode.util.js'
 import { logger }         from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, resolveAgentStream } from './agentUtils.js'
+import { coverageService } from '../api/analyst/coverage.service.js'
 import { buildTagCaptures } from './llmStream.util.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
@@ -148,6 +149,11 @@ const TOOLS = [
         },
         cache_control: { type: 'ephemeral' },
     },
+    {
+        name: 'get_coverage',
+        description: "The Analyst's researched coverage — the living per-name theses you can build a book from (a variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, and the status). Prefer constructing from a RESEARCHED name (a thesis + a target) over a raw screen hit. Optionally filter by sector. Read-only.",
+        input_schema: { type: 'object', properties: { sector: { type: 'string', description: 'optional — narrow to one sector, e.g. Technology' } } },
+    },
 ]
 
 const TOOL_HANDLERS = {
@@ -182,6 +188,27 @@ const TOOL_HANDLERS = {
         ({ from, to, symbols }) => getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []),
         (err) => `Could not fetch earnings calendar: ${err.message}`, LOG),
     ...COMMON_TOOL_HANDLERS,
+}
+
+// P4d: render the Analyst's active coverage as an LLM-ready read for Atlas to construct from. Pure —
+// exported for tests. Shows OUR PT vs the Street (the gap = the edge) so Atlas allocates on research.
+export function _formatCoverage(rows) {
+    const list = (Array.isArray(rows) ? rows : []).filter(c => c && c.symbol)
+    if (!list.length) return 'No Analyst coverage yet — nothing researched to build from. Source via a <screen_request> to Argus, or screen directly.'
+    const lines = list.map(c => {
+        const pt   = c.price_target?.value
+        const gap  = Number.isFinite(c.gap?.pct) ? ` (${c.gap.pct >= 0 ? '+' : ''}${c.gap.pct}% vs Street${Number.isFinite(c.gap?.consensus_pt) ? ` ${c.gap.consensus_pt}` : ''})` : ''
+        const th   = typeof c.thesis === 'string' && c.thesis ? ` — ${c.thesis.length > 160 ? c.thesis.slice(0, 157) + '…' : c.thesis}` : ''
+        return `- ${c.symbol} [${c.rating ?? 'unrated'}]${pt != null ? ` our PT ${pt}${gap}` : ''} · ${c.status ?? 'active'}${th}`
+    })
+    return ['Analyst coverage (researched theses — build from these, our target vs the Street):', ...lines].join('\n')
+}
+
+// Per-session handler — coverage is per-user, so it binds userId (like Kairos's userId-bound tools).
+function makeCoverageHandler(userId) {
+    return makeToolHandler('get_coverage',
+        async ({ sector } = {}) => _formatCoverage(await coverageService.getCoverage(userId, { status: 'active', sector: sector ?? null })),
+        (err) => `Could not fetch coverage: ${err.message}`, LOG)
 }
 
 export const portfolioAgentService = { chatStream }
@@ -249,7 +276,8 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
         promptOrMessages: normalized,
         systemPrompt,
         tools:            TOOLS,
-        toolHandlers:     TOOL_HANDLERS,
+        // Per-session: get_coverage binds this user (coverage is per-user); the rest are static.
+        toolHandlers:     { ...TOOL_HANDLERS, get_coverage: makeCoverageHandler(userId) },
         reasoningEffort,
         signal,
         onToken,
