@@ -196,13 +196,20 @@ export async function deleteKairos(req, res) {
 
 // Structured Argus candidate seed (K3): a scan hand-off arrives as a typed object, not free text.
 // Kept lean + string-only; unknown/absent → null. recommended_mode is a FE concern (pre-fills the
-// mode chip) and is NOT part of the prompt seed.
+// mode chip) and is NOT part of the prompt seed. `window` (a forward-dated list's period) rides along
+// so the model can narrate the gated window; the actual time-gate is set by code at save.
 export function _sanitizeSeed(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
     const s = k => (typeof raw[k] === 'string' && raw[k].trim() ? raw[k].trim() : null)
     const ticker = s('ticker')
     if (!ticker) return null   // a seed without a ticker is meaningless
-    return { ticker: ticker.toUpperCase(), direction: s('direction'), thesis: s('thesis'), analysis: s('analysis') }
+    const w    = (raw.window && typeof raw.window === 'object') ? raw.window : {}
+    const from = (typeof w.from === 'string' && w.from.trim()) ? w.from.trim() : null
+    const to   = (typeof w.to   === 'string' && w.to.trim())   ? w.to.trim()   : null
+    return {
+        ticker: ticker.toUpperCase(), direction: s('direction'), thesis: s('thesis'), analysis: s('analysis'),
+        window: (from || to) ? { from, to } : null,
+    }
 }
 
 function parseStreamBody(body) {

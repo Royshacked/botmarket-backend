@@ -234,9 +234,16 @@ function _buildSystemPrompt(chatState, accounts, brokerContext = null, mode = no
     // K3: a structured Argus candidate seed (scan hand-off or scan-list click) — the ticker + Argus's
     // read arrive as fields, not free text. Start at Phase 1 with this ticker; fold `analysis` into
     // Phase 2 as the provisional thesis (verify it, don't take it on faith).
+    // A forward-dated list (period-scoped, e.g. "November") carries a window → the call is time-gated
+    // to it: monitoring won't start before `from`, and it expires at `to`. The gate is set by code at
+    // save (active_from/valid_until); the model just tells the user the call is scheduled to the window.
+    const win = seed?.window
+    const winLine = (win && (win.from || win.to))
+        ? `\n  scheduled window: ${win.from ?? '—'} → ${win.to ?? '—'} (monitoring is gated to this window; tell the user it won't be watched before ${win.from ?? 'the start'})`
+        : ''
     const seedBlock = seed?.ticker
         ? `\nARGUS SEED (build this candidate): ticker=${seed.ticker}${seed.direction ? `, direction=${seed.direction}` : ''}`
-            + `${seed.thesis ? `\n  thesis: ${seed.thesis}` : ''}${seed.analysis ? `\n  Argus's read: ${seed.analysis}` : ''}`
+            + `${seed.thesis ? `\n  thesis: ${seed.thesis}` : ''}${seed.analysis ? `\n  Argus's read: ${seed.analysis}` : ''}${winLine}`
         : ''
 
     const today = new Date().toISOString().slice(0, 10)

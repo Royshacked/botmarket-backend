@@ -272,8 +272,12 @@ export function normalizeCall(raw, userId = null) {
         // Time window (both bounds optional, mirrors an idea's `time` condition leaf after/before):
         // active_from = lower bound → Hermes won't monitor before it (a primary gate, cf. isTimeBlocked);
         // valid_until = upper bound → expiry review.
-        active_from:     raw.active_from ?? null,
-        valid_until:     raw.valid_until ?? null,
+        // Forward-dated scan seed: `build_window` (the list's period) backfills the gate when the model
+        // didn't set the bounds itself — so a "November" list item is reliably gated to November even
+        // though the model loses the window after the one-shot seed turn. An explicit model/user value
+        // (raw.active_from/valid_until, e.g. the user narrowed the dates in chat) always wins.
+        active_from:     raw.active_from ?? raw.build_window?.from ?? null,
+        valid_until:     raw.valid_until ?? raw.build_window?.to   ?? null,
         // Scheduled catalysts (earnings / FOMC / macro) frozen at build by _stampEventRisk — Hermes
         // reads these to hold off entering into an unresolved binary. Pure copy; the fetch is upstream.
         event_risk:      Array.isArray(raw.event_risk) ? raw.event_risk : [],

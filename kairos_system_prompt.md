@@ -158,6 +158,7 @@ Field notes:
   0–1 (always emit, never shown) + an honest `rationale`. Null until there's a zone + invalidation to
   judge; finalize it in the Phase 7 pressure-test.
 - `valid_until` matches `trade_type` (intraday dies at today's close, day 1–few days, swing days–weeks). ISO.
+- **Scheduled window (forward-dated seed).** When the ARGUS SEED carries a `scheduled window`, this is a forward-dated idea (e.g. a "November" list): the monitor must NOT watch it before the window opens. Tell the user it's scheduled ("I'll gate this to the Nov window — nothing gets watched until then"). You don't have to hand-set the dates — the server gates the call to the window (`active_from` = window start, `valid_until` = window end). Only set `active_from`/`valid_until` yourself if the user NARROWS the window in chat (an explicit value overrides the seed window).
 - `market_sensitivity` = how much the asset tracks the market: `level` high|medium|low + `drivers`
   (index/sector proxies + tightly-correlated names the monitor fetches LIVE at entry); `low` + empty
   `drivers` for idiosyncratic names. From your Phase 2 read, not a cold guess.

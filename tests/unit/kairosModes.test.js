@@ -104,12 +104,23 @@ test('_buildEditSet: in-position (long) → LIGHT edit, NO re-arm, NO entry/exec
 test('_sanitizeSeed: uppercases ticker, keeps string fields, requires a ticker', () => {
     assert.deepEqual(
         _sanitizeSeed({ ticker: 'nvda', direction: 'long', thesis: 'AI leader', analysis: 'clean base' }),
-        { ticker: 'NVDA', direction: 'long', thesis: 'AI leader', analysis: 'clean base' })
-    assert.deepEqual(_sanitizeSeed({ ticker: 'aapl' }), { ticker: 'AAPL', direction: null, thesis: null, analysis: null })
+        { ticker: 'NVDA', direction: 'long', thesis: 'AI leader', analysis: 'clean base', window: null })
+    assert.deepEqual(_sanitizeSeed({ ticker: 'aapl' }), { ticker: 'AAPL', direction: null, thesis: null, analysis: null, window: null })
     assert.equal(_sanitizeSeed({ thesis: 'no ticker' }), null)   // ticker required
     assert.equal(_sanitizeSeed(null), null)
     assert.equal(_sanitizeSeed('nope'), null)
     assert.equal(_sanitizeSeed({ ticker: '   ' }), null)         // blank ticker
+})
+
+test('_sanitizeSeed: carries a forward-dated window (from/to); absent or blank → null', () => {
+    assert.deepEqual(
+        _sanitizeSeed({ ticker: 'nvda', window: { from: '2026-11-01', to: '2026-11-30' } }).window,
+        { from: '2026-11-01', to: '2026-11-30' })
+    // partial window is kept (one bound is enough to gate)
+    assert.deepEqual(_sanitizeSeed({ ticker: 'nvda', window: { from: '2026-11-01' } }).window, { from: '2026-11-01', to: null })
+    // no/blank window → null
+    assert.equal(_sanitizeSeed({ ticker: 'nvda', window: {} }).window, null)
+    assert.equal(_sanitizeSeed({ ticker: 'nvda', window: { from: '  ' } }).window, null)
 })
 
 test('normalizeCall stamps mode (default discretionary; coerces unknown)', () => {
