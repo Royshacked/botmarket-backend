@@ -36,6 +36,7 @@ import { tradesRoutes }      from './api/trades/trades.routes.js'
 import { transcribeRoutes }  from './api/transcribe/transcribe.routes.js'
 import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
 import { scannerRoutes }     from './api/scanner/scanner.routes.js'
+import { analystRoutes }     from './api/analyst/analyst.routes.js'
 import { axlRoutes }         from './api/axl/axl.routes.js'
 import { threadsRoutes }     from './api/threads/threads.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
@@ -101,6 +102,7 @@ app.use('/api/paper',       paperRoutes)
 app.use('/api/trades',      tradesRoutes)
 app.use('/api/portfolio',   portfolioRoutes)
 app.use('/api/scanner',     scannerRoutes)
+app.use('/api/analyst',     analystRoutes)
 app.use('/api/axl',         axlRoutes)
 app.use('/api/threads',     threadsRoutes)
 app.use('/api/market',      marketRoutes)
