@@ -253,6 +253,12 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   `market_sensitivity {level, drivers, note}` — how much the asset tracks the broad market. Hermes reads
   the tape **live** at assessment (gated by `level`; `drivers` are the correlated proxies it pulls), and
   a tentative entry on a market-sensitive call is web_search-confirmed before it fires.
+- `coverage` — the Analyst's living per-name research thesis (one doc per user+symbol): the variant
+  perception (`thesis`), `rating`, OUR `price_target` + `estimates` vs consensus, the `gap` (our PT vs
+  the Street — the edge), monitorable `kill_criteria`, `status` (active│thesis_broken│target_hit│retired│
+  watchlist), and an append-only `revisions[]` history. `compute_valuation` (deterministic, `services/
+  valuation.engine.js`) fills the PT/gap; the Analyst agent + coverage-monitor are in progress. Buy-side
+  research — NOT an execution-tier entity, watched by its own monitor, not Hermes/Minos/Themis.
 - `paperAccounts` / `paperPositions` / `paperOrders` — the virtual broker store.
 - `chat_conversations` / `chat_messages` — social DM + bot notifications; one notify bot per agent
   (`BOT_IDS`, incl. `kairos`). `chat_messages.type`/`payload` drive the typed notification cards

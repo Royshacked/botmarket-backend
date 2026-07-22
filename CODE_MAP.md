@@ -32,6 +32,11 @@ api/
     exitOrders.service.js     in-position exit (re)arming (basisReferenceQuote now a neutralised no-op)
   portfolio/              Portfolio Agent + review    /api/portfolio/*
   scanner/                Scanner Agent + saved scans /api/scanner/*
+  analyst/                Analyst coverage (research/valuation)  /api/analyst/*
+    coverage.service.js       `coverage` collection = living per-name thesis (one doc per user+symbol):
+                              variant-perception + our PT vs Street (the gap) + monitorable kill-criteria +
+                              append-only revisions[]. normalizeCoverage + CRUD (initiate/update-w-revision/
+                              retire). Own collection — NOT the execution-tier entities (P1 of the Analyst)
   broker/                 broker connections/orders/positions  /api/broker/*
     adapters/
       broker.interface.js     BrokerAdapter base class — THE contract every broker fulfils
@@ -67,6 +72,11 @@ services/
   portfolioReview.util.js   PURE review-lifecycle helpers (no I/O): benchmarkTicker (mandate text→ETF proxy),
                             buildFingerprint (the "then" snapshot), computeReviewDelta (benchmark return +
                             regime then→now), computeReviewTriggers (the non-LLM pre-check signals)
+  valuation.engine.js       PURE computeValuation (Analyst T1 relative: justified multiple × forward metric
+                            → PT + bear/base/bull + GAP vs Street consensus); percentile/median. Shared by
+                            the Analyst agent (P3) + coverage monitor (P5) — one source of truth for "our number"
+  valuation.tools.js        get_consensus + compute_valuation agent tools over valuation.engine + FMP consensus
+                            feeds; pure LLM-ready formatters (edge classified above/below/thin vs Street). (P2)
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue
   llmStream.util.js       createTagSuppressor({ onToken, captures })
@@ -116,6 +126,8 @@ providers/
   fmp.provider.js               Starter plan: getFundamentals (valuation+analyst+ETF look-through), getEarnings(Calendar),
                                 screenCandidates (company-screener), getMacroSnapshot + getMacroRaw (treasury/econ/sector);
                                 getSectorSnapshot / getMarketMovers / getAnalystActions (Argus discovery feeds);
+                                getAnalystEstimates / getPriceTargetConsensus / getGradesConsensus + getGradesHistorical /
+                                getHistoricalMultiples (Analyst consensus + valuation feeds, P2);
                                 getSectorRaw. fmp.price.provider.js = live quote + candles (paper feed); week/month
                                 aggregated from daily EOD via groupOhlcByPeriod (FMP has no native week/month endpoint)
   chartImg.provider.js          chart-img (TradingView) PNG — now the FALLBACK behind the own-chart

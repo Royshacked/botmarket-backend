@@ -26,7 +26,7 @@ const DEFAULT_STATUS = 'active'
 // Plan fields re-written on an update; identity (id/user_id/symbol/created_at) + revisions history
 // are preserved out of band.
 const PLAN_FIELDS = ['sector', 'thesis', 'rating', 'price_target', 'estimates', 'gap',
-    'catalysts', 'kill_criteria', 'risk_reward', 'conviction', 'status']
+    'catalysts', 'kill_criteria', 'risk_reward', 'conviction', 'status', 'evidence']
 
 export const coverageService = { initiateCoverage, getCoverage, getCoverageById, updateCoverage, retireCoverage }
 
@@ -147,8 +147,9 @@ async function getCoverage(userId, { sector = null, status = null } = {}, isAdmi
     try {
         const db = await getDb()
         const query = isAdmin ? {} : { user_id: userId }
-        if (sector) query.sector = sector
-        if (status) query.status = status
+        // Validate/coerce the filters — never let a raw query param (e.g. status[$ne]) inject a Mongo operator.
+        if (typeof sector === 'string' && sector.trim()) query.sector = sector.trim()
+        if (typeof status === 'string' && STATUSES.includes(status)) query.status = status
         const rows = await db.collection(COLLECTION).find(query).sort({ updated_at: -1 }).toArray()
         return rows.map(stripId)
     } catch (err) {
