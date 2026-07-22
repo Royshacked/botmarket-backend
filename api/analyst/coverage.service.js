@@ -85,6 +85,10 @@ function normalizeCoverage(raw, userId = null) {
         status:        STATUSES.includes(r.status) ? r.status : DEFAULT_STATUS,
         revisions:     _arr(r.revisions),               // append-only history (the "living" part)
         evidence:      _arr(r.evidence),
+        // Coverage-monitor bookkeeping (P5) — written by the monitor, not a plan field. next_check_at
+        // null → due on the next tick. Preserved across plan updates (updateCoverage never $sets it).
+        monitor:       (r.monitor && typeof r.monitor === 'object' && !Array.isArray(r.monitor))
+            ? r.monitor : { next_check_at: null, last_checked: null, checks: 0 },
         created_at:    _str(r.created_at) ?? now,
         updated_at:    now,
     }

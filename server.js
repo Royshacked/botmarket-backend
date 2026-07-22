@@ -44,6 +44,7 @@ import { calendarRoutes }    from './api/calendar/calendar.routes.js'
 import { newsFeedService }  from './api/news-feed/newsFeed.service.js'
 import { minosService }     from './monitoring/minos.monitor.service.js'
 import { hermesService }    from './monitoring/hermes.monitor.service.js'
+import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
 import { paperEquityService } from './monitoring/paperEquity.service.js'
@@ -120,6 +121,7 @@ threadService.ensureThreadIndexes()
 newsFeedService.start()
 minosService.start()
 hermesService.start()
+coverageMonitorService.start()
 executionReconciler.start()
 paperFillService.start()
 paperEquityService.start()
