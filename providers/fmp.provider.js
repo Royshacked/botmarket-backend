@@ -776,6 +776,81 @@ export function formatPeers(symbol, rows, topN = 10) {
     return `${sym} fundamental peers (same sector/size cohort — feed the ones that matter into get_correlations to measure what it ACTUALLY tracks):\n${list}`
 }
 
+// ─── Analyst / valuation data (P2) ──────────────────────────────────────────
+// Structured feeds for the research analyst: forward consensus estimates (the variant-perception
+// anchor), consensus price target + rating (+ revision trend), and the stock's own historical
+// multiple series (the re-rating anchor for compute_valuation). Slow-moving research data → 6h TTL.
+const ANALYST_TTL_MS = 6 * 60 * 60 * 1000
+const _estCache  = createTtlCache({ ttlMs: ANALYST_TTL_MS, max: 200 })
+const _multCache = createTtlCache({ ttlMs: ANALYST_TTL_MS, max: 200 })
+const _n = v => { const x = Number(v); return Number.isFinite(x) ? x : null }
+
+/**
+ * Forward annual consensus estimates. Returns { rows[], next } — rows ascending by fiscal-year end,
+ * next = the earliest FORWARD fiscal year (the FY1 metric compute_valuation multiplies). Cached 6h.
+ */
+export async function getAnalystEstimates(ticker) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    if (!sym) return { rows: [], next: null }
+    const hit = _estCache.get(sym)
+    if (hit) return hit
+
+    const arr  = await _fmpGet(`/analyst-estimates?symbol=${sym}&period=annual&limit=6`).catch(e => { logger.warn(LOG, `estimates ${sym}`, e.message); return [] })
+    const rows = (Array.isArray(arr) ? arr : [])
+        .map(r => ({ fy: String(r.date || '').slice(0, 4), date: r.date, eps: _n(r.epsAvg), revenue: _n(r.revenueAvg), ebitda: _n(r.ebitdaAvg), net_income: _n(r.netIncomeAvg), num_analysts: _n(r.numAnalystsEps) }))
+        .filter(r => r.date)
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    const yr   = new Date().getFullYear()
+    const next = rows.find(r => Number(r.fy) >= yr) ?? rows[rows.length - 1] ?? null
+    const out  = { rows, next }
+    _estCache.set(sym, out)
+    return out
+}
+
+/** Consensus price target { consensus, high, low, median }, or null. */
+export async function getPriceTargetConsensus(ticker) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    const arr = await _fmpGet(`/price-target-consensus?symbol=${sym}`).catch(e => { logger.warn(LOG, `pt-consensus ${sym}`, e.message); return [] })
+    const r   = Array.isArray(arr) ? arr[0] : null
+    return r ? { consensus: _n(r.targetConsensus), high: _n(r.targetHigh), low: _n(r.targetLow), median: _n(r.targetMedian) } : null
+}
+
+/** Street rating consensus { rating, counts }, or null. */
+export async function getGradesConsensus(ticker) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    const arr = await _fmpGet(`/grades-consensus?symbol=${sym}`).catch(e => { logger.warn(LOG, `grades-consensus ${sym}`, e.message); return [] })
+    const r   = Array.isArray(arr) ? arr[0] : null
+    if (!r) return null
+    return { rating: r.consensus ?? null, counts: { strong_buy: _n(r.strongBuy) ?? 0, buy: _n(r.buy) ?? 0, hold: _n(r.hold) ?? 0, sell: _n(r.sell) ?? 0, strong_sell: _n(r.strongSell) ?? 0 } }
+}
+
+/** Historical rating distribution (newest first) — the REVISION TREND. */
+export async function getGradesHistorical(ticker, limit = 6) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    const arr = await _fmpGet(`/grades-historical?symbol=${sym}&limit=${limit}`).catch(e => { logger.warn(LOG, `grades-hist ${sym}`, e.message); return [] })
+    return (Array.isArray(arr) ? arr : []).map(r => ({
+        date: r.date,
+        strong_buy: _n(r.analystRatingsStrongBuy) ?? 0, buy: _n(r.analystRatingsBuy) ?? 0, hold: _n(r.analystRatingsHold) ?? 0, sell: _n(r.analystRatingsSell) ?? 0, strong_sell: _n(r.analystRatingsStrongSell) ?? 0,
+    })).filter(r => r.date)
+}
+
+// Which historical ratio field is the multiple for each valuation method.
+const _MULT_FIELD = { pe: 'priceToEarningsRatio', ev_sales: 'priceToSalesRatio', ev_ebitda: 'enterpriseValueMultiple' }
+
+/** The stock's own historical multiple series for a method (positive values only). Cached 6h. */
+export async function getHistoricalMultiples(ticker, method = 'pe', years = 8) {
+    const sym   = String(ticker || '').toUpperCase().trim()
+    const field = _MULT_FIELD[method] || _MULT_FIELD.pe
+    const key   = `${sym}:${field}:${years}`
+    const hit   = _multCache.get(key)
+    if (hit) return hit
+
+    const arr = await _fmpGet(`/ratios?symbol=${sym}&period=annual&limit=${years}`).catch(e => { logger.warn(LOG, `ratios ${sym}`, e.message); return [] })
+    const out = (Array.isArray(arr) ? arr : []).map(r => _n(r[field])).filter(x => x !== null && x > 0)
+    _multCache.set(key, out)
+    return out
+}
+
 /**
  * Structured macro read for fingerprinting / trigger comparison (not LLM-formatted):
  * { asOf, spread2s10s, fedFunds, inflation, leaders[] }. Numbers are percent points;
