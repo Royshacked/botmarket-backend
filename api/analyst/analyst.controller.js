@@ -7,9 +7,20 @@ import { logger }             from '../../services/logger.service.js'
 
 const LOG = '[analystCtrl]'
 
+// A structured Argus INVESTING candidate seed (P4b): a hand-off arrives as a typed object, not free
+// text. Kept lean + string-only; ticker required. Mirrors Kairos's _sanitizeSeed.
+export function _sanitizeAnalystSeed(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const s = k => (typeof raw[k] === 'string' && raw[k].trim() ? raw[k].trim() : null)
+    const ticker = s('ticker')
+    if (!ticker) return null
+    return { ticker: ticker.toUpperCase(), sector: s('sector'), thesis: s('thesis'), analysis: s('analysis') }
+}
+
 // Streaming research chat → emits a <coverage> draft (returned for preview; POST /coverage initiates it).
 export async function streamAnalyst(req, res) {
     const { messages, userPrompt, model, reasoningEffort, chatState, brokerContext } = req.body ?? {}
+    const seed = _sanitizeAnalystSeed(req.body?.seed)
     if (messages !== undefined && messages !== null) {
         const v = parseChatMessages(messages)
         if (v.error) return res.status(400).json({ error: v.error })
@@ -22,6 +33,7 @@ export async function streamAnalyst(req, res) {
                 userPrompt,
                 chatState:     (chatState && typeof chatState === 'object') ? chatState : {},
                 brokerContext: brokerContext ?? null,
+                seed,
                 model,
                 reasoningEffort,
                 userId: req.user._id,

@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { _parseAnalystResponse } from '../../services/analyst.agent.service.js'
+import { _sanitizeAnalystSeed } from '../../api/analyst/analyst.controller.js'
 
 // Analyst P3 — <coverage> extraction from the streamed research turn (pure).
 
@@ -40,4 +41,16 @@ test('parse: no coverage tag at all → { reply, coverage:null }', () => {
     const { reply, coverage } = _parseAnalystResponse('Just discussing the name, no pitch yet.')
     assert.equal(coverage, null)
     assert.equal(reply, 'Just discussing the name, no pitch yet.')
+})
+
+// ── _sanitizeAnalystSeed (Argus investing candidate → research hand-off, P4b) ──
+test('seed: uppercases ticker, keeps sector/thesis/analysis, requires a ticker', () => {
+    assert.deepEqual(
+        _sanitizeAnalystSeed({ ticker: 'msft', sector: 'Technology', thesis: 'quality compounder', analysis: 'ROIC 28%, net cash' }),
+        { ticker: 'MSFT', sector: 'Technology', thesis: 'quality compounder', analysis: 'ROIC 28%, net cash' })
+    assert.deepEqual(_sanitizeAnalystSeed({ ticker: 'aapl' }), { ticker: 'AAPL', sector: null, thesis: null, analysis: null })
+    assert.equal(_sanitizeAnalystSeed({ thesis: 'no ticker' }), null)
+    assert.equal(_sanitizeAnalystSeed({ ticker: '  ' }), null)
+    assert.equal(_sanitizeAnalystSeed(null), null)
+    assert.equal(_sanitizeAnalystSeed('nope'), null)
 })

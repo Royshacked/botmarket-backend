@@ -79,12 +79,12 @@ const TOOL_HANDLERS = {
 export const analystAgentService = { chatStream }
 
 async function chatStream({
-    messages, userPrompt, chatState = {}, brokerContext = null,
+    messages, userPrompt, chatState = {}, brokerContext = null, seed = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onToolStart, onReasoning, onPhase, signal,
 }) {
     const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
-    const systemPrompt  = _buildSystemPrompt(chatState, brokerContext)
+    const systemPrompt  = _buildSystemPrompt(chatState, brokerContext, seed)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
     logger.info(LOG, 'chatStream start', { userPrompt, messageCount: builtMessages.length, model, provider })
@@ -132,15 +132,22 @@ function _cleanDraft(c) {
     return { ...c, symbol: c.symbol.toUpperCase().trim() }
 }
 
-function _buildSystemPrompt(chatState, brokerContext = null) {
+function _buildSystemPrompt(chatState, brokerContext = null, seed = null) {
     const today  = new Date().toISOString().slice(0, 10)
     const active = chatState?.active_symbol || 'none'
     const draft  = chatState?.draft
         ? `\nDraft coverage so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
         : ''
+    // P4b: an Argus INVESTING-profile candidate handed over for research. Start Phase 1 with this name +
+    // Argus's screen read as a provisional input — VERIFY it, don't take it on faith, and form your OWN view.
+    const seedBlock = seed?.ticker
+        ? `\nARGUS SEED (research this candidate): ticker=${seed.ticker}${seed.sector ? `, sector=${seed.sector}` : ''}`
+            + `${seed.thesis ? `\n  Argus's screen rationale: ${seed.thesis}` : ''}${seed.analysis ? `\n  Argus's fundamental read: ${seed.analysis}` : ''}`
+            + `\n  → Start here, verify Argus's read against the tools, then form your own variant view.`
+        : ''
     const dynamic = `---
 CURRENT DATE: ${today}. Resolve relative dates (this quarter, next earnings) against it.
-Active name: ${active}${draft}${buildPositionsSection(brokerContext)}`
+Active name: ${active}${seedBlock}${draft}${buildPositionsSection(brokerContext)}`
     return [
         { type: 'text', text: _systemPrompt(), cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamic },
