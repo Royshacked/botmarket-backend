@@ -32,6 +32,8 @@ async function saveScan(scan, userId) {
             thesis:     scan.thesis     ?? 'Scan',
             direction:  scan.direction  ?? 'mixed',
             style:      scan.style       ?? null,
+            // Which Argus profile produced this list (P4a). investing → the names route to the Analyst.
+            profile:    scan.profile === 'investing' ? 'investing' : 'trading',
             candidates: Array.isArray(scan.candidates) ? scan.candidates : [],
             // The scanner conversation that produced this list — lets the user
             // click the thesis to return to that chat.
@@ -89,6 +91,7 @@ async function updateScan(id, patch, userId, isAdmin = false) {
         if (patch.thesis    !== undefined)   set.thesis     = patch.thesis
         if (patch.direction !== undefined)   set.direction  = patch.direction
         if (patch.style     !== undefined)   set.style      = patch.style
+        if (patch.profile   !== undefined)   set.profile    = patch.profile === 'investing' ? 'investing' : 'trading'
         if (Array.isArray(patch.candidates)) {
             set.candidates = patch.candidates
             await enrichWithProfiles(set.candidates, { key: 'ticker', overwriteName: false })
