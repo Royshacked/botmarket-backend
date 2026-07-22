@@ -65,7 +65,7 @@ export async function streamPortfolio(req, res) {
                 userId: req.user._id, portfolioId, threadId, isReviewMode, messages, mandate, storedThesis, result,
             })
 
-            return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null }
+            return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null, ...(result.screenRequest ? { screen_request: result.screenRequest } : {}) }
         },
     })
 }
