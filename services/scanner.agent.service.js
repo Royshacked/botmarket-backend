@@ -10,6 +10,8 @@ import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, resolveAgentStream, TRADE_HORIZONS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
+import { isToolError } from './toolResult.util.js'
+import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS } from './scanner.grounding.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[scannerAgent]'
@@ -312,6 +314,30 @@ const TOOL_HANDLERS = {
     ...COMMON_TOOL_HANDLERS,
 }
 
+// Wrap the module-level handlers with a per-session grounding recorder. A
+// successful discovery call feeds its output text to the tape (`sourced`); a
+// successful per-name call records the ticker it ran on (`touched`). A failed
+// call (toolError — e.g. a bogus symbol that errored) confers nothing, so a
+// fabricated ticker the model merely *attempted* never gets credited.
+function _wrapForGrounding(handlers, ledger) {
+    const wrapped = {}
+    for (const [name, fn] of Object.entries(handlers)) {
+        const reader = PER_NAME_TICKER_ARGS[name]
+        const isDiscovery = DISCOVERY_TOOLS.has(name)
+        wrapped[name] = (reader || isDiscovery)
+            ? async (args) => {
+                const ret = await fn(args)
+                if (!isToolError(ret)) {
+                    if (isDiscovery && typeof ret === 'string') recordSourced(ledger, ret)
+                    if (reader) recordTouched(ledger, reader(args))
+                }
+                return ret
+            }
+            : fn
+    }
+    return wrapped
+}
+
 export const scannerAgentService = { chatStream }
 
 // Exported for unit tests (scanner scorecard normalization + ranking).
@@ -325,6 +351,11 @@ const HANDOFF_CONTEXT = 'KAIROS HAND-OFF MODE: the user was sent here by Kairos 
 async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const normalized = _buildMessages(messages)
     const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
+
+    // Per-session grounding ledger — records which tickers a real, successful tool
+    // engaged, so a fabricated candidate that no tool touched is dropped at normalize.
+    const ledger = makeGroundingLedger()
+    const toolHandlers = _wrapForGrounding(TOOL_HANDLERS, ledger)
 
     // Stable cached base + volatile tail: today's date (so "next week" resolves)
     // and, when editing an existing list, that list's current contents so the
@@ -370,7 +401,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         promptOrMessages: normalized,
         systemPrompt,
         tools:        TOOLS,
-        toolHandlers: TOOL_HANDLERS,
+        toolHandlers,
         reasoningEffort,
         signal,
         onToken,
@@ -386,7 +417,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         ['scan_list', 'phase', 'kairos_pick'],
     ).trim()
 
-    const scan = _normalizeScan(capturedScan, editList)
+    const scan = _normalizeScan(capturedScan, editList, ledger)
     const pick = _normalizeKairosPick(capturedPick)
 
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, phase: capturedPhase })
@@ -422,13 +453,47 @@ export function _normalizeKairosPick(p) {
 // Trade-horizon vocabulary — the shared cross-agent constant (Idea/Kairos/Atlas holdings).
 const SCAN_STYLES = TRADE_HORIZONS
 
-function _normalizeScan(scan, editList = null) {
+function _normalizeScan(scan, editList = null, ledger = null) {
     if (!scan || typeof scan !== 'object') return null
     const priorByTicker = _editListByTicker(editList)
+    // Trade style drives the deterministic composite-total weighting (Argus #2),
+    // so resolve it up front and thread it into every candidate's score.
+    const style = SCAN_STYLES.includes(scan.style) ? scan.style : null
     const candidates = Array.isArray(scan.candidates) ? scan.candidates : []
-    const clean = candidates
-        .map(c => _resolveCandidate(c, priorByTicker))
-        .filter(Boolean)
+    const counts = { sourced: 0, validated: 0, kept: 0, dropped: 0 }
+    const clean = []
+    for (const c of candidates) {
+        if (!c || typeof c.ticker !== 'string' || !c.ticker.trim()) continue
+        const key = c.ticker.toUpperCase().trim()
+
+        // A `keep:true` / bare reference rehydrates from the prior list — its
+        // grounding was checked when the name was first added, so it is exempt
+        // from re-checking (a saved name isn't a fresh fabrication).
+        const isBareReference = !c.analysis && !c.signals && !c.thesis
+        if ((c.keep === true || isBareReference) && priorByTicker.has(key)) {
+            const prior = priorByTicker.get(key)
+            const cand = _cleanCandidate(prior, style)
+            cand.grounding = prior.grounding ?? 'kept'
+            clean.push(cand)
+            counts.kept++
+            continue
+        }
+
+        // Fresh candidate — check it against the tape. Enforcement (drop the
+        // ungrounded) only when a ledger is present; no-ledger callers (tests,
+        // non-scan paths) keep every candidate untouched.
+        const tier = groundingTier(key, ledger)
+        if (ledger) {
+            if (tier === 'ungrounded') { counts.dropped++; continue }   // A1: drop pure fabrications
+            counts[tier]++
+        }
+        const cand = _cleanCandidate(c, style)
+        if (ledger) cand.grounding = tier
+        clean.push(cand)
+    }
+    if (ledger && (counts.dropped || counts.sourced || counts.validated)) {
+        logger.info(LOG, 'grounding', counts)
+    }
     if (!clean.length) return null
 
     // Deterministic ranking: highest composite score first, regardless of the
@@ -446,7 +511,7 @@ function _normalizeScan(scan, editList = null) {
         direction:  ['long', 'short', 'mixed'].includes(scan.direction) ? scan.direction : 'mixed',
         // Shared trade-horizon vocabulary (matches Idea/Kairos/Atlas holdings) — travels
         // with the list so a handed-off candidate carries its horizon. null when unstated.
-        style:      SCAN_STYLES.includes(scan.style) ? scan.style : null,
+        style,
         candidates: clean,
     }
 }
@@ -463,21 +528,7 @@ function _editListByTicker(editList) {
     return map
 }
 
-// Resolve one emitted candidate to a full clean record. A `keep:true` reference
-// (or a bare ticker that matches a prior candidate and carries no new content)
-// is rehydrated from the prior list so untouched names keep their original
-// analysis verbatim instead of being regenerated.
-function _resolveCandidate(c, priorByTicker) {
-    if (!c || typeof c.ticker !== 'string' || !c.ticker.trim()) return null
-    const key = c.ticker.toUpperCase().trim()
-    const isBareReference = !c.analysis && !c.signals && !c.thesis
-    if ((c.keep === true || isBareReference) && priorByTicker.has(key)) {
-        return _cleanCandidate(priorByTicker.get(key))
-    }
-    return _cleanCandidate(c)
-}
-
-function _cleanCandidate(c) {
+function _cleanCandidate(c, style = null) {
     return {
         ticker:    c.ticker.toUpperCase().trim(),
         name:      typeof c.name === 'string' ? c.name : null,
@@ -485,31 +536,64 @@ function _cleanCandidate(c) {
         thesis:    typeof c.thesis === 'string' ? c.thesis : '',
         analysis:  typeof c.analysis === 'string' ? c.analysis : '',
         signals:   (c.signals && typeof c.signals === 'object') ? c.signals : {},
-        score:     _cleanScore(c.score),
+        score:     _cleanScore(c.score, style),
         conviction: cleanConviction(c.conviction),
         sources:   Array.isArray(c.sources) ? c.sources.filter(s => s && s.url) : [],
+        // Grounding provenance (scanner.grounding.js). null on the no-ledger path;
+        // callers stamp 'sourced' | 'validated' | 'kept' when a ledger is present.
+        grounding: null,
     }
 }
 
-// Coerce the transparent scorecard the agent emits into a 0–100 shape, or null
-// when nothing usable is present (the UI then falls back to the conviction chip
-// alone). Each component is clamped to 0–100; a non-numeric field becomes null so
-// a partial card (e.g. total + technical only) still renders what it has.
-const SCORE_KEYS = ['total', 'catalyst', 'technical', 'relativeStrength', 'liquidity']
+// The four scored axes. `total` is NOT one of them — it is computed from these
+// (Argus #2), never trusted from the model.
+const SCORE_COMPONENTS = ['catalyst', 'technical', 'relativeStrength', 'liquidity']
 
-function _cleanScore(raw) {
+// Composite-total weights per trade style. Short horizons lead with technical +
+// relative strength; long horizons lead with the catalyst. Liquidity is a light
+// weighted axis (B1 — a contributor, not a hard gate). Each row sums to 1.
+const SCORE_WEIGHTS = {
+    intraday:    { catalyst: 0.20, technical: 0.40, relativeStrength: 0.30, liquidity: 0.10 },
+    day:         { catalyst: 0.25, technical: 0.35, relativeStrength: 0.30, liquidity: 0.10 },
+    swing:       { catalyst: 0.30, technical: 0.30, relativeStrength: 0.25, liquidity: 0.15 },
+    'long term': { catalyst: 0.35, technical: 0.20, relativeStrength: 0.25, liquidity: 0.20 },
+}
+// null / unknown style → swing (the middle horizon).
+const DEFAULT_WEIGHTS = SCORE_WEIGHTS.swing
+
+// Deterministic composite: a style-weighted mean over the PRESENT axes, renormalized
+// by their weights so a partial card still scores from what it has. Overwrites any
+// model-emitted total — the score is always f(axes), not a free number (A1). Callers
+// only reach here when ≥1 axis is finite, so wsum is always > 0.
+function _composeTotal(components, style) {
+    const w = SCORE_WEIGHTS[style] || DEFAULT_WEIGHTS
+    let sum = 0, wsum = 0
+    for (const k of SCORE_COMPONENTS) {
+        const v = components[k]
+        if (Number.isFinite(v)) { sum += v * w[k]; wsum += w[k] }
+    }
+    return wsum > 0 ? Math.round(sum / wsum) : null
+}
+
+// Coerce the transparent scorecard the agent emits into a 0–100 shape, or null when
+// no axis is present (the UI then falls back to the conviction chip alone). Each axis
+// is clamped to 0–100; a non-numeric axis becomes null so a partial card still renders
+// what it has. `total` is then RECOMPUTED from the present axes by style (Argus #2) —
+// the model's emitted total is discarded. A bare total with no axes is never trusted.
+function _cleanScore(raw, style = null) {
     if (!raw || typeof raw !== 'object') return null
     const out = {}
     let any = false
-    for (const k of SCORE_KEYS) {
+    for (const k of SCORE_COMPONENTS) {
         const v = raw[k]
         // Reject null/''/undefined explicitly — Number(null) and Number('') are 0,
-        // which would fabricate a real score out of an absent field.
+        // which would fabricate a real score out of an absent axis.
         const n = (v === null || v === undefined || v === '') ? NaN : Number(v)
         if (Number.isFinite(n)) { out[k] = Math.min(100, Math.max(0, Math.round(n))); any = true }
         else out[k] = null
     }
-    return any ? out : null
+    if (!any) return null
+    return { total: _composeTotal(out, style), ...out }
 }
 
 // Sort key for ranking: composite total, highest first. Names without a usable

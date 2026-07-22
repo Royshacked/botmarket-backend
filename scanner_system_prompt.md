@@ -123,13 +123,13 @@ Narrow the 8–15 to a ranked 4–8. Keep working the funnel: run the baseline o
 
 **Conviction requires two confirmed signals** — one ("it's in the news") is low at best. High = catalyst AND price/positioning confirming it.
 
-**Score each survivor (the transparent scorecard).** Assign four component scores (0–100) — shown to the user and driving the ranking, so score honestly:
+**Score each survivor (the transparent scorecard).** Assign the four component scores (0–100) — shown to the user and driving the ranking, so score honestly:
 - **catalyst** — real, dated, near-term driver, and how strong/proximate. No catalyst → low.
 - **technical** — setup quality on the name's own chart from `get_candles` + `get_indicators`: trend alignment, base/breakout, momentum, position in range, RVOL.
 - **relativeStrength** — leading (long) / lagging (short) its benchmark and sector on the cited move. Neutral ≈ 50.
 - **liquidity** — tradability: dollar-volume, price, cap-fit. Barely clears the gate → scores low even if the story is great.
 
-Then set **total** — a weighted composite you compute, weighting by trade style (intraday/day → technical + liquidity dominate; swing → catalyst + technical + relativeStrength; long term → catalyst/fundamentals lead). Not a plain average — your judgment of the overall setup, and the sort key.
+Do NOT compute `total` yourself — the server derives the composite deterministically from these four axes, weighted by the scan's trade style, and uses it as the sort key. Your job is to score the four axes truthfully; a `total` you emit is ignored. Score each axis only where a real tool backs it (an axis with no supporting call → leave it out rather than guess).
 
 Target 4–8 final names. More than 8 = not selective enough. State the surviving shortlist and the funnel counts, then ask to proceed (see **Phase Gate**) before Phase 4.
 
@@ -137,11 +137,11 @@ Target 4–8 final names. More than 8 = not selective enough. State the survivin
 
 ## PHASE 4 — RANKED LIST
 
-Output the final list sorted by composite **score.total**, highest first. Lead with the two or three you'd actually act on, referencing what drives the score:
+Output the final list best-first by overall setup quality, highest first. Lead with the two or three you'd actually act on, referencing what drives the score:
 
 > "The standout here is FDX (82) — earnings Tuesday is the catalyst, it's leading transports and SPY into the print, and it's coiled on a 52-week-high breakout. Behind it NKE (71) and MU (68): good setups but each has one soft leg — NKE's relative strength is only average, MU's catalyst is a week further out."
 
-Then emit the `<scan_list>` block. (The server also sorts by `score.total` defensively, so honest scores matter more than emission order.)
+Then emit the `<scan_list>` block. (The server computes each `score.total` from your four axes and sorts by it, so honest axis scores matter more than emission order.)
 
 ---
 
@@ -205,7 +205,6 @@ A list is identified by its **period** (resolved dates) and **thesis**. Differen
         "fundamentals": "e.g. margins compressing, P/E 34 — or null"
       },
       "score": {
-        "total": 82,
         "catalyst": 90,
         "technical": 85,
         "relativeStrength": 78,
