@@ -5,7 +5,7 @@ import {
     _snapToReference, _finalizeProposal, _applyAssessment, _hasEditProposal, _scheduledPatch, _proximityGapMin,
     _nearestZoneWidth, _shouldPulse, _checkCall,
     _timelineEntry, _zonesLabel, _withTimeout, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock,
-    _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _handleAssessToolUses,
+    _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _handleAssessToolUses,
     _reconcilePosition, _rMultiple, _checkPosition, _isStopOut,
     _computeMetrics, _positionGate, _reviewDue, _finalizePositionProposal, _applyPositionAssessment,
 } from '../../monitoring/hermes.monitor.service.js'
@@ -317,6 +317,40 @@ test('handleAssessToolUses: get_cycle_analysis runs a price read on the ladder r
     assert.equal(results[0].content, 'CYCLE READ')
     assert.ok(!results[0].is_error)
 })
+// ── institutional positioning tools (get_short_interest / options / derivatives) ──
+test('institutionalTools: three asset-based positioning tools, NO timeframe required', () => {
+    const tools = _institutionalTools()
+    assert.deepEqual(tools.map(t => t.name), ['get_short_interest', 'get_options_context', 'get_derivatives_context'])
+    for (const t of tools) {
+        assert.deepEqual(t.input_schema.properties, {})          // no args — reads the call's own asset
+        assert.equal(t.input_schema.required, undefined)          // no timeframe gate
+    }
+})
+
+test('handleAssessToolUses: a positioning tool dispatches on the asset with NO timeframe (not ladder-gated)', async () => {
+    const assistant = [{ type: 'tool_use', id: 'p1', name: 'get_short_interest', input: {} }]
+    const seen = []
+    const results = await _handleAssessToolUses(call(), assistant, ['15min'], {
+        getShortInterest: async (sym) => { seen.push(sym); return 'SI: 12% float, 3 days to cover' },
+    })
+    assert.deepEqual(seen, ['TSLA'])                              // read the call's asset, no timeframe
+    assert.equal(results[0].content, 'SI: 12% float, 3 days to cover')
+    assert.ok(!results[0].is_error)                              // NOT rejected for a missing ladder rung
+})
+
+test('handleAssessToolUses: options + derivatives positioning reads route to their providers', async () => {
+    const assistant = [
+        { type: 'tool_use', id: 'p2', name: 'get_options_context', input: {} },
+        { type: 'tool_use', id: 'p3', name: 'get_derivatives_context', input: {} },
+    ]
+    const results = await _handleAssessToolUses(call(), assistant, ['15min'], {
+        getOptionsContext:     async () => 'PUT/CALL 0.8, IV 45%',
+        getDerivativesContext: async () => 'funding +0.01%, OI up',
+    })
+    assert.equal(results[0].content, 'PUT/CALL 0.8, IV 45%')
+    assert.equal(results[1].content, 'funding +0.01%, OI up')
+})
+
 test('applyAssessment: let_expire on a zone trip does NOT expire — call keeps watching, no card', () => {
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), call().entry_zones[0], { verdict: 'let_expire', next_check_min: 15 }, NOW, 'zone_trip')
     assert.equal(set.status, 'watching')          // downgraded to stand_aside → watching, not expired
