@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveAgentStream, TRADE_HORIZONS } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveAgentStream, resolveMainAccountId, TRADE_HORIZONS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS_FOR_MODE, buildKairosToolHandlers } from './kairos.tools.js'
 import { normalizeMode } from './kairos.modes.js'
@@ -40,7 +40,7 @@ export const kairosAgentService = {
 }
 
 async function chatStream({
-    messages, userPrompt, chatState = emptyKairosState(), accounts = [], seed = null, brokerContext = null,
+    messages, userPrompt, chatState = emptyKairosState(), accounts = [], mainAccountId = null, seed = null, brokerContext = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onChart, onToolStart, onReasoning, onPhase, signal,
 }) {
@@ -50,7 +50,7 @@ async function chatStream({
     const tools        = KAIROS_TOOLS_FOR_MODE(mode)
     const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
-    const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext, mode, seed)
+    const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext, mode, seed, mainAccountId)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
     logger.info(LOG, 'chatStream start', { userPrompt, messageCount: builtMessages.length, model, provider, accounts: accounts?.length ?? 0 })
@@ -205,7 +205,8 @@ export async function _resolveVenue(broker, userId, accountId, asset, deps = {})
 // stored. `chatState` (build conversation + draft) rides along so an edit can reopen the chat.
 export async function _finalizeCall(call, { userId = null, accounts = [], mainAccountId = null, updateId = null, chatState = undefined } = {}) {
     const list = Array.isArray(accounts) ? accounts.filter(a => a && a.id != null) : []
-    const main = list.find(a => String(a.id) === String(mainAccountId)) ?? list[0] ?? null
+    const mainId = resolveMainAccountId(list, mainAccountId)   // shared rule — matches the build-chat MAIN tag
+    const main = list.find(a => String(a.id) === mainId) ?? null
     const broker = main?.broker ?? null
 
     const { broker_symbol, basis_offset } = await _resolveVenue(broker, userId, main?.id ?? null, call.asset)
@@ -226,7 +227,7 @@ export async function _finalizeCall(call, { userId = null, accounts = [], mainAc
 }
 
 // ─── Prompt / messages ────────────────────────────────────────────────────────
-function _buildSystemPrompt(chatState, accounts, brokerContext = null, mode = normalizeMode(), seed = null) {
+function _buildSystemPrompt(chatState, accounts, brokerContext = null, mode = normalizeMode(), seed = null, mainAccountId = null) {
     const asset = chatState?.active_asset || 'none'
     const draft = chatState?.draft
         ? `\nDraft call so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
@@ -254,7 +255,7 @@ function _buildSystemPrompt(chatState, accounts, brokerContext = null, mode = no
 CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar or setting valid_until.
 ACTIVE MODE: ${mode} — build this call THROUGH the ${mode} lens (committed; do not switch lenses mid-build).
 CONVERSATION CONTEXT:
-Active asset: ${asset}${seedBlock}${draft}${buildPositionsSection(brokerContext)}${_buildAccountsSection(accounts)}`
+Active asset: ${asset}${seedBlock}${draft}${buildPositionsSection(brokerContext)}${_buildAccountsSection(accounts, mainAccountId)}`
 
     const modeModule = (_modePrompt[mode] ?? _modePrompt.discretionary)()
     return [
@@ -264,12 +265,15 @@ Active asset: ${asset}${seedBlock}${draft}${buildPositionsSection(brokerContext)
     ]
 }
 
-function _buildAccountsSection(accounts) {
+function _buildAccountsSection(accounts, mainAccountId = null) {
     if (!Array.isArray(accounts) || accounts.length === 0) {
         return '\n\nACCOUNTS: none marked. Tell the user to mark a trading account (paper / live / manual) at the bank icon — the call can\'t be generated or monitored without one.'
     }
-    const lines = buildAccountLines(accounts)
-    return `\n\nACCOUNTS (marked at the bank icon — the call will bind here):\n${lines.join('\n')}`
+    const lines = buildAccountLines(accounts, mainAccountId)
+    const mainNote = accounts.length > 1
+        ? ' The account tagged ← MAIN is the one the call binds to — its broker sets the venue (symbol + price space) the call is executed and monitored in.'
+        : ''
+    return `\n\nACCOUNTS (marked at the bank icon — the call will bind here):\n${lines.join('\n')}${mainNote}`
 }
 
 function _buildMessages({ messages, userPrompt }) {

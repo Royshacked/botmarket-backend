@@ -322,13 +322,13 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], clientTime = null, model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], mainAccountId = null, clientTime = null, model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, signal }) {
     const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
     const tools        = TOOLS
     const toolHandlers = _buildToolHandlers(onChart)
 
-    const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts, clientTime)
+    const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts, clientTime, mainAccountId)
     const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
 
     logger.info(LOG, 'chatStream start', {
@@ -381,7 +381,7 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
     return { reply, analysisState: updatedState, phase: capturedPhase, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = [], clientTime = null) {
+function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = [], clientTime = null, mainAccountId = null) {
     const asset   = analysisState?.structured_state?.active_asset || 'none'
     const summary = analysisState?.recent_chat_summary || 'No prior context.'
     const pt      = analysisState?.structured_state?.pending_trade
@@ -402,7 +402,7 @@ CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this mont
 ${_buildTimeSection(clientTime)}
 CONVERSATION CONTEXT:
 ${summary}
-Active asset: ${asset}${stateSection}${buildPositionsSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts)}`
+Active asset: ${asset}${stateSection}${buildPositionsSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts, mainAccountId)}`
 
     return [
         { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },
@@ -442,7 +442,7 @@ export function _formatClientTime(clientTime) {
     }
 }
 
-function _buildIdeaAccountsSection(accounts) {
+function _buildIdeaAccountsSection(accounts, mainAccountId = null) {
     if (!Array.isArray(accounts) || accounts.length === 0) {
         // No account is selected. A trade can't be monitored or executed without one
         // (paper or live), so tell the user to pick one in the account selector before
@@ -450,8 +450,11 @@ function _buildIdeaAccountsSection(accounts) {
         // without a chosen account.
         return `\n\nIDEA ACCOUNTS: none selected. Before finalizing or activating this trade, tell the user they need to choose a trading account (paper or live) in the account selector — the idea can't be monitored or executed without one.`
     }
-    const lines = buildAccountLines(accounts)
-    return `\n\nIDEA ACCOUNTS (the user plans to execute this trade on):\n${lines.join('\n')}`
+    const lines = buildAccountLines(accounts, mainAccountId)
+    const mainNote = accounts.length > 1
+        ? ' The account tagged ← MAIN is the one the trade binds to — its broker sets the venue the trade is executed and monitored in.'
+        : ''
+    return `\n\nIDEA ACCOUNTS (the user plans to execute this trade on):\n${lines.join('\n')}${mainNote}`
 }
 
 function _buildMessages({ messages, userPrompt, analysisState }) {

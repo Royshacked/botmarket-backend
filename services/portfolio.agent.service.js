@@ -188,7 +188,7 @@ function makeCoverageHandler(userId) {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const normalized   = _buildMessages(messages)
     const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
@@ -198,7 +198,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     // OpenAI provider flattens this block array back to a plain string.
     const today = new Date().toISOString().slice(0, 10)
     const dynamicSections = [`CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.`]
-    if (ideaAccounts.length > 0) dynamicSections.push(_buildAccountsSection(ideaAccounts))
+    if (ideaAccounts.length > 0) dynamicSections.push(_buildAccountsSection(ideaAccounts, mainAccountId))
     if (portfolioId && portfolioIdeas.length > 0) dynamicSections.push(_buildPortfolioContext(portfolioId, portfolioIdeas))
     if (mandate)    dynamicSections.push(_buildMandateSection(mandate))
     if (thesis)     dynamicSections.push(_buildThesisSection(thesis))
@@ -390,9 +390,12 @@ function _buildPortfolioContext(portfolioId, ideas) {
     return `${header}\n${ideaLines}`
 }
 
-function _buildAccountsSection(accounts) {
-    const lines = buildAccountLines(accounts)
-    return `PORTFOLIO ACCOUNTS (the user plans to execute ideas from this portfolio on):\n${lines.join('\n')}\n\nWhen suggesting position sizes, use these account balances to recommend concrete allocations. If a main account is identified by a larger balance or context, use it as the reference for scaling other accounts.`
+function _buildAccountsSection(accounts, mainAccountId = null) {
+    const lines = buildAccountLines(accounts, mainAccountId)
+    const mainNote = accounts.length > 1
+        ? ' The account tagged ← MAIN is the reference account — use it as the base for scaling the other accounts. (If none is tagged, use the largest balance or context to pick the reference.)'
+        : ''
+    return `PORTFOLIO ACCOUNTS (the user plans to execute ideas from this portfolio on):\n${lines.join('\n')}\n\nWhen suggesting position sizes, use these account balances to recommend concrete allocations.${mainNote}`
 }
 
 function _buildMandateSection(mandate) {

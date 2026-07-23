@@ -13,7 +13,7 @@ import { resolvePortfolioReviewCard } from '../chat/chat.service.js'
 const LOG = '[portfolio:controller]'
 
 export async function streamPortfolio(req, res) {
-    const { messages, ideaAccounts, portfolioId, portfolioIdeas, threadId, model, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
+    const { messages, ideaAccounts, mainAccountId, portfolioId, portfolioIdeas, threadId, model, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
 
     const validatedMessages = parseChatMessages(messages)
     if (validatedMessages.error) {
@@ -21,6 +21,8 @@ export async function streamPortfolio(req, res) {
     }
 
     const validatedAccounts = parseIdeaAccounts(ideaAccounts)
+    // Starred main account (bank icon) → the reference account Atlas sizes the others against.
+    const validatedMainAccountId = mainAccountId != null ? String(mainAccountId) : null
 
     await streamAgentResponse(req, res, {
         log: LOG,
@@ -39,6 +41,7 @@ export async function streamPortfolio(req, res) {
             const result = await portfolioAgentService.chatStream({
                 messages,
                 ideaAccounts: validatedAccounts,
+                mainAccountId: validatedMainAccountId,
                 portfolioId:   portfolioId   ?? null,
                 portfolioIdeas: Array.isArray(portfolioIdeas) ? portfolioIdeas : [],
                 portfolioState,

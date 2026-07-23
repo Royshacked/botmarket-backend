@@ -33,6 +33,7 @@ export async function streamKairos(req, res) {
                 userPrompt:    parsed.userPrompt,
                 chatState:     parsed.chatState ?? emptyKairosState(),
                 accounts:      parsed.accounts,
+                mainAccountId: parsed.mainAccountId,
                 seed:          parsed.seed,
                 brokerContext,
                 model:         routing.model,
@@ -224,21 +225,24 @@ function parseStreamBody(body) {
     }
 
     const acctList = Array.isArray(accounts) ? accounts.filter(a => a && typeof a === 'object') : []
+    // Which marked account is starred main (bank icon) — lets Kairos tell the user which account
+    // the call will bind to during the build, matching what Generate resolves. Normalized to string.
+    const mainAccountId = body?.mainAccountId != null ? String(body.mainAccountId) : null
 
     if (messages !== undefined && messages !== null) {
         if (!Array.isArray(messages)) return { error: 'messages must be an array' }
         // Empty messages with a userPrompt fallback is allowed here (as on the idea endpoint).
         if (messages.length === 0) {
-            if (trimmedPrompt) return { userPrompt: trimmedPrompt, chatState: state, accounts: acctList, seed }
+            if (trimmedPrompt) return { userPrompt: trimmedPrompt, chatState: state, accounts: acctList, mainAccountId, seed }
             return { error: 'messages must be a non-empty array' }
         }
         // Use the same strict validator as the idea/portfolio/scanner endpoints (was inlined here).
         const validated = parseChatMessages(messages)
         if (validated.error) return { error: validated.error }
         const trimmed = validated.messages.slice(-MAX_RECENT_CHAT_TURNS * 2)
-        return { userPrompt: trimmedPrompt || undefined, messages: trimmed, chatState: state, accounts: acctList, seed }
+        return { userPrompt: trimmedPrompt || undefined, messages: trimmed, chatState: state, accounts: acctList, mainAccountId, seed }
     }
 
-    if (trimmedPrompt) return { userPrompt: trimmedPrompt, chatState: state, accounts: acctList, seed }
+    if (trimmedPrompt) return { userPrompt: trimmedPrompt, chatState: state, accounts: acctList, mainAccountId, seed }
     return { error: 'Request must include messages or userPrompt' }
 }
