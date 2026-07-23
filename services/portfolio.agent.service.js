@@ -1,7 +1,7 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw } from '../providers/yahoofinance.provider.js'
-import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMacroSnapshot } from '../providers/fmp.provider.js'
+import { getFundamentals, getEarningsCalendar, getEarnings, getMacroSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
 import { formatWorkspaceLine } from '../api/portfolio/portfolioMode.util.js'
@@ -61,28 +61,6 @@ const TOOLS = [
             type: 'object',
             properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
             required: ['ticker'],
-        },
-    },
-    {
-        name: 'screen_candidates',
-        description: 'Discover names across the US universe that fit a mandate shape, instead of recalling tickers from memory. Screen by sector, industry, market-cap band (marketCapMoreThan/LowerThan), price band, beta band (betaMoreThan/LowerThan — a proxy for defensive vs cyclical), dividend (dividendMoreThan, absolute $/yr), volume, country, or isEtf. Returns a compact list (symbol, name, sector, mcap, beta, price, dividend). This is the Phase-4 discovery leg — then qualify each hit with get_fundamentals; the screener does not judge quality. All filters optional; combine a few to narrow. Omitted filters are unconstrained.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                sector:            { type: 'string', description: 'e.g. Technology, Healthcare, Energy, Financial Services, Utilities' },
-                industry:          { type: 'string', description: 'optional finer bucket, e.g. Semiconductors' },
-                marketCapMoreThan: { type: 'number', description: 'min market cap in USD, e.g. 10000000000 for $10B+' },
-                marketCapLowerThan:{ type: 'number', description: 'max market cap in USD' },
-                priceMoreThan:     { type: 'number', description: 'min share price' },
-                priceLowerThan:    { type: 'number', description: 'max share price' },
-                betaMoreThan:      { type: 'number', description: 'min beta (higher = more cyclical/volatile)' },
-                betaLowerThan:     { type: 'number', description: 'max beta (lower = more defensive)' },
-                dividendMoreThan:  { type: 'number', description: 'min annual dividend per share in USD' },
-                volumeMoreThan:    { type: 'number', description: 'min average volume (liquidity floor)' },
-                country:           { type: 'string', description: 'e.g. US (default universe is US)' },
-                isEtf:             { type: 'boolean', description: 'true to screen ETFs instead of single stocks' },
-                limit:             { type: 'number', description: 'max results 1–50 (default 25)' },
-            },
         },
     },
     {
@@ -172,9 +150,6 @@ const TOOL_HANDLERS = {
     get_fundamentals: makeToolHandler('get_fundamentals',
         ({ ticker }) => getFundamentals(ticker),
         (err, { ticker }) => `Could not fetch fundamentals for ${ticker}: ${err.message}`, LOG),
-    screen_candidates: makeToolHandler('screen_candidates',
-        (filters) => screenCandidates(filters),
-        (err) => `Could not run screen: ${err.message}`, LOG),
     get_macro_snapshot: makeToolHandler('get_macro_snapshot',
         () => getMacroSnapshot(),
         (err) => `Could not fetch macro snapshot: ${err.message}`, LOG),
