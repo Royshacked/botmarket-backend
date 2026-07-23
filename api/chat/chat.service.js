@@ -66,7 +66,26 @@ export async function getOrCreateConversation(userIdA, userIdB) {
     return { conv: stripId(conv), created: true }
 }
 
-export async function sendMessage(conversationId, senderId, content, type = 'text', payload = null) {
+// ── The one card contract (shared by users + every agent) ─────────────────────
+// "Actionable" is a property of the MESSAGE, not the sender: a message renders the do/dismiss
+// row and carries a resolution lifecycle IFF it has `actions`. Plain DMs and plain bot lines
+// pass actions=null and are inert. The two-button rule ("do something" + dismiss) is defined
+// once, here, so all producers stay uniform.
+export const cardActions = (label) => ({ primary: { label }, dismiss: true })
+
+// Pure: derive the lifecycle fields a message doc carries from its `actions`. Single source of
+// the rule, shared by the writer below (and unit-tested without a DB).
+export function cardLifecycle(actions) {
+    const hasActions = !!actions && typeof actions === 'object'
+    return { actions: hasActions ? actions : null, status: hasActions ? 'pending' : null }
+}
+
+// Pure: normalize a requested resolution to the two terminal states.
+export function normalizeResolveStatus(status) {
+    return status === 'done' ? 'done' : 'dismissed'
+}
+
+export async function sendMessage(conversationId, senderId, content, type = 'text', payload = null, actions = null) {
     const db  = await getDb()
     const msg = {
         id:             `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -75,6 +94,9 @@ export async function sendMessage(conversationId, senderId, content, type = 'tex
         content,
         type,
         payload:        payload ?? null,
+        ...cardLifecycle(actions),   // { actions, status } — same rule for user DMs and agent cards
+        resolvedAt:     null,
+        resolveOutcome: null,
         createdAt:      Date.now(),
         readAt:         null,
     }
@@ -87,20 +109,32 @@ export async function sendMessage(conversationId, senderId, content, type = 'tex
 }
 
 /**
- * The single function all platform features call to notify a user from the bot.
- * Writes to DB then pushes a WS event to the user if they are connected.
+ * Post a bot CARD to a user — the one path every agent/monitor notification funnels through.
+ * `actions` (optional) makes it a do/dismiss card with a resolution lifecycle; omit for a plain
+ * bot line (e.g. Axl's chat replies). Resolves the per-agent bot conversation, writes via the
+ * shared `sendMessage`, and pushes the WS event. Never throws (logs + returns null) — so a broker
+ * hiccup in a monitor loop can't take the loop down.
  */
-export async function sendBotMessage(userId, content, type = 'text', payload = null, botId = BOT_USER_ID) {
+export async function postBotCard({ userId, content, type = 'text', payload = null, botId = BOT_USER_ID, actions = null }) {
+    if (!userId) return null
     try {
         const bot = isBot(botId) ? String(botId) : BOT_USER_ID
         const { conv } = await getOrCreateConversation(userId, bot)
-        const msg = await sendMessage(conv.id, bot, content, type, payload)
+        const msg = await sendMessage(conv.id, bot, content, type, payload, actions)
         await _tryEmit(String(userId), 'new_message', msg)
         return msg
     } catch (err) {
-        logger.error(LOG, 'sendBotMessage failed', err)
+        logger.error(LOG, 'postBotCard failed', err)
         return null
     }
+}
+
+/**
+ * Back-compat thin alias — a plain (actionless) bot message. Prefer `postBotCard` (with `actions`)
+ * for anything the user should act on; this stays for plain bot lines like Axl's chat replies.
+ */
+export async function sendBotMessage(userId, content, type = 'text', payload = null, botId = BOT_USER_ID) {
+    return postBotCard({ userId, content, type, payload, botId, actions: null })
 }
 
 /**
@@ -266,25 +300,40 @@ export async function markRead(conversationId, userId) {
     return { ok: true }
 }
 
-// Mark a single message as dismissed (used by the invalidation-alert bubble so the
-// user's choice persists — the message stays but renders acknowledged). Message-level
-// only; it never touches the idea's invalidation latch, so a re-armed idea still emits
-// a fresh new alert message.
-export async function dismissMessage(conversationId, messageId, userId, outcome = null) {
+/**
+ * Resolve a card's lifecycle — the ONE function every card type routes through (replaces the old
+ * per-type split). `status` is 'done' (the user acted) or 'dismissed' (acknowledged, no action);
+ * `outcome` records WHICH action so the collapsed card reads accurately (confirmed | editing |
+ * closing | deleted…). Writes the uniform top-level status/resolvedAt/resolveOutcome AND, during
+ * the FE transition, the legacy `dismissed`/`dismissOutcome` so a not-yet-updated client still
+ * collapses the card. Message-level only — it never touches the idea/call latch, so a re-armed
+ * idea still emits a fresh alert.
+ */
+export async function resolveMessage(conversationId, messageId, userId, { status = 'dismissed', outcome = null } = {}) {
     const db  = await getDb()
     const uid = String(userId)
 
     const conv = await db.collection(CONVS).findOne({ id: conversationId })
     if (!conv || !conv.participants.includes(uid)) return { ok: false }
 
-    // `dismissed` collapses the card to an acknowledged state; `dismissOutcome` records WHICH
-    // action the user took (dismissed | editing | closing…) so the collapsed card reads "handled"
-    // accurately rather than always "Dismissed".
+    const st = normalizeResolveStatus(status)
     await db.collection(MSGS).updateOne(
         { id: messageId, conversationId },
-        { $set: { dismissed: true, ...(outcome ? { dismissOutcome: String(outcome) } : {}) } }
+        { $set: {
+            status:         st,
+            resolvedAt:     Date.now(),
+            resolveOutcome: outcome ? String(outcome) : null,
+            // transitional dual-write: legacy fields the pre-refactor client reads (drop once FE ships)
+            dismissed:      true,
+            ...(outcome ? { dismissOutcome: String(outcome) } : {}),
+        } }
     )
     return { ok: true }
+}
+
+/** Back-compat alias — a plain dismiss (status='dismissed'). Prefer resolveMessage. */
+export async function dismissMessage(conversationId, messageId, userId, outcome = null) {
+    return resolveMessage(conversationId, messageId, userId, { status: 'dismissed', outcome })
 }
 
 /**
@@ -314,7 +363,16 @@ export async function resolvePortfolioReviewCard(userId, portfolioId, { nextRevi
 
         await db.collection(MSGS).updateOne(
             { id: msg.id },
-            { $set: { 'payload.resolved': true, 'payload.outcome': outcome, 'payload.nextReviewAt': nextReviewAt } }
+            { $set: {
+                // Uniform top-level lifecycle (an 'updated' review = the user acted → done).
+                status:         outcome === 'updated' ? 'done' : 'dismissed',
+                resolvedAt:     Date.now(),
+                resolveOutcome: outcome,
+                // legacy payload fields (transitional — the review bubble still reads these)
+                'payload.resolved':     true,
+                'payload.outcome':      outcome,
+                'payload.nextReviewAt': nextReviewAt,
+            } }
         )
         return { ok: true, messageId: msg.id }
     } catch (err) {

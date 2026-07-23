@@ -37,7 +37,7 @@
  */
 
 import { evaluateTree }                     from './monitor.orchestrator.js'
-import { sendBotMessage }                   from '../api/chat/chat.service.js'
+import { postBotCard, cardActions }         from '../api/chat/chat.service.js'
 import { resolveEntryTimeframe }            from './monitorUtils.js'
 import { logger }                           from '../services/logger.service.js'
 import { ENTITIES }                         from '../services/entity/entityCollection.js'
@@ -254,14 +254,21 @@ function _driftReason(edge, level, anchor) {
 async function _notify(idea, status, edge, level, anchor, reason, inPosition) {
     if (!idea.userId) return
     const content = `Invalidation on ${idea.asset}: ${reason}`
-    await sendBotMessage(idea.userId, content, 'invalidation_alert', {
-        ideaId:     idea.id,
-        asset:      idea.asset,
-        status,
-        edge,
-        level,
-        anchor:     anchor ?? null,
-        reason,
-        inPosition,
-    }, 'idea')   // invalidation alerts are Idea's — post under the Idea bot
+    await postBotCard({
+        userId:  idea.userId,
+        content,
+        type:    'invalidation_alert',
+        payload: {
+            ideaId:     idea.id,
+            asset:      idea.asset,
+            status,
+            edge,
+            level,
+            anchor:     anchor ?? null,
+            reason,
+            inPosition,
+        },
+        botId:   'idea',   // invalidation alerts are Idea's — post under the Idea bot
+        actions: cardActions('Edit in chat'),
+    })
 }

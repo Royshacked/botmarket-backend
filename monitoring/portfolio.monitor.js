@@ -16,7 +16,7 @@
  */
 
 import { portfolioChatService } from '../api/portfolio/portfolioChat.service.js'
-import { sendBotMessage }       from '../api/chat/chat.service.js'
+import { postBotCard, cardActions } from '../api/chat/chat.service.js'
 import { logger }               from '../services/logger.service.js'
 
 const LOG = '[portfolio.monitor]'
@@ -56,15 +56,22 @@ async function _notify(review) {
     const modeLabel = mode ? mode.charAt(0).toUpperCase() + mode.slice(1) : ''
     const scope     = [modeLabel, account].filter(Boolean).join(' · ')
     const content = `Time to review your portfolio "${portfolioName}"${scope ? ` (${scope})` : ''}. ${flagged}`
-    await sendBotMessage(userId, content, 'portfolio_review', {
-        portfolioId,
-        portfolioName,
-        mode:    mode    ?? null,
-        account: account ?? null,
-        reviewCadence,
-        lastReviewAt: lastReviewAt ?? null,
-        triggers,
-    }, 'portfolio')   // portfolio reviews are Atlas's — post under the Atlas (portfolio) bot
+    await postBotCard({
+        userId,
+        content,
+        type:    'portfolio_review',
+        payload: {
+            portfolioId,
+            portfolioName,
+            mode:    mode    ?? null,
+            account: account ?? null,
+            reviewCadence,
+            lastReviewAt: lastReviewAt ?? null,
+            triggers,
+        },
+        botId:   'portfolio',   // portfolio reviews are Atlas's — post under the Atlas (portfolio) bot
+        actions: cardActions('Review portfolio'),
+    })
 
     // Mark as notified so we don't spam on every tick.
     await portfolioChatService.setPortfolioLifecycle(portfolioId, userId, { notifiedAt: Date.now() })

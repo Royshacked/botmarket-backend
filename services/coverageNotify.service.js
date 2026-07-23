@@ -1,9 +1,9 @@
 // Coverage-event notifications (P5) — the Analyst bot posts to social chat when the coverage monitor
 // reaches a material verdict on a living thesis (target hit, thesis broken, validating, diverging).
-// Mirrors tradeNotify: a PURE builder (unit-tested) + a thin async wrapper over sendBotMessage. Each
+// Mirrors tradeNotify: a PURE builder (unit-tested) + a thin async wrapper over postBotCard. Each
 // agent owns its own notifications (Idea→invalidation, Kairos→readiness, Analyst→coverage events).
 
-import { sendBotMessage } from '../api/chat/chat.service.js'
+import { postBotCard, cardActions } from '../api/chat/chat.service.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[coverageNotify]'
@@ -39,6 +39,7 @@ export function buildCoverageEvent(coverage, verdict) {
         type:    'coverage_event',
         payload: { kind: 'coverage', symbol: sym, coverageId: coverage.id, state, edge_gone: !!verdict.edge_gone },
         botId:   'analyst',
+        actions: cardActions('Open coverage'),
     }
 }
 
@@ -47,7 +48,7 @@ export async function notifyCoverageEvent(coverage, verdict) {
     const card = buildCoverageEvent(coverage, verdict)
     if (!card) return null
     try {
-        return await sendBotMessage(card.userId, card.content, card.type, card.payload, card.botId)
+        return await postBotCard(card)
     } catch (err) {
         logger.warn(LOG, 'notify failed', err.message)
         return null

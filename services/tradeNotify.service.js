@@ -1,8 +1,8 @@
 /**
  * Confirm-entry + Kairos-call notifications to social chat.
  *
- * "Major event" cards posted through the same bot-message channel as invalidation_alert /
- * manualNotify (sendBotMessage → chat_messages → WS). These are NOTIFY-AND-ROUTE cards: the
+ * "Major event" cards posted through the same bot-card channel as invalidation_alert /
+ * manualNotify (postBotCard → chat_messages → WS). These are NOTIFY-AND-ROUTE cards: the
  * card is the alert + a clickable preview; the existing action UI is where the user actually
  * acts (paper/live entry → OrderConfirmDialog; a Kairos call → its pop-out detail window, which
  * hosts Confirm-entry / Accept-edit / Delete).
@@ -11,12 +11,12 @@
  * paper/live entry confirmation (was a silent modal) and Kairos readiness/expiry (was a poll
  * card + a silent 'expired' terminal state).
  *
- * Shape is split into pure builders (unit-tested — the { userId, content, type, payload, botId }
- * a card sends) and thin async wrappers that hand the builder's output to sendBotMessage.
+ * Shape is split into pure builders (unit-tested — the { userId, content, type, payload, botId,
+ * actions } a card sends) and thin async wrappers that hand the builder's output to postBotCard.
  * Call docs store the owner as `user_id` (see normalizeCall), NOT `userId`.
  */
 
-import { sendBotMessage } from '../api/chat/chat.service.js'
+import { postBotCard, cardActions } from '../api/chat/chat.service.js'
 import { logger }         from './logger.service.js'
 
 const LOG = '[tradeNotify]'
@@ -41,6 +41,7 @@ export function buildIdeaEntryConfirm(idea, note = null) {
         type:    'entry_confirm',
         payload: { kind: 'idea', ideaId: idea?.id, asset: idea?.asset, direction: idea?.direction ?? null, note: note ?? null },
         botId:   'idea',
+        actions: cardActions('Confirm order'),
     }
 }
 
@@ -58,6 +59,7 @@ export function buildCallReady(call, assessment = null) {
         type:    'entry_confirm',
         payload: { kind: 'call', callId: call?.id, asset: call?.asset, direction: call?.bias ?? null },
         botId:   'kairos',
+        actions: cardActions('Open the call'),
     }
 }
 
@@ -72,6 +74,7 @@ export function buildCallExpiry(call, kind, why = null) {
         type:    'call_expiry',
         payload: { callId: call?.id, asset: call?.asset, kind, why: why ?? null },
         botId:   'kairos',
+        actions: cardActions('Open the call'),
     }
 }
 
@@ -91,6 +94,7 @@ export function buildCallManage(call, card) {
         type:    'call_manage',
         payload: { callId: call?.id, asset, verdict: verb ?? null, read: card?.read ?? null },
         botId:   'kairos',
+        actions: cardActions('Review'),
     }
 }
 
@@ -110,6 +114,7 @@ export function buildCallReentry(call, read = null, outcome = null) {
         type:    'call_reentry',
         payload: { callId: call?.id, asset, exit_price: Number.isFinite(px) ? px : null, why: read?.why ?? null },
         botId:   'kairos',
+        actions: cardActions('Review re-entry'),
     }
 }
 
@@ -117,8 +122,8 @@ export function buildCallReentry(call, read = null, outcome = null) {
 
 async function _post(card, tag) {
     if (!card.userId) return null
-    logger.info(LOG, `${tag} → user ${card.userId}: ${card.payload.asset}`)
-    return sendBotMessage(card.userId, card.content, card.type, card.payload, card.botId)
+    logger.info(LOG, `${tag} → user ${card.userId}`)
+    return postBotCard(card)   // card = { userId, content, type, payload, botId, actions }
 }
 
 export async function notifyIdeaEntryConfirm(idea, note = null) {
