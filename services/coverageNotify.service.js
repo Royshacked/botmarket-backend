@@ -19,16 +19,18 @@ export function buildCoverageEvent(coverage, verdict) {
     const pt  = coverage.price_target?.value
     const state = verdict.state
 
+    // Body carries NO brand prefix — the card's agent tag (FE: CardAgentTag → AGENTS.analyst)
+    // already reads "Prometheus", same as the Idea/Atlas cards. Keep the copy a plain sentence.
     let content
     if (state === 'target_hit') {
-        content = `The Analyst — ${sym} reached our price target${pt != null ? ` (${pt})` : ''}`
+        content = `${sym} reached our price target${pt != null ? ` (${pt})` : ''}`
             + (verdict.edge_gone ? ' — the Street has caught up, so the edge is gone. Consider harvesting.' : '.')
     } else if (state === 'thesis_broken') {
-        content = `The Analyst — ${sym} thesis BROKEN: ${verdict.reason}.`
+        content = `${sym} thesis BROKEN: ${verdict.reason}.`
     } else if (state === 'validating') {
-        content = `The Analyst — ${sym} thesis is playing out: ${verdict.reason}.`
+        content = `${sym} thesis is playing out: ${verdict.reason}.`
     } else if (state === 'diverging') {
-        content = `The Analyst — ${sym}: ${verdict.reason} — we're increasingly contrarian; worth a re-look.`
+        content = `${sym}: ${verdict.reason} — we're increasingly contrarian; worth a re-look.`
     } else {
         return null   // 'stable' and anything else → no notification
     }
