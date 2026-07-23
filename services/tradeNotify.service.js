@@ -74,7 +74,7 @@ export function buildCallExpiry(call, kind, why = null) {
         type:    'call_expiry',
         payload: { callId: call?.id, asset: call?.asset, kind, why: why ?? null },
         botId:   'kairos',
-        actions: cardActions('Open the call'),
+        actions: cardActions('Edit call'),
     }
 }
 
