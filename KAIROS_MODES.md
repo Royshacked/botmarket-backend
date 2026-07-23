@@ -257,6 +257,22 @@ CALIBRATION (the high-bar threshold) is tuned EMPIRICALLY once the 3 modes run �
 (a suggestion, never automatic), so early noise is low-harm. Build the hook in K1; tune later.
 ```
 
+## FE mode selection (DECIDED) — 3 chips + badge, no heavyweight selector
+
+```
+A row of 3 chips (discretionary · smc · institutional) + an active-mode badge. ONE control does all:
+  - direct chat  : user taps a chip (explicit, immediate — takes effect THIS turn)
+  - Argus/scan   : chip pre-set to recommended_mode; user confirms/re-taps
+  - override     : tap another chip anytime
+  - lens_fit     : "weak fit — rebuild in smc?" suggestion, tapped → flips chip + rebuilds
+  - wire         : active chip = chatState.mode on every request
+Over full selector: chips ARE picker+override+fit-target (DRY). Over conversational: no NL ambiguity,
+lands this turn (conversational only lands next turn — tools/prompt fixed once a turn starts).
+DEFERRED (soft): per-chip feasibility warning (needs asset_profile) — feasibility is warn-never-block.
+BACKEND ALREADY DONE: accepts chatState.mode, persists mode on the call (edit relights the right chip),
+emits lens_fit. Purely a FRONTEND piece (botmarket-frontend): 3 chips reading call.mode/call.lens_fit + setting chatState.mode.
+```
+
 ## Build sequence
 ```
 K1  Mode scaffolding (foundation; delivers points 1,2,3): `mode` field + 3 prompt profiles +
