@@ -5,7 +5,7 @@ import {
     _snapToReference, _finalizeProposal, _applyAssessment, _hasEditProposal, _scheduledPatch, _proximityGapMin,
     _nearestZoneWidth, _shouldPulse, _checkCall,
     _timelineEntry, _zonesLabel, _withTimeout, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock,
-    _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _handleAssessToolUses,
+    _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses,
     _reconcilePosition, _rMultiple, _checkPosition, _isStopOut,
     _computeMetrics, _positionGate, _reviewDue, _finalizePositionProposal, _applyPositionAssessment,
 } from '../../monitoring/hermes.monitor.service.js'
@@ -349,6 +349,18 @@ test('handleAssessToolUses: options + derivatives positioning reads route to the
     })
     assert.equal(results[0].content, 'PUT/CALL 0.8, IV 45%')
     assert.equal(results[1].content, 'funding +0.01%, OI up')
+})
+
+// ── mode-lens nudge (injected into the assessment user turn) ──────────────────
+test('modeLensBlock: discretionary/absent → no nudge; smc → structure lens; institutional → positioning lens', () => {
+    assert.equal(_modeLensBlock({ mode: 'discretionary' }), '')
+    assert.equal(_modeLensBlock({}), '')                     // absent mode = classical price action = base prompt
+    const smc = _modeLensBlock({ mode: 'smc' })
+    assert.match(smc, /SMC LENS/)
+    assert.match(smc, /get_structure/)                       // points at the SMC re-verify tools
+    const inst = _modeLensBlock({ mode: 'institutional' })
+    assert.match(inst, /INSTITUTIONAL LENS/)
+    assert.match(inst, /get_short_interest/)                 // points at the positioning re-verify tools
 })
 
 test('applyAssessment: let_expire on a zone trip does NOT expire — call keeps watching, no card', () => {

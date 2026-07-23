@@ -246,6 +246,17 @@ export function _institutionalTools() {
     ]
 }
 
+// Mode-lens nudge injected into the assessment user turn. The base prompt reads like a discretionary
+// price-action trader, and the SMC / institutional tools are already wired in per-mode — but a plain
+// `mode` field in the CALL JSON doesn't tell the model to REASON through that lens or actually CALL the
+// mode's tools. This block does: it points the read at the right primary driver + the exact tools to
+// re-verify it. Discretionary (the default) needs no nudge — the base prompt already IS that lens. Pure.
+export function _modeLensBlock(call) {
+    if (call?.mode === 'smc') return 'SMC LENS — this is a Smart-Money-Concepts call: read market STRUCTURE (BOS/CHoCH), order-blocks, fair-value-gaps and liquidity as the PRIMARY driver, above classical indicators. Re-verify the structural trigger against price NOW via get_structure / get_fvg / get_liquidity at a ladder rung before you decide — don\'t trust the build-time map blindly.'
+    if (call?.mode === 'institutional') return 'INSTITUTIONAL LENS — this call is built on POSITIONING/flow, not chart pattern, and positioning shifts after build (crowding builds, shorts cover, funding flips). Re-verify the crowding/squeeze/skew thesis LIVE via get_short_interest / get_options_context / get_derivatives_context rather than trusting the build-time snapshot; weigh that as the primary driver.'
+    return ''
+}
+
 // A requested chart timeframe is honored only if it's one of the call's ladder rungs. Pure.
 export function _validChartTf(requested, ladder) {
     return (Array.isArray(ladder) ? ladder : []).includes(requested) ? requested : null
@@ -467,6 +478,7 @@ export async function _defaultAssess(call, zone, ctx) {
         `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
         `SESSION NOW: ${sessionPhase(call.asset, call.asset_class)}`,
         `REASON WOKEN: ${ctx.reason}`,
+        _modeLensBlock(call),
         isPulse ? _PULSE_MANDATE : '',
         `PRIOR MEMO: ${call.monitor_state?.memo || '(none)'}`,
         candlesText ? `RECENT CANDLES (${tf}):\n${candlesText}` : '',
@@ -509,6 +521,7 @@ export async function _defaultAssessPosition(call, ps, ctx) {
         `R-MULTIPLE NOW: ${ctx.metrics?.r_multiple_now ?? 'unknown'}`,
         `SESSION NOW: ${sessionPhase(call.asset, call.asset_class)}`,
         `REASON WOKEN: ${ctx.reason}`,
+        _modeLensBlock(call),
         `PENDING CARD: ${ps.pending_action ? JSON.stringify(ps.pending_action) : '(none)'}`,
         `PRIOR MEMO: ${ps.memo || '(none)'}`,
         candlesText ? `RECENT CANDLES (${tf}):\n${candlesText}` : '',
@@ -534,6 +547,7 @@ export async function _defaultAssessReentry(call, outcome, ctx = {}) {
         `CALL: ${JSON.stringify({ asset: call.asset, mode: call.mode, trade_type: call.trade_type, bias: call.bias, thesis: call.thesis, patterns: call.patterns, reference_levels: call.reference_levels, entry_zones: call.entry_zones, timeframe_ladder: call.timeframe_ladder })}`,
         `STOP-OUT: ${JSON.stringify({ exit_price: outcome?.exit_price ?? null, r_multiple: outcome?.r_multiple ?? null, reason: outcome?.reason ?? null })}`,
         `CURRENT PRICE: ${ctx?.price ?? 'unknown'}`,
+        _modeLensBlock(call),
         `PRIOR MEMO: ${call.monitor_state?.memo || '(none)'}`,
         candlesText ? `RECENT CANDLES (${tf}):\n${candlesText}` : '',
         newsText ? `RECENT HEADLINES (newest first):\n${newsText}` : 'RECENT HEADLINES: (none available — news axis unsourced)',

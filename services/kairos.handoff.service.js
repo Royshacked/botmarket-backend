@@ -301,6 +301,17 @@ export function _resolveMainLink(idea, call) {
     return { broker: slot.broker, accountId: slot.accountId, positionId: slot.positionId, quantity: Number(slot.quantity) || 0 }
 }
 
+// EVERY account's open-position linkage — a call is placed one-position-per-account, so a management
+// action fans out across ALL of them, not just the main. Pure. Scoped to the call's declared accounts
+// when present; falls back to all open-position slots (so a live position is never left unmanaged).
+export function _resolveAllLinks(idea, call) {
+    const links  = (Array.isArray(idea?.brokerOrders) ? idea.brokerOrders : []).filter(b => b?.positionId != null)
+    const accts  = Array.isArray(call?.accounts) ? call.accounts.map(String) : []
+    const scoped = accts.length ? links.filter(b => accts.includes(String(b.accountId))) : links
+    const chosen = scoped.length ? scoped : links   // never manage NONE while positions are open
+    return chosen.map(slot => ({ broker: slot.broker, accountId: slot.accountId, positionId: slot.positionId, quantity: Number(slot.quantity) || 0 }))
+}
+
 // The still-working native exit order for a leg on an account (the one to amend/cancel). Pure.
 export function _workingExit(idea, accountId, leg) {
     return (idea?.exitOrders ?? []).find(o =>
@@ -410,25 +421,42 @@ export async function manageCall(id, userId, verb, isAdmin = false, deps = _mdep
         return { ok: true, manual: true, verb }
     }
 
-    const link = _resolveMainLink(idea, call)
-    if (!link) return { ok: false, reason: 'no_position_link' }
+    const links = _resolveAllLinks(idea, call)
+    if (!links.length) return { ok: false, reason: 'no_position_link' }
 
-    // Broker-authoritative idempotency: already flat → clear the card, let Hermes reconcile the close.
-    let open
-    try { open = await deps.findOpenPosition(link.broker, userId, link.accountId, link.positionId) }
-    catch { return { ok: false, reason: 'broker_unreachable' } }
-    if (open === null) {
+    // Fan out across EVERY account the call is placed on (one position per account). Each is checked
+    // broker-authoritatively (skip if already flat) and the action applied independently — a partial
+    // failure on one account doesn't strand the others. The aggregate position_state (new stop level /
+    // total partial qty summed across accounts) is written once, after all accounts have run.
+    const perAccount = []
+    let anyReachable = false, anyOpen = false, anyApplied = false, totalQty = 0
+    for (const link of links) {
+        let open
+        try { open = await deps.findOpenPosition(link.broker, userId, link.accountId, link.positionId); anyReachable = true }
+        catch { perAccount.push({ accountId: link.accountId, reason: 'broker_unreachable' }); continue }
+        if (open === null) { perAccount.push({ accountId: link.accountId, alreadyFlat: true }); continue }
+        anyOpen = true
+        try {
+            const applied = await _executeManage(verb, proposal, idea, link, open, userId, isAdmin, deps)
+            anyApplied = true
+            totalQty += Number(applied?.qty) || 0
+            perAccount.push({ accountId: link.accountId, ok: true })
+        } catch (e) {
+            logger.error(LOG, `manage ${verb} failed for ${id} acct ${link.accountId}:`, e.message)
+            perAccount.push({ accountId: link.accountId, reason: 'execution_failed' })
+        }
+    }
+
+    if (!anyReachable) return { ok: false, reason: 'broker_unreachable', accounts: perAccount }
+    if (!anyOpen) {   // every account already flat → clear the card, let Hermes reconcile the close(s)
         await db.collection(COLLECTION).updateOne({ id }, { $set: { 'position_state.pending_action': null } })
         return { ok: true, alreadyFlat: true }
     }
+    if (!anyApplied) return { ok: false, reason: 'execution_failed', accounts: perAccount }   // every open account errored
 
-    let applied
-    try { applied = await _executeManage(verb, proposal, idea, link, open, userId, isAdmin, deps) }
-    catch (e) { logger.error(LOG, `manage ${verb} failed for ${id}:`, e.message); return { ok: false, reason: 'execution_failed' } }
-
-    await db.collection(COLLECTION).updateOne({ id }, _manageAppliedUpdate(verb, proposal, ps, applied, now))
-    logger.info(LOG, `call ${id} managed → ${verb}`)
-    return { ok: true, verb }
+    await db.collection(COLLECTION).updateOne({ id }, _manageAppliedUpdate(verb, proposal, ps, { qty: totalQty }, now))
+    logger.info(LOG, `call ${id} managed → ${verb} across ${links.length} account(s)`)
+    return { ok: true, verb, accounts: perAccount }
 }
 
 export const kairosHandoffService = { confirmCall, editCall, dismissCall, manageCall, reviveCall, declineReentry }
