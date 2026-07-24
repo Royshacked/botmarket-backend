@@ -393,46 +393,68 @@ export class CTraderAdapter extends BrokerAdapter {
     async closePosition(userId, accountId, positionId, opts = {}) {
         const session = await this._session(userId, accountId)
 
-        if (opts.quantity != null) {
-            await session.send(PT.CLOSE_POSITION, { positionId: Number(positionId), volume: opts.quantity })
-            logger.info(LOG, `Partial close on position ${positionId} (volume=${opts.quantity})`)
-            return
-        }
-
+        // Always source the live position from a reconcile snapshot — for a full close it gives the
+        // true native size; for a trim it also gives the symbolId needed to convert the requested
+        // LOTS into native volume. (The prior partial path sent the lot count STRAIGHT THROUGH as
+        // native volume, e.g. volume=2 for a 2-lot trim of a lotSize-100 symbol — closing ~1% of the
+        // intended size on a live account. Trim quantity is in lots exactly like placeOrder's.)
         const rec = await session.send(PT.RECONCILE, {})
         const pos = (rec?.position ?? []).find(p => Number(p.positionId) === Number(positionId))
         if (!pos) throw new Error(`cTrader: position ${positionId} not found`)
-        const volume = pos.tradeData?.volume
-        if (volume == null) throw new Error(`cTrader: no volume for position ${positionId}`)
+        const totalVolume = pos.tradeData?.volume
+        if (totalVolume == null) throw new Error(`cTrader: no volume for position ${positionId}`)
 
-        const resting = (rec?.order ?? []).filter(o =>
-            Number(o.positionId) === Number(positionId) &&
-            (o.orderType === PROTO_ORDER_TYPE.LIMIT || o.orderType === PROTO_ORDER_TYPE.STOP))
-        for (const o of resting) {
-            try { await session.send(PT.CANCEL_ORDER, { orderId: Number(o.orderId) }) }
-            catch (err) { logger.warn(LOG, `pre-close cancel failed (order ${o.orderId}): ${err.message}`) }
+        let volume  = totalVolume
+        let partial = false
+        if (opts.quantity != null) {
+            const symbolId = pos.tradeData?.symbolId
+            await session._loadSymbols()   // so symbolNameById() resolves the specs label
+            const specs = await session._symbolSpecs(symbolId, session.symbolNameById(symbolId))
+            volume = normalizeVolume(specs, lotsToVolume(specs, opts.quantity))   // lots → native, step-aligned
+            if (!(volume > 0)) throw new Error(`cTrader: trim of ${opts.quantity} lots normalises to 0 for position ${positionId}`)
+            // A trim that rounds up to (or past) the whole size is just a full close — fall through.
+            partial = volume < totalVolume
+            if (!partial) volume = totalVolume
         }
-        if (resting.length) logger.info(LOG, `Cancelled ${resting.length} resting order(s) before closing position ${positionId}`)
 
-        // Hear the broker's own close (and any follow-on) events for this account.
+        // Cancel the position's resting protection ONLY on a full close, so no orphan SL/TP is left
+        // behind. A genuine partial keeps its resting exits — the reconciler shrinks them to the
+        // remaining size when the reduce fill arrives on the (now-wired) execution feed.
+        if (!partial) {
+            const resting = (rec?.order ?? []).filter(o =>
+                Number(o.positionId) === Number(positionId) &&
+                (o.orderType === PROTO_ORDER_TYPE.LIMIT || o.orderType === PROTO_ORDER_TYPE.STOP))
+            for (const o of resting) {
+                try { await session.send(PT.CANCEL_ORDER, { orderId: Number(o.orderId) }) }
+                catch (err) { logger.warn(LOG, `pre-close cancel failed (order ${o.orderId}): ${err.message}`) }
+            }
+            if (resting.length) logger.info(LOG, `Cancelled ${resting.length} resting order(s) before closing position ${positionId}`)
+        }
+
+        // Hear the broker's own execution events for this account (the reduce/close fill + follow-ons).
         this._wireExecutionFeed(session)
 
         await session.send(PT.CLOSE_POSITION, { positionId: Number(positionId), volume })
-        logger.info(LOG, `Close requested on position ${positionId} (volume=${volume})`)
+        logger.info(LOG, `${partial ? 'Partial close' : 'Close'} on position ${positionId} (volume=${volume}${partial ? ` from ${opts.quantity} lots` : ''})`)
 
         // Emit a normalized close ourselves so the reconciler flips the idea to closed
         // deterministically — independent of execution-feed timing/state. The broker's
         // own position.closed (if it also arrives) is idempotent: _onClosed only acts on
         // an idea that is still active. Reason 'manual' is overridden by a monitor-set
         // pendingCloseReason when this close came from a stop/tp.
-        executionBus.emit('execution', {
-            broker:     'ctrader',
-            type:       'position.closed',
-            accountId:  String(session.ctid),
-            positionId: String(positionId),
-            reason:     'manual',
-            at:         Date.now(),
-        })
+        // A PARTIAL does NOT self-emit: the idea stays open and the real reduce fill from the wired
+        // feed carries the true remaining size (which the reconciler needs to resync exits) — a
+        // synthetic reduced event with no fill size would misinform it.
+        if (!partial) {
+            executionBus.emit('execution', {
+                broker:     'ctrader',
+                type:       'position.closed',
+                accountId:  String(session.ctid),
+                positionId: String(positionId),
+                reason:     'manual',
+                at:         Date.now(),
+            })
+        }
     }
 
     /**
