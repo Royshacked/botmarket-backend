@@ -21,7 +21,6 @@ import { getCheckGap, isIntradayTimeframe }     from '../services/timeframe.serv
 import { collectSymbols, resolveConditionTree, extractLeaves } from '../services/conditionTree.service.js'
 import { toMs } from './evaluators/time.evaluator.js'
 import { checkInvalidation }                    from './invalidation.monitor.js'
-import { checkPortfolioReviews }               from './portfolio.monitor.js'
 import { checkPosition }                        from './positionMonitor.js'
 import { notifyManualEntry, entryLegFromIdea }  from '../services/manualNotify.service.js'
 import { notifyIdeaEntryConfirm }               from '../services/tradeNotify.service.js'
@@ -73,7 +72,6 @@ async function _tick() {
     for (const id of _lastChecked.keys()) if (!liveIds.has(id)) _lastChecked.delete(id)
 
     await _marketSweep(db)
-    await checkPortfolioReviews().catch(err => logger.error(LOG, 'Portfolio review check failed', err.message))
 
     if (!ideas || ideas.length === 0) return
     logger.info(LOG, `Checking ${ideas.length} idea(s) (looking + long + short)`)

@@ -7,6 +7,7 @@ import { isSubstantive } from '../../services/thread.util.js'
 import { buildFingerprint, benchmarkTicker, computeReviewDelta, computeReviewTriggers } from '../../services/portfolioReview.util.js'
 import { getMacroRaw } from '../../providers/fmp.provider.js'
 import { getFmpQuote } from '../../providers/fmp.price.provider.js'
+import { coverageService } from '../analyst/coverage.service.js'
 // Mode/account helpers live in a shared util (portfolioState needs them too, and importing
 // them from here would be circular). Re-exported below so existing importers/tests keep working.
 import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames } from './portfolioMode.util.js'
@@ -33,6 +34,7 @@ export const portfolioChatService = {
     completeReview,
     captureFingerprint,
     computeReviewSignals,
+    getPendingThemisChecks,
     loadStreamContext,
     persistStreamOutcome,
 }
@@ -86,7 +88,17 @@ async function computeReviewSignals(portfolioId, userId) {
         ])
         const fingerprint = lifecycle?.lastFingerprint ?? null
         const delta = fingerprint ? await buildReviewDelta(fingerprint, state).catch(() => null) : null
-        return { triggers: computeReviewTriggers({ state, fingerprint, delta }) }
+        // Coverage-delta gate: a held name whose Prometheus coverage flipped terminal. Read the
+        // user's coverage book and keep only the held names that went thesis_broken / target_hit —
+        // the crossing stays artifact-mediated (Themis reads coverage; Prometheus wrote it).
+        const held = new Set((state?.ideas ?? []).map(i => String(i.asset ?? '').toUpperCase()).filter(Boolean))
+        let coverage = []
+        if (held.size) {
+            const rows = await coverageService.getCoverage(userId).catch(() => [])
+            coverage = (Array.isArray(rows) ? rows : []).filter(c =>
+                held.has(String(c.symbol ?? '').toUpperCase()) && ['thesis_broken', 'target_hit'].includes(c.status))
+        }
+        return { triggers: computeReviewTriggers({ state, fingerprint, delta, coverage }) }
     } catch (err) {
         logger.warn(LOG, 'computeReviewSignals failed', err.message)
         return { triggers: [] }
@@ -325,6 +337,74 @@ async function getPendingReviews(userId) {
         })
     } catch (err) {
         logger.error(LOG, 'Failed to get pending reviews', err)
+        return []
+    }
+}
+
+/**
+ * In-position books due for a Themis wake. Anchored on the Themis EOD clock (`themis.next_check_at`,
+ * epoch ms — distinct from the scheduled-review clock `nextReviewAt`): a book is due when that clock
+ * is missing (never checked) or has passed. Each candidate is joined to the `entities` collection for
+ * display meta AND a live-holding count, then FILTERED to books that actually hold a position
+ * (liveCount ≥ 1) — Themis only monitors in-position books. Returns the lifecycle + Themis sub-state
+ * the monitor needs to evaluate both gates and re-lease the clock. Empty on no due books / failure.
+ */
+async function getPendingThemisChecks(now = Date.now()) {
+    try {
+        const db   = await getDb()
+        const docs = await db.collection(COLLECTION)
+            .find({ $or: [
+                { 'themis.next_check_at': null },
+                { 'themis.next_check_at': { $exists: false } },
+                { 'themis.next_check_at': { $lte: now } },
+            ] })
+            .project({ portfolioId: 1, userId: 1, reviewCadence: 1, nextReviewAt: 1, lastReviewAt: 1, notifiedAt: 1, themis: 1 })
+            .toArray()
+
+        if (!docs.length) return []
+
+        const portfolioIds = docs.map(d => d.portfolioId)
+        // One representative idea per portfolio carries the display name + broker/account (a uniform
+        // per-batch mode), plus liveCount = how many holdings are actually open (status long/short).
+        const metaRows = await db.collection(ENTITIES)
+            .aggregate([
+                { $match: { portfolioId: { $in: portfolioIds } } },
+                { $sort:  { createdAt: 1 } },
+                { $group: {
+                    _id:           '$portfolioId',
+                    portfolioName: { $first: '$portfolioName' },
+                    broker:        { $first: '$broker' },
+                    mainAccountId: { $first: '$mainAccountId' },
+                    accounts:      { $first: '$accounts' },
+                    liveCount:     { $sum: { $cond: [{ $in: ['$status', ['long', 'short']] }, 1, 0] } },
+                } },
+            ])
+            .toArray()
+
+        const metaMap       = Object.fromEntries(metaRows.map(r => [r._id, r]))
+        const nameByAccount = await _virtualAccountNames(docs.map(d => d.userId))
+
+        return docs.map(d => {
+            const meta = metaMap[d.portfolioId] ?? {}
+            if ((meta.liveCount ?? 0) < 1) return null   // not in position → invisible to Themis
+            const accountId = meta.mainAccountId ?? _firstAccountId(meta.accounts)
+            const mode      = _deriveMode(meta.broker, accountId)
+            return {
+                portfolioId:   d.portfolioId,
+                userId:        d.userId,
+                portfolioName: meta.portfolioName ?? 'Portfolio',
+                mode,
+                account:       _accountLabel(mode, accountId, nameByAccount, meta.broker),
+                accountId:     accountId ?? null,
+                reviewCadence: d.reviewCadence ?? 'weekly',
+                nextReviewAt:  d.nextReviewAt ?? null,
+                lastReviewAt:  d.lastReviewAt ?? null,
+                notifiedAt:    d.notifiedAt   ?? null,
+                themis:        d.themis       ?? null,
+            }
+        }).filter(Boolean)
+    } catch (err) {
+        logger.error(LOG, 'Failed to get pending Themis checks', err)
         return []
     }
 }

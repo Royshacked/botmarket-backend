@@ -45,6 +45,7 @@ import { newsFeedService }  from './api/news-feed/newsFeed.service.js'
 import { minosService }     from './monitoring/minos.monitor.service.js'
 import { hermesService }    from './monitoring/hermes.monitor.service.js'
 import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
+import { themisService }      from './monitoring/themis.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
 import { paperEquityService } from './monitoring/paperEquity.service.js'
@@ -122,6 +123,7 @@ newsFeedService.start()
 minosService.start()
 hermesService.start()
 coverageMonitorService.start()
+themisService.start()
 executionReconciler.start()
 paperFillService.start()
 paperEquityService.start()
