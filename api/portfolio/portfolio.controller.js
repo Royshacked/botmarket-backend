@@ -2,6 +2,7 @@ import { portfolioAgentService } from '../../services/portfolio.agent.service.js
 import { portfolioChatService }  from './portfolioChat.service.js'
 import { applyRebalance, snapshotConvictions } from './portfolioRebalance.service.js'
 import { invalidatePortfolioState } from '../../services/portfolioState.service.js'
+import { refreshCoverage }        from '../../services/coverageRefresh.service.js'
 import { logger }                from '../../services/logger.service.js'
 import { resolveModel }          from '../../services/modelRouter.service.js'
 import { streamAgentResponse }   from '../_shared/sse.util.js'
@@ -68,7 +69,20 @@ export async function streamPortfolio(req, res) {
                 userId: req.user._id, portfolioId, threadId, isReviewMode, messages, mandate, storedThesis, result,
             })
 
-            return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null, ...(result.screenRequest ? { screen_request: result.screenRequest } : {}) }
+            // G1: Atlas asked Prometheus to re-research a held name. Fire the async refresh-by-hop
+            // (route-and-return) — it runs headless and pings the user when the coverage is rewritten,
+            // then they resume the review. Never blocks the response; best-effort.
+            if (result.coverageRefresh?.ticker) {
+                refreshCoverage({
+                    userId:        req.user._id,
+                    ticker:        result.coverageRefresh.ticker,
+                    question:      result.coverageRefresh.question ?? null,
+                    portfolioId:   portfolioId ?? null,
+                    portfolioName: portfolioState?.portfolioName ?? null,
+                }).catch(err => logger.warn(LOG, 'coverage refresh hop failed', err.message))
+            }
+
+            return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null, ...(result.screenRequest ? { screen_request: result.screenRequest } : {}), ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}) }
         },
     })
 }

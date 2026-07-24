@@ -56,3 +56,44 @@ export async function notifyCoverageEvent(coverage, verdict) {
         return null
     }
 }
+
+// ─── Coverage refresh (G1) ──────────────────────────────────────────────────────
+// Prometheus pings the user when an async refresh-by-hop (requested by Atlas mid-review) has rewritten
+// a held name's coverage — so the user can reopen the review and Atlas reads the fresh artifact. When
+// the refresh carries a portfolioId the card routes back to that review; otherwise it opens coverage.
+
+/**
+ * Build the "research refreshed" card. Pure → { userId, content, type, payload, botId, actions } or null.
+ * `ok:false` = the refresh couldn't produce updated coverage (the existing thesis is left in place).
+ */
+export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, portfolioName = null, coverageId = null, summary = null, ok = true }) {
+    const sym = String(ticker ?? '').toUpperCase().trim()
+    if (!userId || !sym) return null
+    const forBook = portfolioName ? ` for "${portfolioName}"` : ''
+    const gist    = (ok && typeof summary === 'string' && summary.trim())
+        ? ` — ${summary.trim().length > 140 ? summary.trim().slice(0, 137) + '…' : summary.trim()}`
+        : ''
+    const content = ok
+        ? `Fresh research on ${sym} is ready${forBook}${gist}. Resume the review to fold it in.`
+        : `Couldn't refresh research on ${sym} right now — leaving the existing coverage in place. You can resume the review.`
+    return {
+        userId,
+        content,
+        type:    'coverage_refreshed',
+        payload: { kind: 'coverage', symbol: sym, coverageId, portfolioId, ok },
+        botId:   'analyst',
+        actions: portfolioId ? cardActions('Resume review') : cardActions('Open coverage'),
+    }
+}
+
+/** Post the coverage-refresh card (fire-and-forget; never throws into the refresh hop). */
+export async function notifyCoverageRefreshed(args) {
+    const card = buildCoverageRefreshed(args)
+    if (!card) return null
+    try {
+        return await postBotCard(card)
+    } catch (err) {
+        logger.warn(LOG, 'refresh notify failed', err.message)
+        return null
+    }
+}

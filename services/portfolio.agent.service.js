@@ -269,17 +269,36 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     }
     // P4c: Atlas hands a sleeve's mandate to Argus's INVESTING desk to source + research candidates.
     const screenRequest = _parseScreenRequest(raw)
+    // G1: Atlas hands a HELD name back to Prometheus for an async re-research when its coverage is stale.
+    const coverageRefresh = _parseCoverageRefresh(raw)
 
     const reply = stripEmitTags(
         // <ticker> keeps its inner text in the reply (unwrap, don't strip).
         raw.replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1'),
-        ['phase', 'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis', 'screen_request'],
+        ['phase', 'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis', 'screen_request', 'coverage_refresh'],
     ).trim()
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequest: !!screenRequest, phase: capturedPhase })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: capturedPhase, ...(screenRequest ? { screenRequest } : {}) }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequest: !!screenRequest, coverageRefresh: !!coverageRefresh, phase: capturedPhase })
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: capturedPhase, ...(screenRequest ? { screenRequest } : {}), ...(coverageRefresh ? { coverageRefresh } : {}) }
+}
+
+// ─── Coverage-refresh extraction (pure) ─────────────────────────────────────────
+// G1: Atlas → Prometheus hop. In review mode Atlas may ask the research desk to re-research a HELD
+// name whose coverage is stale/insufficient, rather than guessing on its thesis. Pulls the
+// <coverage_refresh> block; needs a ticker (else null). The refresh runs async server-side and pings
+// Atlas when the rewritten coverage is ready. Mirrors _parseScreenRequest. Exported for tests.
+export function _parseCoverageRefresh(raw) {
+    const m = (raw ?? '').match(/<coverage_refresh>([\s\S]*?)<\/coverage_refresh>/)
+    if (!m) return null
+    try {
+        const o = JSON.parse(m[1].trim())
+        const ticker = String(o?.ticker ?? '').toUpperCase().trim()
+        if (!ticker) return null
+        const question = typeof o?.question === 'string' && o.question.trim() ? o.question.trim() : null
+        return { ticker, question }
+    } catch { return null }
 }
 
 // ─── Screen-request extraction (pure) ───────────────────────────────────────────
@@ -491,7 +510,7 @@ export function _formatReviewDelta(d) {
     return lines.length ? lines.join('\n') : null
 }
 
-function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = null) {
+export function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = null) {
     const fmtMoney = (n) => {
         if (n == null) return '—'
         const abs = Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
@@ -531,6 +550,19 @@ function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = 
         return `  conviction ${cur}${trend}`
     }
 
+    // The FROZEN per-holding thesis (notes) + conviction rationale — rendered ONLY in review mode,
+    // where the whole task is judging each holding intact / weakening / broken against the thesis it
+    // was bought on. Omitted in construction/edit context to keep that (prompt-cached) tail lean.
+    const thesisLine = (s) => {
+        if (!isReviewMode) return ''
+        const note = typeof s.notes === 'string' ? s.notes.trim() : ''
+        const rat  = typeof s.conviction?.rationale === 'string' ? s.conviction.rationale.trim() : ''
+        const parts = []
+        if (note) parts.push(`thesis: ${note}`)
+        if (rat && rat !== note) parts.push(`rationale: ${rat}`)
+        return parts.length ? `\n           ↳ ${parts.join(' · ')}` : ''
+    }
+
     const liveLines = live.map(s => {
         const target  = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
         const actual  = `actual ${Math.round(s.actualWeight * 100)}%`
@@ -538,13 +570,13 @@ function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = 
         const pnl     = `P&L ${fmtMoney(s.pnl)} (${fmtPct(s.pnlPct)})`
         const age     = s.thesisAgeDays != null ? `${s.thesisAgeDays}d` : ''
         const earn    = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
-        return `  ${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${fmtConviction(s)}${earn}`
+        return `  ${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${fmtConviction(s)}${earn}${thesisLine(s)}`
     })
 
     const pendingLines = pending.map(s => {
         const target = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
         const earn   = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
-        return `  ${s.asset.padEnd(6)} ${s.direction?.padEnd(6) ?? '      '} ${target}  [${s.status}]${earn}`
+        return `  ${s.asset.padEnd(6)} ${s.direction?.padEnd(6) ?? '      '} ${target}  [${s.status}]${earn}${thesisLine(s)}`
     })
 
     const sections = [header]
@@ -565,7 +597,7 @@ function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = 
     }
 
     sections.push(isReviewMode
-        ? 'Use this data as the starting point for the review. Do not call get_quotes for tickers already shown above — prices are current. Propose specific actions (rebalance, trim, add, exit, swap) where the data warrants it.'
+        ? 'Use this data as the starting point for the review. Do not call get_quotes for tickers already shown above — prices are current. Judge each holding intact / weakening / broken against the thesis + rationale shown beneath it. Propose specific actions (rebalance, trim, add, exit, swap) where the data warrants it.'
         : 'This is the live book you are helping with — the workspace, open positions, and per-position + total P&L are current. Do not call get_quotes for tickers already shown above. Ground any answer or proposed edit in these actual positions and P&L; do NOT run a full scheduled review unless the user asks for one.')
 
     return sections.join('\n\n')
