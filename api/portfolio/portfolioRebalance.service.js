@@ -30,7 +30,7 @@ import { ideaService }              from '../trade-ideas/tradeIdeas.service.js'
 import { brokerService }            from '../broker/broker.service.js'
 import { portfolioChatService }     from './portfolioChat.service.js'
 import { invalidatePortfolioState } from '../../services/portfolioState.service.js'
-import { notifyManualExit, exitLegFromIdea } from '../../services/manualNotify.service.js'
+import { notifyManualExit, notifyManualEntry, exitLegFromIdea } from '../../services/manualNotify.service.js'
 import { ENTITIES }               from '../../services/entity/entityCollection.js'
 import { orderSymbol }            from '../../monitoring/exitOrders.util.js'
 
@@ -45,11 +45,13 @@ export async function applyRebalance(portfolioId, userId, update, isAdmin = fals
     }
 
     const results = []
-    const manualExitLegs = []   // manual legs can't be closed programmatically → one Fill card
+    const manualExitLegs  = []   // manual close/trim legs → one exit Fill card
+    const manualEntryLegs = []   // manual add (scale-in) legs → one entry Fill card
     for (const change of update.changes) {
         try {
             const r = await _applyOne(portfolioId, userId, change, isAdmin)
-            if (r?.manualExitLeg) manualExitLegs.push(r.manualExitLeg)
+            if (r?.manualExitLeg)  manualExitLegs.push(r.manualExitLeg)
+            if (r?.manualEntryLeg) manualEntryLegs.push(r.manualEntryLeg)
             results.push({ action: change.action, itemId: change.itemId ?? change.ideaId ?? null, ...r })
         } catch (err) {
             logger.error(LOG, `change failed (${change.action})`, err.message)
@@ -57,20 +59,22 @@ export async function applyRebalance(portfolioId, userId, update, isAdmin = fals
         }
     }
 
-    // Manual mode: the user reports real fills, so exits post ONE N-leg exit Fill card in
-    // social chat (confirmManualExit closes each leg as its price is submitted) instead of
-    // placing broker orders. See [[project_paper_trading_sim]] / manual-mode.md §4b.
-    let manualExitPosted = false
-    if (manualExitLegs.length) {
+    // Manual mode: the user reports real fills, so close/trim legs post ONE N-leg exit Fill card and
+    // add (scale-in) legs post ONE entry Fill card (the confirm endpoints apply each as its price is
+    // submitted) instead of placing broker orders. See manual-mode.md §4b.
+    let manualExitPosted = false, manualEntryPosted = false
+    if (manualExitLegs.length || manualEntryLegs.length) {
         const db  = await getDb()
         const sib = await db.collection(COLLECTION).findOne({ portfolioId, userId }, { projection: { portfolioName: 1 } })
-        await notifyManualExit(userId, {
-            portfolioId,
-            portfolioName: sib?.portfolioName ?? null,
-            reason:        'rebalance',
-            legs:          manualExitLegs,
-        })
-        manualExitPosted = true
+        const portfolioName = sib?.portfolioName ?? null
+        if (manualExitLegs.length) {
+            await notifyManualExit(userId, { portfolioId, portfolioName, reason: 'rebalance', legs: manualExitLegs })
+            manualExitPosted = true
+        }
+        if (manualEntryLegs.length) {
+            await notifyManualEntry(userId, { portfolioId, portfolioName, legs: manualEntryLegs })
+            manualEntryPosted = true
+        }
     }
 
     // Trajectory point, then deliberate thesis update (if any), then advance the clock.
@@ -81,8 +85,8 @@ export async function applyRebalance(portfolioId, userId, update, isAdmin = fals
     const rev = await portfolioChatService.completeReview(portfolioId, userId)
     invalidatePortfolioState(portfolioId, userId)
 
-    logger.info(LOG, 'rebalance applied', { portfolioId, changes: results.length, manualExitPosted })
-    return { ok: true, results, manualExitPosted, nextReviewAt: rev?.nextReviewAt ?? null }
+    logger.info(LOG, 'rebalance applied', { portfolioId, changes: results.length, manualExitPosted, manualEntryPosted })
+    return { ok: true, results, manualExitPosted, manualEntryPosted, nextReviewAt: rev?.nextReviewAt ?? null }
 }
 
 // A holding is a `portfolio_item`, so the vocabulary is `_item`. The legacy `_idea` verbs are still
@@ -238,8 +242,24 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
 
     const legs = (item.brokerOrders ?? []).filter(b => b.positionId != null)
     if (legs.length === 0) return { ok: false, reason: 'no_position' }
-    // Manual legs can't be placed programmatically (mirrors trim's manual guard).
-    if (legs.some(l => l.broker === 'manual')) return { ok: false, reason: 'manual_add_unsupported' }
+
+    // Manual: no broker to hit — hand the add back as an entry leg so applyRebalance posts a Fill card.
+    // confirmManualAdd grows the live position using the reported size, or the pendingAddQty stamped
+    // here. (Unlike trim, an add can't reuse the entry-confirm endpoint — the FE must route add legs to
+    // /:id/manual-add; the stamp still records intent. A manual holding is a single manual leg.)
+    if (legs.some(l => l.broker === 'manual')) {
+        const leg    = legs.find(l => l.broker === 'manual')
+        const addQty = Math.floor((leg.quantity ?? item.quantity ?? 0) * f)
+        if (addQty <= 0) return { ok: false, reason: 'add_too_small' }
+        await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingAddQty: addQty } })
+        return { ok: true, manual: true, manualEntryLeg: {
+            ideaId:    item.id,
+            asset:     item.asset,
+            direction: item.direction,
+            quantity:  addQty,
+            add:       true,
+        } }
+    }
 
     const direction = item.direction === 'short' ? 'short' : 'long'
     const symbol    = orderSymbol(item)

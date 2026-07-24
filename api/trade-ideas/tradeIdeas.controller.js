@@ -1,5 +1,5 @@
 import { ideaService } from './tradeIdeas.service.js'
-import { confirmManualEntry, confirmManualExit, activateManualPortfolio, requestManualPortfolioExit } from './manualIdea.service.js'
+import { confirmManualEntry, confirmManualExit, confirmManualAdd, activateManualPortfolio, requestManualPortfolioExit } from './manualIdea.service.js'
 import { logger } from '../../services/logger.service.js'
 
 const LOG = '[tradeIdeas:controller]'
@@ -52,6 +52,19 @@ export async function confirmManualExitOrder(req, res) {
     } catch (err) {
         logger.error(LOG, 'confirmManualExitOrder failed', err)
         res.status(500).send({ error: 'Failed to confirm manual exit' })
+    }
+}
+
+export async function confirmManualAddOrder(req, res) {
+    try {
+        const { id } = req.params
+        if (!id) return res.status(400).send({ error: 'Missing id' })
+        const { price, quantity } = req.body ?? {}
+        const result = await confirmManualAdd(id, { price, quantity }, req.user._id, req.user.isAdmin)
+        _sendManual(res, result, r => ({ idea: r.idea }))
+    } catch (err) {
+        logger.error(LOG, 'confirmManualAddOrder failed', err)
+        res.status(500).send({ error: 'Failed to confirm manual add' })
     }
 }
 

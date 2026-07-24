@@ -132,13 +132,33 @@ test('no open position → no_position', async () => {
     const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, fakeBroker())
     assert.deepEqual(r, { ok: false, reason: 'no_position' })
 })
-test('manual leg → manual_add_unsupported (no programmatic placement)', async () => {
-    const db = fakeDb(liveIdea({ brokerOrders: [{ broker: 'manual', accountId: 'a1', positionId: 'p1', quantity: 10 }] }))
-    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, fakeBroker())
-    assert.deepEqual(r, { ok: false, reason: 'manual_add_unsupported' })
-})
 test('wrong owner → forbidden', async () => {
     const db = fakeDb(liveIdea({ userId: 'someone_else' }))
     const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, fakeBroker())
     assert.deepEqual(r, { ok: false, reason: 'forbidden' })
+})
+
+// ── manual mode (G7) — no broker; hands back an entry leg + stamps pendingAddQty ──
+const manualIdea = (over = {}) => liveIdea({
+    quantity: 10,
+    brokerOrders: [{ broker: 'manual', accountId: 'manual-u1', positionId: 'p1', quantity: 10 }],
+    ...over,
+})
+
+test('manual add → entry leg (add:true) + stamps pendingAddQty, no broker call', async () => {
+    const db = fakeDb(manualIdea())
+    const broker = fakeBroker()
+    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, broker)
+
+    assert.equal(r.ok, true)
+    assert.equal(r.manual, true)
+    assert.deepEqual(r.manualEntryLeg, { ideaId: 'i1', asset: 'NVDA', direction: 'long', quantity: 5, add: true })
+    assert.equal(db._updates.at(-1).u.$set.pendingAddQty, 5)
+    assert.equal(broker._placed.length, 0)   // never touches a broker
+})
+
+test('manual add that floors to 0 is rejected (too small)', async () => {
+    const db = fakeDb(manualIdea({ quantity: 10, brokerOrders: [{ broker: 'manual', positionId: 'p1', quantity: 10 }] }))
+    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.05 }, fakeBroker())   // floor(0.5) = 0
+    assert.deepEqual(r, { ok: false, reason: 'add_too_small' })
 })

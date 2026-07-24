@@ -14,7 +14,7 @@
 import { stripId }               from '../../providers/mongodb.provider.js'
 import { logger }                from '../../services/logger.service.js'
 import { routeExits }            from '../../services/protectionPlan.service.js'
-import { openManualPosition, closeManualPosition, reduceManualPosition } from '../broker/manualExecution.service.js'
+import { openManualPosition, closeManualPosition, reduceManualPosition, addToManualPosition } from '../broker/manualExecution.service.js'
 import { notifyManualEntry, notifyManualExit, entryLegFromIdea, exitLegFromIdea } from '../../services/manualNotify.service.js'
 import { tradeCaptureService } from '../../services/tradeCapture.service.js'
 import { entityRepo }          from '../../services/entity/entityRepo.service.js'
@@ -175,6 +175,47 @@ export async function confirmManualExit(id, { price, quantity } = {}, userId, is
         return { ok: true, idea: stripId(updated) }
     } catch (err) {
         logger.error(LOG, `confirmManualExit failed (${id})`, err)
+        return { ok: false, error: err }
+    }
+}
+
+/**
+ * Confirm a user-reported ADD (scale-in) fill: grow the LIVE manual position by the reported size at
+ * the reported price (size-weighted avg) and bump the idea's tracked quantity. The position stays open
+ * — this is NOT an entry (the idea is already long/short), so it does not go through confirmManualEntry.
+ * `quantity` falls back to the pendingAddQty a portfolio add stamped on the idea. Ledger capture of a
+ * scale-in is a known gap (like a partial trim) — the analytics trade keeps its original open.
+ * @param {string} id
+ * @param {{ price:number, quantity?:number }} fill
+ */
+export async function confirmManualAdd(id, { price, quantity } = {}, userId, isAdmin = false) {
+    try {
+        const idea = await entityRepo.getById(id)
+        if (!idea)                        return { ok: false, reason: 'not_found' }
+        if (!_own(idea, userId, isAdmin)) return { ok: false, reason: 'forbidden' }
+        if (idea.broker !== 'manual')     return { ok: false, reason: 'not_manual' }
+        if (idea.status !== 'long' && idea.status !== 'short') return { ok: false, reason: 'not_in_position' }
+
+        const link = (idea.brokerOrders ?? []).find(b => b.positionId != null)
+        if (!link) return { ok: false, reason: 'no_position' }
+
+        const px     = Number(price)
+        const addQty = quantity != null ? Number(quantity)
+            : (idea.pendingAddQty != null ? Number(idea.pendingAddQty) : null)
+        if (!(px > 0))     return { ok: false, reason: 'bad_price' }
+        if (!(addQty > 0)) return { ok: false, reason: 'bad_quantity' }
+
+        const res = await addToManualPosition({ userId: idea.userId, positionId: link.positionId, addQty, price: px })
+        if (!res) return { ok: false, reason: 'no_position' }
+
+        const brokerOrders = (idea.brokerOrders ?? []).map(b =>
+            b.positionId === link.positionId ? { ...b, quantity: res.qty } : b)
+        const updated = await entityRepo.patchAndGet(id, { quantity: res.qty, brokerOrders, pendingAddQty: null })
+
+        logger.info(LOG, `Manual add confirmed for ${id}: +${addQty} @ ${px} → ${res.qty} @ ${res.avgPrice}`)
+        return { ok: true, addedQty: res.addedQty, quantity: res.qty, idea: stripId(updated) }
+    } catch (err) {
+        logger.error(LOG, `confirmManualAdd failed (${id})`, err)
         return { ok: false, error: err }
     }
 }

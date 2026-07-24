@@ -58,9 +58,12 @@ now.
   correctly (paper handles partials natively — this exercises G3/G4 logic without a real broker).
 - [ ] **G7 — manual partial trim** `[ANY]` (manual mode, no broker) — on a **manual** portfolio
   holding, run `trim_item` (e.g. 50%); confirm a Fill card posts, and submitting the exit price
-  **reduces** the position to the remaining size (not a full close) and banks partial P&L. The item's
-  `pendingTrimQty` makes this work even before the Fill card forwards a `quantity`. (Manual **add**
-  is not built yet — see below.)
+  **reduces** the position to the remaining size (not a full close) and banks partial P&L.
+- [ ] **G7 — manual scale-in (add)** `[ANY][DEPLOY]` (manual mode, no broker) — run `add_to_item` on a
+  **manual** holding; confirm an ENTRY Fill card posts (leg flagged `add`), and submitting price + qty
+  **grows** the live position (blended avg entry), not a new holding. Needs the FE bundle redeployed
+  (the Fill card routes `add` legs to the new `/:id/manual-add` endpoint — unlike trim this does not
+  fall back to the old endpoint).
 
 ## C. Needs the FE bundle rebuilt + deployed `[DEPLOY]`
 

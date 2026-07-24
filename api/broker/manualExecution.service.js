@@ -99,4 +99,27 @@ export async function reduceManualPosition({ userId, positionId, qty, price, rea
     return { positionId, pnl: net, exitPrice: price, closedQty: closeQty, remainingQty: 0, closed: true }
 }
 
-export const manualExecutionService = { openManualPosition, closeManualPosition, reduceManualPosition }
+/**
+ * Record an ADD to an existing manual position (scale-in) at the user-reported price: grow the size
+ * and blend the average entry (size-weighted). No balance change (manual has no cost model — P&L banks
+ * on close against the blended avg). Same shared-store + no-emit contract as the others.
+ * @returns {Promise<{ positionId, qty, avgPrice, addedQty }|null>} null if not open
+ */
+export async function addToManualPosition({ userId, positionId, addQty, price }) {
+    const pos = await paperBrokerService.getPosition(userId, positionId)
+    if (!pos || pos.status !== 'open') {
+        logger.warn(LOG, `addToManualPosition: position ${positionId} not open — skipping`)
+        return null
+    }
+    const add = Number(addQty)
+    if (!(add > 0))   throw new Error(`manual addPosition: quantity must be > 0 (got ${addQty})`)
+    if (!(price > 0)) throw new Error(`manual addPosition: price must be > 0 (got ${price})`)
+
+    const newQty = round2(pos.qty + add)
+    const newAvg = round2((pos.avgPrice * pos.qty + price * add) / newQty)   // size-weighted blend
+    await paperBrokerService.updatePosition(userId, positionId, { qty: newQty, avgPrice: newAvg })
+    logger.info(LOG, `Manual position ${positionId} added ${add} @ ${price} → ${newQty} @ ${newAvg}`)
+    return { positionId, qty: newQty, avgPrice: newAvg, addedQty: add }
+}
+
+export const manualExecutionService = { openManualPosition, closeManualPosition, reduceManualPosition, addToManualPosition }
