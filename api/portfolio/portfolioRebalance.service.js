@@ -5,12 +5,15 @@
  * the user) to the live book. This is the only path that turns a review into real
  * orders. Nothing here runs autonomously — the user confirms the whole block first.
  *
- * Action vocabulary (see portfolio_system_prompt.md "Portfolio Edit Output"):
- *   update_idea  — patch a holding's fields in place (no broker touch)
- *   remove_idea  — delete a NON-live idea doc (pending/waiting only)
- *   exit_idea    — fully close a LIVE position across all its accounts
- *   trim_idea    — partially close a LIVE position (reduceFraction of current size)
- *   add_idea     — create a new portfolio holding (mirrors construction semantics)
+ * Action vocabulary (see portfolio_system_prompt.md "Portfolio Edit Output"). A holding is a
+ * `portfolio_item` entity, so the actions are `_item` (the legacy `_idea` names remain accepted as
+ * aliases — see ACTION_ALIAS — so an in-flight review block can't break on the rename):
+ *   update_item  — patch a holding's fields in place (no broker touch)
+ *   remove_item  — delete a NON-live holding doc (pending/waiting only)
+ *   exit_item    — fully close a LIVE position across all its accounts
+ *   trim_item    — partially close a LIVE position (reduceFraction of current size)
+ *   add_item     — create a new portfolio holding (mirrors construction semantics)
+ *   add_to_item  — scale INTO a LIVE position (addFraction of current size)
  *   (swap = exit/trim + add in the same changes array)
  *
  * Per-leg sizing: every close/trim is computed per `brokerOrders[]` entry (account +
@@ -29,6 +32,7 @@ import { portfolioChatService }     from './portfolioChat.service.js'
 import { invalidatePortfolioState } from '../../services/portfolioState.service.js'
 import { notifyManualExit, exitLegFromIdea } from '../../services/manualNotify.service.js'
 import { ENTITIES }               from '../../services/entity/entityCollection.js'
+import { orderSymbol }            from '../../monitoring/exitOrders.util.js'
 
 const LOG        = '[portfolio:rebalance]'
 const COLLECTION = ENTITIES
@@ -46,10 +50,10 @@ export async function applyRebalance(portfolioId, userId, update, isAdmin = fals
         try {
             const r = await _applyOne(portfolioId, userId, change, isAdmin)
             if (r?.manualExitLeg) manualExitLegs.push(r.manualExitLeg)
-            results.push({ action: change.action, ideaId: change.ideaId ?? null, ...r })
+            results.push({ action: change.action, itemId: change.itemId ?? change.ideaId ?? null, ...r })
         } catch (err) {
             logger.error(LOG, `change failed (${change.action})`, err.message)
-            results.push({ action: change.action, ideaId: change.ideaId ?? null, ok: false, error: err.message })
+            results.push({ action: change.action, itemId: change.itemId ?? change.ideaId ?? null, ok: false, error: err.message })
         }
     }
 
@@ -81,26 +85,40 @@ export async function applyRebalance(portfolioId, userId, update, isAdmin = fals
     return { ok: true, results, manualExitPosted, nextReviewAt: rev?.nextReviewAt ?? null }
 }
 
-async function _applyOne(portfolioId, userId, change, isAdmin) {
-    const db = await getDb()
-    switch (change.action) {
-        case 'update_idea':
-            return ideaService.updateIdea(change.ideaId, change.patch ?? {}, userId, isAdmin)
+// A holding is a `portfolio_item`, so the vocabulary is `_item`. The legacy `_idea` verbs are still
+// accepted (a review block built before the rename, or an FE not yet updated) — normalized here.
+const ACTION_ALIAS = {
+    update_idea: 'update_item', remove_idea: 'remove_item', exit_idea: 'exit_item',
+    trim_idea:   'trim_item',   add_idea:    'add_item',    add_to_idea: 'add_to_item',
+}
 
-        case 'remove_idea': {
-            const idea = await db.collection(COLLECTION).findOne({ id: change.ideaId }, { projection: { status: 1 } })
-            if (idea && LIVE.has(idea.status)) return { ok: false, reason: 'live_use_exit_idea' }
-            return ideaService.deleteIdea(change.ideaId, userId, isAdmin)
+async function _applyOne(portfolioId, userId, change, isAdmin) {
+    const db     = await getDb()
+    const action = ACTION_ALIAS[change.action] ?? change.action
+    // Back-compat: the id/spec fields were `ideaId`/`idea` before the portfolio_item rename.
+    const itemId = change.itemId ?? change.ideaId
+    const spec   = change.item   ?? change.idea
+    switch (action) {
+        case 'update_item':
+            return ideaService.updateIdea(itemId, change.patch ?? {}, userId, isAdmin)
+
+        case 'remove_item': {
+            const item = await db.collection(COLLECTION).findOne({ id: itemId }, { projection: { status: 1 } })
+            if (item && LIVE.has(item.status)) return { ok: false, reason: 'live_use_exit_item' }
+            return ideaService.deleteIdea(itemId, userId, isAdmin)
         }
 
-        case 'exit_idea':
-            return _exitIdea(db, change.ideaId, userId, change.reason ?? 'rebalance')
+        case 'exit_item':
+            return _exitItem(db, itemId, userId, change.reason ?? 'rebalance')
 
-        case 'trim_idea':
-            return _trimIdea(db, change.ideaId, userId, change)
+        case 'trim_item':
+            return _trimItem(db, itemId, userId, change)
 
-        case 'add_idea':
-            return _addIdea(db, portfolioId, userId, change.idea)
+        case 'add_item':
+            return _addItem(db, portfolioId, userId, spec)
+
+        case 'add_to_item':
+            return _addToItem(db, itemId, userId, change)
 
         default:
             return { ok: false, reason: 'unknown_action' }
@@ -109,19 +127,19 @@ async function _applyOne(portfolioId, userId, change, isAdmin) {
 
 // Fully close every live leg of a holding. The execution reconciler finalizes the
 // idea to 'closed' as the broker reports the closes.
-async function _exitIdea(db, ideaId, userId, reason) {
-    const idea = await db.collection(COLLECTION).findOne({ id: ideaId })
-    if (!idea) return { ok: false, reason: 'not_found' }
-    if (idea.userId && idea.userId !== userId) return { ok: false, reason: 'forbidden' }
+async function _exitItem(db, itemId, userId, reason) {
+    const item = await db.collection(COLLECTION).findOne({ id: itemId })
+    if (!item) return { ok: false, reason: 'not_found' }
+    if (item.userId && item.userId !== userId) return { ok: false, reason: 'forbidden' }
 
-    const legs = (idea.brokerOrders ?? []).filter(b => b.positionId != null)
+    const legs = (item.brokerOrders ?? []).filter(b => b.positionId != null)
     if (legs.length === 0) return { ok: false, reason: 'no_position' }
 
     // Manual: can't place a broker close — hand the exit leg back so applyRebalance posts
     // ONE Fill card; the user confirms the real exit price (confirmManualExit finalizes it).
     if (legs.some(l => l.broker === 'manual')) {
-        await db.collection(COLLECTION).updateOne({ id: ideaId }, { $set: { pendingCloseReason: reason } })
-        return { ok: true, manual: true, manualExitLeg: exitLegFromIdea(idea) }
+        await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingCloseReason: reason } })
+        return { ok: true, manual: true, manualExitLeg: exitLegFromIdea(item) }
     }
 
     let closed = 0, skipped = 0
@@ -130,26 +148,26 @@ async function _exitIdea(db, ideaId, userId, reason) {
         await brokerService.closePosition(leg.broker, userId, leg.accountId, leg.positionId)
         closed++
     }
-    await db.collection(COLLECTION).updateOne({ id: ideaId }, { $set: { pendingCloseReason: reason } })
+    await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingCloseReason: reason } })
     return { ok: closed > 0, legsClosed: closed, legsSkipped: skipped }
 }
 
 // Partially close a holding: close `reduceFraction` of each leg's volume. Records the
 // new intended weight (targetAllocationRatio) but leaves quantity to the broker truth
 // (the reconciler reconciles the reduce). targetAllocationRatio is advisory only.
-async function _trimIdea(db, ideaId, userId, change) {
-    const idea = await db.collection(COLLECTION).findOne({ id: ideaId })
-    if (!idea) return { ok: false, reason: 'not_found' }
-    if (idea.userId && idea.userId !== userId) return { ok: false, reason: 'forbidden' }
+async function _trimItem(db, itemId, userId, change) {
+    const item = await db.collection(COLLECTION).findOne({ id: itemId })
+    if (!item) return { ok: false, reason: 'not_found' }
+    if (item.userId && item.userId !== userId) return { ok: false, reason: 'forbidden' }
 
     const f = Number(change.reduceFraction)
     if (!(f > 0 && f < 1)) return { ok: false, reason: 'bad_reduceFraction' }
 
-    const legs = (idea.brokerOrders ?? []).filter(b => b.positionId != null)
+    const legs = (item.brokerOrders ?? []).filter(b => b.positionId != null)
     if (legs.length === 0) return { ok: false, reason: 'no_position' }
 
     // Manual: the Fill card closes a leg fully, not a fraction — partial manual trims aren't
-    // supported. Skip (a full exit_idea is the manual-mode path). Rare in practice.
+    // supported. Skip (a full exit_item is the manual-mode path). Rare in practice.
     if (legs.some(l => l.broker === 'manual')) return { ok: false, reason: 'manual_trim_unsupported' }
 
     let trimmed = 0, skipped = 0
@@ -162,14 +180,14 @@ async function _trimIdea(db, ideaId, userId, change) {
     }
 
     if (change.targetAllocationRatio != null && Number.isFinite(Number(change.targetAllocationRatio))) {
-        await db.collection(COLLECTION).updateOne({ id: ideaId }, { $set: { allocationRatio: Number(change.targetAllocationRatio) } })
+        await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { allocationRatio: Number(change.targetAllocationRatio) } })
     }
     return { ok: trimmed > 0, legsTrimmed: trimmed, legsSkipped: skipped }
 }
 
 // Create a new holding in the portfolio. Mirrors construction semantics (saveIdea →
 // status 'waiting'); inherits the portfolio's accounts/name from an existing holding.
-async function _addIdea(db, portfolioId, userId, spec) {
+async function _addItem(db, portfolioId, userId, spec) {
     if (!spec?.asset) return { ok: false, reason: 'no_asset' }
     const sibling = await db.collection(COLLECTION).findOne(
         { portfolioId, userId },
@@ -182,7 +200,68 @@ async function _addIdea(db, portfolioId, userId, spec) {
         accounts:      Array.isArray(sibling?.accounts) ? sibling.accounts : [],
         mainAccountId: sibling?.mainAccountId ?? null,
     }, userId)
-    return res?.ok ? { ok: true, ideaId: res.idea?.id ?? null } : { ok: false, reason: 'save_failed' }
+    return res?.ok ? { ok: true, itemId: res.idea?.id ?? null } : { ok: false, reason: 'save_failed' }
+}
+
+// Scale INTO a live holding: place a same-direction market order per leg to increase exposure. A new
+// name uses add_item (a fresh 'waiting' holding); this grows an EXISTING live position. A same-direction
+// order with NO positionId OPENS/increases (a positionId would make it a CLOSING order); on a hedging
+// broker that adds a sibling position under the same item — fine, since trim/exit iterate ALL legs and
+// computePortfolioState sums them. Portfolio holdings are review-managed (no native stop/TP), so there
+// are no protective exits to grow. `broker` is injectable for tests. targetAllocationRatio is advisory.
+// LIMITATION: a holding that DOES carry native exits won't have them resized here.
+export async function _addToItem(db, itemId, userId, change, broker = brokerService) {
+    const item = await db.collection(COLLECTION).findOne({ id: itemId })
+    if (!item) return { ok: false, reason: 'not_found' }
+    if (item.userId && item.userId !== userId) return { ok: false, reason: 'forbidden' }
+    if (!LIVE.has(item.status)) return { ok: false, reason: 'not_live' }   // not in position → use add_item
+
+    const f = Number(change.addFraction)
+    if (!(f > 0)) return { ok: false, reason: 'bad_addFraction' }
+
+    const legs = (item.brokerOrders ?? []).filter(b => b.positionId != null)
+    if (legs.length === 0) return { ok: false, reason: 'no_position' }
+    // Manual legs can't be placed programmatically (mirrors trim's manual guard).
+    if (legs.some(l => l.broker === 'manual')) return { ok: false, reason: 'manual_add_unsupported' }
+
+    const direction = item.direction === 'short' ? 'short' : 'long'
+    const symbol    = orderSymbol(item)
+
+    let added = 0, skipped = 0, failed = 0
+    const newLegs = []
+    for (const leg of legs) {
+        if (!broker.capabilities(leg.broker)?.trading) { skipped++; continue }
+        const qty = Math.floor((leg.quantity ?? 0) * f)
+        if (qty <= 0) { skipped++; continue }
+        // Per-leg guard (mirrors placeOrdersForIdea): a failure on one account must NOT abandon a
+        // sibling leg whose order already went in unlinked — each success is collected independently.
+        try {
+            const res = await broker.placeOrder(leg.broker, userId, leg.accountId, { symbol, direction, quantity: qty, type: 'market' })
+            newLegs.push({
+                broker:     leg.broker,
+                accountId:  res?.accountId  ?? leg.accountId,
+                orderId:    res?.orderId    ?? null,
+                positionId: res?.positionId ?? null,
+                quantity:   qty,
+            })
+            added++
+        } catch (err) {
+            logger.error(LOG, `add leg failed (${leg.broker}/${leg.accountId})`, err.message)
+            failed++
+        }
+    }
+
+    if (added) {
+        // Link the new legs so the reconciler backfills their positionId on fill (matched by orderId),
+        // and make sure we're listening for those fills.
+        await db.collection(COLLECTION).updateOne({ id: itemId }, { $push: { brokerOrders: { $each: newLegs } } })
+        for (const l of newLegs) broker.startExecutionFeed?.(l.broker, userId, l.accountId)?.catch?.(() => {})
+        // Record the intended new weight (advisory) only when exposure actually changed.
+        if (change.targetAllocationRatio != null && Number.isFinite(Number(change.targetAllocationRatio))) {
+            await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { allocationRatio: Number(change.targetAllocationRatio) } })
+        }
+    }
+    return { ok: added > 0, legsAdded: added, legsSkipped: skipped, ...(failed ? { legsFailed: failed } : {}) }
 }
 
 // Append a conviction snapshot to each holding so the next review can show the
