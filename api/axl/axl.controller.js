@@ -3,7 +3,32 @@ import { resolveModel }    from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages } from '../_shared/parse.util.js'
 
+const VALID_PIPELINES = new Set(['trade', 'portfolio', 'scan', 'research'])
 const LOG = '[axl:controller]'
+
+// SSE reception routing — streams a short Axl comment then emits the resolved pipeline
+// key in the `done` payload so the frontend can navigate to the right desk.
+export async function routeAxl(req, res) {
+    const { message } = req.body ?? {}
+    if (!message || typeof message !== 'string' || !message.trim()) {
+        return res.status(400).json({ error: 'message is required' })
+    }
+
+    await streamAgentResponse(req, res, {
+        log: LOG,
+        handler: async ({ sendEvent, signal }) => {
+            const result = await axlAgentService.routeIntent({
+                message: message.trim(),
+                userId:  req.user._id,
+                signal,
+                onToken:     (text) => sendEvent('token',     { text }),
+                onReasoning: (text) => sendEvent('reasoning', { text }),
+            })
+            const route = VALID_PIPELINES.has(result.route) ? result.route : null
+            return { reply: result.reply, route }
+        },
+    })
+}
 
 // SSE chat with Axl — the 4th-agent chat surface (concierge / app-guide, read-only).
 // Same shape as the scanner stream, minus artifacts: Axl emits no <trade_idea>/scan,

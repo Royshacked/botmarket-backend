@@ -20,7 +20,55 @@ const MAX_MESSAGES = 12
 const TOOLS = []
 const TOOL_HANDLERS = {}
 
-export const axlAgentService = { chatStream }
+export const axlAgentService = { chatStream, routeIntent }
+
+// Tight routing system prompt — phaseless, no tool context needed.
+const ROUTE_SYSTEM = `You are Axl, the reception at a trading platform with four specialist desks.
+Your ONLY job: identify which desk the user wants, then reply with ONE short sentence acknowledging their intent and telling them where you are routing them. End your reply with <route>key</route>.
+
+Desks and keys:
+- trade: intraday, day, or swing trade of a specific asset (begins with Argus validating the asset, then Kairos plans the setup)
+- portfolio: build or manage a portfolio, long-term or swing allocation (Argus scans, Prometheus researches, Atlas allocates)
+- scan: produce a watchlist of candidates for later setups (Argus scans and lists)
+- research: deep-dive research on a company or sector (Prometheus builds a coverage thesis)
+
+Reply format: ONE sentence, then <route>key</route>.
+Examples:
+"Let's find you a setup — routing you to the trading desk." <route>trade</route>
+"Time to build your book — sending you to the portfolio desk." <route>portfolio</route>
+"On it — routing you to the scan desk for a fresh watchlist." <route>scan</route>
+"Deep dive coming — routing you to the research desk." <route>research</route>`
+
+async function routeIntent({ message, userId, onToken, onReasoning, signal } = {}) {
+    const { model, streamFn, onUsage } = resolveAgentStream(undefined, userId)
+
+    let routeCapture = null
+    const tagCaptures = buildTagCaptures({
+        route: (text) => { routeCapture = text.trim() },
+    })
+
+    const systemPrompt = [{ type: 'text', text: ROUTE_SYSTEM }]
+
+    logger.info(LOG, 'routeIntent start', { model })
+
+    const raw = await streamFn({
+        model,
+        promptOrMessages: [{ role: 'user', content: message }],
+        systemPrompt,
+        tools:        [],
+        toolHandlers: {},
+        reasoningEffort: 'low',
+        signal,
+        onToken,
+        tagCaptures,
+        onReasoning,
+        onUsage,
+    })
+
+    const reply = (raw ?? '').trim()
+    logger.info(LOG, 'routeIntent done', { route: routeCapture, replyLength: reply.length })
+    return { reply, route: routeCapture }
+}
 
 async function chatStream({ messages = [], model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, signal } = {}) {
     const normalized = normalizeMessages(messages, MAX_MESSAGES)
