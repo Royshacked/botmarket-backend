@@ -56,6 +56,11 @@ now.
 - [ ] **Paper trim + scale-in** `[PAPER]` — on a **paper** portfolio holding a **crypto** name, run
   `trim_item` then `add_to_item`; confirm the paper venue reduces / increases the virtual position
   correctly (paper handles partials natively — this exercises G3/G4 logic without a real broker).
+- [ ] **G7 — manual partial trim** `[ANY]` (manual mode, no broker) — on a **manual** portfolio
+  holding, run `trim_item` (e.g. 50%); confirm a Fill card posts, and submitting the exit price
+  **reduces** the position to the remaining size (not a full close) and banks partial P&L. The item's
+  `pendingTrimQty` makes this work even before the Fill card forwards a `quantity`. (Manual **add**
+  is not built yet — see below.)
 
 ## C. Needs the FE bundle rebuilt + deployed `[DEPLOY]`
 

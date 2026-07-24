@@ -46,8 +46,8 @@ export async function confirmManualExitOrder(req, res) {
     try {
         const { id } = req.params
         if (!id) return res.status(400).send({ error: 'Missing id' })
-        const { price } = req.body ?? {}
-        const result = await confirmManualExit(id, { price }, req.user._id, req.user.isAdmin)
+        const { price, quantity } = req.body ?? {}
+        const result = await confirmManualExit(id, { price, quantity }, req.user._id, req.user.isAdmin)
         _sendManual(res, result, r => ({ idea: r.idea }))
     } catch (err) {
         logger.error(LOG, 'confirmManualExitOrder failed', err)

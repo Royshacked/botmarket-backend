@@ -65,4 +65,38 @@ export async function closeManualPosition({ userId, positionId, price, reason = 
     return { positionId, pnl: net, exitPrice: price }
 }
 
-export const manualExecutionService = { openManualPosition, closeManualPosition }
+/**
+ * Record a PARTIAL manual close (a trim) at the user-reported price: bank the realized P&L on the
+ * closed size and shrink the position, or fully close it when the reported size meets/exceeds what's
+ * open. Same shared-store + no-emit contract as closeManualPosition (the confirm endpoint updates the
+ * idea directly). `qty` is the size the user reports they closed.
+ * @returns {Promise<{ positionId, pnl, exitPrice, closedQty, remainingQty, closed }|null>} null if not open
+ */
+export async function reduceManualPosition({ userId, positionId, qty, price, reason = 'manual' }) {
+    const pos = await paperBrokerService.getPosition(userId, positionId)
+    if (!pos || pos.status !== 'open') {
+        logger.warn(LOG, `reduceManualPosition: position ${positionId} not open — skipping`)
+        return null
+    }
+    if (!(price > 0)) throw new Error(`manual reducePosition: price must be > 0 (got ${price})`)
+    const closeQty = Math.min(Number(qty), pos.qty)
+    if (!(closeQty > 0)) throw new Error(`manual reducePosition: quantity must be > 0 (got ${qty})`)
+
+    // Realized P&L banks on the closed slice only; the remaining size keeps its original avg price.
+    const net = round2((price - pos.avgPrice) * closeQty * dirSign(pos.direction))
+    await paperBrokerService.adjustBalance(userId, pos.accountId, { cash: net, realizedPnl: net })
+
+    const remainingQty = round2(pos.qty - closeQty)
+    if (remainingQty > 0) {
+        await paperBrokerService.updatePosition(userId, positionId, { qty: remainingQty })
+        logger.info(LOG, `Manual position ${positionId} trimmed by ${closeQty} @ ${price} (pnl ${net}, ${remainingQty} left)`)
+        return { positionId, pnl: net, exitPrice: price, closedQty: closeQty, remainingQty, closed: false }
+    }
+    await paperBrokerService.updatePosition(userId, positionId, {
+        status: 'closed', closedAt: Date.now(), exitPrice: price, realizedPnl: net,
+    })
+    logger.info(LOG, `Manual position ${positionId} fully closed via trim @ ${price} (pnl ${net}, ${reason})`)
+    return { positionId, pnl: net, exitPrice: price, closedQty: closeQty, remainingQty: 0, closed: true }
+}
+
+export const manualExecutionService = { openManualPosition, closeManualPosition, reduceManualPosition }

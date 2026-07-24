@@ -155,7 +155,7 @@ async function _exitItem(db, itemId, userId, reason) {
 // Partially close a holding: close `reduceFraction` of each leg's volume. Records the
 // new intended weight (targetAllocationRatio) but leaves quantity to the broker truth
 // (the reconciler reconciles the reduce). targetAllocationRatio is advisory only.
-async function _trimItem(db, itemId, userId, change) {
+export async function _trimItem(db, itemId, userId, change) {
     const item = await db.collection(COLLECTION).findOne({ id: itemId })
     if (!item) return { ok: false, reason: 'not_found' }
     if (item.userId && item.userId !== userId) return { ok: false, reason: 'forbidden' }
@@ -166,9 +166,26 @@ async function _trimItem(db, itemId, userId, change) {
     const legs = (item.brokerOrders ?? []).filter(b => b.positionId != null)
     if (legs.length === 0) return { ok: false, reason: 'no_position' }
 
-    // Manual: the Fill card closes a leg fully, not a fraction — partial manual trims aren't
-    // supported. Skip (a full exit_item is the manual-mode path). Rare in practice.
-    if (legs.some(l => l.broker === 'manual')) return { ok: false, reason: 'manual_trim_unsupported' }
+    // Manual: no broker to hit — hand the trim back as a PARTIAL exit leg so applyRebalance posts a
+    // Fill card. confirmManualExit reduces the position (not full close) using the reported size, or the
+    // pendingTrimQty stamped here if the FE doesn't forward a quantity. Stamp both so the confirm is
+    // robust. (A manual holding is a single manual leg.)
+    if (legs.some(l => l.broker === 'manual')) {
+        const leg     = legs.find(l => l.broker === 'manual')
+        const openQty = leg.quantity ?? item.quantity ?? 0
+        const trimQty = Math.floor(openQty * f)
+        if (trimQty <= 0) return { ok: false, reason: 'trim_too_small' }
+        await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingCloseReason: 'trim', pendingTrimQty: trimQty } })
+        return { ok: true, manual: true, manualExitLeg: {
+            ideaId:       item.id,
+            asset:        item.asset,
+            direction:    item.direction,
+            positionId:   leg.positionId,
+            quantity:     trimQty,
+            partial:      true,
+            remainingQty: openQty - trimQty,
+        } }
+    }
 
     let trimmed = 0, skipped = 0
     for (const leg of legs) {

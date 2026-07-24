@@ -14,7 +14,7 @@
 import { stripId }               from '../../providers/mongodb.provider.js'
 import { logger }                from '../../services/logger.service.js'
 import { routeExits }            from '../../services/protectionPlan.service.js'
-import { openManualPosition, closeManualPosition } from '../broker/manualExecution.service.js'
+import { openManualPosition, closeManualPosition, reduceManualPosition } from '../broker/manualExecution.service.js'
 import { notifyManualEntry, notifyManualExit, entryLegFromIdea, exitLegFromIdea } from '../../services/manualNotify.service.js'
 import { tradeCaptureService } from '../../services/tradeCapture.service.js'
 import { entityRepo }          from '../../services/entity/entityRepo.service.js'
@@ -112,12 +112,13 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId, i
 }
 
 /**
- * Confirm a user-reported exit fill: close the manual position at the reported price and
- * mark the idea closed. v1 closes the position in full.
+ * Confirm a user-reported exit fill. A reported `quantity` (or a pending trim size stamped by a
+ * portfolio trim) that is strictly LESS than the open size does a PARTIAL close (trim) — the position
+ * shrinks and stays open; otherwise the position closes in full and the idea flips 'closed'.
  * @param {string} id
- * @param {{ price:number }} fill
+ * @param {{ price:number, quantity?:number }} fill
  */
-export async function confirmManualExit(id, { price } = {}, userId, isAdmin = false) {
+export async function confirmManualExit(id, { price, quantity } = {}, userId, isAdmin = false) {
     try {
         const idea = await entityRepo.getById(id)
         if (!idea)                        return { ok: false, reason: 'not_found' }
@@ -132,12 +133,34 @@ export async function confirmManualExit(id, { price } = {}, userId, isAdmin = fa
         if (!(px > 0)) return { ok: false, reason: 'bad_price' }
 
         const reason = idea.pendingCloseReason ?? 'manual'
+
+        // Partial (trim): a reported size — or the trim size a portfolio rebalance stamped on the idea
+        // (pendingTrimQty, robust to an FE that doesn't forward the quantity) — that is smaller than the
+        // open size reduces the position and leaves it open. reqQty ≥ open size falls through to a full close.
+        const openQty = Number(idea.quantity)
+        const reqQty  = quantity != null ? Number(quantity)
+            : (idea.pendingTrimQty != null ? Number(idea.pendingTrimQty) : null)
+        if (reqQty != null && reqQty > 0 && Number.isFinite(openQty) && reqQty < openQty) {
+            const res = await reduceManualPosition({ userId: idea.userId, positionId: link.positionId, qty: reqQty, price: px, reason })
+            const remaining    = res?.remainingQty ?? Math.max(0, openQty - reqQty)
+            const brokerOrders = (idea.brokerOrders ?? []).map(b =>
+                b.positionId === link.positionId ? { ...b, quantity: remaining } : b)
+            const updated = await entityRepo.patchAndGet(id, {
+                quantity: remaining, brokerOrders,
+                pendingTrimQty: null, pendingCloseReason: null,   // consumed
+            })
+            // A partial trim intentionally does NOT captureClose — that would finalize the trade in the
+            // analytics ledger. The FINAL close captures it (a known scaled-out-P&L ledger limitation).
+            logger.info(LOG, `Manual trim confirmed for ${id}: closed ${reqQty} @ ${px}, ${remaining} left (pnl ${res?.pnl})`)
+            return { ok: true, partial: true, remainingQty: remaining, idea: stripId(updated) }
+        }
+
         const res = await closeManualPosition({ userId: idea.userId, positionId: link.positionId, price: px, reason })
 
         const now = Date.now()
         const set = {
             status: 'closed', orderState: 'closed', closedReason: reason, closedAt: now,
-            chat_state: null,
+            chat_state: null, pendingTrimQty: null,
             ...(res?.pnl != null && { realizedPnl: res.pnl }),
         }
         const updated = await entityRepo.patchAndGet(id, set)
