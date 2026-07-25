@@ -32,7 +32,7 @@
         "openai": "^6.35.0",
         "playwright": "^1.61.1",
         "ws": "^8.21.0",
-        "yahoo-finance2": "^3.15.2"
+        "yahoo-finance2": "^3.14.3"
     },
     "devDependencies": {
         "nodemon": "^3.1.14"
