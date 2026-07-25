@@ -7,14 +7,14 @@
 // key (already lowercased/trimmed) -> [timeSpan, multiplier]
 const INTERVAL_MAP = {
     // minutes
-    '1min': ['minute', 1],  '1': ['minute', 1],
-    '5min': ['minute', 5],  '5': ['minute', 5],
-    '15min': ['minute', 15], '15': ['minute', 15],
-    '30min': ['minute', 30], '30': ['minute', 30],
+    '1m': ['minute', 1], '1min': ['minute', 1],  '1': ['minute', 1],
+    '5m': ['minute', 5], '5min': ['minute', 5],  '5': ['minute', 5],
+    '15m': ['minute', 15], '15min': ['minute', 15], '15': ['minute', 15],
+    '30m': ['minute', 30], '30min': ['minute', 30], '30': ['minute', 30],
     // hours
-    '1hr': ['hour', 1], '1hour': ['hour', 1], '60': ['hour', 1], 'hour': ['hour', 1],
-    '2hr': ['hour', 2], '2hour': ['hour', 2], '120': ['hour', 2],
-    '4hr': ['hour', 4], '4hour': ['hour', 4], '240': ['hour', 4],
+    '1h': ['hour', 1], '1hr': ['hour', 1], '1hour': ['hour', 1], '60': ['hour', 1], 'hour': ['hour', 1],
+    '2h': ['hour', 2], '2hr': ['hour', 2], '2hour': ['hour', 2], '120': ['hour', 2],
+    '4h': ['hour', 4], '4hr': ['hour', 4], '4hour': ['hour', 4], '240': ['hour', 4],
     // day / week / month
     'day': ['day', 1], 'daily': ['day', 1], 'd': ['day', 1], '1d': ['day', 1], '1day': ['day', 1],
     'week': ['week', 1], 'weekly': ['week', 1], 'w': ['week', 1], '1w': ['week', 1],
