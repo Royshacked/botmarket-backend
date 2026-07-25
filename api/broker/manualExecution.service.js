@@ -65,4 +65,61 @@ export async function closeManualPosition({ userId, positionId, price, reason = 
     return { positionId, pnl: net, exitPrice: price }
 }
 
-export const manualExecutionService = { openManualPosition, closeManualPosition }
+/**
+ * Record a PARTIAL manual close (a trim) at the user-reported price: bank the realized P&L on the
+ * closed size and shrink the position, or fully close it when the reported size meets/exceeds what's
+ * open. Same shared-store + no-emit contract as closeManualPosition (the confirm endpoint updates the
+ * idea directly). `qty` is the size the user reports they closed.
+ * @returns {Promise<{ positionId, pnl, exitPrice, closedQty, remainingQty, closed }|null>} null if not open
+ */
+export async function reduceManualPosition({ userId, positionId, qty, price, reason = 'manual' }) {
+    const pos = await paperBrokerService.getPosition(userId, positionId)
+    if (!pos || pos.status !== 'open') {
+        logger.warn(LOG, `reduceManualPosition: position ${positionId} not open — skipping`)
+        return null
+    }
+    if (!(price > 0)) throw new Error(`manual reducePosition: price must be > 0 (got ${price})`)
+    const closeQty = Math.min(Number(qty), pos.qty)
+    if (!(closeQty > 0)) throw new Error(`manual reducePosition: quantity must be > 0 (got ${qty})`)
+
+    // Realized P&L banks on the closed slice only; the remaining size keeps its original avg price.
+    const net = round2((price - pos.avgPrice) * closeQty * dirSign(pos.direction))
+    await paperBrokerService.adjustBalance(userId, pos.accountId, { cash: net, realizedPnl: net })
+
+    const remainingQty = round2(pos.qty - closeQty)
+    if (remainingQty > 0) {
+        await paperBrokerService.updatePosition(userId, positionId, { qty: remainingQty })
+        logger.info(LOG, `Manual position ${positionId} trimmed by ${closeQty} @ ${price} (pnl ${net}, ${remainingQty} left)`)
+        return { positionId, pnl: net, exitPrice: price, closedQty: closeQty, remainingQty, closed: false }
+    }
+    await paperBrokerService.updatePosition(userId, positionId, {
+        status: 'closed', closedAt: Date.now(), exitPrice: price, realizedPnl: net,
+    })
+    logger.info(LOG, `Manual position ${positionId} fully closed via trim @ ${price} (pnl ${net}, ${reason})`)
+    return { positionId, pnl: net, exitPrice: price, closedQty: closeQty, remainingQty: 0, closed: true }
+}
+
+/**
+ * Record an ADD to an existing manual position (scale-in) at the user-reported price: grow the size
+ * and blend the average entry (size-weighted). No balance change (manual has no cost model — P&L banks
+ * on close against the blended avg). Same shared-store + no-emit contract as the others.
+ * @returns {Promise<{ positionId, qty, avgPrice, addedQty }|null>} null if not open
+ */
+export async function addToManualPosition({ userId, positionId, addQty, price }) {
+    const pos = await paperBrokerService.getPosition(userId, positionId)
+    if (!pos || pos.status !== 'open') {
+        logger.warn(LOG, `addToManualPosition: position ${positionId} not open — skipping`)
+        return null
+    }
+    const add = Number(addQty)
+    if (!(add > 0))   throw new Error(`manual addPosition: quantity must be > 0 (got ${addQty})`)
+    if (!(price > 0)) throw new Error(`manual addPosition: price must be > 0 (got ${price})`)
+
+    const newQty = round2(pos.qty + add)
+    const newAvg = round2((pos.avgPrice * pos.qty + price * add) / newQty)   // size-weighted blend
+    await paperBrokerService.updatePosition(userId, positionId, { qty: newQty, avgPrice: newAvg })
+    logger.info(LOG, `Manual position ${positionId} added ${add} @ ${price} → ${newQty} @ ${newAvg}`)
+    return { positionId, qty: newQty, avgPrice: newAvg, addedQty: add }
+}
+
+export const manualExecutionService = { openManualPosition, closeManualPosition, reduceManualPosition, addToManualPosition }

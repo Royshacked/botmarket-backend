@@ -11,7 +11,7 @@
  * See docs/architecture/manual-mode.md.
  */
 
-import { sendBotMessage } from '../api/chat/chat.service.js'
+import { postBotCard, cardActions } from '../api/chat/chat.service.js'
 import { logger }         from './logger.service.js'
 
 const LOG = '[manualNotify]'
@@ -52,7 +52,14 @@ export async function notifyManualEntry(userId, { legs, portfolioId = null, port
         : `Manual entry — ${portfolioName || 'portfolio'}: ${legs.length} legs. Enter each at your broker and fill in your average prices.`
     logger.info(LOG, `Manual entry card → user ${userId}: ${legs.map(l => l.asset).join(', ')}`)
     // Attribute to the authoring agent: a portfolio basket is Atlas's, a lone idea is Idea's.
-    return sendBotMessage(userId, content, 'manual_entry', { kind: 'entry', portfolioId, portfolioName, legs }, portfolioId ? 'portfolio' : 'idea')
+    return postBotCard({
+        userId,
+        content,
+        type:    'manual_entry',
+        payload: { kind: 'entry', portfolioId, portfolioName, legs },
+        botId:   portfolioId ? 'portfolio' : 'idea',
+        actions: cardActions('Enter fills'),
+    })
 }
 
 /**
@@ -71,7 +78,14 @@ export async function notifyManualExit(userId, { legs, reason = 'manual', portfo
         : `Exit ${portfolioName || 'portfolio'} — ${legs.length} open legs. Confirm your exit price for each one you've closed.`
     logger.info(LOG, `Manual exit card → user ${userId}: ${legs.map(l => l.asset).join(', ')} (${reason})`)
     // Attribute to the authoring agent: a portfolio basket is Atlas's, a lone idea is Idea's.
-    return sendBotMessage(userId, content, 'manual_exit', { kind: 'exit', reason, portfolioId, portfolioName, legs }, portfolioId ? 'portfolio' : 'idea')
+    return postBotCard({
+        userId,
+        content,
+        type:    'manual_exit',
+        payload: { kind: 'exit', reason, portfolioId, portfolioName, legs },
+        botId:   portfolioId ? 'portfolio' : 'idea',
+        actions: cardActions('Confirm close'),
+    })
 }
 
 export const manualNotifyService = { notifyManualEntry, notifyManualExit, entryLegFromIdea, exitLegFromIdea }

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     deriveMode, buildIdeaFromCall, buildPositionState, applyEditPatch, confirmCall, editCall, dismissCall,
-    manageCall, _resolveMainLink, _workingExit, _partialQty,
+    manageCall, _resolveMainLink, _resolveAllLinks, _workingExit, _partialQty,
     reviveCall, declineReentry, _reentryValidUntil,
 } from '../../services/kairos.handoff.service.js'
 
@@ -18,23 +18,30 @@ function readyCall(extra = {}) {
     }
 }
 
-// Fake db: findOne always returns `call`; updateOne records the $set patch.
+// Fake db: findOne returns the current (merged) call — updateOne folds each $set into it, so a
+// re-read after the merge sees the stamped execution fields (P3b self-shadow). updates[] records
+// every $set patch in order.
 function fakeDb(call) {
     const updates = []
+    let cur = { ...call }
     return { updates, collection: () => ({
-        findOne:   async () => call,
-        updateOne: async (_q, u) => { updates.push(u.$set) },
+        findOne:   async () => cur,
+        updateOne: async (_q, u) => { updates.push(u.$set); cur = { ...cur, ...u.$set } },
     }) }
 }
 
 function baseDeps(db, over = {}) {
     return {
         getDb:              async () => db,
-        saveIdea:           async () => ({ ok: true, idea: { id: 'idea1', pendingOrder: { plan: [{ broker: 'paper', accountId: 'p1', quantity: 220, type: 'market' }] } } }),
+        // Enrichment engine returns ONE child carrying the execution shape (kind:'idea' is stripped
+        // on merge; the call keeps kind:'call'). status:'hit' converges onto the call.
+        buildIdeaChildren:  async () => ({ ok: true, children: [{
+            id: 'idea1', kind: 'idea', parentId: null, status: 'hit',
+            pendingOrder: { plan: [{ broker: 'paper', accountId: 'p1', quantity: 220, type: 'market' }] },
+        }] }),
         placeOrdersForIdea: async () => ({ ok: true }),
         notifyManualEntry:  async () => ({}),
         entryLegFromIdea:   (idea) => ({ ideaId: idea.id, asset: 'TSLA' }),
-        markIdeaOwned:      async () => ({}),
         ...over,
     }
 }
@@ -119,26 +126,28 @@ test('applyEditPatch: empty changes just re-queues', () => {
 })
 
 // ── confirmCall ────────────────────────────────────────────────────────────
-test('confirm: paper → saveIdea + placeOrders, call marked confirmed + linked + owned + seeded', async () => {
+test('confirm: paper → merges execution onto the call (self-shadow), places, seeds position_state', async () => {
     const db = fakeDb(readyCall())
-    let placed = 0, notified = 0, owned = null
+    let placed = 0, notified = 0
     const deps = baseDeps(db, {
         placeOrdersForIdea: async () => { placed++ },
         notifyManualEntry:  async () => { notified++ },
-        markIdeaOwned:      async (id) => { owned = id },
     })
     const res = await confirmCall('call_TSLA_x', 'u1', false, deps)
-    assert.deepEqual(res, { ok: true, mode: 'paper', ideaId: 'idea1' })
+    assert.deepEqual(res, { ok: true, mode: 'paper', ideaId: 'call_TSLA_x' })   // self, not a shadow id
     assert.equal(placed, 1)
     assert.equal(notified, 0)
-    assert.equal(owned, 'idea1')                         // idea flagged Hermes-owned (Minos stands down)
-    assert.equal(db.updates[0].status, 'confirmed')
-    assert.equal(db.updates[0].linked_idea_id, 'idea1')
-    assert.equal(db.updates[0].position_state.linked_idea_id, 'idea1')   // position_state seeded
-    assert.equal(db.updates[0].position_state.stop.initial, 245.2)
+    const set = db.updates[0]
+    assert.equal(set.status, 'hit')                                  // converged execution vocab
+    assert.equal(set.ownedBy, undefined)                             // kind:'call' IS ownership (no flag)
+    assert.equal(set.callId, 'call_TSLA_x')                          // self-origin → tradeCapture origin='call'
+    assert.equal(set.linked_idea_id, 'call_TSLA_x')                  // self-link
+    assert.equal(set.position_state.linked_idea_id, 'call_TSLA_x')   // position_state seeded onto the call
+    assert.equal(set.position_state.stop.initial, 245.2)
+    assert.deepEqual(set.pendingOrder.plan[0].accountId, 'p1')       // execution shape merged in
 })
 
-test('confirm: manual → notifyManualEntry, no order placement', async () => {
+test('confirm: manual → notifyManualEntry with the merged call leg, no order placement', async () => {
     const db = fakeDb(readyCall({ broker: 'manual', accounts: ['manual-u1'], main_account_id: 'manual-u1' }))
     let placed = 0, notifiedLegs = null
     const deps = baseDeps(db, {
@@ -148,16 +157,16 @@ test('confirm: manual → notifyManualEntry, no order placement', async () => {
     const res = await confirmCall('call_TSLA_x', 'u1', false, deps)
     assert.equal(res.mode, 'manual')
     assert.equal(placed, 0)
-    assert.deepEqual(notifiedLegs, [{ ideaId: 'idea1', asset: 'TSLA' }])
-    assert.equal(db.updates[0].status, 'confirmed')
+    assert.deepEqual(notifiedLegs, [{ ideaId: 'call_TSLA_x', asset: 'TSLA' }])   // leg built from the call itself
+    assert.equal(db.updates[0].status, 'hit')
 })
 
-test('confirm: not ready → not_ready (no idea created)', async () => {
+test('confirm: not ready → not_ready (no enrichment)', async () => {
     const db = fakeDb(readyCall({ status: 'watching' }))
-    let saved = 0
-    const res = await confirmCall('call_TSLA_x', 'u1', false, baseDeps(db, { saveIdea: async () => { saved++; return { ok: true, idea: {} } } }))
+    let built = 0
+    const res = await confirmCall('call_TSLA_x', 'u1', false, baseDeps(db, { buildIdeaChildren: async () => { built++; return { ok: true, children: [{}] } } }))
     assert.deepEqual(res, { ok: false, reason: 'not_ready' })
-    assert.equal(saved, 0)
+    assert.equal(built, 0)
 })
 
 test('confirm: no proposal → no_proposal', async () => {
@@ -172,13 +181,14 @@ test('confirm: not owner → forbidden', async () => {
     assert.deepEqual(res, { ok: false, reason: 'forbidden' })
 })
 
-test('confirm: placement throws → placement_failed (call NOT marked confirmed)', async () => {
+test('confirm: placement throws → placement_failed, call rolled back to ready (retryable)', async () => {
     const db = fakeDb(readyCall())
     const deps = baseDeps(db, { placeOrdersForIdea: async () => { throw new Error('broker down') } })
     const res = await confirmCall('call_TSLA_x', 'u1', false, deps)
     assert.equal(res.ok, false)
     assert.equal(res.reason, 'placement_failed')
-    assert.equal(db.updates.length, 0)   // no 'confirmed' write
+    // merge write happened, then a compensating reset — the call is not left stuck 'hit'.
+    assert.equal(db.updates.at(-1).status, 'ready')
 })
 
 // ── editCall ───────────────────────────────────────────────────────────────
@@ -297,6 +307,91 @@ test('manage: exit_now works bare (no pending) → full close', async () => {
     assert.equal(res.ok, true)
     assert.equal(called, true)
     assert.equal(opts, undefined)                                      // full close: no quantity
+})
+
+// ── manageCall multi-account fan-out ─────────────────────────────────────────
+// A call placed on >1 account has one position per account; management must reach every one.
+function ideaDoc2(over = {}) {
+    return {
+        id: 'idea1', userId: 'u1', direction: 'long', quantity: 160,
+        brokerOrders: [
+            { broker: 'paper', accountId: 'p1', positionId: 'pos1', quantity: 100 },
+            { broker: 'paper', accountId: 'p2', positionId: 'pos2', quantity: 60 },
+        ],
+        exitOrders: [
+            { leg: 'stop', status: 'working', orderId: 'so1', accountId: 'p1', broker: 'paper', price: 245 },
+            { leg: 'tp',   status: 'working', orderId: 'to1', accountId: 'p1', broker: 'paper', price: 252 },
+            { leg: 'stop', status: 'working', orderId: 'so2', accountId: 'p2', broker: 'paper', price: 245 },
+            { leg: 'tp',   status: 'working', orderId: 'to2', accountId: 'p2', broker: 'paper', price: 252 },
+        ],
+        ...over,
+    }
+}
+const inPosCall2 = (psExtra = {}, extra = {}) => inPosCall(psExtra, { accounts: ['p1', 'p2'], ...extra })
+
+test('manage: _resolveAllLinks → one link per account (scoped to call.accounts)', () => {
+    assert.deepEqual(_resolveAllLinks(ideaDoc2(), inPosCall2()), [
+        { broker: 'paper', accountId: 'p1', positionId: 'pos1', quantity: 100 },
+        { broker: 'paper', accountId: 'p2', positionId: 'pos2', quantity: 60 },
+    ])
+    // no accounts on the call → all links (never manage NONE while positions are open)
+    assert.equal(_resolveAllLinks(ideaDoc2(), inPosCall()).length, 2)
+})
+
+test('manage: move_stop fans out → amends BOTH accounts native stops', async () => {
+    const db = mgmtDb(inPosCall2())
+    const amended = []
+    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', false, mDeps(db, {
+        getIdea:      async () => ideaDoc2(),
+        amendOrder:   async (_b, _u, acct, orderId, fields) => { amended.push({ acct, orderId, fields }); return { orderId: orderId + 'x' } },
+        syncIdeaExit: async () => {},
+    }))
+    assert.equal(res.ok, true)
+    assert.deepEqual(res.accounts, [{ accountId: 'p1', ok: true }, { accountId: 'p2', ok: true }])
+    assert.deepEqual(amended, [
+        { acct: 'p1', orderId: 'so1', fields: { stopPrice: 248 } },
+        { acct: 'p2', orderId: 'so2', fields: { stopPrice: 248 } },
+    ])
+    assert.equal(db.updates[0].$set['position_state.stop.current'], 248)
+})
+
+test('manage: take_partial fans out → per-account size summed into taken ledger', async () => {
+    const db = mgmtDb(inPosCall2({ pending_action: { verdict: 'take_partial', severity: 2, proposal: { size_pct: 50 } } }))
+    const closed = []
+    const res = await manageCall('call_TSLA_x', 'u1', 'take_partial', false, mDeps(db, {
+        getIdea:          async () => ideaDoc2(),
+        findOpenPosition: async (_b, _u, acct) => ({ volume: acct === 'p2' ? 60 : 100 }),
+        closePosition:    async (_b, _u, acct, _p, opts) => { closed.push({ acct, ...opts }) },
+    }))
+    assert.equal(res.ok, true)
+    assert.deepEqual(closed, [{ acct: 'p1', quantity: 50 }, { acct: 'p2', quantity: 30 }])
+    assert.equal(db.updates[0].$push['position_state.taken'].size, 80)   // 50 + 30 across accounts
+})
+
+test('manage: one account already flat, one open → applies to the open one only, still ok', async () => {
+    const db = mgmtDb(inPosCall2())
+    const amended = []
+    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', false, mDeps(db, {
+        getIdea:          async () => ideaDoc2(),
+        findOpenPosition: async (_b, _u, acct) => (acct === 'p1' ? null : { volume: 60 }),
+        amendOrder:       async (_b, _u, acct, orderId) => { amended.push(acct); return { orderId } },
+        syncIdeaExit:     async () => {},
+    }))
+    assert.equal(res.ok, true)
+    assert.deepEqual(res.accounts, [{ accountId: 'p1', alreadyFlat: true }, { accountId: 'p2', ok: true }])
+    assert.deepEqual(amended, ['p2'])
+    assert.equal(db.updates[0].$set['position_state.stop.current'], 248)   // aggregate still persisted
+})
+
+test('manage: all accounts unreachable → broker_unreachable, no persist', async () => {
+    const db = mgmtDb(inPosCall2())
+    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', false, mDeps(db, {
+        getIdea:          async () => ideaDoc2(),
+        findOpenPosition: async () => { throw new Error('down') },
+    }))
+    assert.equal(res.ok, false)
+    assert.equal(res.reason, 'broker_unreachable')
+    assert.equal(db.updates.length, 0)
 })
 
 test('manage: already flat → clears card, NO execution (Hermes reconciles the close)', async () => {

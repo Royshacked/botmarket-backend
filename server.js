@@ -36,6 +36,7 @@ import { tradesRoutes }      from './api/trades/trades.routes.js'
 import { transcribeRoutes }  from './api/transcribe/transcribe.routes.js'
 import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
 import { scannerRoutes }     from './api/scanner/scanner.routes.js'
+import { analystRoutes }     from './api/analyst/analyst.routes.js'
 import { axlRoutes }         from './api/axl/axl.routes.js'
 import { threadsRoutes }     from './api/threads/threads.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
@@ -43,6 +44,8 @@ import { calendarRoutes }    from './api/calendar/calendar.routes.js'
 import { newsFeedService }  from './api/news-feed/newsFeed.service.js'
 import { minosService }     from './monitoring/minos.monitor.service.js'
 import { hermesService }    from './monitoring/hermes.monitor.service.js'
+import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
+import { themisService }      from './monitoring/themis.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
 import { paperEquityService } from './monitoring/paperEquity.service.js'
@@ -101,6 +104,7 @@ app.use('/api/paper',       paperRoutes)
 app.use('/api/trades',      tradesRoutes)
 app.use('/api/portfolio',   portfolioRoutes)
 app.use('/api/scanner',     scannerRoutes)
+app.use('/api/analyst',     analystRoutes)
 app.use('/api/axl',         axlRoutes)
 app.use('/api/threads',     threadsRoutes)
 app.use('/api/market',      marketRoutes)
@@ -118,6 +122,8 @@ threadService.ensureThreadIndexes()
 newsFeedService.start()
 minosService.start()
 hermesService.start()
+coverageMonitorService.start()
+themisService.start()
 executionReconciler.start()
 paperFillService.start()
 paperEquityService.start()

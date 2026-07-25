@@ -21,6 +21,7 @@ import { randomUUID }   from 'crypto'
 import { getDb }        from '../providers/mongodb.provider.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { logger }       from './logger.service.js'
+import { ENTITIES }     from './entity/entityCollection.js'
 
 const COLLECTION = 'trades'
 const LOG        = '[tradeCapture]'
@@ -142,7 +143,7 @@ async function captureOpen(idea, exec) {
         let call = null
         if (idea.callId) {
             try {
-                call = await db.collection('kairos_calls').findOne(
+                call = await db.collection(ENTITIES).findOne(
                     { id: idea.callId },
                     { projection: { thesis: 1, bias: 1, entry_zones: 1, patterns: 1, _id: 0 } },
                 )

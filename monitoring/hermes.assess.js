@@ -5,13 +5,15 @@
 // with adaptive thinking, and parse the first JSON object out of the reply.
 
 import Anthropic from '@anthropic-ai/sdk'
-import { getQuotes, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
+import { getQuotes, getCycleAnalysis, getShortInterest, getOptionsContext } from '../providers/yahoofinance.provider.js'
+import { getDerivativesContext }       from '../providers/binance.provider.js'
 import { getTickerAggregates }         from '../providers/candles.provider.js'
 import { buildStudies } from './evaluators/chart.evaluator.js'
 import { CANDLE_CFG, aggregateCandles } from '../services/marketData.tools.js'
 import { sessionPhase } from '../services/market.service.js'
 import { cachedChartImage } from '../services/chartImgCache.service.js'
 import { readStructure, STRUCTURE_VISIONS } from '../services/priceStructure.tools.js'
+import { smcReadText, smcBars, SMC_TOOL_NAMES } from '../services/smc.tools.js'
 import { newsService } from '../services/news.service.js'
 import { userService } from '../api/user/user.service.js'
 import { logger } from '../services/logger.service.js'
@@ -215,6 +217,46 @@ export function _structureTools(ladder) {
     ]
 }
 
+// NUMERIC SMC tools (get_structure / get_fvg / get_liquidity), timeframe LOCKED to the call's ladder.
+// Added ONLY for smc-mode calls (call.mode==='smc') so Hermes monitors an SMC call with the SAME exact
+// levels it was built on (the shared smc.engine). See KAIROS_MODES.md K2.
+export function _smcTools(ladder) {
+    const rungs = Array.isArray(ladder) && ladder.length ? ladder : ['15min']
+    const timeframe = { type: 'string', enum: rungs, description: "One of the call's timeframe_ladder rungs." }
+    const schema = { type: 'object', properties: { timeframe }, required: ['timeframe'] }
+    return [
+        { name: 'get_structure', description: "Exact market structure from OHLCV at one of this call's ladder rungs — trend, last BOS/CHoCH + level, swing high/low, premium/discount, fresh order-blocks. Confirm the SMC call's structural trigger. Optional.", input_schema: schema },
+        { name: 'get_fvg',       description: "Exact unfilled fair-value-gaps from OHLCV at one of this call's ladder rungs — is the FVG the call anchors to still open / being filled? Optional.", input_schema: schema },
+        { name: 'get_liquidity', description: "Exact liquidity pools (equal highs/lows) from OHLCV at one of this call's ladder rungs — has a pool been swept? Optional.", input_schema: schema },
+    ]
+}
+
+// POSITIONING tools (asset-based, NO timeframe). Added ONLY for institutional-mode calls
+// (call.mode==='institutional') so Hermes can RE-VERIFY the positioning/crowding thesis LIVE at
+// assessment — the institutional lens is positioning-driven, and unlike a price level it can shift after
+// build (crowding builds, shorts cover, funding flips). Mirrors _smcTools for the SMC lens. The read is
+// on the call's OWN asset; the provider handles asset class (equity vs crypto) and returns "no data" off-class.
+export const POSITIONING_TOOL_NAMES = ['get_short_interest', 'get_options_context', 'get_derivatives_context']
+export function _institutionalTools() {
+    const noArgs = { type: 'object', properties: {} }
+    return [
+        { name: 'get_short_interest',      description: "Short interest for this call's asset — short % of float, days-to-cover, and month-over-month change (FINRA, ~2-week lag). Has the squeeze / crowded-positioning the thesis leaned on shifted? US equities only. Optional.", input_schema: noArgs },
+        { name: 'get_options_context',     description: "Options positioning for this call's asset — put/call ratio + at-the-money implied vol (nearest expiry). Is the directional skew / priced move still backing the thesis? Equities & ETFs. Optional.", input_schema: noArgs },
+        { name: 'get_derivatives_context', description: "Crypto-perp positioning for this call's asset — funding rate, open interest, and the long/short account ratio. The crowding / leverage behind the thesis. Crypto only. Optional.", input_schema: noArgs },
+    ]
+}
+
+// Mode-lens nudge injected into the assessment user turn. The base prompt reads like a discretionary
+// price-action trader, and the SMC / institutional tools are already wired in per-mode — but a plain
+// `mode` field in the CALL JSON doesn't tell the model to REASON through that lens or actually CALL the
+// mode's tools. This block does: it points the read at the right primary driver + the exact tools to
+// re-verify it. Discretionary (the default) needs no nudge — the base prompt already IS that lens. Pure.
+export function _modeLensBlock(call) {
+    if (call?.mode === 'smc') return 'SMC LENS — this is a Smart-Money-Concepts call: read market STRUCTURE (BOS/CHoCH), order-blocks, fair-value-gaps and liquidity as the PRIMARY driver, above classical indicators. Re-verify the structural trigger against price NOW via get_structure / get_fvg / get_liquidity at a ladder rung before you decide — don\'t trust the build-time map blindly.'
+    if (call?.mode === 'institutional') return 'INSTITUTIONAL LENS — this call is built on POSITIONING/flow, not chart pattern, and positioning shifts after build (crowding builds, shorts cover, funding flips). Re-verify the crowding/squeeze/skew thesis LIVE via get_short_interest / get_options_context / get_derivatives_context rather than trusting the build-time snapshot; weigh that as the primary driver.'
+    return ''
+}
+
 // A requested chart timeframe is honored only if it's one of the call's ladder rungs. Pure.
 export function _validChartTf(requested, ladder) {
     return (Array.isArray(ladder) ? ladder : []).includes(requested) ? requested : null
@@ -230,11 +272,27 @@ export async function _handleAssessToolUses(call, assistantContent, ladder, deps
         renderChart:      _renderChart      = cachedChartImage,
         readStructure:    _readStructure    = readStructure,
         getCycleAnalysis: _getCycleAnalysis = getCycleAnalysis,
+        smcBars:          _smcBars          = smcBars,
+        getShortInterest:      _getShortInterest      = getShortInterest,
+        getOptionsContext:     _getOptionsContext     = getOptionsContext,
+        getDerivativesContext: _getDerivativesContext = getDerivativesContext,
     } = deps
     const symbol = String(call.asset).toUpperCase()
     const uses = (assistantContent ?? []).filter(b => b?.type === 'tool_use')
     const results = []
     for (const use of uses) {
+        // Positioning tools (institutional mode) are asset-based — no timeframe gate; read the call's asset.
+        if (POSITIONING_TOOL_NAMES.includes(use.name)) {
+            try {
+                const fn = use.name === 'get_short_interest' ? _getShortInterest
+                    : use.name === 'get_options_context' ? _getOptionsContext
+                    : _getDerivativesContext
+                results.push({ type: 'tool_result', tool_use_id: use.id, content: String(await fn(symbol)) })
+            } catch (err) {
+                results.push({ type: 'tool_result', tool_use_id: use.id, is_error: true, content: `could not read ${use.name} for ${symbol}: ${err.message}` })
+            }
+            continue
+        }
         const tf = _validChartTf(use.input?.timeframe, ladder)
         if (!tf) {
             results.push({ type: 'tool_result', tool_use_id: use.id, is_error: true,
@@ -245,6 +303,10 @@ export async function _handleAssessToolUses(call, assistantContent, ladder, deps
             if (use.name === 'get_orderblocks' || use.name === 'get_false_breaks') {
                 const kind = use.name === 'get_orderblocks' ? 'orderblocks' : 'false_breaks'
                 const { text } = await _readStructure({ symbol, timeframe: tf, kind, vision: STRUCTURE_VISIONS[kind] })
+                results.push({ type: 'tool_result', tool_use_id: use.id, content: text })
+            } else if (SMC_TOOL_NAMES.includes(use.name)) {
+                // Numeric SMC read (smc-mode calls) — the SAME engine the call was built on.
+                const text = smcReadText(use.name, symbol, tf, await _smcBars(symbol, tf))
                 results.push({ type: 'tool_result', tool_use_id: use.id, content: text })
             } else if (use.name === 'get_cycle_analysis') {
                 const text = await _getCycleAnalysis(symbol, 'price', null, 4, tf)
@@ -290,7 +352,9 @@ async function _runAssessment(call, systemPrompt, buildUserText, label) {
         const thinking  = _thinkingConfig(reasoningEffort)
         const maxTokens = thinking ? ASSESS_MAX_TOKENS_THINKING : ASSESS_MAX_TOKENS
         const system    = [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
-        const tools     = [..._chartTool(ladder), ..._structureTools(ladder)]
+        const tools     = [..._chartTool(ladder), ..._structureTools(ladder),
+            ...(call.mode === 'smc' ? _smcTools(ladder) : []),                     // exact SMC levels for smc-mode calls
+            ...(call.mode === 'institutional' ? _institutionalTools() : [])]       // live positioning re-check for institutional calls
         const messages  = [{ role: 'user', content: primary }]
 
         // Adaptive-timeframe loop: the read may pull extra ladder-rung charts (get_chart) or structured
@@ -409,11 +473,12 @@ const _PULSE_MANDATE = `MOMENTUM PULSE — price has moved materially AWAY from 
 export async function _defaultAssess(call, zone, ctx) {
     const isPulse = ctx.reason === 'momentum_pulse'
     const raw = await _runAssessment(call, _ASSESS_SYSTEM, (tf, candlesText, newsText, marketText) => [
-        `CALL: ${JSON.stringify({ asset: call.asset, trade_type: call.trade_type, bias: call.bias, thesis: call.thesis, conviction: call.conviction, entry_zones: call.entry_zones, reference_levels: call.reference_levels, patterns: call.patterns, timeframe_ladder: call.timeframe_ladder, valid_until: call.valid_until })}`,
+        `CALL: ${JSON.stringify({ asset: call.asset, mode: call.mode, trade_type: call.trade_type, bias: call.bias, thesis: call.thesis, conviction: call.conviction, entry_zones: call.entry_zones, reference_levels: call.reference_levels, patterns: call.patterns, timeframe_ladder: call.timeframe_ladder, valid_until: call.valid_until })}`,
         `ARMED ZONE: ${zone ? JSON.stringify(zone) : (isPulse ? 'none — price is OUTSIDE all mapped zones' : 'none (expiry review)')}`,
         `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
         `SESSION NOW: ${sessionPhase(call.asset, call.asset_class)}`,
         `REASON WOKEN: ${ctx.reason}`,
+        _modeLensBlock(call),
         isPulse ? _PULSE_MANDATE : '',
         `PRIOR MEMO: ${call.monitor_state?.memo || '(none)'}`,
         candlesText ? `RECENT CANDLES (${tf}):\n${candlesText}` : '',
@@ -450,12 +515,13 @@ Include "proposal" only when the verdict is NOT "hold" (only the fields that ver
 
 export async function _defaultAssessPosition(call, ps, ctx) {
     return _runAssessment(call, _POSITION_SYSTEM, (tf, candlesText, newsText, marketText) => [
-        `CALL: ${JSON.stringify({ asset: call.asset, trade_type: call.trade_type, bias: call.bias, thesis: call.thesis, patterns: call.patterns, reference_levels: call.reference_levels })}`,
+        `CALL: ${JSON.stringify({ asset: call.asset, mode: call.mode, trade_type: call.trade_type, bias: call.bias, thesis: call.thesis, patterns: call.patterns, reference_levels: call.reference_levels })}`,
         `POSITION: ${JSON.stringify({ entry: ps.entry, stop: ps.stop, targets: ps.targets, taken: ps.taken, phase: ps.phase })}`,
         `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
         `R-MULTIPLE NOW: ${ctx.metrics?.r_multiple_now ?? 'unknown'}`,
         `SESSION NOW: ${sessionPhase(call.asset, call.asset_class)}`,
         `REASON WOKEN: ${ctx.reason}`,
+        _modeLensBlock(call),
         `PENDING CARD: ${ps.pending_action ? JSON.stringify(ps.pending_action) : '(none)'}`,
         `PRIOR MEMO: ${ps.memo || '(none)'}`,
         candlesText ? `RECENT CANDLES (${tf}):\n${candlesText}` : '',
@@ -478,9 +544,10 @@ Output ONLY a JSON object, no prose:
 
 export async function _defaultAssessReentry(call, outcome, ctx = {}) {
     return _runAssessment(call, _REENTRY_SYSTEM, (tf, candlesText, newsText, marketText) => [
-        `CALL: ${JSON.stringify({ asset: call.asset, trade_type: call.trade_type, bias: call.bias, thesis: call.thesis, patterns: call.patterns, reference_levels: call.reference_levels, entry_zones: call.entry_zones, timeframe_ladder: call.timeframe_ladder })}`,
+        `CALL: ${JSON.stringify({ asset: call.asset, mode: call.mode, trade_type: call.trade_type, bias: call.bias, thesis: call.thesis, patterns: call.patterns, reference_levels: call.reference_levels, entry_zones: call.entry_zones, timeframe_ladder: call.timeframe_ladder })}`,
         `STOP-OUT: ${JSON.stringify({ exit_price: outcome?.exit_price ?? null, r_multiple: outcome?.r_multiple ?? null, reason: outcome?.reason ?? null })}`,
         `CURRENT PRICE: ${ctx?.price ?? 'unknown'}`,
+        _modeLensBlock(call),
         `PRIOR MEMO: ${call.monitor_state?.memo || '(none)'}`,
         candlesText ? `RECENT CANDLES (${tf}):\n${candlesText}` : '',
         newsText ? `RECENT HEADLINES (newest first):\n${newsText}` : 'RECENT HEADLINES: (none available — news axis unsourced)',

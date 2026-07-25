@@ -33,6 +33,8 @@ export async function streamKairos(req, res) {
                 userPrompt:    parsed.userPrompt,
                 chatState:     parsed.chatState ?? emptyKairosState(),
                 accounts:      parsed.accounts,
+                mainAccountId: parsed.mainAccountId,
+                seed:          parsed.seed,
                 brokerContext,
                 model:         routing.model,
                 reasoningEffort: routing.reasoningEffort,
@@ -193,9 +195,28 @@ export async function deleteKairos(req, res) {
     }
 }
 
+// Structured Argus candidate seed (K3): a scan hand-off arrives as a typed object, not free text.
+// Kept lean + string-only; unknown/absent → null. recommended_mode is a FE concern (pre-fills the
+// mode chip) and is NOT part of the prompt seed. `window` (a forward-dated list's period) rides along
+// so the model can narrate the gated window; the actual time-gate is set by code at save.
+export function _sanitizeSeed(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const s = k => (typeof raw[k] === 'string' && raw[k].trim() ? raw[k].trim() : null)
+    const ticker = s('ticker')
+    if (!ticker) return null   // a seed without a ticker is meaningless
+    const w    = (raw.window && typeof raw.window === 'object') ? raw.window : {}
+    const from = (typeof w.from === 'string' && w.from.trim()) ? w.from.trim() : null
+    const to   = (typeof w.to   === 'string' && w.to.trim())   ? w.to.trim()   : null
+    return {
+        ticker: ticker.toUpperCase(), direction: s('direction'), thesis: s('thesis'), analysis: s('analysis'),
+        window: (from || to) ? { from, to } : null,
+    }
+}
+
 function parseStreamBody(body) {
     const { messages, userPrompt, chatState, accounts } = body ?? {}
     const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
+    const seed = _sanitizeSeed(body?.seed)
 
     let state = null
     if (chatState !== undefined && chatState !== null) {
@@ -204,21 +225,24 @@ function parseStreamBody(body) {
     }
 
     const acctList = Array.isArray(accounts) ? accounts.filter(a => a && typeof a === 'object') : []
+    // Which marked account is starred main (bank icon) — lets Kairos tell the user which account
+    // the call will bind to during the build, matching what Generate resolves. Normalized to string.
+    const mainAccountId = body?.mainAccountId != null ? String(body.mainAccountId) : null
 
     if (messages !== undefined && messages !== null) {
         if (!Array.isArray(messages)) return { error: 'messages must be an array' }
         // Empty messages with a userPrompt fallback is allowed here (as on the idea endpoint).
         if (messages.length === 0) {
-            if (trimmedPrompt) return { userPrompt: trimmedPrompt, chatState: state, accounts: acctList }
+            if (trimmedPrompt) return { userPrompt: trimmedPrompt, chatState: state, accounts: acctList, mainAccountId, seed }
             return { error: 'messages must be a non-empty array' }
         }
         // Use the same strict validator as the idea/portfolio/scanner endpoints (was inlined here).
         const validated = parseChatMessages(messages)
         if (validated.error) return { error: validated.error }
         const trimmed = validated.messages.slice(-MAX_RECENT_CHAT_TURNS * 2)
-        return { userPrompt: trimmedPrompt || undefined, messages: trimmed, chatState: state, accounts: acctList }
+        return { userPrompt: trimmedPrompt || undefined, messages: trimmed, chatState: state, accounts: acctList, mainAccountId, seed }
     }
 
-    if (trimmedPrompt) return { userPrompt: trimmedPrompt, chatState: state, accounts: acctList }
+    if (trimmedPrompt) return { userPrompt: trimmedPrompt, chatState: state, accounts: acctList, mainAccountId, seed }
     return { error: 'Request must include messages or userPrompt' }
 }

@@ -12,9 +12,12 @@ import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } 
 import { cleanConviction } from '../../services/conviction.util.js'
 import { placeOrdersForIdea, placeRestingEntryForIdea, triggerEntryNow } from './ideaExecution.service.js'
 import { armExitsInPosition } from './exitOrders.service.js'
+import { entityRepo }         from '../../services/entity/entityRepo.service.js'
+import { kindForDoc }         from '../../services/entity/envelope.js'
+import { ENTITIES }           from '../../services/entity/entityCollection.js'
 
 const LOG = '[idea]'
-const COLLECTION = 'ideas'
+const COLLECTION = ENTITIES
 
 const LOCKED_DELETE_STATUSES = new Set(['long', 'short'])
 const VALID_STATUSES = new Set(['waiting', 'looking', 'resting', 'hit', 'long', 'short', 'closed'])
@@ -29,6 +32,7 @@ export function shouldMarketEnterOnUpdate(patch, existingStatus) {
 
 export const ideaService = {
     saveIdea,
+    buildIdeaChildren,
     saveBatchIdeas,
     getIdeas,
     getAssetClassMap,
@@ -84,7 +88,14 @@ export function isClosedIdeaFrozen(existingStatus, patchStatus) {
     return existingStatus === 'closed' && patchStatus != null && patchStatus !== 'closed'
 }
 
-async function saveIdea(tradeIdea, userId) {
+/**
+ * Enrich + broker-partition an idea input into its child doc(s) — WITHOUT inserting. This is the
+ * idea-creation engine (condition trees, brokerSymbol resolution, basisOffset, immediate plan)
+ * shared by saveIdea (which inserts) and the Kairos handoff (P3b: merges the single child's
+ * execution fields onto the call entity instead of minting a shadow). Returns
+ * { ok, children, forked } or { ok:false, reason?, error }.
+ */
+async function buildIdeaChildren(tradeIdea, userId) {
     const entryTree = resolveConditionTree(tradeIdea.entry_condition,  tradeIdea.entry_conditions, tradeIdea.entry_logic ?? 'AND')
     const stopTree  = resolveConditionTree(tradeIdea.stop_loss,        tradeIdea.stop_conditions,  tradeIdea.stop_logic  ?? 'OR')
     const tpTree    = resolveConditionTree(tradeIdea.take_profit,      tradeIdea.tp_conditions,    tradeIdea.tp_logic    ?? 'OR')
@@ -110,6 +121,9 @@ async function saveIdea(tradeIdea, userId) {
 
     const enriched = {
         id:              randomUUID(),
+        // Entity discriminator (P2): a holding (carries portfolioId) is a portfolio_item, else an idea.
+        kind:            kindForDoc(tradeIdea),
+        parentId:        tradeIdea.portfolioId ?? null,
         savedAt:         Date.now(),
         status:          isImmediate ? 'hit' : 'waiting',
         entryTriggeredAt: isImmediate ? Date.now() : undefined,
@@ -206,9 +220,21 @@ async function saveIdea(tradeIdea, userId) {
             children.push(child)
         }
 
+        return { ok: true, children, forked }
+    } catch (err) {
+        logger.error(LOG, 'Failed to build idea children', err)
+        return { ok: false, error: err }
+    }
+}
+
+async function saveIdea(tradeIdea, userId) {
+    const built = await buildIdeaChildren(tradeIdea, userId)
+    if (!built.ok) return built
+    try {
+        const { children } = built
         const db = await getDb()
         await db.collection(COLLECTION).insertMany(children)
-        logger.info(LOG, 'Idea saved', { id: enriched.id, asset: enriched.asset, immediate: isImmediate, forked, children: children.length })
+        logger.info(LOG, 'Idea saved', { id: children[0].id, asset: children[0].asset, forked: built.forked, children: children.length })
 
         return { ok: true, idea: stripId(children[0]), ideas: children.map(stripId) }
     } catch (err) {
@@ -243,9 +269,10 @@ async function getIdeas(userId, isAdmin = false) {
     try {
         const db = await getDb()
         const query = isAdmin ? {} : { userId }
-        // Exclude Kairos-owned ideas: a confirmed call materializes an idea stamped ownedBy:'hermes'
-        // as its execution vehicle. It's surfaced as the Call row (Calls tab) + its live position, so
-        // it must NOT also appear as a standalone idea. ($ne also matches ideas with no ownedBy.)
+        // Exclude Kairos calls: a call is surfaced on the Calls tab (+ its live position), never as a
+        // standalone idea. Kind-derived now (calls are kind:'call'); the ownedBy:$ne guard is kept
+        // transitionally to also hide pre-cutover idea shadows (kind:'idea', ownedBy:'hermes').
+        query.kind    = { $ne: 'call' }
         query.ownedBy = { $ne: 'hermes' }
         const items = await db.collection(COLLECTION).find(query).sort({ savedAt: -1 }).toArray()
         return items.map(stripId)
@@ -272,18 +299,17 @@ async function getAssetClassMap(userId) {
 
 /**
  * Map of `broker:accountId:positionId` → callId for call-originated open positions. A confirmed
- * Kairos call materializes an execution idea stamped ownedBy:'hermes' (hidden from the ideas list,
- * see getIdeas) carrying its origin callId; that idea's brokerOrders link the live broker position.
- * The Positions tab resolves a row's owner through the visible ideas list, so a call's position has
- * no resolvable owner and clicking it is a dead no-op. This lets the /positions route stamp the
- * owning callId onto the position → the client opens the Call pop-out instead. Keyed to match the
- * broker/account/positionId the client already carries on each position.
+ * Kairos call carries its own execution (kind:'call', self-origin callId) whose brokerOrders link
+ * the live broker position (P3b). The Positions tab resolves a row's owner through the visible ideas
+ * list, so a call's position has no resolvable owner and clicking it is a dead no-op. This lets the
+ * /positions route stamp the owning callId onto the position → the client opens the Call pop-out.
+ * The ownedBy branch covers pre-cutover calls that still execute via an idea shadow (transitional).
  */
 async function getCallPositionMap(userId) {
     try {
         const db = await getDb()
         const rows = await db.collection(COLLECTION)
-            .find({ userId, ownedBy: 'hermes', callId: { $ne: null } },
+            .find({ userId, callId: { $ne: null }, $or: [{ kind: 'call' }, { ownedBy: 'hermes' }] },
                   { projection: { callId: 1, brokerOrders: 1 } })
             .toArray()
         const map = {}
@@ -446,7 +472,7 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
         if (shouldMarketEnterOnUpdate(patch, existing.status)) {
             patch.status           = 'hit'
             patch.entryTriggeredAt = Date.now()
-            const merged = { ...(await db.collection(COLLECTION).findOne({ id })), ...patch }
+            const merged = { ...(await entityRepo.getById(id)), ...patch }
             const plan   = await buildOrderPlanForIdea(merged)
             if (plan.length > 0) {
                 const open = isAssetOpen(merged.asset, merged.asset_class)
@@ -456,15 +482,11 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
             minosService.resetIdea(id)
         }
 
-        const updateFilter = isAdmin || !existing.userId
-            ? { id }
-            : { id, userId }
+        // Ownership guard: non-admins may only patch their own idea (admins / legacy ownerless
+        // ideas pass an empty guard). The write funnels through entityRepo (P1b).
+        const ownerGuard = isAdmin || !existing.userId ? {} : { userId }
 
-        const result = await db.collection(COLLECTION).findOneAndUpdate(
-            updateFilter,
-            { $set: patch },
-            { returnDocument: 'after' }
-        )
+        const result = await entityRepo.patchAndGet(id, patch, ownerGuard)
         if (!result) return { ok: false, reason: 'not_found' }
         logger.info(LOG, 'Idea updated', { id, patch })
 

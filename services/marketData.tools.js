@@ -63,7 +63,8 @@ export function aggregateCandles(rows, groupSize) {
 }
 
 // Fetch → (optionally aggregate) → slice to `count` most recent bars for a timeframe.
-async function _fetchCandleRows(ticker, timeframe) {
+// Exported so other OHLCV-compute tools (the SMC engine's tools) reuse ONE candle-fetch path (DRY).
+export async function _fetchCandleRows(ticker, timeframe) {
     const cfg  = CANDLE_CFG[timeframe] ?? CANDLE_CFG['day']
     const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
     // Pass an explicit `to` (now). The Massive provider builds `new Date(to)` and

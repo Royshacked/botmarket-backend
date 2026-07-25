@@ -4,6 +4,7 @@ import {
     postUserMessage,
     markRead,
     dismissMessage,
+    resolveMessage,
     searchUsers,
     getOrCreateConversation,
 } from './chat.service.js'
@@ -57,6 +58,20 @@ export async function dismissMessageHandler(req, res, next) {
     try {
         const { id, msgId } = req.params
         const result = await dismissMessage(id, msgId, req.user._id, req.body?.outcome ?? null)
+        if (!result.ok) return res.status(403).json({ error: 'Forbidden' })
+        res.json({ ok: true })
+    } catch (err) {
+        next(err)
+    }
+}
+
+// Unified resolution: mark a card 'done' (acted) or 'dismissed'. Supersedes the dismiss-only
+// handler; body = { status?: 'done'|'dismissed', outcome?: string }. Default status 'dismissed'.
+export async function resolveMessageHandler(req, res, next) {
+    try {
+        const { id, msgId } = req.params
+        const { status = 'dismissed', outcome = null } = req.body ?? {}
+        const result = await resolveMessage(id, msgId, req.user._id, { status, outcome })
         if (!result.ok) return res.status(403).json({ error: 'Forbidden' })
         res.json({ ok: true })
     } catch (err) {

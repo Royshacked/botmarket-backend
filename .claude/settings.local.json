@@ -62,7 +62,9 @@
       "Bash(git -C 'C:/Roy/Coding Academy/Projects/ar2trade/botmarket-frontend' commit -q -m ' *)",
       "Bash(git -C \"C:/Roy/Coding Academy/Projects/ar2trade/botmarket-frontend\" log --oneline -2)",
       "Bash(xargs -I{} sh -c 'echo \"FILE: {}\"; grep -o \"backdrop-filter:[^;}]*\" \"{}\" | head; echo \"---count---\"; grep -o \"backdrop-filter\" \"{}\" | wc -l; echo \"---webkit---\"; grep -o \"\\\\-webkit-backdrop-filter\" \"{}\" | wc -l')",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(git checkout *)",
+      "Bash(rm -f public/assets/index-BtEHbu29.css public/assets/index-WDf5_nw-.js)"
     ]
   }
 }

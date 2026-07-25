@@ -1,15 +1,16 @@
 import { getDb } from '../providers/mongodb.provider.js'
+import { ENTITIES } from '../services/entity/entityCollection.js'
 import { getQuote }              from '../providers/yahoofinance.provider.js'
 import { getTickerAggregates }   from '../providers/candles.provider.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../services/tradeNotify.service.js'
 import { withTimeout, createPollLoop } from './monitorUtils.js'
-import { _defaultAssess, _defaultAssessPosition, _defaultAssessReentry, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _handleAssessToolUses } from './hermes.assess.js'
+import { _defaultAssess, _defaultAssessPosition, _defaultAssessReentry, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses } from './hermes.assess.js'
 
 // The LLM assessment IO lives in hermes.assess.js (wired into _deps below). Re-exported here
 // under their historical names so the existing unit tests import path is unchanged.
-export { _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _handleAssessToolUses }
+export { _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses }
 
 // Hermes — the Kairos-call readiness monitor: a self-scheduling readiness loop (KAIROS_PLAN.md,
 // Phase 2). Its own tick, its own collection (`kairos_calls`), sharing NO mutable state with Minos
@@ -20,16 +21,20 @@ export { _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _mark
 // + a running memo carried across wakes. Pre-entry readiness only — hands off at the enter card.
 
 const LOG          = '[hermes.monitor]'
-const COLLECTION   = 'kairos_calls'
+const COLLECTION   = ENTITIES   // calls now live in the shared entities collection as kind:'call'
+const KIND_CALL    = 'call'
 const POLL_INTERVAL_MS = 60_000
 // Only these are re-checked by the loop. `expiry_review` is triggered TIME-based on these two
 // (via _isExpiring), so 'expiring' is NOT here — like 'ready', it's an awaiting-user state (an
 // edit card was fired) that Phase 3 re-queues to 'waiting' on accept, preventing card spam.
 const ACTIVE_STATUSES  = ['waiting', 'watching']
-// Post-confirm statuses routed to the position path (NOT the zone-gate readiness path): Hermes
-// watches the linked idea to promote confirmed→in_position on fill and in_position→closed on close
-// (Phase 5). `confirmed` = order placed / awaiting fill; `in_position` = live and managed.
-const POSITION_STATUSES = ['confirmed', 'in_position']
+// Post-confirm statuses routed to the position path (NOT the zone-gate readiness path). P3b: the
+// call carries its own execution, so its status CONVERGES to the execution vocab after confirm —
+// 'hit' = order placed / awaiting fill; 'long'/'short' = live (reconciler-set on fill) and managed.
+// Promotion (awaiting→in-position) is detected by position_state.entry.fill_at, not a status name.
+// 'confirmed'/'in_position' are kept transitionally so calls confirmed BEFORE the P3b cutover (which
+// still link to an idea shadow) keep being managed; they never collide with idea statuses.
+const POSITION_STATUSES = ['hit', 'long', 'short', 'confirmed', 'in_position']
 const EXPIRY_THRESHOLD_MS = 15 * 60_000   // run the final "expiry review" within 15m of valid_until
 // A single check must never wedge the loop. If any IO inside _checkCall (vision assess / chart /
 // price fetch) hangs with no timeout, the awaited call never returns, `_running` stays true, and
@@ -51,6 +56,7 @@ async function _tick() {
     // Due = active status AND (never checked OR next_check_at has passed). ISO strings compare
     // lexicographically for same-format UTC timestamps, so $lte on the string is correct.
     const calls = await db.collection(COLLECTION).find({
+        kind: KIND_CALL,   // entities holds ideas too; a missing monitor_state would else match waiting ideas
         status: { $in: [...ACTIVE_STATUSES, ...POSITION_STATUSES] },
         $or: [
             { 'monitor_state.next_check_at': null },
@@ -296,18 +302,19 @@ export function _reconcilePosition(call, idea, nowMs, trade = null) {
     const bumpCount = (call?.monitor_state?.check_count ?? 0) + 1
     const idle = { set: { 'monitor_state.next_check_at': nextAt, 'monitor_state.check_count': bumpCount }, entry: null }
 
-    if (!idea) return idle   // linked idea not found yet — look again next cadence
+    if (!idea) return idle   // self-lookup empty (shouldn't happen post-confirm) — look again next cadence
+
+    // P3b: call === idea (self-linked), so `status` is the ONE converged field. Promotion
+    // (awaiting-fill → in-position) is detected by the stamped fill_at, not a status name.
+    if (idea.status === 'closed') return _closeFromIdea(call, idea, nowMs, bumpCount, trade)
 
     const inPos = idea.status === 'long' || idea.status === 'short'
-
-    if (call.status === 'confirmed') {
-        if (inPos)                    return _promoteToInPosition(call, idea, nowMs, nextAt, bumpCount, trade)
-        if (idea.status === 'closed') return _closeFromIdea(call, idea, nowMs, bumpCount, trade)   // opened+closed / rejected before we saw
-        return idle   // still awaiting fill (looking / hit / resting)
+    if (inPos) {
+        const promoted = call.position_state?.entry?.fill_at != null
+        if (!promoted) return _promoteToInPosition(call, idea, nowMs, nextAt, bumpCount, trade)
+        return { manage: true }   // already in position → the management brain
     }
-    // in_position
-    if (idea.status === 'closed') return _closeFromIdea(call, idea, nowMs, bumpCount, trade)
-    return { manage: true }   // still open → _checkPosition runs the management brain
+    return idle   // 'hit' / awaiting fill
 }
 
 // confirmed → in_position: stamp the fill onto the pre-seeded position_state and open the journal
@@ -320,7 +327,8 @@ function _promoteToInPosition(call, idea, nowMs, nextAt, bumpCount, trade = null
     const fillPrice = _num(trade?.entry?.price) ?? ps.entry?.intended ?? null
     const fillAtMs  = idea.entryTriggeredAt ?? idea.activatedAt ?? nowMs
     const set = {
-        status: 'in_position',
+        // P3b: no status write — the converged status stays 'long'/'short' (set by the reconciler).
+        // Promotion is recorded by position_state.entry.fill_at below (the _reconcilePosition gate).
         'position_state.entry.fill_price': fillPrice,
         'position_state.entry.fill_at':    new Date(fillAtMs).toISOString(),
         'position_state.entry.size':       idea.quantity ?? ps.entry?.size ?? null,
@@ -971,7 +979,7 @@ const _deps = {
     nextOpenMs:  (asset, assetClass) => getMarketStatus(asset, assetClass).nextOpenMs,
     // The linked idea (broker-authoritative, maintained by the execution reconciler) — Hermes reads
     // it to reconcile the call's position lifecycle (Phase 5). Null id / read failure → null.
-    getIdea:     async (id) => { if (!id) return null; try { return await (await getDb()).collection('ideas').findOne({ id }) } catch { return null } },
+    getIdea:     async (id) => { if (!id) return null; try { return await (await getDb()).collection(ENTITIES).findOne({ id }) } catch { return null } },
     // The ledger trade for the idea's main position (real entry/exit price + realized P&L) — the
     // broker-authoritative source for the close outcome (slice 4). Null when not yet captured.
     getTrade:    async (idea) => {

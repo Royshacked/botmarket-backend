@@ -1,11 +1,14 @@
 import { getPriceAction, getCycleAnalysis, getCorrelations } from '../providers/yahoofinance.provider.js'
-import { getEarningsCalendar, getFundamentals, getStockPeers, getMacroSnapshot } from '../providers/fmp.provider.js'
+import { getEarningsCalendar, getFundamentals, getStockPeers, getMacroSnapshot, getSectorSnapshot } from '../providers/fmp.provider.js'
+import { getTradingContext } from './tradingContext.service.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { COMMON_TOOL_HANDLERS, makeToolHandler } from './agentUtils.js'
 import {
     makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler, makeIndicatorsHandler,
 } from './marketData.tools.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
+import { SMC_TOOLS, SMC_TOOL_HANDLERS } from './smc.tools.js'
+import { DEFAULT_MODE } from './kairos.modes.js'
 
 // Kairos's market-data toolset. Deliberately its OWN schemas (not imported from the
 // Idea agent) so Kairos is a self-contained trial — but the heavy lifting reuses the
@@ -63,6 +66,16 @@ export const KAIROS_TOOLS = [
     {
         name: 'get_macro_snapshot',
         description: 'Hard macro read for the Phase 2 regime call: the current Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today\'s sector rotation (leaders/laggards). The DATA half of the regime read — pair it with web_search for the narrative. Weight by horizon: real weight for swing, a lighter backdrop for intraday/day. No arguments.',
+        input_schema: { type: 'object', properties: {} },
+    },
+    {
+        name: 'get_sector_snapshot',
+        description: 'Today\'s sector rotation — every sector ranked leaders→laggards by average move. Institutional mode: the sector leg of the relative-strength read (is the name\'s sector rotating IN or OUT?). No arguments.',
+        input_schema: { type: 'object', properties: {} },
+    },
+    {
+        name: 'get_trading_context',
+        description: 'The user\'s live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and the marked-able accounts (id, broker, name, balance, capabilities). Use it to confirm a venue exists before finalizing, to feed sizing, and to tell the user what to mark. No arguments.',
         input_schema: { type: 'object', properties: {} },
     },
     {
@@ -215,6 +228,7 @@ export const KAIROS_TOOLS = [
         input_schema: { type: 'object', properties: { symbol: { type: 'string', description: 'e.g. BTC, ETH, SOL' } }, required: ['symbol'] },
         cache_control: { type: 'ephemeral' },
     },
+    ...SMC_TOOLS,   // K2 numeric SMC: get_fvg, get_structure, get_liquidity
 ]
 
 // Candle aggregation + the get_quote·candles·earnings·chart·indicators handlers and
@@ -241,6 +255,10 @@ const _STATIC_HANDLERS = {
         () => getMacroSnapshot(),
         (err) => `Could not fetch macro snapshot: ${err.message}`, LOG),
 
+    get_sector_snapshot: makeToolHandler('get_sector_snapshot',
+        () => getSectorSnapshot(),
+        (err) => `Could not fetch sector snapshot: ${err.message}`, LOG),
+
     get_correlations: makeToolHandler('get_correlations',
         ({ tickers }) => getCorrelations(tickers),
         (err) => `Could not compute correlations: ${err.message}`, LOG),
@@ -261,15 +279,45 @@ const _STATIC_HANDLERS = {
         ({ ticker }) => getSecFilings(ticker),
         (err, { ticker }) => `Could not fetch SEC filings for ${ticker}: ${err.message}`, LOG),
 
+    ...SMC_TOOL_HANDLERS,
     ...COMMON_TOOL_HANDLERS,
+}
+
+// ── Per-mode tool subsets (KAIROS_MODES.md tool allocation) ────────────────────
+// The model only sees the tool LIST, so subsetting the list is what gates a mode's toolset;
+// the handler map can stay full (extra handlers are never reached). UNIVERSAL tools are shared
+// by all modes (DRY). NEW numeric SMC tools (K2) + get_sector_snapshot/get_rs_chart join later.
+const UNIVERSAL = ['web_search', 'get_quote', 'get_candles', 'get_chart', 'get_trading_context']
+// SMC-lens numeric tools (smc only). get_key_levels is SHARED (classical prior-day levels + SMC session liquidity).
+const SMC_ONLY = ['get_orderblocks', 'get_fvg', 'get_structure', 'get_liquidity']
+const MODE_TOOLS = {
+    // classical PA + false-breaks + correlation/positioning + prior-day key levels; NOT the SMC-lens tools.
+    discretionary: KAIROS_TOOLS.map(t => t.name).filter(n => !SMC_ONLY.includes(n)),
+    // strict smart-money, chart-core: vision OB/sweeps + K2 numeric FVG/structure/liquidity (exact levels).
+    smc: [...UNIVERSAL, 'get_price_action', 'get_orderblocks', 'get_false_breaks', 'get_indicators',
+        'get_fvg', 'get_structure', 'get_liquidity', 'get_key_levels'],
+    // macro/regime + relative-strength + positioning, chart-light; no order-blocks/false-breaks.
+    institutional: [...UNIVERSAL, 'get_macro_snapshot', 'get_sector_snapshot', 'get_correlations', 'get_peers',
+        'get_short_interest', 'get_options_context', 'get_derivatives_context', 'get_fundamentals',
+        'get_sec_filings', 'get_earnings', 'get_earnings_calendar', 'get_cycle_analysis', 'get_price_action'],
+}
+
+/** The tool LIST for a mode (subset of KAIROS_TOOLS by name). Unknown mode → discretionary. */
+export function KAIROS_TOOLS_FOR_MODE(mode) {
+    const allowed = MODE_TOOLS[mode] ?? MODE_TOOLS[DEFAULT_MODE]
+    return KAIROS_TOOLS.filter(t => allowed.includes(t.name))
 }
 
 // Build the per-request handler map. get_chart closes over onChart so it can surface the
 // rendered chart to the user's chat when the agent flags show_to_user; pass onChart = null
-// (non-Anthropic provider) to keep the image model-only.
-export function buildKairosToolHandlers(onChart) {
+// (non-Anthropic provider) to keep the image model-only. userId is closed over by the
+// account-aware tools (get_trading_context — the user's live venue/accounts).
+export function buildKairosToolHandlers(onChart, userId = null) {
     return {
         ..._STATIC_HANDLERS,
+        get_trading_context: makeToolHandler('get_trading_context',
+            () => getTradingContext(userId),
+            (err) => `Could not fetch trading context: ${err.message}`, LOG),
         get_chart: makeChartHandler({
             log: LOG,
             onChart,

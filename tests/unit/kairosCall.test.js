@@ -167,6 +167,35 @@ test('normalize: cadence defaults by trade_type when omitted', () => {
     assert.deepEqual(normalizeCall(call({ trade_type: 'day' })).cadence, { min_gap_min: 1, max_gap_min: 15 })
 })
 
+// ── forward-dated seed: build_window backfills the time gate ──────────────
+test('normalize: build_window backfills active_from/valid_until when the model omits them', () => {
+    const doc = normalizeCall(call({ build_window: { from: '2026-11-01', to: '2026-11-30' } }))
+    assert.equal(doc.active_from, '2026-11-01')   // Hermes won't monitor before this
+    assert.equal(doc.valid_until, '2026-11-30')
+    assert.equal('build_window' in doc, false)    // transient input — not persisted
+})
+
+test('normalize: an explicit active_from/valid_until wins over build_window (user narrowed it)', () => {
+    const doc = normalizeCall(call({
+        active_from: '2026-11-10', valid_until: '2026-11-20',
+        build_window: { from: '2026-11-01', to: '2026-11-30' },
+    }))
+    assert.equal(doc.active_from, '2026-11-10')
+    assert.equal(doc.valid_until, '2026-11-20')
+})
+
+test('normalize: partial window (from only) gates the start, leaves valid_until open', () => {
+    const doc = normalizeCall(call({ build_window: { from: '2026-11-01', to: null } }))
+    assert.equal(doc.active_from, '2026-11-01')
+    assert.equal(doc.valid_until, null)
+})
+
+test('normalize: no window and no explicit bounds → both null (ungated, as before)', () => {
+    const doc = normalizeCall(call())
+    assert.equal(doc.active_from, null)
+    assert.equal(doc.valid_until, null)
+})
+
 test('normalize: explicit cadence is preserved', () => {
     const doc = normalizeCall(call({ cadence: { min_gap_min: 3, max_gap_min: 45 } }))
     assert.deepEqual(doc.cadence, { min_gap_min: 3, max_gap_min: 45 })

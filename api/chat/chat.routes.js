@@ -7,6 +7,7 @@ import {
     postMessage,
     markConversationRead,
     dismissMessageHandler,
+    resolveMessageHandler,
     searchUsersHandler,
     startConversation,
 } from './chat.controller.js'
@@ -21,6 +22,7 @@ router.get('/conversations/:id/messages',        log, listMessages)
 router.post('/conversations/:id/messages',       log, postMessage)
 router.post('/conversations/:id/read',           log, markConversationRead)
 router.post('/conversations/:id/messages/:msgId/dismiss', log, dismissMessageHandler)
+router.post('/conversations/:id/messages/:msgId/resolve',  log, resolveMessageHandler)
 router.get('/users/search',                      log, searchUsersHandler)
 
 export const chatRoutes = router

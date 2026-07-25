@@ -103,13 +103,32 @@ export function formatMoney(v) {
     return v != null ? `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'
 }
 
-export function buildAccountLines(accounts) {
+// Which marked account a call / portfolio binds to as MAIN — the venue + monitoring anchor.
+// Mirrors _finalizeCall's rule so the prompt an agent sees matches what save actually does:
+// the explicitly-marked main if it's still in the list, else the first marked account. Ids are
+// compared as strings (a marked-account id may arrive as a number or string). Returns null for
+// an empty / id-less list.
+export function resolveMainAccountId(accounts, mainAccountId = null) {
+    const list = Array.isArray(accounts) ? accounts.filter(a => a && a.id != null) : []
+    if (list.length === 0) return null
+    const explicit = list.find(a => String(a.id) === String(mainAccountId))
+    return String((explicit ?? list[0]).id)
+}
+
+// `mainAccountId` (optional) tags which account the trade binds to as MAIN — but only when more
+// than one account is marked, since a single account is unambiguous and the tag would be noise.
+// The tagged account mirrors resolveMainAccountId (explicit main, else first) so the agent's
+// answer to "which account is connected?" matches the save. An id-less list renders untagged.
+export function buildAccountLines(accounts, mainAccountId = null) {
+    const valid  = Array.isArray(accounts) ? accounts.filter(a => a && a.id != null) : []
+    const mainId = valid.length > 1 ? resolveMainAccountId(valid, mainAccountId) : null
     return accounts.map(a => {
         const type  = a.isLive ? 'LIVE' : 'DEMO'
         const parts = [`${(a.broker || '').toUpperCase()} ${type} — login: ${a.login || '—'}, currency: ${a.currency || '—'}`]
         if (a.balance != null) parts.push(`balance: ${formatMoney(a.balance)}`)
         if (a.equity  != null) parts.push(`equity: ${formatMoney(a.equity)}`)
-        return `  - ${parts.join(', ')}`
+        const line = `  - ${parts.join(', ')}`
+        return (mainId != null && a.id != null && String(a.id) === mainId) ? `${line}  ← MAIN` : line
     })
 }
 

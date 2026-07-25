@@ -21,18 +21,17 @@ import { getCheckGap, isIntradayTimeframe }     from '../services/timeframe.serv
 import { collectSymbols, resolveConditionTree, extractLeaves } from '../services/conditionTree.service.js'
 import { toMs } from './evaluators/time.evaluator.js'
 import { checkInvalidation }                    from './invalidation.monitor.js'
-import { checkPortfolioReviews }               from './portfolio.monitor.js'
 import { checkPosition }                        from './positionMonitor.js'
 import { notifyManualEntry, entryLegFromIdea }  from '../services/manualNotify.service.js'
 import { notifyIdeaEntryConfirm }               from '../services/tradeNotify.service.js'
+import { entityRepo }                           from '../services/entity/entityRepo.service.js'
 import {
     fetchCandles, buildSymbolMap, buildVolumeCtx, brokerCandleCtx,
     hasCumulativeVolume, logCheck, persistConditionStates,
     resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe, withTimeout, createPollLoop,
 } from './monitorUtils.js'
 
-const LOG        = '[minos.monitor]'
-const COLLECTION = 'ideas'
+const LOG = '[minos.monitor]'
 
 const POLL_INTERVAL_MS = 60_000
 // A single idea's check awaits provider/LLM/vision IO with no inherent bound. If one
@@ -61,9 +60,7 @@ async function _tick() {
     let db, ideas
     try {
         db    = await getDb()
-        ideas = await db.collection(COLLECTION)
-            .find({ status: { $in: ['looking', 'long', 'short'] } })
-            .toArray()
+        ideas = await entityRepo.listByStatus(['looking', 'long', 'short'])
     } catch (err) {
         logger.error(LOG, 'DB read error in tick:', err.message)
         return
@@ -75,7 +72,6 @@ async function _tick() {
     for (const id of _lastChecked.keys()) if (!liveIds.has(id)) _lastChecked.delete(id)
 
     await _marketSweep(db)
-    await checkPortfolioReviews().catch(err => logger.error(LOG, 'Portfolio review check failed', err.message))
 
     if (!ideas || ideas.length === 0) return
     logger.info(LOG, `Checking ${ideas.length} idea(s) (looking + long + short)`)
@@ -91,7 +87,7 @@ async function _tick() {
 async function _marketSweep(db) {
     let deferred
     try {
-        deferred = await db.collection(COLLECTION).find({ orderState: 'awaiting_market' }).toArray()
+        deferred = await entityRepo.listByOrderState('awaiting_market')
     } catch (err) {
         logger.error(LOG, 'Market sweep read error:', err.message)
         return
@@ -147,13 +143,13 @@ async function _checkIdea(db, idea) {
         return
     }
 
-    // Hermes-owned position (a confirmed Kairos call): Hermes is the sole in-position brain and
-    // drives exits through the reconciler's hands. Minos — and checkInvalidation, called from
-    // within this function — stand down so two brains can't fight the same broker orders. The
-    // native stop/TP still rest at the broker (placed by the reconciler) and Hermes amends them.
-    // (KAIROS_PLAN.md Phase 5.)
-    if (idea.ownedBy === 'hermes') {
-        logger.info(LOG, `[${id}] Owned by Hermes — Minos standing down`)
+    // Hermes-owned position (a Kairos call): Hermes is the sole in-position brain and drives exits
+    // through the reconciler's hands. Minos — and checkInvalidation, called from within this
+    // function — stand down so two brains can't fight the same broker orders. Ownership is now
+    // KIND-DERIVED (a call is Hermes's, ownerForKind('call')==='hermes'); the `ownedBy` flag is kept
+    // only transitionally for calls confirmed BEFORE the P3b cutover (idea shadows, kind:'idea').
+    if (idea.kind === 'call' || idea.ownedBy === 'hermes') {
+        logger.info(LOG, `[${id}] Hermes-owned — Minos standing down`)
         return
     }
 
@@ -263,7 +259,7 @@ async function _checkEntry(db, idea, candles) {
         return
     }
 
-    await persistConditionStates(db, idea, 'entry', entryStates, COLLECTION)
+    await persistConditionStates(db, idea, 'entry', entryStates)
 
     if (triggered) {
         const triggeredWhileWaiting = triggerAt != null && idea.activatedAt != null && triggerAt < idea.activatedAt
@@ -396,6 +392,6 @@ async function _close(db, id, reason) {
 }
 
 async function _patch(db, id, fields) {
-    await db.collection(COLLECTION).updateOne({ id }, { $set: fields })
+    await entityRepo.patch(id, fields)   // `db` vestigial — write funnels through entityRepo (P1b)
     logger.info(LOG, `Patched idea ${id}:`, fields)
 }

@@ -54,11 +54,19 @@ test('parse: <scan_request> block is stripped from the visible reply', () => {
 })
 
 // ── _parseScanRequest (discovery hand-off to Argus) ──────────────────────
-test('scanRequest: parses direction + validated style + hints', () => {
+test('scanRequest: parses direction + validated style + hints (no ticker → discovery)', () => {
     const raw = `Sending you to Argus.\n<scan_request>{ "direction": "long", "style": "swing", "period_hint": "next week", "angle_hint": "momentum breakouts", "note": "large-cap swings" }</scan_request>`
     assert.deepEqual(_parseScanRequest(raw), {
-        direction: 'long', style: 'swing', period_hint: 'next week', angle_hint: 'momentum breakouts', note: 'large-cap swings',
+        direction: 'long', ticker: null, style: 'swing', period_hint: 'next week', angle_hint: 'momentum breakouts', note: 'large-cap swings',
     })
+})
+
+test('scanRequest: a ticker is parsed + uppercased (validate-a-name mode)', () => {
+    const out = _parseScanRequest('<scan_request>{ "direction": "long", "ticker": "nvda", "style": "swing" }</scan_request>')
+    assert.equal(out.ticker, 'NVDA')
+    assert.equal(out.direction, 'long')
+    // a blank ticker is treated as absent (discovery)
+    assert.equal(_parseScanRequest('<scan_request>{ "direction": "long", "ticker": "  " }</scan_request>').ticker, null)
 })
 
 test('scanRequest: no block → null', () => {
@@ -73,7 +81,7 @@ test('scanRequest: a block without a valid direction → null (a scan needs a bi
 
 test('scanRequest: off-vocabulary style drops to null, hints default to null', () => {
     const out = _parseScanRequest('<scan_request>{ "direction": "short", "style": "scalp" }</scan_request>')
-    assert.deepEqual(out, { direction: 'short', style: null, period_hint: null, angle_hint: null, note: null })
+    assert.deepEqual(out, { direction: 'short', ticker: null, style: null, period_hint: null, angle_hint: null, note: null })
 })
 
 test('scanRequest: malformed JSON → null', () => {

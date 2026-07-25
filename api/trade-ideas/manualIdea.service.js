@@ -11,15 +11,15 @@
  * See docs/architecture/manual-mode.md.
  */
 
-import { getDb, stripId }        from '../../providers/mongodb.provider.js'
+import { stripId }               from '../../providers/mongodb.provider.js'
 import { logger }                from '../../services/logger.service.js'
 import { routeExits }            from '../../services/protectionPlan.service.js'
-import { openManualPosition, closeManualPosition } from '../broker/manualExecution.service.js'
+import { openManualPosition, closeManualPosition, reduceManualPosition, addToManualPosition } from '../broker/manualExecution.service.js'
 import { notifyManualEntry, notifyManualExit, entryLegFromIdea, exitLegFromIdea } from '../../services/manualNotify.service.js'
 import { tradeCaptureService } from '../../services/tradeCapture.service.js'
+import { entityRepo }          from '../../services/entity/entityRepo.service.js'
 
-const LOG        = '[manualIdea]'
-const COLLECTION = 'ideas'
+const LOG = '[manualIdea]'
 
 // Statuses from which a manual leg can still be activated into an entry (not already in a
 // position or done).
@@ -42,8 +42,7 @@ function _accountId(idea) {
  */
 export async function confirmManualEntry(id, { price, quantity } = {}, userId, isAdmin = false) {
     try {
-        const db   = await getDb()
-        const idea = await db.collection(COLLECTION).findOne({ id })
+        const idea = await entityRepo.getById(id)
         if (!idea)                                     return { ok: false, reason: 'not_found' }
         if (!_own(idea, userId, isAdmin))              return { ok: false, reason: 'forbidden' }
         if (idea.broker !== 'manual')                  return { ok: false, reason: 'not_manual' }
@@ -60,10 +59,7 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId, i
 
         // Atomic claim so a double-submit can't open two positions: only the first caller
         // flips awaiting_manual_fill → manual_filling and proceeds to open.
-        const claimed = await db.collection(COLLECTION).findOneAndUpdate(
-            { id, broker: 'manual', orderState: 'awaiting_manual_fill' },
-            { $set: { orderState: 'manual_filling' } },
-        )
+        const claimed = await entityRepo.claimIf(id, { broker: 'manual', orderState: 'awaiting_manual_fill' }, { orderState: 'manual_filling' })
         if (!claimed) return { ok: false, reason: 'not_awaiting_fill' }
 
         let positionId
@@ -78,7 +74,7 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId, i
             })
         } catch (err) {
             // Open failed — release the claim so the user can retry.
-            await db.collection(COLLECTION).updateOne({ id }, { $set: { orderState: 'awaiting_manual_fill' } })
+            await entityRepo.patch(id, { orderState: 'awaiting_manual_fill' })
             throw err
         }
 
@@ -97,7 +93,7 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId, i
             monitorStop:  monitored && route.stop.hasAny,
             monitorTp:    monitored && route.tp.hasAny,
         }
-        const updated = await db.collection(COLLECTION).findOneAndUpdate({ id }, { $set: set }, { returnDocument: 'after' })
+        const updated = await entityRepo.patchAndGet(id, set)
 
         // Capture into the analytics ledger — manual has no reconciler, so we call the same
         // capture hook the reconciler uses directly (best-effort; never throws). Reuse means
@@ -116,15 +112,15 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId, i
 }
 
 /**
- * Confirm a user-reported exit fill: close the manual position at the reported price and
- * mark the idea closed. v1 closes the position in full.
+ * Confirm a user-reported exit fill. A reported `quantity` (or a pending trim size stamped by a
+ * portfolio trim) that is strictly LESS than the open size does a PARTIAL close (trim) — the position
+ * shrinks and stays open; otherwise the position closes in full and the idea flips 'closed'.
  * @param {string} id
- * @param {{ price:number }} fill
+ * @param {{ price:number, quantity?:number }} fill
  */
-export async function confirmManualExit(id, { price } = {}, userId, isAdmin = false) {
+export async function confirmManualExit(id, { price, quantity } = {}, userId, isAdmin = false) {
     try {
-        const db   = await getDb()
-        const idea = await db.collection(COLLECTION).findOne({ id })
+        const idea = await entityRepo.getById(id)
         if (!idea)                        return { ok: false, reason: 'not_found' }
         if (!_own(idea, userId, isAdmin)) return { ok: false, reason: 'forbidden' }
         if (idea.broker !== 'manual')     return { ok: false, reason: 'not_manual' }
@@ -137,15 +133,37 @@ export async function confirmManualExit(id, { price } = {}, userId, isAdmin = fa
         if (!(px > 0)) return { ok: false, reason: 'bad_price' }
 
         const reason = idea.pendingCloseReason ?? 'manual'
+
+        // Partial (trim): a reported size — or the trim size a portfolio rebalance stamped on the idea
+        // (pendingTrimQty, robust to an FE that doesn't forward the quantity) — that is smaller than the
+        // open size reduces the position and leaves it open. reqQty ≥ open size falls through to a full close.
+        const openQty = Number(idea.quantity)
+        const reqQty  = quantity != null ? Number(quantity)
+            : (idea.pendingTrimQty != null ? Number(idea.pendingTrimQty) : null)
+        if (reqQty != null && reqQty > 0 && Number.isFinite(openQty) && reqQty < openQty) {
+            const res = await reduceManualPosition({ userId: idea.userId, positionId: link.positionId, qty: reqQty, price: px, reason })
+            const remaining    = res?.remainingQty ?? Math.max(0, openQty - reqQty)
+            const brokerOrders = (idea.brokerOrders ?? []).map(b =>
+                b.positionId === link.positionId ? { ...b, quantity: remaining } : b)
+            const updated = await entityRepo.patchAndGet(id, {
+                quantity: remaining, brokerOrders,
+                pendingTrimQty: null, pendingCloseReason: null,   // consumed
+            })
+            // A partial trim intentionally does NOT captureClose — that would finalize the trade in the
+            // analytics ledger. The FINAL close captures it (a known scaled-out-P&L ledger limitation).
+            logger.info(LOG, `Manual trim confirmed for ${id}: closed ${reqQty} @ ${px}, ${remaining} left (pnl ${res?.pnl})`)
+            return { ok: true, partial: true, remainingQty: remaining, idea: stripId(updated) }
+        }
+
         const res = await closeManualPosition({ userId: idea.userId, positionId: link.positionId, price: px, reason })
 
         const now = Date.now()
         const set = {
             status: 'closed', orderState: 'closed', closedReason: reason, closedAt: now,
-            chat_state: null,
+            chat_state: null, pendingTrimQty: null,
             ...(res?.pnl != null && { realizedPnl: res.pnl }),
         }
-        const updated = await db.collection(COLLECTION).findOneAndUpdate({ id }, { $set: set }, { returnDocument: 'after' })
+        const updated = await entityRepo.patchAndGet(id, set)
 
         // Patch the open trade to closed in the analytics ledger (best-effort; never throws).
         await tradeCaptureService.captureClose({
@@ -162,6 +180,47 @@ export async function confirmManualExit(id, { price } = {}, userId, isAdmin = fa
 }
 
 /**
+ * Confirm a user-reported ADD (scale-in) fill: grow the LIVE manual position by the reported size at
+ * the reported price (size-weighted avg) and bump the idea's tracked quantity. The position stays open
+ * — this is NOT an entry (the idea is already long/short), so it does not go through confirmManualEntry.
+ * `quantity` falls back to the pendingAddQty a portfolio add stamped on the idea. Ledger capture of a
+ * scale-in is a known gap (like a partial trim) — the analytics trade keeps its original open.
+ * @param {string} id
+ * @param {{ price:number, quantity?:number }} fill
+ */
+export async function confirmManualAdd(id, { price, quantity } = {}, userId, isAdmin = false) {
+    try {
+        const idea = await entityRepo.getById(id)
+        if (!idea)                        return { ok: false, reason: 'not_found' }
+        if (!_own(idea, userId, isAdmin)) return { ok: false, reason: 'forbidden' }
+        if (idea.broker !== 'manual')     return { ok: false, reason: 'not_manual' }
+        if (idea.status !== 'long' && idea.status !== 'short') return { ok: false, reason: 'not_in_position' }
+
+        const link = (idea.brokerOrders ?? []).find(b => b.positionId != null)
+        if (!link) return { ok: false, reason: 'no_position' }
+
+        const px     = Number(price)
+        const addQty = quantity != null ? Number(quantity)
+            : (idea.pendingAddQty != null ? Number(idea.pendingAddQty) : null)
+        if (!(px > 0))     return { ok: false, reason: 'bad_price' }
+        if (!(addQty > 0)) return { ok: false, reason: 'bad_quantity' }
+
+        const res = await addToManualPosition({ userId: idea.userId, positionId: link.positionId, addQty, price: px })
+        if (!res) return { ok: false, reason: 'no_position' }
+
+        const brokerOrders = (idea.brokerOrders ?? []).map(b =>
+            b.positionId === link.positionId ? { ...b, quantity: res.qty } : b)
+        const updated = await entityRepo.patchAndGet(id, { quantity: res.qty, brokerOrders, pendingAddQty: null })
+
+        logger.info(LOG, `Manual add confirmed for ${id}: +${addQty} @ ${px} → ${res.qty} @ ${res.avgPrice}`)
+        return { ok: true, addedQty: res.addedQty, quantity: res.qty, idea: stripId(updated) }
+    } catch (err) {
+        logger.error(LOG, `confirmManualAdd failed (${id})`, err)
+        return { ok: false, error: err }
+    }
+}
+
+/**
  * Activate a manual portfolio: mark every pending manual leg awaiting_manual_fill and post
  * ONE N-leg entry FillCard. "Activate" means the user is entering the basket now (a market
  * entry the user executes), so legs skip condition monitoring for entry.
@@ -169,18 +228,16 @@ export async function confirmManualExit(id, { price } = {}, userId, isAdmin = fa
  */
 export async function activateManualPortfolio(portfolioId, userId, isAdmin = false) {
     try {
-        const db    = await getDb()
-        const query = isAdmin ? { portfolioId } : { portfolioId, userId }
-        const legs  = await db.collection(COLLECTION).find(query).toArray()
+        const legs = await entityRepo.listByPortfolio(portfolioId, isAdmin ? null : userId)
         if (!legs.length) return { ok: false, reason: 'not_found' }
 
         const pending = legs.filter(l => l.broker === 'manual' && !l.ordersPlacedAt && ACTIVATABLE.has(l.status))
         if (!pending.length) return { ok: false, reason: 'nothing_to_activate' }
 
         const now = Date.now()
-        await db.collection(COLLECTION).updateMany(
-            { id: { $in: pending.map(l => l.id) } },
-            { $set: { status: 'hit', entryTriggeredAt: now, orderState: 'awaiting_manual_fill' } }
+        await entityRepo.patchMany(
+            pending.map(l => l.id),
+            { status: 'hit', entryTriggeredAt: now, orderState: 'awaiting_manual_fill' },
         )
 
         await notifyManualEntry(pending[0].userId, {
@@ -205,9 +262,7 @@ export async function activateManualPortfolio(portfolioId, userId, isAdmin = fal
  */
 export async function requestManualPortfolioExit(portfolioId, userId, isAdmin = false) {
     try {
-        const db    = await getDb()
-        const query = isAdmin ? { portfolioId } : { portfolioId, userId }
-        const legs  = await db.collection(COLLECTION).find(query).toArray()
+        const legs = await entityRepo.listByPortfolio(portfolioId, isAdmin ? null : userId)
         if (!legs.length) return { ok: false, reason: 'not_found' }
 
         const open = legs.filter(l => l.broker === 'manual' && (l.status === 'long' || l.status === 'short'))

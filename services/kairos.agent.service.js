@@ -1,8 +1,9 @@
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveAgentStream, TRADE_HORIZONS } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveAgentStream, resolveMainAccountId, TRADE_HORIZONS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
-import { KAIROS_TOOLS, buildKairosToolHandlers } from './kairos.tools.js'
+import { KAIROS_TOOLS_FOR_MODE, buildKairosToolHandlers } from './kairos.tools.js'
+import { normalizeMode } from './kairos.modes.js'
 import { kairosService } from '../api/kairos/kairos.service.js'
 import { toBrokerSymbol } from './brokerSymbol.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
@@ -22,8 +23,16 @@ const MAX_RECENT_MESSAGES = 8
 
 const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 
+// Per-mode lens module (phases 2–4). The base is the shared SPINE; the mode module is injected as its
+// own cached block — one agent, three profiles (KAIROS_MODES.md). Loaders are keyed by mode name.
+const _modePrompt = {
+    discretionary: makePromptLoader(join(__dirname, '../kairos_mode_discretionary.md'), LOG),
+    smc:           makePromptLoader(join(__dirname, '../kairos_mode_smc.md'), LOG),
+    institutional: makePromptLoader(join(__dirname, '../kairos_mode_institutional.md'), LOG),
+}
+
 export function emptyKairosState() {
-    return { active_asset: '', draft: null }
+    return { active_asset: '', draft: null, mode: normalizeMode() }
 }
 
 export const kairosAgentService = {
@@ -31,16 +40,17 @@ export const kairosAgentService = {
 }
 
 async function chatStream({
-    messages, userPrompt, chatState = emptyKairosState(), accounts = [], brokerContext = null,
+    messages, userPrompt, chatState = emptyKairosState(), accounts = [], mainAccountId = null, seed = null, brokerContext = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onChart, onToolStart, onReasoning, onPhase, signal,
 }) {
     const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
-    const tools        = KAIROS_TOOLS
-    const toolHandlers = buildKairosToolHandlers(onChart)
+    const mode         = normalizeMode(chatState?.mode)   // build-time lens (KAIROS_MODES.md)
+    const tools        = KAIROS_TOOLS_FOR_MODE(mode)
+    const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
-    const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext)
+    const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext, mode, seed, mainAccountId)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
     logger.info(LOG, 'chatStream start', { userPrompt, messageCount: builtMessages.length, model, provider, accounts: accounts?.length ?? 0 })
@@ -64,6 +74,7 @@ async function chatStream({
 
     const { reply, call } = _parseKairosResponse(raw)
     const mergedCall = _mergeCallDraft(chatState?.draft, call)
+    if (mergedCall) mergedCall.mode = mode   // carry the build lens onto the draft/call (persisted by normalizeCall)
     // Discovery hand-off: on a "find me a ticker" turn the model emits <scan_request> (bias + horizon
     // constraints) INSTEAD of a <call> — the client uses it to route the user to Argus (the scanner).
     const scanRequest = _parseScanRequest(raw)
@@ -129,6 +140,8 @@ export function _parseKairosResponse(raw) {
 // passes them to Argus as scan constraints (the ticker comes back, so they round-trip unchanged).
 // A scan needs at least a direction to constrain, so a block without a valid long/short → null.
 // `style` is validated against the shared TRADE_HORIZONS; the rest are free-text hints for the seed.
+// `ticker` (optional) flips Argus into VALIDATE-A-NAME mode: when the user already has a name, Kairos
+// hands it to Argus for the feasibility + lens gate (Pipeline-B "B1") instead of open discovery.
 export function _parseScanRequest(raw) {
     const m = (raw ?? '').match(/<scan_request>([\s\S]*?)<\/scan_request>/)
     if (!m) return null
@@ -143,6 +156,7 @@ export function _parseScanRequest(raw) {
     if (!direction) return null
     return {
         direction,
+        ticker:      (typeof obj?.ticker === 'string' && obj.ticker.trim()) ? obj.ticker.toUpperCase().trim() : null,
         style:       TRADE_HORIZONS.includes(obj?.style) ? obj.style : null,
         period_hint: typeof obj?.period_hint === 'string' ? obj.period_hint : null,
         angle_hint:  typeof obj?.angle_hint  === 'string' ? obj.angle_hint  : null,
@@ -191,7 +205,8 @@ export async function _resolveVenue(broker, userId, accountId, asset, deps = {})
 // stored. `chatState` (build conversation + draft) rides along so an edit can reopen the chat.
 export async function _finalizeCall(call, { userId = null, accounts = [], mainAccountId = null, updateId = null, chatState = undefined } = {}) {
     const list = Array.isArray(accounts) ? accounts.filter(a => a && a.id != null) : []
-    const main = list.find(a => String(a.id) === String(mainAccountId)) ?? list[0] ?? null
+    const mainId = resolveMainAccountId(list, mainAccountId)   // shared rule — matches the build-chat MAIN tag
+    const main = list.find(a => String(a.id) === mainId) ?? null
     const broker = main?.broker ?? null
 
     const { broker_symbol, basis_offset } = await _resolveVenue(broker, userId, main?.id ?? null, call.asset)
@@ -212,30 +227,53 @@ export async function _finalizeCall(call, { userId = null, accounts = [], mainAc
 }
 
 // ─── Prompt / messages ────────────────────────────────────────────────────────
-function _buildSystemPrompt(chatState, accounts, brokerContext = null) {
+function _buildSystemPrompt(chatState, accounts, brokerContext = null, mode = normalizeMode(), seed = null, mainAccountId = null) {
     const asset = chatState?.active_asset || 'none'
     const draft = chatState?.draft
         ? `\nDraft call so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
         : ''
+    // K3: a structured Argus candidate seed (scan hand-off or scan-list click) — the ticker + Argus's
+    // read arrive as fields, not free text. Start at Phase 1 with this ticker; fold `analysis` into
+    // Phase 2 as the provisional thesis (verify it, don't take it on faith).
+    // A forward-dated list (period-scoped, e.g. "November") carries a window → the call is time-gated
+    // to it: monitoring won't start before `from`, and it expires at `to`. The gate is set by code at
+    // save (active_from/valid_until); the model just tells the user the call is scheduled to the window.
+    const win = seed?.window
+    const winLine = (win && (win.from || win.to))
+        ? `\n  scheduled window: ${win.from ?? '—'} → ${win.to ?? '—'} (monitoring is gated to this window; tell the user it won't be watched before ${win.from ?? 'the start'})`
+        : ''
+    const seedBlock = seed?.ticker
+        ? `\nARGUS SEED (build this candidate): ticker=${seed.ticker}${seed.direction ? `, direction=${seed.direction}` : ''}`
+            + `${seed.thesis ? `\n  thesis: ${seed.thesis}` : ''}${seed.analysis ? `\n  Argus's read: ${seed.analysis}` : ''}${winLine}`
+        : ''
 
     const today = new Date().toISOString().slice(0, 10)
+    // The MODE section (the per-mode lens profile) is injected here — the shared spine is the cached
+    // base prompt; the mode module lives in the volatile block. K1 declares the mode; K1-step2 fills
+    // the full per-mode profile (analysis lens + phase weighting + fit signal). See KAIROS_MODES.md.
     const dynamicContext = `---
 CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar or setting valid_until.
+ACTIVE MODE: ${mode} — build this call THROUGH the ${mode} lens (committed; do not switch lenses mid-build).
 CONVERSATION CONTEXT:
-Active asset: ${asset}${draft}${buildPositionsSection(brokerContext)}${_buildAccountsSection(accounts)}`
+Active asset: ${asset}${seedBlock}${draft}${buildPositionsSection(brokerContext)}${_buildAccountsSection(accounts, mainAccountId)}`
 
+    const modeModule = (_modePrompt[mode] ?? _modePrompt.discretionary)()
     return [
         { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: modeModule, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamicContext },
     ]
 }
 
-function _buildAccountsSection(accounts) {
+function _buildAccountsSection(accounts, mainAccountId = null) {
     if (!Array.isArray(accounts) || accounts.length === 0) {
         return '\n\nACCOUNTS: none marked. Tell the user to mark a trading account (paper / live / manual) at the bank icon — the call can\'t be generated or monitored without one.'
     }
-    const lines = buildAccountLines(accounts)
-    return `\n\nACCOUNTS (marked at the bank icon — the call will bind here):\n${lines.join('\n')}`
+    const lines = buildAccountLines(accounts, mainAccountId)
+    const mainNote = accounts.length > 1
+        ? ' The account tagged ← MAIN is the one the call binds to — its broker sets the venue (symbol + price space) the call is executed and monitored in.'
+        : ''
+    return `\n\nACCOUNTS (marked at the bank icon — the call will bind here):\n${lines.join('\n')}${mainNote}`
 }
 
 function _buildMessages({ messages, userPrompt }) {

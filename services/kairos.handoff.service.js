@@ -1,4 +1,5 @@
 import { getDb } from '../providers/mongodb.provider.js'
+import { ENTITIES } from './entity/entityCollection.js'
 import { ideaService } from '../api/trade-ideas/tradeIdeas.service.js'
 import { placeOrdersForIdea } from '../api/trade-ideas/ideaExecution.service.js'
 import { notifyManualEntry, entryLegFromIdea } from './manualNotify.service.js'
@@ -13,7 +14,7 @@ import { logger } from './logger.service.js'
 // (status 'confirmed'). Mode (live/paper/manual) is DERIVED from the call's broker.
 
 const LOG        = '[kairos.handoff]'
-const COLLECTION = 'kairos_calls'
+const COLLECTION = ENTITIES   // calls live in entities as kind:'call' (all ops here are {id}-scoped)
 
 // ── Pure helpers (unit-tested) ─────────────────────────────────────────────────
 export function deriveMode(broker) {
@@ -100,13 +101,10 @@ export function applyEditPatch(editProposal, bias = null) {
 // ── Orchestration (injectable deps for testing) ────────────────────────────────
 const _deps = {
     getDb,
-    saveIdea:           (input, userId)               => ideaService.saveIdea(input, userId),
+    buildIdeaChildren:  (input, userId)               => ideaService.buildIdeaChildren(input, userId),
     placeOrdersForIdea: (id, orders, userId, isAdmin) => placeOrdersForIdea(id, orders, userId, isAdmin),
     notifyManualEntry:  (userId, opts)                => notifyManualEntry(userId, opts),
     entryLegFromIdea,
-    // Flag the linked idea Hermes-owned so Minos + checkInvalidation stand down (Phase 5): Hermes
-    // is the sole in-position brain; the event-driven reconciler stays the shared hands.
-    markIdeaOwned:      async (ideaId) => { const db = await getDb(); await db.collection('ideas').updateOne({ id: ideaId }, { $set: { ownedBy: 'hermes' } }) },
 }
 
 async function _loadOwned(db, id, userId, isAdmin, projection = {}) {
@@ -131,43 +129,51 @@ export async function confirmCall(id, userId, isAdmin = false, deps = _deps) {
 
     const armedZone = (call.entry_zones ?? []).find(z => z.id === call.monitor_state?.armed_zone_id)
     const direction = armedZone?.side
-    const saved = await deps.saveIdea(buildIdeaFromCall(call, proposal, direction), userId)
-    if (!saved?.ok) return { ok: false, reason: saved?.reason ?? 'idea_create_failed' }
-    const idea = saved.idea
 
-    // Hermes owns this position end-to-end — stamp the idea BEFORE placement so Minos can't pick it
-    // up in the window between save and fill (its own tick could otherwise race the fill).
-    await deps.markIdeaOwned(idea.id)
+    // P3b — the call carries its OWN execution (no idea shadow). Enrich the entry via the shared idea
+    // engine, then MERGE the single child's execution shape onto the CALL itself (keeping its id +
+    // kind:'call'). Self-link (callId / linked_idea_id → this call) so the reconciler, Hermes, and
+    // manageCall act on the call directly; keep ownedBy:'hermes' so Minos + checkInvalidation stand
+    // down exactly as they did for the shadow. Status converges to the execution vocab (hit→long/short).
+    const built = await deps.buildIdeaChildren(buildIdeaFromCall(call, proposal, direction), userId)
+    if (!built.ok)                     return { ok: false, reason: built.reason ?? 'idea_create_failed' }
+    if (built.children.length !== 1)   return { ok: false, reason: 'multi_broker_call' }
+    const { id: _cid, kind: _ck, parentId: _cp, ...exec } = built.children[0]
 
-    try {
-        if (mode === 'manual') {
-            // Broker-less: post the fill card; the user reports the real fill at their broker.
-            await deps.notifyManualEntry(userId, { legs: [deps.entryLegFromIdea(idea)] })
-        } else {
-            // paper / live: place the market entry (+ native stop/TP exits) via the idea engine.
-            await deps.placeOrdersForIdea(idea.id, idea.pendingOrder?.plan ?? [], userId, isAdmin)
-        }
-    } catch (placeErr) {
-        logger.error(LOG, `handoff placement failed for ${id}:`, placeErr.message)
-        return { ok: false, reason: 'placement_failed', ideaId: idea.id }
-    }
-
-    // status 'confirmed' = order placed / awaiting fill. Hermes's tick watches the linked idea and
-    // promotes the call to 'in_position' when it actually opens (Phase 5). Seed position_state now.
     await db.collection(COLLECTION).updateOne(
         { id },
         { $set: {
-            status:         'confirmed',
-            linked_idea_id: idea.id,
+            ...exec,                                       // status:'hit', condition trees, brokerSymbol,
+                                                           // basisOffset, broker, direction, quantity, pendingOrder…
+            callId:         id,                            // self-origin → tradeCapture origin.type='call'
+            linked_idea_id: id,                            // self — getIdea(self) returns this call
+            // No ownedBy flag: kind:'call' IS the ownership (Minos/getIdeas/getCallPositionMap are
+            // kind-aware). ownerForKind('call')==='hermes'.
             confirmed_at:   new Date().toISOString(),
-            position_state: buildPositionState(call, proposal, direction, idea.id),
-            // Reset the readiness-phase cadence so the position path checks for the fill on the next
-            // tick (else it could inherit a next_check_at up to max_gap in the future).
-            'monitor_state.next_check_at': null,
+            position_state: buildPositionState(call, proposal, direction, id),
+            'monitor_state.next_check_at': null,           // check for the fill on the next tick
         } },
     )
-    logger.info(LOG, `call ${id} confirmed → idea ${idea.id} (${mode})`)
-    return { ok: true, mode, ideaId: idea.id }
+
+    // Re-read the merged call — it now carries the execution shape placement needs.
+    const merged = await db.collection(COLLECTION).findOne({ id })
+
+    try {
+        if (mode === 'manual') {
+            await deps.notifyManualEntry(userId, { legs: [deps.entryLegFromIdea(merged)] })
+        } else {
+            await deps.placeOrdersForIdea(id, merged.pendingOrder?.plan ?? [], userId, isAdmin)
+        }
+    } catch (placeErr) {
+        logger.error(LOG, `handoff placement failed for ${id}:`, placeErr.message)
+        // Roll the call back to 'ready' so it isn't stuck 'hit' with no orders — the user can retry
+        // confirm. (The old flow left an orphaned shadow; here the call is the entity, so we reset it.)
+        await db.collection(COLLECTION).updateOne({ id }, { $set: { status: 'ready' } })
+        return { ok: false, reason: 'placement_failed', ideaId: id }
+    }
+
+    logger.info(LOG, `call ${id} confirmed → self-executing (${mode})`)
+    return { ok: true, mode, ideaId: id }
 }
 
 // Accept the expiry edit: re-map + re-queue the call to 'waiting'.
@@ -265,7 +271,7 @@ const MANAGE_VERBS = new Set(['move_stop', 'take_partial', 'exit_now', 'let_run'
 
 const _mdeps = {
     getDb,
-    getIdea:          async (id)                              => { if (!id) return null; const db = await getDb(); return db.collection('ideas').findOne({ id }) },
+    getIdea:          async (id)                              => { if (!id) return null; const db = await getDb(); return db.collection(ENTITIES).findOne({ id }) },
     findOpenPosition: (broker, userId, acct, positionId)      => brokerService.findOpenPosition(broker, userId, acct, positionId),
     closePosition:    (broker, userId, acct, positionId, opts)=> brokerService.closePosition(broker, userId, acct, positionId, opts),
     amendOrder:       (broker, userId, acct, orderId, fields) => brokerService.amendOrder(broker, userId, acct, orderId, fields),
@@ -280,7 +286,7 @@ const _mdeps = {
         if (patch?.status  != null) set['exitOrders.$[e].status']  = patch.status
         if (!Object.keys(set).length) return
         const db = await getDb()
-        await db.collection('ideas').updateOne({ id: ideaId }, { $set: set },
+        await db.collection(ENTITIES).updateOne({ id: ideaId }, { $set: set },
             { arrayFilters: [{ 'e.accountId': String(accountId), 'e.leg': leg, 'e.status': 'working' }] })
     },
 }
@@ -293,6 +299,17 @@ export function _resolveMainLink(idea, call) {
         ?? links.find(b => b?.positionId != null)
     if (!slot) return null
     return { broker: slot.broker, accountId: slot.accountId, positionId: slot.positionId, quantity: Number(slot.quantity) || 0 }
+}
+
+// EVERY account's open-position linkage — a call is placed one-position-per-account, so a management
+// action fans out across ALL of them, not just the main. Pure. Scoped to the call's declared accounts
+// when present; falls back to all open-position slots (so a live position is never left unmanaged).
+export function _resolveAllLinks(idea, call) {
+    const links  = (Array.isArray(idea?.brokerOrders) ? idea.brokerOrders : []).filter(b => b?.positionId != null)
+    const accts  = Array.isArray(call?.accounts) ? call.accounts.map(String) : []
+    const scoped = accts.length ? links.filter(b => accts.includes(String(b.accountId))) : links
+    const chosen = scoped.length ? scoped : links   // never manage NONE while positions are open
+    return chosen.map(slot => ({ broker: slot.broker, accountId: slot.accountId, positionId: slot.positionId, quantity: Number(slot.quantity) || 0 }))
 }
 
 // The still-working native exit order for a leg on an account (the one to amend/cancel). Pure.
@@ -404,25 +421,42 @@ export async function manageCall(id, userId, verb, isAdmin = false, deps = _mdep
         return { ok: true, manual: true, verb }
     }
 
-    const link = _resolveMainLink(idea, call)
-    if (!link) return { ok: false, reason: 'no_position_link' }
+    const links = _resolveAllLinks(idea, call)
+    if (!links.length) return { ok: false, reason: 'no_position_link' }
 
-    // Broker-authoritative idempotency: already flat → clear the card, let Hermes reconcile the close.
-    let open
-    try { open = await deps.findOpenPosition(link.broker, userId, link.accountId, link.positionId) }
-    catch { return { ok: false, reason: 'broker_unreachable' } }
-    if (open === null) {
+    // Fan out across EVERY account the call is placed on (one position per account). Each is checked
+    // broker-authoritatively (skip if already flat) and the action applied independently — a partial
+    // failure on one account doesn't strand the others. The aggregate position_state (new stop level /
+    // total partial qty summed across accounts) is written once, after all accounts have run.
+    const perAccount = []
+    let anyReachable = false, anyOpen = false, anyApplied = false, totalQty = 0
+    for (const link of links) {
+        let open
+        try { open = await deps.findOpenPosition(link.broker, userId, link.accountId, link.positionId); anyReachable = true }
+        catch { perAccount.push({ accountId: link.accountId, reason: 'broker_unreachable' }); continue }
+        if (open === null) { perAccount.push({ accountId: link.accountId, alreadyFlat: true }); continue }
+        anyOpen = true
+        try {
+            const applied = await _executeManage(verb, proposal, idea, link, open, userId, isAdmin, deps)
+            anyApplied = true
+            totalQty += Number(applied?.qty) || 0
+            perAccount.push({ accountId: link.accountId, ok: true })
+        } catch (e) {
+            logger.error(LOG, `manage ${verb} failed for ${id} acct ${link.accountId}:`, e.message)
+            perAccount.push({ accountId: link.accountId, reason: 'execution_failed' })
+        }
+    }
+
+    if (!anyReachable) return { ok: false, reason: 'broker_unreachable', accounts: perAccount }
+    if (!anyOpen) {   // every account already flat → clear the card, let Hermes reconcile the close(s)
         await db.collection(COLLECTION).updateOne({ id }, { $set: { 'position_state.pending_action': null } })
         return { ok: true, alreadyFlat: true }
     }
+    if (!anyApplied) return { ok: false, reason: 'execution_failed', accounts: perAccount }   // every open account errored
 
-    let applied
-    try { applied = await _executeManage(verb, proposal, idea, link, open, userId, isAdmin, deps) }
-    catch (e) { logger.error(LOG, `manage ${verb} failed for ${id}:`, e.message); return { ok: false, reason: 'execution_failed' } }
-
-    await db.collection(COLLECTION).updateOne({ id }, _manageAppliedUpdate(verb, proposal, ps, applied, now))
-    logger.info(LOG, `call ${id} managed → ${verb}`)
-    return { ok: true, verb }
+    await db.collection(COLLECTION).updateOne({ id }, _manageAppliedUpdate(verb, proposal, ps, { qty: totalQty }, now))
+    logger.info(LOG, `call ${id} managed → ${verb} across ${links.length} account(s)`)
+    return { ok: true, verb, accounts: perAccount }
 }
 
 export const kairosHandoffService = { confirmCall, editCall, dismissCall, manageCall, reviveCall, declineReentry }

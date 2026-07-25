@@ -12,6 +12,14 @@ capability-flag adapter layer. Real-time via SSE (agent streams) and WebSocket
 - Follow existing naming conventions (see CODE_MAP.md)
 - After each feature, check for conflicts with shared state
 - At milestones, prompt me to run the QA/CR/docs update cycle
+- Shared mechanism → one service. When two or more callers need the same
+  *mechanism* — a transport, a data fetch, a formatter, a parser — route them
+  through ONE shared service instead of duplicating (or subtly diverging) the
+  logic. Before adding a second copy, look for the existing one and extend it.
+  Nuance: share the pipe, not the judgment. Per-domain *decisions* stay owned by
+  their agent (see the data-vs-judgment principle) — do NOT merge them into a
+  single "unifier"/router. Example: all agents post notifications through the one
+  `sendBotMessage` transport, but each still builds its own card copy/payload.
 
 # Inner QA Loop (run after every implementation)
 After producing any code, before considering the task done, check:

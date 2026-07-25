@@ -1,12 +1,13 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw } from '../providers/yahoofinance.provider.js'
-import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMacroSnapshot } from '../providers/fmp.provider.js'
+import { getFundamentals, getEarningsCalendar, getEarnings, getMacroSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
 import { formatWorkspaceLine } from '../api/portfolio/portfolioMode.util.js'
 import { logger }         from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, resolveAgentStream } from './agentUtils.js'
+import { coverageService } from '../api/analyst/coverage.service.js'
 import { buildTagCaptures } from './llmStream.util.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
@@ -60,28 +61,6 @@ const TOOLS = [
             type: 'object',
             properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
             required: ['ticker'],
-        },
-    },
-    {
-        name: 'screen_candidates',
-        description: 'Discover names across the US universe that fit a mandate shape, instead of recalling tickers from memory. Screen by sector, industry, market-cap band (marketCapMoreThan/LowerThan), price band, beta band (betaMoreThan/LowerThan — a proxy for defensive vs cyclical), dividend (dividendMoreThan, absolute $/yr), volume, country, or isEtf. Returns a compact list (symbol, name, sector, mcap, beta, price, dividend). This is the Phase-4 discovery leg — then qualify each hit with get_fundamentals; the screener does not judge quality. All filters optional; combine a few to narrow. Omitted filters are unconstrained.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                sector:            { type: 'string', description: 'e.g. Technology, Healthcare, Energy, Financial Services, Utilities' },
-                industry:          { type: 'string', description: 'optional finer bucket, e.g. Semiconductors' },
-                marketCapMoreThan: { type: 'number', description: 'min market cap in USD, e.g. 10000000000 for $10B+' },
-                marketCapLowerThan:{ type: 'number', description: 'max market cap in USD' },
-                priceMoreThan:     { type: 'number', description: 'min share price' },
-                priceLowerThan:    { type: 'number', description: 'max share price' },
-                betaMoreThan:      { type: 'number', description: 'min beta (higher = more cyclical/volatile)' },
-                betaLowerThan:     { type: 'number', description: 'max beta (lower = more defensive)' },
-                dividendMoreThan:  { type: 'number', description: 'min annual dividend per share in USD' },
-                volumeMoreThan:    { type: 'number', description: 'min average volume (liquidity floor)' },
-                country:           { type: 'string', description: 'e.g. US (default universe is US)' },
-                isEtf:             { type: 'boolean', description: 'true to screen ETFs instead of single stocks' },
-                limit:             { type: 'number', description: 'max results 1–50 (default 25)' },
-            },
         },
     },
     {
@@ -148,6 +127,11 @@ const TOOLS = [
         },
         cache_control: { type: 'ephemeral' },
     },
+    {
+        name: 'get_coverage',
+        description: "The Analyst's researched coverage — the living per-name theses you can build a book from (a variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, and the status). Prefer constructing from a RESEARCHED name (a thesis + a target) over a raw screen hit. Optionally filter by sector. Read-only.",
+        input_schema: { type: 'object', properties: { sector: { type: 'string', description: 'optional — narrow to one sector, e.g. Technology' } } },
+    },
 ]
 
 const TOOL_HANDLERS = {
@@ -166,9 +150,6 @@ const TOOL_HANDLERS = {
     get_fundamentals: makeToolHandler('get_fundamentals',
         ({ ticker }) => getFundamentals(ticker),
         (err, { ticker }) => `Could not fetch fundamentals for ${ticker}: ${err.message}`, LOG),
-    screen_candidates: makeToolHandler('screen_candidates',
-        (filters) => screenCandidates(filters),
-        (err) => `Could not run screen: ${err.message}`, LOG),
     get_macro_snapshot: makeToolHandler('get_macro_snapshot',
         () => getMacroSnapshot(),
         (err) => `Could not fetch macro snapshot: ${err.message}`, LOG),
@@ -184,9 +165,30 @@ const TOOL_HANDLERS = {
     ...COMMON_TOOL_HANDLERS,
 }
 
+// P4d: render the Analyst's active coverage as an LLM-ready read for Atlas to construct from. Pure —
+// exported for tests. Shows OUR PT vs the Street (the gap = the edge) so Atlas allocates on research.
+export function _formatCoverage(rows) {
+    const list = (Array.isArray(rows) ? rows : []).filter(c => c && c.symbol)
+    if (!list.length) return 'No Analyst coverage yet — nothing researched to build from. Source via a <screen_request> to Argus, or screen directly.'
+    const lines = list.map(c => {
+        const pt   = c.price_target?.value
+        const gap  = Number.isFinite(c.gap?.pct) ? ` (${c.gap.pct >= 0 ? '+' : ''}${c.gap.pct}% vs Street${Number.isFinite(c.gap?.consensus_pt) ? ` ${c.gap.consensus_pt}` : ''})` : ''
+        const th   = typeof c.thesis === 'string' && c.thesis ? ` — ${c.thesis.length > 160 ? c.thesis.slice(0, 157) + '…' : c.thesis}` : ''
+        return `- ${c.symbol} [${c.rating ?? 'unrated'}]${pt != null ? ` our PT ${pt}${gap}` : ''} · ${c.status ?? 'active'}${th}`
+    })
+    return ['Analyst coverage (researched theses — build from these, our target vs the Street):', ...lines].join('\n')
+}
+
+// Per-session handler — coverage is per-user, so it binds userId (like Kairos's userId-bound tools).
+function makeCoverageHandler(userId) {
+    return makeToolHandler('get_coverage',
+        async ({ sector } = {}) => _formatCoverage(await coverageService.getCoverage(userId, { status: 'active', sector: sector ?? null })),
+        (err) => `Could not fetch coverage: ${err.message}`, LOG)
+}
+
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const normalized   = _buildMessages(messages)
     const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
@@ -196,7 +198,7 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     // OpenAI provider flattens this block array back to a plain string.
     const today = new Date().toISOString().slice(0, 10)
     const dynamicSections = [`CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.`]
-    if (ideaAccounts.length > 0) dynamicSections.push(_buildAccountsSection(ideaAccounts))
+    if (ideaAccounts.length > 0) dynamicSections.push(_buildAccountsSection(ideaAccounts, mainAccountId))
     if (portfolioId && portfolioIdeas.length > 0) dynamicSections.push(_buildPortfolioContext(portfolioId, portfolioIdeas))
     if (mandate)    dynamicSections.push(_buildMandateSection(mandate))
     if (thesis)     dynamicSections.push(_buildThesisSection(thesis))
@@ -249,7 +251,8 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
         promptOrMessages: normalized,
         systemPrompt,
         tools:            TOOLS,
-        toolHandlers:     TOOL_HANDLERS,
+        // Per-session: get_coverage binds this user (coverage is per-user); the rest are static.
+        toolHandlers:     { ...TOOL_HANDLERS, get_coverage: makeCoverageHandler(userId) },
         reasoningEffort,
         signal,
         onToken,
@@ -264,17 +267,54 @@ async function chatStream({ messages = [], ideaAccounts = [], portfolioId = null
     if (thesisMatch) {
         try { capturedThesis = JSON.parse(thesisMatch[1].trim()) } catch { /* malformed */ }
     }
+    // P4c: Atlas hands a sleeve's mandate to Argus's INVESTING desk to source + research candidates.
+    const screenRequest = _parseScreenRequest(raw)
+    // G1: Atlas hands a HELD name back to Prometheus for an async re-research when its coverage is stale.
+    const coverageRefresh = _parseCoverageRefresh(raw)
 
     const reply = stripEmitTags(
         // <ticker> keeps its inner text in the reply (unwrap, don't strip).
         raw.replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1'),
-        ['phase', 'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis'],
+        ['phase', 'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis', 'screen_request', 'coverage_refresh'],
     ).trim()
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, phase: capturedPhase })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: capturedPhase }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequest: !!screenRequest, coverageRefresh: !!coverageRefresh, phase: capturedPhase })
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: capturedPhase, ...(screenRequest ? { screenRequest } : {}), ...(coverageRefresh ? { coverageRefresh } : {}) }
+}
+
+// ─── Coverage-refresh extraction (pure) ─────────────────────────────────────────
+// G1: Atlas → Prometheus hop. In review mode Atlas may ask the research desk to re-research a HELD
+// name whose coverage is stale/insufficient, rather than guessing on its thesis. Pulls the
+// <coverage_refresh> block; needs a ticker (else null). The refresh runs async server-side and pings
+// Atlas when the rewritten coverage is ready. Mirrors _parseScreenRequest. Exported for tests.
+export function _parseCoverageRefresh(raw) {
+    const m = (raw ?? '').match(/<coverage_refresh>([\s\S]*?)<\/coverage_refresh>/)
+    if (!m) return null
+    try {
+        const o = JSON.parse(m[1].trim())
+        const ticker = String(o?.ticker ?? '').toUpperCase().trim()
+        if (!ticker) return null
+        const question = typeof o?.question === 'string' && o.question.trim() ? o.question.trim() : null
+        return { ticker, question }
+    } catch { return null }
+}
+
+// ─── Screen-request extraction (pure) ───────────────────────────────────────────
+// Atlas is the PM — it doesn't run the discovery funnel; it hands a sleeve's MANDATE to Argus's
+// INVESTING profile (the screening desk) to source fundamentally-screened candidates, which the Analyst
+// then researches. This pulls the <screen_request> mandate block. Needs a sector OR a style to constrain
+// (else null). Mirrors Kairos's _parseScanRequest. Exported for tests.
+export function _parseScreenRequest(raw) {
+    const m = (raw ?? '').match(/<screen_request>([\s\S]*?)<\/screen_request>/)
+    if (!m) return null
+    let obj
+    try { obj = JSON.parse(m[1].trim()) } catch (err) { logger.warn(LOG, 'screen_request parse failed:', err.message); return null }
+    const s = k => (typeof obj?.[k] === 'string' && obj[k].trim() ? obj[k].trim() : null)
+    const sector = s('sector'), style = s('style')
+    if (!sector && !style) return null   // a screen needs at least a sector or a style to constrain
+    return { sector, style, cap_band: s('cap_band'), constraints: s('constraints'), note: s('note') }
 }
 
 /**
@@ -369,9 +409,12 @@ function _buildPortfolioContext(portfolioId, ideas) {
     return `${header}\n${ideaLines}`
 }
 
-function _buildAccountsSection(accounts) {
-    const lines = buildAccountLines(accounts)
-    return `PORTFOLIO ACCOUNTS (the user plans to execute ideas from this portfolio on):\n${lines.join('\n')}\n\nWhen suggesting position sizes, use these account balances to recommend concrete allocations. If a main account is identified by a larger balance or context, use it as the reference for scaling other accounts.`
+function _buildAccountsSection(accounts, mainAccountId = null) {
+    const lines = buildAccountLines(accounts, mainAccountId)
+    const mainNote = accounts.length > 1
+        ? ' The account tagged ← MAIN is the reference account — use it as the base for scaling the other accounts. (If none is tagged, use the largest balance or context to pick the reference.)'
+        : ''
+    return `PORTFOLIO ACCOUNTS (the user plans to execute ideas from this portfolio on):\n${lines.join('\n')}\n\nWhen suggesting position sizes, use these account balances to recommend concrete allocations.${mainNote}`
 }
 
 function _buildMandateSection(mandate) {
@@ -467,7 +510,7 @@ export function _formatReviewDelta(d) {
     return lines.length ? lines.join('\n') : null
 }
 
-function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = null) {
+export function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = null) {
     const fmtMoney = (n) => {
         if (n == null) return '—'
         const abs = Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
@@ -507,6 +550,19 @@ function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = 
         return `  conviction ${cur}${trend}`
     }
 
+    // The FROZEN per-holding thesis (notes) + conviction rationale — rendered ONLY in review mode,
+    // where the whole task is judging each holding intact / weakening / broken against the thesis it
+    // was bought on. Omitted in construction/edit context to keep that (prompt-cached) tail lean.
+    const thesisLine = (s) => {
+        if (!isReviewMode) return ''
+        const note = typeof s.notes === 'string' ? s.notes.trim() : ''
+        const rat  = typeof s.conviction?.rationale === 'string' ? s.conviction.rationale.trim() : ''
+        const parts = []
+        if (note) parts.push(`thesis: ${note}`)
+        if (rat && rat !== note) parts.push(`rationale: ${rat}`)
+        return parts.length ? `\n           ↳ ${parts.join(' · ')}` : ''
+    }
+
     const liveLines = live.map(s => {
         const target  = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
         const actual  = `actual ${Math.round(s.actualWeight * 100)}%`
@@ -514,13 +570,13 @@ function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = 
         const pnl     = `P&L ${fmtMoney(s.pnl)} (${fmtPct(s.pnlPct)})`
         const age     = s.thesisAgeDays != null ? `${s.thesisAgeDays}d` : ''
         const earn    = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
-        return `  ${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${fmtConviction(s)}${earn}`
+        return `  ${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${fmtConviction(s)}${earn}${thesisLine(s)}`
     })
 
     const pendingLines = pending.map(s => {
         const target = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
         const earn   = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
-        return `  ${s.asset.padEnd(6)} ${s.direction?.padEnd(6) ?? '      '} ${target}  [${s.status}]${earn}`
+        return `  ${s.asset.padEnd(6)} ${s.direction?.padEnd(6) ?? '      '} ${target}  [${s.status}]${earn}${thesisLine(s)}`
     })
 
     const sections = [header]
@@ -541,7 +597,7 @@ function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = 
     }
 
     sections.push(isReviewMode
-        ? 'Use this data as the starting point for the review. Do not call get_quotes for tickers already shown above — prices are current. Propose specific actions (rebalance, trim, add, exit, swap) where the data warrants it.'
+        ? 'Use this data as the starting point for the review. Do not call get_quotes for tickers already shown above — prices are current. Judge each holding intact / weakening / broken against the thesis + rationale shown beneath it. Propose specific actions (rebalance, trim, add, exit, swap) where the data warrants it.'
         : 'This is the live book you are helping with — the workspace, open positions, and per-position + total P&L are current. Do not call get_quotes for tickers already shown above. Ground any answer or proposed edit in these actual positions and P&L; do NOT run a full scheduled review unless the user asks for one.')
 
     return sections.join('\n\n')

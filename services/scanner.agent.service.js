@@ -4,16 +4,23 @@ import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../
 import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMarketMovers, getAnalystActions, getSectorSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from './marketData.tools.js'
+import { isMode } from './kairos.modes.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, resolveAgentStream, TRADE_HORIZONS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
+import { isToolError } from './toolResult.util.js'
+import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS } from './scanner.grounding.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[scannerAgent]'
-// Hot-reload the system prompt on file change (mtime-gated) — no restart needed.
-const _systemPrompt = makePromptLoader(join(__dirname, '../scanner_system_prompt.md'), LOG)
+// One prompt per Argus PROFILE (P4a): trading = the technical/catalyst trade scanner (unchanged);
+// investing = the fundamental/quality screen for portfolio candidates (→ Analyst). Hot-reloaded.
+const _profilePrompt = {
+    trading:   makePromptLoader(join(__dirname, '../scanner_system_prompt.md'), LOG),
+    investing: makePromptLoader(join(__dirname, '../scanner_profile_investing.md'), LOG),
+}
 const MAX_MESSAGES = 10
 
 const TOOLS = [
@@ -278,8 +285,8 @@ const TOOL_HANDLERS = {
     get_candles:    makeCandlesHandler(LOG),
     get_indicators: makeIndicatorsHandler(LOG),
     // Vision tools (KLineCharts render + visual read). onChart: null → the image goes to
-    // the LLM only, not the scan UI (Level A). Wire onChart through the controller/SSE +
-    // ScannerPanel later to also surface the chart to the user.
+    // the LLM only, not the scan UI. This is DELIBERATE: the scanner does not surface charts
+    // to the user (decided 2026-07-22) — the render is an internal vision read, not a deliverable.
     get_chart:        makeChartHandler({ log: LOG, onChart: null, readText: 'Read the price STRUCTURE visually — trend, base/breakout geometry, S/R, where price sits vs any overlays. Confirm the named setup; indicators only confirm, never lead.' }),
     get_orderblocks:  makeStructureVisionHandler({ log: LOG, kind: 'orderblocks',  vision: OB_VISION, onChart: null }),
     get_false_breaks: makeStructureVisionHandler({ log: LOG, kind: 'false_breaks', vision: FB_VISION, onChart: null }),
@@ -311,19 +318,60 @@ const TOOL_HANDLERS = {
     ...COMMON_TOOL_HANDLERS,
 }
 
+// Wrap the module-level handlers with a per-session grounding recorder. A
+// successful discovery call feeds its output text to the tape (`sourced`); a
+// successful per-name call records the ticker it ran on (`touched`). A failed
+// call (toolError — e.g. a bogus symbol that errored) confers nothing, so a
+// fabricated ticker the model merely *attempted* never gets credited.
+function _wrapForGrounding(handlers, ledger) {
+    const wrapped = {}
+    for (const [name, fn] of Object.entries(handlers)) {
+        const reader = PER_NAME_TICKER_ARGS[name]
+        const isDiscovery = DISCOVERY_TOOLS.has(name)
+        wrapped[name] = (reader || isDiscovery)
+            ? async (args) => {
+                const ret = await fn(args)
+                if (!isToolError(ret)) {
+                    if (isDiscovery && typeof ret === 'string') recordSourced(ledger, ret)
+                    if (reader) recordTouched(ledger, reader(args))
+                }
+                return ret
+            }
+            : fn
+    }
+    return wrapped
+}
+
 export const scannerAgentService = { chatStream }
 
 // Exported for unit tests (scanner scorecard normalization + ranking).
-export { _normalizeScan, _cleanScore }
+export { _normalizeScan, _cleanScore, SCANNER_TOOLS_FOR_PROFILE }
+
+// Tool subset per profile (P4a). Investing drops the technical/momentum/vision kit (candles, indicators,
+// chart, orderblocks, movers, positioning, cycles) and keeps the fundamental screen. Trading = full kit.
+const INVESTING_TOOL_NAMES = new Set([
+    'web_search', 'screen_candidates', 'get_fundamentals', 'get_sector_snapshot',
+    'get_earnings', 'get_earnings_calendar', 'get_analyst_actions', 'get_sec_filings',
+    'get_quotes', 'get_price_action',
+])
+function SCANNER_TOOLS_FOR_PROFILE(profile) {
+    return profile === 'investing' ? TOOLS.filter(t => INVESTING_TOOL_NAMES.has(t.name)) : TOOLS
+}
 
 // Injected into the volatile context when Argus is invoked as a Kairos discovery hand-off: it flips
 // Argus from "build a watchlist" to "find ONE ticker + emit <kairos_pick>" (see the prompt's
 // KAIROS HAND-OFF MODE section). The bias/horizon ride in the seeded opening message.
 const HANDOFF_CONTEXT = 'KAIROS HAND-OFF MODE: the user was sent here by Kairos to find ONE ticker for a single call. Follow the KAIROS HAND-OFF MODE section — converge to a single best pick, do NOT ask whether they are ready for Kairos, and end with a <kairos_pick> block (not a <scan_list>).'
 
-async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, profile = 'trading', reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
+    const prof = profile === 'investing' ? 'investing' : 'trading'
     const normalized = _buildMessages(messages)
     const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
+
+    // Per-session grounding ledger — records which tickers a real, successful tool
+    // engaged, so a fabricated candidate that no tool touched is dropped at normalize.
+    const ledger = makeGroundingLedger()
+    const toolHandlers = _wrapForGrounding(TOOL_HANDLERS, ledger)
 
     // Stable cached base + volatile tail: today's date (so "next week" resolves)
     // and, when editing an existing list, that list's current contents so the
@@ -332,10 +380,11 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     const dynamic = [`CURRENT DATE: ${today}. Resolve all relative timeframes (today, next week, this month) against this date.`]
     const editSection = _buildEditSection(editList)
     if (editSection) dynamic.push(editSection)
-    if (handoff) dynamic.push(HANDOFF_CONTEXT)
+    if (handoff && prof === 'trading') dynamic.push(HANDOFF_CONTEXT)   // hand-off is a trading-only path
 
+    const promptLoader = _profilePrompt[prof] ?? _profilePrompt.trading
     const systemPrompt = [
-        { type: 'text', text: _systemPrompt(), cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: promptLoader(), cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamic.join('\n\n') },
     ]
 
@@ -368,8 +417,8 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         model,
         promptOrMessages: normalized,
         systemPrompt,
-        tools:        TOOLS,
-        toolHandlers: TOOL_HANDLERS,
+        tools:        SCANNER_TOOLS_FOR_PROFILE(prof),
+        toolHandlers,
         reasoningEffort,
         signal,
         onToken,
@@ -385,10 +434,10 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         ['scan_list', 'phase', 'kairos_pick'],
     ).trim()
 
-    const scan = _normalizeScan(capturedScan, editList)
+    const scan = _normalizeScan(capturedScan, editList, ledger, prof)
     const pick = _normalizeKairosPick(capturedPick)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, phase: capturedPhase })
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, profile: prof, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, phase: capturedPhase })
     return { reply, scan, phase: capturedPhase, ...(pick ? { pick } : {}) }
 }
 
@@ -402,6 +451,9 @@ export function _normalizeKairosPick(p) {
         direction: p.direction === 'short' ? 'short' : 'long',
         thesis:    typeof p.thesis === 'string' ? p.thesis : '',
         analysis:  typeof p.analysis === 'string' ? p.analysis : '',
+        // K3: Argus's recommended Kairos lens from the dominant driver (feasibility-filtered). null =
+        // no recommendation → the FE keeps the user's current mode chip. See KAIROS_MODES.md.
+        recommended_mode: isMode(p.recommended_mode) ? p.recommended_mode : null,
     }
 }
 
@@ -418,13 +470,48 @@ export function _normalizeKairosPick(p) {
 // Trade-horizon vocabulary — the shared cross-agent constant (Idea/Kairos/Atlas holdings).
 const SCAN_STYLES = TRADE_HORIZONS
 
-function _normalizeScan(scan, editList = null) {
+function _normalizeScan(scan, editList = null, ledger = null, profile = 'trading') {
     if (!scan || typeof scan !== 'object') return null
     const priorByTicker = _editListByTicker(editList)
+    // Trade style drives the deterministic composite-total weighting (Argus #2),
+    // so resolve it up front and thread it into every candidate's score.
+    const style = SCAN_STYLES.includes(scan.style) ? scan.style : null
+    const prof  = profile === 'investing' ? 'investing' : 'trading'
     const candidates = Array.isArray(scan.candidates) ? scan.candidates : []
-    const clean = candidates
-        .map(c => _resolveCandidate(c, priorByTicker))
-        .filter(Boolean)
+    const counts = { sourced: 0, validated: 0, kept: 0, dropped: 0 }
+    const clean = []
+    for (const c of candidates) {
+        if (!c || typeof c.ticker !== 'string' || !c.ticker.trim()) continue
+        const key = c.ticker.toUpperCase().trim()
+
+        // A `keep:true` / bare reference rehydrates from the prior list — its
+        // grounding was checked when the name was first added, so it is exempt
+        // from re-checking (a saved name isn't a fresh fabrication).
+        const isBareReference = !c.analysis && !c.signals && !c.thesis
+        if ((c.keep === true || isBareReference) && priorByTicker.has(key)) {
+            const prior = priorByTicker.get(key)
+            const cand = _cleanCandidate(prior, style, prof)
+            cand.grounding = prior.grounding ?? 'kept'
+            clean.push(cand)
+            counts.kept++
+            continue
+        }
+
+        // Fresh candidate — check it against the tape. Enforcement (drop the
+        // ungrounded) only when a ledger is present; no-ledger callers (tests,
+        // non-scan paths) keep every candidate untouched.
+        const tier = groundingTier(key, ledger)
+        if (ledger) {
+            if (tier === 'ungrounded') { counts.dropped++; continue }   // A1: drop pure fabrications
+            counts[tier]++
+        }
+        const cand = _cleanCandidate(c, style, prof)
+        if (ledger) cand.grounding = tier
+        clean.push(cand)
+    }
+    if (ledger && (counts.dropped || counts.sourced || counts.validated)) {
+        logger.info(LOG, 'grounding', counts)
+    }
     if (!clean.length) return null
 
     // Deterministic ranking: highest composite score first, regardless of the
@@ -442,7 +529,11 @@ function _normalizeScan(scan, editList = null) {
         direction:  ['long', 'short', 'mixed'].includes(scan.direction) ? scan.direction : 'mixed',
         // Shared trade-horizon vocabulary (matches Idea/Kairos/Atlas holdings) — travels
         // with the list so a handed-off candidate carries its horizon. null when unstated.
-        style:      SCAN_STYLES.includes(scan.style) ? scan.style : null,
+        style,
+        // P4a: which Argus lens produced this list + where a candidate is built. investing → the Analyst
+        // (research), trading → the trade-idea builder (Kairos).
+        profile:     prof,
+        destination: prof === 'investing' ? 'analyst' : 'kairos',
         candidates: clean,
     }
 }
@@ -459,21 +550,22 @@ function _editListByTicker(editList) {
     return map
 }
 
-// Resolve one emitted candidate to a full clean record. A `keep:true` reference
-// (or a bare ticker that matches a prior candidate and carries no new content)
-// is rehydrated from the prior list so untouched names keep their original
-// analysis verbatim instead of being regenerated.
-function _resolveCandidate(c, priorByTicker) {
-    if (!c || typeof c.ticker !== 'string' || !c.ticker.trim()) return null
-    const key = c.ticker.toUpperCase().trim()
-    const isBareReference = !c.analysis && !c.signals && !c.thesis
-    if ((c.keep === true || isBareReference) && priorByTicker.has(key)) {
-        return _cleanCandidate(priorByTicker.get(key))
-    }
-    return _cleanCandidate(c)
+// Liquidity floor below which smc/institutional aren't feasible lenses (#4, B).
+const MODE_LIQUIDITY_FLOOR = 60
+
+// Light feasibility guard (#4, A1): smc/institutional need a liquid, structure-rich
+// name. If the model recommends one but scored `liquidity` below the floor, downgrade
+// the SUGGESTION to discretionary (the universal-safe default). Warn-never-block — this
+// only sanitizes the pre-fill; the user can still pick any mode. discretionary/null and
+// an absent/unscored liquidity axis pass through unchanged (never downgrade on missing data).
+function _feasibleMode(mode, score) {
+    if (mode !== 'smc' && mode !== 'institutional') return mode
+    const liq = score?.liquidity
+    return (Number.isFinite(liq) && liq < MODE_LIQUIDITY_FLOOR) ? 'discretionary' : mode
 }
 
-function _cleanCandidate(c) {
+function _cleanCandidate(c, style = null, profile = 'trading') {
+    const score = _cleanScore(c.score, style, profile)
     return {
         ticker:    c.ticker.toUpperCase().trim(),
         name:      typeof c.name === 'string' ? c.name : null,
@@ -481,31 +573,72 @@ function _cleanCandidate(c) {
         thesis:    typeof c.thesis === 'string' ? c.thesis : '',
         analysis:  typeof c.analysis === 'string' ? c.analysis : '',
         signals:   (c.signals && typeof c.signals === 'object') ? c.signals : {},
-        score:     _cleanScore(c.score),
+        score,
         conviction: cleanConviction(c.conviction),
         sources:   Array.isArray(c.sources) ? c.sources.filter(s => s && s.url) : [],
+        // K3/#4: Argus's recommended Kairos lens — TRADING profile only (an investing candidate goes to
+        // the Analyst for research, not to Kairos, so it carries no build lens). isMode-validated + then
+        // feasibility-guarded against the liquidity axis.
+        recommended_mode: profile === 'investing' ? null : _feasibleMode(isMode(c.recommended_mode) ? c.recommended_mode : null, score),
+        // Grounding provenance (scanner.grounding.js). null on the no-ledger path;
+        // callers stamp 'sourced' | 'validated' | 'kept' when a ledger is present.
+        grounding: null,
     }
 }
 
-// Coerce the transparent scorecard the agent emits into a 0–100 shape, or null
-// when nothing usable is present (the UI then falls back to the conviction chip
-// alone). Each component is clamped to 0–100; a non-numeric field becomes null so
-// a partial card (e.g. total + technical only) still renders what it has.
-const SCORE_KEYS = ['total', 'catalyst', 'technical', 'relativeStrength', 'liquidity']
+// TRADING profile axes + style-weights (the default). Short horizons lead with technical + relative
+// strength; long horizons lead with the catalyst. Liquidity is a light contributor. Each row sums to 1.
+const TRADING_COMPONENTS = ['catalyst', 'technical', 'relativeStrength', 'liquidity']
+const TRADING_WEIGHTS = {
+    intraday:    { catalyst: 0.20, technical: 0.40, relativeStrength: 0.30, liquidity: 0.10 },
+    day:         { catalyst: 0.25, technical: 0.35, relativeStrength: 0.30, liquidity: 0.10 },
+    swing:       { catalyst: 0.30, technical: 0.30, relativeStrength: 0.25, liquidity: 0.15 },
+    'long term': { catalyst: 0.35, technical: 0.20, relativeStrength: 0.25, liquidity: 0.20 },
+}
+// INVESTING profile axes (P4a) — a fundamental/quality lens for portfolio candidates. ONE weight set:
+// investing is long-horizon, so style doesn't re-weight it. quality + valuation lead; then growth;
+// balance-sheet a light gate. Sums to 1.
+const INVESTING_COMPONENTS = ['quality', 'valuation', 'growth', 'balance_sheet']
+const INVESTING_WEIGHTS    = { quality: 0.30, valuation: 0.30, growth: 0.25, balance_sheet: 0.15 }
 
-function _cleanScore(raw) {
+// Resolve the scored axes + their weights for a (profile, style). Trading is style-weighted; investing
+// is a single set (null/unknown trading style → swing).
+function _scoreSpec(profile, style) {
+    if (profile === 'investing') return { components: INVESTING_COMPONENTS, weights: INVESTING_WEIGHTS }
+    return { components: TRADING_COMPONENTS, weights: TRADING_WEIGHTS[style] || TRADING_WEIGHTS.swing }
+}
+
+// Deterministic composite: a weighted mean over the PRESENT axes, renormalized by their weights so a
+// partial card still scores from what it has. Overwrites any model-emitted total (Argus #2). Callers
+// only reach here when ≥1 axis is finite, so wsum is always > 0.
+function _composeTotal(out, components, weights) {
+    let sum = 0, wsum = 0
+    for (const k of components) {
+        const v = out[k]
+        if (Number.isFinite(v)) { sum += v * weights[k]; wsum += weights[k] }
+    }
+    return wsum > 0 ? Math.round(sum / wsum) : null
+}
+
+// Coerce the transparent scorecard the agent emits into a 0–100 shape, or null when no axis is present.
+// The axis SET depends on the profile (trading: catalyst/technical/relStrength/liquidity; investing:
+// quality/valuation/growth/balance_sheet). Each axis clamped to 0–100; a non-numeric axis → null so a
+// partial card still renders. `total` is RECOMPUTED from the present axes (Argus #2) — the model's total
+// is discarded. A bare total with no axes is never trusted.
+function _cleanScore(raw, style = null, profile = 'trading') {
     if (!raw || typeof raw !== 'object') return null
+    const { components, weights } = _scoreSpec(profile, style)
     const out = {}
     let any = false
-    for (const k of SCORE_KEYS) {
+    for (const k of components) {
         const v = raw[k]
-        // Reject null/''/undefined explicitly — Number(null) and Number('') are 0,
-        // which would fabricate a real score out of an absent field.
+        // Reject null/''/undefined explicitly — Number(null) and Number('') are 0, fabricating a score.
         const n = (v === null || v === undefined || v === '') ? NaN : Number(v)
         if (Number.isFinite(n)) { out[k] = Math.min(100, Math.max(0, Math.round(n))); any = true }
         else out[k] = null
     }
-    return any ? out : null
+    if (!any) return null
+    return { total: _composeTotal(out, components, weights), ...out }
 }
 
 // Sort key for ranking: composite total, highest first. Names without a usable

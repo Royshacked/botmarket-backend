@@ -5,7 +5,7 @@ import {
     _snapToReference, _finalizeProposal, _applyAssessment, _hasEditProposal, _scheduledPatch, _proximityGapMin,
     _nearestZoneWidth, _shouldPulse, _checkCall,
     _timelineEntry, _zonesLabel, _withTimeout, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock,
-    _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _handleAssessToolUses,
+    _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses,
     _reconcilePosition, _rMultiple, _checkPosition, _isStopOut,
     _computeMetrics, _positionGate, _reviewDue, _finalizePositionProposal, _applyPositionAssessment,
 } from '../../monitoring/hermes.monitor.service.js'
@@ -317,6 +317,52 @@ test('handleAssessToolUses: get_cycle_analysis runs a price read on the ladder r
     assert.equal(results[0].content, 'CYCLE READ')
     assert.ok(!results[0].is_error)
 })
+// ── institutional positioning tools (get_short_interest / options / derivatives) ──
+test('institutionalTools: three asset-based positioning tools, NO timeframe required', () => {
+    const tools = _institutionalTools()
+    assert.deepEqual(tools.map(t => t.name), ['get_short_interest', 'get_options_context', 'get_derivatives_context'])
+    for (const t of tools) {
+        assert.deepEqual(t.input_schema.properties, {})          // no args — reads the call's own asset
+        assert.equal(t.input_schema.required, undefined)          // no timeframe gate
+    }
+})
+
+test('handleAssessToolUses: a positioning tool dispatches on the asset with NO timeframe (not ladder-gated)', async () => {
+    const assistant = [{ type: 'tool_use', id: 'p1', name: 'get_short_interest', input: {} }]
+    const seen = []
+    const results = await _handleAssessToolUses(call(), assistant, ['15min'], {
+        getShortInterest: async (sym) => { seen.push(sym); return 'SI: 12% float, 3 days to cover' },
+    })
+    assert.deepEqual(seen, ['TSLA'])                              // read the call's asset, no timeframe
+    assert.equal(results[0].content, 'SI: 12% float, 3 days to cover')
+    assert.ok(!results[0].is_error)                              // NOT rejected for a missing ladder rung
+})
+
+test('handleAssessToolUses: options + derivatives positioning reads route to their providers', async () => {
+    const assistant = [
+        { type: 'tool_use', id: 'p2', name: 'get_options_context', input: {} },
+        { type: 'tool_use', id: 'p3', name: 'get_derivatives_context', input: {} },
+    ]
+    const results = await _handleAssessToolUses(call(), assistant, ['15min'], {
+        getOptionsContext:     async () => 'PUT/CALL 0.8, IV 45%',
+        getDerivativesContext: async () => 'funding +0.01%, OI up',
+    })
+    assert.equal(results[0].content, 'PUT/CALL 0.8, IV 45%')
+    assert.equal(results[1].content, 'funding +0.01%, OI up')
+})
+
+// ── mode-lens nudge (injected into the assessment user turn) ──────────────────
+test('modeLensBlock: discretionary/absent → no nudge; smc → structure lens; institutional → positioning lens', () => {
+    assert.equal(_modeLensBlock({ mode: 'discretionary' }), '')
+    assert.equal(_modeLensBlock({}), '')                     // absent mode = classical price action = base prompt
+    const smc = _modeLensBlock({ mode: 'smc' })
+    assert.match(smc, /SMC LENS/)
+    assert.match(smc, /get_structure/)                       // points at the SMC re-verify tools
+    const inst = _modeLensBlock({ mode: 'institutional' })
+    assert.match(inst, /INSTITUTIONAL LENS/)
+    assert.match(inst, /get_short_interest/)                 // points at the positioning re-verify tools
+})
+
 test('applyAssessment: let_expire on a zone trip does NOT expire — call keeps watching, no card', () => {
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), call().entry_zones[0], { verdict: 'let_expire', next_check_min: 15 }, NOW, 'zone_trip')
     assert.equal(set.status, 'watching')          // downgraded to stand_aside → watching, not expired
@@ -849,11 +895,12 @@ test('reconcile: confirmed + idea still looking → idle reschedule (no promotio
     assert.ok(set['monitor_state.next_check_at'] > new Date(NOW).toISOString())
 })
 
-test('reconcile: confirmed + idea long → promote to in_position, stamp fill, open journal', () => {
+test('reconcile: idea long, not yet promoted (no fill_at) → promote, stamp fill, open journal', () => {
     const idea = { id: 'idea1', status: 'long', direction: 'long', quantity: 220, entryTriggeredAt: NOW }
-    const { set, entry } = _reconcilePosition(posCall('confirmed'), idea, NOW)
-    assert.equal(set.status, 'in_position')
-    assert.equal(set['position_state.entry.fill_price'], 248.3)   // best-effort = intended (slice 1)
+    const { set, entry } = _reconcilePosition(posCall('long'), idea, NOW)
+    assert.equal(set.status, undefined)                          // P3b: converged status stays 'long', not overwritten
+    assert.equal(set['position_state.entry.fill_price'], 248.3)  // best-effort = intended (slice 1)
+    assert.ok(set['position_state.entry.fill_at'] != null)       // promotion is RECORDED by fill_at
     assert.equal(set['position_state.entry.size'], 220)
     assert.equal(set['position_state.phase'], 'running')
     assert.equal(entry.reason, 'entry')
@@ -903,8 +950,10 @@ test('reconcile: in_position + idea closed → outcome + close journal (reason f
     assert.match(entry.note, /closed on TSLA — tp/)
 })
 
-test('reconcile: in_position + idea still long → manage (routes to the brain)', () => {
-    const rec = _reconcilePosition(posCall('in_position'), { id: 'idea1', status: 'long' }, NOW)
+test('reconcile: idea long, already promoted (fill_at set) → manage (routes to the brain)', () => {
+    const ps = posCall('long')
+    ps.position_state.entry.fill_at = new Date(NOW).toISOString()
+    const rec = _reconcilePosition(ps, { id: 'idea1', status: 'long' }, NOW)
     assert.equal(rec.manage, true)
     assert.equal(rec.set, undefined)
 })
@@ -916,14 +965,14 @@ test('reconcile: linked idea not found → idle reschedule', () => {
     assert.equal(set['monitor_state.check_count'], 4)
 })
 
-test('_checkPosition: reads idea via deps.getIdea and persists the reconcile', async () => {
+test('_checkPosition: reads the (self) call via deps.getIdea and persists the reconcile', async () => {
     const updates = []
     const db = { collection: () => ({ updateOne: async (_q, u) => updates.push(u) }) }
     const deps = { getIdea: async () => ({ id: 'idea1', status: 'long', direction: 'long', quantity: 220, entryTriggeredAt: NOW }) }
-    const res = await _checkPosition(db, posCall('confirmed'), NOW, deps)
-    assert.equal(res.status, 'in_position')
-    assert.equal(updates[0].$set.status, 'in_position')
-    assert.ok(updates[0].$push['monitor_state.timeline'])   // journal entry appended
+    const res = await _checkPosition(db, posCall('long'), NOW, deps)
+    assert.equal(res.status, 'long')                                     // converged status unchanged by promote
+    assert.ok(updates[0].$set['position_state.entry.fill_at'] != null)   // promotion stamped
+    assert.ok(updates[0].$push['monitor_state.timeline'])                // journal entry appended
 })
 
 // ── P2: re-entry offer at a stop-out ──────────────────────────────────────

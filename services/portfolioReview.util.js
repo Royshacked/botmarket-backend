@@ -45,15 +45,36 @@ const _SEVERITY_ORDER = { high: 0, medium: 1 }
  * fingerprint that's worth a look. Pure — takes the current state + fingerprint + the already-
  * computed reviewDelta. Returns triggers ordered high→medium (empty = quiet cycle).
  *
+ * `coverage` = the held names whose Prometheus coverage has flipped terminal (thesis_broken /
+ * target_hit), resolved by the caller (a DB read — kept out of this pure fn). Each is a "look now"
+ * signal in its own right. `adverseMoveThreshold` (pts) is the "nuclear war" proxy: rather than a
+ * news classifier, the market's own reaction — a sharp drop in book P&L% since the fingerprint —
+ * is what earns a look.
+ *
  * @returns {Array<{kind:string, severity:'high'|'medium', label:string}>}
  */
-export function computeReviewTriggers({ state = null, fingerprint = null, delta = null, now = Date.now(), driftThreshold = 0.10, benchmarkLagThreshold = 3 } = {}) {
+export function computeReviewTriggers({ state = null, fingerprint = null, delta = null, coverage = [], now = Date.now(), driftThreshold = 0.10, benchmarkLagThreshold = 3, adverseMoveThreshold = 8 } = {}) {
     const triggers = []
     const ideas = Array.isArray(state?.ideas) ? state.ideas : []
 
     // Conviction fell on any holding (highest-signal early warning).
     const fell = ideas.filter(s => _convictionFell(s.convictionPrev, s.conviction))
     if (fell.length) triggers.push({ kind: 'conviction', severity: 'high', label: `conviction fell on ${fell.map(s => s.asset).join(', ')}` })
+
+    // A held name's research thesis flipped terminal (the coverage-delta gate). thesis_broken is a
+    // hard "reassess now"; target_hit is good news (harvest?) but still worth a deliberate look.
+    for (const c of (Array.isArray(coverage) ? coverage : [])) {
+        if (c?.status === 'thesis_broken') triggers.push({ kind: 'coverage', severity: 'high',   label: `${c.symbol}: research thesis broken` })
+        else if (c?.status === 'target_hit') triggers.push({ kind: 'coverage', severity: 'medium', label: `${c.symbol}: research price target hit` })
+    }
+
+    // "Nuclear war" proxy — a sharp adverse move in book P&L% since the fingerprint. The market's
+    // reaction is the signal; no news feed needed. Two-point (then→now) like the benchmark leg.
+    const nowPnl = state?.totalPnlPct, thenPnl = fingerprint?.totalPnlPct
+    if (Number.isFinite(nowPnl) && Number.isFinite(thenPnl)) {
+        const move = nowPnl - thenPnl
+        if (move <= -adverseMoveThreshold) triggers.push({ kind: 'drawdown', severity: 'high', label: `book down ${move.toFixed(1)}pt since last look` })
+    }
 
     // Regime shift since the book was last reviewed.
     if (delta?.regime?.inversionFlip) {

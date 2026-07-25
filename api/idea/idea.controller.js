@@ -30,6 +30,7 @@ export async function streamIdea(req, res) {
                 analysisState: parsed.analysisState ?? emptyAnalysisState(),
                 brokerContext,
                 ideaAccounts:  parsed.ideaAccounts ?? [],
+                mainAccountId: parsed.mainAccountId ?? null,
                 clientTime:    parsed.clientTime ?? null,
                 model:         routing.model,
                 reasoningEffort: routing.reasoningEffort,
@@ -82,6 +83,9 @@ function parseIdeaBody(body) {
     const { messages, userPrompt, analysisState, ideaAccounts } = body ?? {}
     const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
     const clientTime = parseClientTime(body)
+    // Starred main account (bank icon) → lets Idea name which account the trade binds to,
+    // matching what batch-create resolves. Normalized to string; null when unmarked.
+    const mainAccountId = body?.mainAccountId != null ? String(body.mainAccountId) : null
 
     let priorState = null
     if (analysisState !== undefined && analysisState !== null) {
@@ -99,7 +103,7 @@ function parseIdeaBody(body) {
         // shared validator, which treats empty as an error).
         if (messages.length === 0) {
             if (trimmedPrompt) {
-                return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: parseIdeaAccounts(ideaAccounts), clientTime }
+                return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: parseIdeaAccounts(ideaAccounts), mainAccountId, clientTime }
             }
             return { error: 'messages must be a non-empty array' }
         }
@@ -113,12 +117,13 @@ function parseIdeaBody(body) {
             messages:      trimmed,
             analysisState: priorState,
             ideaAccounts:  parseIdeaAccounts(ideaAccounts),
+            mainAccountId,
             clientTime,
         }
     }
 
     if (trimmedPrompt) {
-        return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: parseIdeaAccounts(ideaAccounts), clientTime }
+        return { userPrompt: trimmedPrompt, analysisState: priorState, ideaAccounts: parseIdeaAccounts(ideaAccounts), mainAccountId, clientTime }
     }
 
     return { error: 'Request must include messages or userPrompt' }

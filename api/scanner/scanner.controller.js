@@ -11,7 +11,7 @@ import { reasonToStatus }      from '../_shared/reason.util.js'
 const LOG = '[scanner:controller]'
 
 export async function streamScanner(req, res) {
-    const { messages, model, editList, handoff, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
+    const { messages, model, editList, handoff, profile, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
 
     const validatedMessages = parseChatMessages(messages)
     if (validatedMessages.error) {
@@ -29,6 +29,7 @@ export async function streamScanner(req, res) {
                 model:           routing.model,
                 editList:        editList && typeof editList === 'object' ? editList : null,
                 handoff:         handoff === true,
+                profile:         profile === 'investing' ? 'investing' : 'trading',
                 reasoningEffort: routing.reasoningEffort,
                 userId:   req.user._id,
                 signal:   signal,

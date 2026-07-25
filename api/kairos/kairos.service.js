@@ -3,6 +3,8 @@ import { getDb, stripId }           from '../../providers/mongodb.provider.js'
 import { logger }                   from '../../services/logger.service.js'
 import { buildEventRisk }           from '../../services/eventRisk.service.js'
 import { cleanConviction }          from '../../services/conviction.util.js'
+import { ENTITIES }                 from '../../services/entity/entityCollection.js'
+import { normalizeMode, isMode }    from '../../services/kairos.modes.js'
 
 // Kairos = discretionary day/swing agent. Its artifact is a "call" (Idea produces ideas,
 // Kairos produces calls): one document in `kairos_calls` = identity + plan (authored at build,
@@ -11,7 +13,8 @@ import { cleanConviction }          from '../../services/conviction.util.js'
 // self-contained trial (see KAIROS_PLAN.md).
 
 const LOG        = '[kairos]'
-const COLLECTION = 'kairos_calls'
+const COLLECTION = ENTITIES   // calls live in the shared entities collection as kind:'call'
+const KIND_CALL  = 'call'
 
 const TRADE_TYPES = new Set(['intraday', 'day', 'swing'])
 const BROKERS     = new Set(['ctrader', 'paper', 'manual'])
@@ -37,11 +40,40 @@ export const kairosService = {
 // Plan fields re-written on an in-place edit ("Update call"). Identity (id/created_at/user_id),
 // monitor_state history, position_state, and linked_idea_id are PRESERVED (never in the $set).
 const PLAN_FIELDS = [
+    'mode',
     'asset', 'asset_class', 'trade_type', 'bias', 'thesis', 'timeframe_ladder', 'cadence',
     'entry_zones', 'reference_levels', 'patterns', 'sizing', 'broker', 'accounts',
     'main_account_id', 'broker_symbol', 'basis_offset', 'active_from', 'valid_until', 'event_risk',
-    'market_sensitivity', 'rr', 'conviction',
+    'market_sensitivity', 'rr', 'conviction', 'lens_fit',
 ]
+
+// K4 — a call already in a live position gets a LIGHT edit: only the discretionary CONTEXT fields
+// (thesis / levels / patterns / conviction / horizon), NEVER entry_zones / sizing / venue / status /
+// execution, and NO monitor re-arm. Hermes keeps managing the live position; a stop/target MOVE goes
+// through the manage card, not a plan rewrite. Statuses that mean "past entry" (self-shadow execution
+// vocab hit/long/short + the transitional confirmed/in_position).
+const POSITION_STATUSES = new Set(['hit', 'long', 'short', 'confirmed', 'in_position'])
+const LIGHT_FIELDS = [
+    'thesis', 'timeframe_ladder', 'cadence', 'reference_levels', 'patterns',
+    'valid_until', 'market_sensitivity', 'rr', 'conviction', 'lens_fit',
+]
+
+/**
+ * Pure: build the $set for an in-place call edit. IN-POSITION → LIGHT_FIELDS only + NO re-arm (never
+ * flip a live call back to 'waiting' — that would orphan the reconciler's position match). PRE-position
+ * → full PLAN_FIELDS re-map + re-arm (status→waiting, next check + armed zone cleared).
+ */
+export function _buildEditSet(cur, full, chatState) {
+    const inPosition = POSITION_STATUSES.has(cur?.status)
+    const $set = { chat_state: chatState ?? cur?.chat_state ?? null }
+    for (const k of (inPosition ? LIGHT_FIELDS : PLAN_FIELDS)) $set[k] = full[k]
+    if (!inPosition) {
+        $set.status = 'waiting'
+        $set['monitor_state.next_check_at'] = null
+        $set['monitor_state.armed_zone_id'] = null
+    }
+    return { $set, inPosition }
+}
 
 // Broad-market coupling levels. Anything else (or missing) → Hermes treats the tape as immaterial.
 const SENSITIVITY_LEVELS = new Set(['high', 'medium', 'low'])
@@ -81,7 +113,7 @@ export function computeKairosPerformance(calls) {
 async function getKairosPerformance(userId, isAdmin = false) {
     try {
         const db    = await getDb()
-        const query = isAdmin ? { status: 'closed' } : { status: 'closed', user_id: userId }
+        const query = isAdmin ? { kind: KIND_CALL, status: 'closed' } : { kind: KIND_CALL, status: 'closed', user_id: userId }
         const calls = await db.collection(COLLECTION)
             .find(query, { projection: { status: 1, position_state: 1 } })
             .toArray()
@@ -205,7 +237,10 @@ export function normalizeCall(raw, userId = null) {
     return {
         // ── identity ──
         id:          `call_${String(raw.asset || 'x').replace(/[^A-Za-z0-9]/g, '')}_${randomUUID().slice(0, 8)}`,
+        kind:        'call',   // entity discriminator (P3) — a call is its own kind in `entities`
+        parentId:    null,
         strategy:    'kairos',
+        mode:        normalizeMode(raw.mode),   // build lens (KAIROS_MODES.md) — persisted so edit reopens in-mode
         user_id:     userId,
         created_at:  new Date().toISOString(),
         savedAt:     Date.now(),
@@ -237,8 +272,12 @@ export function normalizeCall(raw, userId = null) {
         // Time window (both bounds optional, mirrors an idea's `time` condition leaf after/before):
         // active_from = lower bound → Hermes won't monitor before it (a primary gate, cf. isTimeBlocked);
         // valid_until = upper bound → expiry review.
-        active_from:     raw.active_from ?? null,
-        valid_until:     raw.valid_until ?? null,
+        // Forward-dated scan seed: `build_window` (the list's period) backfills the gate when the model
+        // didn't set the bounds itself — so a "November" list item is reliably gated to November even
+        // though the model loses the window after the one-shot seed turn. An explicit model/user value
+        // (raw.active_from/valid_until, e.g. the user narrowed the dates in chat) always wins.
+        active_from:     raw.active_from ?? raw.build_window?.from ?? null,
+        valid_until:     raw.valid_until ?? raw.build_window?.to   ?? null,
         // Scheduled catalysts (earnings / FOMC / macro) frozen at build by _stampEventRisk — Hermes
         // reads these to hold off entering into an unresolved binary. Pure copy; the fetch is upstream.
         event_risk:      Array.isArray(raw.event_risk) ? raw.event_risk : [],
@@ -253,6 +292,12 @@ export function normalizeCall(raw, userId = null) {
         // 0 (Number(null)===0 would otherwise slip through Number.isFinite) back to null.
         rr:         Number.isFinite(Number(raw.rr)) && Number(raw.rr) > 0 ? Number(raw.rr) : null,
         conviction: cleanConviction(raw.conviction),
+        // Fit signal (K1): does the setup suit the build mode? 'weak' + suggested_mode flags a switch
+        // (the user decides whether to rebuild). Advisory — never gates the call.
+        lens_fit: {
+            fit:            raw.lens_fit?.fit === 'weak' ? 'weak' : 'good',
+            suggested_mode: (raw.lens_fit?.fit === 'weak' && isMode(raw.lens_fit?.suggested_mode)) ? raw.lens_fit.suggested_mode : null,
+        },
 
         // ── monitor_state (written each wake, Phase 2) ──
         status: 'waiting',
@@ -312,16 +357,12 @@ async function updateKairosCall(id, raw, userId, isAdmin = false) {
         if (cur.user_id && cur.user_id !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
 
         const full = normalizeCall(await _stampEventRisk(raw), cur.user_id ?? userId)   // fresh normalized plan (re-ids zones/levels) + refreshed event_risk
-        const $set = { savedAt: Date.now(), chat_state: raw.chat_state ?? cur.chat_state ?? null }
-        for (const k of PLAN_FIELDS) $set[k] = full[k]
-        // Re-arm on the new plan: back to waiting, monitor re-schedules on the next tick.
-        $set.status = 'waiting'
-        $set['monitor_state.next_check_at'] = null
-        $set['monitor_state.armed_zone_id'] = null
+        const { $set, inPosition } = _buildEditSet(cur, full, raw.chat_state)   // in-position → LIGHT edit, no re-arm
+        $set.savedAt = Date.now()
 
         await db.collection(COLLECTION).updateOne({ id }, { $set })
         const updated = await db.collection(COLLECTION).findOne({ id })
-        logger.info(LOG, 'call updated', { id, asset: $set.asset, trade_type: $set.trade_type })
+        logger.info(LOG, 'call updated', { id, asset: updated.asset, inPosition, mode: inPosition ? 'light' : 're-arm' })
         return { ok: true, call: stripId(updated) }
     } catch (err) {
         logger.error(LOG, 'Failed to update call', err)
@@ -362,7 +403,7 @@ async function getKairosCall(id, userId, isAdmin = false) {
 async function listKairosCalls(userId, isAdmin = false) {
     try {
         const db    = await getDb()
-        const query = isAdmin ? {} : { user_id: userId }
+        const query = isAdmin ? { kind: KIND_CALL } : { kind: KIND_CALL, user_id: userId }
         const items = await db.collection(COLLECTION).find(query).sort({ savedAt: -1 }).toArray()
         return items.map(stripId)
     } catch (err) {

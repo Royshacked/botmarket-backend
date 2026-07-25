@@ -12,6 +12,7 @@ import { brokerService }      from '../api/broker/broker.service.js'
 import { paperBrokerService, VIRTUAL_MODES } from '../api/broker/paperBroker.service.js'
 import { SUPPORTED_BROKERS }  from '../api/broker/broker.factory.js'
 import { logger }             from './logger.service.js'
+import { ideaToEnvelope }     from './entity/toEnvelope.js'
 
 const LOG = '[orderPlan]'
 
@@ -60,13 +61,22 @@ export async function resolveUserAccounts(userId, wantedIds) {
 }
 
 /**
- * @param {object} idea  must carry accounts[], mainAccountId, quantity, userId
+ * Kind-BLIND order-plan builder. Reads only the shared Envelope's execution binding +
+ * sizing + identity — so an idea, a call, or a portfolio_item plan the same way (see
+ * ENTITY_MODEL.md P1). The main account (execution.mainAccountId) trades the raw quantity;
+ * every other account scales by its balance ratio to the main account.
+ *
+ * @param {import('./entity/envelope.js').Envelope} envelope
+ * @param {{ resolveAccounts?: typeof resolveUserAccounts }} [deps]  injectable for tests
  * @returns {Promise<Array<{ broker, accountId, accountNo, quantity, type }>>}
- *          `type` is the broker execution type — always 'market' for a confirmed
- *          entry (NOT idea.type, which is the trade STYLE: intraday/swing/scalp).
+ *          `type` is the broker execution type — always 'market' for a confirmed entry
+ *          (NOT the entity's trade STYLE: intraday/swing).
  */
-export async function buildOrderPlanForIdea(idea) {
-    const { accounts, mainAccountId, quantity, userId } = idea
+export async function buildOrderPlan(envelope, { resolveAccounts = resolveUserAccounts } = {}) {
+    const accounts      = envelope?.execution?.accounts
+    const mainAccountId = envelope?.execution?.mainAccountId
+    const quantity      = envelope?.sizing?.resolvedQty ?? envelope?.sizing?.requested
+    const userId        = envelope?.userId
     if (!Array.isArray(accounts) || accounts.length === 0) return []
 
     const wantedIds = new Set(accounts.map(a => String(typeof a === 'object' ? a.id : a)))
@@ -74,9 +84,9 @@ export async function buildOrderPlanForIdea(idea) {
     // Resolve account IDs → live account info across the user's connected brokers
     let byId
     try {
-        byId = await resolveUserAccounts(userId, wantedIds)
+        byId = await resolveAccounts(userId, wantedIds)
     } catch (err) {
-        logger.error(LOG, `Failed to resolve accounts for idea ${idea.id}: ${err.message}`)
+        logger.error(LOG, `Failed to resolve accounts for entity ${envelope?.id}: ${err.message}`)
         return []
     }
 
@@ -101,4 +111,14 @@ export async function buildOrderPlanForIdea(idea) {
         })
     }
     return plan
+}
+
+/**
+ * @param {object} idea  must carry accounts[], mainAccountId, quantity, userId
+ * @returns {Promise<Array<{ broker, accountId, accountNo, quantity, type }>>}
+ * Thin idea-shim over the kind-blind {@link buildOrderPlan}: the real call path now flows
+ * through the Envelope, byte-identically. Callers stay unchanged.
+ */
+export async function buildOrderPlanForIdea(idea) {
+    return buildOrderPlan(ideaToEnvelope(idea))
 }
