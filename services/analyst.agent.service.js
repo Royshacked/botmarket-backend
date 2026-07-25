@@ -138,6 +138,9 @@ function _buildSystemPrompt(chatState, brokerContext = null, seed = null) {
     const draft  = chatState?.draft
         ? `\nDraft coverage so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
         : ''
+    const existingBlock = chatState?.existing_coverage
+        ? `\nEXISTING COVERAGE — update mode: this name is already in the book. Revise the thesis rather than starting from scratch. Reference what's changed since the prior view.\n${JSON.stringify(chatState.existing_coverage, null, 2)}`
+        : ''
     // P4b: an Argus INVESTING-profile candidate handed over for research. Start Phase 1 with this name +
     // Argus's screen read as a provisional input — VERIFY it, don't take it on faith, and form your OWN view.
     const seedBlock = seed?.ticker
@@ -147,7 +150,7 @@ function _buildSystemPrompt(chatState, brokerContext = null, seed = null) {
         : ''
     const dynamic = `---
 CURRENT DATE: ${today}. Resolve relative dates (this quarter, next earnings) against it.
-Active name: ${active}${seedBlock}${draft}${buildPositionsSection(brokerContext)}`
+Active name: ${active}${seedBlock}${draft}${existingBlock}${buildPositionsSection(brokerContext)}`
     return [
         { type: 'text', text: _systemPrompt(), cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamic },
