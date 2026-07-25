@@ -25,7 +25,7 @@ export async function routeAxl(req, res) {
                 onReasoning: (text) => sendEvent('reasoning', { text }),
             })
             const route = VALID_PIPELINES.has(result.route) ? result.route : null
-            return { reply: result.reply, route }
+            return { reply: result.reply, route, chart: result.chart ?? null }
         },
     })
 }
@@ -57,7 +57,7 @@ export async function streamAxl(req, res) {
                 onReasoning: (text) => sendEvent('reasoning', { text }),
             })
 
-            return { reply: result.reply }
+            return { reply: result.reply, chart: result.chart ?? null }
         },
     })
 }

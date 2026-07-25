@@ -24,7 +24,7 @@ export const axlAgentService = { chatStream, routeIntent }
 
 // Tight routing system prompt — phaseless, no tool context needed.
 const ROUTE_SYSTEM = `You are Axl, the reception at a trading platform with four specialist desks.
-Your ONLY job: identify which desk the user wants, then reply with ONE short sentence acknowledging their intent and telling them where you are routing them. End your reply with <route>key</route>.
+Your ONLY job: identify which desk the user wants (or handle a chart request directly), then reply with ONE short sentence. End your reply with the appropriate tag(s).
 
 Desks and keys:
 - trade: intraday, day, or swing trade of a specific asset (begins with Argus validating the asset, then Kairos plans the setup)
@@ -32,19 +32,29 @@ Desks and keys:
 - scan: produce a watchlist of candidates for later setups (Argus scans and lists)
 - research: deep-dive research on a company or sector (Prometheus builds a coverage thesis)
 
-Reply format: ONE sentence, then <route>key</route>.
+Chart requests (handle directly — do NOT route to a desk):
+If the user asks to open or show a chart for a ticker, acknowledge it and emit <route>open_chart</route><chart>{"ticker":"TICKER","timeframe":"TIMEFRAME"}</chart>
+Use the ticker they mentioned. Use the timeframe they mentioned (1m 5m 15m 30m 1h 4h 1d 1w); default to 1d if none given.
+
+Reply format: ONE sentence, then tag(s).
 Examples:
 "Let's find you a setup — routing you to the trading desk." <route>trade</route>
 "Time to build your book — sending you to the portfolio desk." <route>portfolio</route>
 "On it — routing you to the scan desk for a fresh watchlist." <route>scan</route>
-"Deep dive coming — routing you to the research desk." <route>research</route>`
+"Deep dive coming — routing you to the research desk." <route>research</route>
+"Opening AAPL on the 1h." <route>open_chart</route><chart>{"ticker":"AAPL","timeframe":"1h"}</chart>
+"Here's TSLA on the daily." <route>open_chart</route><chart>{"ticker":"TSLA","timeframe":"1d"}</chart>`
 
 async function routeIntent({ message, userId, onToken, onReasoning, signal } = {}) {
     const { model, streamFn, onUsage } = resolveAgentStream(undefined, userId)
 
     let routeCapture = null
+    let chartCapture = null
     const tagCaptures = buildTagCaptures({
         route: (text) => { routeCapture = text.trim() },
+        chart: (text) => {
+            try { chartCapture = JSON.parse(text.trim()) } catch { /* malformed — ignore */ }
+        },
     })
 
     const systemPrompt = [{ type: 'text', text: ROUTE_SYSTEM }]
@@ -67,7 +77,7 @@ async function routeIntent({ message, userId, onToken, onReasoning, signal } = {
 
     const reply = (raw ?? '').trim()
     logger.info(LOG, 'routeIntent done', { route: routeCapture, replyLength: reply.length })
-    return { reply, route: routeCapture }
+    return { reply, route: routeCapture, chart: chartCapture }
 }
 
 async function chatStream({ messages = [], model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, signal } = {}) {
@@ -83,9 +93,12 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
 
     logger.info(LOG, 'chatStream start', { messageCount: normalized.length, model, provider })
 
-    // Axl authors no artifacts, so it captures nothing — but suppress every known
-    // emit tag anyway so a stray one from the model never leaks raw into the chat.
-    const tagCaptures = buildTagCaptures()
+    let chartCapture = null
+    const tagCaptures = buildTagCaptures({
+        chart: (text) => {
+            try { chartCapture = JSON.parse(text.trim()) } catch { /* malformed — ignore */ }
+        },
+    })
 
     const raw = await streamFn({
         model,
@@ -104,5 +117,5 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
 
     const reply = (raw ?? '').trim()
     logger.info(LOG, 'chatStream done', { replyLength: reply.length })
-    return { reply }
+    return { reply, chart: chartCapture }
 }
