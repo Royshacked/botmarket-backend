@@ -2,11 +2,15 @@ import { getDb } from '../providers/mongodb.provider.js'
 
 const TOKEN_BUDGET_USD = Number(process.env.TOKEN_BUDGET_USD) || 20
 
-// Pricing per 1M tokens in USD
+// Pricing per 1M tokens in USD. cacheRead is 0.1x input, cacheWrite 1.25x input
+// (the 5-minute TTL premium — we never set ttl:'1h', which would be 2x).
+// Opus is $5/$25 as of the 4.7 generation; the old $15/$75 was Opus-3-era and
+// overstated every Opus row by 3x while it was in here.
 const PRICING = {
     'claude-haiku-4-5-20251001': { input: 1.00,  output: 5.00,  cacheRead: 0.10,  cacheWrite: 1.25  },
     'claude-sonnet-4-6':        { input: 3.00,  output: 15.00, cacheRead: 0.30,  cacheWrite: 3.75  },
-    'claude-opus-4-8':          { input: 15.00, output: 75.00, cacheRead: 1.50,  cacheWrite: 18.75 },
+    'claude-opus-5':            { input: 5.00,  output: 25.00, cacheRead: 0.50,  cacheWrite: 6.25  },
+    'claude-opus-4-8':          { input: 5.00,  output: 25.00, cacheRead: 0.50,  cacheWrite: 6.25  },
 }
 const DEFAULT_PRICING = { input: 3.00, output: 15.00 }
 
@@ -14,7 +18,8 @@ export function monthKey(date = new Date()) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
-function calcCost(model, usage) {
+// Exported for testing.
+export function calcCost(model, usage) {
     const p = PRICING[model] ?? DEFAULT_PRICING
     return (
         (usage.input_tokens                  ?? 0) * p.input              / 1_000_000 +

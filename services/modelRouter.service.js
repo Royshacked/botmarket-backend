@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 
 const HAIKU  = 'claude-haiku-4-5-20251001'
 const SONNET = 'claude-sonnet-4-6'
+const OPUS   = 'claude-opus-5'
 
 export const ROUTING_MODES = {
     MANUAL:     'manual',
@@ -62,12 +63,16 @@ Agents: idea (trade idea builder, phases 1-5), portfolio (portfolio manager, pha
 Model options:
 - "haiku": greeting, simple data lookup, single-field update, no synthesis
 - "sonnet": analysis, synthesis, multi-tool coordination, judgment, generation
+- "opus": the hardest calls only — full thesis construction, portfolio sizing and allocation, contradictory evidence to weigh, risk decisions with real money on the line
 
 Reasoning options:
 - "off": clear task, no ambiguity
 - "low": chart analysis, ambiguous conditions, complex nesting, multi-factor judgment, final JSON generation
+- "high": sizing, risk/reward trade-offs, conflicting signals — anything where being wrong costs money
 
-Output format: {"model":"haiku"|"sonnet","reasoning":"off"|"low"}`
+Opus is expensive: pick it only when sonnet would plausibly get the call wrong, not merely when the task is long.
+
+Output format: {"model":"haiku"|"sonnet"|"opus","reasoning":"off"|"low"|"high"}`
 
 /**
  * Resolve model and reasoningEffort for the current turn.
@@ -79,7 +84,11 @@ Output format: {"model":"haiku"|"sonnet","reasoning":"off"|"low"}`
  * @param {string} [opts.reasoningEffort] - manual mode: explicit effort
  * @param {string} [opts.lastMessage]     - classifier mode: last user message text
  */
-export async function resolveModel({ routingMode, agent, phase, model, reasoningEffort, lastMessage }) {
+export async function resolveModel(opts) {
+    return _floorEffort(await _resolveRoute(opts ?? {}))
+}
+
+async function _resolveRoute({ routingMode, agent, phase, model, reasoningEffort, lastMessage }) {
     if (routingMode === ROUTING_MODES.MANUAL) {
         return { model: model ?? SONNET, reasoningEffort: reasoningEffort ?? REASONING_EFFORT.OFF }
     }
@@ -110,12 +119,42 @@ async function _classify(agent, phase, lastMessage) {
         messages:   [{ role: 'user', content: `Agent: ${agent}\nPhase: ${phase ?? 'unknown'}\nMessage: ${String(lastMessage ?? '').slice(0, 400)}` }],
     })
 
-    const text   = response.content[0]?.text ?? ''
-    const parsed = JSON.parse(text)
-    const modelMap = { haiku: HAIKU, sonnet: SONNET }
+    const text = response.content[0]?.text ?? ''
+    return _normalizeClassification(JSON.parse(text))
+}
 
+const _MODEL_MAP  = { haiku: HAIKU, sonnet: SONNET, opus: OPUS }
+const _EFFORT_MAP = {
+    off:  REASONING_EFFORT.OFF,
+    low:  REASONING_EFFORT.LOW,
+    high: REASONING_EFFORT.HIGH,
+}
+
+/**
+ * Map the classifier's JSON onto a real route. Anything unrecognised — a
+ * hallucinated model name, a missing field, a whole missing object — lands on
+ * the conservative default rather than reaching a provider. Pure; exported for
+ * testing.
+ */
+export function _normalizeClassification(parsed) {
     return {
-        model:          modelMap[parsed.model]   ?? SONNET,
-        reasoningEffort: parsed.reasoning === 'low' ? 'low' : 'off',
+        model:           _MODEL_MAP[parsed?.model]       ?? SONNET,
+        reasoningEffort: _EFFORT_MAP[parsed?.reasoning]  ?? REASONING_EFFORT.OFF,
     }
+}
+
+// Opus 5 reasons by default: unlike Sonnet 4.6 / Opus 4.8, sending no thinking
+// block does NOT buy zero reasoning tokens — the model thinks anyway, and those
+// tokens count against max_tokens. Explicitly disabling thinking is worse than
+// leaving it on: with thinking off, Opus 5 sometimes writes a tool call as plain
+// text instead of a tool_use block, so the call silently never runs — fatal in
+// agents that are entirely tool-driven. So we floor the effort instead of
+// turning thinking off, here rather than in the provider, so the route we report
+// and persist matches what actually runs.
+const _MIN_EFFORT = { [OPUS]: REASONING_EFFORT.LOW }
+
+function _floorEffort(route) {
+    const min = _MIN_EFFORT[route.model]
+    if (!min || route.reasoningEffort !== REASONING_EFFORT.OFF) return route
+    return { ...route, reasoningEffort: min }
 }

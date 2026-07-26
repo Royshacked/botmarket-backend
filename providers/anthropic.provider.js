@@ -19,8 +19,22 @@ const DEFAULT_MAX_CONTINUATIONS = 10
 // "streaming failed" bug in Opus deep-think mode). Adaptive + effort is the
 // supported path across both Opus 4.8 and Sonnet 4.6.
 const EFFORT_LEVELS = { low: 'low', high: 'high' }
-function _thinkingConfig(reasoningEffort) {
+
+// Opus 5 thinks by default — omitting the thinking block does NOT mean "no
+// reasoning" the way it does on Sonnet 4.6 / Opus 4.8. It reasons anyway, those
+// tokens count against max_tokens, and DEFAULT_MAX_TOKENS would truncate the
+// reply mid-answer. Turning thinking explicitly off is the worse fix: with
+// thinking disabled, Opus 5 can emit a tool call as plain text instead of a
+// tool_use block — the call silently never runs, which breaks every agent here.
+// So on Opus 5 an 'off' effort floors to 'low' (and gets THINKING_MAX_TOKENS).
+// modelRouter applies the same floor so the reported route matches; this is the
+// backstop for callers that build a request without going through the router.
+const THINKS_BY_DEFAULT = new Set(['claude-opus-5'])
+const FLOOR_EFFORT = 'low'
+
+export function _thinkingConfig(reasoningEffort, model) {
     const effort = EFFORT_LEVELS[reasoningEffort]
+        ?? (THINKS_BY_DEFAULT.has(model) ? FLOOR_EFFORT : null)
     return effort
         ? { thinking: { type: 'adaptive' }, output_config: { effort } }
         : null
@@ -47,7 +61,7 @@ export async function streamAnthropicWithTools({
 }) {
     const messages   = _normalizeMessages(promptOrMessages)
     const suppressor = createTagSuppressor({ onToken, captures: tagCaptures })
-    const reasoning  = _thinkingConfig(reasoningEffort)
+    const reasoning  = _thinkingConfig(reasoningEffort, model ?? DEFAULT_MODEL)
 
     for (let i = 0; i < maxContinuations; i++) {
         // Client disconnected (user hit Stop) — end the loop instead of burning
