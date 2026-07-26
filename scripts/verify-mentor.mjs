@@ -32,11 +32,14 @@ const argOf  = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? a
 // close, which is all the zone gate needs). BTC is the 24/7 option but its aggregates rate-limit.
 const TICKER = String(argOf('--ticker', 'NVDA')).toUpperCase()
 const PERSIST = args.includes('--persist')
+const VERIFY_USER = 'mentor-verify-user'
 
 const fmtZones = (zs) => zs?.length ? zs.map(z => (z.lower === z.upper ? `${z.lower}` : `${z.lower}–${z.upper}`)).join(' / ') : '—'
 
-// A paper account so the readiness gate can actually reach green without a broker connection.
-const ACCOUNTS = [{ id: 'paper-verify', broker: 'paper', name: 'Paper (verify)', balance: 100000, currency: 'USD' }]
+// A placeholder account for the CHAT turns, so the readiness gate can reach green without a broker
+// connection. --persist replaces it with a REAL paper account from the store (an invented id
+// resolves to an empty order plan).
+const ACCOUNTS = [{ id: 'paper-chat-stub', broker: 'paper', name: 'Paper (verify)', balance: 100000, currency: 'USD' }]
 
 const C = { dim: '\x1b[2m', red: '\x1b[31m', yellow: '\x1b[33m', green: '\x1b[32m', cyan: '\x1b[36m', bold: '\x1b[1m', off: '\x1b[0m' }
 const findings = []
@@ -66,7 +69,7 @@ async function runTurn(prompt, chatState, history, n) {
         userPrompt: prompt,
         chatState,
         accounts: ACCOUNTS,
-        mainAccountId: 'paper-verify',
+        mainAccountId: 'paper-chat-stub',
         clientTime: { clientNow: Date.now(), clientTz: 'Asia/Jerusalem' },
         userId: null,                       // no usage accounting in a script run
         onToken:     (t) => { streamed += t; process.stdout.write(C.dim + t + C.off) },
@@ -182,37 +185,76 @@ function checkGate(setup, price) {
 
 async function checkPersist(setup) {
     head('Persist + arm + one tick (--persist)')
-    const { setupService } = await import('../api/setups/setups.service.js')
-    const { _checkSetup }  = await import('../monitoring/talos.monitor.service.js')
+    const { setupService }      = await import('../api/setups/setups.service.js')
+    const { _checkSetup }       = await import('../monitoring/talos.monitor.service.js')
+    const { paperBrokerService } = await import('../api/broker/paperBroker.service.js')
 
-    const gen = await setupService.generateSetup(setup, { userId: 'verify-user', accounts: ACCOUNTS, mainAccountId: 'paper-verify' })
+    // A REAL paper account in the store. The order-plan builder resolves account ids against the
+    // paper store, so an invented id silently yields an empty plan ("no placeable accounts") and
+    // the money path goes untested — which is exactly what happened on the first --persist run.
+    const acct = await paperBrokerService.createAccount(VERIFY_USER, { mode: 'paper', name: 'verify', startingBalance: 100000 })
+    const acctId = acct.accountId
+    ok(`paper account ${acctId} created`)
+    const accounts = [{ id: acctId, broker: 'paper', name: 'verify', balance: 100000, currency: 'USD' }]
+
+    const gen = await setupService.generateSetup(setup, { userId: VERIFY_USER, accounts, mainAccountId: acctId })
     if (!gen.ok) { fail(`generate rejected: ${gen.reason}`); return }
     ok(`generated ${gen.setup.id} — status ${gen.setup.status}, mode ${gen.setup.mode}, broker ${gen.setup.broker}`)
     gen.setup.event_risk?.length
         ? ok(`event_risk stamped: ${gen.setup.event_risk.map(e => `${e.date} ${e.label}`).join(' · ')}`)
         : ok('event_risk stamped: none in the next ~10 days')
 
-    const armed = await setupService.patchSetup(gen.setup.id, { status: 'looking' }, 'verify-user')
+    const armed = await setupService.patchSetup(gen.setup.id, { status: 'looking' }, VERIFY_USER)
     armed.ok ? ok('armed → looking') : fail(`arm refused: ${armed.reason}`)
     if (!armed.ok) return
 
-    // One real tick with the assessment and card stubbed — we're verifying the gate + the
-    // execution handoff, not spending an LLM call or posting to the user's chat.
+    // The assessment and the card are stubbed — we're verifying the gate and the EXECUTION
+    // handoff here, not spending an LLM call or posting into the user's chat. The order plan is
+    // the real one.
     let carded = null
-    const res = await _checkSetup(armed.setup, Date.now(), {
+    // NOT stubbed: the real plan builder, resolving the paper account for real.
+    const { buildOrderPlanForIdea } = await import('../services/orderPlan.service.js')
+    const tickDeps = (priceFn) => ({
         isAssetOpen: () => true,
         nextOpenMs:  () => Date.now() + 3600_000,
-        getPrice:    () => fetchLastPrice(setup.asset),
-        assess:      async () => ({ verdict: 'enter', read: '(stubbed)', next_check_min: 30 }),
-        buildOrderPlan: async () => [{ accountId: 'paper-verify', quantity: setup.quantity }],
+        getPrice:    priceFn,
+        assess:      async () => ({ verdict: 'wait', read: '(stubbed) not convinced', warning: 'Stubbed warning — the card must fire anyway.', next_check_min: 30 }),
         onCard:       async (_s, a) => { carded = a },
         onManualCard: async () => {},
+        buildOrderPlan: buildOrderPlanForIdea,
     })
-    ok(`tick → ${res.reason}${res.fired ? ` (FIRED, orderState=${res.orderState})` : ''}`)
-    if (res.fired && !carded) fail('fired but no card was produced')
 
-    await setupService.deleteSetup(gen.setup.id, 'verify-user')
-    ok('cleaned up')
+    // Tick 1 — the real live price. Almost certainly outside the zone; proves the cheap path.
+    const real = await _checkSetup(armed.setup, Date.now(), tickDeps(() => fetchLastPrice(setup.asset)))
+    ok(`tick @ live price → ${real.reason}${real.fired ? ` (FIRED, orderState=${real.orderState})` : ''}`)
+
+    // Tick 2 — force price into the first entry zone so the EXECUTION handoff actually runs.
+    // Without this the money-adjacent path (order plan + orderState + card) stays untested.
+    const z = setup.entry_zones[0]
+    const inZone = (z.lower + z.upper) / 2
+    head(`Forced trigger @ ${inZone} (inside ${z.id})`)
+    const fired = await _checkSetup(armed.setup, Date.now(), tickDeps(async () => inZone))
+
+    fired.fired ? ok(`triggered on ${z.id}`) : fail(`price inside ${z.id} did not trigger`)
+    fired.orderState === 'awaiting_confirm'
+        ? ok(`orderState ${fired.orderState}`)
+        : fail(`orderState is ${fired.orderState} — a 'hit' with no plan dead-ends at the dialog`)
+    carded ? ok(`card fired on a "${carded.verdict}" verdict — warning: "${carded.warning}"`) : fail('no confirm card')
+    if (carded && !carded.warning) fail('a non-enter verdict produced no warning')
+
+    // Read it back: this is what the confirm dialog would actually receive.
+    const after = await setupService.getSetup(gen.setup.id, VERIFY_USER)
+    console.log(`   status=${after.status} orderState=${after.orderState} armed_zone=${after.armed_zone_id}`)
+    console.log(`   pendingOrder.plan: ${JSON.stringify(after.pendingOrder?.plan ?? null)}`)
+    after.pendingOrder?.plan?.length
+        ? ok('a placeable order plan is persisted')
+        : fail('no pendingOrder.plan persisted — nothing for the confirm dialog to place')
+    console.log(`   timeline: ${(after.monitor_state?.timeline ?? []).map(t => t.kind).join(' → ')}`)
+    console.log(`   memo: ${after.monitor_state?.memo ?? '(none)'}`)
+
+    await setupService.deleteSetup(gen.setup.id, VERIFY_USER)
+    await paperBrokerService.deleteAccount(VERIFY_USER, acctId).catch(() => {})
+    ok('cleaned up (setup + paper account)')
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
