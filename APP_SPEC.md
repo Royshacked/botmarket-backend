@@ -280,5 +280,4 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
 ## 7. Auth & exposure
 
 - JWT in an httpOnly cookie; `requireAuth` guards most routes. `req.user._id` is the custom string id.
-- **Intentionally public:** news-feed list + SSE stream. **Authed (cost/abuse guard):** transcribe,
-  and the per-asset news endpoints (`/asset/:symbol[/sentiment]`).
+- **Authed (cost/abuse guard):** transcribe.

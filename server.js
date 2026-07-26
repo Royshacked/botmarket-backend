@@ -26,7 +26,6 @@ import { ensureTradeIndexes } from './services/tradeCapture.service.js'
 import { threadService } from './services/thread.service.js'
 import { ideaRoutes } from './api/idea/idea.routes.js'
 import { kairosRoutes } from './api/kairos/kairos.routes.js'
-import { newsFeedRoutes } from './api/news-feed/newsFeed.routes.js'
 import { tradeIdeasRoutes } from './api/trade-ideas/tradeIdeas.routes.js'
 import { authRoutes }   from './api/authentication/authentication.routes.js'
 import { userRoutes }   from './api/user/user.routes.js'
@@ -41,7 +40,6 @@ import { axlRoutes }         from './api/axl/axl.routes.js'
 import { threadsRoutes }     from './api/threads/threads.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
-import { newsFeedService }  from './api/news-feed/newsFeed.service.js'
 import { minosService }     from './monitoring/minos.monitor.service.js'
 import { hermesService }    from './monitoring/hermes.monitor.service.js'
 import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
@@ -95,7 +93,6 @@ if (process.env.NODE_ENV === 'production') {
 
 app.use('/api/idea', ideaRoutes)
 app.use('/api/kairos',      kairosRoutes)
-app.use('/api/news-feed',   newsFeedRoutes)
 app.use('/api/trade-ideas', tradeIdeasRoutes)
 app.use('/api/auth',        authRoutes)
 app.use('/api/users',       userRoutes)
@@ -119,7 +116,6 @@ ensureKairosIndexes()
 ensureTradeIndexes()
 threadService.ensureThreadIndexes()
 
-newsFeedService.start()
 minosService.start()
 hermesService.start()
 coverageMonitorService.start()

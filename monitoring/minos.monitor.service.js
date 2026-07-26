@@ -28,8 +28,9 @@ import { entityRepo }                           from '../services/entity/entityR
 import {
     fetchCandles, buildSymbolMap, buildVolumeCtx, brokerCandleCtx,
     hasCumulativeVolume, logCheck, persistConditionStates,
-    resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe, withTimeout, createPollLoop,
+    resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe, createPollLoop,
 } from './monitorUtils.js'
+import { withTimeout } from '../services/timeout.util.js'
 
 const LOG = '[minos.monitor]'
 

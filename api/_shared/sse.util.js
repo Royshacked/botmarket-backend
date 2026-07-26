@@ -1,5 +1,5 @@
 // Shared Server-Sent-Events boilerplate for the streaming endpoints
-// (orchestrator / portfolio / scanner / news-feed). Sets the SSE headers,
+// (orchestrator / portfolio / scanner / analyst / kairos / axl). Sets the SSE headers,
 // disables proxy buffering, starts a keep-alive heartbeat, and wires an
 // AbortController to the response close so a client disconnect (Stop / navigate
 // away) aborts the work instead of letting it finish silently.

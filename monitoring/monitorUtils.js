@@ -169,19 +169,6 @@ export function createPollLoop({ intervalMs, tick, eager = false, log = '[pollLo
     }
 }
 
-// ─── Timeout guard ─────────────────────────────────────────────────────────────
-
-// Race a promise against a timeout so a single hung IO call (LLM/vision/price fetch)
-// can't wedge a poll loop forever — without it, an unbounded await keeps `_running`
-// true and every later tick skips. The underlying promise is left to settle on its
-// own (best-effort, not cancellable); the caller just stops waiting. Pure — shared by
-// the Minos and Hermes monitors.
-export function withTimeout(promise, ms) {
-    let t
-    const timeout = new Promise((_, reject) => { t = setTimeout(() => reject(new Error(`check timed out after ${ms}ms`)), ms) })
-    return Promise.race([promise, timeout]).finally(() => clearTimeout(t))
-}
-
 // ─── JSON extraction ───────────────────────────────────────────────────────────
 
 // Walk from the first '{' to its matching '}' and JSON.parse that slice — avoids greedy

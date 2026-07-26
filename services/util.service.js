@@ -38,33 +38,13 @@ export async function deduplicateItems(type = '', name, data) {
 }
 
 
-export function cleanJSON(text) {
-    return text
-        .replace(/```json/g, '')
-        .replace(/```/g, '')
-        .trim()
-}
+// NOTE: parsing JSON out of an LLM reply lives in ONE place —
+// monitoring/monitorUtils.js `extractFirstJSON`. Don't add a second parser here.
 
 
 export function isCacheFresh(lastFetchedAt, cacheTimeMs = 5 * 60 * 1000) {
     if (!lastFetchedAt) return false
     return Date.now() - lastFetchedAt < cacheTimeMs
-}
-
-
-export function safeParseJsonObject(text) {
-    const cleaned = cleanJSON(text || '')
-    try {
-        return JSON.parse(cleaned)
-    } catch {
-        const extracted = _extractFirstJsonObject(cleaned)
-        if (!extracted) return null
-        try {
-            return JSON.parse(extracted)
-        } catch {
-            return null
-        }
-    }
 }
 
 
@@ -159,13 +139,4 @@ function _itemsFilePath(type, name) {
 
 function _formatYyyyMmDd(date) {
     return date.toISOString().slice(0, 10)
-}
-
-
-function _extractFirstJsonObject(text) {
-    if (!text) return null
-    const start = text.indexOf('{')
-    const end = text.lastIndexOf('}')
-    if (start === -1 || end === -1 || end <= start) return null
-    return text.slice(start, end + 1)
 }

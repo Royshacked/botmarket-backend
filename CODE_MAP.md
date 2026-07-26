@@ -54,7 +54,7 @@ api/
   paper/                  paper mode toggle/settings/reset/trades/equity  /api/paper/*
   chat/                   social DM + bot notifications (chatWs.js = WebSocket); sendBotMessage funnel,
                           BOT_IDS = axl·idea·portfolio·scanner·kairos (one notify bot per agent)
-  news-feed/ market/ calendar/ user/ authentication/ transcribe/
+  market/ calendar/ user/ authentication/ transcribe/
   _shared/                cross-controller helpers:
       sse.util.js             startSseStream() — SSE headers + heartbeat + abort wiring
       parse.util.js           parseChatMessages / parseIdeaAccounts
@@ -180,7 +180,7 @@ docs/                       architecture design docs
 ## Naming conventions
 
 - **Feature modules:** `<feature>.routes.js` / `.controller.js` / `.service.js`. Routers apply
-  `requireAuth` + `log` middleware. (Exceptions: `news-feed` list/stream and `transcribe`… see APP_SPEC.)
+  `requireAuth` + `log` middleware. (Exception: `transcribe`… see APP_SPEC.)
 - **Providers:** `<name>.provider.js`; export bare named functions. A few also export a
   `<name>Service` namespace object.
 - **Broker adapters:** `<broker>.adapter.js`, a class extending `BrokerAdapter`; register in

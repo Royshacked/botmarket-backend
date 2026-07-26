@@ -1,5 +1,7 @@
 import { fetchChartImage } from '../providers/chartImg.provider.js'
 import { renderChartImage } from './chartRender/klineRender.provider.js'
+import { createTtlCache } from './ttlCache.util.js'
+import { withTimeout } from './timeout.util.js'
 import { logger } from './logger.service.js'
 
 // Short-lived chart-image cache, keyed by symbol + timeframe + studies. Chart rendering is the
@@ -12,8 +14,8 @@ import { logger } from './logger.service.js'
 // without the marketData.tools ⇄ chart.evaluator import cycle — this module imports only the
 // providers, so nothing depends back on it.
 const LOG          = '[chartImgCache]'
-const _chartCache  = new Map()   // key -> { at, png }
 const CHART_TTL_MS = 60 * 1000   // intraday views go stale fast; 60s is plenty within a chat / assessment
+const _chartCache  = createTtlCache({ ttlMs: CHART_TTL_MS, max: 100 })   // key -> base64 png
 
 // ─── Renderer selection (FALLBACK-FIRST rollout) ──────────────────────────────
 // The own-chart headless renderer (KLineCharts + our FMP candles) tries first; ANY failure or a
@@ -28,17 +30,11 @@ const OWN_RENDER_ON     = process.env.OWN_CHART_RENDER !== 'false' && process.en
 // runs isn't abandoned mid-flight and needlessly re-fetched from chart-img.
 const RENDER_TIMEOUT_MS = Number(process.env.OWN_CHART_RENDER_TIMEOUT_MS) || 12000
 
-function _withTimeout(promise, ms, label) {
-    let timer
-    const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms) })
-    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
-}
-
 /** Produce a chart PNG: own renderer first, chart-img as fallback. Returns base64 PNG. */
 async function _renderPng(symbol, timeframe, studies) {
     if (!OWN_RENDER_ON) return fetchChartImage(symbol, timeframe, studies)
     try {
-        const png = await _withTimeout(renderChartImage(symbol, timeframe, studies), RENDER_TIMEOUT_MS, 'own-render')
+        const png = await withTimeout(renderChartImage(symbol, timeframe, studies), RENDER_TIMEOUT_MS, 'own-render')
         logger.info(LOG, `served by own-render: ${symbol}/${timeframe}`)
         return png
     } catch (err) {
@@ -57,9 +53,7 @@ function _studyKey(s) {
 export async function cachedChartImage(symbol, timeframe, studies) {
     const key = `${symbol}|${timeframe}|${studies.map(_studyKey).join(',')}`
     const hit = _chartCache.get(key)
-    if (hit && Date.now() - hit.at < CHART_TTL_MS) return hit.png
+    if (hit) return hit
     const png = await _renderPng(symbol, timeframe, studies)
-    if (_chartCache.size > 100) _chartCache.clear()
-    _chartCache.set(key, { at: Date.now(), png })
-    return png
+    return _chartCache.set(key, png)
 }

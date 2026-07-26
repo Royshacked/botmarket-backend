@@ -5,7 +5,8 @@ import { getTickerAggregates }   from '../providers/candles.provider.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../services/tradeNotify.service.js'
-import { withTimeout, createPollLoop } from './monitorUtils.js'
+import { createPollLoop } from './monitorUtils.js'
+import { withTimeout } from '../services/timeout.util.js'
 import { _defaultAssess, _defaultAssessPosition, _defaultAssessReentry, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses } from './hermes.assess.js'
 
 // The LLM assessment IO lives in hermes.assess.js (wired into _deps below). Re-exported here

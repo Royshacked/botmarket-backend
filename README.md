@@ -55,7 +55,7 @@ npm start            # node server.js
 npm run server:prod  # NODE_ENV=production (serves built frontend from public/)
 ```
 `server.js` fails fast if `MONGODB_URI` or `JWT_SECRET` are missing. On boot it starts the
-background services: news feed, monitor, execution reconciler, paper fill engine, paper
+background services: monitor, execution reconciler, paper fill engine, paper
 equity snapshotter.
 
 ---
@@ -73,7 +73,7 @@ api/                   HTTP surface — one folder per feature (routes + control
     adapters/          BrokerAdapter interface + ctrader / ibkr / paper adapters
   paper/               paper-mode toggle, settings, trades, equity curve
   chat/                user-to-user (social) messaging + bot notifications (WS)
-  news-feed/ market/ calendar/ user/ authentication/ transcribe/
+  market/ calendar/ user/ authentication/ transcribe/
 services/              agent services, model routing, condition trees, pricing, order plan…
 providers/             external clients (LLMs, market data, brokers, Mongo)
 monitoring/            monitor loop, evaluators, reconciler, invalidation monitor, paper engines
@@ -408,15 +408,13 @@ GET  /equity-curve   equity points (?fromMs=)
 ## Other endpoints
 
 - **Auth** `/api/auth` — `POST /signup`, `POST /signin`, `POST /signout`, `GET /me`.
-  JWT lives in an httpOnly cookie; `requireAuth` guards everything except broker OAuth callback,
-  the news-feed router, and transcribe.
+  JWT lives in an httpOnly cookie; `requireAuth` guards everything except broker OAuth callback
+  and transcribe.
 - **Users** `/api/users` — CRUD + `GET /:id/usage` (token-usage stats).
 - **Social chat** `/api/chat` — user-to-user messaging (`/conversations`, messages, read
   receipts, `GET /users/search`). Realtime via WebSocket (`api/chat/chatWs.js`). This is **not**
   the AI agent chat — that's the idea-agent SSE. Agent notifications (idea hit, invalidation
   alert) arrive here as bot messages.
-- **News feed** `/api/news-feed` — `GET /`, `GET /stream` (SSE), `GET /asset/:symbol`,
-  `GET /asset/:symbol/sentiment`.
 - **Market** `/api/market/status` · **Calendar** `/api/calendar/earnings` (Finnhub, +company logo/name), `/api/calendar/fed` (macro/FOMC via FRED), `/api/calendar/ipo` (Finnhub).
 - **Transcribe** `/api/transcribe` — raw audio → text (registered before `express.json`).
 

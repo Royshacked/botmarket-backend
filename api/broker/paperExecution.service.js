@@ -16,6 +16,7 @@ import { getCandles }         from '../../providers/ohlcv.provider.js'
 import { getFmpQuote }        from '../../providers/fmp.price.provider.js'
 import { executionBus }       from '../../services/executionBus.js'
 import { isAssetOpen }        from '../../services/market.service.js'
+import { createTtlCache }     from '../../services/ttlCache.util.js'
 import { logger }             from '../../services/logger.service.js'
 
 const LOG = '[paperExecution]'
@@ -46,6 +47,11 @@ export function applySpread(price, isBuy, spreadBps = 0) {
 // failed/empty fetch reuses the last good quote instead of returning null. Keep the TTL
 // in the "every few seconds" range so touch-based stop/TP fills stay responsive — the
 // fill loop can only be as fresh as the quote it reads.
+//
+// DELIBERATELY NOT services/ttlCache.util.js: this is a stale-while-error cache, not a
+// plain TTL cache. The fallback below reads the entry AFTER it has expired, and
+// createTtlCache.get() evicts on expiry — routing this through it would silently drop
+// the last-known quote and blank P&L on any transient provider error.
 const _quoteCache   = new Map()   // symbol → { quote, at }
 const QUOTE_TTL_MS  = Number(process.env.PAPER_QUOTE_TTL_MS) || 5_000
 
@@ -101,8 +107,9 @@ export async function quoteMapForSymbols(symbols) {
 // Symbols FMP can't price (some futures / index CFDs / broker symbols) — cached with a
 // retry TTL so we don't re-hit FMP every mark tick for a symbol it can't resolve, but a
 // transient miss on a real equity re-tries later instead of downgrading forever.
-const _noFmpUntil   = new Map()   // symbol → ts to retry FMP after
+// A fresh entry means "FMP can't price this — skip it"; the entry expiring IS the retry.
 const NO_FMP_TTL_MS = 10 * 60_000
+const _noFmp        = createTtlCache({ ttlMs: NO_FMP_TTL_MS, max: 500 })   // symbol → true
 
 /**
  * Best price for MARKING open-position P&L AND for touch-fill detection. Prefers a
@@ -115,16 +122,14 @@ const NO_FMP_TTL_MS = 10 * 60_000
  * trigger that tick).
  */
 export async function latestMarkPrice(symbol) {
-    const retryAfter = _noFmpUntil.get(symbol)
-    if (retryAfter == null || Date.now() > retryAfter) {
+    // get() returns undefined when absent OR expired (it evicts on read), so a falsy
+    // hit is exactly "no live suppression — try FMP".
+    if (!_noFmp.get(symbol)) {
         try {
             const price = await getFmpQuote(symbol)
-            if (price != null && Number.isFinite(price) && price > 0) {
-                _noFmpUntil.delete(symbol)
-                return price
-            }
+            if (price != null && Number.isFinite(price) && price > 0) return price
         } catch { /* provider error — fall back to an intraday candle */ }
-        _noFmpUntil.set(symbol, Date.now() + NO_FMP_TTL_MS)
+        _noFmp.set(symbol, true)
     }
     // Intraday (1-min) candle close ONLY — never a day candle (see above). Skip entirely when
     // the session is closed: no fresh intraday bars exist, so the fetch only returns empty and

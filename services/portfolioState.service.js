@@ -2,6 +2,7 @@ import { getDb }                             from '../providers/mongodb.provider
 import { ENTITIES }                          from './entity/entityCollection.js'
 import { brokerService }                     from '../api/broker/broker.service.js'
 import { getEarningsCalendarRaw, getSectorRaw } from '../providers/fmp.provider.js'
+import { createTtlCache }                    from './ttlCache.util.js'
 import { logger }                            from './logger.service.js'
 import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames, BROKER_LABELS } from '../api/portfolio/portfolioMode.util.js'
 
@@ -16,22 +17,27 @@ const PENDING_STATUSES = new Set(['looking', 'waiting', 'resting', 'hit'])
 // timestamped block that can never be prompt-cached. Snapshotting for a few
 // minutes both kills the repeated round-trips and makes the dynamic context
 // byte-identical across turns so it can sit behind a cache_control breakpoint.
+// Bounded so a long-lived process can't accumulate one entry per portfolio×user
+// forever — snapshots hold positions + quotes, so they are not small.
 const STATE_TTL_MS = 5 * 60 * 1000
-const _stateCache  = new Map()   // `${portfolioId}|${userId}` → { state, expiresAt }
+const _stateCache  = createTtlCache({ ttlMs: STATE_TTL_MS, max: 200 })   // `${portfolioId}|${userId}` → state
 
 /**
  * Cached wrapper around computePortfolioState. Returns the same snapshot for up
- * to ttlMs so review follow-ups reuse it (prices frozen for the window).
+ * to STATE_TTL_MS so review follow-ups reuse it (prices frozen for the window).
  */
-export async function getPortfolioStateCached(portfolioId, userId, { ttlMs = STATE_TTL_MS } = {}) {
+export async function getPortfolioStateCached(portfolioId, userId) {
     const key = `${portfolioId}|${userId}`
     const hit = _stateCache.get(key)
-    if (hit && hit.expiresAt > Date.now()) {
+    if (hit) {
         logger.info(LOG, 'snapshot cache hit', { portfolioId })
         return hit.state
     }
+    // Wrapped in an object because computePortfolioState returns NULL for an empty
+    // portfolio, and a bare null would read back as a cache miss — re-querying Mongo
+    // on every turn. The wrapper keeps the stored value truthy so null is cached too.
     const state = await computePortfolioState(portfolioId, userId)
-    _stateCache.set(key, { state, expiresAt: Date.now() + ttlMs })
+    _stateCache.set(key, { state })
     return state
 }
 

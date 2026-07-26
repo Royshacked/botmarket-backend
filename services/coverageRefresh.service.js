@@ -8,7 +8,7 @@
 import { analystAgentService } from './analyst.agent.service.js'
 import { coverageService }     from '../api/analyst/coverage.service.js'
 import { notifyCoverageRefreshed } from './coverageNotify.service.js'
-import { withTimeout }         from '../monitoring/monitorUtils.js'
+import { withTimeout }         from './timeout.util.js'
 import { logger }              from './logger.service.js'
 
 const LOG = '[coverageRefresh]'

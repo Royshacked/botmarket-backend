@@ -54,7 +54,7 @@ Even though the trigger is scheduled cadence, the cron is the final piece — th
 1. **Foundation — state + lifecycle home.** Add `computePortfolioState`, plus a portfolio lifecycle record holding `reviewCadence`, `nextReviewAt`, `lastReviewAt`, and a `reviewHistory[]` change log (date, action, deltas, rationale, performance snapshot). The change log feeds the agent on the next review.
 2. **Review conversation (manual trigger).** Inject the live state into the portfolio agent; extend the `portfolio_update` vocabulary with live-position actions (`rebalance`/`trim`/`add`, `exit_idea`, `swap`). Propose → approve → place. Live-verify by opening a portfolio manually before any automation.
 3. **Order layer for live positions.** Trim/add/close order-set builder + re-normalize weights to 1.0 (reuse the existing `_sizePlan` normalize). This is where the real risk lives (multi-account).
-4. **Scheduler + surfacing.** A cron finds portfolios where `nextReviewAt <= now`, runs step 2 automatically, and surfaces the proposed review in NewsFeed (mirror the Scanner "Scans" tab pattern) with a notification. Frontend: cadence picker + target-vs-actual review view.
+4. **Scheduler + surfacing.** A cron finds portfolios where `nextReviewAt <= now`, runs step 2 automatically, and surfaces the proposed review in the Radar (mirror the Scanner "Scans" tab pattern) with a notification. Frontend: cadence picker + target-vs-actual review view.
 
 ## Locked decisions
 
