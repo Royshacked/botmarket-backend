@@ -45,6 +45,43 @@ export function buildIdeaEntryConfirm(idea, note = null) {
     }
 }
 
+/**
+ * A `setup` reached one of its entry zones → confirm to place the order.
+ *
+ * Its own builder rather than a reuse of buildIdeaEntryConfirm: that one's `note` is a
+ * three-value enum the copy branches on, so passing Talos's free-text warning through it would
+ * silently swallow the warning. Shared TRANSPORT (postBotCard + cardActions), own COPY — the
+ * house rule.
+ *
+ * Talos advises but never vetoes, so this card fires on ANY verdict. When the verdict is not
+ * "enter", the warning leads the copy: the user must see the objection before they confirm, not
+ * after. `read` carries Talos's one-line monologue for the card body.
+ */
+export function buildSetupEntryConfirm(setup, assessment = null) {
+    const dir     = String(setup?.direction || '').toUpperCase()
+    const warning = assessment?.warning ?? null
+    const lead    = warning
+        ? `Price reached your zone — ${dir} ${setup?.asset}, but Talos flags: ${warning}`
+        : `Price reached your zone — ${dir} ${setup?.asset}.`
+    return {
+        userId:  setup?.userId ?? null,
+        content: `${lead} Confirm to place your order.`,
+        type:    'entry_confirm',
+        payload: {
+            kind:      'setup',
+            setupId:   setup?.id,
+            asset:     setup?.asset,
+            direction: setup?.direction ?? null,
+            zoneId:    assessment?.zone_id ?? setup?.armed_zone_id ?? null,
+            verdict:   assessment?.verdict ?? null,
+            warning,
+            read:      assessment?.read ?? null,
+        },
+        botId:   'mentor',
+        actions: cardActions('Confirm order'),
+    }
+}
+
 /** Kairos call READY to enter → open the call to confirm. Proposal comes from the fresh assessment. */
 export function buildCallReady(call, assessment = null) {
     // Only show the price bits when BOTH numbers finalized — _finalizeProposal returns null for
@@ -130,6 +167,10 @@ export async function notifyIdeaEntryConfirm(idea, note = null) {
     return _post(buildIdeaEntryConfirm(idea, note), 'Entry-confirm card')
 }
 
+export async function notifySetupEntryConfirm(setup, assessment = null) {
+    return _post(buildSetupEntryConfirm(setup, assessment), 'Setup entry-confirm card')
+}
+
 export async function notifyCallReady(call, assessment = null) {
     return _post(buildCallReady(call, assessment), 'Call-ready card')
 }
@@ -146,4 +187,4 @@ export async function notifyCallReentry(call, read = null, outcome = null) {
     return _post(buildCallReentry(call, read, outcome), 'Call-reentry card')
 }
 
-export const tradeNotifyService = { notifyIdeaEntryConfirm, notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry }
+export const tradeNotifyService = { notifyIdeaEntryConfirm, notifySetupEntryConfirm, notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry }

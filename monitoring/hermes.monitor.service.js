@@ -5,7 +5,7 @@ import { getTickerAggregates }   from '../providers/candles.provider.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../services/tradeNotify.service.js'
-import { createPollLoop } from './monitorUtils.js'
+import { createPollLoop, fetchLastPrice } from './monitorUtils.js'
 import { withTimeout } from '../services/timeout.util.js'
 import { _defaultAssess, _defaultAssessPosition, _defaultAssessReentry, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses } from './hermes.assess.js'
 
@@ -997,18 +997,11 @@ const _deps = {
     onReentry:      _defaultOnReentry,
 }
 
+// Quote-then-candles last price. Body moved to monitorUtils.fetchLastPrice so Talos's zone gate
+// reads prices through the SAME fallback chain (a divergence here means one monitor silently
+// never fires). Behaviour is unchanged.
 async function _defaultGetPrice(call) {
-    try {
-        const q = await getQuote(call.asset)
-        const p = Number(q?.price ?? q?.regularMarketPrice ?? q?.last ?? q?.c)
-        if (Number.isFinite(p)) return p
-    } catch { /* fall through to candles */ }
-    try {
-        const rows = await getTickerAggregates(String(call.asset).toUpperCase(), { timeSpan: 'minute', multiplier: 1, from: Date.now() - 3 * 24 * 60 * 60 * 1000 })
-        const last = rows?.at(-1)
-        if (Number.isFinite(last?.close)) return last.close
-    } catch { /* give up */ }
-    return null
+    return fetchLastPrice(call.asset)
 }
 
 // Post the readiness/expiry card to social chat (notify + route to the call pop-out). `enter`

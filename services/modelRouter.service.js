@@ -52,13 +52,17 @@ const PHASE_TABLES = {
     // Axl is a single-mode agent (no phases) — intentionally empty so it resolves to
     // DEFAULT_ROUTE. Present here so the omission reads as deliberate, not a missing table.
     axl: {},
+    // Mentor has NO phases by design (invariants, not steps — docs/setup-entity.md), so there is
+    // no step number to key a table off. Its intended mode is CLASSIFIER, which routes from the
+    // last user message; AUTO falls through to DEFAULT_ROUTE. Empty on purpose, like axl.
+    mentor: {},
 }
 
 const _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 const _CLASSIFIER_SYSTEM = `You are a routing classifier for a trading AI assistant. Output ONLY valid JSON — no prose, no markdown.
 
-Agents: idea (trade idea builder, phases 1-5), portfolio (portfolio manager, phases 1-6), scanner (market scanner, phases 1-4), kairos (discretionary day/swing call builder, phases 1-7)
+Agents: idea (trade idea builder, phases 1-5), portfolio (portfolio manager, phases 1-6), scanner (market scanner, phases 1-4), kairos (discretionary day/swing call builder, phases 1-7), mentor (trade assistant building the user's own setup — NO phases; judge each turn on its own merits: a greeting or a one-field edit is haiku, analysis/zone-placing/candidate-proposing is sonnet, and weighing a contradictory read or final sizing is where reasoning earns its cost)
 
 Model options:
 - "haiku": greeting, simple data lookup, single-field update, no synthesis

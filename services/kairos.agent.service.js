@@ -5,9 +5,7 @@ import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS_FOR_MODE, buildKairosToolHandlers } from './kairos.tools.js'
 import { normalizeMode } from './kairos.modes.js'
 import { kairosService } from '../api/kairos/kairos.service.js'
-import { toBrokerSymbol } from './brokerSymbol.service.js'
-import { brokerService } from '../api/broker/broker.service.js'
-import { computeBasisOffset } from '../api/broker/brokerPrice.service.js'
+import { resolveVenue as _resolveVenue } from './venue.resolve.service.js'
 import { logger } from './logger.service.js'
 
 // Kairos build agent: a conversation → a DRAFT trading "call" (see KAIROS_PLAN.md, Phase 1).
@@ -164,40 +162,13 @@ export function _parseScanRequest(raw) {
     }
 }
 
-// ─── Venue resolution (cTrader symbol gate, copied from the Idea flow) ─────────
-// Bind the call to the selected account's venue and resolve the broker-native symbol +
-// basis offset. Only cTrader needs resolution (NQ→US100→US100.cash + index basis); paper and
-// manual trade in chart space (symbol == asset, offset 0). Never throws — falls back to the
-// static map / zero offset. Deps are injectable for testing.
-export async function _resolveVenue(broker, userId, accountId, asset, deps = {}) {
-    const {
-        toBrokerSymbol:     _toBrokerSymbol     = toBrokerSymbol,
-        // Wrapped (not detached) so the real brokerService method keeps its receiver.
-        resolveSymbol:      _resolveSymbol      = (...args) => brokerService.resolveSymbol(...args),
-        computeBasisOffset: _computeBasisOffset = computeBasisOffset,
-    } = deps
-
-    if (broker !== 'ctrader') return { broker_symbol: asset, basis_offset: 0 }
-
-    const mapped = _toBrokerSymbol('ctrader', asset)
-    let brokerSymbol = mapped
-    try {
-        const res = await _resolveSymbol('ctrader', userId, accountId, mapped)
-        if (res?.found && res.symbol) brokerSymbol = res.symbol
-    } catch (err) {
-        logger.warn(LOG, `resolveSymbol ${asset}→${mapped} failed — using static map: ${err.message}`)
-    }
-
-    let basis_offset = 0
-    try {
-        const { offset } = await _computeBasisOffset({ brokerSymbol, asset })
-        basis_offset = offset || 0
-    } catch (err) {
-        logger.warn(LOG, `basis offset failed for ${asset}→${brokerSymbol}: ${err.message}`)
-    }
-
-    return { broker_symbol: brokerSymbol, basis_offset }
-}
+// ─── Venue resolution (cTrader symbol gate) ───────────────────────────────────
+// Moved to services/venue.resolve.service.js so the `setup` kind binds through the SAME symbol
+// gate instead of forking the cTrader basis logic (docs/setup-entity.md §8). Re-exported under
+// its historical name so existing importers and tests resolve unchanged. Imported (not just
+// re-exported) because _finalizeCall calls it in-file — a bare `export … from` creates no local
+// binding.
+export { _resolveVenue }
 
 // Called on Generate (and on the "Update call" edit — pass `updateId`). Bind venue from the marked
 // accounts (bank icon), resolve the symbol gate, then validate + persist. Multi-broker forking is

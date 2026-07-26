@@ -1,4 +1,6 @@
 import { getCandles }          from '../providers/ohlcv.provider.js'
+import { getQuote }            from '../providers/yahoofinance.provider.js'
+import { getTickerAggregates } from '../providers/candles.provider.js'
 import { extractLeaves }       from '../services/conditionTree.service.js'
 import { logger }              from '../services/logger.service.js'
 import { sessionStartMs }      from '../services/market.service.js'
@@ -8,6 +10,34 @@ import { entityRepo }          from '../services/entity/entityRepo.service.js'
 
 const LOG        = '[monitorUtils]'
 const CANDLE_COUNT = 300
+
+// ─── Last price ───────────────────────────────────────────────────────────────
+
+/**
+ * The last traded price for a symbol — the input to every zone gate.
+ *
+ * Quote first, then a 1-minute-candle fallback when the quote is missing or throws. Both layers
+ * matter: providers vary in which field carries the price (`price` / `regularMarketPrice` /
+ * `last` / `c`), and a monitor that reads `null` here simply never fires, silently and forever.
+ *
+ * Shared by Hermes and Talos so a fix to the quote-shape fallback chain reaches both gates.
+ * Returns null only when BOTH sources fail.
+ */
+export async function fetchLastPrice(asset) {
+    const symbol = String(asset ?? '').toUpperCase()
+    if (!symbol) return null
+    try {
+        const q = await getQuote(asset)
+        const p = Number(q?.price ?? q?.regularMarketPrice ?? q?.last ?? q?.c)
+        if (Number.isFinite(p)) return p
+    } catch { /* fall through to candles */ }
+    try {
+        const rows = await getTickerAggregates(symbol, { timeSpan: 'minute', multiplier: 1, from: Date.now() - 3 * 24 * 60 * 60 * 1000 })
+        const last = rows?.at(-1)
+        if (Number.isFinite(last?.close)) return last.close
+    } catch { /* give up */ }
+    return null
+}
 
 // ─── Candle fetching ──────────────────────────────────────────────────────────
 
