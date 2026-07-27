@@ -67,6 +67,9 @@ export async function resolveVenue(broker, userId, accountId, asset, deps = {}) 
 /** The supported live brokers. Paper and manual are workspaces, not brokers. */
 export const LIVE_BROKERS = ['ctrader', 'ibkr']
 
+/** Every workspace a trade can live in. The frontend mirrors this list. */
+export const WORKSPACE_MODES = ['live', 'paper', 'manual']
+
 /**
  * The WORKSPACE a trade belongs to: 'live' | 'paper' | 'manual'. Never null — every trade lives
  * somewhere, and defaulting to 'live' is the safe direction (it can only over-warn, never
@@ -82,6 +85,12 @@ export const LIVE_BROKERS = ['ctrader', 'ibkr']
  * broker and/or account: an idea, a setup, a call, a position, or a bare { broker, accountId }.
  */
 export function resolveMode(source = {}) {
+    // An already-stamped mode is the frozen answer — return it rather than recomputing, so calling
+    // this on a stored doc can never contradict what that doc says about itself. Producers pass a
+    // source with no `mode` (a fresh partition / account list) and fall through to derivation.
+    // A junk value is NOT trusted; it falls through too.
+    if (WORKSPACE_MODES.includes(source?.mode)) return source.mode
+
     const broker = source?.broker ?? null
     if (broker === 'paper' || broker === 'manual') return broker
 

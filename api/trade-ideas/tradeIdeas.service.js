@@ -8,6 +8,7 @@ import { routeExits, currentReferencePrice, detectNativeEntryLevel } from '../..
 import { isAssetOpen } from '../../services/market.service.js'
 import { toBrokerSymbol, normSymbol } from '../../services/brokerSymbol.service.js'
 import { computeBasisOffset }         from '../broker/brokerPrice.service.js'
+import { resolveMode }                from '../../services/venue.resolve.service.js'
 import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } from '../../services/conditionTree.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
 import { placeOrdersForIdea, placeRestingEntryForIdea, triggerEntryNow } from './ideaExecution.service.js'
@@ -209,6 +210,12 @@ async function buildIdeaChildren(tradeIdea, userId) {
                 mainAccountId: part.mainAccountId,
                 groupId,
                 broker:        part.broker,
+                // The workspace, FROZEN at bind. This is the moment mode becomes knowable — the
+                // venue is decided right here — and it never changes afterwards, so it is stamped
+                // rather than re-derived. Per PARTITION, because a forked idea can straddle
+                // workspaces (a paper leg and a live leg are different modes of the same idea).
+                // Lets the frontend read `idea.mode` instead of re-implementing the rule.
+                mode:          resolveMode({ broker: part.broker, accounts: part.accountIds, mainAccountId: part.mainAccountId }),
                 brokerSymbol,
                 // Basis offset measured ONCE, here. Downstream (monitor candle-shift, order
                 // placement) apply this stored scalar; 0 for everything but aliased index

@@ -92,3 +92,43 @@ test('the two questions genuinely differ for an unsupported broker', () => {
     assert.equal(knownVenue('robinhood'), null)     // "I cannot bind execution here"
     assert.equal(resolveMode({ broker: 'robinhood' }), 'live')   // "…but it is real money"
 })
+
+// ─── SHARED CASE TABLE — keep in lockstep with the frontend ───────────────────
+//
+// The frontend derives the workspace too, as a fallback for documents saved before `mode` was
+// stamped. Neither repo can import the other, so this table is the seam: the SAME cases are
+// asserted in botmarket-frontend/src/cmps/TradeIdeas/tradeIdea.workspace.test.js. Change the rule
+// on one side and the other fails loudly.
+//
+// It exists only for the transition. Once a backfill migration stamps `mode` on the old docs, the
+// frontend fallback is deleted and this table goes with it.
+const CASES = [
+    // [ description,                          input,                                        expected ]
+    ['stamped mode wins outright',             { mode: 'paper', broker: 'ctrader' },          'paper'],
+    ['stamped live is honoured',               { mode: 'live', mainAccountId: 'paper-u1' },   'live'],
+    ['broker paper',                           { broker: 'paper' },                           'paper'],
+    ['broker manual',                          { broker: 'manual' },                          'manual'],
+    ['broker ctrader',                         { broker: 'ctrader' },                         'live'],
+    ['broker ibkr',                            { broker: 'ibkr' },                            'live'],
+    ['legacy: no broker, paper account',       { accountId: 'paper-u1-abc' },                 'paper'],
+    ['legacy: no broker, manual account',      { accountId: 'manual-u1-abc' },                'manual'],
+    ['legacy: paper mainAccountId',            { mainAccountId: 'paper-u1' },                 'paper'],
+    ['legacy: paper in accounts[]',            { accounts: ['paper-u1'] },                    'paper'],
+    ['legacy: manual as { id } object',        { accounts: [{ id: 'manual-u1' }] },           'manual'],
+    ['real broker account is not virtual',     { broker: 'ctrader', accountId: '12345678' },  'live'],
+    ['"papertrade-" must not match "paper-"',  { accountId: 'papertrade-9' },                 'live'],
+    ['unknown venue defaults to live',         { broker: 'nope', accountId: '12345678' },     'live'],
+    ['empty object',                           {},                                            'live'],
+]
+
+test('workspace mode matches the frontend case-for-case', () => {
+    for (const [what, input, expected] of CASES) {
+        assert.equal(resolveMode(input), expected, what)
+    }
+})
+
+test('a garbage stamped mode is not trusted — it falls through to derivation', () => {
+    // Mirrors the frontend guard: only a known workspace short-circuits.
+    assert.equal(resolveMode({ mode: 'sandbox', broker: 'paper' }), 'paper')
+    assert.equal(resolveMode({ mode: '', accountId: 'manual-u1' }), 'manual')
+})
