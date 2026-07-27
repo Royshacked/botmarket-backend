@@ -16,7 +16,8 @@
  * Call docs store the owner as `user_id` (see normalizeCall), NOT `userId`.
  */
 
-import { postBotCard, cardActions } from '../api/chat/chat.service.js'
+import { cardActions } from '../api/chat/chat.service.js'
+import { postCard } from './notifyCard.js'
 import { logger }         from './logger.service.js'
 
 const LOG = '[tradeNotify]'
@@ -157,11 +158,9 @@ export function buildCallReentry(call, read = null, outcome = null) {
 
 // ── Thin IO wrappers ────────────────────────────────────────────────────────────
 
-async function _post(card, tag) {
-    if (!card.userId) return null
-    logger.info(LOG, `${tag} → user ${card.userId}`)
-    return postBotCard(card)   // card = { userId, content, type, payload, botId, actions }
-}
+// Delegates to the shared poster, which NEVER throws — these cards are posted AFTER the state
+// change they announce, so a delivery failure must not abort the caller's remaining work.
+const _post = (card, tag) => postCard(card, { tag, log: LOG })
 
 export async function notifyIdeaEntryConfirm(idea, note = null) {
     return _post(buildIdeaEntryConfirm(idea, note), 'Entry-confirm card')
