@@ -3,7 +3,7 @@ import { getDb, stripId }    from '../../providers/mongodb.provider.js'
 import { logger }            from '../../services/logger.service.js'
 import { buildEventRisk }    from '../../services/eventRisk.service.js'
 import { ENTITIES }          from '../../services/entity/entityCollection.js'
-import { resolveVenue, modeForBroker } from '../../services/venue.resolve.service.js'
+import { resolveVenue, resolveMode } from '../../services/venue.resolve.service.js'
 import { normalizeSetup, setupReadiness } from '../../services/setup.schema.js'
 import { resolveMainAccountId } from '../../services/agentUtils.js'
 
@@ -111,7 +111,7 @@ async function generateSetup(rawSetup, { userId, accounts = [], mainAccountId = 
 
         const bound = {
             ...setup,
-            mode:     modeForBroker(broker),
+            mode:     resolveMode({ broker, accounts: list, mainAccountId: main?.id }),
             broker,
             accounts: list.map(a => String(a.id)),
             // camelCase on purpose: the execution path reads these RAW off the doc, with no

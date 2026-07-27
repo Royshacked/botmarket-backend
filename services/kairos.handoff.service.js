@@ -6,6 +6,7 @@ import { notifyManualEntry, entryLegFromIdea } from './manualNotify.service.js'
 import { notifyCallManage } from './tradeNotify.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { normalizeZones, normalizeReferenceLevels } from '../api/kairos/kairos.service.js'
+import { knownVenue } from './venue.resolve.service.js'
 import { logger } from './logger.service.js'
 
 // Kairos Phase 3 — the confirm / edit / dismiss handoff. When the user acts on a readiness card,
@@ -17,12 +18,10 @@ const LOG        = '[kairos.handoff]'
 const COLLECTION = ENTITIES   // calls live in entities as kind:'call' (all ops here are {id}-scoped)
 
 // ── Pure helpers (unit-tested) ─────────────────────────────────────────────────
-export function deriveMode(broker) {
-    if (broker === 'ctrader') return 'live'
-    if (broker === 'paper')   return 'paper'
-    if (broker === 'manual')  return 'manual'
-    return null
-}
+// A VALIDITY gate, not a workspace label: null means "not a venue I can bind execution to".
+// Distinct from venue.resolveMode, which always commits to a workspace. Delegates to the shared
+// knownVenue so the supported-broker list has one home. Exported under its historical name.
+export const deriveMode = knownVenue
 
 // Map a confirmed call + its fired proposal to a saveIdea() input: an IMMEDIATE market entry with
 // the stop + FINAL target as native `touch` exits. saveIdea builds the condition trees, resolves

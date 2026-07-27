@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { validateSetup, SETUP_STATUSES } from '../../api/setups/setups.service.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
-import { modeForBroker } from '../../services/venue.resolve.service.js'
+import { resolveMode } from '../../services/venue.resolve.service.js'
 
 // The Generate gate — the boundary where a chat draft becomes a monitored, executable document.
 // Everything that gets through here can place a real order, so each rejection below is the last
@@ -66,11 +66,11 @@ test('a zero-width zone is allowed — it is an exact level, not a broken band',
     assert.equal(validateSetup(s, 'ctrader', ACCTS).ok, true)
 })
 
-test('the workspace mode is derived from the broker, never authored', () => {
-    assert.equal(modeForBroker('paper'), 'paper')
-    assert.equal(modeForBroker('manual'), 'manual')
-    assert.equal(modeForBroker('ctrader'), 'live')
-    assert.equal(modeForBroker(null), 'live', 'unknown broker is treated as real money, not paper')
+test('the workspace mode is derived from the venue, never authored', () => {
+    assert.equal(resolveMode({ broker: 'paper' }), 'paper')
+    assert.equal(resolveMode({ broker: 'manual' }), 'manual')
+    assert.equal(resolveMode({ broker: 'ctrader' }), 'live')
+    assert.equal(resolveMode({ broker: null }), 'live', 'unknown venue defaults to real money, not paper')
 })
 
 test('the status vocabulary converges on the execution vocab after entry', () => {
