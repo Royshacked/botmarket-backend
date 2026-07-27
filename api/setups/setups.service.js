@@ -1,4 +1,5 @@
 import { randomUUID }        from 'crypto'
+import { statusesFor, PAST_ENTRY } from '../../services/entity/vocabulary.js'
 import { getDb, stripId }    from '../../providers/mongodb.provider.js'
 import { logger }            from '../../services/logger.service.js'
 import { buildEventRisk }    from '../../services/eventRisk.service.js'
@@ -27,10 +28,10 @@ const BROKERS = new Set(['ctrader', 'paper', 'manual'])
 //
 // There is no 'watching': because the entry card fires on ANY verdict, a zone trip resolves to
 // 'hit' within the same wake, so price is never inside a zone unresolved.
-export const SETUP_STATUSES = new Set(['waiting', 'looking', 'hit', 'long', 'short', 'closed'])
+export const SETUP_STATUSES = new Set(statusesFor(KIND))
 
 // Past-entry statuses: the setup is live at the broker, so a plan rewrite must not re-arm it.
-const POSITION_STATUSES = new Set(['hit', 'long', 'short'])
+const POSITION_STATUSES = new Set(PAST_ENTRY)
 
 // Plan fields rewritten by an in-place edit. Identity, monitor_state history and execution
 // linkage are never in the $set.

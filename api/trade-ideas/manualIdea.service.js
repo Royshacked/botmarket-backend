@@ -12,6 +12,7 @@
  */
 
 import { stripId }               from '../../providers/mongodb.provider.js'
+import { STATUS } from '../../services/entity/vocabulary.js'
 import { logger }                from '../../services/logger.service.js'
 import { routeExits }            from '../../services/protectionPlan.service.js'
 import { openManualPosition, closeManualPosition, reduceManualPosition, addToManualPosition } from '../broker/manualExecution.service.js'
@@ -23,7 +24,9 @@ const LOG = '[manualIdea]'
 
 // Statuses from which a manual leg can still be activated into an entry (not already in a
 // position or done).
-const ACTIVATABLE = new Set(['waiting', 'looking', 'hit'])
+// Bespoke group (manual mode can be activated from any of these), but the WORDS come from
+// the shared enum so a status rename can't leave this set silently matching nothing.
+const ACTIVATABLE = new Set([STATUS.WAITING, STATUS.LOOKING, STATUS.HIT])
 
 function _own(idea, userId, isAdmin) {
     return !idea.userId || idea.userId === userId || isAdmin

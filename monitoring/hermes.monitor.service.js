@@ -1,4 +1,5 @@
 import { getDb } from '../providers/mongodb.provider.js'
+import { PAST_ENTRY_LEGACY } from '../services/entity/vocabulary.js'
 import { ENTITIES } from '../services/entity/entityCollection.js'
 import { getQuote }              from '../providers/yahoofinance.provider.js'
 import { getTickerAggregates }   from '../providers/candles.provider.js'
@@ -35,7 +36,7 @@ const ACTIVE_STATUSES  = ['waiting', 'watching']
 // Promotion (awaiting→in-position) is detected by position_state.entry.fill_at, not a status name.
 // 'confirmed'/'in_position' are kept transitionally so calls confirmed BEFORE the P3b cutover (which
 // still link to an idea shadow) keep being managed; they never collide with idea statuses.
-const POSITION_STATUSES = ['hit', 'long', 'short', 'confirmed', 'in_position']
+const POSITION_STATUSES = PAST_ENTRY_LEGACY
 const EXPIRY_THRESHOLD_MS = 15 * 60_000   // run the final "expiry review" within 15m of valid_until
 // A single check must never wedge the loop. If any IO inside _checkCall (vision assess / chart /
 // price fetch) hangs with no timeout, the awaited call never returns, `_running` stays true, and

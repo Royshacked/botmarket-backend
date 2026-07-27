@@ -1,4 +1,5 @@
 import { randomUUID }       from 'crypto'
+import { LIVE_POSITION, statusesFor } from '../../services/entity/vocabulary.js'
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { minosService }     from '../../monitoring/minos.monitor.service.js'
@@ -20,8 +21,9 @@ import { ENTITIES }           from '../../services/entity/entityCollection.js'
 const LOG = '[idea]'
 const COLLECTION = ENTITIES
 
-const LOCKED_DELETE_STATUSES = new Set(['long', 'short'])
-const VALID_STATUSES = new Set(['waiting', 'looking', 'resting', 'hit', 'long', 'short', 'closed'])
+// Only a LIVE position is delete-locked; 'hit' stays deletable (confirm-gated).
+const LOCKED_DELETE_STATUSES = new Set(LIVE_POSITION)
+const VALID_STATUSES = new Set(statusesFor('idea'))
 
 // A pending idea can be flipped to an immediate market entry ("go in now") from the
 // edit/build flow. Guard it tightly: only an explicit immediate flag on a still-pending

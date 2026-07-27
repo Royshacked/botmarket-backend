@@ -1,4 +1,5 @@
 import { readFileSync, statSync } from 'fs'
+import { TRADE_HORIZONS as VOCAB_TRADE_HORIZONS } from './entity/vocabulary.js'
 import { getShortInterest, getOptionsContext } from '../providers/yahoofinance.provider.js'
 import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError } from './toolResult.util.js'
@@ -213,7 +214,10 @@ export function buildPositionsSection(brokerContext) {
 // Scanner). The fault line between intraday and day is OVERNIGHT: intraday is flat by the session
 // close, day carries 1–few days. Kairos trades a subset (no long term), but all agents validate
 // against this same list so a horizon round-trips between them (e.g. a Kairos↔Argus scan) unchanged.
-export const TRADE_HORIZONS = ['intraday', 'day', 'swing', 'long term']
+// Moved to services/entity/vocabulary.js — one home for the words entities and agents share.
+// Re-exported here (imported into a local const, since a bare re-export creates no local binding)
+// so the agents that already import it from agentUtils resolve unchanged.
+export const TRADE_HORIZONS = VOCAB_TRADE_HORIZONS
 
 // ─── User-local time context ──────────────────────────────────────────────────
 // Shared by every agent that authors an absolute UTC instant from something the user said in

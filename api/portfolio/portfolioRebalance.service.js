@@ -25,6 +25,7 @@
  */
 
 import { getDb }                    from '../../providers/mongodb.provider.js'
+import { PAST_ENTRY } from '../../services/entity/vocabulary.js'
 import { logger }                   from '../../services/logger.service.js'
 import { ideaService }              from '../trade-ideas/tradeIdeas.service.js'
 import { brokerService }            from '../broker/broker.service.js'
@@ -36,7 +37,7 @@ import { orderSymbol }            from '../../monitoring/exitOrders.util.js'
 
 const LOG        = '[portfolio:rebalance]'
 const COLLECTION = ENTITIES
-const LIVE       = new Set(['hit', 'long', 'short'])
+const LIVE       = new Set(PAST_ENTRY)
 
 export async function applyRebalance(portfolioId, userId, update, isAdmin = false) {
     if (!portfolioId) return { ok: false, reason: 'missing_portfolioId' }

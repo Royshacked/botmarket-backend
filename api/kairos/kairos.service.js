@@ -1,4 +1,6 @@
 import { randomUUID }               from 'crypto'
+import { normalizeAssetClass } from '../../services/entity/vocabulary.js'
+import { PAST_ENTRY_LEGACY, CALL_HORIZONS } from '../../services/entity/vocabulary.js'
 import { getDb, stripId }           from '../../providers/mongodb.provider.js'
 import { logger }                   from '../../services/logger.service.js'
 import { buildEventRisk }           from '../../services/eventRisk.service.js'
@@ -16,7 +18,9 @@ const LOG        = '[kairos]'
 const COLLECTION = ENTITIES   // calls live in the shared entities collection as kind:'call'
 const KIND_CALL  = 'call'
 
-const TRADE_TYPES = new Set(['intraday', 'day', 'swing'])
+// A call is a moment to act on, not a multi-month hold — the narrowing is a declared
+// SUBSET of the shared ladder, not a second list that merely looks like it minus one.
+const TRADE_TYPES = new Set(CALL_HORIZONS)
 const BROKERS     = new Set(['ctrader', 'paper', 'manual'])
 
 // Fallback self-scheduling bounds (minutes) per horizon, used when the call omits cadence.
@@ -52,7 +56,7 @@ const PLAN_FIELDS = [
 // execution, and NO monitor re-arm. Hermes keeps managing the live position; a stop/target MOVE goes
 // through the manage card, not a plan rewrite. Statuses that mean "past entry" (self-shadow execution
 // vocab hit/long/short + the transitional confirmed/in_position).
-const POSITION_STATUSES = new Set(['hit', 'long', 'short', 'confirmed', 'in_position'])
+const POSITION_STATUSES = new Set(PAST_ENTRY_LEGACY)
 const LIGHT_FIELDS = [
     'thesis', 'timeframe_ladder', 'cadence', 'reference_levels', 'patterns',
     'valid_until', 'market_sensitivity', 'rr', 'conviction', 'lens_fit',
@@ -250,7 +254,7 @@ export function normalizeCall(raw, userId = null) {
 
         // ── plan (authored at build, ~immutable) ──
         asset:            raw.asset ?? '',
-        asset_class:      raw.asset_class ?? null,
+        asset_class:      normalizeAssetClass(raw.asset_class),
         trade_type:       raw.trade_type,
         bias:             raw.bias ?? null,
         thesis:           raw.thesis ?? null,

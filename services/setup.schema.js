@@ -9,8 +9,9 @@
 // marked account and the event-risk service; see setup.finalize.
 
 import { normalizeTimeframe, VALID_TIMEFRAMES } from './timeframe.service.js'
+import { normalizeAssetClass } from './entity/vocabulary.js'
 import { cleanConviction } from './conviction.util.js'
-import { TRADE_HORIZONS } from './agentUtils.js'
+import { TRADE_HORIZONS } from './entity/vocabulary.js'
 
 // Coarse → fine. The ladder is a contiguous slice of this, centred on the authored timeframe.
 export const TF_RUNGS = ['month', 'week', 'day', '4hr', '2hr', '1hr', '30min', '15min', '5min', '1min']
@@ -173,7 +174,10 @@ export function normalizeSetup(raw) {
 
     return {
         asset:       typeof raw.asset === 'string' ? raw.asset.toUpperCase().trim() : '',
-        asset_class: typeof raw.asset_class === 'string' ? raw.asset_class.trim() : null,
+        // Canonicalised at the door: market hours, event risk and the monitors all branch on
+        // this, and each had grown its own synonym map. An unknown value becomes null, which
+        // every consumer already reads as "fall back to the symbol heuristic".
+        asset_class: normalizeAssetClass(raw.asset_class),
         direction:   raw.direction === 'short' ? 'short' : raw.direction === 'long' ? 'long' : null,
         type,
         trade_mode:  TRADE_MODES.includes(raw.trade_mode) ? raw.trade_mode : 'classical',

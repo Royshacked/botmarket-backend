@@ -13,12 +13,17 @@
 // transition these are two different physical collections.
 
 import { getDb } from '../../providers/mongodb.provider.js'
+import { LIVE_POSITION } from './vocabulary.js'
 import { ENTITIES } from './entityCollection.js'
 
 /** The kind-blind entity store (P2 cutover done — was 'ideas'). */
 export const EXEC_COLLECTION = ENTITIES
 /** Idea-lifecycle "in a live position" set. P3 generalizes per kind. */
-export const ACTIVE_STATUSES = ['long', 'short']
+// The kind-blind reconciler matches on these. Sourced from the shared vocabulary so idea /
+// setup / call can never drift apart on the words that make a fill reconcilable. Imported into a
+// local const (not a bare re-export) because this module uses it in its own queries — a
+// `export { X as Y } from` binding would not exist locally.
+export const ACTIVE_STATUSES = LIVE_POSITION
 
 async function _defaultColl() {
     return (await getDb()).collection(EXEC_COLLECTION)
