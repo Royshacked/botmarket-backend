@@ -1,4 +1,5 @@
 import { fileURLToPath }  from 'url'
+import { parseEmitBlock, makePhaseCapture, runAgentStream } from './agentIO.js'
 import { toolsFor } from './agentTools.registry.js'
 import { dirname, join }  from 'path'
 import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw } from '../providers/yahoofinance.provider.js'
@@ -7,7 +8,7 @@ import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
 import { formatWorkspaceLine } from '../api/portfolio/portfolioMode.util.js'
 import { logger }         from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, resolveAgentStream } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler } from './agentUtils.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
 import { buildTagCaptures } from './llmStream.util.js'
 
@@ -93,7 +94,6 @@ export const portfolioAgentService = { chatStream }
 
 async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const normalized   = _buildMessages(messages)
-    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
     // Stable base (cached) + volatile per-request sections (accounts, edit
     // context). cache_control on the base lets Anthropic cache the
@@ -120,21 +120,12 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
             : []),
     ]
 
-    logger.info(LOG, 'chatStream start', { messageCount: normalized.length, accountCount: ideaAccounts.length, editMode: !!portfolioId, model, provider })
 
     let capturedPlan    = null
     let capturedUpdate  = null
     let capturedMandate = null
     let capturedThesis  = null
-    let capturedPhase   = null
-
-    const onPhaseCapture = (p) => {
-        const n = parseInt(p, 10)
-        if (n >= 1 && n <= 6) {
-            capturedPhase = n
-            onPhase?.(n)
-        }
-    }
+    const phase = makePhaseCapture(6, onPhase)
     const onPlan    = (json) => { try { capturedPlan    = JSON.parse(json) } catch { /* malformed */ } }
     const onUpdate  = (json) => { try { capturedUpdate  = JSON.parse(json) } catch { /* malformed */ } }
     const onMandate = (json) => { try { capturedMandate = JSON.parse(json) } catch { /* malformed */ } }
@@ -142,27 +133,21 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // All known emit tags suppressed by default; this agent captures phase, ticker
     // (which keeps its inner text in the UI), and the plan/update/mandate blocks.
     const tagCaptures = buildTagCaptures({
-        phase:             onPhaseCapture,
+        phase:             phase.capture,
         ticker:            { onCapture: onTicker, keepText: true },
         portfolio_plan:    onPlan,
         portfolio_update:  onUpdate,
         portfolio_mandate: onMandate,
     })
 
-    const raw = await streamFn({
-        model,
-        promptOrMessages: normalized,
-        systemPrompt,
-        tools:            TOOLS,
+    const raw = await runAgentStream({
+        log: LOG, requestedModel, userId,
+        messages: normalized, systemPrompt,
+        tools: TOOLS,
         // Per-session: get_coverage binds this user (coverage is per-user); the rest are static.
-        toolHandlers:     { ...TOOL_HANDLERS, get_coverage: makeCoverageHandler(userId) },
-        reasoningEffort,
-        signal,
-        onToken,
-        tagCaptures,
-        onToolStart,
-        onReasoning,
-        onUsage,
+        toolHandlers: { ...TOOL_HANDLERS, get_coverage: makeCoverageHandler(userId) },
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning,
+        meta: { accountCount: ideaAccounts.length, editMode: !!portfolioId },
     })
 
     // <portfolio_thesis> is suppressed from the UI stream but remains in raw — pull it here.
@@ -183,8 +168,8 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequest: !!screenRequest, coverageRefresh: !!coverageRefresh, phase: capturedPhase })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: capturedPhase, ...(screenRequest ? { screenRequest } : {}), ...(coverageRefresh ? { coverageRefresh } : {}) }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequest: !!screenRequest, coverageRefresh: !!coverageRefresh, phase: phase.get() })
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequest ? { screenRequest } : {}), ...(coverageRefresh ? { coverageRefresh } : {}) }
 }
 
 // ─── Coverage-refresh extraction (pure) ─────────────────────────────────────────
@@ -193,15 +178,12 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
 // <coverage_refresh> block; needs a ticker (else null). The refresh runs async server-side and pings
 // Atlas when the rewritten coverage is ready. Mirrors _parseScreenRequest. Exported for tests.
 export function _parseCoverageRefresh(raw) {
-    const m = (raw ?? '').match(/<coverage_refresh>([\s\S]*?)<\/coverage_refresh>/)
-    if (!m) return null
-    try {
-        const o = JSON.parse(m[1].trim())
-        const ticker = String(o?.ticker ?? '').toUpperCase().trim()
-        if (!ticker) return null
-        const question = typeof o?.question === 'string' && o.question.trim() ? o.question.trim() : null
-        return { ticker, question }
-    } catch { return null }
+    const o = parseEmitBlock(raw, 'coverage_refresh', LOG)
+    if (!o) return null
+    const ticker = String(o?.ticker ?? '').toUpperCase().trim()
+    if (!ticker) return null
+    const question = typeof o?.question === 'string' && o.question.trim() ? o.question.trim() : null
+    return { ticker, question }
 }
 
 // ─── Screen-request extraction (pure) ───────────────────────────────────────────
@@ -210,10 +192,8 @@ export function _parseCoverageRefresh(raw) {
 // then researches. This pulls the <screen_request> mandate block. Needs a sector OR a style to constrain
 // (else null). Mirrors Kairos's _parseScanRequest. Exported for tests.
 export function _parseScreenRequest(raw) {
-    const m = (raw ?? '').match(/<screen_request>([\s\S]*?)<\/screen_request>/)
-    if (!m) return null
-    let obj
-    try { obj = JSON.parse(m[1].trim()) } catch (err) { logger.warn(LOG, 'screen_request parse failed:', err.message); return null }
+    const obj = parseEmitBlock(raw, 'screen_request', LOG)
+    if (!obj) return null
     const s = k => (typeof obj?.[k] === 'string' && obj[k].trim() ? obj[k].trim() : null)
     const sector = s('sector'), style = s('style')
     if (!sector && !style) return null   // a screen needs at least a sector or a style to constrain

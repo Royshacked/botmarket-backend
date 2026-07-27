@@ -1,4 +1,5 @@
 import { fileURLToPath }  from 'url'
+import { makePhaseCapture, runAgentStream } from './agentIO.js'
 import { toolsFor } from './agentTools.registry.js'
 import { dirname, join }  from 'path'
 import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
@@ -9,7 +10,7 @@ import { isMode } from './kairos.modes.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, resolveAgentStream, TRADE_HORIZONS } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, TRADE_HORIZONS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { isToolError } from './toolResult.util.js'
 import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS } from './scanner.grounding.js'
@@ -160,7 +161,6 @@ const HANDOFF_CONTEXT = 'KAIROS HAND-OFF MODE: the user was sent here by Kairos 
 async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, profile = 'trading', reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
     const prof = profile === 'investing' ? 'investing' : 'trading'
     const normalized = _buildMessages(messages)
-    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
     // Per-session grounding ledger — records which tickers a real, successful tool
     // engaged, so a fabricated candidate that no tool touched is dropped at normalize.
@@ -182,44 +182,30 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         { type: 'text', text: dynamic.join('\n\n') },
     ]
 
-    logger.info(LOG, 'chatStream start', { messageCount: normalized.length, model, provider })
 
     let capturedScan  = null
-    let capturedPhase = null
     let capturedPick  = null
 
     const onScan = (json) => { try { capturedScan = JSON.parse(json) } catch { /* malformed — ignore */ } }
     const onPick = (json) => { try { capturedPick = JSON.parse(json) } catch { /* malformed — ignore */ } }
-    const onPhaseCapture = (p) => {
-        const n = parseInt(p, 10)
-        if (n >= 1 && n <= 4) {
-            capturedPhase = n
-            onPhase?.(n)
-        }
-    }
+    const phase = makePhaseCapture(4, onPhase)
 
     // All known emit tags suppressed by default; this agent captures phase, ticker
     // (which keeps its inner text in the UI), scan_list, and — in hand-off mode — kairos_pick.
     const tagCaptures = buildTagCaptures({
-        phase:       onPhaseCapture,
+        phase:       phase.capture,
         ticker:      { onCapture: onTicker, keepText: true },
         scan_list:   onScan,
         kairos_pick: onPick,
     })
 
-    const raw = await streamFn({
-        model,
-        promptOrMessages: normalized,
-        systemPrompt,
-        tools:        SCANNER_TOOLS_FOR_PROFILE(prof),
+    const raw = await runAgentStream({
+        log: LOG, requestedModel, userId,
+        messages: normalized, systemPrompt,
+        tools: SCANNER_TOOLS_FOR_PROFILE(prof),
         toolHandlers,
-        reasoningEffort,
-        signal,
-        onToken,
-        tagCaptures,
-        onToolStart,
-        onReasoning,
-        onUsage,
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning,
+        meta: { profile: prof },
     })
 
     const reply = stripEmitTags(
@@ -231,8 +217,8 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     const scan = _normalizeScan(capturedScan, editList, ledger, prof)
     const pick = _normalizeKairosPick(capturedPick)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, profile: prof, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, phase: capturedPhase })
-    return { reply, scan, phase: capturedPhase, ...(pick ? { pick } : {}) }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, profile: prof, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, phase: phase.get() })
+    return { reply, scan, phase: phase.get(), ...(pick ? { pick } : {}) }
 }
 
 // Normalize a captured <kairos_pick> (hand-off mode) — the single ticker Argus recommends back to

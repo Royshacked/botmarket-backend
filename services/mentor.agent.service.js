@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'url'
+import { parseEmitBlock, mergeDraft, runAgentStream } from './agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveAgentStream, buildTimeSection } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, buildTimeSection } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS, buildKairosToolHandlers } from './kairos.tools.js'
 import { normalizeSetup, setupReadiness, computeRR } from './setup.schema.js'
@@ -40,18 +41,12 @@ async function chatStream({
     model: requestedModel, reasoningEffort, userId,
     onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, signal,
 }) {
-    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
     const tools        = KAIROS_TOOLS
     const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext, mainAccountId, clientTime)
     const builtMessages = _buildMessages({ messages, userPrompt })
-
-    logger.info(LOG, 'chatStream start', {
-        userPrompt, messageCount: builtMessages.length, model, provider,
-        asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0,
-    })
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
     // but a turn that forgets a dimension must not un-read it. Union with the prior state.
@@ -70,9 +65,10 @@ async function chatStream({
         coverage: onCoverageCapture,
     })
 
-    const raw = await streamFn({
-        model, promptOrMessages: builtMessages, systemPrompt, tools, toolHandlers,
-        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onUsage,
+    const raw = await runAgentStream({
+        log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers,
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning,
+        meta: { userPrompt, asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
     })
 
     const { reply, setup, setups } = _parseMentorResponse(raw)
@@ -131,11 +127,7 @@ export function mergeCoverage(prior, raw) {
  * replaces its prior value outright, so the model can still DROP a zone or clear a field with an
  * explicit null — only omission is protected. Returns null when there's no new setup this turn.
  */
-export function _mergeSetupDraft(prevDraft, setup) {
-    if (!setup) return null
-    if (!prevDraft || typeof prevDraft !== 'object' || Array.isArray(prevDraft)) return setup
-    return { ...prevDraft, ...setup }
-}
+export const _mergeSetupDraft = mergeDraft
 
 // ─── Emit-block extraction (pure) ─────────────────────────────────────────────
 
@@ -152,18 +144,9 @@ export function _parseMentorResponse(raw) {
     return { reply, setup: _parseBlock(text, 'setup'), setups: _parseCandidates(text) }
 }
 
-function _parseBlock(text, tag) {
-    // `setup` and `setups` share a prefix — require the exact closing tag so <setups> can never be
-    // matched as a <setup> whose body happens to start with an "s".
-    const m = text.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))
-    if (!m) return null
-    try {
-        return JSON.parse(m[1].trim())
-    } catch (err) {
-        logger.warn(LOG, `${tag} JSON parse failed:`, err.message)
-        return null
-    }
-}
+// The shared extractor already matches the tag EXACTLY, which is what keeps <setups> from being
+// read as a <setup> whose body happens to start with an "s".
+const _parseBlock = (text, tag) => parseEmitBlock(text, tag, LOG)
 
 /**
  * The candidate offer. Each entry is a full setup plus a label and a pitch; the setups are
@@ -215,7 +198,6 @@ Active asset: ${asset}${draft}${buildPositionsSection(brokerContext)}${_buildAcc
         { type: 'text', text: dynamicContext },
     ]
 }
-
 
 function _buildAccountsSection(accounts, mainAccountId = null) {
     if (!Array.isArray(accounts) || accounts.length === 0) {

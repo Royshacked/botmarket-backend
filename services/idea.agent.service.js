@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'url'
+import { makePhaseCapture, runAgentStream } from './agentIO.js'
 import { toolsFor } from './agentTools.registry.js'
 import { dirname, join } from 'path'
 import { callAnthropicWithTools } from '../providers/anthropic.provider.js'
@@ -7,7 +8,7 @@ import { getSecFilings } from '../providers/sec.provider.js'
 import { getEarningsCalendar, getFundamentals } from '../providers/fmp.provider.js'
 import { getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
 import { logger } from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, buildPositionsSection, makeToolHandler, resolveAgentStream, buildTimeSection, formatClientTime } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, buildPositionsSection, makeToolHandler, buildTimeSection, formatClientTime } from './agentUtils.js'
 
 // Re-exported under its historical name so the existing unit test resolves unchanged; the
 // implementation now lives in agentUtils (Mentor authors UTC bounds the same way).
@@ -137,7 +138,6 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
 }
 
 async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], mainAccountId = null, clientTime = null, model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, signal }) {
-    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
     const tools        = TOOLS
     const toolHandlers = _buildToolHandlers(onChart)
@@ -153,34 +153,18 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
         provider,
     })
 
-    let capturedPhase = null
-
-    const onPhaseCapture = (p) => {
-        const n = parseInt(p, 10)
-        if (n >= 1 && n <= 5) {
-            capturedPhase = n
-            onPhase?.(n)
-        }
-    }
+    const phase = makePhaseCapture(5, onPhase)
 
     // All known emit tags are suppressed by default (buildTagCaptures); this agent
     // captures asset/interval/phase. Everything else is suppress-only so no stray
     // tag reaches the UI.
-    const tagCaptures = buildTagCaptures({ asset: onAsset, interval: onInterval, phase: onPhaseCapture })
+    const tagCaptures = buildTagCaptures({ asset: onAsset, interval: onInterval, phase: phase.capture })
 
-    const raw = await streamFn({
-        model,
-        promptOrMessages: builtMessages,
-        systemPrompt,
-        tools,
-        toolHandlers,
-        reasoningEffort,
-        signal,
-        onToken,
-        tagCaptures,
-        onToolStart,
-        onReasoning,
-        onUsage,
+    const raw = await runAgentStream({
+        log: LOG, requestedModel, userId,
+        messages: builtMessages, systemPrompt, tools, toolHandlers,
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning,
+        meta: { userPrompt, activeAsset: analysisState?.structured_state?.active_asset ?? '' },
     })
 
     const { reply, updatedState, tradeIdea } = _parseResponse(raw, analysisState, userPrompt)
@@ -189,10 +173,10 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
         replyLength:       reply.length,
         hasTradeIdea:      Boolean(tradeIdea),
         recentMessageCount: updatedState.recent_messages.length,
-        phase: capturedPhase,
+        phase: phase.get(),
     })
 
-    return { reply, analysisState: updatedState, phase: capturedPhase, ...(tradeIdea ? { tradeIdea } : {}) }
+    return { reply, analysisState: updatedState, phase: phase.get(), ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
 function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = [], clientTime = null, mainAccountId = null) {

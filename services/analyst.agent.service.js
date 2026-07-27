@@ -5,12 +5,14 @@
 // exactly as Kairos parses <call> here and normalizeCall runs at save.
 
 import { fileURLToPath } from 'url'
+import { makePhaseCapture, runAgentStream } from './agentIO.js'
+import { parseEmitBlock } from './agentIO.js'
 import { toolsFor } from './agentTools.registry.js'
 import { dirname, join } from 'path'
 
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
-import { makePromptLoader, stripEmitTags, buildPositionsSection, normalizeMessages, resolveAgentStream, makeToolHandler, COMMON_TOOL_HANDLERS } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildPositionsSection, normalizeMessages, makeToolHandler, COMMON_TOOL_HANDLERS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from './valuation.tools.js'
 import { logger } from './logger.service.js'
@@ -58,28 +60,23 @@ async function chatStream({
     model: requestedModel, reasoningEffort, userId,
     onToken, onToolStart, onReasoning, onPhase, signal,
 }) {
-    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
     const systemPrompt  = _buildSystemPrompt(chatState, brokerContext, seed)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
-    logger.info(LOG, 'chatStream start', { userPrompt, messageCount: builtMessages.length, model, provider })
 
-    let capturedPhase = null
-    const onPhaseCapture = (p) => {
-        const n = parseInt(p, 10)
-        if (n >= 1 && n <= 6) { capturedPhase = n; onPhase?.(n) }
-    }
+    const phase = makePhaseCapture(6, onPhase)
     // Suppress every emit tag from the token stream; capture phase live. <coverage> is suppressed and
     // parsed from `raw` afterward (same as Kairos parses <call>).
-    const tagCaptures = buildTagCaptures({ phase: onPhaseCapture })
+    const tagCaptures = buildTagCaptures({ phase: phase.capture })
 
-    const raw = await streamFn({
-        model, promptOrMessages: builtMessages, systemPrompt, tools: TOOLS, toolHandlers: TOOL_HANDLERS,
-        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onUsage,
+    const raw = await runAgentStream({
+        log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers,
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning,
+        meta: { userPrompt },
     })
 
     const { reply, coverage } = _parseAnalystResponse(raw)
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCoverage: Boolean(coverage), phase: capturedPhase })
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCoverage: Boolean(coverage), phase: phase.get() })
     // The coverage is a DRAFT — returned for preview, NOT saved. Initiating persists it (P1).
     return { reply, phase: capturedPhase, ...(coverage ? { coverage } : {}) }
 }
@@ -90,14 +87,7 @@ async function chatStream({
 export function _parseAnalystResponse(raw) {
     const text  = raw ?? ''
     const reply = stripEmitTags(text, ['coverage', 'phase']).trim()
-    const m = text.match(/<coverage>([\s\S]*?)<\/coverage>/)
-    if (!m) return { reply, coverage: null }
-    try {
-        return { reply, coverage: _cleanDraft(JSON.parse(m[1].trim())) }
-    } catch (err) {
-        logger.warn(LOG, 'coverage JSON parse failed:', err.message)
-        return { reply, coverage: null }
-    }
+    return { reply, coverage: _cleanDraft(parseEmitBlock(text, 'coverage', LOG)) }
 }
 
 // Light guard on the draft (full normalization happens at initiate): must be an object with a symbol.
