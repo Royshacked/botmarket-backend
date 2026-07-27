@@ -5,6 +5,7 @@
 // exactly as Kairos parses <call> here and normalizeCall runs at save.
 
 import { fileURLToPath } from 'url'
+import { toolsFor } from './agentTools.registry.js'
 import { dirname, join } from 'path'
 
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../providers/fmp.provider.js'
@@ -20,49 +21,23 @@ const PROMPT_PATH = join(__dirname, '../analyst_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 const MAX_RECENT_MESSAGES = 8
 
-const TOOLS = [
-    { type: 'web_search_20250305', name: 'web_search' },
+export const TOOLS = [
+    // web_search leads, then the SHARED valuation module (its own single home), then the
+    // read tools. Order is preserved exactly — prompt caching keys off the array prefix.
+    ...toolsFor({
+        web_search: '',
+    }),
     ...VALUATION_TOOLS,   // get_consensus, compute_valuation (P2)
-    {
-        name: 'get_fundamentals',
-        description: 'Company fundamentals for a single ticker: sector/industry, market cap, valuation, margins, ROE, growth. The Phase-1 profile read.',
-        input_schema: { type: 'object', properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA' } }, required: ['ticker'] },
-    },
-    {
-        name: 'get_sec_filings',
-        description: "What the company actually filed with the SEC: latest 8-K (2.02 = earnings release), 10-Q, 10-K, with dates + links. Free EDGAR read — confirm what happened, don't rely on memory. US filers only.",
-        input_schema: { type: 'object', properties: { ticker: { type: 'string', description: 'e.g. AAPL, NKE' } }, required: ['ticker'] },
-    },
-    {
-        name: 'get_earnings',
-        description: 'Next earnings date + EPS estimate, and the last 4 quarterly EPS actuals vs estimates (surprise %). Use it for the catalyst calendar and the beat/miss track record.',
-        input_schema: { type: 'object', properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA' } }, required: ['ticker'] },
-    },
-    {
-        name: 'get_stock_peers',
-        description: 'The fundamental peer cohort (same sector/size) for a ticker — the comp set for a relative-multiple argument.',
-        input_schema: { type: 'object', properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA' } }, required: ['ticker'] },
-    },
-    {
-        name: 'get_sector_snapshot',
-        description: 'Today’s sector rotation — every sector ranked leaders→laggards. Backdrop for whether the group is a tailwind or headwind. No arguments.',
-        input_schema: { type: 'object', properties: {} },
-    },
-    {
-        name: 'get_macro_snapshot',
-        description: 'Hard macro regime: treasury curve, key econ indicators, sector move. The top-down backdrop for a long-horizon thesis. No arguments.',
-        input_schema: { type: 'object', properties: {} },
-    },
-    {
-        name: 'get_short_interest',
-        description: 'Short % of float + days-to-cover for a US single stock (FINRA, ~2-week lag). Crowded-bearish / squeeze context for the thesis. No ETFs/crypto.',
-        input_schema: { type: 'object', properties: { ticker: { type: 'string', description: 'e.g. GME, TSLA' } }, required: ['ticker'] },
-    },
-    {
-        name: 'get_options_context',
-        description: 'Options positioning for a US equity/ETF: put/call ratio + ATM implied vol (nearest expiry). How big a move the market is pricing around a catalyst.',
-        input_schema: { type: 'object', properties: { ticker: { type: 'string', description: 'e.g. NVDA, SPY' } }, required: ['ticker'] },
-    },
+    ...toolsFor({
+        get_fundamentals: `Company fundamentals for a single ticker: sector/industry, market cap, valuation, margins, ROE, growth. The Phase-1 profile read.`,
+        get_sec_filings: `What the company actually filed with the SEC: latest 8-K (2.02 = earnings release), 10-Q, 10-K, with dates + links. Free EDGAR read — confirm what happened, don't rely on memory. US filers only.`,
+        get_earnings: `Next earnings date + EPS estimate, and the last 4 quarterly EPS actuals vs estimates (surprise %). Use it for the catalyst calendar and the beat/miss track record.`,
+        get_stock_peers: `The fundamental peer cohort (same sector/size) for a ticker — the comp set for a relative-multiple argument.`,
+        get_sector_snapshot: `Today’s sector rotation — every sector ranked leaders→laggards. Backdrop for whether the group is a tailwind or headwind. No arguments.`,
+        get_macro_snapshot: `Hard macro regime: treasury curve, key econ indicators, sector move. The top-down backdrop for a long-horizon thesis. No arguments.`,
+        get_short_interest: `Short % of float + days-to-cover for a US single stock (FINRA, ~2-week lag). Crowded-bearish / squeeze context for the thesis. No ETFs/crypto.`,
+        get_options_context: `Options positioning for a US equity/ETF: put/call ratio + ATM implied vol (nearest expiry). How big a move the market is pricing around a catalyst.`,
+    }),
 ]
 
 const TOOL_HANDLERS = {
