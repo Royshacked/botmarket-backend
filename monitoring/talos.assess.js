@@ -1,16 +1,15 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { getQuotes, getShortInterest, getOptionsContext } from '../providers/yahoofinance.provider.js'
 import { getDerivativesContext } from '../providers/binance.provider.js'
-import { getTickerAggregates }   from '../providers/candles.provider.js'
 import { getFundamentals }       from '../providers/fmp.provider.js'
 import { buildStudies }          from './evaluators/chart.evaluator.js'
-import { CANDLE_CFG, aggregateCandles } from '../services/marketData.tools.js'
 import { sessionPhase }          from '../services/market.service.js'
 import { cachedChartImage }      from '../services/chartImgCache.service.js'
 import { newsService }           from '../services/news.service.js'
-import { userService }           from '../api/user/user.service.js'
 import { logger }                from '../services/logger.service.js'
 import { extractFirstJSON }      from './monitorUtils.js'
+import { assessRouting, candlesText as _candlesText, BROAD_INDICES,
+    ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING } from './assess.shared.js'
 import {
     _thinkingConfig, _allText, _formatHeadlines, _formatEventRisk,
     _chartTool, _structureTools, _smcTools, _institutionalTools, _handleAssessToolUses,
@@ -30,34 +29,10 @@ import {
 const LOG = '[talos.assess]'
 
 const _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-const ASSESS_MODEL    = 'claude-sonnet-4-6'
-const ALLOWED_MODELS  = new Set(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-8'])
-const ALLOWED_EFFORTS = new Set(['off', 'low', 'high'])
-// Hidden reasoning tokens count toward max_tokens when thinking is on, so the thinking cap is far
-// larger — a truncated reply means an unparseable JSON verdict and a wasted wake.
-const MAX_TOKENS          = 2_500
-const MAX_TOKENS_THINKING = 16_000
-const MAX_TOOL_ROUNDS     = 3
-
-const BROAD_INDICES = ['SPY', 'QQQ', '^VIX']
+const MAX_TOOL_ROUNDS = 3
 
 // Verdicts Talos may return pre-entry. Anything off-menu is coerced to 'wait' by the monitor.
 export const READINESS_VERDICTS = new Set(['enter', 'wait', 'stand_aside', 'edit', 'let_expire'])
-
-// Talos runs under the user's AI preferences, same knobs Hermes uses. Falls back to Sonnet /
-// no-thinking when unset, invalid, or unreadable. All allowed models are vision-capable.
-async function _routing(userId) {
-    if (!userId) return { model: ASSESS_MODEL, reasoningEffort: 'off' }
-    try {
-        const prefs = await userService.getPreferences(userId)
-        return {
-            model:           ALLOWED_MODELS.has(prefs?.hermesModel)      ? prefs.hermesModel     : ASSESS_MODEL,
-            reasoningEffort: ALLOWED_EFFORTS.has(prefs?.hermesReasoning) ? prefs.hermesReasoning : 'off',
-        }
-    } catch {
-        return { model: ASSESS_MODEL, reasoningEffort: 'off' }
-    }
-}
 
 /** The distinct kinds declared on a setup. */
 export function declaredKinds(setup) {
@@ -84,19 +59,6 @@ export function buildToolsFor(setup) {
 }
 
 // ─── Gather (only what was declared) ──────────────────────────────────────────
-
-// Recent candles for the numeric price block, at the ladder's finest rung. Shared CANDLE_CFG so
-// the lookback scales with the timeframe and 2hr/4hr aggregate from native 1hr bars.
-async function _candlesText(asset, tf) {
-    const cfg  = CANDLE_CFG[tf] ?? CANDLE_CFG['day']
-    const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
-    const raw  = await getTickerAggregates(String(asset).toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
-    const bars = cfg.aggregate ? aggregateCandles(raw, cfg.aggregate) : raw
-    return (bars ?? []).slice(-cfg.count).map(c => {
-        const d = new Date(c.timestamp * 1000).toISOString().slice(0, 16).replace('T', ' ')
-        return `${d} O:${c.open} H:${c.high} L:${c.low} C:${c.close} V:${c.volume}`
-    }).join('\n')
-}
 
 async function _positioningText(asset, assetClass) {
     const isCrypto = String(assetClass || '').toLowerCase() === 'crypto'
@@ -241,7 +203,7 @@ export async function assessSetup(setup, zone, ctx = {}) {
             ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: g.png } }, { type: 'text', text: userText }]
             : userText
 
-        const { model, reasoningEffort } = await _routing(setup.userId)
+        const { model, reasoningEffort } = await assessRouting(setup.userId)
         const thinking  = _thinkingConfig(reasoningEffort)
         const maxTokens = thinking ? MAX_TOKENS_THINKING : MAX_TOKENS
         const system    = [{ type: 'text', text: _SYSTEM, cache_control: { type: 'ephemeral' } }]

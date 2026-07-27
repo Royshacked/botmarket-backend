@@ -7,32 +7,22 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { getQuotes, getCycleAnalysis, getShortInterest, getOptionsContext } from '../providers/yahoofinance.provider.js'
 import { getDerivativesContext }       from '../providers/binance.provider.js'
-import { getTickerAggregates }         from '../providers/candles.provider.js'
 import { buildStudies } from './evaluators/chart.evaluator.js'
-import { CANDLE_CFG, aggregateCandles } from '../services/marketData.tools.js'
 import { sessionPhase } from '../services/market.service.js'
 import { cachedChartImage } from '../services/chartImgCache.service.js'
 import { readStructure, STRUCTURE_VISIONS } from '../services/priceStructure.tools.js'
 import { smcReadText, smcBars, SMC_TOOL_NAMES } from '../services/smc.tools.js'
 import { newsService } from '../services/news.service.js'
-import { userService } from '../api/user/user.service.js'
 import { logger } from '../services/logger.service.js'
 import { extractFirstJSON } from './monitorUtils.js'
+// Shared assessment mechanics — routing, token caps, the candle block, the index list. Hermes and
+// Talos had byte-identical copies; the JUDGMENT (prompts, gather strategy, verdicts) stays local.
+import { assessRouting as _hermesRouting, candlesText as _candlesText, BROAD_INDICES,
+    ASSESS_MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING } from './assess.shared.js'
 
 const LOG = '[hermes.assess]'
 
 const _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-const ASSESS_MODEL    = 'claude-sonnet-4-6'
-const ALLOWED_MODELS  = new Set(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-8'])
-const ALLOWED_EFFORTS = new Set(['off', 'low', 'high'])
-// The visible reply is a small JSON object, but when thinking is on the hidden reasoning tokens
-// ALSO count toward max_tokens — so give generous headroom to avoid truncating the JSON.
-// Non-thinking cap bumped 900→2500: the thesis-anchored prompt now fills each axis `read` +
-// `patterns_seen` + `proposal`/`memo_update` with real prose, and 900 was truncating the JSON on
-// essentially every wake (stop_reason=max_tokens → unclosed-JSON → null assessment). Mirrors the
-// browse-confirm pass, which already carries CONFIRM_MAX_TOKENS headroom for the same reason.
-const ASSESS_MAX_TOKENS          = 2_500
-const ASSESS_MAX_TOKENS_THINKING = 16_000
 // The browse-confirm pass narrates its searches before the JSON, so it needs more room than the
 // terse first-pass reply to avoid truncating the trailing JSON object.
 const CONFIRM_MAX_TOKENS         = 2_000
@@ -44,22 +34,6 @@ export function _thinkingConfig(effort) {
     return (effort === 'low' || effort === 'high')
         ? { thinking: { type: 'adaptive' }, output_config: { effort } }
         : null
-}
-
-// Hermes runs under the user's AI preferences: read their synced `hermesModel` + `hermesReasoning`
-// from account preferences and use them for the assessment. Falls back to Sonnet / no-thinking when
-// unset, invalid, or unreadable. All allowed models are vision-capable, so the chart read is safe.
-async function _hermesRouting(userId) {
-    if (!userId) return { model: ASSESS_MODEL, reasoningEffort: 'off' }
-    try {
-        const prefs = await userService.getPreferences(userId)
-        return {
-            model:           ALLOWED_MODELS.has(prefs?.hermesModel)      ? prefs.hermesModel     : ASSESS_MODEL,
-            reasoningEffort: ALLOWED_EFFORTS.has(prefs?.hermesReasoning) ? prefs.hermesReasoning : 'off',
-        }
-    } catch {
-        return { model: ASSESS_MODEL, reasoningEffort: 'off' }
-    }
 }
 
 // Pull the first text block from an assessment response. With extended thinking on, content[0] is a
@@ -74,21 +48,6 @@ export function _assessText(msg) {
 // trailing object regardless of how many text turns the search produced. Pure.
 export function _allText(msg) {
     return (msg?.content ?? []).filter(b => b?.type === 'text').map(b => b.text).join('\n')
-}
-
-// Recent candles for the assessment's numeric price-action block. Uses the shared CANDLE_CFG so the
-// lookback window + bar count scale with the timeframe (a `day` request pulls ~40 daily bars, not the
-// ~7 a fixed 10-day window used to yield) and 2hr/4hr aggregate from native 1hr bars — same math the
-// agents' get_candles uses. Unknown tf → daily config.
-async function _candlesText(asset, tf) {
-    const cfg  = CANDLE_CFG[tf] ?? CANDLE_CFG['day']
-    const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
-    const raw  = await getTickerAggregates(String(asset).toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
-    const bars = cfg.aggregate ? aggregateCandles(raw, cfg.aggregate) : raw
-    return (bars ?? []).slice(-cfg.count).map(c => {
-        const d = new Date(c.timestamp * 1000).toISOString().slice(0, 16).replace('T', ' ')
-        return `${d} O:${c.open} H:${c.high} L:${c.low} C:${c.close} V:${c.volume}`
-    }).join('\n')
 }
 
 // Format up to 12 newest-first, dated headlines into the block the prompt scores the news axis from.
@@ -118,9 +77,6 @@ export function _formatEventRisk(events) {
         })
         .join('\n')
 }
-
-// Broad-market barometer symbols pulled live for a market-sensitive call: index breadth + risk gauge.
-const BROAD_INDICES = ['SPY', 'QQQ', '^VIX']
 
 // Fetch the LIVE broad-market state for a call — but ONLY when Kairos judged the asset market-sensitive
 // (level high/medium). For low/unknown sensitivity the tape is immaterial, so we skip the fetch. Pulls

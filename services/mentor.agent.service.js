@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveAgentStream } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveAgentStream, buildTimeSection } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS, buildKairosToolHandlers } from './kairos.tools.js'
 import { normalizeSetup, setupReadiness, computeRR } from './setup.schema.js'
@@ -205,7 +205,7 @@ function _buildSystemPrompt(chatState, accounts, brokerContext, mainAccountId, c
     const today = new Date().toISOString().slice(0, 10)
     const dynamicContext = `---
 CURRENT DATE: ${today}. Resolve relative dates (today, next week, this month) against it — including when setting active_from / valid_until.
-${_buildTimeSection(clientTime)}
+${buildTimeSection(clientTime, 'active_from / valid_until')}
 COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.
 CONVERSATION CONTEXT:
 Active asset: ${asset}${draft}${buildPositionsSection(brokerContext)}${_buildAccountsSection(accounts, mainAccountId)}`
@@ -216,28 +216,6 @@ Active asset: ${asset}${draft}${buildPositionsSection(brokerContext)}${_buildAcc
     ]
 }
 
-// Mentor authors absolute UTC bounds (active_from / valid_until) from what the user says in their
-// own clock ("from Monday", "good through next Friday"), so it needs the browser's zone the same
-// way the Idea agent did for time conditions. Unknown zone → ask, never guess.
-function _buildTimeSection(clientTime) {
-    const tz  = typeof clientTime?.clientTz === 'string' ? clientTime.clientTz.trim() : ''
-    const now = Number.isFinite(clientTime?.clientNow) ? clientTime.clientNow : Date.now()
-    if (!tz) {
-        return 'USER LOCAL TIMEZONE: unknown. If the user gives a clock time or date for active_from / valid_until, ask which timezone (or confirm UTC) before converting — never guess.'
-    }
-    try {
-        const d     = new Date(now)
-        const local = d.toLocaleString('en-US', {
-            timeZone: tz, weekday: 'short', year: 'numeric', month: '2-digit',
-            day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
-        })
-        const offset = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' })
-            .formatToParts(d).find(p => p.type === 'timeZoneName')?.value ?? ''
-        return `USER LOCAL TIME: ${local} ${tz}${offset ? ` (${offset})` : ''}. Interpret any clock time or date WITHOUT an explicit timezone in THIS zone, then store active_from / valid_until as absolute UTC (ISO-8601 …Z).`
-    } catch {
-        return 'USER LOCAL TIMEZONE: unknown. If the user gives a clock time or date for active_from / valid_until, ask which timezone (or confirm UTC) before converting — never guess.'
-    }
-}
 
 function _buildAccountsSection(accounts, mainAccountId = null) {
     if (!Array.isArray(accounts) || accounts.length === 0) {

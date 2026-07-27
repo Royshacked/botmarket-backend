@@ -6,7 +6,11 @@ import { getSecFilings } from '../providers/sec.provider.js'
 import { getEarningsCalendar, getFundamentals } from '../providers/fmp.provider.js'
 import { getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
 import { logger } from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, buildPositionsSection, makeToolHandler, resolveAgentStream } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, buildPositionsSection, makeToolHandler, resolveAgentStream, buildTimeSection, formatClientTime } from './agentUtils.js'
+
+// Re-exported under its historical name so the existing unit test resolves unchanged; the
+// implementation now lives in agentUtils (Mentor authors UTC bounds the same way).
+export { formatClientTime as _formatClientTime }
 import { buildTagCaptures } from './llmStream.util.js'
 import { makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler, makeIndicatorsHandler } from './marketData.tools.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
@@ -399,7 +403,7 @@ function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = [], cli
     const today = new Date().toISOString().slice(0, 10)
     const dynamicContext = `---
 CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.
-${_buildTimeSection(clientTime)}
+${buildTimeSection(clientTime, 'a time condition')}
 CONVERSATION CONTEXT:
 ${summary}
 Active asset: ${asset}${stateSection}${buildPositionsSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts, mainAccountId)}`
@@ -410,37 +414,7 @@ Active asset: ${asset}${stateSection}${buildPositionsSection(brokerContext)}${_b
     ]
 }
 
-// Timezone guidance for time-condition authoring. The browser sends its instant + IANA
-// zone; render the user's local wall-clock + UTC offset so the agent converts clock/date
-// times against the USER's timezone and stores after/before as absolute UTC. When the zone
-// is missing/invalid, tell the agent to ask rather than guess. See project_timestamp_ideas.
-function _buildTimeSection(clientTime) {
-    const local = _formatClientTime(clientTime)
-    return local
-        ? `USER LOCAL TIME: ${local}. Interpret any clock time or date the user gives WITHOUT an explicit timezone in THIS timezone, and resolve relative dates (today, tomorrow, next week) against the user's local date. For a time condition, always store after/before as absolute UTC (ISO-8601 …Z).`
-        : `USER LOCAL TIMEZONE: unknown. If the user gives a clock time or date for a time condition, ask which timezone (or confirm UTC) before converting — never guess — then store after/before as absolute UTC (ISO-8601 …Z).`
-}
 
-// Format the browser instant in its IANA zone as "Mon, 07/13/2026, 19:24 Asia/Jerusalem
-// (GMT+03:00)". Returns null when the zone is absent or invalid (bad IANA string throws in
-// Intl). Exported for unit testing.
-export function _formatClientTime(clientTime) {
-    const tz  = typeof clientTime?.clientTz === 'string' ? clientTime.clientTz.trim() : ''
-    const now = Number.isFinite(clientTime?.clientNow) ? clientTime.clientNow : Date.now()
-    if (!tz) return null
-    try {
-        const d     = new Date(now)
-        const local = d.toLocaleString('en-US', {
-            timeZone: tz, weekday: 'short', year: 'numeric', month: '2-digit',
-            day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
-        })
-        const offset = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' })
-            .formatToParts(d).find(p => p.type === 'timeZoneName')?.value ?? ''
-        return `${local} ${tz}${offset ? ` (${offset})` : ''}`
-    } catch {
-        return null   // invalid IANA timezone
-    }
-}
 
 function _buildIdeaAccountsSection(accounts, mainAccountId = null) {
     if (!Array.isArray(accounts) || accounts.length === 0) {

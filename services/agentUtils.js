@@ -215,6 +215,47 @@ export function buildPositionsSection(brokerContext) {
 // against this same list so a horizon round-trips between them (e.g. a Kairos↔Argus scan) unchanged.
 export const TRADE_HORIZONS = ['intraday', 'day', 'swing', 'long term']
 
+// ─── User-local time context ──────────────────────────────────────────────────
+// Shared by every agent that authors an absolute UTC instant from something the user said in
+// their own clock ("enter at 16:40", "good through Friday"). Idea and Mentor had byte-identical
+// copies of this pair; a divergence here silently mis-times a trade by hours.
+
+/**
+ * Format the browser instant in its IANA zone as
+ * "Mon, 07/13/2026, 19:24 Asia/Jerusalem (GMT+03:00)".
+ * Returns null when the zone is absent or invalid (a bad IANA string throws inside Intl).
+ */
+export function formatClientTime(clientTime) {
+    const tz  = typeof clientTime?.clientTz === 'string' ? clientTime.clientTz.trim() : ''
+    const now = Number.isFinite(clientTime?.clientNow) ? clientTime.clientNow : Date.now()
+    if (!tz) return null
+    try {
+        const d     = new Date(now)
+        const local = d.toLocaleString('en-US', {
+            timeZone: tz, weekday: 'short', year: 'numeric', month: '2-digit',
+            day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+        })
+        const offset = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' })
+            .formatToParts(d).find(p => p.type === 'timeZoneName')?.value ?? ''
+        return `${local} ${tz}${offset ? ` (${offset})` : ''}`
+    } catch {
+        return null   // invalid IANA timezone
+    }
+}
+
+/**
+ * The timezone guidance block for a system prompt. With a known zone it tells the agent to read
+ * bare clock times in the USER's zone and store the result as absolute UTC; with an unknown zone
+ * it tells the agent to ASK rather than guess — a silent guess is how a scheduled entry ends up
+ * firing on the wrong side of the world. `what` names the fields being authored.
+ */
+export function buildTimeSection(clientTime, what = 'a time condition') {
+    const local = formatClientTime(clientTime)
+    return local
+        ? `USER LOCAL TIME: ${local}. Interpret any clock time or date the user gives WITHOUT an explicit timezone in THIS timezone, and resolve relative dates (today, tomorrow, next week) against the user's local date. For ${what}, always store the bounds as absolute UTC (ISO-8601 …Z).`
+        : `USER LOCAL TIMEZONE: unknown. If the user gives a clock time or date for ${what}, ask which timezone (or confirm UTC) before converting — never guess — then store the bounds as absolute UTC (ISO-8601 …Z).`
+}
+
 // ─── Emit-tag cleanup ─────────────────────────────────────────────────────────
 // Strip the given emit blocks (<name>…</name>) from a raw model reply. Each name
 // is removed globally, matching the per-agent hand-written `.replace(...)` chains.
