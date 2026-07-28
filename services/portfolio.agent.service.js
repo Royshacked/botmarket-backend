@@ -94,7 +94,7 @@ function makeCoverageHandler(userId) {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, onOpenChart, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal }) {
     const normalized   = _buildMessages(messages)
 
     // Stable base (cached) + volatile per-request sections (accounts, edit
@@ -154,7 +154,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
             get_coverage: makeCoverageHandler(userId),
             get_chart:    makeChartHandler({ log: LOG, onChart, readText: 'Read it as a POSITIONING question — where in the range, trend intact or broken, base or breakdown. Weights still come from the numbers.' }),
         },
-        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onOpenChart,
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
         meta: { accountCount: ideaAccounts.length, editMode: !!portfolioId },
     })
 

@@ -1,9 +1,9 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { logger }         from './logger.service.js'
-import { normalizeMessages, makePromptLoader, resolveAgentStream } from './agentUtils.js'
+import { normalizeMessages, makePromptLoader, resolveAgentStream, stripEmitTags } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
-import { makeChartOpenCapture, runAgentStream, stripChartBlock, CHART_TIMEFRAMES } from './agentIO.js'
+import { makeChartChatPipe, runAgentStream, stripChartBlock, CHART_TIMEFRAMES } from './agentIO.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -34,27 +34,29 @@ Desks and keys:
 - research: deep-dive research on a company or sector (Prometheus builds a coverage thesis)
 
 Chart requests (handle directly — do NOT route to a desk):
-If the user asks to open or show a chart for a ticker, acknowledge it and emit <route>open_chart</route><chart>{"ticker":"TICKER","timeframe":"TIMEFRAME"}</chart>
-The chart opens on the workspace panel beside this chat.
+If the user asks to open or show a chart for a ticker, emit ONLY the tags, with NO sentence at all:
+<route>open_chart</route><chart>{"ticker":"TICKER","timeframe":"TIMEFRAME"}</chart>
+The chart appears right here and carries its own ticker and timeframe, so a sentence would only
+repeat it. The user stays at reception; nothing is routed.
 Use the ticker they mentioned. Use the timeframe they mentioned (${CHART_TIMEFRAMES.join(' ')}); default to day if none given.
 
-Reply format: ONE sentence, then tag(s).
+Reply format: ONE sentence, then tag(s) — except a chart request, which is tags only.
 Examples:
 "Let's find you a setup — routing you to the trading desk." <route>trade</route>
 "Time to build your book — sending you to the portfolio desk." <route>portfolio</route>
 "On it — routing you to the scan desk for a fresh watchlist." <route>scan</route>
 "Deep dive coming — routing you to the research desk." <route>research</route>
-"Opening AAPL on the 1h." <route>open_chart</route><chart>{"ticker":"AAPL","timeframe":"1hr"}</chart>
-"Here's TSLA on the daily." <route>open_chart</route><chart>{"ticker":"TSLA","timeframe":"day"}</chart>`
+<route>open_chart</route><chart>{"ticker":"AAPL","timeframe":"1hr"}</chart>
+<route>open_chart</route><chart>{"ticker":"TSLA","timeframe":"day"}</chart>`
 
-async function routeIntent({ message, userId, onToken, onReasoning, onOpenChart, signal } = {}) {
+async function routeIntent({ message, userId, onToken, onReasoning, onChart, signal } = {}) {
     const { model, streamFn, onUsage } = resolveAgentStream(undefined, userId)
 
     let routeCapture = null
-    // Reception's chart tag rides the SHARED protocol (agentIO): same validation, same
-    // normalization, same `chart_open` event every other desk emits — the routing prompt above only
-    // adds the <route>open_chart</route> pairing it needs to skip desk routing.
-    const chart = makeChartOpenCapture(onOpenChart, LOG)
+    // Reception's chart tag rides the SHARED pipe (agentIO) end to end — same validation, same
+    // `chart` row every agent chat shows. It cannot use runAgentStream (it also captures <route>),
+    // so it wires the pipe by hand; that is the only difference.
+    const chart = makeChartChatPipe(onChart, { log: LOG })
     const tagCaptures = buildTagCaptures({
         route: (text) => { routeCapture = text.trim() },
         chart: chart.capture,
@@ -78,12 +80,15 @@ async function routeIntent({ message, userId, onToken, onReasoning, onOpenChart,
         onUsage,
     })
 
-    const reply = stripChartBlock(raw).trim()
+    // Both tags come out of `raw`, not just <chart>: the suppressor keeps them off the token stream,
+    // but this return value is a second consumer, and it was handing back "…on the daily.
+    // <route>open_chart</route>". Nothing rendered it, which is exactly why it survived.
+    const reply = stripEmitTags(stripChartBlock(raw), ['route']).trim()
     logger.info(LOG, 'routeIntent done', { route: routeCapture, replyLength: reply.length })
     return { reply, route: routeCapture, chart: chart.get() }
 }
 
-async function chatStream({ messages = [], model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onOpenChart, signal } = {}) {
+async function chatStream({ messages = [], model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal } = {}) {
     const normalized = normalizeMessages(messages, MAX_MESSAGES)
 
     // Stable cached base + volatile tail (today's date, so "this week" resolves).
@@ -93,10 +98,10 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
         { type: 'text', text: `CURRENT DATE: ${today}. Resolve relative timeframes (today, this week, this month) against this date.` },
     ]
 
-    // The chart tag is captured by runAgentStream (shared protocol) — Axl only forwards the
-    // callback, exactly like every other agent. `chart` on the return keeps the old `done` payload
-    // shape for clients that read it there.
-    let chartCapture = null
+    // The chart tag is captured, rendered and emitted by runAgentStream (shared protocol) — Axl only
+    // forwards the callback, exactly like every other agent, and that ONE argument is the whole
+    // reason a toolless agent can put a chart in its chat at all.
+    let chartRow = null
     const raw = await runAgentStream({
         log: LOG, requestedModel, userId,
         messages: normalized, systemPrompt,
@@ -104,10 +109,13 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
         reasoningEffort, signal, onToken,
         tagCaptures: buildTagCaptures(),
         onToolStart, onReasoning,
-        onOpenChart: (c) => { chartCapture = c; onOpenChart?.(c) },
+        onChart: (row) => { chartRow = row; onChart?.(row) },
     })
 
     const reply = (raw ?? '').trim()
     logger.info(LOG, 'chatStream done', { replyLength: reply.length })
-    return { reply, chart: chartCapture }
+    // `chart` on the return keeps the `done` payload shape for clients that read it there — the
+    // REQUEST, never the image: the PNG already went out on its own event and doubling it here
+    // would double the bytes on the wire.
+    return { reply, chart: chartRow ? { ticker: chartRow.symbol, timeframe: chartRow.timeframe } : null }
 }

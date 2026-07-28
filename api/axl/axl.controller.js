@@ -23,7 +23,7 @@ export async function routeAxl(req, res) {
                 signal,
                 onToken:     (text)  => sendEvent('token',     { text }),
                 onReasoning: (text)  => sendEvent('reasoning', { text }),
-                onOpenChart: (chart) => sendEvent('chart_open', chart),
+                onChart:     (chart) => sendEvent('chart',     chart),
             })
             const route = VALID_PIPELINES.has(result.route) ? result.route : null
             return { reply: result.reply, route, chart: result.chart ?? null }
@@ -56,7 +56,7 @@ export async function streamAxl(req, res) {
                 onToken:     (text)  => sendEvent('token',     { text }),
                 onToolStart: (tool)  => sendEvent('status',    { tool }),
                 onReasoning: (text)  => sendEvent('reasoning', { text }),
-                onOpenChart: (chart) => sendEvent('chart_open', chart),
+                onChart:     (chart) => sendEvent('chart',     chart),
             })
 
             return { reply: result.reply, chart: result.chart ?? null }

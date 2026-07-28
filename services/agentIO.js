@@ -73,19 +73,34 @@ export function makePhaseCapture(maxPhase, onPhase) {
     }
 }
 
-// ─── The chart-open protocol ──────────────────────────────────────────────────
+// ─── The chart-in-chat protocol ───────────────────────────────────────────────
 //
-// The workspace has ONE live chart surface, and every agent opens it the same way: end the reply
-// with `<chart>{"ticker":"AAPL","timeframe":"1hr"}</chart>`. The tag is captured mid-stream, the
-// controller forwards it as the `chart_open` SSE event, and the client's shared chart service
-// puts it on screen. Per-agent judgment (when a chart is worth opening) stays in the agent's own
-// prompt; this is only the pipe.
+// Any agent can show the user a chart in its OWN chat, and they all do it the same way: emit
+// `<chart>{"ticker":"SPY","timeframe":"day"}</chart>`. The tag is captured mid-stream and the
+// controller forwards it as the `chart` SSE event — the same event `get_chart(show_to_user)` uses,
+// so the client's one chart row shows it with no per-agent component. Per-agent judgment (when a
+// chart is worth showing) stays in the agent's own prompt; this is only the pipe.
 //
-// Wiring a NEW agent is one argument — pass `onOpenChart` to runAgentStream and it supplies the
+// Wiring a NEW agent is one argument — pass `onChart` to runAgentStream and it supplies the
 // instruction, the tag capture and the tag strip. Nothing else to remember.
 //
-// NOT the same thing as the `get_chart` TOOL some agents carry: that renders a static image for
-// the agent to READ (and optionally drop in the chat). This opens the user's interactive chart.
+// TWO triggers on ONE event, and the payloads differ because the two things ARE different:
+//
+//   the tag  (the USER asked to see a chart)  → `{ symbol, timeframe, live: true }`
+//   get_chart(show_to_user) (the AGENT shows what it read) → `{ symbol, timeframe, imageBase64 }`
+//
+// A chart the user asked for is LIVE: the client mounts its own interactive chart (crosshair, zoom,
+// ticker/timeframe header, fresh candles), so nothing is rendered server-side and the row appears
+// instantly instead of after a headless-Chromium round trip. A chart the AGENT looked at stays a
+// still PNG on purpose — it is evidence of what the model actually saw, overlays included, and a
+// live chart would quietly redraw that evidence.
+//
+// An agent whose TOOL charts are deliberately model-only (Argus) still gets the tag — the user
+// asking to look is not the agent illustrating itself.
+//
+// EVERY surface that can ask for a chart shows it this way, the reception included: it has no
+// message list, but it does have a result area, and a chart the user asked for belongs next to the
+// sentence that answered them — not on a panel across the screen.
 
 /** Canonical timeframe spellings — the same set get_candles / get_chart accept. */
 export const CHART_TIMEFRAMES = ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month']
@@ -108,9 +123,10 @@ const _TF_ALIASES = {
 /**
  * Normalize a `<chart>` payload into something the client can actually render, or null.
  *
- * The ticker is the only hard requirement — a chart with no symbol is nothing to open. An
- * unrecognised timeframe falls back to `day` rather than failing the whole request: the user asked
- * to see the chart, and the wrong resolution is a click away while no chart at all is a dead end.
+ * The ticker is the only hard requirement — a chart with no symbol is nothing to render. An
+ * unrecognised timeframe falls back to `day` rather than failing the whole request: "give SPY" names
+ * no timeframe at all, and the daily is the answer to it — while no chart is a dead end, and asking
+ * the user to restate a timeframe they never gave is worse than showing them one.
  */
 export function normalizeChartRequest(req) {
     const ticker = String(req?.ticker ?? '').trim().toUpperCase().replace(/^\$/, '')
@@ -123,12 +139,16 @@ export function normalizeChartRequest(req) {
 }
 
 /**
- * Capture callback for the `<chart>` tag. Fires `onOpenChart` the moment the block closes — the
- * chart opens while the reply is still streaming — and remembers the last valid request.
+ * Capture callback for the `<chart>` tag. Fires `onRequest` the moment the block closes — while the
+ * reply is still streaming — and remembers the last valid request.
+ *
+ * The callback gets the normalized REQUEST, not a rendered chart. `makeChartChatPipe` wraps this to
+ * add the render + emit that every surface actually wants; the bare capture stays exported for a
+ * caller that only needs to know WHAT was asked for.
  *
  * A malformed or symbol-less block is warn-logged and dropped: the reply itself is unaffected.
  */
-export function makeChartOpenCapture(onOpenChart, log = '[agentIO]') {
+export function makeChartRequestCapture(onRequest, log = '[agentIO]') {
     let captured = null
     return {
         capture: (text) => {
@@ -140,27 +160,32 @@ export function makeChartOpenCapture(onOpenChart, log = '[agentIO]') {
             const req = normalizeChartRequest(parsed)
             if (!req) { logger.warn(log, 'chart block has no usable ticker', { got: parsed?.ticker }); return }
             captured = req
-            onOpenChart?.(req)
+            onRequest?.(req)
         },
         get: () => captured,
     }
 }
 
 /** Appended to the system prompt of every agent wired for charts. */
-export const CHART_OPEN_INSTRUCTION = `## Opening a chart for the user
+export const CHART_INSTRUCTION = `## Showing the user a chart
 
-The user's workspace has one live, interactive chart panel. When the user asks to SEE a chart —
-"show me NVDA", "open the 4h", "pull up that chart", "let me look at it" — open it by ending your
-reply with a chart tag:
+When the user asks to SEE a chart — "give SPY", "show me NVDA", "let me look at the 4h", "pull up
+that chart" — show it by emitting a chart tag:
 
-<chart>{"ticker":"NVDA","timeframe":"1hr"}</chart>
+<chart>{"ticker":"SPY","timeframe":"day"}</chart>
 
 - timeframe: one of ${CHART_TIMEFRAMES.join(' ')}. Use the one they asked for; default to day.
-- Acknowledge in one short sentence ("Opening NVDA on the 1h.") and then emit the tag. Never
-  mention the tag itself, and never describe what a chart is.
-- ONE chart tag per reply — the newest replaces whatever is on the panel.
+- Say NOTHING about it. No "Here's SPY on the daily.", no "Opening the chart." — the chart carries
+  its own ticker and timeframe, so a sentence repeating them is noise. When the chart is all they
+  asked for, the tag IS your entire reply: emit it and stop. Never mention the tag itself.
+- The chart appears in this chat as part of the same turn, and it is LIVE — they can hover it for
+  OHLC, zoom and pan. ONE chart per reply: if you already put one in front of the user with a tool
+  this turn (show_to_user), do not emit the tag as well.
+- The tag needs no tool call. When the user only wants to LOOK, use it rather than spending a
+  get_chart round trip.
 - Emit it ONLY when the user asked to see a chart. It is not a way to illustrate your own analysis
-  (use your chart/candle tools for that), and it does not replace any answer you owe them.`
+  (use your chart/candle tools for that). If they asked something ELSE in the same breath, answer
+  that in full — the silence rule covers the chart, never a question you owe them.`
 
 // Point the `<chart>` descriptor at our capture. All emit tags are suppressed by default
 // (buildTagCaptures), so the descriptor is normally already there — appended defensively for a
@@ -189,6 +214,31 @@ export function stripChartBlock(raw) {
 }
 
 /**
+ * The whole chat pipe for one turn: capture the tag, hand the chat a LIVE chart row.
+ *
+ * Synchronous, and that is the point — the row goes out the moment the tag closes, mid-stream, with
+ * nothing to render and nothing to wait for. `.get()` returns the last normalized REQUEST, which is
+ * what the reception's `done` payload reports so the client knows a chart was asked for, not a desk.
+ *
+ * A repeated IDENTICAL request emits once. Models restate an acknowledgement (and re-emit the tag)
+ * more often than they mean two charts, and two identical charts read as a bug.
+ *
+ * A throwing `onChart` is contained: the reply still lands.
+ */
+export function makeChartChatPipe(onChart, { log = '[agentIO]' } = {}) {
+    let last = null
+    return makeChartRequestCapture((req) => {
+        if (last?.ticker === req.ticker && last?.timeframe === req.timeframe) return
+        last = req
+        try {
+            onChart?.({ symbol: req.ticker, timeframe: req.timeframe, live: true })
+        } catch (err) {
+            logger.warn(log, 'chart emit failed:', err.message)
+        }
+    }, log)
+}
+
+/**
  * Open a model stream for an agent and return its raw text.
  *
  * Wraps the three lines every agent repeats: resolve the model + usage recorder, log the start,
@@ -196,9 +246,10 @@ export function stripChartBlock(raw) {
  * fields to the start log (asset, account count, edit mode…) without each agent re-deriving
  * `model` and `provider` for its own log line.
  *
- * `onOpenChart` opts the agent into the chart-open protocol above: the instruction is appended to
- * its system prompt, the `<chart>` tag is captured, and the block is stripped from the returned
- * raw so no agent has to add it to its own strip list.
+ * `onChart` opts the agent into the chart-in-chat protocol above: the instruction is appended to its
+ * system prompt, the `<chart>` tag is captured and passed to `onChart` as a live chart row, and the
+ * block is stripped from the returned raw so no agent has to add it to its own strip list. It is the
+ * SAME callback an agent gives its `get_chart` tool — one chart row, one event, either trigger.
  *
  * Deliberately does NOT parse otherwise: what comes back out of the stream is the agent's own
  * contract.
@@ -206,20 +257,20 @@ export function stripChartBlock(raw) {
 export async function runAgentStream({
     log = '[agentIO]', requestedModel, userId,
     messages, systemPrompt, tools, toolHandlers,
-    reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onOpenChart,
+    reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
     meta = {},
     // Injectable so the argument-bag contract can be tested without a provider or a real model id.
     _resolve = resolveAgentStream,
 }) {
     const { model, streamFn, provider, onUsage } = _resolve(requestedModel, userId)
 
-    const chart = onOpenChart ? makeChartOpenCapture(onOpenChart, log) : null
+    const chart = onChart ? makeChartChatPipe(onChart, { log }) : null
 
     logger.info(log, 'chatStream start', { messageCount: messages?.length ?? 0, model, provider, ...meta })
 
     const raw = await streamFn({
         model, promptOrMessages: messages,
-        systemPrompt: chart ? _appendSystemBlock(systemPrompt, CHART_OPEN_INSTRUCTION) : systemPrompt,
+        systemPrompt: chart ? _appendSystemBlock(systemPrompt, CHART_INSTRUCTION) : systemPrompt,
         tools, toolHandlers,
         reasoningEffort, signal, onToken,
         tagCaptures: chart ? _withChartCapture(tagCaptures, chart.capture) : tagCaptures,

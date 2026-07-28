@@ -58,7 +58,7 @@ export const analystAgentService = { chatStream }
 async function chatStream({
     messages, userPrompt, chatState = {}, brokerContext = null, seed = null,
     model: requestedModel, reasoningEffort, userId,
-    onToken, onToolStart, onReasoning, onPhase, onOpenChart, signal,
+    onToken, onToolStart, onReasoning, onPhase, onChart, signal,
 }) {
     const systemPrompt  = _buildSystemPrompt(chatState, brokerContext, seed)
     const builtMessages = _buildMessages({ messages, userPrompt })
@@ -71,7 +71,7 @@ async function chatStream({
 
     const raw = await runAgentStream({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers,
-        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onOpenChart,
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
         meta: { userPrompt },
     })
 
