@@ -9,8 +9,12 @@ const CLIENT_REASONS = new Set([
     'invalid_setup', 'invalid_zone', 'no_venue', 'not_found', 'in_position',
     'invalid_status', 'nothing_to_patch', 'closed_is_terminal',
 ])
+// Reaching someone else's setup is its own answer — 403, not a 400 or a 500. The shared crud
+// reports it apart from not_found, which the hand-rolled setup queries could not.
 const _status = (reason) =>
-    (CLIENT_REASONS.has(reason) || reason?.startsWith('missing_') || reason?.startsWith('cannot_arm_')) ? 400 : 500
+    reason === 'forbidden' ? 403
+        : (CLIENT_REASONS.has(reason) || reason?.startsWith('missing_') || reason?.startsWith('cannot_arm_')) ? 400
+            : 500
 
 /** Generate: persist a drafted setup (or update one in place when `updateId` is present). */
 export async function generateSetup(req, res) {

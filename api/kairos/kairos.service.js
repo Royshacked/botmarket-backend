@@ -1,11 +1,12 @@
 import { randomUUID }               from 'crypto'
 import { normalizeAssetClass } from '../../services/entity/vocabulary.js'
 import { PAST_ENTRY_LEGACY, CALL_HORIZONS } from '../../services/entity/vocabulary.js'
-import { getDb, stripId }           from '../../providers/mongodb.provider.js'
+import { getDb }                    from '../../providers/mongodb.provider.js'
 import { logger }                   from '../../services/logger.service.js'
 import { buildEventRisk }           from '../../services/eventRisk.service.js'
 import { cleanConviction }          from '../../services/conviction.util.js'
 import { ENTITIES }                 from '../../services/entity/entityCollection.js'
+import { makeEntityCrud }           from '../../services/entity/entityCrud.service.js'
 import { normalizeMode, isMode }    from '../../services/kairos.modes.js'
 
 // Kairos = discretionary day/swing agent. Its artifact is a "call" (Idea produces ideas,
@@ -17,6 +18,12 @@ import { normalizeMode, isMode }    from '../../services/kairos.modes.js'
 const LOG        = '[kairos]'
 const COLLECTION = ENTITIES   // calls live in the shared entities collection as kind:'call'
 const KIND_CALL  = 'call'
+
+// Owner-scoped CRUD (the shared mechanism). No deleteLock: unlike an idea or a setup, a call is
+// deletable at any status — the position it opened lives on its own broker linkage and survives.
+// What stays below is call JUDGMENT: the construction gate, normalizeCall, and the edit's
+// re-arm-vs-light-edit split.
+const crud = makeEntityCrud({ kind: KIND_CALL, log: LOG })
 
 // A call is a moment to act on, not a multi-month hold — the narrowing is a declared
 // SUBSET of the shared ladder, not a second list that merely looks like it minus one.
@@ -41,7 +48,7 @@ export const kairosService = {
     getKairosPerformance,
 }
 
-// Plan fields re-written on an in-place edit ("Update call"). Identity (id/created_at/user_id),
+// Plan fields re-written on an in-place edit ("Update call"). Identity (id/created_at/userId),
 // monitor_state history, position_state, and linked_idea_id are PRESERVED (never in the $set).
 const PLAN_FIELDS = [
     'mode',
@@ -114,10 +121,10 @@ export function computeKairosPerformance(calls) {
     }
 }
 
-async function getKairosPerformance(userId, isAdmin = false) {
+async function getKairosPerformance(userId) {
     try {
         const db    = await getDb()
-        const query = isAdmin ? { kind: KIND_CALL, status: 'closed' } : { kind: KIND_CALL, status: 'closed', user_id: userId }
+        const query = { kind: KIND_CALL, status: 'closed', userId }
         const calls = await db.collection(COLLECTION)
             .find(query, { projection: { status: 1, position_state: 1 } })
             .toArray()
@@ -132,7 +139,7 @@ export async function ensureKairosIndexes() {
     try {
         const db = await getDb()
         await db.collection(COLLECTION).createIndex({ id: 1 }, { unique: true })
-        await db.collection(COLLECTION).createIndex({ user_id: 1 })
+        await db.collection(COLLECTION).createIndex({ userId: 1 })
         await db.collection(COLLECTION).createIndex({ status: 1 })
     } catch (err) {
         logger.warn(LOG, 'ensureKairosIndexes failed:', err.message)
@@ -245,7 +252,9 @@ export function normalizeCall(raw, userId = null) {
         parentId:    null,
         strategy:    'kairos',
         mode:        normalizeMode(raw.mode),   // build lens (KAIROS_MODES.md) — persisted so edit reopens in-mode
-        user_id:     userId,
+        // Envelope field — camelCase like every other kind in `entities`, so the kind-blind
+        // readers (getCallPositionMap, getAssetClassMap, toEnvelope) can filter on one name.
+        userId,
         created_at:  new Date().toISOString(),
         savedAt:     Date.now(),
         // Build conversation (messages + draft) so the Calls-tab edit pencil can reopen the
@@ -333,11 +342,10 @@ async function saveKairosCall(raw, userId) {
     }
 
     try {
-        const doc = normalizeCall(await _stampEventRisk(raw), userId)
-        const db  = await getDb()
-        await db.collection(COLLECTION).insertOne(doc)
+        const doc   = normalizeCall(await _stampEventRisk(raw), userId)
+        const saved = await crud.insert(doc)
         logger.info(LOG, 'call saved', { id: doc.id, asset: doc.asset, trade_type: doc.trade_type })
-        return { ok: true, call: stripId(doc) }
+        return { ok: true, call: saved }
     } catch (err) {
         logger.error(LOG, 'Failed to save call', err)
         return { ok: false, error: err }
@@ -348,26 +356,25 @@ async function saveKairosCall(raw, userId) {
 // Re-validates + re-normalizes the plan exactly like a fresh save, then $sets ONLY the plan fields
 // (+ chat_state) onto the existing doc, RE-ARMING the monitor (status→waiting, next check cleared)
 // so Hermes re-evaluates the new plan from scratch. Identity + monitor history + position_state kept.
-async function updateKairosCall(id, raw, userId, isAdmin = false) {
+async function updateKairosCall(id, raw, userId) {
     const gate = validateCall(raw)
     if (!gate.ok) {
         logger.warn(LOG, 'call update rejected by construction gate', { reason: gate.reason, id })
         return { ok: false, reason: gate.reason }
     }
     try {
-        const db  = await getDb()
-        const cur = await db.collection(COLLECTION).findOne({ id })
-        if (!cur) return { ok: false, reason: 'not_found' }
-        if (cur.user_id && cur.user_id !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+        const found = await crud.getOwned(id, userId)
+        if (!found.ok) return found
+        const cur = found.doc
 
-        const full = normalizeCall(await _stampEventRisk(raw), cur.user_id ?? userId)   // fresh normalized plan (re-ids zones/levels) + refreshed event_risk
+        const full = normalizeCall(await _stampEventRisk(raw), cur.userId ?? userId)   // fresh normalized plan (re-ids zones/levels) + refreshed event_risk
         const { $set, inPosition } = _buildEditSet(cur, full, raw.chat_state)   // in-position → LIGHT edit, no re-arm
         $set.savedAt = Date.now()
 
-        await db.collection(COLLECTION).updateOne({ id }, { $set })
-        const updated = await db.collection(COLLECTION).findOne({ id })
-        logger.info(LOG, 'call updated', { id, asset: updated.asset, inPosition, mode: inPosition ? 'light' : 're-arm' })
-        return { ok: true, call: stripId(updated) }
+        const res = await crud.patchOwned(id, userId, $set)
+        if (!res.ok) return res
+        logger.info(LOG, 'call updated', { id, asset: res.doc.asset, inPosition, mode: inPosition ? 'light' : 're-arm' })
+        return { ok: true, call: res.doc }
     } catch (err) {
         logger.error(LOG, 'Failed to update call', err)
         return { ok: false, error: err }
@@ -376,57 +383,25 @@ async function updateKairosCall(id, raw, userId, isAdmin = false) {
 
 // Lightweight partial patch — progressive chat_state save during an edit session (no re-validation,
 // no plan change). Whitelisted to chat_state so a stray field can't rewrite the plan.
-async function patchKairosCall(id, patch, userId, isAdmin = false) {
-    try {
-        const db  = await getDb()
-        const cur = await db.collection(COLLECTION).findOne({ id }, { projection: { user_id: 1 } })
-        if (!cur) return { ok: false, reason: 'not_found' }
-        if (cur.user_id && cur.user_id !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
-        if (!patch || !Object.prototype.hasOwnProperty.call(patch, 'chat_state')) return { ok: true }
-        await db.collection(COLLECTION).updateOne({ id }, { $set: { chat_state: patch.chat_state } })
-        return { ok: true }
-    } catch (err) {
-        logger.error(LOG, 'Failed to patch call', err)
-        return { ok: false, error: err }
-    }
+async function patchKairosCall(id, patch, userId) {
+    const found = await crud.getOwned(id, userId, { projection: { id: 1 } })
+    if (!found.ok) return found
+    // Whitelist enforced BEFORE the write: a patch carrying anything else is a no-op, not a
+    // partial apply.
+    if (!patch || !Object.prototype.hasOwnProperty.call(patch, 'chat_state')) return { ok: true }
+    const res = await crud.patchOwned(id, userId, { chat_state: patch.chat_state })
+    return res.ok ? { ok: true } : res
 }
 
-async function getKairosCall(id, userId, isAdmin = false) {
-    try {
-        const db   = await getDb()
-        const call = await db.collection(COLLECTION).findOne({ id })
-        if (!call) return { ok: false, reason: 'not_found' }
-        if (call.user_id && call.user_id !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
-        return { ok: true, call: stripId(call) }
-    } catch (err) {
-        logger.error(LOG, 'Failed to get call', err)
-        return { ok: false, error: err }
-    }
+async function getKairosCall(id, userId) {
+    const res = await crud.getOwnedStripped(id, userId)
+    return res.ok ? { ok: true, call: res.doc } : res
 }
 
-async function listKairosCalls(userId, isAdmin = false) {
-    try {
-        const db    = await getDb()
-        const query = isAdmin ? { kind: KIND_CALL } : { kind: KIND_CALL, user_id: userId }
-        const items = await db.collection(COLLECTION).find(query).sort({ savedAt: -1 }).toArray()
-        return items.map(stripId)
-    } catch (err) {
-        logger.error(LOG, 'Failed to list calls', err)
-        return []
-    }
+async function listKairosCalls(userId) {
+    return crud.list(userId)
 }
 
-async function deleteKairosCall(id, userId, isAdmin = false) {
-    try {
-        const db   = await getDb()
-        const call = await db.collection(COLLECTION).findOne({ id }, { projection: { user_id: 1 } })
-        if (!call) return { ok: false, reason: 'not_found' }
-        if (call.user_id && call.user_id !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
-        await db.collection(COLLECTION).deleteOne({ id })
-        logger.info(LOG, 'call deleted', { id })
-        return { ok: true }
-    } catch (err) {
-        logger.error(LOG, 'Failed to delete call', err)
-        return { ok: false, error: err }
-    }
+async function deleteKairosCall(id, userId) {
+    return crud.remove(id, userId)
 }

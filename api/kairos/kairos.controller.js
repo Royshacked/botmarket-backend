@@ -91,14 +91,13 @@ export async function updateKairosCall(req, res) {
         const { id } = req.params
         const { call, accounts, mainAccountId, chat_state } = req.body ?? {}
         const userId  = req.user._id
-        const isAdmin = req.user.isAdmin === true
 
         let result
         if (call && typeof call === 'object' && !Array.isArray(call)) {
             const acctList = Array.isArray(accounts) ? accounts : []
             result = await _finalizeCall(call, { userId, accounts: acctList, mainAccountId, updateId: id, chatState: chat_state })
         } else {
-            result = await kairosService.patchKairosCall(id, { chat_state }, userId, isAdmin)
+            result = await kairosService.patchKairosCall(id, { chat_state }, userId)
         }
 
         if (!result.ok) {
@@ -122,15 +121,14 @@ export async function actOnKairosCall(req, res) {
         const { id }     = req.params
         const { action } = req.body ?? {}
         const userId  = req.user._id
-        const isAdmin = req.user.isAdmin === true
 
         let result
-        if (action === 'confirm')             result = await kairosHandoffService.confirmCall(id, userId, isAdmin)
-        else if (action === 'edit')           result = await kairosHandoffService.editCall(id, userId, isAdmin)
-        else if (action === 'dismiss')        result = await kairosHandoffService.dismissCall(id, userId, isAdmin)
-        else if (action === 'reentry')        result = await kairosHandoffService.reviveCall(id, userId, isAdmin)
-        else if (action === 'decline_reentry') result = await kairosHandoffService.declineReentry(id, userId, isAdmin)
-        else if (MANAGE_ACTIONS.includes(action)) result = await kairosHandoffService.manageCall(id, userId, action, isAdmin)
+        if (action === 'confirm')             result = await kairosHandoffService.confirmCall(id, userId)
+        else if (action === 'edit')           result = await kairosHandoffService.editCall(id, userId)
+        else if (action === 'dismiss')        result = await kairosHandoffService.dismissCall(id, userId)
+        else if (action === 'reentry')        result = await kairosHandoffService.reviveCall(id, userId)
+        else if (action === 'decline_reentry') result = await kairosHandoffService.declineReentry(id, userId)
+        else if (MANAGE_ACTIONS.includes(action)) result = await kairosHandoffService.manageCall(id, userId, action)
         else return res.status(400).send({ error: 'action must be confirm | edit | dismiss | reentry | decline_reentry | move_stop | take_partial | exit_now | let_run' })
 
         if (!result.ok) {
@@ -146,7 +144,7 @@ export async function actOnKairosCall(req, res) {
 
 export async function listKairos(req, res) {
     try {
-        const items = await kairosService.listKairosCalls(req.user._id, req.user.isAdmin === true)
+        const items = await kairosService.listKairosCalls(req.user._id)
         res.send(items)
     } catch (err) {
         logger.error(LOG, 'Failed to list kairos calls', err)
@@ -157,7 +155,7 @@ export async function listKairos(req, res) {
 // Kairos track record — aggregate of closed calls' outcomes (Phase 5, slice 4).
 export async function getKairosPerformance(req, res) {
     try {
-        const result = await kairosService.getKairosPerformance(req.user._id, req.user.isAdmin === true)
+        const result = await kairosService.getKairosPerformance(req.user._id)
         if (!result.ok) return res.status(500).send({ error: 'performance_failed' })
         res.send(result.performance)
     } catch (err) {
@@ -169,7 +167,7 @@ export async function getKairosPerformance(req, res) {
 // Single call (with its monitor_state.timeline) — the pop-out polls this for the live journal.
 export async function getKairos(req, res) {
     try {
-        const result = await kairosService.getKairosCall(req.params.id, req.user._id, req.user.isAdmin === true)
+        const result = await kairosService.getKairosCall(req.params.id, req.user._id)
         if (!result.ok) {
             const code = reasonToStatus(result.reason, 500)
             return res.status(code).send({ error: result.reason ?? 'get_failed' })
@@ -183,7 +181,7 @@ export async function getKairos(req, res) {
 
 export async function deleteKairos(req, res) {
     try {
-        const result = await kairosService.deleteKairosCall(req.params.id, req.user._id, req.user.isAdmin === true)
+        const result = await kairosService.deleteKairosCall(req.params.id, req.user._id)
         if (!result.ok) {
             const code = reasonToStatus(result.reason, 400)
             return res.status(code).send({ error: result.reason ?? 'delete_failed' })

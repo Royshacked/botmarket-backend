@@ -28,11 +28,14 @@ test('past-entry includes hit — an order exists even before the fill', () => {
     assert.ok(!isPastEntry('looking'))
 })
 
-test('the legacy pre-P3b call statuses are recognised but never in the modern set', () => {
-    assert.ok(isPastEntry('in_position'), 'a pre-cutover call must stay manageable')
-    assert.ok(isPastEntry('confirmed'))
-    assert.ok(!isPastEntry('in_position', false), 'opt out and the legacy pair is excluded')
-    assert.ok(!PAST_ENTRY.includes('in_position'))
+test('the pre-P3b call statuses are gone from the language entirely', () => {
+    // They described a call that executed through an idea shadow. Nothing writes them, no document
+    // carries them, and while they lingered the gates that tested them silently matched nothing.
+    for (const dead of ['in_position', 'confirmed']) {
+        assert.ok(!PAST_ENTRY.includes(dead))
+        assert.ok(!isPastEntry(dead), `${dead} must not be a status any more`)
+        assert.ok(!statusesFor('call').includes(dead), `${dead} must not be in the call vocabulary`)
+    }
 })
 
 test('pre-entry and past-entry never overlap', () => {
@@ -56,13 +59,38 @@ test('each kind gets a SUBSET, not its own vocabulary', () => {
     }
 })
 
+test('every kind speaks the SAME ladder — subsets, never synonyms', () => {
+    // The rule that keeps shared code working: two kinds may use different SUBSETS, but the same
+    // meaning always has the same word. Every second spelling this project grew — `unarmed` for
+    // waiting, `watching` for looking, `ready` for hit — produced the same bug: a gate somewhere
+    // kept testing the old word and silently matched nothing.
+    const LADDER = ['waiting', 'looking', 'hit', 'long', 'short', 'closed']
+    for (const kind of Object.keys(STATUSES_BY_KIND)) {
+        for (const s of statusesFor(kind)) {
+            assert.ok(LADDER.includes(s) || s === 'resting', `${kind} speaks a private word: ${s}`)
+        }
+    }
+    // No kind may reintroduce a synonym for a rung that already has a word.
+    for (const dead of ['unarmed', 'watching', 'ready', 'expiring', 'expired', 'dismissed', 'in_position', 'confirmed']) {
+        for (const kind of Object.keys(STATUSES_BY_KIND)) {
+            assert.ok(!statusesFor(kind).includes(dead), `${kind} must not speak ${dead}`)
+        }
+    }
+})
+
 test('the kinds differ exactly where their mechanics differ', () => {
-    // A setup has no `resting` (a zone cannot rest as a broker order) and no `watching` (the card
-    // fires on any verdict, so a trip resolves to `hit` in one wake). An idea is the mirror image.
+    // `resting` is the ONE kind-specific rung, and it earns that: an idea's stop-market entry
+    // actually sits AT the broker, which is materially different from being watched. A zone
+    // cannot rest as a broker order, so no setup or call has it.
     assert.ok(statusesFor('idea').includes('resting'))
     assert.ok(!statusesFor('setup').includes('resting'))
-    assert.ok(!statusesFor('setup').includes('watching'))
-    assert.ok(statusesFor('call').includes('watching'))
+    assert.ok(!statusesFor('call').includes('resting'))
+
+    // Everything else is shared, including the word for "armed".
+    for (const kind of Object.keys(STATUSES_BY_KIND)) {
+        assert.ok(statusesFor(kind).includes('looking'), `${kind} missing looking`)
+        assert.ok(statusesFor(kind).includes('waiting'), `${kind} missing waiting`)
+    }
 })
 
 test('the setup service and the vocabulary agree', () => {

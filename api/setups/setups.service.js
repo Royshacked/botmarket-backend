@@ -1,9 +1,8 @@
 import { randomUUID }        from 'crypto'
-import { statusesFor, PAST_ENTRY } from '../../services/entity/vocabulary.js'
-import { getDb, stripId }    from '../../providers/mongodb.provider.js'
+import { statusesFor, PAST_ENTRY, LIVE_POSITION } from '../../services/entity/vocabulary.js'
 import { logger }            from '../../services/logger.service.js'
 import { buildEventRisk }    from '../../services/eventRisk.service.js'
-import { ENTITIES }          from '../../services/entity/entityCollection.js'
+import { makeEntityCrud }    from '../../services/entity/entityCrud.service.js'
 import { resolveVenue, resolveMode } from '../../services/venue.resolve.service.js'
 import { normalizeSetup, setupReadiness } from '../../services/setup.schema.js'
 import { resolveMainAccountId } from '../../services/agentUtils.js'
@@ -17,20 +16,27 @@ import { resolveMainAccountId } from '../../services/agentUtils.js'
 // It writes to the shared `entities` collection as kind:'setup', so execution (orderPlan,
 // reconciler, trades ledger) picks it up unchanged — those are already kind-blind.
 
-const LOG        = '[setups]'
-const COLLECTION = ENTITIES
-const KIND       = 'setup'
+const LOG  = '[setups]'
+const KIND = 'setup'
+
+// Owner-scoped CRUD (the shared mechanism). A LIVE position is delete-locked — close it at the
+// broker first. Everything below this line is setup JUDGMENT: the Generate gate, the server-owned
+// binding, and which fields an edit may rewrite.
+const crud = makeEntityCrud({ kind: KIND, deleteLock: LIVE_POSITION, log: LOG })
 
 const BROKERS = new Set(['ctrader', 'paper', 'manual'])
 
-// Statuses this kind moves through. Pre-position vocabulary is our own; from entry onward it
-// CONVERGES to the shared execution vocab so the kind-blind reconciler matches it (ENTITY_MODEL P3b).
+// Statuses this kind moves through: unarmed → waiting → watching → ready → long/short → closed.
+// A setup runs the ONE shared ladder: waiting (generated, unmonitored) → looking (armed) → hit
+// (fulfilled, awaiting confirm) → long/short → closed. Generate and Arm are two separate acts, so
+// a setup sits at `waiting` until the user arms it — that is what `waiting` means everywhere.
 //
-// There is no 'watching': because the entry card fires on ANY verdict, a zone trip resolves to
-// 'hit' within the same wake, so price is never inside a zone unresolved.
+// Price sitting INSIDE a zone is `armed_zone_id` on a `looking` setup, not a status: the zone is
+// only the first gate, so a trip does not resolve within the wake, but "being in a zone" is a
+// detail of looking rather than a lifecycle rung of its own.
 export const SETUP_STATUSES = new Set(statusesFor(KIND))
 
-// Past-entry statuses: the setup is live at the broker, so a plan rewrite must not re-arm it.
+// Past-entry: the setup is live at the broker, so a plan rewrite must not disarm it.
 const POSITION_STATUSES = new Set(PAST_ENTRY)
 
 // Plan fields rewritten by an in-place edit. Identity, monitor_state history and execution
@@ -134,7 +140,6 @@ async function generateSetup(rawSetup, { userId, accounts = [], mainAccountId = 
 }
 
 async function _insert(bound, userId) {
-    const db  = await getDb()
     const now = Date.now()
 
     const doc = {
@@ -142,8 +147,9 @@ async function _insert(bound, userId) {
         kind:    KIND,
         userId,
         parentId: null,
-        // 'waiting' = created but NOT monitored. Talos polls from 'looking'; arming is the
-        // user's separate action, exactly as it is for ideas.
+        // 'waiting' = persisted but NOT monitored. Talos polls from 'looking'; arming is the
+        // user's separate action. This extra state is the only place a setup's ladder differs
+        // from a call's — a call is live the moment it is saved.
         status:  'waiting',
         savedAt: now,
         ...bound,
@@ -152,15 +158,15 @@ async function _insert(bound, userId) {
         pulse_anchor_px: null,
     }
 
-    await db.collection(COLLECTION).insertOne(doc)
+    const saved = await crud.insert(doc)
     logger.info(LOG, `saved setup ${doc.id} (${doc.asset} ${doc.direction} ${doc.type}, ${doc.mode})`)
-    return { ok: true, setup: stripId(doc) }
+    return { ok: true, setup: saved }
 }
 
 async function _update(id, bound, userId) {
-    const db  = await getDb()
-    const cur = await db.collection(COLLECTION).findOne({ id, kind: KIND, userId })
-    if (!cur) return { ok: false, reason: 'not_found' }
+    const found = await crud.getOwned(id, userId)
+    if (!found.ok) return found
+    const cur = found.doc
 
     const inPosition = POSITION_STATUSES.has(cur.status)
     const $set = {}
@@ -169,8 +175,9 @@ async function _update(id, bound, userId) {
     }
     if (bound.chat_state !== undefined) $set.chat_state = bound.chat_state
 
-    // Pre-position: a rewritten plan re-arms from scratch. In-position: NEVER — flipping a live
-    // setup back to 'waiting' would orphan the reconciler's position match.
+    // Pre-position: a rewritten plan DISARMS — the user must Arm again, because the plan Talos
+    // was watching no longer exists. In-position: NEVER — flipping a live setup back would orphan
+    // the reconciler's position match.
     if (!inPosition) {
         $set.status = 'waiting'
         $set.armed_zone_id = null
@@ -178,36 +185,34 @@ async function _update(id, bound, userId) {
         $set['monitor_state.next_check_at'] = null
     }
 
-    await db.collection(COLLECTION).updateOne({ id, kind: KIND }, { $set })
-    const updated = await db.collection(COLLECTION).findOne({ id, kind: KIND })
+    const res = await crud.patchOwned(id, userId, $set)
+    if (!res.ok) return res
     logger.info(LOG, `updated setup ${id} (${inPosition ? 'light/in-position' : 'full re-arm'})`)
-    return { ok: true, setup: stripId(updated) }
+    return { ok: true, setup: res.doc }
 }
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
+// Thin by design: the shared crud owns the owner guard, the sort and stripId; what stays here is
+// the per-kind judgment layered on top (status vocabulary, the arm gate, terminal-closed).
 
 async function getSetup(id, userId) {
-    const db  = await getDb()
-    const doc = await db.collection(COLLECTION).findOne({ id, kind: KIND, userId })
-    return doc ? stripId(doc) : null
+    const res = await crud.getOwnedStripped(id, userId)
+    return res.ok ? res.doc : null
 }
 
 async function listSetups(userId, { status = null } = {}) {
-    const db    = await getDb()
-    const query = { kind: KIND, userId, ...(status ? { status } : {}) }
-    const docs  = await db.collection(COLLECTION).find(query).sort({ savedAt: -1 }).toArray()
-    return docs.map(stripId)
+    return crud.list(userId, { filter: status ? { status } : {} })
 }
 
 /**
  * Patch a setup. Only status transitions and monitor-owned fields go through here; a plan rewrite
- * belongs in generateSetup(updateId). Arming ('looking') stamps activatedAt and clears the check
- * timer so Talos picks it up on the next tick.
+ * belongs in generateSetup(updateId). Arming ('waiting' → 'looking') stamps activatedAt and clears
+ * the check timer so Talos picks it up on the next tick.
  */
 async function patchSetup(id, patch, userId) {
-    const db = await getDb()
-    const cur = await db.collection(COLLECTION).findOne({ id, kind: KIND, userId })
-    if (!cur) return { ok: false, reason: 'not_found' }
+    const found = await crud.getOwned(id, userId)
+    if (!found.ok) return found
+    const cur = found.doc
 
     const $set = {}
     if (patch?.status !== undefined) {
@@ -230,19 +235,11 @@ async function patchSetup(id, patch, userId) {
 
     if (Object.keys($set).length === 0) return { ok: false, reason: 'nothing_to_patch' }
 
-    await db.collection(COLLECTION).updateOne({ id, kind: KIND }, { $set })
-    const updated = await db.collection(COLLECTION).findOne({ id, kind: KIND })
-    return { ok: true, setup: stripId(updated) }
+    const res = await crud.patchOwned(id, userId, $set)
+    return res.ok ? { ok: true, setup: res.doc } : res
 }
 
-/** Delete a setup. A live position is delete-locked — close it at the broker first. */
+/** Delete a setup. A live position is delete-locked (deleteLock) — close it at the broker first. */
 async function deleteSetup(id, userId) {
-    const db  = await getDb()
-    const cur = await db.collection(COLLECTION).findOne({ id, kind: KIND, userId })
-    if (!cur) return { ok: false, reason: 'not_found' }
-    if (cur.status === 'long' || cur.status === 'short') return { ok: false, reason: 'in_position' }
-
-    await db.collection(COLLECTION).deleteOne({ id, kind: KIND, userId })
-    logger.info(LOG, `deleted setup ${id}`)
-    return { ok: true }
+    return crud.remove(id, userId)
 }

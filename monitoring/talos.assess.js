@@ -131,7 +131,7 @@ Always include "read": ONE short, plain first-person sentence — what you see a
 Verdicts: "enter" (this is the moment), "wait" (not yet, keep watching), "stand_aside" (the premise is damaged — don't take it now), "edit" (the map is stale and needs re-drawing; provide edit_proposal), "let_expire" (expiry review only).
 
 Output ONLY a JSON object, no prose:
-{"timeframe_used":"15min","read":"<one first-person sentence>","factors":[{"kind":"structure","present":true,"note":"..."}],"verdict":"enter|wait|stand_aside|edit|let_expire","warning":"<one line, ONLY when the verdict is not enter: what the user should know before they confirm anyway>","next_check_min":15,"memo_update":"..."}
+{"timeframe_used":"15min","read":"<one first-person sentence>","factors":[{"kind":"structure","present":true,"note":"..."}],"verdict":"enter|wait|stand_aside|edit|let_expire","warning":"<one line, ONLY when the verdict is not enter: what is missing or wrong, for the setup's record — the user is NOT asked to enter on a non-enter verdict, so this is not pre-confirmation copy>","next_check_min":15,"memo_update":"..."}
 Include "edit_proposal":{"why":"...","changes":{}} only when the verdict is "edit".`
 
 function _watchBlock(setup) {

@@ -304,7 +304,7 @@ async function _runAssessment(call, systemPrompt, buildUserText, label) {
             ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }, { type: 'text', text: userText }]
             : userText
 
-        const { model, reasoningEffort } = await _hermesRouting(call.user_id)
+        const { model, reasoningEffort } = await _hermesRouting(call.userId)
         const thinking  = _thinkingConfig(reasoningEffort)
         const maxTokens = thinking ? ASSESS_MAX_TOKENS_THINKING : ASSESS_MAX_TOKENS
         const system    = [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
@@ -396,7 +396,7 @@ confirm=true → the entry still stands; confirm=false → stand aside for now.`
 // returns the first-pass raw unchanged (fail-open, see _applyEntryConfirmation).
 async function _confirmEntryWithBrowse(call, zone, raw) {
     try {
-        const { model, reasoningEffort } = await _hermesRouting(call.user_id)
+        const { model, reasoningEffort } = await _hermesRouting(call.userId)
         const thinking = _thinkingConfig(reasoningEffort)
         const drivers  = (call.market_sensitivity?.drivers ?? []).join(', ') || 'the broad indices'
         const userText = [

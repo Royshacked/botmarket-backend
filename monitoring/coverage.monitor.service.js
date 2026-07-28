@@ -79,7 +79,7 @@ export async function _checkCoverage(db, cov, nowMs, deps = _deps) {
     const patch = { gap, revision_kind: verdict.state, revision_note: note }
     const status = statusForState(verdict.state)
     if (status) patch.status = status
-    await deps.updateCoverage(cov.id, patch, cov.user_id, true)
+    await deps.updateCoverage(cov.id, patch, cov.userId)
     await db.collection(COLLECTION).updateOne({ id: cov.id }, bookkeeping)   // updateCoverage doesn't touch monitor.*
     deps.notify(cov, verdict)
     return verdict

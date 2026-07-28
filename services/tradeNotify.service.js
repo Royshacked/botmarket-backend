@@ -9,11 +9,10 @@
  *
  * Manual-mode fills keep their own inline FillCard (manualNotify) — this covers the two gaps:
  * paper/live entry confirmation (was a silent modal) and Kairos readiness/expiry (was a poll
- * card + a silent 'expired' terminal state).
+ * card + a silent terminal expiry).
  *
  * Shape is split into pure builders (unit-tested — the { userId, content, type, payload, botId,
  * actions } a card sends) and thin async wrappers that hand the builder's output to postBotCard.
- * Call docs store the owner as `user_id` (see normalizeCall), NOT `userId`.
  */
 
 import { cardActions } from '../api/chat/chat.service.js'
@@ -54,19 +53,17 @@ export function buildIdeaEntryConfirm(idea, note = null) {
  * silently swallow the warning. Shared TRANSPORT (postBotCard + cardActions), own COPY — the
  * house rule.
  *
- * Talos advises but never vetoes, so this card fires on ANY verdict. When the verdict is not
- * "enter", the warning leads the copy: the user must see the objection before they confirm, not
- * after. `read` carries Talos's one-line monologue for the card body.
+ * This fires ONLY on an `enter` verdict — a fulfilled setup, not merely a tripped zone. A card
+ * that arrives is therefore never hedged: there is no "but Talos flags…" variant, because a setup
+ * Talos declined never gets here (it stays 'looking' instead). `read` carries Talos's one-line
+ * monologue for the card body; the copy leads with the SETUP being confirmed, not the zone, since
+ * the zone alone was never what the user is being asked about.
  */
 export function buildSetupEntryConfirm(setup, assessment = null) {
-    const dir     = String(setup?.direction || '').toUpperCase()
-    const warning = assessment?.warning ?? null
-    const lead    = warning
-        ? `Price reached your zone — ${dir} ${setup?.asset}, but Talos flags: ${warning}`
-        : `Price reached your zone — ${dir} ${setup?.asset}.`
+    const dir = String(setup?.direction || '').toUpperCase()
     return {
         userId:  setup?.userId ?? null,
-        content: `${lead} Confirm to place your order.`,
+        content: `Your ${dir} ${setup?.asset} setup is confirmed — price reached the zone and the setup filled in. Confirm to place your order.`,
         type:    'entry_confirm',
         payload: {
             kind:      'setup',
@@ -75,7 +72,6 @@ export function buildSetupEntryConfirm(setup, assessment = null) {
             direction: setup?.direction ?? null,
             zoneId:    assessment?.zone_id ?? setup?.armed_zone_id ?? null,
             verdict:   assessment?.verdict ?? null,
-            warning,
             read:      assessment?.read ?? null,
         },
         botId:   'mentor',
@@ -92,7 +88,7 @@ export function buildCallReady(call, assessment = null) {
     const hasNums = p && Number.isFinite(p.entry) && Number.isFinite(p.stop)
     const bits    = hasNums ? ` (entry ${p.entry}, stop ${p.stop})` : ''
     return {
-        userId:  call?.user_id ?? null,
+        userId:  call?.userId ?? null,
         content: `Kairos — ${call?.asset} is ready to enter${bits}. Open the call to confirm.`,
         type:    'entry_confirm',
         payload: { kind: 'call', callId: call?.id, asset: call?.asset, direction: call?.bias ?? null },
@@ -101,13 +97,17 @@ export function buildCallReady(call, assessment = null) {
     }
 }
 
-/** Kairos call thesis expiring ('edit' → re-map) or expired ('expired' → let it go / delete). */
+/**
+ * Kairos call thesis went stale: `kind` is 'edit' (re-map it) or 'expired' (let it go / delete).
+ * NB `kind` is this CARD's parameter, not the call's status — a stale thesis is the invalidation
+ * axis; the call itself stays 'looking' until the user acts.
+ */
 export function buildCallExpiry(call, kind, why = null) {
     const content = kind === 'expired'
         ? `Kairos — ${call?.asset} thesis expired. Edit to re-map it or delete the call.`
         : `Kairos — ${call?.asset} thesis is expiring. Re-map it or let it go.`
     return {
-        userId:  call?.user_id ?? null,
+        userId:  call?.userId ?? null,
         content,
         type:    'call_expiry',
         payload: { callId: call?.id, asset: call?.asset, kind, why: why ?? null },
@@ -127,7 +127,7 @@ export function buildCallManage(call, card) {
         let_run:      'let it run',
     }[verb] ?? 'manage the trade'
     return {
-        userId:  call?.user_id ?? null,
+        userId:  call?.userId ?? null,
         content: `Kairos — ${asset}: I want to ${verbCopy}. Open the call to accept or dismiss.`,
         type:    'call_manage',
         payload: { callId: call?.id, asset, verdict: verb ?? null, read: card?.read ?? null },
@@ -147,7 +147,7 @@ export function buildCallReentry(call, read = null, outcome = null) {
     const stopBit = Number.isFinite(px) ? ` at ${px}` : ''
     const why     = read?.why ? ` ${read.why}` : ''
     return {
-        userId:  call?.user_id ?? null,
+        userId:  call?.userId ?? null,
         content: `Kairos — ${asset} stopped out${stopBit}, but the thesis still looks intact.${why} Re-enter or close it out?`,
         type:    'call_reentry',
         payload: { callId: call?.id, asset, exit_price: Number.isFinite(px) ? px : null, why: read?.why ?? null },

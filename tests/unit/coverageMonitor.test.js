@@ -6,7 +6,7 @@ import { _checkCoverage } from '../../monitoring/coverage.monitor.service.js'
 // Analyst P5 — the monitor's per-coverage check, with mocked price/consensus/DB (deps injectable).
 
 const cov = (over = {}) => ({
-    id: 'cov1', user_id: 'u1', symbol: 'NVDA', rating: 'buy',
+    id: 'cov1', userId: 'u1', symbol: 'NVDA', rating: 'buy',
     price_target: { value: 200 },
     gap: { our_pt: 200, consensus_pt: 180, pct: 11.11 },
     risk_reward: { bull: 240, base: 200, bear: 150 },

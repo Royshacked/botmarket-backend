@@ -9,12 +9,26 @@
 // estimates/price_target/gap; the Analyst agent (P3) authors the thesis.
 
 import { randomUUID }      from 'crypto'
-import { getDb, stripId }  from '../../providers/mongodb.provider.js'
+import { getDb }           from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
+import { makeEntityCrud }  from '../../services/entity/entityCrud.service.js'
 
 const LOG        = '[coverage]'
 const COLLECTION = 'coverage'
+
+// Owner-scoped CRUD (the shared mechanism), same factory the entity kinds use. Coverage differs
+// only in its wiring, not its rules: its own collection, no `kind` discriminator, and recency is
+// `updated_at` — a thesis is as fresh as its last revision, not its initiation.
+//
+// No deleteLock: retiring is a STATUS change through updateCoverage, not a delete. What stays
+// below is coverage judgment — one-per-(user,symbol) initiation, the revision trail, and which
+// plan fields an update may rewrite.
+const crud = makeEntityCrud({
+    collection: COLLECTION,
+    sortBy:     { updated_at: -1 },
+    log:        LOG,
+})
 
 // Rating vocabulary — mirrors FMP grades-consensus so our rating and the Street's are comparable.
 export const RATINGS  = ['strong_buy', 'buy', 'hold', 'sell', 'strong_sell']
@@ -23,7 +37,7 @@ export const RATINGS  = ['strong_buy', 'buy', 'hold', 'sell', 'strong_sell']
 export const STATUSES = ['active', 'thesis_broken', 'target_hit', 'retired', 'watchlist']
 const DEFAULT_STATUS = 'active'
 
-// Plan fields re-written on an update; identity (id/user_id/symbol/created_at) + revisions history
+// Plan fields re-written on an update; identity (id/userId/symbol/created_at) + revisions history
 // are preserved out of band.
 const PLAN_FIELDS = ['sector', 'thesis', 'rating', 'price_target', 'estimates', 'gap',
     'catalysts', 'kill_criteria', 'risk_reward', 'conviction', 'status', 'evidence']
@@ -70,7 +84,8 @@ function normalizeCoverage(raw, userId = null) {
     const now = new Date().toISOString()
     return {
         id:            _str(r.id) ?? `cov_${symbol || 'x'}_${randomUUID().slice(0, 8)}`,
-        user_id:       userId,
+        // Owner — camelCase like every other owner-scoped list (the payload below stays snake_case).
+        userId,
         symbol,
         sector:        _str(r.sector),
         thesis:        _str(r.thesis),                 // the VARIANT PERCEPTION vs consensus
@@ -118,8 +133,8 @@ function _diffPlan(prev, next) {
 async function _ensureIndexes(db) {
     await db.collection(COLLECTION).createIndex({ id: 1 }, { unique: true })
     // One coverage per (user, symbol) — unique is the race backstop for the initiate check below.
-    await db.collection(COLLECTION).createIndex({ user_id: 1, symbol: 1 }, { unique: true })
-    await db.collection(COLLECTION).createIndex({ user_id: 1, status: 1 })
+    await db.collection(COLLECTION).createIndex({ userId: 1, symbol: 1 }, { unique: true })
+    await db.collection(COLLECTION).createIndex({ userId: 1, status: 1 })
 }
 
 // ─── CRUD ────────────────────────────────────────────────────────────────────
@@ -131,14 +146,14 @@ async function initiateCoverage(raw, userId) {
     try {
         const db = await getDb()
         await _ensureIndexes(db)
-        const existing = await db.collection(COLLECTION).findOne({ user_id: userId, symbol })
+        const existing = await db.collection(COLLECTION).findOne({ userId, symbol })
         if (existing) return { ok: false, reason: 'already_covered', id: existing.id }
 
         const doc = normalizeCoverage(raw, userId)
         doc.revisions = [newRevision({ kind: 'initiate', note: _str(raw?.init_note) ?? `Initiated coverage on ${symbol}` })]
-        await db.collection(COLLECTION).insertOne(doc)
+        const saved = await crud.insert(doc)
         logger.info(LOG, 'coverage initiated', { id: doc.id, symbol, sector: doc.sector })
-        return { ok: true, coverage: stripId(doc) }
+        return { ok: true, coverage: saved }
     } catch (err) {
         // Lost the race to a concurrent initiate on the same (user, symbol) → unique-index conflict.
         if (err?.code === 11000) return { ok: false, reason: 'already_covered' }
@@ -147,64 +162,44 @@ async function initiateCoverage(raw, userId) {
     }
 }
 
-async function getCoverage(userId, { sector = null, status = null } = {}, isAdmin = false) {
-    try {
-        const db = await getDb()
-        const query = isAdmin ? {} : { user_id: userId }
-        // Validate/coerce the filters — never let a raw query param (e.g. status[$ne]) inject a Mongo operator.
-        if (typeof sector === 'string' && sector.trim()) query.sector = sector.trim()
-        if (typeof status === 'string' && STATUSES.includes(status)) query.status = status
-        const rows = await db.collection(COLLECTION).find(query).sort({ updated_at: -1 }).toArray()
-        return rows.map(stripId)
-    } catch (err) {
-        logger.error(LOG, 'Failed to get coverage', err)
-        return []
-    }
+async function getCoverage(userId, { sector = null, status = null } = {}) {
+    // Validate/coerce the filters — never let a raw query param (e.g. status[$ne]) inject a Mongo operator.
+    const filter = {}
+    if (typeof sector === 'string' && sector.trim()) filter.sector = sector.trim()
+    if (typeof status === 'string' && STATUSES.includes(status)) filter.status = status
+    return crud.list(userId, { filter })
 }
 
-async function getCoverageById(id, userId, isAdmin = false) {
-    try {
-        const db  = await getDb()
-        const doc = await db.collection(COLLECTION).findOne({ id })
-        if (!doc) return { ok: false, reason: 'not_found' }
-        if (doc.user_id && doc.user_id !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
-        return { ok: true, coverage: stripId(doc) }
-    } catch (err) {
-        logger.error(LOG, 'Failed to get coverage by id', err)
-        return { ok: false, error: err }
-    }
+async function getCoverageById(id, userId) {
+    const res = await crud.getOwnedStripped(id, userId)
+    return res.ok ? { ok: true, coverage: res.doc } : res
 }
 
 // In-place update of a live thesis. Re-normalizes the patch merged over current (partial patches keep
 // prior fields + identity), APPENDS a revision (never loses history), preserves created_at.
-async function updateCoverage(id, patch, userId, isAdmin = false) {
-    try {
-        const db  = await getDb()
-        const cur = await db.collection(COLLECTION).findOne({ id })
-        if (!cur) return { ok: false, reason: 'not_found' }
-        if (cur.user_id && cur.user_id !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+async function updateCoverage(id, patch, userId) {
+    const found = await crud.getOwned(id, userId)
+    if (!found.ok) return found
+    const cur = found.doc
 
-        const p      = (patch && typeof patch === 'object') ? patch : {}
-        const merged = normalizeCoverage(
-            { ...cur, ...p, id: cur.id, symbol: cur.symbol, created_at: cur.created_at, revisions: cur.revisions },
-            cur.user_id ?? userId,
-        )
-        const revision = newRevision({ kind: _str(p.revision_kind) ?? 'update', note: _str(p.revision_note), changed: _diffPlan(cur, merged) })
-        const revisions = [revision, ..._arr(cur.revisions)]
+    const p      = (patch && typeof patch === 'object') ? patch : {}
+    const merged = normalizeCoverage(
+        { ...cur, ...p, id: cur.id, symbol: cur.symbol, created_at: cur.created_at, revisions: cur.revisions },
+        cur.userId ?? userId,
+    )
+    const revision = newRevision({ kind: _str(p.revision_kind) ?? 'update', note: _str(p.revision_note), changed: _diffPlan(cur, merged) })
+    const revisions = [revision, ..._arr(cur.revisions)]
 
-        const $set = { updated_at: merged.updated_at, revisions }
-        for (const k of PLAN_FIELDS) $set[k] = merged[k]
+    const $set = { updated_at: merged.updated_at, revisions }
+    for (const k of PLAN_FIELDS) $set[k] = merged[k]
 
-        const updated = await db.collection(COLLECTION).findOneAndUpdate({ id }, { $set }, { returnDocument: 'after' })
-        logger.info(LOG, 'coverage updated', { id, kind: revision.kind })
-        return { ok: true, coverage: stripId(updated) }
-    } catch (err) {
-        logger.error(LOG, 'Failed to update coverage', err)
-        return { ok: false, error: err }
-    }
+    const res = await crud.patchOwned(id, userId, $set)
+    if (!res.ok) return res
+    logger.info(LOG, 'coverage updated', { id, kind: revision.kind })
+    return { ok: true, coverage: res.doc }
 }
 
 // Churn a name out of the book (S5) — a status change to `retired`, logged as a revision.
-async function retireCoverage(id, userId, isAdmin = false) {
-    return updateCoverage(id, { status: 'retired', revision_kind: 'retire', revision_note: 'Coverage retired' }, userId, isAdmin)
+async function retireCoverage(id, userId) {
+    return updateCoverage(id, { status: 'retired', revision_kind: 'retire', revision_note: 'Coverage retired' }, userId)
 }

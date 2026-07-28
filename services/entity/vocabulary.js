@@ -13,24 +13,39 @@
 
 // ─── Lifecycle statuses ───────────────────────────────────────────────────────
 //
-// Pre-entry vocabulary is kind-specific; from entry onward every kind CONVERGES on the execution
-// vocabulary (hit → long/short → closed) so the kind-blind reconciler can match any of them
-// (ENTITY_MODEL P3b).
+// ONE ladder, spelled the same way by every kind:
+//
+//   waiting → looking → hit → long|short → closed
+//   (created,  monitored,  entry fired,  in position,  terminal)
+//
+// A kind may use a SUBSET, never a synonym. `resting` is the one kind-specific rung — an idea's
+// stop-entry order genuinely sits AT the broker, which is a different thing from being watched.
+//
+// This is deliberately small. Earlier iterations grew `unarmed`, `watching` and `ready` as second
+// spellings of `waiting`, `looking` and `hit`, and every one of them produced the same bug: a gate
+// somewhere kept testing the old word and silently matched nothing. Two states that differ only in
+// a DETAIL belong in a field, not a status — price being inside a zone is `armed_zone_id`, not a
+// lifecycle rung.
+//
+// A plan that goes stale before it ever enters is NOT a lifecycle state either — that is the
+// INVALIDATION axis below, which ideas have always had.
 
 export const STATUS = {
-    WAITING:  'waiting',    // created, NOT monitored — arming is a separate user act
-    LOOKING:  'looking',    // armed; the monitor is watching for entry
-    WATCHING: 'watching',   // (calls) price is inside a mapped zone right now
-    RESTING:  'resting',    // (ideas) a stop-market entry is resting at the broker
-    HIT:      'hit',        // entry triggered; an order is placed or awaiting confirm
+    WAITING:  'waiting',    // created / re-armed — nothing is monitoring it
+    LOOKING:  'looking',    // a monitor is watching for entry
+    RESTING:  'resting',    // (ideas) a stop-market entry is resting AT the broker
+    HIT:      'hit',        // entry triggered — an order is placed or awaiting the user's confirm
     LONG:     'long',
     SHORT:    'short',
-    CLOSED:   'closed',     // terminal
+    CLOSED:   'closed',     // terminal — `closedReason` says why (expired / dismissed / stopped / …)
 }
 
-// Calls confirmed BEFORE the P3b cutover still carry these; kept so those documents stay
-// manageable. New writes never use them.
-export const LEGACY_POSITION_STATUSES = ['confirmed', 'in_position']
+/**
+ * Entry fired, the user is being asked — the state in which confirming actually places orders.
+ * placeOrdersForIdea is kind-blind so it gates on this, never on one kind's vocabulary.
+ * `ordersPlacedAt` is what prevents a double-place, not the status.
+ */
+export const AWAITING_CONFIRM = [STATUS.HIT]
 
 /**
  * In a LIVE broker position. This is what the kind-blind reconciler matches on, so the words must
@@ -42,26 +57,55 @@ export const LIVE_POSITION = [STATUS.LONG, STATUS.SHORT]
 /** Past entry: an order exists at the broker, or is awaiting the user's confirm. */
 export const PAST_ENTRY = [STATUS.HIT, ...LIVE_POSITION]
 
-/** Past entry, including the transitional pre-P3b call statuses. */
-export const PAST_ENTRY_LEGACY = [...PAST_ENTRY, ...LEGACY_POSITION_STATUSES]
+/** Alias kept so call sites read as intent. No legacy spellings remain. */
+export const PAST_ENTRY_LEGACY = PAST_ENTRY
 
-/** Before entry — still being watched, nothing at the broker yet. */
-export const PRE_ENTRY = [STATUS.WAITING, STATUS.LOOKING, STATUS.WATCHING, STATUS.RESTING]
+/** Before entry — nothing at the broker yet, so the entity is freely editable and deletable. */
+export const PRE_ENTRY = [STATUS.WAITING, STATUS.LOOKING, STATUS.RESTING]
+
+/**
+ * ARMED — a monitor is actively watching this entity. One word now, but shared code must still ask
+ * THIS rather than the literal: it is the question ("is anything watching?"), and asking it by name
+ * is what stopped `setups.filter(s => s.status === 'looking')` from silently counting zero.
+ */
+export const ARMED = [STATUS.LOOKING]
+export const isArmed = (status) => ARMED.includes(status)
+
+/** Awaiting the user's confirm — kind-blind (see AWAITING_CONFIRM). */
+export const isAwaitingConfirm = (status) => AWAITING_CONFIRM.includes(status)
 
 export const TERMINAL = [STATUS.CLOSED]
 
+// ─── Invalidation — the SECOND axis ───────────────────────────────────────────
+//
+// Orthogonal to the lifecycle: a plan can go stale while it is still perfectly well `looking`.
+// Ideas have always had this (a price envelope watched by invalidation.monitor); calls used to
+// spend three lifecycle statuses on the same idea — `expiring` / `expired` / `dismissed` — which
+// is what made a call's language diverge from every other kind's.
+//
+// Fire-once latch: set it and the monitor stops re-firing until the user acts. The TRIGGER differs
+// by kind (an idea's price envelope, a call's or setup's `valid_until`); the state does not.
+export const INVALIDATION = {
+    DRIFTING: 'drifting',   // soft — running the wrong way, still alive
+    FIRED:    'fired',      // latched — awaiting the user (re-map it, or let it go)
+}
+/** What tripped it. 'lower'/'upper' are price-envelope edges; 'time' is an expiry window. */
+export const INVALIDATION_EDGES = ['lower', 'upper', 'time']
+export const isInvalidated = (status) => status === INVALIDATION.FIRED
+
 /**
- * The statuses each kind may hold. Subsets, not separate vocabularies:
- *   • idea  — has `resting` (a stop-market entry can rest at the broker) but no `watching`.
- *   • setup — no `resting` (a zone cannot rest as a broker order) and no `watching` (the card
- *     fires on any verdict, so a zone trip resolves to `hit` in the same wake).
- *   • call  — has `watching` (price inside a mapped zone) plus the legacy pair.
+ * The statuses each kind may hold — SUBSETS of the one ladder, never synonyms.
+ *
+ *   • idea  — the full ladder. `resting` is idea-only: a stop-market entry actually rests at the
+ *     broker, which is materially different from being watched.
+ *   • setup — no `resting` (a zone cannot rest as a broker order). Price sitting inside a zone is
+ *     `armed_zone_id` on a `looking` setup, not a status of its own.
+ *   • call  — same as setup. A thesis going stale pre-entry is the INVALIDATION axis, not a status.
  */
 export const STATUSES_BY_KIND = {
     idea:  [STATUS.WAITING, STATUS.LOOKING, STATUS.RESTING, STATUS.HIT, STATUS.LONG, STATUS.SHORT, STATUS.CLOSED],
     setup: [STATUS.WAITING, STATUS.LOOKING, STATUS.HIT, STATUS.LONG, STATUS.SHORT, STATUS.CLOSED],
-    call:  [STATUS.WAITING, STATUS.WATCHING, STATUS.HIT, STATUS.LONG, STATUS.SHORT, STATUS.CLOSED,
-        ...LEGACY_POSITION_STATUSES],
+    call:  [STATUS.WAITING, STATUS.LOOKING, STATUS.HIT, STATUS.LONG, STATUS.SHORT, STATUS.CLOSED],
 }
 
 export const statusesFor = (kind) => STATUSES_BY_KIND[kind] ?? []

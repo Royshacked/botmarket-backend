@@ -2,8 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     zoneGate, zoneDistance, proximityGapMin, _isPreActive, _isExpiring, _nextCheckAt, _checkSetup,
+    _nextStatus,
 } from '../../monitoring/talos.monitor.service.js'
 import { buildToolsFor, declaredKinds } from '../../monitoring/talos.assess.js'
+import { statusesFor, AWAITING_CONFIRM } from '../../services/entity/vocabulary.js'
 
 // Talos's gates. Everything here runs on EVERY wake for free — the expensive assessment only fires
 // when these say so — so a wrong gate is either a missed entry or a wasted LLM call on every poll.
@@ -13,7 +15,7 @@ const SETUP = {
     direction: 'long', type: 'swing', trade_mode: 'classical', timeframe: '1hr',
     ladder: ['4hr', '2hr', '1hr', '30min', '15min'],
     cadence: { min: 30, max: 240 },
-    status: 'looking',
+    status: 'looking',   // armed — the setup ladder's spelling, shared with calls
     entry_zones: [{ id: 'ez1', lower: 237.8, upper: 238.6, quantity: 100 }],
     stop_zones:  [{ id: 'sz1', lower: 234.8, upper: 235.9, quantity: 100 }],
     watch: [{ kind: 'structure', look_for: 'CHoCH up', timeframe: '15min', weight: 'primary' }],
@@ -185,16 +187,73 @@ test('price outside every zone reschedules without ever calling the model', asyn
     assert.equal(assessed, false, 'the cheap gate is the whole point')
 })
 
-test('a zone trip fires the card even when the verdict is NOT enter', async () => {
-    // The defining rule of this kind: Talos advises, it never vetoes.
-    let card = null
-    const res = await _checkSetup(LIVE, T, stubDeps({
-        assess: async () => ({ verdict: 'stand_aside', read: 'Semis are diverging.', warning: 'SMH is red while NVDA taps the zone.' }),
-        onCard: async (_s, a) => { card = a },
+// THE GATE. A zone trip buys an assessment, nothing more — only a fulfilled setup asks the user
+// to act. Every non-enter verdict holds at 'looking' with no card.
+for (const verdict of ['wait', 'stand_aside', 'edit']) {
+    test(`a zone trip with verdict "${verdict}" does NOT ask the user to confirm — it watches`, async () => {
+        let carded = false
+        const res = await _checkSetup(LIVE, T, stubDeps({
+            assess: async () => ({ verdict, read: 'Semis are diverging.', warning: 'SMH is red while NVDA taps the zone.' }),
+            onCard: async () => { carded = true },
+        }))
+        assert.equal(carded, false, 'a setup Talos declined must not produce a confirm card')
+        assert.equal(res.fired, undefined)
+        assert.equal(res.watching, true)
+        assert.equal(res.verdict, verdict)
+    })
+}
+
+// One ladder, shared by every kind. Pinned as a set so re-spelling any rung fails here first,
+// instead of silently at a gate that stops matching.
+test('a setup runs the SAME ladder as every other kind — no private words', () => {
+    for (const s of ['waiting', 'looking', 'hit', 'long', 'short', 'closed']) {
+        assert.ok(statusesFor('setup').includes(s), `setup should allow '${s}'`)
+        assert.ok(statusesFor('call').includes(s), `call should allow '${s}'`)
+        assert.ok(statusesFor('idea').includes(s), `idea should allow '${s}'`)
+    }
+    // The synonyms this kind grew and shed. Each one broke a gate while it existed.
+    for (const dead of ['unarmed', 'watching', 'ready']) {
+        assert.ok(!statusesFor('setup').includes(dead), `setup must not speak '${dead}'`)
+    }
+})
+
+test('_nextStatus walks the ladder: fulfilled → hit, otherwise → looking', () => {
+    assert.equal(_nextStatus('enter', 'zone_trip'), 'hit')
+    assert.equal(_nextStatus('wait', 'zone_trip'), 'looking')
+    assert.equal(_nextStatus('stand_aside', 'zone_trip'), 'looking')
+    assert.equal(_nextStatus('edit', 'zone_trip'), 'looking')
+    // Price sitting inside a zone is armed_zone_id on a `looking` setup — being in a zone is a
+    // detail of looking, not a lifecycle rung. It must never mint a status of its own again.
+    for (const v of ['enter', 'wait', 'stand_aside', 'edit']) {
+        for (const r of ['zone_trip', 'expiry_review']) {
+            assert.notEqual(_nextStatus(v, r), 'watching')
+        }
+    }
+})
+
+// placeOrdersForIdea is kind-blind and used to gate on status === 'hit', which silently refused
+// every setup confirm with reason 'not_hit'. The gate is now this shared set.
+test("a fulfilled setup's status is placeable by the kind-blind execution path", () => {
+    assert.ok(AWAITING_CONFIRM.includes(_nextStatus('enter', 'zone_trip')))
+    assert.ok(AWAITING_CONFIRM.includes('hit'), 'an idea still reaches placement as hit')
+})
+
+test('price leaving the zone drops a watching setup back to armed, still without an LLM call', async () => {
+    let assessed = false
+    const res = await _checkSetup({ ...LIVE, status: 'looking' }, T, stubDeps({
+        getPrice: async () => 300,                      // well outside every zone
+        assess:   async () => { assessed = true; return {} },
     }))
+    assert.equal(res.reason, 'scheduled')
+    assert.equal(assessed, false, 'un-watching is arithmetic, not a read')
+})
+
+test('an enter verdict — the setup FULFILLED — is what fires the card', async () => {
+    let carded = false
+    const res = await _checkSetup(LIVE, T, stubDeps({ onCard: async () => { carded = true } }))
+    assert.equal(carded, true)
     assert.equal(res.fired, true)
-    assert.equal(res.verdict, 'stand_aside')
-    assert.equal(card.warning, 'SMH is red while NVDA taps the zone.', 'the warning rides on the card')
+    assert.equal(res.verdict, 'enter')
 })
 
 test('the card names the tripped zone so the confirm dialog knows which one fired', async () => {

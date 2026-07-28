@@ -15,7 +15,7 @@ const LOG = '[coverageNotify]'
  * verdict = { state, reason, edge_gone } from coverage.assess.classifyGapState.
  */
 export function buildCoverageEvent(coverage, verdict) {
-    if (!coverage?.user_id || !verdict?.state) return null
+    if (!coverage?.userId || !verdict?.state) return null
     const sym = coverage.symbol
     const pt  = coverage.price_target?.value
     const state = verdict.state
@@ -37,7 +37,7 @@ export function buildCoverageEvent(coverage, verdict) {
     }
 
     return {
-        userId:  coverage.user_id,
+        userId:  coverage.userId,
         content,
         type:    'coverage_event',
         payload: { kind: 'coverage', symbol: sym, coverageId: coverage.id, state, edge_gone: !!verdict.edge_gone },

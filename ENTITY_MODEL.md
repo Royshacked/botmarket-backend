@@ -139,7 +139,12 @@ Hard coupling (P1b / P2–P4 — the real work):
   → likely holds per-entity (each idea/holding/call = one position/acct); CONFIRM, not assume
 - status-value coupling (ACTIVE=[long,short], resting/hit/looking/waiting) is idea-lifecycle vocab
 - direction:'both' (calls) NOT handled by closeSide — latent gap, resolve at P3
-- casing: idea camelCase vs call snake_case — absorbed ONLY if read via toEnvelope
+- casing: idea camelCase vs call snake_case PAYLOAD — absorbed ONLY if read via toEnvelope.
+  ENVELOPE fields are exempt: they carry ONE name per field across every kind. `userId` was the
+  violator (calls stored `user_id`), which silently broke the kind-blind owner filters — converged
+  by scripts/migrate-call-userid.mjs, and in the `coverage` collection by
+  scripts/migrate-coverage-userid.mjs. One owner name across every owner-scoped list is what lets
+  services/entity/entityCrud.service.js exist. Do not reintroduce a per-kind alias.
 ```
 
 ## P1b design — `entityRepo` persistence facade (behavior-preserving indirection)

@@ -73,13 +73,17 @@ test('the workspace mode is derived from the venue, never authored', () => {
     assert.equal(resolveMode({ broker: null }), 'live', 'unknown venue defaults to real money, not paper')
 })
 
-test('the status vocabulary converges on the execution vocab after entry', () => {
-    // The reconciler matches kind-blind on long/short, so those names must exist here verbatim.
+test('a setup speaks the ONE shared ladder — no private words', () => {
+    // The reconciler matches kind-blind on these names, so they must exist here verbatim.
     for (const s of ['waiting', 'looking', 'hit', 'long', 'short', 'closed']) {
         assert.ok(SETUP_STATUSES.has(s), s)
     }
-    assert.equal(SETUP_STATUSES.has('in_position'), false, 'no kind-specific alias for a live position')
-    // No 'watching': the card fires on any verdict, so a zone trip resolves to 'hit' in one wake
-    // and price is never inside a zone unresolved.
-    assert.equal(SETUP_STATUSES.has('watching'), false)
+    // Every synonym this kind grew and shed. Each existed for a while and each broke a gate:
+    // `unarmed`/`ready` left MainPage confirming on a status nothing wrote, `watching` left the
+    // Setups hub counting zero, and `in_position` was never a setup word at all.
+    for (const dead of ['unarmed', 'watching', 'ready', 'in_position']) {
+        assert.equal(SETUP_STATUSES.has(dead), false, `setups must not speak '${dead}'`)
+    }
+    // Price sitting inside a zone is armed_zone_id on a `looking` setup — a detail, not a rung.
+    assert.ok(SETUP_STATUSES.has('looking'))
 })

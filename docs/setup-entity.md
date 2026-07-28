@@ -152,7 +152,7 @@ running the legacy `idea` kind until those drain, then is deleted; Talos polls
 `kind:'setup'` only, so the two never contend.
 
 ```
-poll 60s → setups where next_check_at ≤ now, status ∈ [looking, watching, long, short]
+poll 60s → setups where next_check_at ≤ now, status ∈ [waiting, watching]
 
   claim (lease next_check_at forward — double-fire guard)
   ├─ active_from in the future?   → sleep until it opens
@@ -160,19 +160,27 @@ poll 60s → setups where next_check_at ≤ now, status ∈ [looking, watching, 
   ├─ market closed?               → sleep until open
   └─ fetch price
 
-  price inside an entry_zone?
+  price inside an entry_zone?          ← GATE 1 (arithmetic, free)
     no  → reschedule, tightening as price nears the nearest zone
-    yes → ASSESS → build the order plan → status 'hit' → card
+    yes → ASSESS                       ← GATE 2 (the heavy read)
+            enter → build the order plan → status 'ready' → card
+            else  → status 'watching', no card, look again on Talos's cadence
 
   ASSESS — mounts only the watch[] tools, judges against `thesis`:
     verdicts: enter | wait | stand_aside | edit | let_expire
-    → card · memo carried forward · next_check_at (self-chosen, clamped to cadence)
+    → memo carried forward · next_check_at (self-chosen, clamped to cadence)
 ```
 
-**The assessment never blocks.** On a zone trip the confirm card fires either way —
-a `wait` / `stand_aside` verdict rides along as a **warning leading the card copy**, not
-a veto. The user decides. This is Mentor's standing rule carried into monitoring:
-advisory, never gate.
+**The entry gate is the SETUP, not the zone.** This is the Hermes shape: the cheap
+arithmetic gate says price is *where* the setup lives, which is what makes an
+assessment worth paying for; the assessment says whether the setup actually
+*happened*. That second gate is what `watch[]` exists for.
+
+Only an `enter` verdict — "this is the moment" — asks the user to confirm an entry.
+A `wait` / `stand_aside` / `edit` read means the setup has not fulfilled, so no card
+fires: asking someone to confirm an entry Talos just declined is not advice, it is
+noise. The read is still recorded on the setup (assessment, memo, timeline), so the
+objection is visible without interrupting anyone.
 
 **A trigger builds its order plan in the same step it flips to `hit`.** `pendingOrder.plan`
 + `orderState` are what the execution path actually places; a `hit` without them opens the
@@ -186,17 +194,35 @@ reads clean. One line in the assessment prompt.
 **At `valid_until`: expiry review**, like Hermes — `enter` (it finally looks good) /
 `edit` (roll it forward with new levels) / `let_expire`. Never a silent auto-close.
 
-Statuses: `waiting` (created, unarmed — not monitored) → `looking` (armed, the ONLY
-status Talos polls) → `hit` (plan built, awaiting confirm) → `long`/`short` → `closed`.
-Pre-position vocabulary is kind-specific; on entry it converges to the execution vocab,
-exactly as calls do (ENTITY_MODEL P3b).
+Statuses: `unarmed` (persisted, NOT monitored) → `waiting` (armed) → `watching` (price
+is inside a zone, setup not yet fulfilled) → `ready` (plan built, awaiting confirm) →
+`long`/`short` → `closed`. Talos polls `waiting` **and** `watching`.
 
-There is deliberately no `watching` state: because the card fires on any verdict, a zone
-trip resolves to `hit` within the same wake, so price is never inside a zone unresolved.
+**`waiting` → `watching` → `ready` is the SAME ladder a Kairos call runs.** A setup and
+a call are the same shape of thing — a plan armed against zones, assessed by a monitor,
+surfaced for a decision — so they say it with the same words. The one divergence is
+`unarmed` in front: a call is live the moment it is saved, whereas Generate and Arm are
+two separate acts for a setup and only the second starts Talos spending.
 
-**Arming is the real gate.** Only from `looking` does Talos spend price fetches and
-assessments, so `PATCH status:'looking'` re-runs the full Generate check — a setup whose
-broker disconnected after Generate is refused rather than polled forever.
+`ready` carries more than a call's does: a setup's order plan is stamped in the same
+write, which is why its card routes straight to the order dialog while a call's routes
+to its pop-out. `ready` is NOT past-entry — nothing is at the broker until the user
+confirms, so a ready setup stays freely re-plannable and deletable. `hit` remains in the
+allowed set for the kind-blind execution path (a manual fill, a forced trigger) but Talos
+never writes it.
+
+`watching` exists because the zone is only the first gate: price can sit inside a zone
+for hours while the setup fails to fulfil, and that state has to be both visible and
+still polled. Price leaving the zone drops it back to `waiting`.
+
+The legacy `idea` kind keeps its own older spelling of armed (`looking`) and is
+deliberately NOT migrated — it is draining, and re-spelling a live money path to match a
+naming convention is not worth the risk.
+
+**Arming is the real gate.** Only from `waiting` does Talos spend price fetches and
+assessments, so `PATCH status:'waiting'` re-runs the full Generate check — a setup whose
+broker disconnected after Generate is refused rather than polled forever. A pre-position
+plan rewrite disarms back to `unarmed`: the plan Talos was watching no longer exists.
 
 ## 6. Execution boundary — where a zone becomes a price
 

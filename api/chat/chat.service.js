@@ -13,7 +13,11 @@ export const BOT_USER_ID = 'axl'   // the default + the one conversational bot
 // posts under its authoring agent so the social-chat conversation sender matches the
 // card's agent tag — a portfolio review reads "from Atlas", an invalidation "from Idea".
 // The specialist threads are notify-only feeds; only Axl handles replies.
-export const BOT_IDS = ['axl', 'idea', 'portfolio', 'scanner', 'kairos', 'analyst']
+// NB: this list is the GATE, not a label — postBotCard silently falls back to Axl for an id that
+// isn't here, so a missing entry doesn't error, it misattributes. `mentor` was missing while
+// buildSetupEntryConfirm posted under it, which is why Talos's setup cards arrived from Axl.
+// The frontend registry (agentMeta.jsx BOT_IDS) must stay in step with this one.
+export const BOT_IDS = ['axl', 'idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'analyst']
 export const isBot = (id) => BOT_IDS.includes(String(id))
 const BOT_WELCOME = "Hi, I'm Axl — your trading assistant. I'll notify you here about portfolio reviews, position alerts, and anything that needs your attention, and you can ask me how the app works. Just message me."
 

@@ -2,31 +2,31 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildSetupEntryConfirm } from '../../services/tradeNotify.service.js'
 
-// The setup entry card. Talos advises but never vetoes, so this card fires on ANY verdict — which
-// makes the warning the only thing standing between a flagged setup and a one-click confirm. If it
-// isn't in the visible copy, it may as well not exist.
+// The setup entry card. It fires ONLY on an `enter` verdict — a fulfilled setup, not merely a
+// tripped zone (talos.monitor holds every other verdict at 'watching' and posts nothing). So the
+// card is never hedged: there is no warning variant, because a declined setup never gets here.
 
 const SETUP = { id: 'setup_NVDA_1', userId: 'u1', asset: 'NVDA', direction: 'long', armed_zone_id: 'ez1' }
 
-test('a clean entry reads as a plain confirm', () => {
-    const card = buildSetupEntryConfirm(SETUP, { verdict: 'enter', warning: null, read: 'Trigger is live.' })
-    assert.match(card.content, /Price reached your zone — LONG NVDA\./)
+test('the copy says the SETUP is confirmed, not merely that price tagged a zone', () => {
+    const card = buildSetupEntryConfirm(SETUP, { verdict: 'enter', read: 'Trigger is live.' })
+    assert.match(card.content, /LONG NVDA setup is confirmed/)
     assert.match(card.content, /Confirm to place your order\./)
-    assert.equal(card.payload.warning, null)
 })
 
-test("a flagged entry LEADS with the warning — the user sees it before the button", () => {
+test('the card carries NO warning channel — a hedged confirm is what the gate exists to prevent', () => {
+    // Even handed a warning (a stale assessment, a caller mistake), the copy must not turn into
+    // "confirm anyway": reaching this builder already means Talos said enter.
     const card = buildSetupEntryConfirm(SETUP, {
-        verdict: 'stand_aside', warning: 'SMH is red while NVDA taps the zone.', read: 'Semis diverging.',
+        verdict: 'enter', warning: 'SMH is red while NVDA taps the zone.', read: 'Semis diverging.',
     })
-    assert.match(card.content, /Talos flags: SMH is red while NVDA taps the zone\./)
-    // The warning must appear before the call to action, not trail after it.
-    assert.ok(card.content.indexOf('SMH is red') < card.content.indexOf('Confirm to place'))
+    assert.doesNotMatch(card.content, /Talos flags/)
+    assert.equal(card.payload.warning, undefined)
 })
 
 test('the verdict and read ride in the payload for the detail view', () => {
-    const card = buildSetupEntryConfirm(SETUP, { verdict: 'wait', warning: 'No reclaim yet.', read: 'Coiling under it.', zone_id: 'ez2' })
-    assert.equal(card.payload.verdict, 'wait')
+    const card = buildSetupEntryConfirm(SETUP, { verdict: 'enter', read: 'Coiling under it.', zone_id: 'ez2' })
+    assert.equal(card.payload.verdict, 'enter')
     assert.equal(card.payload.read, 'Coiling under it.')
     assert.equal(card.payload.zoneId, 'ez2', 'the assessment zone wins over the stored one')
 })

@@ -35,11 +35,12 @@ const CLAIM_LEASE_MS      = CHECK_TIMEOUT_MS
 const EXPIRY_THRESHOLD_MS = 15 * 60_000   // run the expiry review within 15m of valid_until
 const TIMELINE_MAX        = 50
 
-// The only status the loop polls. 'waiting' is created-but-unarmed (the user arms it); everything
-// from 'hit' onward belongs to the execution path, not to readiness.
-//
-// There is deliberately no 'watching' state: because the card fires on ANY verdict, price is never
-// sitting inside a zone unresolved — a trip resolves to 'hit' in the same wake.
+// The statuses the loop polls — the readiness ladder a setup shares with a call:
+//   'waiting'  persisted but NOT monitored (Arm is the user's separate act) — never polled
+//   'looking'  armed — polled. Price sitting INSIDE a zone is `armed_zone_id`, not a status:
+//              being in a zone is a detail of looking, not a different lifecycle rung.
+//   'hit'      fulfilled; the user is being asked to confirm — hands over to the execution path
+// Everything from 'hit' onward belongs to execution, not readiness, so it leaves the loop.
 const ACTIVE_STATUSES = ['looking']
 
 const _loop = createPollLoop({ intervalMs: POLL_INTERVAL_MS, tick: _tick, eager: true, log: LOG, name: 'talos monitor' })
@@ -121,7 +122,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     if (_isPreActive(setup, nowMs)) {
         const wakeAt = new Date(Date.parse(setup.active_from)).toISOString()
         await _persist(setup.id, {
-            status: 'looking',
+            status: 'waiting',
             'monitor_state.next_check_at': wakeAt,
             'monitor_state.check_count': (setup.monitor_state?.check_count ?? 0) + 1,
         }, _entry('pre_active', { nowMs, nextAt: wakeAt }))
@@ -170,12 +171,16 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
 /**
  * Act on a verdict.
  *
- * The defining rule of this kind: on a zone trip the confirm card fires REGARDLESS of the verdict.
- * Talos advises, it never vetoes — a `wait` / `stand_aside` read rides along as a warning ON the
- * card, and the user decides. (docs/setup-entity.md §5.)
+ * THE ENTRY GATE IS THE SETUP, NOT THE ZONE. A zone trip is only the first of two gates: it says
+ * price is WHERE the setup lives, which is what makes an assessment worth paying for. Whether the
+ * setup is actually fulfilled is the second gate, and that is what `watch[]` is for — so only an
+ * `enter` verdict ("this is the moment") asks the user to confirm an entry.
  *
- * Card spam isn't a risk here because firing moves the setup to 'hit', which leaves the polled
- * statuses entirely.
+ * Anything else means the setup has not fulfilled: the card would be asking the user to enter a
+ * trade Talos just said isn't there. Those keep looking instead — Talos's own
+ * tightened cadence, assessment recorded so the read is visible on the setup without a card.
+ *
+ * Card spam isn't a risk: firing moves the setup to 'hit', which leaves the polled statuses.
  */
 async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
     const assessment = {
@@ -206,11 +211,21 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
         return { reason, verdict: raw.verdict, closed: true }
     }
 
-    // A zone trip always surfaces — Talos advises, it never vetoes. Build the executable order
-    // plan in the SAME step that flips to 'hit': a 'hit' setup with no pendingOrder would open the
-    // confirm dialog onto nothing and dead-end there (the bug that shipped in the first draft).
+    // Price is in a zone but the setup did NOT fulfil — the second gate is the point of the
+    // assessment, so this is the normal outcome, not an error. Stay 'looking' (still polled)
+    // and let Talos's self-chosen cadence decide when to look again. No card: asking the user to
+    // confirm an entry Talos just declined is the one thing this gate exists to prevent.
+    if (zone && raw.verdict !== 'enter') {
+        await _persist(setup.id, { ...base, status: _nextStatus(raw.verdict, reason), armed_zone_id: zone.id },
+            _entry(reason, { nowMs, price, zone: zone.id, verdict: raw.verdict, read: raw.read }))
+        return { reason, verdict: raw.verdict, watching: true }
+    }
+
+    // Fulfilled. Build the executable order plan in the SAME step that flips to 'hit': a 'hit'
+    // setup with no pendingOrder would open the confirm dialog onto nothing and dead-end there
+    // (the bug that shipped in the first draft).
     if (zone) {
-        const patch = { ...base, status: 'hit', armed_zone_id: zone.id, entryTriggeredAt: nowMs }
+        const patch = { ...base, status: _nextStatus(raw.verdict, reason), armed_zone_id: zone.id, entryTriggeredAt: nowMs }
 
         // Manual (broker-less real money): no order plan — the user places it themselves and
         // reports the fill. Its own card, not the confirm dialog.
@@ -288,6 +303,26 @@ export function _isExpiring(setup, nowMs) {
  * tighten toward the min gap as it approaches, so a fast run into a zone isn't missed by a lazy
  * timer. Within ~1 zone-width → the floor; beyond ~8 → the ceiling; linear in between.
  */
+/**
+ * Status transition from the verdict (+ why we were looking) — the Talos twin of
+ * hermes._nextStatus, one tier down in the vocabulary:
+ *
+  *   hermes (call):  enter → 'hit' · else → 'looking'
+ *   talos  (setup): enter → 'hit' · else → 'looking'
+ *
+ * Identical now, deliberately: a setup and a call are the same shape of thing, so they run the
+ * same readiness ladder. What still differs is what `ready` CARRIES — a call's order plan is built
+ * later, at confirm, by the Kairos handoff, whereas a setup's is stamped in this same write. That
+ * is why a setup's card routes straight to the order dialog and a call's routes to its pop-out.
+ *
+ * Unlike Hermes there is no `edit`/`let_expire` branch here: a setup's expiry review is handled
+ * ahead of this in _applyVerdict (let_expire closes it, anything else stays alive on cadence), so
+ * by the time status is derived the only question left is whether the setup fulfilled.
+ */
+export function _nextStatus(verdict, reason) {
+    return verdict === 'enter' ? 'hit' : 'looking'
+}
+
 export function proximityGapMin(setup, price) {
     const { min = 5, max = 30 } = setup?.cadence ?? {}
     const d = zoneDistance(setup?.entry_zones, price)
@@ -308,6 +343,7 @@ export function _nextCheckAt(setup, nowMs, nextCheckMin) {
 function _reschedule(setup, nowMs, price) {
     const gap = proximityGapMin(setup, price)
     return {
+        // No zone tripped (or market closed / assessment failed) → the setup isn't actively being
         'monitor_state.check_count':   (setup.monitor_state?.check_count ?? 0) + 1,
         'monitor_state.next_check_at': new Date(nowMs + gap * 60_000).toISOString(),
     }

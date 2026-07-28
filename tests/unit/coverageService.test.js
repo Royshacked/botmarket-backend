@@ -10,7 +10,7 @@ import { normalizeCoverage, newRevision, RATINGS, STATUSES } from '../../api/ana
 test('normalize: uppercases symbol, defaults status=active, stamps id + timestamps', () => {
     const c = normalizeCoverage({ symbol: 'nvda' }, 'u1')
     assert.equal(c.symbol, 'NVDA')
-    assert.equal(c.user_id, 'u1')
+    assert.equal(c.userId, 'u1')
     assert.equal(c.status, 'active')
     assert.match(c.id, /^cov_NVDA_[0-9a-f]{8}$/)
     assert.ok(c.created_at && c.updated_at)

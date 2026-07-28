@@ -9,8 +9,14 @@ import { executionReconciler }  from '../../monitoring/execution.reconciler.js'
 import { orderSymbol }          from '../../monitoring/exitOrders.util.js'
 import { armExitsInPosition, exitFields, basisReferenceQuote } from './exitOrders.service.js'
 import { entityRepo }          from '../../services/entity/entityRepo.service.js'
+import { ownsEntity }          from '../../services/entity/entityCrud.service.js'
+import { AWAITING_CONFIRM }    from '../../services/entity/vocabulary.js'
 
 const LOG = '[ideaExecution]'
+
+// Kind-blind placement gate: an idea reaches here as 'hit', a setup as 'ready' — same meaning,
+// different kind vocabularies. Hard-coding 'hit' here silently refused every setup confirm.
+const PLACEABLE = new Set(AWAITING_CONFIRM)
 
 const ORDER_EXEC_TYPES = new Set(['market', 'limit', 'stop'])
 const toExecType = t => (ORDER_EXEC_TYPES.has(t) ? t : 'market')
@@ -19,14 +25,14 @@ const toExecType = t => (ORDER_EXEC_TYPES.has(t) ? t : 'market')
  * Place broker orders for a triggered ('hit') idea after the user confirms.
  * On at least one success the idea advances to long/short so stop/TP monitoring begins.
  */
-export async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
+export async function placeOrdersForIdea(id, orders, userId) {
     try {
         const db   = await getDb()   // retained solely for executionReconciler.placeExits(db, …)
         const idea = await entityRepo.getById(id)
         if (!idea) return { ok: false, reason: 'not_found' }
-        if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
-        if (idea.status !== 'hit')  return { ok: false, reason: 'not_hit' }
-        if (idea.ordersPlacedAt)    return { ok: false, reason: 'already_placed' }
+        if (!ownsEntity(idea, userId)) return { ok: false, reason: 'forbidden' }
+        if (!PLACEABLE.has(idea.status)) return { ok: false, reason: 'not_hit' }
+        if (idea.ordersPlacedAt)         return { ok: false, reason: 'already_placed' }
 
         const plan = (idea.pendingOrder?.plan?.length) ? idea.pendingOrder.plan : orders
         if (!Array.isArray(plan) || plan.length === 0) return { ok: false, reason: 'no_orders' }
@@ -99,11 +105,11 @@ export async function placeOrdersForIdea(id, orders, userId, isAdmin = false) {
  * so the normal order-confirm dialog surfaces. It does NOT place at the broker —
  * the user still confirms (which routes through placeOrdersForIdea).
  */
-export async function triggerEntryNow(id, userId, isAdmin = false) {
+export async function triggerEntryNow(id, userId) {
     try {
         const idea = await entityRepo.getById(id)
         if (!idea) return { ok: false, reason: 'not_found' }
-        if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+        if (!ownsEntity(idea, userId)) return { ok: false, reason: 'forbidden' }
         if (idea.status !== 'looking') return { ok: false, reason: 'not_looking' }
 
         // Explicit user action → not a "triggered while waiting" event.
@@ -129,11 +135,11 @@ export async function triggerEntryNow(id, userId, isAdmin = false) {
  * Activate a resting (broker-native stop-market) entry: place a working STOP order
  * at the trigger price on each account. The idea moves to 'resting'.
  */
-export async function placeRestingEntryForIdea(id, userId, isAdmin = false) {
+export async function placeRestingEntryForIdea(id, userId) {
     try {
         const idea = await entityRepo.getById(id)
         if (!idea) return { ok: false, reason: 'not_found' }
-        if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+        if (!ownsEntity(idea, userId)) return { ok: false, reason: 'forbidden' }
         if (idea.entryOrderType !== 'stop')              return { ok: false, reason: 'not_resting' }
         if (idea.ordersPlacedAt || idea.restingPlacedAt) return { ok: false, reason: 'already_placed' }
 
