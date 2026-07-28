@@ -2,12 +2,21 @@
 // (resolved dates) and thesis, and holds rich per-candidate analysis so a later
 // trade-idea chat can be pre-loaded from a clicked candidate.
 
-import { getDb, stripId }   from '../../providers/mongodb.provider.js'
 import { enrichWithProfiles } from '../../services/companyProfile.util.js'
+import { makeEntityCrud }  from '../../services/entity/entityCrud.service.js'
 import { logger }  from '../../services/logger.service.js'
 
 const LOG        = '[scan]'
 const COLLECTION = 'scans'
+
+// Owner-scoped CRUD (the shared mechanism), the same factory the entity kinds and coverage use.
+// A scan is not an execution-tier entity — it is a research artifact in its own collection — but
+// it is an OWNER-SCOPED LIST, and that is what qualifies a caller here. No `kind` (the collection
+// holds one thing), no deleteLock (a scan owns no broker position), default savedAt ordering.
+//
+// There is no admin bypass, here or anywhere in the owner-scoped layer: cross-user visibility is
+// pinned off at the token, so every `isAdmin` branch was unreachable code that still read as live.
+const crud = makeEntityCrud({ collection: COLLECTION, log: LOG })
 
 export const scanService = { saveScan, getScans, getScanById, updateScan, deleteScan }
 
@@ -24,7 +33,6 @@ export function _stampStale(scan, todayStr = new Date().toISOString().slice(0, 1
 
 async function saveScan(scan, userId) {
     try {
-        const db  = await getDb()
         const doc = {
             id:         `scan_${Date.now()}`,
             userId:     userId ?? null,
@@ -44,47 +52,31 @@ async function saveScan(scan, userId) {
         // the same logo/name treatment as the calendar lists. Keyed on `ticker`;
         // the agent's candidate name is preserved when present.
         await enrichWithProfiles(doc.candidates, { key: 'ticker', overwriteName: false })
-        await db.collection(COLLECTION).insertOne(doc)
+        const saved = await crud.insert(doc)
         logger.info(LOG, 'Scan saved', { id: doc.id, candidates: doc.candidates.length })
-        return { ok: true, scan: _stampStale(stripId(doc)) }
+        return { ok: true, scan: _stampStale(saved) }
     } catch (err) {
         logger.error(LOG, 'Failed to save scan', err)
         return { ok: false, error: err }
     }
 }
 
-async function getScans(userId, isAdmin = false) {
-    try {
-        const db    = await getDb()
-        const query = isAdmin ? {} : { userId }
-        const rows  = await db.collection(COLLECTION).find(query).sort({ savedAt: -1 }).toArray()
-        const today = new Date().toISOString().slice(0, 10)
-        return rows.map(r => _stampStale(stripId(r), today))
-    } catch (err) {
-        logger.error(LOG, 'Failed to get scans', err)
-        return []
-    }
+async function getScans(userId) {
+    const today = new Date().toISOString().slice(0, 10)
+    // Staleness is DERIVED on read, never stored — so it is stamped here rather than in the
+    // shared crud, which knows nothing about periods.
+    return (await crud.list(userId)).map(r => _stampStale(r, today))
 }
 
-async function getScanById(id, userId, isAdmin = false) {
-    try {
-        const db   = await getDb()
-        const scan = await db.collection(COLLECTION).findOne({ id })
-        if (!scan) return { ok: false, reason: 'not_found' }
-        if (scan.userId && scan.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
-        return { ok: true, scan: _stampStale(stripId(scan)) }
-    } catch (err) {
-        logger.error(LOG, 'Failed to get scan by id', err)
-        return { ok: false, error: err }
-    }
+async function getScanById(id, userId) {
+    const res = await crud.getOwnedStripped(id, userId)
+    return res.ok ? { ok: true, scan: _stampStale(res.doc) } : res
 }
 
-async function updateScan(id, patch, userId, isAdmin = false) {
+async function updateScan(id, patch, userId) {
     try {
-        const db   = await getDb()
-        const scan = await db.collection(COLLECTION).findOne({ id })
-        if (!scan) return { ok: false, reason: 'not_found' }
-        if (scan.userId && scan.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+        const found = await crud.getOwned(id, userId)
+        if (!found.ok) return found
 
         const set = { updatedAt: Date.now() }
         if (patch.period    !== undefined)   set.period     = patch.period
@@ -98,28 +90,16 @@ async function updateScan(id, patch, userId, isAdmin = false) {
         }
         if (Array.isArray(patch.chat))       set.chat       = patch.chat
 
-        const updated = await db.collection(COLLECTION).findOneAndUpdate(
-            { id }, { $set: set }, { returnDocument: 'after' }
-        )
+        const res = await crud.patchOwned(id, userId, set)
+        if (!res.ok) return res
         logger.info(LOG, 'Scan updated', { id, candidates: set.candidates?.length })
-        return { ok: true, scan: _stampStale(stripId(updated)) }
+        return { ok: true, scan: _stampStale(res.doc) }
     } catch (err) {
         logger.error(LOG, 'Failed to update scan', err)
         return { ok: false, error: err }
     }
 }
 
-async function deleteScan(id, userId, isAdmin = false) {
-    try {
-        const db   = await getDb()
-        const scan = await db.collection(COLLECTION).findOne({ id })
-        if (!scan) return { ok: false, reason: 'not_found' }
-        if (scan.userId && scan.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
-        await db.collection(COLLECTION).deleteOne({ id })
-        logger.info(LOG, 'Scan deleted', { id })
-        return { ok: true }
-    } catch (err) {
-        logger.error(LOG, 'Failed to delete scan', err)
-        return { ok: false, error: err }
-    }
+async function deleteScan(id, userId) {
+    return crud.remove(id, userId)
 }
