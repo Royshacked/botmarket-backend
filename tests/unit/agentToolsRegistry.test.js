@@ -26,6 +26,10 @@ import { VALUATION_TOOLS }          from '../../services/valuation.tools.js'
 // What is allowed to differ: the human prose INSIDE a parameter (one agent's ticker example read
 // "e.g. GME, TSLA, AAPL" and another's "e.g. TSLA, GME, AAPL"). Canonicalising that noise is the
 // entire point; keeping it per-agent would defeat the consolidation.
+//
+// Past the refactor it keeps earning its keep as a CHANGE DETECTOR: a tool list, description or
+// schema never drifts by accident. A DELIBERATE change (Atlas gaining get_chart) is appended to
+// the fixture in the same commit — the point is that it can't happen silently.
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SNAPSHOT  = JSON.parse(fs.readFileSync(join(__dirname, '../fixtures/agentTools.snapshot.json'), 'utf8'))

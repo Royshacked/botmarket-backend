@@ -60,6 +60,8 @@ export async function streamPortfolio(req, res) {
                 onPhase:     (phase)  => sendEvent('phase',     { phase }),
                 onToolStart: (tool)   => sendEvent('status',    { tool }),
                 onReasoning: (text)   => sendEvent('reasoning', { text }),
+                onChart:     (chart)  => sendEvent('chart',     chart),
+                onOpenChart: (chart)  => sendEvent('chart_open', chart),
             })
 
             // Post-stream persistence (mandate/thesis/draft) → service. Only when the client is

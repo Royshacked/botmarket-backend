@@ -44,6 +44,7 @@ export async function streamKairos(req, res) {
                 onChart:     (chart)  => sendEvent('chart',     chart),
                 onToolStart: (tool)   => sendEvent('status',    { tool }),
                 onReasoning: (text)   => sendEvent('reasoning', { text }),
+                onOpenChart: (chart)  => sendEvent('chart_open', chart),
                 onPhase:     (phase)  => sendEvent('phase',     { phase }),
             })
 

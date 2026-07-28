@@ -42,6 +42,7 @@ export async function streamAnalyst(req, res) {
                 onPhase:     phase => sendEvent('phase',     { phase }),
                 onToolStart: tool  => sendEvent('status',    { tool }),
                 onReasoning: text  => sendEvent('reasoning', { text }),
+                onOpenChart: chart => sendEvent('chart_open', chart),
             })
             return { reply: result.reply, phase: result.phase ?? null, ...(result.coverage ? { coverage: result.coverage } : {}) }
         },

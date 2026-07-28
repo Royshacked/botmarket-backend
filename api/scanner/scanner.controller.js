@@ -38,6 +38,7 @@ export async function streamScanner(req, res) {
                 onPhase:     (phase)  => sendEvent('phase',     { phase }),
                 onToolStart: (tool)   => sendEvent('status',    { tool }),
                 onReasoning: (text)   => sendEvent('reasoning', { text }),
+                onOpenChart: (chart)  => sendEvent('chart_open', chart),
             })
 
             // `kairos_pick` (hand-off mode) → the single ticker Argus recommends back to Kairos.

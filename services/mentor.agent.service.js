@@ -39,7 +39,7 @@ async function chatStream({
     messages, userPrompt, chatState = emptyMentorState(), accounts = [], mainAccountId = null,
     brokerContext = null, clientTime = null,
     model: requestedModel, reasoningEffort, userId,
-    onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, signal,
+    onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, onOpenChart, signal,
 }) {
 
     const tools        = KAIROS_TOOLS
@@ -67,7 +67,7 @@ async function chatStream({
 
     const raw = await runAgentStream({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers,
-        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning,
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onOpenChart,
         meta: { userPrompt, asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
     })
 

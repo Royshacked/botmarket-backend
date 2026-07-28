@@ -3,6 +3,7 @@ import { dirname, join }  from 'path'
 import { logger }         from './logger.service.js'
 import { normalizeMessages, makePromptLoader, resolveAgentStream } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
+import { makeChartOpenCapture, runAgentStream, stripChartBlock, CHART_TIMEFRAMES } from './agentIO.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -34,7 +35,8 @@ Desks and keys:
 
 Chart requests (handle directly — do NOT route to a desk):
 If the user asks to open or show a chart for a ticker, acknowledge it and emit <route>open_chart</route><chart>{"ticker":"TICKER","timeframe":"TIMEFRAME"}</chart>
-Use the ticker they mentioned. Use the timeframe they mentioned (1m 5m 15m 30m 1h 4h 1d 1w); default to 1d if none given.
+The chart opens on the workspace panel beside this chat.
+Use the ticker they mentioned. Use the timeframe they mentioned (${CHART_TIMEFRAMES.join(' ')}); default to day if none given.
 
 Reply format: ONE sentence, then tag(s).
 Examples:
@@ -42,19 +44,20 @@ Examples:
 "Time to build your book — sending you to the portfolio desk." <route>portfolio</route>
 "On it — routing you to the scan desk for a fresh watchlist." <route>scan</route>
 "Deep dive coming — routing you to the research desk." <route>research</route>
-"Opening AAPL on the 1h." <route>open_chart</route><chart>{"ticker":"AAPL","timeframe":"1h"}</chart>
-"Here's TSLA on the daily." <route>open_chart</route><chart>{"ticker":"TSLA","timeframe":"1d"}</chart>`
+"Opening AAPL on the 1h." <route>open_chart</route><chart>{"ticker":"AAPL","timeframe":"1hr"}</chart>
+"Here's TSLA on the daily." <route>open_chart</route><chart>{"ticker":"TSLA","timeframe":"day"}</chart>`
 
-async function routeIntent({ message, userId, onToken, onReasoning, signal } = {}) {
+async function routeIntent({ message, userId, onToken, onReasoning, onOpenChart, signal } = {}) {
     const { model, streamFn, onUsage } = resolveAgentStream(undefined, userId)
 
     let routeCapture = null
-    let chartCapture = null
+    // Reception's chart tag rides the SHARED protocol (agentIO): same validation, same
+    // normalization, same `chart_open` event every other desk emits — the routing prompt above only
+    // adds the <route>open_chart</route> pairing it needs to skip desk routing.
+    const chart = makeChartOpenCapture(onOpenChart, LOG)
     const tagCaptures = buildTagCaptures({
         route: (text) => { routeCapture = text.trim() },
-        chart: (text) => {
-            try { chartCapture = JSON.parse(text.trim()) } catch { /* malformed — ignore */ }
-        },
+        chart: chart.capture,
     })
 
     const systemPrompt = [{ type: 'text', text: ROUTE_SYSTEM }]
@@ -75,14 +78,13 @@ async function routeIntent({ message, userId, onToken, onReasoning, signal } = {
         onUsage,
     })
 
-    const reply = (raw ?? '').trim()
+    const reply = stripChartBlock(raw).trim()
     logger.info(LOG, 'routeIntent done', { route: routeCapture, replyLength: reply.length })
-    return { reply, route: routeCapture, chart: chartCapture }
+    return { reply, route: routeCapture, chart: chart.get() }
 }
 
-async function chatStream({ messages = [], model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, signal } = {}) {
+async function chatStream({ messages = [], model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onOpenChart, signal } = {}) {
     const normalized = normalizeMessages(messages, MAX_MESSAGES)
-    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
     // Stable cached base + volatile tail (today's date, so "this week" resolves).
     const today = new Date().toISOString().slice(0, 10)
@@ -91,28 +93,18 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
         { type: 'text', text: `CURRENT DATE: ${today}. Resolve relative timeframes (today, this week, this month) against this date.` },
     ]
 
-    logger.info(LOG, 'chatStream start', { messageCount: normalized.length, model, provider })
-
+    // The chart tag is captured by runAgentStream (shared protocol) — Axl only forwards the
+    // callback, exactly like every other agent. `chart` on the return keeps the old `done` payload
+    // shape for clients that read it there.
     let chartCapture = null
-    const tagCaptures = buildTagCaptures({
-        chart: (text) => {
-            try { chartCapture = JSON.parse(text.trim()) } catch { /* malformed — ignore */ }
-        },
-    })
-
-    const raw = await streamFn({
-        model,
-        promptOrMessages: normalized,
-        systemPrompt,
-        tools:        TOOLS,
-        toolHandlers: TOOL_HANDLERS,
-        reasoningEffort,
-        signal,
-        onToken,
-        tagCaptures,
-        onToolStart,
-        onReasoning,
-        onUsage,
+    const raw = await runAgentStream({
+        log: LOG, requestedModel, userId,
+        messages: normalized, systemPrompt,
+        tools: TOOLS, toolHandlers: TOOL_HANDLERS,
+        reasoningEffort, signal, onToken,
+        tagCaptures: buildTagCaptures(),
+        onToolStart, onReasoning,
+        onOpenChart: (c) => { chartCapture = c; onOpenChart?.(c) },
     })
 
     const reply = (raw ?? '').trim()

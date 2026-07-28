@@ -137,7 +137,7 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], mainAccountId = null, clientTime = null, model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], mainAccountId = null, clientTime = null, model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, onOpenChart, signal }) {
 
     const tools        = TOOLS
     const toolHandlers = _buildToolHandlers(onChart)
@@ -163,7 +163,7 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
     const raw = await runAgentStream({
         log: LOG, requestedModel, userId,
         messages: builtMessages, systemPrompt, tools, toolHandlers,
-        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning,
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onOpenChart,
         meta: { userPrompt, activeAsset: analysisState?.structured_state?.active_asset ?? '' },
     })
 

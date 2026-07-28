@@ -158,7 +158,7 @@ function SCANNER_TOOLS_FOR_PROFILE(profile) {
 // KAIROS HAND-OFF MODE section). The bias/horizon ride in the seeded opening message.
 const HANDOFF_CONTEXT = 'KAIROS HAND-OFF MODE: the user was sent here by Kairos to find ONE ticker for a single call. Follow the KAIROS HAND-OFF MODE section — converge to a single best pick, do NOT ask whether they are ready for Kairos, and end with a <kairos_pick> block (not a <scan_list>).'
 
-async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, profile = 'trading', reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, profile = 'trading', reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onOpenChart, signal }) {
     const prof = profile === 'investing' ? 'investing' : 'trading'
     const normalized = _buildMessages(messages)
 
@@ -204,7 +204,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         messages: normalized, systemPrompt,
         tools: SCANNER_TOOLS_FOR_PROFILE(prof),
         toolHandlers,
-        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning,
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onOpenChart,
         meta: { profile: prof },
     })
 

@@ -58,7 +58,7 @@ export const analystAgentService = { chatStream }
 async function chatStream({
     messages, userPrompt, chatState = {}, brokerContext = null, seed = null,
     model: requestedModel, reasoningEffort, userId,
-    onToken, onToolStart, onReasoning, onPhase, signal,
+    onToken, onToolStart, onReasoning, onPhase, onOpenChart, signal,
 }) {
     const systemPrompt  = _buildSystemPrompt(chatState, brokerContext, seed)
     const builtMessages = _buildMessages({ messages, userPrompt })
@@ -71,14 +71,14 @@ async function chatStream({
 
     const raw = await runAgentStream({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers,
-        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning,
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onOpenChart,
         meta: { userPrompt },
     })
 
     const { reply, coverage } = _parseAnalystResponse(raw)
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCoverage: Boolean(coverage), phase: phase.get() })
     // The coverage is a DRAFT — returned for preview, NOT saved. Initiating persists it (P1).
-    return { reply, phase: capturedPhase, ...(coverage ? { coverage } : {}) }
+    return { reply, phase: phase.get(), ...(coverage ? { coverage } : {}) }
 }
 
 // ─── Coverage extraction (pure) ───────────────────────────────────────────────

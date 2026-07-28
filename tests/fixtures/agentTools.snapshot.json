@@ -640,6 +640,47 @@
           }
         }
       }
+    },
+    {
+      "name": "get_chart",
+      "description": "Render a candlestick chart IMAGE for ONE name and look at it directly. Your job is allocation, not entry timing, so use this for the questions a picture answers better than a number: where a candidate sits in its multi-year range, whether a holding's trend is intact or broken, how ugly a drawdown was, what a long base looks like. Prefer weekly/monthly for a multi-month or multi-year hold; a daily view is for judging whether to phase into a position now or wait. Numbers (valuation, risk metrics, correlations) still decide the WEIGHT — this only informs the read. Set show_to_user true when the picture is part of the case you're making to the user, so they see what you saw.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
+          },
+          "timeframe": {
+            "type": "string",
+            "enum": [
+              "1min",
+              "5min",
+              "15min",
+              "30min",
+              "1hr",
+              "2hr",
+              "4hr",
+              "day",
+              "week",
+              "month"
+            ],
+            "description": "Chart timeframe. All resolutions render natively via TradingView."
+          },
+          "indicators": {
+            "type": "string",
+            "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
+          },
+          "show_to_user": {
+            "type": "boolean",
+            "description": "Set true whenever this chart relates to the user's ACTUAL setup — you are defining, validating, or refining their entry / stop / take-profit or reading the market structure behind it, or they asked to see it. In those cases the user wants to see what you are looking at, so show it. Leave false / omit ONLY for a quick throwaway internal peek that does not inform the setup under discussion; such a check must NOT appear in the chat."
+          }
+        },
+        "required": [
+          "ticker",
+          "timeframe"
+        ]
+      }
     }
   ],
   "scanner": [
