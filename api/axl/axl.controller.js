@@ -6,11 +6,23 @@ import { parseChatMessages } from '../_shared/parse.util.js'
 // The desks a reply may hand the user to. Validated here rather than trusted from the model: an
 // unknown key would leave the client trying to navigate to a tab that doesn't exist, so it becomes
 // null and the user simply stays with Axl.
-const VALID_PIPELINES = new Set(['trade', 'portfolio', 'scan', 'research'])
+export const VALID_PIPELINES = new Set(['trade', 'portfolio', 'scan', 'assist', 'research'])
 const LOG = '[axl:controller]'
 
+// The ticker a reply may hand over with the desk (`<route>research NVDA</route>`). Sanitized on the
+// same principle as the desk key: it becomes the desk's OPENING TURN, so a hallucinated "the" or a
+// company name would put an agent to work on nothing. Anything that isn't a plausible symbol is
+// dropped and the desk simply opens empty — the old behaviour, never a broken one.
+const SYMBOL_RE = /^[A-Z0-9][A-Z0-9.-]{0,11}$/
+export function _sanitizeRouteSymbol(raw) {
+    if (typeof raw !== 'string') return null
+    const symbol = raw.trim().toUpperCase()
+    return SYMBOL_RE.test(symbol) ? symbol : null
+}
+
 // SSE chat with Axl — the one Axl surface. It answers, remembers the thread, docks charts, and
-// routes to a desk when the user wants one (`route` in the `done` payload). There is deliberately no
+// routes to a desk when the user wants one (`route` + optional `routeSymbol` in the `done` payload,
+// the desk and the name it should open on). There is deliberately no
 // second endpoint: a separate one-shot `/route` doorman used to answer the landing box with no
 // history and no app knowledge, which meant confident wrong answers and follow-ups that couldn't
 // resolve. Model routing follows the user's shared AI-mode (agent 'axl' is phaseless → auto/
@@ -39,9 +51,12 @@ export async function streamAxl(req, res) {
                 onChart:     (chart) => sendEvent('chart',     chart),
             })
 
+            const route = VALID_PIPELINES.has(result.route) ? result.route : null
             return {
                 reply: result.reply,
-                route: VALID_PIPELINES.has(result.route) ? result.route : null,
+                route,
+                // A symbol only rides along WITH a desk — with no route it has nowhere to land.
+                routeSymbol: route ? _sanitizeRouteSymbol(result.routeSymbol) : null,
                 chart: result.chart ?? null,
             }
         },
