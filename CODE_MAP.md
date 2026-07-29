@@ -23,7 +23,7 @@ monitoring/   →  services/  →  providers/            background path (poll +
 ```
 server.js                 app wiring, route mounts, background-service boot
 api/
-  idea/                   Trade Agent SSE chat        POST /api/idea/stream
+  idea/                   ARCHIVED 2026-07-29 — Trade Agent SSE chat; route NOT mounted
   trade-ideas/            idea CRUD + order placement /api/trade-ideas/*
     tradeIdeas.service.js     save/get/update/delete, broker forking; getTicker-resolved
                               brokerSymbol + fork-time basisOffset per child; venue gate
@@ -60,7 +60,8 @@ api/
       parse.util.js           parseChatMessages / parseIdeaAccounts
       chatState.util.js       makeGetChatState / makeDeleteChatState factories
 services/
-  idea.agent.service.js   + idea.stateParser.js (response/state machine)
+  idea.agent.service.js   ARCHIVED 2026-07-29 (superseded by kairos + mentor; unreachable)
+                          + idea.stateParser.js (response/state machine — still shared)
   portfolio.agent.service.js  scanner.agent.service.js
                           Atlas tools: screen_candidates + get_macro_snapshot + enriched get_fundamentals
                           (FMP Starter); review-state block renders benchmark-relative perf + regime delta
@@ -136,7 +137,8 @@ providers/
   ibkr.provider.js (retired) / ibkr.gateway.provider.js
   mongodb.provider.js       getDb(), stripId/stripIds
 monitoring/
-  minos.monitor.service.js  Minos — the idea monitor: 60s poll loop; preflightEntry (arm-time already-satisfied check);
+  minos.monitor.service.js  ARCHIVED 2026-07-29 — NOT started (server.js). Minos — the idea monitor:
+                            60s poll loop; preflightEntry (arm-time already-satisfied check);
                             _entryTimeGate (scheduled/time-only entry: exempt from market-closed skip; _marketSweep
                             surfaces deferred entries + notifies at market open)
   monitor.orchestrator.js   evaluateTree / evaluateConditions → _evalOne (opts: stateLevel, requireHeld)

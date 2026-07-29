@@ -1,4 +1,6 @@
 import { logger }           from '../../services/logger.service.js'
+// ⚠ ARCHIVED 2026-07-29 — these handlers are no longer reachable: server.js does not mount
+// `/api/idea`. See the header of services/idea.agent.service.js for the why and how to revive.
 import { ideaAgentService, emptyAnalysisState } from '../../services/idea.agent.service.js'
 import { brokerService }     from '../broker/broker.service.js'
 import { resolveModel }      from '../../services/modelRouter.service.js'

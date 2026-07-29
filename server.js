@@ -24,7 +24,7 @@ import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
 import { ensureKairosIndexes } from './api/kairos/kairos.service.js'
 import { ensureTradeIndexes } from './services/tradeCapture.service.js'
 import { threadService } from './services/thread.service.js'
-import { ideaRoutes } from './api/idea/idea.routes.js'
+// import { ideaRoutes } from './api/idea/idea.routes.js'   // ARCHIVED — see the mount below
 import { kairosRoutes } from './api/kairos/kairos.routes.js'
 import { mentorRoutes } from './api/mentor/mentor.routes.js'
 import { setupsRoutes } from './api/setups/setups.routes.js'
@@ -42,7 +42,7 @@ import { axlRoutes }         from './api/axl/axl.routes.js'
 import { threadsRoutes }     from './api/threads/threads.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
-import { minosService }     from './monitoring/minos.monitor.service.js'
+// import { minosService } from './monitoring/minos.monitor.service.js'   // ARCHIVED — see the start() below
 import { hermesService }    from './monitoring/hermes.monitor.service.js'
 import { talosService }     from './monitoring/talos.monitor.service.js'
 import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
@@ -94,7 +94,9 @@ if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve('public')))
 }
 
-app.use('/api/idea', ideaRoutes)
+// ARCHIVED 2026-07-29 — the Idea agent (legacy `idea` kind) is superseded by Kairos (`call`) and
+// Mentor (`setup`). Routes left unmounted rather than deleted; re-add this line to revive it.
+// app.use('/api/idea',     ideaRoutes)
 app.use('/api/kairos',      kairosRoutes)
 app.use('/api/mentor',      mentorRoutes)
 app.use('/api/setups',      setupsRoutes)
@@ -121,7 +123,10 @@ ensureKairosIndexes()
 ensureTradeIndexes()
 threadService.ensureThreadIndexes()
 
-minosService.start()
+// ARCHIVED 2026-07-29 — Minos watched the legacy `idea` kind, which nothing builds any more, and
+// its tick was also picking up `setup` entities that belong to Talos. Not started; re-add this
+// line to revive it (the kind filter it was missing is now in place).
+// minosService.start()
 hermesService.start()
 talosService.start()
 coverageMonitorService.start()

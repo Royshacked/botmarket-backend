@@ -33,7 +33,7 @@ All three agents stream over Server-Sent Events; every router applies `requireAu
 
 | Agent | Route file | Endpoint | Controller |
 |---|---|---|---|
-| Trade | `api/idea/idea.routes.js` | `POST /api/idea/stream` | `streamIdea` |
+| Trade | `api/idea/idea.routes.js` | `POST /api/idea/stream` | `streamIdea` | **ARCHIVED 2026-07-29 — not mounted** |
 | Portfolio | `api/portfolio/portfolio.routes.js` | `POST /api/portfolio/stream` | `streamPortfolio` |
 | Scanner | `api/scanner/scanner.routes.js` | `POST /api/scanner/stream` | `streamScanner` |
 
@@ -69,7 +69,10 @@ System prompts are hot-reloaded (mtime-gated) by `agentUtils.js` `makePromptLoad
 and sent as two cached content blocks — a stable base (`cache_control: ephemeral`) + a
 volatile context tail.
 
-### Trade agent — `services/idea.agent.service.js`
+### Trade agent — `services/idea.agent.service.js` — ⚠ ARCHIVED 2026-07-29
+Unreachable: `/api/idea` is no longer mounted, and its monitor (Minos) is not started.
+Superseded by Kairos (`call`) and Mentor (`setup`). Retained for reference; see the file header.
+
 Prompt `idea_system_prompt.md`. Entry `chatStream` (non-stream `chat`). Tools:
 
 | Tool | Purpose |
@@ -208,7 +211,8 @@ Arming is a **status PATCH**, not a new document:
 `PATCH /api/trade-ideas/:id` → `updateTradeIdea` → `ideaService.updateIdea`.
 
 On `status: 'looking'` the service sets `monitorPhase='entry'`, clears `entryTriggeredAt`,
-**stamps `activatedAt = Date.now()`**, and calls `minosService.resetIdea(id)`.
+**stamps `activatedAt = Date.now()`**, and calls `minosService.resetIdea(id)` (still wired, but a
+silent no-op while Minos is archived — it only clears that monitor's in-memory check timer).
 `activatedAt` gates the monitor's "triggered while waiting" logic.
 
 **Pre-flight entry check** — after a successful arm, `minosService.preflightEntry(idea)`

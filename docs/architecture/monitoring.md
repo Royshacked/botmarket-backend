@@ -5,6 +5,15 @@
 The monitoring system watches active trade ideas and automatically evaluates their conditions
 against live market data. It runs as a background service inside the Express process.
 
+> **⚠ ARCHIVED 2026-07-29 — Minos is NOT started.** Everything below describes the monitor for
+> the legacy `idea` kind (condition trees), which nothing authors any more. The live monitors are
+> **Hermes** (Kairos `call`) and **Talos** (Mentor `setup`), plus Themis (portfolio) and the
+> coverage monitor. Both lines in `server.js` are commented out; uncomment them to revive.
+>
+> It was switched off because its tick selected work by STATUS alone (`looking`/`long`/`short`),
+> which is shared vocabulary across every kind — so it was waking on `setup` entities that belong
+> to Talos. It now filters `kind: 'idea'` as well, so a revival can't reintroduce that.
+
 **Reversibility:** The entire system lives in `monitoring/`. Only two lines in `server.js` reference it:
 ```js
 import { minosService } from './monitoring/minos.monitor.service.js'
@@ -581,7 +590,7 @@ Same condition string is only parsed once regardless of how many ideas use it.
 
 ```
 monitoring/
-  minos.monitor.service.js    Minos — idea monitor public API: start() / stop(), poll loop, per-idea dispatch
+  minos.monitor.service.js    ARCHIVED — Minos, the idea monitor: start() / stop(), poll loop, per-idea dispatch
   hermes.monitor.service.js   Hermes — Kairos-call readiness monitor (own tick, kairos_calls)
   monitor.orchestrator.js     AND/OR logic, condition routing, context injection, legacy normalisation
   monitor.claude.js           Claude Haiku client (claudeJSON, claudeText, claudeVision)

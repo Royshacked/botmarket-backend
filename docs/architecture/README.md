@@ -24,7 +24,7 @@ Internal services
   {trade,portfolio,scanner}.agent.service   SSE chat → structured idea/plan/scan (see building.md)
   newsService         per-symbol news, on-demand (1h cache)
   priceService        OHLCV cache-first with incremental sync
-  minosService        background 60s loop, evaluates active ideas (7 leaf types)
+  minosService        ARCHIVED 2026-07-29 — not started; was the 60s loop over `idea` condition trees
   brokerService       multi-broker orchestration via capability flags
   executionReconciler executionBus → idea status + native exit-order lifecycle
 

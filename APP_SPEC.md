@@ -11,6 +11,11 @@ reconciler keeps idea state honest against the broker.
 
 ## 1. Trade Idea lifecycle
 
+> **ARCHIVED 2026-07-29.** The `idea` kind described in this section is legacy: nothing authors
+> one any more and neither its agent nor its monitor runs. It is superseded by Kairos's `call`
+> (monitored by Hermes) and Mentor's `setup` (monitored by Talos). `/api/idea` is unmounted and
+> Minos is not started; the condition-tree machinery below is retained but dormant.
+
 An idea is authored by the **Trade Agent** (`POST /api/idea/stream`), which emits
 a `<trade_idea>` block the frontend saves via `POST /api/trade-ideas`.
 
@@ -61,7 +66,8 @@ waiting ──► looking ──► hit ──► long / short ──► closed
 ## 2. Condition trees & evaluators
 
 Entry / stop / TP are **condition trees**: AND/OR group nodes over typed leaves. The monitor
-(`minos.monitor.service.js`, ~60s) evaluates them via `monitor.orchestrator.evaluateTree`.
+(`minos.monitor.service.js`, ~60s) evaluates them via `monitor.orchestrator.evaluateTree`
+(ARCHIVED — Minos is no longer started; `evaluateTree` itself stays in use elsewhere).
 
 **7 leaf types** (`monitoring/evaluators/*`):
 
@@ -119,7 +125,8 @@ Dismiss/handled state persists per-message.
 | `entry_confirm` | Entry triggered, confirm needed (`kind: idea`\|`call`) | idea → workspace + `OrderConfirmDialog`; call → `/call/:id` pop-out |
 | `call_expiry` | Kairos thesis expiring/expired (`kind: edit`\|`expired`) | Edit → `/call/:id` pop-out · Delete · Dismiss |
 
-`entry_confirm` fires for paper/live idea entries (`minos.monitor.service.js`, on `awaiting_confirm`) and
+`entry_confirm` fires for paper/live idea entries (`minos.monitor.service.js`, on `awaiting_confirm` —
+ARCHIVED, so in practice only the call/setup paths below still fire it) and
 Kairos-ready calls; **manual** entries keep their own FillCard. `entry_confirm`/`call_expiry` for
 calls come from Hermes (the Kairos monitor)'s card hook (`enter`→ready, `edit`→expiring, `let_expire`→expired
 — the last previously expired silently). Once a call's card fires it leaves the monitor's active

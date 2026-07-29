@@ -91,8 +91,9 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                  TRADE AGENT CHAT (Idea)                         │
-│  POST /api/idea/stream   (SSE)                                   │
+│         TRADE AGENT CHAT (Idea)  — ARCHIVED 2026-07-29           │
+│  POST /api/idea/stream   (SSE)   — route NOT mounted             │
+│  superseded by Kairos (call) + Mentor (setup)                    │
 │                                                                  │
 │  User ──► ideaAgentService.chatStream()                          │
 │             │  model chosen per-request by modelRouter           │

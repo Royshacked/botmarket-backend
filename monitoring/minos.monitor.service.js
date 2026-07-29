@@ -1,6 +1,23 @@
 /**
  * Minos — the trade-idea monitor (public interface for the idea monitoring system).
  *
+ * ⚠ ARCHIVED 2026-07-29 — NOT STARTED. Its kind, `idea` (condition trees), is superseded by
+ * Kairos's `call` (watched by Hermes) and Mentor's `setup` (watched by Talos), and nothing
+ * builds a legacy idea any more. server.js no longer calls start(), so this file's poll loop
+ * never runs and it emits no logs.
+ *
+ * Why it was switched off: it was waking on `setup` entities that belong to Talos. `_tick`
+ * lists by STATUS (looking/long/short), which is shared vocabulary across every kind, and the
+ * only kind guard was a single `kind === 'call'` skip — so setups fell straight through it.
+ * Hermes and Talos both filter by kind in the QUERY; this one didn't. That gap is now closed
+ * below (KIND) so reviving it can't reintroduce the leak.
+ *
+ * `resetIdea` and `preflightEntry` stay exported and wired into tradeIdeas.service.js: both are
+ * no-ops for anything that isn't a legacy idea (preflightEntry only acts on entry_condition_tree),
+ * so the live CRUD path is unaffected either way.
+ *
+ * To revive: uncomment the import + start() in server.js.
+ *
  * Usage (server.js):
  *   import { minosService } from './monitoring/minos.monitor.service.js'
  *   minosService.start()
@@ -32,7 +49,8 @@ import {
 } from './monitorUtils.js'
 import { withTimeout } from '../services/timeout.util.js'
 
-const LOG = '[minos.monitor]'
+const LOG  = '[minos.monitor]'
+const KIND = 'idea'   // the one kind Minos owns — see the ARCHIVED note at the top
 
 const POLL_INTERVAL_MS = 60_000
 // A single idea's check awaits provider/LLM/vision IO with no inherent bound. If one
@@ -52,7 +70,10 @@ export const minosService = { start: _loop.start, stop: _loop.stop, resetIdea, p
 
 function resetIdea(id) {
     _lastChecked.delete(id)
-    logger.info(LOG, `Reset check timer for idea ${id}`)
+    // Silent while archived: tradeIdeas.service.js calls this on every 'looking' update — for
+    // CALLS and SETUPS too — so logging here would put an archived monitor's name in the log on
+    // a path it no longer has any part in. Restore the line if Minos is ever revived.
+    // logger.info(LOG, `Reset check timer for idea ${id}`)
 }
 
 // ─── Poll loop ────────────────────────────────────────────────────────────────
@@ -61,7 +82,11 @@ async function _tick() {
     let db, ideas
     try {
         db    = await getDb()
-        ideas = await entityRepo.listByStatus(['looking', 'long', 'short'])
+        // Status is SHARED vocabulary — 'looking' is a call's and a setup's status too, so the
+        // status list alone selects other monitors' work. Minos owns exactly one kind. Legacy
+        // docs pre-date the kind field, so a missing kind still reads as 'idea'.
+        ideas = (await entityRepo.listByStatus(['looking', 'long', 'short']))
+            .filter(e => (e?.kind ?? KIND) === KIND)
     } catch (err) {
         logger.error(LOG, 'DB read error in tick:', err.message)
         return
