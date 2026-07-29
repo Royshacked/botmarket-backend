@@ -64,7 +64,7 @@ export async function computePortfolioState(portfolioId, userId) {
     const db    = await getDb()
     const ideas = await db.collection(ENTITIES)
         .find({ portfolioId, userId })
-        .project({ id: 1, asset: 1, direction: 1, allocationRatio: 1, conviction: 1, notes: 1, status: 1, type: 1, activatedAt: 1, brokerOrders: 1, portfolioName: 1, broker: 1, mainAccountId: 1, accounts: 1 })
+        .project({ id: 1, asset: 1, direction: 1, allocationRatio: 1, conviction: 1, notes: 1, status: 1, type: 1, activatedAt: 1, brokerOrders: 1, portfolioName: 1, broker: 1, mainAccountId: 1, accounts: 1, research_basis: 1 })
         .toArray()
 
     if (!ideas.length) return null
@@ -140,6 +140,11 @@ export async function computePortfolioState(portfolioId, userId) {
             drift:           null,
             pnl:             matched > 0 ? pnlSum : null,
             pnlPct,
+            // What we actually paid, already computed for pnlPct above. Exposed because the coverage
+            // gate asks whether our own revised price target still clears our own cost.
+            entryPrice:      avgEntry,
+            // The research frozen at entry (coverageId + the PT we bought on), or null.
+            researchBasis:   idea.research_basis ?? null,
             thesisAgeDays:   idea.activatedAt ? Math.floor((Date.now() - idea.activatedAt) / 86400000) : null,
             conviction:      idea.conviction ?? null,
             convictionPrev:  _lastConviction(idea),

@@ -11,8 +11,10 @@ import { exitFields, basisReferenceQuote } from './exitOrders.service.js'
 import { entityRepo }          from '../../services/entity/entityRepo.service.js'
 import { ownsEntity }          from '../../services/entity/entityCrud.service.js'
 import { AWAITING_CONFIRM }    from '../../services/entity/vocabulary.js'
+import { coverageService }     from '../analyst/coverage.service.js'
 
 const LOG = '[ideaExecution]'
+
 
 // Kind-blind placement gate: an idea reaches here as 'hit', a setup as 'ready' — same meaning,
 // different kind vocabularies. Hard-coding 'hit' here silently refused every setup confirm.
@@ -69,9 +71,12 @@ export async function placeOrdersForIdea(id, orders, userId) {
 
         const now    = Date.now()
         const status = idea.direction === 'short' ? 'short' : 'long'
+        // The research we're opening ON, frozen for the life of the position (see the service doc).
+        const basis  = await coverageService.captureResearchBasis({ userId: idea.userId, symbol: idea.asset })
         const set    = {
             status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed', brokerOrders,
             brokerSymbol: idea.brokerSymbol,
+            ...(basis ? { research_basis: basis } : {}),
             ...(await exitFields(idea, route)),
         }
         let updated = await entityRepo.patchAndGet(id, set)

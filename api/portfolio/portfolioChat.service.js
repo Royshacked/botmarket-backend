@@ -89,15 +89,31 @@ async function computeReviewSignals(portfolioId, userId) {
         ])
         const fingerprint = lifecycle?.lastFingerprint ?? null
         const delta = fingerprint ? await buildReviewDelta(fingerprint, state).catch(() => null) : null
-        // Coverage-delta gate: a held name whose Prometheus coverage flipped terminal. Read the
-        // user's coverage book and keep only the held names that went thesis_broken / target_hit —
-        // the crossing stays artifact-mediated (Themis reads coverage; Prometheus wrote it).
-        const held = new Set((state?.ideas ?? []).map(i => String(i.asset ?? '').toUpperCase()).filter(Boolean))
+        // Coverage-delta gate. Join each HELD name to its live coverage and to the research basis
+        // frozen when we bought it, so the pure trigger fn can ask the only question that means
+        // anything for a position: does our own revised price target still clear our own cost?
+        // The crossing stays artifact-mediated (Themis reads coverage; Prometheus wrote it) — no
+        // filtering on status here, because status is no longer where invalidation lives.
+        const holdings = new Map()
+        for (const i of (state?.ideas ?? [])) {
+            const sym = String(i.asset ?? '').toUpperCase()
+            if (sym && !holdings.has(sym)) holdings.set(sym, i)
+        }
         let coverage = []
-        if (held.size) {
+        if (holdings.size) {
             const rows = await coverageService.getCoverage(userId).catch(() => [])
-            coverage = (Array.isArray(rows) ? rows : []).filter(c =>
-                held.has(String(c.symbol ?? '').toUpperCase()) && ['thesis_broken', 'target_hit'].includes(c.status))
+            coverage = (Array.isArray(rows) ? rows : [])
+                .filter(c => holdings.has(String(c.symbol ?? '').toUpperCase()))
+                .map(c => {
+                    const h = holdings.get(String(c.symbol).toUpperCase())
+                    return {
+                        symbol:     c.symbol,
+                        status:     c.status,
+                        currentPt:  c.price_target?.value ?? null,      // live — the thing that moves
+                        basisPt:    h?.researchBasis?.coveragePt ?? null, // frozen at entry
+                        entryPrice: h?.entryPrice ?? null,               // what we actually paid
+                    }
+                })
         }
         return { triggers: computeReviewTriggers({ state, fingerprint, delta, coverage }) }
     } catch (err) {

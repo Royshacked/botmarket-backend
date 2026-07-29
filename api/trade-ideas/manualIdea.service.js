@@ -12,6 +12,7 @@
  */
 
 import { stripId }               from '../../providers/mongodb.provider.js'
+import { coverageService }       from '../analyst/coverage.service.js'
 import { STATUS } from '../../services/entity/vocabulary.js'
 import { logger }                from '../../services/logger.service.js'
 import { routeExits }            from '../../services/protectionPlan.service.js'
@@ -87,8 +88,12 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId) {
         const monitored = !idea.portfolioId
         const now       = Date.now()
         const status    = idea.direction === 'short' ? 'short' : 'long'
+        // Same freeze as broker placement — a manual fill is still a position, and the coverage gate
+        // measures every held name against the research it was opened on.
+        const basis     = await coverageService.captureResearchBasis({ userId: idea.userId, symbol: idea.asset })
         const set = {
             status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed',
+            ...(basis ? { research_basis: basis } : {}),
             quantity:     qty,   // the confirmed size drives exit sizing
             brokerOrders: [{ broker: 'manual', accountId, orderId: positionId, positionId, quantity: qty }],
             monitorStop:  monitored && route.stop.hasAny,

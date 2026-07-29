@@ -159,3 +159,64 @@ test('format: benchmark BEHIND + regime flip render as expected', () => {
     assert.match(text, /sector leaders \+\[Healthcare\] −\[Energy\]/)
     assert.equal(_formatReviewDelta(null), null)
 })
+
+// ─── the coverage gate: our own PT vs the basis we bought on ────────────────
+// Research has no invalidation of its own — a thesis whose price fell is cheaper, not wrong. What
+// earns a portfolio look is OUR price target moving against a position we actually hold.
+
+const covTriggers = (coverage) =>
+    computeReviewTriggers({ state: { ideas: [] }, fingerprint: {}, delta: null, coverage })
+        .filter(t => t.kind === 'coverage')
+
+test('coverage gate: a revised PT at or below our entry is HIGH — no upside left on our own numbers', () => {
+    const t = covTriggers([{ symbol: 'TSM', currentPt: 380, basisPt: 702, entryPrice: 404 }])
+    assert.equal(t.length, 1)
+    assert.equal(t[0].severity, 'high')
+    assert.match(t[0].label, /at or below our entry/)
+})
+
+test('coverage gate: a material PT cut that still clears cost is MEDIUM', () => {
+    const t = covTriggers([{ symbol: 'TSM', currentPt: 516, basisPt: 702, entryPrice: 404 }])
+    assert.equal(t.length, 1)
+    assert.equal(t[0].severity, 'medium')
+    assert.match(t[0].label, /cut 26% since entry \(702 → 516\)/)
+})
+
+test('coverage gate: a trim inside the noise band is silent', () => {
+    assert.deepEqual(covTriggers([{ symbol: 'TSM', currentPt: 650, basisPt: 702, entryPrice: 404 }]), [])  // -7%
+})
+
+test('coverage gate: the harder finding does not double-report the softer one', () => {
+    // PT below entry AND a big cut — one trigger, the high one.
+    const t = covTriggers([{ symbol: 'X', currentPt: 100, basisPt: 300, entryPrice: 200 }])
+    assert.equal(t.length, 1)
+    assert.equal(t[0].severity, 'high')
+})
+
+test('coverage gate: a missing PT / basis / entry is silent, never a zero', () => {
+    // The Number(null) === 0 shape: a null PT must not read as "0 ≤ our entry" and ring on every name.
+    assert.deepEqual(covTriggers([{ symbol: 'X', currentPt: null, basisPt: 300, entryPrice: 200 }]), [])
+    assert.deepEqual(covTriggers([{ symbol: 'X', currentPt: 250, basisPt: null, entryPrice: null }]), [])
+    assert.deepEqual(covTriggers([{ symbol: 'X' }]), [])
+    // A zero/unknown entry price can't produce a HIGH — but the PT cut is still real on its own.
+    const noEntry = covTriggers([{ symbol: 'X', currentPt: 250, basisPt: 300, entryPrice: 0 }])
+    assert.equal(noEntry.every(t => t.severity !== 'high'), true)
+    assert.match(noEntry[0].label, /cut 17% since entry/)
+})
+
+test('coverage gate: an unheld name contributes nothing (no basis, no entry)', () => {
+    assert.deepEqual(covTriggers([{ symbol: 'NEW', currentPt: 500, basisPt: null, entryPrice: null }]), [])
+})
+
+test('coverage gate: a DELIBERATE thesis_broken is still honoured', () => {
+    // Nothing deterministic sets it any more, so its presence means the analyst tier or the user did.
+    const t = covTriggers([{ symbol: 'X', status: 'thesis_broken', currentPt: 500, basisPt: 500, entryPrice: 100 }])
+    assert.equal(t.length, 1)
+    assert.equal(t[0].severity, 'high')
+    assert.match(t[0].label, /research thesis broken/)
+})
+
+test('coverage gate: target_hit stays a medium "worth a deliberate look"', () => {
+    const t = covTriggers([{ symbol: 'X', status: 'target_hit', currentPt: 500, basisPt: 500, entryPrice: 100 }])
+    assert.equal(t[0].severity, 'medium')
+})

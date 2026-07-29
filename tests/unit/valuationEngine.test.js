@@ -25,6 +25,59 @@ test('pe: provided multiple × forward EPS → PT, ±15% bear/base/bull', () => 
     assert.equal(v.our_pt, 200)
 })
 
+// ── scenario bands: each leg its OWN multiple AND its OWN earnings ───────────
+test('no scenarios → the band is labelled multiple_sensitivity, EPS held constant', () => {
+    const v = computeValuation({ method: 'pe', multiple: 20, forward_metric: 10 })
+    assert.equal(v.band_basis, 'multiple_sensitivity')
+    // every leg priced off the SAME earnings — that is what makes it not a downside case
+    assert.equal(v.legs.bear.forward_metric, 10)
+    assert.equal(v.legs.bull.forward_metric, 10)
+    assert.equal(v.legs.bear.basis, 'multiple_sensitivity')
+})
+
+test('a bear scenario compresses the multiple AND the earnings together', () => {
+    // SNDK's real judgment, which the old engine could not express at any multiple: a trough multiple
+    // on trough earnings. The ±15% band would have said 1870; the cycle case says 700.
+    const v = computeValuation({
+        method: 'pe', multiple: 10, forward_metric: 220,
+        scenarios: { bear: { multiple: 3.5, forward_metric: 200 } },
+    })
+    assert.equal(v.band_basis, 'scenario')
+    assert.equal(v.pt.bear, 700)                  // 3.5 × 200
+    assert.equal(v.pt.base, 2200)                 // base untouched
+    assert.equal(v.pt.bull, 2530)                 // bull still ±15% — legs are independent
+    assert.deepEqual(v.legs.bear, { value: 700, multiple: 3.5, forward_metric: 200, basis: 'scenario' })
+    assert.equal(v.legs.bull.basis, 'multiple_sensitivity')
+})
+
+test('a leg may vary just one input — the other inherits the base', () => {
+    const reRate = computeValuation({ method: 'pe', multiple: 20, forward_metric: 10, scenarios: { bear: { multiple: 12 } } })
+    assert.equal(reRate.pt.bear, 120)                        // 12 × the base EPS 10
+    assert.equal(reRate.legs.bear.forward_metric, 10)
+
+    const earnings = computeValuation({ method: 'pe', multiple: 20, forward_metric: 10, scenarios: { bear: { forward_metric: 6 } } })
+    assert.equal(earnings.pt.bear, 120)                      // the base multiple 20 × 6
+    assert.equal(earnings.legs.bear.multiple, 20)
+})
+
+test('an unusable scenario leg falls back to sensitivity rather than poisoning the band', () => {
+    for (const bad of [{ multiple: 0 }, { forward_metric: -5 }, { multiple: 'x' }, {}, null]) {
+        const v = computeValuation({ method: 'pe', multiple: 20, forward_metric: 10, scenarios: { bear: bad } })
+        assert.equal(v.pt.bear, 170, `bear=${JSON.stringify(bad)}`)
+        assert.equal(v.band_basis, 'multiple_sensitivity', `bear=${JSON.stringify(bad)}`)
+    }
+})
+
+test('ev_* scenarios ride the equity bridge too', () => {
+    const v = computeValuation({
+        method: 'ev_ebitda', multiple: 10, forward_metric: 1000, shares_out: 100, net_debt: 2000,
+        scenarios: { bear: { multiple: 6, forward_metric: 800 } },
+    })
+    assert.equal(v.pt.base, 80)     // (10×1000 − 2000)/100
+    assert.equal(v.pt.bear, 28)     // (6×800 − 2000)/100
+    assert.equal(v.band_basis, 'scenario')
+})
+
 test('pe: the GAP vs consensus + upside vs price', () => {
     const v = computeValuation({ method: 'pe', multiple: 20, forward_metric: 10, consensus_pt: 180, current_price: 150 })
     assert.deepEqual(v.gap, { value: 20, pct: 11.11 })     // (200-180)/180

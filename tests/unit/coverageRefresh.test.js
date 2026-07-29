@@ -41,13 +41,14 @@ test('buildCoverageRefreshed: no user or ticker → null', () => {
 })
 
 // ─── refreshCoverage orchestration (injected deps) ──────────────────────────────
-function harness({ draft, initResult }) {
-    const calls = { research: [], initiate: [], update: [], notify: [] }
+function harness({ draft, initResult, existing = null }) {
+    const calls = { research: [], initiate: [], update: [], notify: [], existing: [] }
     const deps = {
         research: async (args) => { calls.research.push(args); return draft ? { coverage: draft } : {} },
         initiate: async (d, userId) => { calls.initiate.push({ d, userId }); return initResult },
         update:   async (id, patch, userId) => { calls.update.push({ id, patch, userId }); return { ok: true } },
         notify:   async (a) => { calls.notify.push(a) },
+        existing: async (userId, sym) => { calls.existing.push({ userId, sym }); return existing },
     }
     return { deps, calls }
 }
@@ -99,4 +100,32 @@ test('_buildRefreshPrompt: includes ticker always, question only when given', ()
     assert.match(_buildRefreshPrompt('NVDA', 'guide?'), /Re-research NVDA/)
     assert.match(_buildRefreshPrompt('NVDA', 'guide?'), /Focus especially on: guide\?/)
     assert.doesNotMatch(_buildRefreshPrompt('NVDA', null), /Focus especially on/)
+})
+
+// ─── update mode: a refresh REVISES, it does not start over ────────────────────
+// The prompt always claimed "this is a refresh of an existing thesis" while showing the agent
+// nothing. Harmless when a refresh was an occasional Atlas request; once the coverage monitor
+// schedules re-models off earnings dates, every one would discard the prior view.
+
+test('an existing thesis is handed to the agent as update-mode context', async () => {
+    const prior = { id: 'covOLD', symbol: 'NVDA', thesis: 'la tesis anterior', price_target: { value: 200 } }
+    const h = harness({ draft: { symbol: 'NVDA', thesis: 'v2' }, initResult: { ok: false, reason: 'already_covered', id: 'covOLD' }, existing: prior })
+    await refreshCoverage({ userId: 'u1', ticker: 'nvda' }, h.deps)
+
+    assert.deepEqual(h.calls.existing[0], { userId: 'u1', sym: 'NVDA' })
+    const sent = h.calls.research[0]
+    assert.deepEqual(sent.chatState.existing_coverage, prior)
+    assert.equal(sent.chatState.active_symbol, 'NVDA')
+})
+
+test('an uncovered name carries no update-mode context — there is nothing to revise', async () => {
+    const h = harness({ draft: { symbol: 'NVDA' }, initResult: { ok: true, doc: { id: 'covNEW' } }, existing: null })
+    await refreshCoverage({ userId: 'u1', ticker: 'NVDA' }, h.deps)
+    assert.equal(h.calls.research[0].chatState, undefined)
+})
+
+test('the refresh prompt pins prose to the existing language, enums to English', () => {
+    const p = _buildRefreshPrompt('NVDA', null)
+    assert.match(p, /SAME LANGUAGE as the existing coverage/)
+    assert.match(p, /rating, status, band_basis, horizon.*canonical English/)
 })
