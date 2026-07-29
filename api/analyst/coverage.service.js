@@ -42,7 +42,7 @@ const DEFAULT_STATUS = 'active'
 const PLAN_FIELDS = ['sector', 'thesis', 'rating', 'price_target', 'estimates', 'gap',
     'catalysts', 'kill_criteria', 'risk_reward', 'conviction', 'status', 'evidence']
 
-export const coverageService = { initiateCoverage, getCoverage, getCoverageById, updateCoverage, retireCoverage, captureResearchBasis }
+export const coverageService = { initiateCoverage, getCoverage, getCoverageById, updateCoverage, retireCoverage, deleteCoverage, captureResearchBasis }
 
 // Exported for tests + downstream phases (P2 valuation, P3 agent, P5 monitor).
 export { normalizeCoverage, newRevision }
@@ -274,7 +274,23 @@ async function captureResearchBasis({ userId, symbol } = {}, deps = { getCoverag
     }
 }
 
-// Churn a name out of the book (S5) — a status change to `retired`, logged as a revision.
+// Churn a name out of the book (S5) — a status change to `retired`, logged as a revision. The doc and
+// its whole revision trail stay: a retired thesis is archived research, not deleted research.
 async function retireCoverage(id, userId) {
     return updateCoverage(id, { status: 'retired', revision_kind: 'retire', revision_note: 'Coverage retired' }, userId)
+}
+
+/**
+ * REMOVE the document — permanently, trail and all. The one operation `retireCoverage` deliberately
+ * is not.
+ *
+ * Retiring is the normal way a name leaves the book, because the revision history is usually the
+ * most valuable thing on the doc. Delete is for research that should never have existed: a mistaken
+ * ticker, a test run, a duplicate. There is no undo, so the UI confirms first.
+ *
+ * No deleteLock: unlike an execution-tier entity there is no broker state to strand, and a held name
+ * losing its coverage costs only the review gate's basis comparison — never a position.
+ */
+async function deleteCoverage(id, userId) {
+    return crud.remove(id, userId)
 }

@@ -74,9 +74,13 @@ export const listCoverage   = crud.list
 export const getCoverageOne = crud.get
 
 // ── The moves that aren't CRUD ────────────────────────────────────────────────
-// Initiate, update and retire each carry judgment a shared shell can't hold: initiation guards a
-// once-per-name event, update takes a patch under an envelope, and retire is a STATUS CHANGE
-// wearing a DELETE route — it never removes the document, because the revision trail is the point.
+// Initiate and update each carry judgment a shared shell can't hold: initiation guards a once-per-name
+// event, update takes a patch under an envelope.
+//
+// Retire and delete are DIFFERENT operations and now have different routes. Retire (POST …/retire) is
+// a status change that keeps the document and its revision trail — archived research. Delete (DELETE
+// …/:id) removes it for good. Retire used to wear the DELETE verb, which made the API say "removed"
+// while the doc stayed; the verbs now mean what they say.
 
 export async function initiateCoverage(req, res) {
     try {
@@ -124,5 +128,19 @@ export async function retireCoverage(req, res) {
     } catch (err) {
         logger.error(LOG, 'retireCoverage failed', err)
         res.status(500).send({ error: 'Failed to retire coverage' })
+    }
+}
+
+// Permanent — the document and its revision trail are gone. Answers `{ ok: true }` because there is
+// no longer a document to answer with, which is exactly the difference from retire above.
+export async function deleteCoverage(req, res) {
+    try {
+        const result = await coverageService.deleteCoverage(req.params.id, req.user._id)
+        if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to delete coverage' })
+        logger.info(LOG, 'coverage deleted', { id: req.params.id })
+        res.send({ ok: true })
+    } catch (err) {
+        logger.error(LOG, 'deleteCoverage failed', err)
+        res.status(500).send({ error: 'Failed to delete coverage' })
     }
 }
