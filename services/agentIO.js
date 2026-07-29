@@ -183,9 +183,11 @@ that chart" — show it by emitting a chart tag:
   this turn (show_to_user), do not emit the tag as well.
 - The tag needs no tool call. When the user only wants to LOOK, use it rather than spending a
   get_chart round trip.
-- Emit it ONLY when the user asked to see a chart. It is not a way to illustrate your own analysis
-  (use your chart/candle tools for that). If they asked something ELSE in the same breath, answer
-  that in full — the silence rule covers the chart, never a question you owe them.`
+- Emit it ONLY when the user asked to see a chart, in THIS message. It is not a way to illustrate
+  your own analysis (use your chart/candle tools for that), and answering an unrelated question is
+  not a reason to re-show the chart already in front of them — a chart you showed earlier is still
+  there. If they asked something ELSE in the same breath, answer that in full: the silence rule
+  covers the chart, never a question you owe them.`
 
 // Point the `<chart>` descriptor at our capture. All emit tags are suppressed by default
 // (buildTagCaptures), so the descriptor is normally already there — appended defensively for a
