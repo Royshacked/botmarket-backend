@@ -1232,7 +1232,7 @@
     },
     {
       "name": "compute_valuation",
-      "description": "Compute OUR price target for a stock, deterministically: a justified multiple × a forward metric, with the GAP vs the Street consensus. Supply `multiple` to express your justified re-rating (the edge lives here) — omit it to anchor on the stock’s own historical range. `forward_metric` overrides the consensus estimate with your own number (the other place an edge can live). Returns a transparent bear/base/bull with the multiple basis. method: pe (× forward EPS), ev_sales / ev_ebitda (× forward revenue/EBITDA, needs shares_out + net_debt for the equity bridge).",
+      "description": "Compute OUR price target for a stock, deterministically: a justified multiple × a forward metric, with the GAP vs the Street consensus. Supply `multiple` to express your justified re-rating (the edge lives here) — omit it to anchor on the stock’s own historical range. `forward_metric` overrides the consensus estimate with your own number (the other place an edge can live). Supply `scenarios` to get a REAL bear/bull — each leg priced off its own multiple AND its own earnings; without it the band is only a ±15% re-rate on unchanged earnings, which is NOT a downside case and must never be read as one (the reply states which you got). method: pe (× forward EPS), ev_sales / ev_ebitda (× forward revenue/EBITDA, needs shares_out + net_debt for the equity bridge).",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1268,6 +1268,38 @@
           "net_debt": {
             "type": "number",
             "description": "Net debt — for ev_* (defaults 0)."
+          },
+          "scenarios": {
+            "type": "object",
+            "description": "Your bear/bull CASES. In a real downturn the multiple compresses AND earnings fall — model both. Each leg takes its own `multiple` and/or `forward_metric`; whichever you omit inherits the base. Omit a leg to leave that side as plain ±15% sensitivity.",
+            "properties": {
+              "bear": {
+                "type": "object",
+                "properties": {
+                  "multiple": {
+                    "type": "number",
+                    "description": "Trough multiple in your downside case"
+                  },
+                  "forward_metric": {
+                    "type": "number",
+                    "description": "Downside EPS / revenue / EBITDA"
+                  }
+                }
+              },
+              "bull": {
+                "type": "object",
+                "properties": {
+                  "multiple": {
+                    "type": "number",
+                    "description": "Peak multiple in your upside case"
+                  },
+                  "forward_metric": {
+                    "type": "number",
+                    "description": "Upside EPS / revenue / EBITDA"
+                  }
+                }
+              }
+            }
           }
         },
         "required": [

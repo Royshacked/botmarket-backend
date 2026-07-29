@@ -22,16 +22,35 @@ const _deps = {
     initiate: (draft, userId)      => coverageService.initiateCoverage(draft, userId),
     update:   (id, patch, userId)  => coverageService.updateCoverage(id, patch, userId),
     notify:   (args)               => notifyCoverageRefreshed(args),
+    // The thesis being refreshed. Fetched so the agent runs in UPDATE mode (analyst.agent.service
+    // `existing_coverage`) instead of from a blank slate — see _existingCoverage below.
+    existing: (userId, symbol)     => _existingCoverage(userId, symbol),
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
+/** The user's live thesis for this name, or null. Never throws — a refresh must survive a bad read. */
+async function _existingCoverage(userId, symbol) {
+    try {
+        const rows = await coverageService.getCoverage(userId)
+        return (Array.isArray(rows) ? rows : [])
+            .find(c => String(c.symbol ?? '').toUpperCase() === symbol) ?? null
+    } catch {
+        return null
+    }
+}
+
 // The headless research prompt. A refresh is a re-model of an EXISTING thesis, optionally focused by
 // Atlas's question. Pure — exported for tests.
+//
+// The language line matters because this path has no conversation to inherit from. A thesis written
+// in Spanish by an analyst working in Spanish would otherwise come back in English purely because
+// the SCHEDULER spoke English — a doc silently changing language on its own, with no one asking.
 export function _buildRefreshPrompt(ticker, question) {
     const q = typeof question === 'string' && question.trim() ? question.trim() : null
     return `Re-research ${ticker} and emit an updated <coverage> block for it.`
         + (q ? ` Focus especially on: ${q}` : '')
         + ` This is a refresh of an existing thesis for a portfolio review — produce your current variant-perception view, our price target vs the Street, catalysts, and monitorable kill-criteria.`
+        + ` Write the block's prose in the SAME LANGUAGE as the existing coverage shown to you; keep the vocabulary fields (rating, status, band_basis, horizon) in canonical English.`
 }
 
 /**
@@ -46,9 +65,18 @@ export async function refreshCoverage({ userId, ticker, question = null, portfol
 
     logger.info(LOG, 'refresh start', { userId, ticker: sym, portfolioId })
     try {
+        // UPDATE MODE. Without this the agent researches from a blank slate every time and the prompt's
+        // claim that it is "a refresh of an existing thesis" is a fiction — it was never shown one.
+        // That mattered little when a refresh was an occasional Atlas request; now that the coverage
+        // monitor schedules re-models off earnings dates, every one of them would discard the prior
+        // view rather than revise against it, which is exactly what the revision trail exists to show.
+        // It also carries the language of the existing thesis (see _buildRefreshPrompt).
+        const existing = await deps.existing(userId, sym)
+
         const result = await withTimeout(deps.research({
             messages:  [],
             userPrompt: _buildRefreshPrompt(sym, question),
+            ...(existing ? { chatState: { existing_coverage: existing, active_symbol: sym } } : {}),
             userId,
             onToken: () => {}, onToolStart: () => {}, onReasoning: () => {}, onPhase: () => {},
         }), RESEARCH_TIMEOUT_MS)

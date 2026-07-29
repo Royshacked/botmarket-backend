@@ -75,11 +75,19 @@ export function valuationReadText(sym, method, result, meta = {}) {
     const edge = result.gap
         ? (result.gap.pct > 3 ? 'ABOVE the Street — a bullish variant view' : result.gap.pct < -3 ? 'BELOW the Street — a bearish variant view' : 'in line with the Street — thin edge, may not be worth covering')
         : 'no consensus to compare'
+    // Spell out what the band IS. A sensitivity band read as a downside case is the failure this
+    // whole field exists to prevent, so the agent is told plainly and nudged to model a real one.
+    const legs = result.legs
+    const bandLine = result.band_basis === 'scenario'
+        ? `- Band basis: SCENARIO — bear ${legs.bear.multiple}x on ${legs.bear.forward_metric}, bull ${legs.bull.multiple}x on ${legs.bull.forward_metric}`
+        : `- Band basis: MULTIPLE SENSITIVITY (±15% re-rate on UNCHANGED ${result.forward_metric}) — this is NOT a downside case. For a real bear/bull, pass \`scenarios\` with a trough/peak multiple AND the earnings that go with it.`
+
     return [
         `Our ${result.method.toUpperCase()} valuation of ${S}:`,
         `- Multiple: ${m.used}x (${m.basis}; range ${m.low}–${m.high}x)${ctx.length ? ` — ${ctx.join(', ')}` : ''}`,
         `- Forward metric: ${result.forward_metric} (${fwdSrc}${meta.fy ? `, FY${meta.fy}` : ''})`,
         `- OUR price target: ${result.our_pt} (bear ${pt.bear} / base ${pt.base} / bull ${pt.bull})`,
+        bandLine,
         `- Street consensus PT: ${result.consensus_pt ?? 'n/a'}`,
         `- THE GAP: ${gapLine}${result.upside_pct != null ? ` · upside ${_sign(result.upside_pct)}${result.upside_pct}% vs price` : ''}`,
         `- Edge: ${edge}`,
@@ -96,7 +104,7 @@ async function _getConsensus({ ticker }) {
     return formatConsensus(sym, { estimates, pt, grades, gradesHist })
 }
 
-async function _computeValuation({ ticker, method = 'pe', multiple, forward_metric, current_price, shares_out, net_debt }) {
+async function _computeValuation({ ticker, method = 'pe', multiple, forward_metric, current_price, shares_out, net_debt, scenarios }) {
     const sym = String(ticker || '').toUpperCase().trim()
     if (!sym) return 'Provide a ticker.'
     const m = VALUATION_METHODS.includes(method) ? method : 'pe'
@@ -117,6 +125,7 @@ async function _computeValuation({ ticker, method = 'pe', multiple, forward_metr
         current_price,
         shares_out,
         net_debt,
+        scenarios,
     })
     return valuationReadText(sym, m, result, { fy: est?.next?.fy, consensusMetric: usingConsensus })
 }
@@ -129,7 +138,7 @@ export const VALUATION_TOOLS = [
     },
     {
         name: 'compute_valuation',
-        description: 'Compute OUR price target for a stock, deterministically: a justified multiple × a forward metric, with the GAP vs the Street consensus. Supply `multiple` to express your justified re-rating (the edge lives here) — omit it to anchor on the stock’s own historical range. `forward_metric` overrides the consensus estimate with your own number (the other place an edge can live). Returns a transparent bear/base/bull with the multiple basis. method: pe (× forward EPS), ev_sales / ev_ebitda (× forward revenue/EBITDA, needs shares_out + net_debt for the equity bridge).',
+        description: 'Compute OUR price target for a stock, deterministically: a justified multiple × a forward metric, with the GAP vs the Street consensus. Supply `multiple` to express your justified re-rating (the edge lives here) — omit it to anchor on the stock’s own historical range. `forward_metric` overrides the consensus estimate with your own number (the other place an edge can live). Supply `scenarios` to get a REAL bear/bull — each leg priced off its own multiple AND its own earnings; without it the band is only a ±15% re-rate on unchanged earnings, which is NOT a downside case and must never be read as one (the reply states which you got). method: pe (× forward EPS), ev_sales / ev_ebitda (× forward revenue/EBITDA, needs shares_out + net_debt for the equity bridge).',
         input_schema: {
             type: 'object',
             properties: {
@@ -140,6 +149,14 @@ export const VALUATION_TOOLS = [
                 current_price:  { type: 'number', description: 'Optional — current price, to also report upside %.' },
                 shares_out:     { type: 'number', description: 'Shares outstanding — required for ev_* (the EV→equity bridge).' },
                 net_debt:       { type: 'number', description: 'Net debt — for ev_* (defaults 0).' },
+                scenarios:      {
+                    type: 'object',
+                    description: 'Your bear/bull CASES. In a real downturn the multiple compresses AND earnings fall — model both. Each leg takes its own `multiple` and/or `forward_metric`; whichever you omit inherits the base. Omit a leg to leave that side as plain ±15% sensitivity.',
+                    properties: {
+                        bear: { type: 'object', properties: { multiple: { type: 'number', description: 'Trough multiple in your downside case' }, forward_metric: { type: 'number', description: 'Downside EPS / revenue / EBITDA' } } },
+                        bull: { type: 'object', properties: { multiple: { type: 'number', description: 'Peak multiple in your upside case' }, forward_metric: { type: 'number', description: 'Upside EPS / revenue / EBITDA' } } },
+                    },
+                },
             },
             required: ['ticker'],
         },

@@ -1,5 +1,7 @@
 // Pure helpers for the portfolio review lifecycle — no I/O, no DB.
 //
+import { toNum } from './format.util.js'
+//
 // A review is a delta operation anchored to the thesis, but the book's "then" state
 // (the regime, book value, and benchmark price it was last reviewed / constructed in)
 // isn't recoverable after the fact. buildFingerprint captures that compact "then" so the
@@ -40,6 +42,15 @@ const _convictionFell = (prev, cur) => {
 }
 const _SEVERITY_ORDER = { high: 0, medium: 1 }
 
+// How far OUR price target must fall below the one we bought on before the book deserves a look.
+// Below this is ordinary re-modelling noise; above it, the case has materially weakened.
+export const PT_CUT_PCT = 15
+
+// The SHARED coercion, not a local retype: `Number(null)` is 0, so the terse version turns a missing
+// price target into a real zero — which would read as "PT 0 ≤ our entry" and ring the doorbell on
+// every held name at once. That exact shape already broke the coverage book once.
+const _n = toNum
+
 /**
  * Cheap, NON-LLM pre-check for the scheduled-review nudge: what (if anything) changed since the
  * fingerprint that's worth a look. Pure — takes the current state + fingerprint + the already-
@@ -61,11 +72,32 @@ export function computeReviewTriggers({ state = null, fingerprint = null, delta 
     const fell = ideas.filter(s => _convictionFell(s.convictionPrev, s.conviction))
     if (fell.length) triggers.push({ kind: 'conviction', severity: 'high', label: `conviction fell on ${fell.map(s => s.asset).join(', ')}` })
 
-    // A held name's research thesis flipped terminal (the coverage-delta gate). thesis_broken is a
-    // hard "reassess now"; target_hit is good news (harvest?) but still worth a deliberate look.
+    // The coverage-delta gate. Research itself has no invalidation — a thesis whose price fell is
+    // cheaper, not wrong — so what earns a look here is our OWN PRICE TARGET moving against a position
+    // we actually hold, measured against the basis frozen when we bought it:
+    //   • PT ≤ what we paid  → no upside left on our own numbers. That is the real "thesis broken".
+    //   • PT cut materially since entry → the case is weakening even if it still clears cost.
+    // `status` is still honoured, but only as a DELIBERATE verdict: nothing deterministic sets
+    // thesis_broken any more, so its presence means the analyst tier or the user said so.
     for (const c of (Array.isArray(coverage) ? coverage : [])) {
-        if (c?.status === 'thesis_broken') triggers.push({ kind: 'coverage', severity: 'high',   label: `${c.symbol}: research thesis broken` })
+        const pt = _n(c?.currentPt)
+
+        if (c?.status === 'thesis_broken')  triggers.push({ kind: 'coverage', severity: 'high',   label: `${c.symbol}: research thesis broken` })
         else if (c?.status === 'target_hit') triggers.push({ kind: 'coverage', severity: 'medium', label: `${c.symbol}: research price target hit` })
+
+        const entry = _n(c?.entryPrice)
+        if (pt !== null && entry !== null && entry > 0 && pt <= entry) {
+            triggers.push({ kind: 'coverage', severity: 'high', label: `${c.symbol}: our price target ${pt} is at or below our entry ${_round2(entry)} — no upside left on our own numbers` })
+            continue   // the harder finding already covers the softer one
+        }
+
+        const basis = _n(c?.basisPt)
+        if (pt !== null && basis !== null && basis > 0) {
+            const cutPct = (basis - pt) / basis * 100
+            if (cutPct >= PT_CUT_PCT) {
+                triggers.push({ kind: 'coverage', severity: 'medium', label: `${c.symbol}: our price target cut ${Math.round(cutPct)}% since entry (${_round2(basis)} → ${_round2(pt)})` })
+            }
+        }
     }
 
     // "Nuclear war" proxy — a sharp adverse move in book P&L% since the fingerprint. The market's

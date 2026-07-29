@@ -42,7 +42,7 @@ const DEFAULT_STATUS = 'active'
 const PLAN_FIELDS = ['sector', 'thesis', 'rating', 'price_target', 'estimates', 'gap',
     'catalysts', 'kill_criteria', 'risk_reward', 'conviction', 'status', 'evidence']
 
-export const coverageService = { initiateCoverage, getCoverage, getCoverageById, updateCoverage, retireCoverage }
+export const coverageService = { initiateCoverage, getCoverage, getCoverageById, updateCoverage, retireCoverage, captureResearchBasis }
 
 // Exported for tests + downstream phases (P2 valuation, P3 agent, P5 monitor).
 export { normalizeCoverage, newRevision }
@@ -61,15 +61,60 @@ function _priceTarget(pt) {
     if (value === null) return null   // a PT with no number is meaningless
     return { value, horizon: _str(pt.horizon), basis: _str(pt.basis) }
 }
+/**
+ * THE GAP — our PT against the Street's, kept as a DISTRIBUTION rather than a single number.
+ *
+ * The Street arrives as {consensus, high, low, median} and only `consensus` used to survive, which
+ * flattered every thesis: "12% below the Street" sounds contrarian, but with targets spanning
+ * 500–700 our 516 sits in the 8th percentile of a crowded range — an analyst is already lower than
+ * us. `pctile` is that position, and it is the honest read of a variant view; `pct` (vs the mean) is
+ * kept because it is what the existing card copy and FE render.
+ */
 function _gap(g) {
     if (!g || typeof g !== 'object') return null
     const our_pt = _num(g.our_pt), consensus_pt = _num(g.consensus_pt), pct = _num(g.pct)
-    return (our_pt === null && consensus_pt === null && pct === null) ? null : { our_pt, consensus_pt, pct }
+    const low = _num(g.low), high = _num(g.high), median = _num(g.median), pctile = _num(g.pctile)
+    if (our_pt === null && consensus_pt === null && pct === null && low === null && high === null) return null
+    return { our_pt, consensus_pt, pct, low, high, median, pctile }
 }
+// One valuation leg → { value, multiple, forward_metric }. A bare number is accepted and widened
+// (legacy docs predate the inputs); anything else is null.
+function _leg(v) {
+    if (v === null || v === undefined) return null
+    if (typeof v === 'object' && !Array.isArray(v)) {
+        const value = _num(v.value)
+        return value === null ? null : { value, multiple: _num(v.multiple), forward_metric: _num(v.forward_metric) }
+    }
+    const value = _num(v)
+    return value === null ? null : { value, multiple: null, forward_metric: null }
+}
+
+/**
+ * The bear/base/bull band, each leg carrying the inputs that produced it, plus `band_basis` naming
+ * what the band MEANS ('scenario' = own multiple + own earnings per leg; 'multiple_sensitivity' =
+ * ±15% re-rate on unchanged earnings). Both come straight from valuation.engine.
+ *
+ * `ordered:false` is stamped when bear < base < bull does not hold. It is recorded rather than
+ * rejected — a malformed band must not silently vanish and take the thesis with it — but it flags a
+ * band that was hand-written rather than computed. That is not hypothetical: SNDK was persisted with
+ * a bull matching the engine exactly (2530) and a bear that did not (700 vs the engine's 1870),
+ * because nothing here ever compared the emitted band against the tool's own output.
+ */
 function _riskReward(rr) {
     if (!rr || typeof rr !== 'object') return null
-    const bull = _num(rr.bull), base = _num(rr.base), bear = _num(rr.bear)
-    return (bull === null && base === null && bear === null) ? null : { bull, base, bear }
+    const bull = _leg(rr.bull), base = _leg(rr.base), bear = _leg(rr.bear)
+    if (bull === null && base === null && bear === null) return null
+
+    const vals = [bear?.value, base?.value, bull?.value]
+    const ordered = vals.every(v => v !== null && v !== undefined)
+        ? (vals[0] < vals[1] && vals[1] < vals[2])
+        : true   // an incomplete band can't be judged out of order
+
+    return {
+        bear, base, bull,
+        band_basis: ['scenario', 'multiple_sensitivity'].includes(rr.band_basis) ? rr.band_basis : null,
+        ordered,
+    }
 }
 
 /**
@@ -197,6 +242,36 @@ async function updateCoverage(id, patch, userId) {
     if (!res.ok) return res
     logger.info(LOG, 'coverage updated', { id, kind: revision.kind })
     return res
+}
+
+/**
+ * The research a position is being opened ON, frozen for the life of that position:
+ * `{ coverageId, coveragePt, at }`, or null when the name isn't covered.
+ *
+ * WHY IT IS FROZEN. Invalidation belongs to the POSITION, not to the research — a thesis whose price
+ * falls is cheaper, not wrong — so what a held name needs is "has our own price target moved against
+ * what we paid?". That question needs a fixed "what we believed at entry" to measure from, and the
+ * live coverage doc is precisely the thing that moves.
+ *
+ * Best-effort BY DESIGN: research is not a precondition for trading, and no order may fail because
+ * the coverage book was unreachable. Any problem → null, and the gate simply never fires.
+ *
+ * Shared by every path into a live position (broker placement and manual fill both call it) so the
+ * two can't drift into freezing different things.
+ */
+async function captureResearchBasis({ userId, symbol } = {}, deps = { getCoverage }) {
+    try {
+        const sym = String(symbol ?? '').toUpperCase().trim()
+        if (!sym || !userId) return null
+        const rows = await deps.getCoverage(userId)
+        const cov  = (Array.isArray(rows) ? rows : []).find(c => String(c.symbol ?? '').toUpperCase() === sym)
+        const pt   = _num(cov?.price_target?.value)
+        if (!cov || pt === null) return null
+        return { coverageId: cov.id, coveragePt: pt, at: new Date().toISOString() }
+    } catch (err) {
+        logger.warn(LOG, 'research basis capture failed (caller unaffected)', err.message)
+        return null
+    }
 }
 
 // Churn a name out of the book (S5) — a status change to `retired`, logged as a revision.

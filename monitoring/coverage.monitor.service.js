@@ -1,20 +1,28 @@
 // Coverage monitor (P5) — the slow background loop that keeps the Analyst's theses LIVING. Mirrors the
 // Hermes/Themis pattern (poll loop + due-selection + a two-tier verdict), but at a research cadence:
-// each active coverage is re-checked ~daily. It tracks THE GAP (our view vs the Street) via the pure
+// each coverage is re-checked ~daily. It tracks THE GAP (our view vs the Street) via the pure
 // classifier in coverage.assess.js — is the Street converging to us (thesis playing out, edge closing)
-// or diverging — plus price hitting our target / the invalidation edge. Material verdicts append a
-// revision + move status + notify; a quiet day just refreshes the recorded gap.
+// or diverging — plus price reaching our target. Material verdicts append a revision + notify; a quiet
+// day just refreshes the recorded gap.
 //
-// This is the DETERMINISTIC tier. The full quarterly re-model (re-run compute_valuation with fresh
-// estimates) + judging the text kill-criteria is the LLM tier that wakes the Analyst agent — a later add.
+// TWO TIERS, and the split is about cost:
+//   • DETERMINISTIC (every due coverage, every day) — price + consensus → gap → card. Free.
+//   • RE-MODEL (rare, gated) — wake Prometheus headless for a full research run, rewriting the PT and
+//     the band. Multi-minute and tool-heavy, so coverage.remodel.js decides when it is earned:
+//     a dated catalyst landed, the edge changed category, or the quarterly floor expired — under a
+//     per-name cooldown and a per-tick cap, held names first.
+// Judging the free-text kill_criteria is still the LLM tier's job and still unbuilt.
 
 import { getDb }                  from '../providers/mongodb.provider.js'
-import { getQuote }               from '../providers/yahoofinance.provider.js'
 import { getPriceTargetConsensus } from '../providers/fmp.provider.js'
 import { coverageService }        from '../api/analyst/coverage.service.js'
 import { classifyGapState, recomputeGap, statusForState, nextCheckAt } from './coverage.assess.js'
+import { remodelDecision }        from './coverage.remodel.js'
 import { notifyCoverageEvent }    from '../services/coverageNotify.service.js'
-import { createPollLoop }         from './monitorUtils.js'
+import { refreshCoverage }        from '../services/coverageRefresh.service.js'
+import { entityRepo }             from '../services/entity/entityRepo.service.js'
+import { LIVE_POSITION }          from '../services/entity/vocabulary.js'
+import { createPollLoop, fetchLastPrice } from './monitorUtils.js'
 import { logger }                 from '../services/logger.service.js'
 
 const LOG        = '[coverageMonitor]'
@@ -22,12 +30,43 @@ const COLLECTION = 'coverage'
 // Tick hourly; each coverage gates itself to ~daily via monitor.next_check_at (research cadence).
 const POLL_INTERVAL_MS = 60 * 60 * 1000
 const MAX_PER_TICK     = 50
+// Re-models are the expensive tier: a hard ceiling per tick so an earnings week can't fire a dozen
+// multi-minute research runs at once. Overflow isn't lost — it stays due and lands on a later tick.
+const MAX_REMODELS_PER_TICK = 3
 
 // Injectable IO so tests exercise the branching without real price/consensus/DB writes.
 const _deps = {
-    getPrice:       async (sym) => { const q = await getQuote(sym).catch(() => null); return q?.price ?? q?.regularMarketPrice ?? q?.last ?? null },
-    getConsensusPt: async (sym) => { const c = await getPriceTargetConsensus(sym).catch(() => null); return c?.consensus ?? null },
+    // The SHARED price read (quote → candle fallback), the same one Hermes and Talos gate on. This
+    // used to hand-roll a getQuote() lookup — the LLM-display formatter, which returns a STRING — so
+    // the price was silently null on every tick and every thesis broke on its first check.
+    getPrice:       (sym) => fetchLastPrice(sym).catch(() => null),
+    // The WHOLE distribution {consensus, high, low, median} — the gap is our PT's position within the
+    // Street's range, not a percentage off its mean.
+    getConsensusPt: (sym) => getPriceTargetConsensus(sym).catch(() => null),
     updateCoverage: coverageService.updateCoverage,
+    // The expensive tier — the SAME headless-Prometheus hop Atlas triggers mid-review, reused rather
+    // than forked, so a re-model persists and notifies identically however it was asked for.
+    remodel: (cov, reason) => refreshCoverage({
+        userId:   cov.userId,
+        ticker:   cov.symbol,
+        question: `Scheduled re-model (${reason}). Re-run the valuation with fresh estimates and restate the variant view.`,
+    }),
+    // Symbols this user holds RIGHT NOW — they get the scarce re-model slots first, because they are
+    // the only ones carrying risk. A failure here degrades to "no priority", never to no re-models.
+    getHeldSymbols: async (userId) => {
+        try {
+            // listByStatus is owner-BLIND (it serves the kind-blind reconciler), so scope it here —
+            // otherwise one user's holdings would prioritise another user's research.
+            const live = await entityRepo.listByStatus(LIVE_POSITION)
+            return new Set((live ?? [])
+                .filter(e => e.userId === userId)
+                .map(e => String(e.asset ?? '').toUpperCase())
+                .filter(Boolean))
+        } catch (err) {
+            logger.warn(LOG, 'held-symbol lookup failed; re-model priority is flat this tick', err.message)
+            return new Set()
+        }
+    },
     // Post to the Analyst's social-chat feed on a material verdict (P5). Logs too, for the server trail.
     notify: (cov, verdict) => {
         logger.info(LOG, 'coverage event', { symbol: cov.symbol, state: verdict.state, reason: verdict.reason, edge_gone: verdict.edge_gone })
@@ -42,8 +81,10 @@ export const coverageMonitorService = { start: _loop.start, stop: _loop.stop }
 async function _tick() {
     const db  = await getDb()
     const now = new Date().toISOString()
+    // Everything except a RETIRED name. A thesis keeps living — including one that already hit its
+    // target — until the user churns it out of the book; only that decision stops the loop.
     const due = await db.collection(COLLECTION).find({
-        status: 'active',
+        status: { $ne: 'retired' },
         $or: [
             { 'monitor.next_check_at': null },
             { 'monitor.next_check_at': { $exists: false } },
@@ -51,27 +92,87 @@ async function _tick() {
         ],
     }).limit(MAX_PER_TICK).toArray()
 
+    const candidates = []
     for (const cov of due) {
-        try { await _checkCoverage(db, cov, Date.now(), _deps) }
-        catch (err) { logger.warn(LOG, `check ${cov.symbol} failed:`, err.message) }
+        try {
+            const res = await _checkCoverage(db, cov, Date.now(), _deps)
+            if (res?.remodel?.due) candidates.push({ cov, reason: res.remodel.reason })
+        } catch (err) { logger.warn(LOG, `check ${cov.symbol} failed:`, err.message) }
+    }
+    if (candidates.length) await _runRemodels(db, candidates, _deps)
+}
+
+/**
+ * Fire the re-models this tick can afford. Held names first — they are the ones carrying risk — then
+ * capped. Anything over the cap keeps its due state and is picked up on a later tick, and the drop is
+ * LOGGED: a silent truncation would read as "everything was re-modelled" when it wasn't.
+ */
+export async function _runRemodels(db, candidates, deps = _deps) {
+    const held = new Set()
+    for (const userId of new Set(candidates.map(c => c.cov.userId))) {
+        for (const s of await deps.getHeldSymbols(userId)) held.add(`${userId}:${s}`)
+    }
+    const isHeld = c => held.has(`${c.cov.userId}:${String(c.cov.symbol).toUpperCase()}`)
+
+    const ordered = [...candidates].sort((a, b) => (isHeld(b) ? 1 : 0) - (isHeld(a) ? 1 : 0))
+    const run = ordered.slice(0, MAX_REMODELS_PER_TICK)
+    const deferred = ordered.slice(MAX_REMODELS_PER_TICK)
+    if (deferred.length) {
+        logger.info(LOG, `re-model cap reached — deferring ${deferred.length} to a later tick: ${deferred.map(c => c.cov.symbol).join(', ')}`)
+    }
+
+    for (const { cov, reason } of run) {
+        // Stamp BEFORE the run, not after: a re-model takes minutes, and the hourly tick must not
+        // start a second one for the same name in the meantime. It also starts the cooldown at the
+        // decision, so a run that fails doesn't immediately re-trigger on the next tick.
+        await db.collection(COLLECTION).updateOne({ id: cov.id }, {
+            $set: { 'monitor.last_remodel_at': new Date().toISOString(), 'monitor.last_remodel_reason': reason },
+            $inc: { 'monitor.remodels': 1 },
+        })
+        logger.info(LOG, 'RE-MODEL', { symbol: cov.symbol, held: isHeld({ cov }), reason })
+        try { await deps.remodel(cov, reason) }
+        catch (err) { logger.warn(LOG, `re-model ${cov.symbol} failed:`, err.message) }
     }
 }
 
 // Check one coverage: fetch fresh price + consensus → classify the gap → apply. Exported for tests.
 export async function _checkCoverage(db, cov, nowMs, deps = _deps) {
-    const [price, consensusPt] = await Promise.all([deps.getPrice(cov.symbol), deps.getConsensusPt(cov.symbol)])
+    const [price, street] = await Promise.all([deps.getPrice(cov.symbol), deps.getConsensusPt(cov.symbol)])
+    // The classifier compares point-to-point (our PT vs the Street's mean); the stored gap keeps the
+    // whole distribution. A bare number is still accepted, so an injected test dep can stay simple.
+    const consensusPt = (street && typeof street === 'object') ? street.consensus ?? null : street ?? null
     const verdict = classifyGapState(cov, { price, consensus_pt: consensusPt })
-    const gap     = recomputeGap(cov.price_target?.value, consensusPt) ?? cov.gap ?? null
+    const gap     = recomputeGap(cov.price_target?.value, street) ?? cov.gap ?? null
     const nextAt  = nextCheckAt(cov, verdict.state, nowMs)
+
+    // The expensive-tier decision rides the SAME daily fetch — no extra call to ask "is a re-model
+    // earned?". `edge_category` is persisted on every tick precisely so the next one can spot a
+    // CHANGE; recording it is what makes that trigger possible at all.
+    const remodel = remodelDecision(cov, { street, nowMs })
+
     const bookkeeping = {
-        $set: { 'monitor.next_check_at': nextAt, 'monitor.last_checked': new Date(nowMs).toISOString() },
+        $set: {
+            'monitor.next_check_at':   nextAt,
+            'monitor.last_checked':    new Date(nowMs).toISOString(),
+            'monitor.edge_category':   remodel.edge_category,
+            'monitor.next_remodel_at': remodel.next_remodel_at,
+        },
         $inc: { 'monitor.checks': 1 },
     }
 
-    if (verdict.state === 'stable') {
+    // A verdict the doc ALREADY records is not news. Now that a target_hit name keeps being watched
+    // (nothing terminal stops the loop any more), a price parked above our PT would otherwise re-fire
+    // the same revision and the same card every single day. Consensus states self-limit — each write
+    // moves `gap.consensus_pt`, so `diverging` can only fire again on a FURTHER move — but a price
+    // comparison has no such ratchet, so it needs this one.
+    const alreadyRecorded = verdict.state === 'target_hit' && cov.status === 'target_hit'
+
+    if (verdict.state === 'stable' || alreadyRecorded) {
         // Quiet day — refresh the recorded gap + bookkeeping directly (no revision, no notify).
+        // A quiet DAY is not a quiet QUARTER: the re-model decision still stands, since a catalyst
+        // landing or the floor expiring has nothing to do with whether today's tape moved.
         await db.collection(COLLECTION).updateOne({ id: cov.id }, { ...bookkeeping, $set: { ...bookkeeping.$set, gap } })
-        return verdict
+        return { ...verdict, applied: false, remodel }
     }
 
     // Material verdict → update the thesis (status + gap + an appended revision) then notify.
@@ -79,8 +180,20 @@ export async function _checkCoverage(db, cov, nowMs, deps = _deps) {
     const patch = { gap, revision_kind: verdict.state, revision_note: note }
     const status = statusForState(verdict.state)
     if (status) patch.status = status
-    await deps.updateCoverage(cov.id, patch, cov.userId)
+
+    // The write is the source of truth for the card. If the thesis didn't actually move, telling the
+    // user it did sends them to a coverage that contradicts the message — so we log and stay quiet.
+    // Bookkeeping is skipped too, deliberately: leaving the doc due re-checks it on the next tick
+    // rather than swallowing a real verdict for a day over a transient failure.
+    const res = await deps.updateCoverage(cov.id, patch, cov.userId)
+    if (!res?.ok) {
+        logger.warn(LOG, 'thesis update failed — no status change, not notifying', { id: cov.id, symbol: cov.symbol, reason: res?.reason ?? 'unknown' })
+        // No re-model either: a doc we could not write is one whose `last_remodel_at` stamp would
+        // also fail, and a re-model that can't record itself would repeat every tick.
+        return { ...verdict, applied: false }
+    }
+
     await db.collection(COLLECTION).updateOne({ id: cov.id }, bookkeeping)   // updateCoverage doesn't touch monitor.*
     deps.notify(cov, verdict)
-    return verdict
+    return { ...verdict, remodel }
 }

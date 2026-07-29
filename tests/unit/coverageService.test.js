@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { normalizeCoverage, newRevision, RATINGS, STATUSES } from '../../api/analyst/coverage.service.js'
+import { normalizeCoverage, newRevision, RATINGS, STATUSES, coverageService } from '../../api/analyst/coverage.service.js'
 
 // Analyst P1 — coverage schema normalizer (pure). The CRUD methods are DB-bound (not unit-tested,
 // mirroring normalizeCall vs saveKairosCall).
@@ -53,17 +53,51 @@ test('normalize: price_target requires a numeric value (else null)', () => {
     assert.equal(normalizeCoverage({ symbol: 'X', price_target: 'nope' }).price_target, null)
 })
 
-test('normalize: gap coerces numbers; all-absent → null', () => {
+test('normalize: gap keeps the whole Street distribution; all-absent → null', () => {
     assert.deepEqual(
-        normalizeCoverage({ symbol: 'X', gap: { our_pt: 182, consensus_pt: 165, pct: '10.3' } }).gap,
-        { our_pt: 182, consensus_pt: 165, pct: 10.3 })
+        normalizeCoverage({ symbol: 'X', gap: { our_pt: 182, consensus_pt: 165, pct: '10.3', low: 140, high: 210, median: 168, pctile: 60 } }).gap,
+        { our_pt: 182, consensus_pt: 165, pct: 10.3, low: 140, high: 210, median: 168, pctile: 60 })
+    // A mean-only gap still normalizes — the range legs are simply unknown.
+    assert.deepEqual(
+        normalizeCoverage({ symbol: 'X', gap: { our_pt: 182, consensus_pt: 165, pct: 10.3 } }).gap,
+        { our_pt: 182, consensus_pt: 165, pct: 10.3, low: null, high: null, median: null, pctile: null })
     assert.equal(normalizeCoverage({ symbol: 'X', gap: {} }).gap, null)
 })
 
-test('normalize: risk_reward all-null → null; partial kept', () => {
+test('normalize: risk_reward legs carry the inputs that produced them', () => {
     assert.equal(normalizeCoverage({ symbol: 'X', risk_reward: {} }).risk_reward, null)
-    assert.deepEqual(normalizeCoverage({ symbol: 'X', risk_reward: { bull: 220, base: 180, bear: 140 } }).risk_reward,
-        { bull: 220, base: 180, bear: 140 })
+    const rr = normalizeCoverage({
+        symbol: 'X',
+        risk_reward: {
+            bear: { value: 700, multiple: 3.2, forward_metric: 220 },
+            base: { value: 2200, multiple: 10, forward_metric: 220 },
+            bull: { value: 2530, multiple: 11.5, forward_metric: 220 },
+            band_basis: 'scenario',
+        },
+    }).risk_reward
+    assert.deepEqual(rr.bear, { value: 700, multiple: 3.2, forward_metric: 220 })
+    assert.equal(rr.band_basis, 'scenario')
+    assert.equal(rr.ordered, true)
+})
+
+test('normalize: a bare-number leg is widened, not dropped (legacy docs predate the inputs)', () => {
+    const rr = normalizeCoverage({ symbol: 'X', risk_reward: { bull: 220, base: 180, bear: 140 } }).risk_reward
+    assert.deepEqual(rr.bear, { value: 140, multiple: null, forward_metric: null })
+    assert.deepEqual(rr.bull, { value: 220, multiple: null, forward_metric: null })
+    assert.equal(rr.band_basis, null)   // unknown — exactly what a legacy band should report
+    assert.equal(rr.ordered, true)
+})
+
+test('normalize: an out-of-order band is FLAGGED, not silently kept or dropped', () => {
+    // SNDK's real defect shape: a leg hand-edited away from the engine's output.
+    const rr = normalizeCoverage({ symbol: 'X', risk_reward: { bear: 2400, base: 2200, bull: 2530 } }).risk_reward
+    assert.equal(rr.ordered, false)
+    assert.equal(rr.bear.value, 2400)   // preserved — a malformed band must not take the thesis with it
+})
+
+test('normalize: an unknown band_basis is rejected rather than trusted', () => {
+    const rr = normalizeCoverage({ symbol: 'X', risk_reward: { bear: 140, base: 180, bull: 220, band_basis: 'vibes' } }).risk_reward
+    assert.equal(rr.band_basis, null)
 })
 
 test('normalize: estimates keeps an object, rejects non-object; arrays defaulted', () => {
@@ -84,4 +118,39 @@ test('newRevision: builds {at,kind,note,changed}; non-object changed → null; d
     assert.equal(bare.kind, null)
     assert.equal(bare.changed, null)
     assert.equal(newRevision({ changed: 'nope' }).changed, null)
+})
+
+// ─── captureResearchBasis: what a position freezes at entry ─────────────────
+// The gate that replaced price-invalidation asks "has our own PT moved against what we paid?", which
+// needs a fixed "what we believed at entry" — the live coverage doc is the thing that moves.
+
+const basisDeps = (rows) => ({ getCoverage: async () => rows })
+
+test('research basis: freezes the coverage id + the PT we bought on', async () => {
+    const b = await coverageService.captureResearchBasis(
+        { userId: 'u1', symbol: 'tsm' },
+        basisDeps([{ id: 'cov_TSM_1', symbol: 'TSM', price_target: { value: 702 } }]))
+    assert.equal(b.coverageId, 'cov_TSM_1')
+    assert.equal(b.coveragePt, 702)
+    assert.ok(Date.parse(b.at) > 0)
+})
+
+test('research basis: an uncovered name freezes nothing — research is not a precondition for trading', async () => {
+    assert.equal(await coverageService.captureResearchBasis({ userId: 'u1', symbol: 'AAPL' },
+        basisDeps([{ id: 'c', symbol: 'TSM', price_target: { value: 702 } }])), null)
+    assert.equal(await coverageService.captureResearchBasis({ userId: 'u1', symbol: '' }, basisDeps([])), null)
+    assert.equal(await coverageService.captureResearchBasis({ symbol: 'TSM' }, basisDeps([])), null)
+})
+
+test('research basis: coverage with no usable PT freezes nothing (never a zero)', async () => {
+    for (const pt of [null, undefined, {}, { value: null }, { value: 'x' }]) {
+        assert.equal(await coverageService.captureResearchBasis({ userId: 'u1', symbol: 'TSM' },
+            basisDeps([{ id: 'c', symbol: 'TSM', price_target: pt }])), null, JSON.stringify(pt))
+    }
+})
+
+test('research basis: a failing coverage read NEVER breaks the order path', async () => {
+    const b = await coverageService.captureResearchBasis({ userId: 'u1', symbol: 'TSM' },
+        { getCoverage: async () => { throw new Error('mongo down') } })
+    assert.equal(b, null)
 })
