@@ -1,7 +1,4 @@
 import { userService } from './user.service.js'
-import { logger } from '../../services/logger.service.js'
-
-const LOG = '[userController]'
 
 export async function list(req, res, next) {
     try {

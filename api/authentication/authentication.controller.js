@@ -1,7 +1,5 @@
 import { authService } from './authentication.service.js'
-import { logger } from '../../services/logger.service.js'
 
-const LOG = '[authController]'
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
 export async function signup(req, res, next) {

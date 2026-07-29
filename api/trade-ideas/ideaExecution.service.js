@@ -7,7 +7,7 @@ import { routeExits, detectNativeEntryLevel } from '../../services/protectionPla
 import { toBrokerSymbol }       from '../../services/brokerSymbol.service.js'
 import { executionReconciler }  from '../../monitoring/execution.reconciler.js'
 import { orderSymbol }          from '../../monitoring/exitOrders.util.js'
-import { armExitsInPosition, exitFields, basisReferenceQuote } from './exitOrders.service.js'
+import { exitFields, basisReferenceQuote } from './exitOrders.service.js'
 import { entityRepo }          from '../../services/entity/entityRepo.service.js'
 import { ownsEntity }          from '../../services/entity/entityCrud.service.js'
 import { AWAITING_CONFIRM }    from '../../services/entity/vocabulary.js'

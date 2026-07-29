@@ -37,10 +37,7 @@ test('normalizeResolveStatus: only done survives; everything else is dismissed',
 
 // ── every producer card now carries the standard actions ──────────────────────
 test('trade/coverage builders all emit the do/dismiss actions', () => {
-    const idea = { id: 'i1', userId: 'u1', asset: 'NQ', direction: 'long' }
-    const call = { id: 'c1', userId: 'u1', asset: 'AAPL', bias: 'long' }
-    const cov  = { id: 'cov1', userId: 'u1', symbol: 'NVDA', price_target: { value: 200 } }
-
+    // Fixtures live in allCards() — it builds its own idea/setup/call/coverage inputs.
     for (const c of allCards()) {
         assert.ok(c.actions, `${c.type} should carry actions`)
         assert.equal(c.actions.dismiss, true, `${c.type} should offer dismiss`)

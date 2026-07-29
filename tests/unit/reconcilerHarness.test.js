@@ -224,7 +224,7 @@ test('partial reduce: matched slice filled, broker says still open → resync (n
 
 // ── Scenario E: idealess simulated-venue close → captureClose only, no idea, no broker ────────
 test('idealess sim close: captureClose only (no linked idea)', async () => {
-    const { opLog, store, restore } = harness([])   // empty store — nothing linked
+    const { opLog, restore } = harness([])   // empty store — nothing linked
     try {
         await executionReconciler.handleExecution({ type: 'position.closed', simulated: true, accountId: 'sim1', positionId: 'sp1', price: 5, reason: 'tp', pnl: 10, at: 5 })
     } finally { restore() }

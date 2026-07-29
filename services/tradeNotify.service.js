@@ -17,7 +17,6 @@
 
 import { cardActions } from '../api/chat/chat.service.js'
 import { postCard } from './notifyCard.js'
-import { logger }         from './logger.service.js'
 
 const LOG = '[tradeNotify]'
 

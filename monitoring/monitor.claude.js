@@ -5,10 +5,8 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
-import { logger } from '../services/logger.service.js'
 import { extractFirstJSON } from './monitorUtils.js'
 
-const LOG    = '[monitor.claude]'
 const MODEL  = 'claude-haiku-4-5-20251001'
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 

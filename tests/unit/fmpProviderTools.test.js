@@ -128,7 +128,7 @@ test('macro: latest treasury row wins, 2s10s computed', () => {
         ],
     })
     assert.match(out, /Treasury curve \(2026-07-16\):/)   // newest, not array order
-    assert.match(out, /3M 3\.84%  2Y 4\.16%  10Y 4\.57%  30Y 5\.09%/)
+    assert.match(out, /3M 3\.84% {2}2Y 4\.16% {2}10Y 4\.57% {2}30Y 5\.09%/)
     assert.match(out, /2s10s \+41bp/)
 })
 

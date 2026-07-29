@@ -36,7 +36,6 @@
  */
 
 import { getDb }         from '../providers/mongodb.provider.js'
-import { LIVE_POSITION } from '../services/entity/vocabulary.js'
 import { logger }        from '../services/logger.service.js'
 import { executionBus }  from '../services/executionBus.js'
 import { brokerService } from '../api/broker/broker.service.js'
@@ -46,7 +45,6 @@ import { buildExitOrder, exitOrderRecord } from './exitOrders.util.js'
 import { entityRepo }    from '../services/entity/entityRepo.service.js'
 
 const LOG        = '[execution.reconciler]'
-const ACTIVE     = LIVE_POSITION
 const EPS        = 1e-6   // quantity comparison slack
 
 // Injection seam (matches the Hermes monitor's `_deps` pattern). Defaults ARE the real

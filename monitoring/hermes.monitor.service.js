@@ -1,8 +1,6 @@
 import { getDb } from '../providers/mongodb.provider.js'
 import { PAST_ENTRY_LEGACY, INVALIDATION } from '../services/entity/vocabulary.js'
 import { ENTITIES } from '../services/entity/entityCollection.js'
-import { getQuote }              from '../providers/yahoofinance.provider.js'
-import { getTickerAggregates }   from '../providers/candles.provider.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../services/tradeNotify.service.js'
