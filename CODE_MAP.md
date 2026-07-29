@@ -59,6 +59,11 @@ api/
       sse.util.js             startSseStream() — SSE headers + heartbeat + abort wiring
       parse.util.js           parseChatMessages / parseIdeaAccounts
       chatState.util.js       makeGetChatState / makeDeleteChatState factories
+      reason.util.js          THE reason→HTTP map (in_position=409, forbidden=403 …) + sendReason();
+                              route-owned reasons are passed in as `overrides`, never re-mapped locally
+      entityController.util.js  makeEntityController() — list/get/patch/delete for any owner-scoped
+                              kind (the HTTP twin of services/entity/entityCrud); `envelope` carries
+                              the legacy `{idea}/{ideas}` body shape, everything else answers bare
 services/
   idea.agent.service.js   ARCHIVED 2026-07-29 (superseded by kairos + mentor; unreachable)
                           + idea.stateParser.js (response/state machine — still shared)
@@ -198,9 +203,19 @@ docs/                       architecture design docs
   both fine because they yield the *same* `{ error }` shape:
   - **Preferred (new controllers):** let the service throw a typed error (`Object.assign(new Error(msg), { status })`)
     and `catch (err) { next(err) }` — no per-handler status/message duplication (see `user`/`chat`/`authentication`).
-  - **Legacy (still fine):** local `try/catch` returning a specific `res.status(...).json({ error })`. Keep this
-    when a handler needs several **per-reason** codes/messages from a `result.reason` (e.g. `tradeIdeas`,
-    `kairos`) — those don't map cleanly to a single thrown error. Use `reasonToStatus` (`api/_shared`) for the ladder.
+  - **Result-shaped (`{ok, reason}`) services:** never hand-roll the ladder — `sendReason()` from
+    `api/_shared/reason.util.js` owns it. A reason that more than one kind can raise (`in_position`,
+    `already_placed`, `not_found`…) lives in that file's SHARED table so two routes cannot answer the
+    same refusal differently; reasons a single route owns (`missing_*`, manual-mode fills) are passed
+    as `overrides`. A guard test fails the build if a controller branches on a shared reason itself.
+  - **Plain CRUD on an owner-scoped kind:** don't write the handler at all — `makeEntityController()`
+    gives you list/get/patch/delete. Every kind rides it (call · setup · idea/portfolio_item ·
+    coverage · scan); only the kind's own moves (Generate, act, place orders, initiate, retire) stay
+    hand-written. Portfolio has no entity CRUD at all — a portfolio is the SET of ideas sharing a
+    `portfolioId`, not a document — so its controller is stream + reviews + rebalance only.
+  - **Services answer in the crud's shape.** `{ ok:true, doc }` / `{ ok:false, reason }`, never re-keyed
+    under the kind's own name (`{ok, setup}`, `{ok, coverage}`), so a caller never has to remember
+    which function renamed the document.
 
 ## Where to add things
 

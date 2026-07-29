@@ -277,9 +277,10 @@ async function _attachImmediatePlan(idea) {
     }
 }
 
+// Crud shape `{ ok, doc }` straight through; the route's `{ idea: … }` envelope is applied at the
+// HTTP tier, where the rest of this route's legacy body shapes already live.
 async function getIdeaById(id, userId) {
-    const res = await crud.getOwnedStripped(id, userId)
-    return res.ok ? { ok: true, idea: res.doc } : res
+    return crud.getOwnedStripped(id, userId)
 }
 
 async function getIdeas(userId) {

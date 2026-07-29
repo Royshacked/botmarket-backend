@@ -9,6 +9,10 @@ import { resolveMainAccountId } from '../../services/agentUtils.js'
 
 // Persistence for the `setup` kind — Mentor's artifact (docs/setup-entity.md).
 //
+// Every function here answers in the shared crud's shape — `{ ok:true, doc }` / `{ ok:false,
+// reason }` — including Generate. One shape per service, so a caller never has to remember which
+// function re-keyed the document under the kind's own name.
+//
 // A setup is built in chat as an unsaved draft and only becomes a document when the user presses
 // Generate. This module owns that transition: the Generate gate, the server-stamped binding
 // (mode / broker / accounts / venue / event_risk), and CRUD.
@@ -160,7 +164,7 @@ async function _insert(bound, userId) {
 
     const saved = await crud.insert(doc)
     logger.info(LOG, `saved setup ${doc.id} (${doc.asset} ${doc.direction} ${doc.type}, ${doc.mode})`)
-    return { ok: true, setup: saved }
+    return { ok: true, doc: saved }
 }
 
 async function _update(id, bound, userId) {
@@ -188,16 +192,18 @@ async function _update(id, bound, userId) {
     const res = await crud.patchOwned(id, userId, $set)
     if (!res.ok) return res
     logger.info(LOG, `updated setup ${id} (${inPosition ? 'light/in-position' : 'full re-arm'})`)
-    return { ok: true, setup: res.doc }
+    return res
 }
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 // Thin by design: the shared crud owns the owner guard, the sort and stripId; what stays here is
 // the per-kind judgment layered on top (status vocabulary, the arm gate, terminal-closed).
 
+// Crud shape `{ ok, doc }`, not doc-or-null. Collapsing it threw away the one distinction the
+// shared crud exists to make — someone else's setup is `forbidden` (403), a missing one is
+// `not_found` (404) — and the route could only ever answer 404 for both.
 async function getSetup(id, userId) {
-    const res = await crud.getOwnedStripped(id, userId)
-    return res.ok ? res.doc : null
+    return crud.getOwnedStripped(id, userId)
 }
 
 async function listSetups(userId, { status = null } = {}) {
@@ -235,8 +241,7 @@ async function patchSetup(id, patch, userId) {
 
     if (Object.keys($set).length === 0) return { ok: false, reason: 'nothing_to_patch' }
 
-    const res = await crud.patchOwned(id, userId, $set)
-    return res.ok ? { ok: true, setup: res.doc } : res
+    return crud.patchOwned(id, userId, $set)   // `{ ok, doc }` — see getSetup
 }
 
 /** Delete a setup. A live position is delete-locked (deleteLock) — close it at the broker first. */

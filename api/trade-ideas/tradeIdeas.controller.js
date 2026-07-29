@@ -1,16 +1,24 @@
 import { ideaService } from './tradeIdeas.service.js'
 import { confirmManualEntry, confirmManualExit, confirmManualAdd, activateManualPortfolio, requestManualPortfolioExit } from './manualIdea.service.js'
+import { sendReason } from '../_shared/reason.util.js'
+import { makeEntityController } from '../_shared/entityController.util.js'
 import { logger } from '../../services/logger.service.js'
 
 const LOG = '[tradeIdeas:controller]'
 
+// Every table below holds ONLY reasons this route owns. The cross-kind ones — not_found,
+// forbidden, in_position, already_placed, already_closed, invalid_status — come from the shared
+// map (reason.util.js), which is what stops this route and the call/setup routes from answering
+// the same refusal with different statuses.
+
 // ─── Manual (broker-less) confirmations ───────────────────────────────────────
 // The two user confirmations that drive manual mode: report the real entry fill
 // (price + size) and the real exit price. See docs/architecture/manual-mode.md.
+//
+// `already_placed` is deliberately re-worded here — in manual mode it means the FILL was already
+// reported, not that broker orders went out — but it keeps the shared 409.
 
 const _manualErr = {
-    not_found:          [404, 'Idea not found'],
-    forbidden:          [403, 'Forbidden'],
     not_manual:         [400, 'Not a manual idea'],
     already_placed:     [409, 'Already filled'],
     not_awaiting_fill:  [409, 'Idea is not awaiting a manual fill'],
@@ -25,8 +33,7 @@ const _manualErr = {
 
 function _sendManual(res, result, onOk) {
     if (result.ok) return res.send(onOk(result))
-    const [code, msg] = _manualErr[result.reason] ?? [500, 'Manual action failed']
-    return res.status(code).send({ error: msg })
+    return sendReason(res, result.reason, { overrides: _manualErr, fallback: 500, fallbackMessage: 'Manual action failed' })
 }
 
 export async function confirmManualEntryOrder(req, res) {
@@ -92,22 +99,22 @@ export async function requestManualPortfolioExitOrders(req, res) {
     }
 }
 
-export async function getTradeIdea(req, res) {
-    try {
-        const { id } = req.params
-        if (!id) return res.status(400).send({ error: 'Missing id' })
-        const result = await ideaService.getIdeaById(id, req.user._id)
-        if (!result.ok) {
-            if (result.reason === 'not_found') return res.status(404).send({ error: 'Idea not found' })
-            if (result.reason === 'forbidden') return res.status(403).send({ error: 'Forbidden' })
-            return res.status(500).send({ error: 'Failed to get idea' })
-        }
-        res.send({ idea: result.idea })
-    } catch (err) {
-        logger.error(LOG, 'getTradeIdea failed', err)
-        res.status(500).send({ error: 'Failed to get trade idea' })
-    }
-}
+// list / get / delete are the shared HTTP tier. What this route keeps that the newer ones don't is
+// its BODY SHAPE: it answers `{ idea }` / `{ ideas }` where /api/setups and /api/kairos answer the
+// bare document. That's a transport difference the clients already depend on (the frontend's
+// makeEntityApi carries the mirror of it as `listKey`), so it is configured, not re-implemented.
+const crud = makeEntityController({
+    log: LOG, noun: 'idea', envelope: { one: 'idea', many: 'ideas' },
+    service: {
+        list:   (userId)     => ideaService.getIdeas(userId),
+        get:    (id, userId) => ideaService.getIdeaById(id, userId),
+        remove: (id, userId) => ideaService.deleteIdea(id, userId),
+    },
+})
+
+export const getTradeIdea     = crud.get
+export const getTradeIdeas    = crud.list
+export const deleteTradeIdea  = crud.remove
 
 export async function createTradeIdea(req, res) {
     try {
@@ -128,36 +135,6 @@ export async function createTradeIdea(req, res) {
     } catch (err) {
         logger.error(LOG, 'createTradeIdea failed', err)
         res.status(500).send({ error: 'Failed to create trade idea' })
-    }
-}
-
-export async function getTradeIdeas(req, res) {
-    try {
-        const ideas = await ideaService.getIdeas(req.user._id)
-        res.send({ ideas })
-    } catch (err) {
-        logger.error(LOG, 'getTradeIdeas failed', err)
-        res.status(500).send({ error: 'Failed to get trade ideas' })
-    }
-}
-
-export async function deleteTradeIdea(req, res) {
-    try {
-        const { id } = req.params
-        if (!id) return res.status(400).send({ error: 'Missing id' })
-
-        const result = await ideaService.deleteIdea(id, req.user._id)
-        if (!result.ok) {
-            if (result.reason === 'not_found')   return res.status(404).send({ error: 'Idea not found' })
-            if (result.reason === 'forbidden')   return res.status(403).send({ error: 'Forbidden' })
-            if (result.reason === 'in_position') return res.status(409).send({ error: 'Idea is live on the broker — close the position first', reason: 'in_position' })
-            return res.status(500).send({ error: 'Failed to delete idea' })
-        }
-
-        res.send({ ok: true })
-    } catch (err) {
-        logger.error(LOG, 'deleteTradeIdea failed', err)
-        res.status(500).send({ error: 'Failed to delete trade idea' })
     }
 }
 
@@ -184,13 +161,17 @@ export async function placeTradeIdeaOrders(req, res) {
         const { orders } = req.body ?? {}
         const result = await ideaService.placeOrdersForIdea(id, orders, req.user._id)
         if (!result.ok) {
-            if (result.reason === 'not_found')      return res.status(404).send({ error: 'Idea not found' })
-            if (result.reason === 'forbidden')      return res.status(403).send({ error: 'Forbidden' })
-            if (result.reason === 'no_orders')      return res.status(400).send({ error: 'No orders provided' })
-            if (result.reason === 'not_hit')        return res.status(400).send({ error: 'Idea is not awaiting confirmation' })
-            if (result.reason === 'already_placed') return res.status(409).send({ error: 'Orders already placed' })
-            if (result.reason === 'all_failed')     return res.status(502).send({ error: 'All broker orders failed', results: result.results })
-            return res.status(500).send({ error: 'Failed to place orders' })
+            // `all_failed` is the one refusal that isn't the client's fault or the entity's state:
+            // the request was fine and every broker rejected it — 502, with the per-order results.
+            const PLACE = {
+                no_orders:  [400, 'No orders provided'],
+                not_hit:    [400, 'Idea is not awaiting confirmation'],
+                all_failed: [502, 'All broker orders failed'],
+            }
+            return sendReason(res, result.reason, {
+                overrides: PLACE, fallback: 500, fallbackMessage: 'Failed to place orders',
+                extra: result.reason === 'all_failed' ? { results: result.results } : null,
+            })
         }
 
         res.send({ idea: result.idea, results: result.results })
@@ -209,10 +190,10 @@ export async function triggerTradeIdeaEntry(req, res) {
 
         const result = await ideaService.triggerEntryNow(id, req.user._id)
         if (!result.ok) {
-            if (result.reason === 'not_found')   return res.status(404).send({ error: 'Idea not found' })
-            if (result.reason === 'forbidden')   return res.status(403).send({ error: 'Forbidden' })
-            if (result.reason === 'not_looking') return res.status(409).send({ error: 'Idea is not armed (looking)' })
-            return res.status(500).send({ error: 'Failed to trigger entry' })
+            return sendReason(res, result.reason, {
+                overrides: { not_looking: [409, 'Idea is not armed (looking)'] },
+                fallback: 500, fallbackMessage: 'Failed to trigger entry',
+            })
         }
 
         res.send({ idea: result.idea })
@@ -254,17 +235,17 @@ export async function updateTradeIdea(req, res) {
 
         const result = await ideaService.updateIdea(id, patch, req.user._id)
         if (!result.ok) {
-            if (result.reason === 'not_found')      return res.status(404).send({ error: 'Idea not found' })
-            if (result.reason === 'forbidden')      return res.status(403).send({ error: 'Forbidden' })
-            if (result.reason === 'invalid_status') return res.status(400).send({ error: 'Invalid status value' })
-            if (result.reason === 'already_closed')  return res.status(409).send({ error: 'Idea is closed', reason: 'already_closed' })
-            // Resting (broker-native stop-market) entry activation failures
-            if (result.reason === 'not_resting')      return res.status(400).send({ error: 'Idea is not a resting entry' })
-            if (result.reason === 'already_placed')   return res.status(409).send({ error: 'Order already placed' })
-            if (result.reason === 'no_trigger_price') return res.status(400).send({ error: 'Entry is not a single price level' })
-            if (result.reason === 'no_accounts')      return res.status(400).send({ error: 'No broker accounts on this idea' })
-            if (result.reason === 'all_failed')       return res.status(502).send({ error: 'Broker rejected the resting order', results: result.results })
-            return res.status(500).send({ error: 'Failed to update idea' })
+            // Resting (broker-native stop-market) entry activation failures — all idea-only.
+            const UPDATE = {
+                not_resting:      [400, 'Idea is not a resting entry'],
+                no_trigger_price: [400, 'Entry is not a single price level'],
+                no_accounts:      [400, 'No broker accounts on this idea'],
+                all_failed:       [502, 'Broker rejected the resting order'],
+            }
+            return sendReason(res, result.reason, {
+                overrides: UPDATE, fallback: 500, fallbackMessage: 'Failed to update idea',
+                extra: result.reason === 'all_failed' ? { results: result.results } : null,
+            })
         }
 
         res.send({

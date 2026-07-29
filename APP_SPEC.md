@@ -52,7 +52,15 @@ waiting ──► looking ──► hit ──► long / short ──► closed
 - **The reconciler is broker-authoritative.** On a reduce/close it asks the broker whether the
   position survived (`findOpenPosition`) before mutating idea state — it never closes an idea on a
   transient/unknown result.
-- **Delete lock:** live ideas (`hit`/`long`/`short`) cannot be deleted (409 `reason:'in_position'`).
+- **Delete lock (every kind).** An entity holding a LIVE position (`long`/`short`) cannot be
+  deleted — idea, call, setup and portfolio holding alike (`makeEntityCrud({ deleteLock:
+  LIVE_POSITION })` → 409 `reason:'in_position'`). Deleting one would leave the position open at
+  the broker with nothing describing it, so no monitor runs its stop. `hit` IS deletable (nothing
+  is at the broker yet — only a parked order plan), and the client confirms intent first. The call
+  route was the last kind without the lock; it has it as of 2026-07-29.
+- **One reason → one answer.** Services refuse with a slug (`{ok:false, reason}`) and
+  `api/_shared/reason.util.js` owns the slug→HTTP map, so no two kinds answer the same refusal
+  differently. Refusal bodies are always `{ error, reason }` — branch on `reason`, never on prose.
 - **Scheduled (timestamp) entries.** A regular idea whose entry is a `time` leaf enters on a
   wall-clock schedule — **not** an immediate trade: `saveIdea` only honours `immediate` when
   there is *no* gating entry condition (`resolveImmediate`). The agent converts the user's local

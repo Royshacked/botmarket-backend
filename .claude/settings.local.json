@@ -65,7 +65,8 @@
       "mcp__ide__getDiagnostics",
       "Bash(git checkout *)",
       "Bash(rm -f public/assets/index-BtEHbu29.css public/assets/index-WDf5_nw-.js)",
-      "Bash(python -)"
+      "Bash(python -)",
+      "Bash(npm test *)"
     ]
   }
 }

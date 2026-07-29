@@ -3,6 +3,8 @@ import { coverageService }    from './coverage.service.js'
 import { analystAgentService } from '../../services/analyst.agent.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages }   from '../_shared/parse.util.js'
+import { sendReason }          from '../_shared/reason.util.js'
+import { makeEntityController } from '../_shared/entityController.util.js'
 import { logger }             from '../../services/logger.service.js'
 
 const LOG = '[analystCtrl]'
@@ -49,49 +51,78 @@ export async function streamAnalyst(req, res) {
     })
 }
 
-// reason → HTTP status for the CRUD result envelope.
-const STATUS = { symbol_required: 400, already_covered: 409, not_found: 404, forbidden: 403 }
-const _http = reason => STATUS[reason] ?? 400
-
-export async function listCoverage(req, res) {
-    try {
-        const { sector, status } = req.query ?? {}
-        const rows = await coverageService.getCoverage(req.user._id, { sector, status })
-        res.send(rows)
-    } catch (err) {
-        logger.error(LOG, 'listCoverage failed', err)
-        res.status(500).send({ error: 'Failed to list coverage' })
-    }
+// ─── Coverage CRUD ────────────────────────────────────────────────────────────
+// Coverage is owner-scoped like every other kind — its own collection, but the same crud factory
+// and the same HTTP tier. What stays analyst-OWNED is one reason: initiation is an EVENT, so a
+// second one on a name already covered is a conflict, not an update.
+const COVERAGE_REASONS = {
+    symbol_required: [400, 'A symbol is required to initiate coverage'],
+    already_covered: [409, 'Already covered — update the thesis instead of initiating it again'],
 }
 
-export async function getCoverageOne(req, res) {
-    const result = await coverageService.getCoverageById(req.params.id, req.user._id)
-    if (!result.ok) return res.status(result.reason ? _http(result.reason) : 500).send({ error: result.reason ?? 'get_failed' })
-    res.send(result.coverage)
-}
+const crud = makeEntityController({
+    log: LOG, noun: 'coverage', overrides: COVERAGE_REASONS,
+    service: {
+        // `?sector=` / `?status=` — the service validates them; a raw query param must never reach
+        // Mongo as an operator.
+        list: (userId, req) => coverageService.getCoverage(userId, req.query ?? {}),
+        get:  (id, userId)  => coverageService.getCoverageById(id, userId),
+    },
+})
+
+export const listCoverage   = crud.list
+export const getCoverageOne = crud.get
+
+// ── The moves that aren't CRUD ────────────────────────────────────────────────
+// Initiate, update and retire each carry judgment a shared shell can't hold: initiation guards a
+// once-per-name event, update takes a patch under an envelope, and retire is a STATUS CHANGE
+// wearing a DELETE route — it never removes the document, because the revision trail is the point.
 
 export async function initiateCoverage(req, res) {
-    const { coverage } = req.body ?? {}
-    if (!coverage || typeof coverage !== 'object' || Array.isArray(coverage)) {
-        return res.status(400).send({ error: 'coverage must be an object' })
+    try {
+        const { coverage } = req.body ?? {}
+        if (!coverage || typeof coverage !== 'object' || Array.isArray(coverage)) {
+            return res.status(400).send({ error: 'coverage must be an object' })
+        }
+        const result = await coverageService.initiateCoverage(coverage, req.user._id)
+        // The existing id rides along on `already_covered` so the caller can go straight to it —
+        // coverageRefresh depends on that to update instead of giving up.
+        if (!result.ok) {
+            return sendReason(res, result.reason, {
+                overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to initiate coverage',
+                extra: result.id ? { id: result.id } : null,
+            })
+        }
+        res.send(result.doc)
+    } catch (err) {
+        logger.error(LOG, 'initiateCoverage failed', err)
+        res.status(500).send({ error: 'Failed to initiate coverage' })
     }
-    const result = await coverageService.initiateCoverage(coverage, req.user._id)
-    if (!result.ok) return res.status(result.reason ? _http(result.reason) : 500).send({ error: result.reason ?? 'initiate_failed', id: result.id })
-    res.send(result.coverage)
 }
 
 export async function updateCoverage(req, res) {
-    const patch = req.body?.patch ?? req.body
-    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
-        return res.status(400).send({ error: 'patch must be an object' })
+    try {
+        const patch = req.body?.patch ?? req.body
+        if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+            return res.status(400).send({ error: 'patch must be an object' })
+        }
+        const result = await coverageService.updateCoverage(req.params.id, patch, req.user._id)
+        if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to update coverage' })
+        res.send(result.doc)
+    } catch (err) {
+        logger.error(LOG, 'updateCoverage failed', err)
+        res.status(500).send({ error: 'Failed to update coverage' })
     }
-    const result = await coverageService.updateCoverage(req.params.id, patch, req.user._id)
-    if (!result.ok) return res.status(result.reason ? _http(result.reason) : 500).send({ error: result.reason ?? 'update_failed' })
-    res.send(result.coverage)
 }
 
 export async function retireCoverage(req, res) {
-    const result = await coverageService.retireCoverage(req.params.id, req.user._id)
-    if (!result.ok) return res.status(result.reason ? _http(result.reason) : 500).send({ error: result.reason ?? 'retire_failed' })
-    res.send(result.coverage)
+    try {
+        const result = await coverageService.retireCoverage(req.params.id, req.user._id)
+        if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to retire coverage' })
+        // Answers the updated document, not `{ok:true}` — the name is still in the book, retired.
+        res.send(result.doc)
+    } catch (err) {
+        logger.error(LOG, 'retireCoverage failed', err)
+        res.status(500).send({ error: 'Failed to retire coverage' })
+    }
 }

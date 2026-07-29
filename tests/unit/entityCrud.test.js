@@ -138,10 +138,13 @@ test('remove on someone else\'s doc is forbidden and never reaches deleteOne', a
     assert.equal(coll.calls.some(c => c[0] === 'deleteOne'), false)
 })
 
-test('no deleteLock configured → a live doc deletes (calls stay deletable in position)', async () => {
-    const coll = spyColl({ findOne: { id: 'c1', userId: 'u1', status: 'long' } })
-    const res = await makeEntityCrud({ kind: 'call', log: '[test]', coll: async () => coll })
-        .remove('c1', 'u1')
+// The lock is OPT-IN, so an unconfigured crud deletes at any status. No live kind relies on that
+// any more — call was the last one, and it now passes LIVE_POSITION like setup and idea — but the
+// default has to stay honest for the next kind that registers.
+test('no deleteLock configured → a live doc deletes', async () => {
+    const coll = spyColl({ findOne: { id: 'x1', userId: 'u1', status: 'long' } })
+    const res = await makeEntityCrud({ kind: 'other', log: '[test]', coll: async () => coll })
+        .remove('x1', 'u1')
     assert.deepEqual(res, { ok: true })
 })
 

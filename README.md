@@ -65,18 +65,29 @@ equity snapshotter.
 ```
 server.js              Express app, route mounts, background-service boot
 api/                   HTTP surface — one folder per feature (routes + controller + service)
-  idea/                Trade Agent SSE chat (the AI idea-building conversation)
-  trade-ideas/         idea CRUD + order placement
-  portfolio/           Portfolio Agent chat + review lifecycle
-  scanner/             Scanner Agent chat + saved scans
+  _shared/             the cross-kind HTTP tier: reason.util (ONE reason→status map),
+                       entityController.util (list/get/patch/delete for any kind), sse.util, parse
+  axl/                 Axl — the concierge/critic meta-layer that routes to the specialists
+  kairos/              Kairos chat + the `call` kind (monitored by Hermes)
+  mentor/ setups/      Mentor chat + the `setup` kind (monitored by Talos)
+  analyst/             buy-side analyst chat + the `coverage` research artifact
+  trade-ideas/         entity CRUD + order placement — serves `portfolio_item` (holdings) and the
+                       archived `idea` kind; the name is historical, the route is live
+  idea/                ARCHIVED 2026-07-29 — the Idea agent's SSE chat, no longer mounted
+  portfolio/           Atlas chat + portfolio review lifecycle
+  scanner/             Argus chat + saved scans
+  threads/ trades/     build-conversation drafts · the frozen-at-fill trade ledger
   broker/              broker connections, orders, positions
-    adapters/          BrokerAdapter interface + ctrader / ibkr / paper adapters
+    adapters/          BrokerAdapter interface + ctrader / ibkr / paper / manual adapters
   paper/               paper-mode toggle, settings, trades, equity curve
   chat/                user-to-user (social) messaging + bot notifications (WS)
   market/ calendar/ user/ authentication/ transcribe/
 services/              agent services, model routing, condition trees, pricing, order plan…
+  entity/              the entity envelope + makeEntityCrud — ONE owner-scoped CRUD for every kind
 providers/             external clients (LLMs, market data, brokers, Mongo)
-monitoring/            monitor loop, evaluators, reconciler, invalidation monitor, paper engines
+monitoring/            one monitor per kind + the shared execution layer
+                       hermes (call) · talos (setup) · themis (portfolio) · coverage (analyst)
+                       minos (idea) is ARCHIVED and not started
   evaluators/          touch, structured, indicator, time, volume, news, chart
 docs/architecture/     design docs
 ```

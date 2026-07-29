@@ -6,7 +6,8 @@ import { resolveModel }        from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages }   from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
-import { reasonToStatus }      from '../_shared/reason.util.js'
+import { sendReason }          from '../_shared/reason.util.js'
+import { makeEntityController } from '../_shared/entityController.util.js'
 
 const LOG = '[scanner:controller]'
 
@@ -56,22 +57,26 @@ export async function createScan(req, res) {
         }
         const result = await scanService.saveScan(scan, req.user._id)
         if (!result.ok) return res.status(500).json({ error: 'Failed to save scan' })
-        res.json({ scan: result.scan })
+        res.json({ scan: result.doc })
     } catch (err) {
         logger.error(LOG, 'createScan failed', err)
         res.status(500).json({ error: 'Failed to save scan' })
     }
 }
 
-export async function listScans(req, res) {
-    try {
-        const scans = await scanService.getScans(req.user._id)
-        res.json({ scans })
-    } catch (err) {
-        logger.error(LOG, 'listScans failed', err)
-        res.status(500).json({ error: 'Failed to list scans' })
-    }
-}
+// A scan is an owner-scoped kind like any other (it moved onto makeEntityCrud in b863a03), so
+// list and delete are the shared HTTP tier. The `{scans}` / `{scan}` envelope is this route's own
+// body shape, configured rather than re-implemented.
+const crud = makeEntityController({
+    log: LOG, noun: 'scan', envelope: { one: 'scan', many: 'scans' },
+    service: {
+        list:   (userId)     => scanService.getScans(userId),
+        remove: (id, userId) => scanService.deleteScan(id, userId),
+    },
+})
+
+export const listScans  = crud.list
+export const removeScan = crud.remove
 
 export async function updateScan(req, res) {
     try {
@@ -79,23 +84,11 @@ export async function updateScan(req, res) {
         const { scan } = req.body ?? {}
         if (!scan || typeof scan !== 'object') return res.status(400).json({ error: 'scan patch is required' })
         const result = await scanService.updateScan(id, scan, req.user._id)
-        if (!result.ok) return res.status(reasonToStatus(result.reason, 404)).json({ error: result.reason || 'Failed to update' })
-        res.json({ scan: result.scan })
+        if (!result.ok) return sendReason(res, result.reason, { fallback: 500, fallbackMessage: 'Failed to update scan' })
+        res.json({ scan: result.doc })
     } catch (err) {
         logger.error(LOG, 'updateScan failed', err)
         res.status(500).json({ error: 'Failed to update scan' })
-    }
-}
-
-export async function removeScan(req, res) {
-    try {
-        const { id } = req.params
-        const result = await scanService.deleteScan(id, req.user._id)
-        if (!result.ok) return res.status(reasonToStatus(result.reason, 404)).json({ error: result.reason || 'Failed to delete' })
-        res.json({ ok: true })
-    } catch (err) {
-        logger.error(LOG, 'removeScan failed', err)
-        res.status(500).json({ error: 'Failed to delete scan' })
     }
 }
 

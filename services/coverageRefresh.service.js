@@ -67,7 +67,7 @@ export async function refreshCoverage({ userId, ticker, question = null, portfol
         let coverageId = null
         const init = await deps.initiate(draft, userId)
         if (init?.ok) {
-            coverageId = init.coverage?.id ?? null
+            coverageId = init.doc?.id ?? null
         } else if (init?.reason === 'already_covered') {
             const upd = await deps.update(init.id, draft, userId)
             coverageId = init.id

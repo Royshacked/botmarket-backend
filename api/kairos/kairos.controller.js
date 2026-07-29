@@ -5,7 +5,8 @@ import { brokerService }       from '../broker/broker.service.js'
 import { kairosHandoffService } from '../../services/kairos.handoff.service.js'
 import { resolveModel }        from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
-import { reasonToStatus }      from '../_shared/reason.util.js'
+import { sendReason }         from '../_shared/reason.util.js'
+import { makeEntityController } from '../_shared/entityController.util.js'
 import { parseChatMessages }   from '../_shared/parse.util.js'
 
 const LOG = '[kairos:controller]'
@@ -73,7 +74,9 @@ export async function generateKairosCall(req, res) {
         // chat with its history (parity with the update path — without this, a generated call saves
         // chat_state:null and re-editing it starts a blank chat).
         const result = await _finalizeCall(call, { userId: req.user._id, accounts: acctList, mainAccountId, chatState: chat_state })
-        if (!result.ok) return res.status(400).send({ error: result.reason ?? 'generate_failed' })
+        // Construction-gate reasons are Kairos's own (`missing_*`, `invalid_*`) — nothing shared
+        // claims them, so they fall through to a 400 carrying the slug.
+        if (!result.ok) return sendReason(res, result.reason, { fallbackMessage: 'generate_failed' })
 
         res.send(result.call)
     } catch (err) {
@@ -100,10 +103,7 @@ export async function updateKairosCall(req, res) {
             result = await kairosService.patchKairosCall(id, { chat_state }, userId)
         }
 
-        if (!result.ok) {
-            const code = reasonToStatus(result.reason, 400)
-            return res.status(code).send({ error: result.reason ?? 'update_failed' })
-        }
+        if (!result.ok) return sendReason(res, result.reason, { fallbackMessage: 'update_failed' })
         res.send(result.call ?? { ok: true })
     } catch (err) {
         logger.error(LOG, 'Failed to update kairos call', err)
@@ -131,10 +131,7 @@ export async function actOnKairosCall(req, res) {
         else if (MANAGE_ACTIONS.includes(action)) result = await kairosHandoffService.manageCall(id, userId, action)
         else return res.status(400).send({ error: 'action must be confirm | edit | dismiss | reentry | decline_reentry | move_stop | take_partial | exit_now | let_run' })
 
-        if (!result.ok) {
-            const code = reasonToStatus(result.reason, 400)
-            return res.status(code).send({ error: result.reason ?? 'action_failed' })
-        }
+        if (!result.ok) return sendReason(res, result.reason, { fallbackMessage: 'action_failed' })
         res.send(result)
     } catch (err) {
         logger.error(LOG, 'actOnKairosCall failed:', err.message)
@@ -142,15 +139,22 @@ export async function actOnKairosCall(req, res) {
     }
 }
 
-export async function listKairos(req, res) {
-    try {
-        const items = await kairosService.listKairosCalls(req.user._id)
-        res.send(items)
-    } catch (err) {
-        logger.error(LOG, 'Failed to list kairos calls', err)
-        res.status(500).send({ error: 'Failed to list calls' })
-    }
-}
+// list / get / delete are the shared HTTP tier — the same moves every kind makes over the same
+// crud. A call has no PATCH route: mid-edit chat-state saves ride updateKairosCall (below), which
+// also has to decide between a plan rewrite and a conversation save.
+const crud = makeEntityController({
+    log: LOG, noun: 'call',
+    service: {
+        list:   (userId)     => kairosService.listKairosCalls(userId),
+        get:    (id, userId) => kairosService.getKairosCall(id, userId),
+        remove: (id, userId) => kairosService.deleteKairosCall(id, userId),
+    },
+})
+
+export const listKairos  = crud.list
+// Single call (with its monitor_state.timeline) — the pop-out polls this for the live journal.
+export const getKairos   = crud.get
+export const deleteKairos = crud.remove
 
 // Kairos track record — aggregate of closed calls' outcomes (Phase 5, slice 4).
 export async function getKairosPerformance(req, res) {
@@ -161,35 +165,6 @@ export async function getKairosPerformance(req, res) {
     } catch (err) {
         logger.error(LOG, 'Failed to get kairos performance', err)
         res.status(500).send({ error: 'Failed to get performance' })
-    }
-}
-
-// Single call (with its monitor_state.timeline) — the pop-out polls this for the live journal.
-export async function getKairos(req, res) {
-    try {
-        const result = await kairosService.getKairosCall(req.params.id, req.user._id)
-        if (!result.ok) {
-            const code = reasonToStatus(result.reason, 500)
-            return res.status(code).send({ error: result.reason ?? 'get_failed' })
-        }
-        res.send(result.call)
-    } catch (err) {
-        logger.error(LOG, 'Failed to get kairos call', err)
-        res.status(500).send({ error: 'Failed to get call' })
-    }
-}
-
-export async function deleteKairos(req, res) {
-    try {
-        const result = await kairosService.deleteKairosCall(req.params.id, req.user._id)
-        if (!result.ok) {
-            const code = reasonToStatus(result.reason, 400)
-            return res.status(code).send({ error: result.reason ?? 'delete_failed' })
-        }
-        res.send({ ok: true })
-    } catch (err) {
-        logger.error(LOG, 'Failed to delete kairos call', err)
-        res.status(500).send({ error: 'Failed to delete call' })
     }
 }
 

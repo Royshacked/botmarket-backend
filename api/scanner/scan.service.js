@@ -54,7 +54,7 @@ async function saveScan(scan, userId) {
         await enrichWithProfiles(doc.candidates, { key: 'ticker', overwriteName: false })
         const saved = await crud.insert(doc)
         logger.info(LOG, 'Scan saved', { id: doc.id, candidates: doc.candidates.length })
-        return { ok: true, scan: _stampStale(saved) }
+        return { ok: true, doc: _stampStale(saved) }
     } catch (err) {
         logger.error(LOG, 'Failed to save scan', err)
         return { ok: false, error: err }
@@ -68,9 +68,11 @@ async function getScans(userId) {
     return (await crud.list(userId)).map(r => _stampStale(r, today))
 }
 
+// `{ ok, doc }` like every other service here — staleness stamped on the way out, since it is
+// derived on read rather than stored.
 async function getScanById(id, userId) {
     const res = await crud.getOwnedStripped(id, userId)
-    return res.ok ? { ok: true, scan: _stampStale(res.doc) } : res
+    return res.ok ? { ok: true, doc: _stampStale(res.doc) } : res
 }
 
 async function updateScan(id, patch, userId) {
@@ -93,7 +95,7 @@ async function updateScan(id, patch, userId) {
         const res = await crud.patchOwned(id, userId, set)
         if (!res.ok) return res
         logger.info(LOG, 'Scan updated', { id, candidates: set.candidates?.length })
-        return { ok: true, scan: _stampStale(res.doc) }
+        return { ok: true, doc: _stampStale(res.doc) }
     } catch (err) {
         logger.error(LOG, 'Failed to update scan', err)
         return { ok: false, error: err }

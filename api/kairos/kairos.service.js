@@ -1,6 +1,6 @@
 import { randomUUID }               from 'crypto'
 import { normalizeAssetClass } from '../../services/entity/vocabulary.js'
-import { PAST_ENTRY_LEGACY, CALL_HORIZONS } from '../../services/entity/vocabulary.js'
+import { PAST_ENTRY_LEGACY, CALL_HORIZONS, LIVE_POSITION } from '../../services/entity/vocabulary.js'
 import { getDb }                    from '../../providers/mongodb.provider.js'
 import { logger }                   from '../../services/logger.service.js'
 import { buildEventRisk }           from '../../services/eventRisk.service.js'
@@ -19,11 +19,16 @@ const LOG        = '[kairos]'
 const COLLECTION = ENTITIES   // calls live in the shared entities collection as kind:'call'
 const KIND_CALL  = 'call'
 
-// Owner-scoped CRUD (the shared mechanism). No deleteLock: unlike an idea or a setup, a call is
-// deletable at any status — the position it opened lives on its own broker linkage and survives.
+// Owner-scoped CRUD (the shared mechanism). A LIVE position is delete-locked, the same rule the
+// setup and the portfolio holding already carried — a call was the one kind that let you delete
+// the document while its position was open at the broker. The position does survive on its own
+// linkage, which is exactly the problem: it survives with nothing left describing it, so Hermes
+// stops managing it and the stop/target it was running are no longer anyone's job. Close it at
+// the broker first.
+//
 // What stays below is call JUDGMENT: the construction gate, normalizeCall, and the edit's
 // re-arm-vs-light-edit split.
-const crud = makeEntityCrud({ kind: KIND_CALL, log: LOG })
+const crud = makeEntityCrud({ kind: KIND_CALL, deleteLock: LIVE_POSITION, log: LOG })
 
 // A call is a moment to act on, not a multi-month hold — the narrowing is a declared
 // SUBSET of the shared ladder, not a second list that merely looks like it minus one.
@@ -393,9 +398,10 @@ async function patchKairosCall(id, patch, userId) {
     return res.ok ? { ok: true } : res
 }
 
+// Answers in the crud's own `{ ok, doc }` shape — the shared HTTP tier reads `doc`, and re-keying
+// it to `call` here bought nothing but a word the controller then had to know.
 async function getKairosCall(id, userId) {
-    const res = await crud.getOwnedStripped(id, userId)
-    return res.ok ? { ok: true, call: res.doc } : res
+    return crud.getOwnedStripped(id, userId)
 }
 
 async function listKairosCalls(userId) {

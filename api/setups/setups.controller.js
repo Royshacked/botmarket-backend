@@ -1,20 +1,51 @@
 import { logger }       from '../../services/logger.service.js'
+import { sendReason }   from '../_shared/reason.util.js'
+import { makeEntityController } from '../_shared/entityController.util.js'
 import { setupService } from './setups.service.js'
 
 const LOG = '[setups:controller]'
 
-// Gate reasons that mean "the draft isn't finished" (a 400 the user can fix in chat) vs a real
-// server failure. Keeps a missing stop zone from being reported as a 500.
-const CLIENT_REASONS = new Set([
-    'invalid_setup', 'invalid_zone', 'no_venue', 'not_found', 'in_position',
-    'invalid_status', 'nothing_to_patch', 'closed_is_terminal',
-])
-// Reaching someone else's setup is its own answer — 403, not a 400 or a 500. The shared crud
-// reports it apart from not_found, which the hand-rolled setup queries could not.
-const _status = (reason) =>
-    reason === 'forbidden' ? 403
-        : (CLIENT_REASONS.has(reason) || reason?.startsWith('missing_') || reason?.startsWith('cannot_arm_')) ? 400
-            : 500
+// Setup-OWNED reasons. Everything cross-kind (not_found / forbidden / in_position /
+// closed_is_terminal / invalid_status / nothing_to_patch) is answered by the shared table, so this
+// route can no longer disagree with the idea and call routes about what a refusal means.
+//
+// What's left is the Generate gate: `missing_*` says the draft isn't finished and `cannot_arm_*`
+// says re-running that gate at Arm time failed (the broker disconnected after Generate). Both are
+// "fix it in the chat" — a 400 carrying the slug, never a 500.
+const SETUP_REASONS = {
+    invalid_setup: [400, 'The draft is not a usable setup'],
+    invalid_zone:  [400, 'A zone is inverted or not numeric'],
+    no_venue:      [400, 'Mark a trading account before generating'],
+}
+const setupReason = (reason) =>
+    (reason?.startsWith('missing_') || reason?.startsWith('cannot_arm_'))
+        ? [400, reason]
+        : SETUP_REASONS[reason] ?? null
+
+// list / get / patch / delete are the shared HTTP tier — the same moves every kind makes, over the
+// same crud. Arming IS a patch (`{status:'looking'}`); the gate it re-runs lives in the service,
+// which is where the judgment belongs.
+const crud = makeEntityController({
+    log: LOG, noun: 'setup', overrides: setupReason,
+    service: {
+        // `?status=looking` — the Arm-state filter the setups list uses. It is a LIST option, not
+        // a body, which is why the shell hands the request through.
+        list:   (userId, req)      => setupService.listSetups(userId, { status: req.query?.status ?? null }),
+        get:    (id, userId)       => setupService.getSetup(id, userId),
+        patch:  (id, body, userId) => setupService.patchSetup(id, body, userId),
+        remove: (id, userId)       => setupService.deleteSetup(id, userId),
+    },
+})
+
+export const listSetups  = crud.list
+export const getSetup    = crud.get
+/** Status transitions (arm / disarm) and chat-state saves. Plan rewrites go through generate. */
+export const patchSetup  = crud.patch
+export const deleteSetup = crud.remove
+
+// ── Generate: the one move that isn't CRUD ────────────────────────────────────
+// It binds the venue, runs the readiness gate and can re-route to an in-place edit, so it stays
+// hand-written — a shared shell has no business knowing any of that.
 
 /** Generate: persist a drafted setup (or update one in place when `updateId` is present). */
 export async function generateSetup(req, res) {
@@ -31,54 +62,11 @@ export async function generateSetup(req, res) {
             updateId: updateId ?? null,
             chatState: chat_state,
         })
-        if (!result.ok) return res.status(_status(result.reason)).send({ error: result.reason })
+        if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallback: 500 })
 
-        res.send(result.setup)
+        res.send(result.doc)
     } catch (err) {
         logger.error(LOG, 'Failed to generate setup', err)
         res.status(500).send({ error: 'generate_failed' })
-    }
-}
-
-export async function listSetups(req, res) {
-    try {
-        res.send(await setupService.listSetups(req.user._id, { status: req.query?.status ?? null }))
-    } catch (err) {
-        logger.error(LOG, 'Failed to list setups', err)
-        res.status(500).send({ error: 'list_failed' })
-    }
-}
-
-export async function getSetup(req, res) {
-    try {
-        const setup = await setupService.getSetup(req.params.id, req.user._id)
-        if (!setup) return res.status(404).send({ error: 'not_found' })
-        res.send(setup)
-    } catch (err) {
-        logger.error(LOG, 'Failed to get setup', err)
-        res.status(500).send({ error: 'get_failed' })
-    }
-}
-
-/** Status transitions (arm / disarm) and chat-state saves. Plan rewrites go through generate. */
-export async function patchSetup(req, res) {
-    try {
-        const result = await setupService.patchSetup(req.params.id, req.body ?? {}, req.user._id)
-        if (!result.ok) return res.status(_status(result.reason)).send({ error: result.reason })
-        res.send(result.setup)
-    } catch (err) {
-        logger.error(LOG, 'Failed to patch setup', err)
-        res.status(500).send({ error: 'patch_failed' })
-    }
-}
-
-export async function deleteSetup(req, res) {
-    try {
-        const result = await setupService.deleteSetup(req.params.id, req.user._id)
-        if (!result.ok) return res.status(_status(result.reason)).send({ error: result.reason })
-        res.send({ ok: true })
-    } catch (err) {
-        logger.error(LOG, 'Failed to delete setup', err)
-        res.status(500).send({ error: 'delete_failed' })
     }
 }

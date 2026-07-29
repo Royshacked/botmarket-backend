@@ -53,7 +53,7 @@ function harness({ draft, initResult }) {
 }
 
 test('new name → initiate + ok ping with the new coverage id', async () => {
-    const h = harness({ draft: { symbol: 'NVDA', thesis: 'edge' }, initResult: { ok: true, coverage: { id: 'covNEW' } } })
+    const h = harness({ draft: { symbol: 'NVDA', thesis: 'edge' }, initResult: { ok: true, doc: { id: 'covNEW' } } })
     const r = await refreshCoverage({ userId: 'u1', ticker: 'nvda', portfolioId: 'p1', portfolioName: 'Core' }, h.deps)
     assert.deepEqual(r, { ok: true, coverageId: 'covNEW' })
     assert.equal(h.calls.initiate.length, 1)

@@ -153,7 +153,7 @@ async function initiateCoverage(raw, userId) {
         doc.revisions = [newRevision({ kind: 'initiate', note: _str(raw?.init_note) ?? `Initiated coverage on ${symbol}` })]
         const saved = await crud.insert(doc)
         logger.info(LOG, 'coverage initiated', { id: doc.id, symbol, sector: doc.sector })
-        return { ok: true, coverage: saved }
+        return { ok: true, doc: saved }
     } catch (err) {
         // Lost the race to a concurrent initiate on the same (user, symbol) → unique-index conflict.
         if (err?.code === 11000) return { ok: false, reason: 'already_covered' }
@@ -170,9 +170,9 @@ async function getCoverage(userId, { sector = null, status = null } = {}) {
     return crud.list(userId, { filter })
 }
 
+// The shared crud's shape, `{ ok, doc }` — the same one every other kind's service answers in.
 async function getCoverageById(id, userId) {
-    const res = await crud.getOwnedStripped(id, userId)
-    return res.ok ? { ok: true, coverage: res.doc } : res
+    return crud.getOwnedStripped(id, userId)
 }
 
 // In-place update of a live thesis. Re-normalizes the patch merged over current (partial patches keep
@@ -196,7 +196,7 @@ async function updateCoverage(id, patch, userId) {
     const res = await crud.patchOwned(id, userId, $set)
     if (!res.ok) return res
     logger.info(LOG, 'coverage updated', { id, kind: revision.kind })
-    return { ok: true, coverage: res.doc }
+    return res
 }
 
 // Churn a name out of the book (S5) — a status change to `retired`, logged as a revision.

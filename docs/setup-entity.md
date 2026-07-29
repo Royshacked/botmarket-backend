@@ -266,6 +266,25 @@ and Mentor says so and points at Axl rather than growing a screener.
 Mentor returns to Axl when the setup is generated, on the shared return beat
 (`agentMeta.RETURN_MS`, "Heading back to axl") — same as every other specialist.
 
+### Editing a saved setup (wired 2026-07-29)
+
+The pencil on a setup card / Floor row reopens **the conversation that built it**, exactly as the
+call pencil reopens the Kairos chat. Three rules make that work, and they matter in this order:
+
+1. **Generate persists `chat_state`** — `{ messages, draft, coverage }` — so an edit restores the
+   conversation, the worksheet AND the coverage chips. A setup saved before this existed rebuilds
+   its worksheet from the document; the user edits a real setup, just without the reasoning.
+2. **A mid-edit turn saves the CONVERSATION only** (`PATCH /api/setups/:id { chat_state }`).
+   Routing it through `generate(updateId)` would re-run the readiness gate, re-bind the venue from
+   the currently-marked accounts, and send a watched setup back to `waiting` — Talos would stop
+   watching a live setup because the user asked a question about it.
+3. **"Update setup" writes the plan** (`generate` with `updateId`), which re-arms: pre-entry the
+   setup drops to `waiting` and must be armed again, because the plan Talos was watching no longer
+   exists. In position it is a LIGHT edit (context fields only) and never disarms.
+
+The pencil is offered pre-entry only. Past entry it is disabled — mid-trade changes go through the
+management cards, not a re-run of the build conversation.
+
 ## 8. Reuse — share the pipe, not the judgment
 
 Build directive: **reuse the existing shared design wherever a mechanism already
