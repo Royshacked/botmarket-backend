@@ -25,6 +25,7 @@
  */
 
 import { getDb }                    from '../../providers/mongodb.provider.js'
+import { PAST_ENTRY } from '../../services/entity/vocabulary.js'
 import { logger }                   from '../../services/logger.service.js'
 import { ideaService }              from '../trade-ideas/tradeIdeas.service.js'
 import { brokerService }            from '../broker/broker.service.js'
@@ -36,9 +37,9 @@ import { orderSymbol }            from '../../monitoring/exitOrders.util.js'
 
 const LOG        = '[portfolio:rebalance]'
 const COLLECTION = ENTITIES
-const LIVE       = new Set(['hit', 'long', 'short'])
+const LIVE       = new Set(PAST_ENTRY)
 
-export async function applyRebalance(portfolioId, userId, update, isAdmin = false) {
+export async function applyRebalance(portfolioId, userId, update) {
     if (!portfolioId) return { ok: false, reason: 'missing_portfolioId' }
     if (!update || !Array.isArray(update.changes) || update.changes.length === 0) {
         return { ok: false, reason: 'no_changes' }
@@ -49,7 +50,7 @@ export async function applyRebalance(portfolioId, userId, update, isAdmin = fals
     const manualEntryLegs = []   // manual add (scale-in) legs → one entry Fill card
     for (const change of update.changes) {
         try {
-            const r = await _applyOne(portfolioId, userId, change, isAdmin)
+            const r = await _applyOne(portfolioId, userId, change)
             if (r?.manualExitLeg)  manualExitLegs.push(r.manualExitLeg)
             if (r?.manualEntryLeg) manualEntryLegs.push(r.manualEntryLeg)
             results.push({ action: change.action, itemId: change.itemId ?? change.ideaId ?? null, ...r })
@@ -96,7 +97,7 @@ const ACTION_ALIAS = {
     trim_idea:   'trim_item',   add_idea:    'add_item',    add_to_idea: 'add_to_item',
 }
 
-async function _applyOne(portfolioId, userId, change, isAdmin) {
+async function _applyOne(portfolioId, userId, change) {
     const db     = await getDb()
     const action = ACTION_ALIAS[change.action] ?? change.action
     // Back-compat: the id/spec fields were `ideaId`/`idea` before the portfolio_item rename.
@@ -104,12 +105,12 @@ async function _applyOne(portfolioId, userId, change, isAdmin) {
     const spec   = change.item   ?? change.idea
     switch (action) {
         case 'update_item':
-            return ideaService.updateIdea(itemId, change.patch ?? {}, userId, isAdmin)
+            return ideaService.updateIdea(itemId, change.patch ?? {}, userId)
 
         case 'remove_item': {
             const item = await db.collection(COLLECTION).findOne({ id: itemId }, { projection: { status: 1 } })
             if (item && LIVE.has(item.status)) return { ok: false, reason: 'live_use_exit_item' }
-            return ideaService.deleteIdea(itemId, userId, isAdmin)
+            return ideaService.deleteIdea(itemId, userId)
         }
 
         case 'exit_item':

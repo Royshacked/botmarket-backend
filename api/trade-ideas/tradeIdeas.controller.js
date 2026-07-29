@@ -34,7 +34,7 @@ export async function confirmManualEntryOrder(req, res) {
         const { id } = req.params
         if (!id) return res.status(400).send({ error: 'Missing id' })
         const { price, quantity } = req.body ?? {}
-        const result = await confirmManualEntry(id, { price, quantity }, req.user._id, req.user.isAdmin)
+        const result = await confirmManualEntry(id, { price, quantity }, req.user._id)
         _sendManual(res, result, r => ({ idea: r.idea }))
     } catch (err) {
         logger.error(LOG, 'confirmManualEntryOrder failed', err)
@@ -47,7 +47,7 @@ export async function confirmManualExitOrder(req, res) {
         const { id } = req.params
         if (!id) return res.status(400).send({ error: 'Missing id' })
         const { price, quantity } = req.body ?? {}
-        const result = await confirmManualExit(id, { price, quantity }, req.user._id, req.user.isAdmin)
+        const result = await confirmManualExit(id, { price, quantity }, req.user._id)
         _sendManual(res, result, r => ({ idea: r.idea }))
     } catch (err) {
         logger.error(LOG, 'confirmManualExitOrder failed', err)
@@ -60,7 +60,7 @@ export async function confirmManualAddOrder(req, res) {
         const { id } = req.params
         if (!id) return res.status(400).send({ error: 'Missing id' })
         const { price, quantity } = req.body ?? {}
-        const result = await confirmManualAdd(id, { price, quantity }, req.user._id, req.user.isAdmin)
+        const result = await confirmManualAdd(id, { price, quantity }, req.user._id)
         _sendManual(res, result, r => ({ idea: r.idea }))
     } catch (err) {
         logger.error(LOG, 'confirmManualAddOrder failed', err)
@@ -72,7 +72,7 @@ export async function activateManualPortfolioOrders(req, res) {
     try {
         const { portfolioId } = req.params
         if (!portfolioId) return res.status(400).send({ error: 'Missing portfolioId' })
-        const result = await activateManualPortfolio(portfolioId, req.user._id, req.user.isAdmin)
+        const result = await activateManualPortfolio(portfolioId, req.user._id)
         _sendManual(res, result, r => ({ legs: r.legs }))
     } catch (err) {
         logger.error(LOG, 'activateManualPortfolioOrders failed', err)
@@ -84,7 +84,7 @@ export async function requestManualPortfolioExitOrders(req, res) {
     try {
         const { portfolioId } = req.params
         if (!portfolioId) return res.status(400).send({ error: 'Missing portfolioId' })
-        const result = await requestManualPortfolioExit(portfolioId, req.user._id, req.user.isAdmin)
+        const result = await requestManualPortfolioExit(portfolioId, req.user._id)
         _sendManual(res, result, r => ({ legs: r.legs }))
     } catch (err) {
         logger.error(LOG, 'requestManualPortfolioExitOrders failed', err)
@@ -96,7 +96,7 @@ export async function getTradeIdea(req, res) {
     try {
         const { id } = req.params
         if (!id) return res.status(400).send({ error: 'Missing id' })
-        const result = await ideaService.getIdeaById(id, req.user._id, req.user.isAdmin)
+        const result = await ideaService.getIdeaById(id, req.user._id)
         if (!result.ok) {
             if (result.reason === 'not_found') return res.status(404).send({ error: 'Idea not found' })
             if (result.reason === 'forbidden') return res.status(403).send({ error: 'Forbidden' })
@@ -133,7 +133,7 @@ export async function createTradeIdea(req, res) {
 
 export async function getTradeIdeas(req, res) {
     try {
-        const ideas = await ideaService.getIdeas(req.user._id, req.user.isAdmin)
+        const ideas = await ideaService.getIdeas(req.user._id)
         res.send({ ideas })
     } catch (err) {
         logger.error(LOG, 'getTradeIdeas failed', err)
@@ -146,7 +146,7 @@ export async function deleteTradeIdea(req, res) {
         const { id } = req.params
         if (!id) return res.status(400).send({ error: 'Missing id' })
 
-        const result = await ideaService.deleteIdea(id, req.user._id, req.user.isAdmin)
+        const result = await ideaService.deleteIdea(id, req.user._id)
         if (!result.ok) {
             if (result.reason === 'not_found')   return res.status(404).send({ error: 'Idea not found' })
             if (result.reason === 'forbidden')   return res.status(403).send({ error: 'Forbidden' })
@@ -182,7 +182,7 @@ export async function placeTradeIdeaOrders(req, res) {
         if (!id) return res.status(400).send({ error: 'Missing id' })
 
         const { orders } = req.body ?? {}
-        const result = await ideaService.placeOrdersForIdea(id, orders, req.user._id, req.user.isAdmin)
+        const result = await ideaService.placeOrdersForIdea(id, orders, req.user._id)
         if (!result.ok) {
             if (result.reason === 'not_found')      return res.status(404).send({ error: 'Idea not found' })
             if (result.reason === 'forbidden')      return res.status(403).send({ error: 'Forbidden' })
@@ -207,7 +207,7 @@ export async function triggerTradeIdeaEntry(req, res) {
         const { id } = req.params
         if (!id) return res.status(400).send({ error: 'Missing id' })
 
-        const result = await ideaService.triggerEntryNow(id, req.user._id, req.user.isAdmin)
+        const result = await ideaService.triggerEntryNow(id, req.user._id)
         if (!result.ok) {
             if (result.reason === 'not_found')   return res.status(404).send({ error: 'Idea not found' })
             if (result.reason === 'forbidden')   return res.status(403).send({ error: 'Forbidden' })
@@ -252,7 +252,7 @@ export async function updateTradeIdea(req, res) {
             return res.status(400).send({ error: 'Nothing to update' })
         }
 
-        const result = await ideaService.updateIdea(id, patch, req.user._id, req.user.isAdmin)
+        const result = await ideaService.updateIdea(id, patch, req.user._id)
         if (!result.ok) {
             if (result.reason === 'not_found')      return res.status(404).send({ error: 'Idea not found' })
             if (result.reason === 'forbidden')      return res.status(403).send({ error: 'Forbidden' })

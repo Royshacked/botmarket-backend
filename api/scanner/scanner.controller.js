@@ -38,6 +38,7 @@ export async function streamScanner(req, res) {
                 onPhase:     (phase)  => sendEvent('phase',     { phase }),
                 onToolStart: (tool)   => sendEvent('status',    { tool }),
                 onReasoning: (text)   => sendEvent('reasoning', { text }),
+                onChart:     (chart)  => sendEvent('chart',     chart),
             })
 
             // `kairos_pick` (hand-off mode) → the single ticker Argus recommends back to Kairos.
@@ -64,7 +65,7 @@ export async function createScan(req, res) {
 
 export async function listScans(req, res) {
     try {
-        const scans = await scanService.getScans(req.user._id, req.user.isAdmin)
+        const scans = await scanService.getScans(req.user._id)
         res.json({ scans })
     } catch (err) {
         logger.error(LOG, 'listScans failed', err)
@@ -77,7 +78,7 @@ export async function updateScan(req, res) {
         const { id }   = req.params
         const { scan } = req.body ?? {}
         if (!scan || typeof scan !== 'object') return res.status(400).json({ error: 'scan patch is required' })
-        const result = await scanService.updateScan(id, scan, req.user._id, req.user.isAdmin)
+        const result = await scanService.updateScan(id, scan, req.user._id)
         if (!result.ok) return res.status(reasonToStatus(result.reason, 404)).json({ error: result.reason || 'Failed to update' })
         res.json({ scan: result.scan })
     } catch (err) {
@@ -89,7 +90,7 @@ export async function updateScan(req, res) {
 export async function removeScan(req, res) {
     try {
         const { id } = req.params
-        const result = await scanService.deleteScan(id, req.user._id, req.user.isAdmin)
+        const result = await scanService.deleteScan(id, req.user._id)
         if (!result.ok) return res.status(reasonToStatus(result.reason, 404)).json({ error: result.reason || 'Failed to delete' })
         res.json({ ok: true })
     } catch (err) {

@@ -1,4 +1,5 @@
 import { getDb }                             from '../providers/mongodb.provider.js'
+import { LIVE_POSITION, PRE_ENTRY, STATUS } from './entity/vocabulary.js'
 import { ENTITIES }                          from './entity/entityCollection.js'
 import { brokerService }                     from '../api/broker/broker.service.js'
 import { getEarningsCalendarRaw, getSectorRaw } from '../providers/fmp.provider.js'
@@ -8,8 +9,8 @@ import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames, BROK
 
 const LOG = '[portfolioState]'
 
-const LIVE_STATUSES    = new Set(['long', 'short'])
-const PENDING_STATUSES = new Set(['looking', 'waiting', 'resting', 'hit'])
+const LIVE_STATUSES    = new Set(LIVE_POSITION)
+const PENDING_STATUSES = new Set([...PRE_ENTRY, STATUS.HIT])
 
 // ── Short-TTL snapshot cache ──────────────────────────────────────────────
 // A review conversation sends several follow-up turns. Recomputing the state

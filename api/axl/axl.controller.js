@@ -3,37 +3,18 @@ import { resolveModel }    from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages } from '../_shared/parse.util.js'
 
+// The desks a reply may hand the user to. Validated here rather than trusted from the model: an
+// unknown key would leave the client trying to navigate to a tab that doesn't exist, so it becomes
+// null and the user simply stays with Axl.
 const VALID_PIPELINES = new Set(['trade', 'portfolio', 'scan', 'research'])
 const LOG = '[axl:controller]'
 
-// SSE reception routing — streams a short Axl comment then emits the resolved pipeline
-// key in the `done` payload so the frontend can navigate to the right desk.
-export async function routeAxl(req, res) {
-    const { message } = req.body ?? {}
-    if (!message || typeof message !== 'string' || !message.trim()) {
-        return res.status(400).json({ error: 'message is required' })
-    }
-
-    await streamAgentResponse(req, res, {
-        log: LOG,
-        handler: async ({ sendEvent, signal }) => {
-            const result = await axlAgentService.routeIntent({
-                message: message.trim(),
-                userId:  req.user._id,
-                signal,
-                onToken:     (text) => sendEvent('token',     { text }),
-                onReasoning: (text) => sendEvent('reasoning', { text }),
-            })
-            const route = VALID_PIPELINES.has(result.route) ? result.route : null
-            return { reply: result.reply, route, chart: result.chart ?? null }
-        },
-    })
-}
-
-// SSE chat with Axl — the 4th-agent chat surface (concierge / app-guide, read-only).
-// Same shape as the scanner stream, minus artifacts: Axl emits no <trade_idea>/scan,
-// only text (+ status/reasoning). Model routing follows the user's shared AI-mode
-// (agent 'axl' is phaseless → auto/classifier fall back to the default route).
+// SSE chat with Axl — the one Axl surface. It answers, remembers the thread, docks charts, and
+// routes to a desk when the user wants one (`route` in the `done` payload). There is deliberately no
+// second endpoint: a separate one-shot `/route` doorman used to answer the landing box with no
+// history and no app knowledge, which meant confident wrong answers and follow-ups that couldn't
+// resolve. Model routing follows the user's shared AI-mode (agent 'axl' is phaseless → auto/
+// classifier fall back to the default route).
 export async function streamAxl(req, res) {
     const { messages, model, reasoningEffort, routingMode } = req.body ?? {}
 
@@ -52,12 +33,17 @@ export async function streamAxl(req, res) {
                 reasoningEffort: routing.reasoningEffort,
                 userId:  req.user._id,
                 signal:  signal,
-                onToken:     (text) => sendEvent('token',     { text }),
-                onToolStart: (tool) => sendEvent('status',    { tool }),
-                onReasoning: (text) => sendEvent('reasoning', { text }),
+                onToken:     (text)  => sendEvent('token',     { text }),
+                onToolStart: (tool)  => sendEvent('status',    { tool }),
+                onReasoning: (text)  => sendEvent('reasoning', { text }),
+                onChart:     (chart) => sendEvent('chart',     chart),
             })
 
-            return { reply: result.reply, chart: result.chart ?? null }
+            return {
+                reply: result.reply,
+                route: VALID_PIPELINES.has(result.route) ? result.route : null,
+                chart: result.chart ?? null,
+            }
         },
     })
 }

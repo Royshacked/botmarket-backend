@@ -121,12 +121,16 @@ test('effectiveVerdict: enter/edit always pass through', () => {
 })
 
 // ── _nextStatus ───────────────────────────────────────────────────────────
-test('nextStatus: verdict → status transitions', () => {
-    assert.equal(_nextStatus('enter', 'zone_trip'), 'ready')
-    assert.equal(_nextStatus('edit', 'expiry_review'), 'expiring')
-    assert.equal(_nextStatus('let_expire', 'expiry_review'), 'expired')
-    assert.equal(_nextStatus('wait', 'zone_trip'), 'watching')
-    assert.equal(_nextStatus('stand_aside', 'scheduled'), 'waiting')
+test('nextStatus: only ENTRY moves the lifecycle', () => {
+    assert.equal(_nextStatus('enter'), 'hit')
+    // A stale thesis is the invalidation axis, not a status — the call is still being looked at.
+    assert.equal(_nextStatus('edit'), 'looking')
+    assert.equal(_nextStatus('wait'), 'looking')
+    assert.equal(_nextStatus('stand_aside'), 'looking')
+    // The three statuses calls used to spend on the thesis lifecycle are gone from the language.
+    for (const v of ['enter', 'edit', 'let_expire', 'wait', 'stand_aside']) {
+        assert.ok(!['expiring', 'expired', 'dismissed', 'watching', 'ready'].includes(_nextStatus(v)))
+    }
 })
 
 // ── _snapToReference ──────────────────────────────────────────────────────
@@ -173,7 +177,7 @@ test('finalizeProposal: null proposal → null', () => {
 })
 
 // ── _applyAssessment ──────────────────────────────────────────────────────
-test('applyAssessment: enter → ready, arms zone, clamps next check, fires card', () => {
+test('applyAssessment: enter → hit, arms zone, clamps next check, fires card', () => {
     const raw = {
         verdict: 'enter', timeframe_used: '15min', next_check_min: 999,
         market: { score: 'supportive' }, price_action: { strength: 'strong' },
@@ -181,7 +185,7 @@ test('applyAssessment: enter → ready, arms zone, clamps next check, fires card
         memo_update: 'reclaim confirmed',
     }
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), call().entry_zones[0], raw, NOW, 'zone_trip')
-    assert.equal(set.status, 'ready')
+    assert.equal(set.status, 'hit')
     assert.equal(set['monitor_state.armed_zone_id'], 'ez1')
     assert.equal(set['monitor_state.chosen_timeframe'], '15min')
     assert.equal(set['monitor_state.check_count'], 3)                     // 2 → 3
@@ -194,34 +198,40 @@ test('applyAssessment: enter → ready, arms zone, clamps next check, fires card
 test('applyAssessment: wait carries the prior memo when no memo_update', () => {
     const raw = { verdict: 'wait', next_check_min: 10 }
     const { set, fireCard } = _applyAssessment(call(), call().entry_zones[0], raw, NOW, 'zone_trip')
-    assert.equal(set.status, 'watching')
+    assert.equal(set.status, 'looking')
     assert.equal(set['monitor_state.memo'], 'prior note')   // carried across the wake
     assert.equal(fireCard, false)
 })
 test('applyAssessment: let_expire → expired, no proposal, fires the expiry card', () => {
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), null, { verdict: 'let_expire', next_check_min: 5 }, NOW, 'expiry_review')
-    assert.equal(set.status, 'expired')
-    assert.equal(fireCard, true)   // now notifies (expiry card) instead of expiring silently
+    assert.equal(set.status, 'closed')            // terminal, with the reason in a FIELD
+    assert.equal(set.closedReason, 'expired')
+    assert.equal(fireCard, true)   // notifies (expiry card) instead of expiring silently
     assert.equal(lastAssessment.proposal, undefined)
 })
-test('applyAssessment: edit → expiring + fires card + carries edit_proposal', () => {
+test('applyAssessment: edit LATCHES invalidation and leaves the lifecycle alone', () => {
     const raw = { verdict: 'edit', next_check_min: 30, edit_proposal: { why: 'roll', changes: {} } }
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), null, raw, NOW, 'expiry_review')
-    assert.equal(set.status, 'expiring')
+    // A stale thesis does not stop the call being watched — it flags it, on the second axis, the
+    // way an idea's price envelope always has.
+    assert.equal(set.status, 'looking')
+    assert.equal(set.invalidation_status, 'fired')
+    assert.equal(set.invalidation_edge, 'time')
+    assert.equal(set.invalidation_reason, 'roll')
     assert.equal(fireCard, true)
     assert.deepEqual(lastAssessment.edit_proposal, { why: 'roll', changes: {} })
 })
-test('applyAssessment: off-menu verdict → treated as wait (watching on a zone trip, no card)', () => {
+test('applyAssessment: off-menu verdict → treated as wait (still looking, no card)', () => {
     const raw = { verdict: 'enter_now', next_check_min: 10 }   // typo'd / hallucinated verdict
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), call().entry_zones[0], raw, NOW, 'zone_trip')
-    assert.equal(set.status, 'watching')
+    assert.equal(set.status, 'looking')
     assert.equal(fireCard, false)              // never mis-fire an entry card on a garbled verdict
     assert.equal(lastAssessment.verdict, 'wait')
 })
 test('applyAssessment: edit WITHOUT a usable edit_proposal → wait, no blank re-map card', () => {
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), null, { verdict: 'edit', next_check_min: 30 }, NOW, 'expiry_review')
     assert.equal(fireCard, false)              // don't fire an edit card with empty why/changes
-    assert.notEqual(set.status, 'expiring')
+    assert.equal(set.invalidation_status, undefined)   // nothing latched either
     assert.equal(lastAssessment.verdict, 'wait')
 })
 test('applyAssessment: edit with an empty edit_proposal (blank why, no changes) → wait', () => {
@@ -363,16 +373,18 @@ test('modeLensBlock: discretionary/absent → no nudge; smc → structure lens; 
     assert.match(inst, /get_short_interest/)                 // points at the positioning re-verify tools
 })
 
-test('applyAssessment: let_expire on a zone trip does NOT expire — call keeps watching, no card', () => {
+test('applyAssessment: let_expire on a zone trip does NOT expire — call keeps looking, no card', () => {
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), call().entry_zones[0], { verdict: 'let_expire', next_check_min: 15 }, NOW, 'zone_trip')
-    assert.equal(set.status, 'watching')          // downgraded to stand_aside → watching, not expired
+    assert.equal(set.status, 'looking')           // downgraded to stand_aside — never closed
+    assert.equal(set.closedReason, undefined)
     assert.equal(fireCard, false)                 // no misleading "thesis expired" card
     assert.equal(lastAssessment.verdict, 'stand_aside')
 })
-test('applyAssessment: PAST-expiry review still on wait → forced expired + fires the expiry card', () => {
+test('applyAssessment: PAST-expiry review still on wait → forced closed + fires the expiry card', () => {
     const PAST = Date.parse('2026-07-09T20:30:00Z')   // 30m past valid_until (20:00Z)
     const { set, fireCard, lastAssessment } = _applyAssessment(call(), null, { verdict: 'wait', next_check_min: 5 }, PAST, 'expiry_review')
-    assert.equal(set.status, 'expired')           // hard cutoff — no infinite re-assessment loop
+    assert.equal(set.status, 'closed')            // hard cutoff — no infinite re-assessment loop
+    assert.equal(set.closedReason, 'expired')
     assert.equal(fireCard, true)
     assert.equal(lastAssessment.verdict, 'let_expire')
 })
@@ -467,7 +479,7 @@ test('checkCall: material out-of-zone move → momentum pulse; edit re-maps and 
     assert.equal(out.verdict, 'edit')
     assert.equal(assessArgs.zone, null)                        // pulse assesses with NO armed zone
     assert.equal(assessArgs.ctx.reason, 'momentum_pulse')
-    assert.equal(db.updates[0].set.status, 'expiring')         // edit card flow
+    assert.equal(db.updates[0].set.status, 'looking')         // edit card flow
     assert.equal(db.updates[0].set['monitor_state.pulse_anchor_px'], 150)                 // re-anchored to the move
     assert.equal(db.updates[0].set['monitor_state.last_pulse_at'], new Date(NOW).toISOString())
     assert.equal(carded.verdict, 'edit')
@@ -490,7 +502,7 @@ test('checkCall: a pulse returning enter is coerced to wait (no direct entry, no
     const deps = { getPrice: async () => 150, assess: async () => ({ verdict: 'enter', proposal: { entry: 150, stop: 145, take_profit: [{ price: 160 }] }, next_check_min: 15 }), onCard: async () => { carded = true }, isAssetOpen: () => true }
     const out = await _checkCall(db, pulseCall(), NOW, deps)
     assert.equal(out.verdict, 'wait')                          // enter coerced away
-    assert.notEqual(db.updates[0].set.status, 'ready')
+    assert.notEqual(db.updates[0].set.status, 'hit')
     assert.equal(carded, false)
 })
 test('checkCall: sub-threshold out-of-zone move → cheap reschedule, no pulse', async () => {
@@ -558,7 +570,7 @@ test('checkCall: price in a zone → assessment runs, verdict persisted, card fi
     const out = await _checkCall(db, call(), NOW, deps)
     assert.equal(out.reason, 'zone_trip')
     assert.equal(out.verdict, 'enter')
-    assert.equal(db.updates[0].set.status, 'ready')
+    assert.equal(db.updates[0].set.status, 'hit')
     assert.equal(db.updates[0].set['monitor_state.armed_zone_id'], 'ez1')
     assert.equal(carded.verdict, 'enter')
 })
@@ -579,7 +591,8 @@ test('checkCall: near expiry runs assessment even with no zone tripped', async (
     const deps = { getPrice: async () => 250, assess: async () => ({ verdict: 'let_expire', next_check_min: 5 }), onCard: async () => {}, isAssetOpen: () => true }
     const out = await _checkCall(db, expiringCall, NOW, deps)
     assert.equal(out.reason, 'expiry_review')
-    assert.equal(db.updates[0].set.status, 'expired')
+    assert.equal(db.updates[0].set.status, 'closed')
+    assert.equal(db.updates[0].set.closedReason, 'expired')
 })
 
 test('checkCall: market CLOSED + not expiring → skipped (no price, no assess), rescheduled', async () => {
@@ -598,20 +611,20 @@ test('checkCall: market CLOSED + not expiring → skipped (no price, no assess),
     assert.equal(db.updates[0].set['monitor_state.next_check_at'], new Date(NOW + 60 * 60_000).toISOString())
 })
 
-test('checkCall: a watching call that leaves the zone resets to waiting', async () => {
+test('checkCall: a call out of every zone just reschedules — no status churn', async () => {
     const db = fakeDb()
     const deps = { getPrice: async () => 250, assess: async () => ({}), onCard: async () => {}, isAssetOpen: () => true }
-    await _checkCall(db, call({ status: 'watching' }), NOW, deps)   // 250 is in no zone → scheduled path
-    assert.equal(db.updates[0].set.status, 'waiting')
+    await _checkCall(db, call({ status: 'looking' }), NOW, deps)   // 250 is in no zone → scheduled path
+    // Being in or out of a zone is armed_zone_id, not a lifecycle rung, so nothing to reset.
+    assert.equal(db.updates[0].set.status, undefined)
 })
 
-test('checkCall: market CLOSED sleeps until the next open + clears stale watching', async () => {
+test('checkCall: market CLOSED sleeps until the next open', async () => {
     const db = fakeDb()
     const openMs = NOW + 3 * 3600_000
     const deps = { getPrice: async () => 248, assess: async () => ({}), onCard: async () => {}, isAssetOpen: () => false, nextOpenMs: () => openMs }
-    const out = await _checkCall(db, call({ status: 'watching' }), NOW, deps)
+    const out = await _checkCall(db, call({ status: 'looking' }), NOW, deps)
     assert.equal(out.reason, 'closed')
-    assert.equal(db.updates[0].set.status, 'waiting')                                            // stale watching cleared
     assert.equal(db.updates[0].set['monitor_state.next_check_at'], new Date(openMs).toISOString())  // sleeps to the open
 })
 
@@ -626,7 +639,8 @@ test('checkCall: market CLOSED but EXPIRING → expiry review still runs', async
     }
     const out = await _checkCall(db, expiringCall, NOW, deps)
     assert.equal(out.reason, 'expiry_review')
-    assert.equal(db.updates[0].set.status, 'expired')
+    assert.equal(db.updates[0].set.status, 'closed')
+    assert.equal(db.updates[0].set.closedReason, 'expired')
 })
 
 // ── _zonesLabel + _timelineEntry (the live monitor journal) ────────────────

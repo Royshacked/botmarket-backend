@@ -60,6 +60,7 @@ export async function streamPortfolio(req, res) {
                 onPhase:     (phase)  => sendEvent('phase',     { phase }),
                 onToolStart: (tool)   => sendEvent('status',    { tool }),
                 onReasoning: (text)   => sendEvent('reasoning', { text }),
+                onChart:     (chart)  => sendEvent('chart',     chart),
             })
 
             // Post-stream persistence (mandate/thesis/draft) → service. Only when the client is
@@ -179,7 +180,7 @@ export async function applyPortfolioRebalance(req, res) {
         if (!update || !Array.isArray(update.changes)) {
             return res.status(400).json({ error: 'Missing update.changes' })
         }
-        const result = await applyRebalance(portfolioId, req.user._id, update, req.user?.isAdmin === true)
+        const result = await applyRebalance(portfolioId, req.user._id, update)
         if (!result.ok) return res.status(400).json(result)
 
         // Flip the Atlas notification card to "Updated · next review <date>".

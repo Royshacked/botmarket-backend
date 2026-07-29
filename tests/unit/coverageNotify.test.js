@@ -5,7 +5,7 @@ import { buildCoverageEvent } from '../../services/coverageNotify.service.js'
 
 // Analyst P5 — coverage-event notification card (pure builder).
 
-const cov = (over = {}) => ({ user_id: 'u1', symbol: 'NVDA', id: 'cov1', price_target: { value: 200 }, ...over })
+const cov = (over = {}) => ({ userId: 'u1', symbol: 'NVDA', id: 'cov1', price_target: { value: 200 }, ...over })
 
 test('target_hit → analyst card; edge_gone adds the harvest nudge', () => {
     const c = buildCoverageEvent(cov(), { state: 'target_hit', reason: 'price 205 reached PT 200', edge_gone: false })
@@ -27,7 +27,7 @@ test('thesis_broken / validating / diverging each phrase the reason', () => {
 
 test('stable / no-user / no-verdict → null (no notification)', () => {
     assert.equal(buildCoverageEvent(cov(), { state: 'stable', reason: 'x' }), null)
-    assert.equal(buildCoverageEvent(cov({ user_id: null }), { state: 'target_hit' }), null)
+    assert.equal(buildCoverageEvent(cov({ userId: null }), { state: 'target_hit' }), null)
     assert.equal(buildCoverageEvent(cov(), null), null)
     assert.equal(buildCoverageEvent(null, { state: 'target_hit' }), null)
 })

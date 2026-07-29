@@ -1,4 +1,6 @@
 import { fileURLToPath }  from 'url'
+import { makePhaseCapture, runAgentStream } from './agentIO.js'
+import { toolsFor } from './agentTools.registry.js'
 import { dirname, join }  from 'path'
 import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMarketMovers, getAnalystActions, getSectorSnapshot } from '../providers/fmp.provider.js'
@@ -8,7 +10,7 @@ import { isMode } from './kairos.modes.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, resolveAgentStream, TRADE_HORIZONS } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, TRADE_HORIZONS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { isToolError } from './toolResult.util.js'
 import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS } from './scanner.grounding.js'
@@ -23,251 +25,44 @@ const _profilePrompt = {
 }
 const MAX_MESSAGES = 10
 
-const TOOLS = [
-    { type: 'web_search_20250305', name: 'web_search' },
-    {
-        name: 'screen_candidates',
-        description: 'Screen the US universe for names that fit the scan\'s shape — the grounded discovery leg (Phase 2). Filter by sector, market cap, price, beta, dividend, and a liquidity floor (volume). NOTE: this is a FUNDAMENTAL & liquidity screen — it CANNOT filter for chart setups (52-week-high, base, RSI). For a technical angle, use it to define a liquid, in-sector universe, then confirm the setup per-name with get_candles/get_indicators. Returns a compact list; qualify each hit before listing it.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                sector:            { type: 'string', description: 'e.g. Technology, Healthcare, Energy, Financial Services, Utilities' },
-                industry:          { type: 'string', description: 'optional finer bucket, e.g. Semiconductors' },
-                marketCapMoreThan: { type: 'number', description: 'min market cap in USD, e.g. 10000000000 for $10B+' },
-                marketCapLowerThan:{ type: 'number', description: 'max market cap in USD, e.g. 2000000000 for small-cap' },
-                priceMoreThan:     { type: 'number', description: 'min share price (a tradability floor — e.g. 5 to drop penny names)' },
-                priceLowerThan:    { type: 'number', description: 'max share price' },
-                betaMoreThan:      { type: 'number', description: 'min beta (higher = more cyclical/volatile)' },
-                betaLowerThan:     { type: 'number', description: 'max beta (lower = more defensive)' },
-                dividendMoreThan:  { type: 'number', description: 'min annual dividend per share in USD' },
-                volumeMoreThan:    { type: 'number', description: 'min average volume — the liquidity floor; set it for tradability' },
-                country:           { type: 'string', description: 'e.g. US (default universe is US)' },
-                isEtf:             { type: 'boolean', description: 'true to screen ETFs instead of single stocks' },
-                limit:             { type: 'number', description: 'max results 1–50 (default 25)' },
-            },
-        },
+export const TOOLS = toolsFor({
+    web_search: '',
+    screen_candidates: `Screen the US universe for names that fit the scan's shape — the grounded discovery leg (Phase 2). Filter by sector, market cap, price, beta, dividend, and a liquidity floor (volume). NOTE: this is a FUNDAMENTAL & liquidity screen — it CANNOT filter for chart setups (52-week-high, base, RSI). For a technical angle, use it to define a liquid, in-sector universe, then confirm the setup per-name with get_candles/get_indicators. Returns a compact list; qualify each hit before listing it.`,
+    get_market_movers: `Today's biggest movers — the momentum / gap / "what's moving" starting pool for Phase-2 discovery. kind="gainers" (biggest % up), "losers" (biggest % down — short pool), or "active" (highest volume). Grounded discovery, not a watchlist: qualify every name (relative strength, tradability, a real catalyst) before it makes the list. US-listed.`,
+    get_sector_snapshot: `Today's sector rotation — every sector ranked leaders→laggards by average move. Use it in Phase 2 for a sector-rotation angle (find the leading/lagging groups, then screen_candidates INSIDE them), and in Phase 3 as the sector leg of the relative-strength check (is the name's sector leading?). No arguments.`,
+    get_analyst_actions: `Recent analyst rating changes — a catalyst pool beyond earnings. With NO symbols: the market-wide latest upgrades/downgrades feed (Phase-2 discovery of ratings-driven names). With symbols: each name's recent rating actions (Phase-3 validation of a shortlist — is a fresh upgrade/downgrade backing the move?). US-listed equities.`,
+    get_price_action: `Recent price-action summary for a ticker: 1d/5d/1m/3m moves, position within the 1y range, and relative volume. Use it to confirm a name is actually moving the way your thesis claims.`,
+    get_quotes: `Get current prices for several tickers at once.`,
+    get_risk_metrics: `Annualized volatility and ATR (from 1y of daily prices) for a ticker. Use it to gauge how violent a name is before putting it on the list.`,
+    get_candles: `Fetch recent OHLCV candles for a ticker + timeframe — the exact price structure to name the setup and run the structure-respect check (swing highs/lows, prior-day levels, breakout shelves, base/range). Baseline Phase-3 tool: read the structure from the candles before you score \`technical\`. Always call it before committing to a named setup or a level.`,
+    get_indicators: `Compute exact indicator VALUES from recent candles — the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Use it to CONFIRM the technical read with hard numbers: price vs EMA/VWAP for location, RSI for momentum/divergence, MACD for trend, ATR for how violent the name is. Price action / structure (get_candles) leads; indicators only confirm — a name clean on price with soft indicators is a lower \`technical\` score, not a reject.`,
+    get_chart: {
+        description: `Render an actual candlestick chart IMAGE (KLineCharts, optional indicator overlays) and look at it directly for VISUAL / structural analysis — chart patterns, trend, where price sits vs moving averages / VWAP, base/breakout geometry. Use it to CONFIRM the named setup on the strongest names. EXPENSIVE (image render + vision) — reserve it for the top shortlist and the Kairos single-pick, NOT every candidate. For exact numeric levels prefer get_candles.`,
+        omit: ["show_to_user"],
     },
-    {
-        name: 'get_market_movers',
-        description: 'Today\'s biggest movers — the momentum / gap / "what\'s moving" starting pool for Phase-2 discovery. kind="gainers" (biggest % up), "losers" (biggest % down — short pool), or "active" (highest volume). Grounded discovery, not a watchlist: qualify every name (relative strength, tradability, a real catalyst) before it makes the list. US-listed.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                kind:  { type: 'string', enum: ['gainers', 'losers', 'active'], description: 'gainers = biggest % up, losers = biggest % down, active = most traded by volume' },
-                limit: { type: 'number', description: 'how many to return, 1–50 (default 20)' },
-            },
-            required: ['kind'],
-        },
+    get_orderblocks: {
+        description: `Detect ORDER BLOCKS on a plain candlestick chart (one ticker + timeframe): the last opposing candle/cluster before an impulsive structure break, whether it is fresh/untested or mitigated, and its zone vs current price. Angle-triggered — reach for it when the scan angle is structure / supply-demand / entry-zone hunting. Levels are approximate; confirm exact prices with get_candles.`,
+        omit: ["show_to_user"],
     },
-    {
-        name: 'get_sector_snapshot',
-        description: 'Today\'s sector rotation — every sector ranked leaders→laggards by average move. Use it in Phase 2 for a sector-rotation angle (find the leading/lagging groups, then screen_candidates INSIDE them), and in Phase 3 as the sector leg of the relative-strength check (is the name\'s sector leading?). No arguments.',
-        input_schema: { type: 'object', properties: {} },
+    get_false_breaks: {
+        description: `Detect FALSE BREAKS / liquidity sweeps on a plain candlestick chart (one ticker + timeframe): where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Angle-triggered — reach for it for a failed-breakout / reversal / squeeze angle. Levels are approximate; confirm exact prices with get_candles.`,
+        omit: ["show_to_user"],
     },
-    {
-        name: 'get_analyst_actions',
-        description: 'Recent analyst rating changes — a catalyst pool beyond earnings. With NO symbols: the market-wide latest upgrades/downgrades feed (Phase-2 discovery of ratings-driven names). With symbols: each name\'s recent rating actions (Phase-3 validation of a shortlist — is a fresh upgrade/downgrade backing the move?). US-listed equities.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                symbols: { type: 'array', items: { type: 'string' }, description: 'optional — narrow to these tickers for a per-name read; omit for the market-wide discovery feed' },
-                limit:   { type: 'number', description: 'max rows for the market-wide feed, 1–50 (default 25)' },
-            },
-        },
+    get_fundamentals: `Company fundamentals for a single ticker: sector/industry, market cap, valuation, margins, ROE, growth. Use it to qualify a longer-horizon pick. ETFs return exposure/profile only.`,
+    get_earnings: `For a SINGLE ticker: its next earnings date + EPS estimate, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use it to qualify one scan candidate — is a print imminent (gap risk), and does the name have a track record of beating or missing. For the forward "who reports when" across a period, use get_earnings_calendar. US equities only.`,
+    get_earnings_calendar: `Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for the forward-looking "who reports when" — especially for week/multi-day scans.`,
+    get_sec_filings: `What a company has actually filed with the SEC: latest 8-K (item 2.02 = the real earnings release), 10-Q, 10-K, with dates and links. Use it to confirm an earnings event truly dropped. US filers only; most ETFs and foreign tickers aren't in EDGAR.`,
+    get_cycle_analysis: {
+        description: `Detect recurring cycles in a stock's price history. Two modes: "price" finds the dominant peak-to-peak / trough-to-trough interval, tells you the current phase, and estimates the next turning point. "calendar" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking with the historical pattern. Use "price" for recurring-interval / cyclic-window theses ("cycles every ~6 weeks"); use "calendar" for seasonal / calendar-pattern theses ("June is always weak"). The angle makes the mode clear — pick it directly rather than asking which they mean.`,
+        omit: ["timeframe"],
     },
-    {
-        name: 'get_price_action',
-        description: 'Recent price-action summary for a ticker: 1d/5d/1m/3m moves, position within the 1y range, and relative volume. Use it to confirm a name is actually moving the way your thesis claims.',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
-            required: ['ticker'],
-        },
+    get_short_interest: `Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it for squeeze potential and crowded-bearish-positioning context on a scan candidate, not as a live read. No data for ETFs, crypto, FX or futures.`,
+    get_options_context: `Options positioning for a US equity/ETF: put/call ratio (by open interest and by volume) and at-the-money implied volatility for the nearest expiry. Use it to gauge directional skew and how big a move the market is pricing (elevated IV = expensive options / large expected move, often around a catalyst). Quotes ~15-min delayed. No data for crypto, FX or futures.`,
+    get_derivatives_context: {
+        description: `Crypto-perp positioning from Binance: funding rate (who pays to hold the trade — a crowding signal), open interest (committed leverage), and the global long/short account ratio (retail skew). This is the crypto analog to short-interest/options sentiment. Crypto perps only (BTC, ETH, SOL…) — not equities, FX or traditional futures.`,
+        cache: true,
     },
-    {
-        name: 'get_quotes',
-        description: 'Get current prices for several tickers at once.',
-        input_schema: {
-            type: 'object',
-            properties: { tickers: { type: 'array', items: { type: 'string' }, description: 'e.g. ["AAPL","NVDA","FDX"]' } },
-            required: ['tickers'],
-        },
-    },
-    {
-        name: 'get_risk_metrics',
-        description: 'Annualized volatility and ATR (from 1y of daily prices) for a ticker. Use it to gauge how violent a name is before putting it on the list.',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
-            required: ['ticker'],
-        },
-    },
-    {
-        name: 'get_candles',
-        description: 'Fetch recent OHLCV candles for a ticker + timeframe — the exact price structure to name the setup and run the structure-respect check (swing highs/lows, prior-day levels, breakout shelves, base/range). Baseline Phase-3 tool: read the structure from the candles before you score `technical`. Always call it before committing to a named setup or a level.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                ticker:    { type: 'string', description: 'e.g. AAPL, NVDA, SPY' },
-                timeframe: {
-                    type: 'string',
-                    enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'],
-                    description: 'Candle timeframe. 2hr/4hr are aggregated from native 1hr bars; every other resolution is native. Match it to the scan\'s trade style — intraday/day → minutes/hours, swing → day, long term → day/week.',
-                },
-            },
-            required: ['ticker', 'timeframe'],
-        },
-    },
-    {
-        name: 'get_indicators',
-        description: 'Compute exact indicator VALUES from recent candles — the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Use it to CONFIRM the technical read with hard numbers: price vs EMA/VWAP for location, RSI for momentum/divergence, MACD for trend, ATR for how violent the name is. Price action / structure (get_candles) leads; indicators only confirm — a name clean on price with soft indicators is a lower `technical` score, not a reject.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                ticker:    { type: 'string', description: 'e.g. AAPL, NVDA' },
-                timeframe: {
-                    type: 'string',
-                    enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'],
-                    description: 'Candle timeframe to compute on.',
-                },
-                indicators: {
-                    type: 'string',
-                    description: 'Comma-separated list with optional period, e.g. "ema(20), ema(50), rsi(14), atr(14), macd, vwap". Period is optional (defaults: ema/sma 20, rsi/atr 14). VWAP is session-anchored (intraday).',
-                },
-            },
-            required: ['ticker', 'timeframe', 'indicators'],
-        },
-    },
-    {
-        name: 'get_chart',
-        description: 'Render an actual candlestick chart IMAGE (KLineCharts, optional indicator overlays) and look at it directly for VISUAL / structural analysis — chart patterns, trend, where price sits vs moving averages / VWAP, base/breakout geometry. Use it to CONFIRM the named setup on the strongest names. EXPENSIVE (image render + vision) — reserve it for the top shortlist and the Kairos single-pick, NOT every candidate. For exact numeric levels prefer get_candles.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                ticker:     { type: 'string', description: 'Ticker symbol e.g. AAPL, NVDA' },
-                timeframe:  { type: 'string', enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'], description: 'Chart timeframe — match the scan\'s trade style.' },
-                indicators: { type: 'string', description: 'Optional overlays, e.g. "ema(50), vwap, volume". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure without moving-average clutter.' },
-            },
-            required: ['ticker', 'timeframe'],
-        },
-    },
-    {
-        name: 'get_orderblocks',
-        description: 'Detect ORDER BLOCKS on a plain candlestick chart (one ticker + timeframe): the last opposing candle/cluster before an impulsive structure break, whether it is fresh/untested or mitigated, and its zone vs current price. Angle-triggered — reach for it when the scan angle is structure / supply-demand / entry-zone hunting. Levels are approximate; confirm exact prices with get_candles.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                ticker:    { type: 'string', description: 'Ticker symbol e.g. AAPL, NVDA' },
-                timeframe: { type: 'string', enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'], description: 'Chart timeframe to read the orderblocks on.' },
-            },
-            required: ['ticker', 'timeframe'],
-        },
-    },
-    {
-        name: 'get_false_breaks',
-        description: 'Detect FALSE BREAKS / liquidity sweeps on a plain candlestick chart (one ticker + timeframe): where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Angle-triggered — reach for it for a failed-breakout / reversal / squeeze angle. Levels are approximate; confirm exact prices with get_candles.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                ticker:    { type: 'string', description: 'Ticker symbol e.g. AAPL, NVDA' },
-                timeframe: { type: 'string', enum: ['1min', '5min', '15min', '30min', '1hr', '2hr', '4hr', 'day', 'week', 'month'], description: 'Chart timeframe to read the sweeps on.' },
-            },
-            required: ['ticker', 'timeframe'],
-        },
-    },
-    {
-        name: 'get_fundamentals',
-        description: 'Company fundamentals for a single ticker: sector/industry, market cap, valuation, margins, ROE, growth. Use it to qualify a longer-horizon pick. ETFs return exposure/profile only.',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
-            required: ['ticker'],
-        },
-    },
-    {
-        name: 'get_earnings',
-        description: 'For a SINGLE ticker: its next earnings date + EPS estimate, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use it to qualify one scan candidate — is a print imminent (gap risk), and does the name have a track record of beating or missing. For the forward "who reports when" across a period, use get_earnings_calendar. US equities only.',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, TSLA' } },
-            required: ['ticker'],
-        },
-    },
-    {
-        name: 'get_earnings_calendar',
-        description: 'Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for the forward-looking "who reports when" — especially for week/multi-day scans.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                from:    { type: 'string', description: 'start date YYYY-MM-DD' },
-                to:      { type: 'string', description: 'end date YYYY-MM-DD' },
-                symbols: { type: 'array', items: { type: 'string' }, description: 'optional — narrow to these tickers' },
-            },
-            required: ['from', 'to'],
-        },
-    },
-    {
-        name: 'get_sec_filings',
-        description: "What a company has actually filed with the SEC: latest 8-K (item 2.02 = the real earnings release), 10-Q, 10-K, with dates and links. Use it to confirm an earnings event truly dropped. US filers only; most ETFs and foreign tickers aren't in EDGAR.",
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. AAPL, FDX, NKE' } },
-            required: ['ticker'],
-        },
-    },
-    {
-        name: 'get_cycle_analysis',
-        description: 'Detect recurring cycles in a stock\'s price history. Two modes: "price" finds the dominant peak-to-peak / trough-to-trough interval, tells you the current phase, and estimates the next turning point. "calendar" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking with the historical pattern. Use "price" for recurring-interval / cyclic-window theses ("cycles every ~6 weeks"); use "calendar" for seasonal / calendar-pattern theses ("June is always weak"). The angle makes the mode clear — pick it directly rather than asking which they mean.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' },
-                mode: { type: 'string', enum: ['price', 'calendar'], description: '"price" for recurring interval cycles, "calendar" for seasonal window analysis' },
-                calendar_window: {
-                    type: 'object',
-                    description: 'Required for mode "calendar". Defines the window to analyze each year.',
-                    properties: {
-                        month_start: { type: 'number', description: '1-based month number (Jan=1). Start month of the window.' },
-                        month_end:   { type: 'number', description: '1-based month number. End month — same as month_start for a single month.' },
-                        day_start:   { type: 'number', description: 'Optional. Starting day within month_start (default 1).' },
-                        day_end:     { type: 'number', description: 'Optional. Ending day within month_end (default last day of month).' },
-                    },
-                    required: ['month_start'],
-                },
-                lookback_years: { type: 'number', description: 'Years of history to use (default 4, max 6). More years = more reliable pattern but older data.' },
-            },
-            required: ['ticker', 'mode'],
-        },
-    },
-    {
-        name: 'get_short_interest',
-        description: 'Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it for squeeze potential and crowded-bearish-positioning context on a scan candidate, not as a live read. No data for ETFs, crypto, FX or futures.',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. GME, TSLA, AAPL' } },
-            required: ['ticker'],
-        },
-    },
-    {
-        name: 'get_options_context',
-        description: 'Options positioning for a US equity/ETF: put/call ratio (by open interest and by volume) and at-the-money implied volatility for the nearest expiry. Use it to gauge directional skew and how big a move the market is pricing (elevated IV = expensive options / large expected move, often around a catalyst). Quotes ~15-min delayed. No data for crypto, FX or futures.',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. NVDA, SPY, AAPL' } },
-            required: ['ticker'],
-        },
-    },
-    {
-        name: 'get_derivatives_context',
-        description: 'Crypto-perp positioning from Binance: funding rate (who pays to hold the trade — a crowding signal), open interest (committed leverage), and the global long/short account ratio (retail skew). This is the crypto analog to short-interest/options sentiment. Crypto perps only (BTC, ETH, SOL…) — not equities, FX or traditional futures.',
-        input_schema: {
-            type: 'object',
-            properties: { symbol: { type: 'string', description: 'e.g. BTC, ETH, SOL (or BTC-USD / BTCUSDT)' } },
-            required: ['symbol'],
-        },
-        cache_control: { type: 'ephemeral' },
-    },
-]
+})
 
 const TOOL_HANDLERS = {
     screen_candidates: makeToolHandler('screen_candidates',
@@ -363,10 +158,9 @@ function SCANNER_TOOLS_FOR_PROFILE(profile) {
 // KAIROS HAND-OFF MODE section). The bias/horizon ride in the seeded opening message.
 const HANDOFF_CONTEXT = 'KAIROS HAND-OFF MODE: the user was sent here by Kairos to find ONE ticker for a single call. Follow the KAIROS HAND-OFF MODE section — converge to a single best pick, do NOT ask whether they are ready for Kairos, and end with a <kairos_pick> block (not a <scan_list>).'
 
-async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, profile = 'trading', reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, profile = 'trading', reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal }) {
     const prof = profile === 'investing' ? 'investing' : 'trading'
     const normalized = _buildMessages(messages)
-    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
     // Per-session grounding ledger — records which tickers a real, successful tool
     // engaged, so a fabricated candidate that no tool touched is dropped at normalize.
@@ -388,44 +182,33 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         { type: 'text', text: dynamic.join('\n\n') },
     ]
 
-    logger.info(LOG, 'chatStream start', { messageCount: normalized.length, model, provider })
 
     let capturedScan  = null
-    let capturedPhase = null
     let capturedPick  = null
 
     const onScan = (json) => { try { capturedScan = JSON.parse(json) } catch { /* malformed — ignore */ } }
     const onPick = (json) => { try { capturedPick = JSON.parse(json) } catch { /* malformed — ignore */ } }
-    const onPhaseCapture = (p) => {
-        const n = parseInt(p, 10)
-        if (n >= 1 && n <= 4) {
-            capturedPhase = n
-            onPhase?.(n)
-        }
-    }
+    const phase = makePhaseCapture(4, onPhase)
 
     // All known emit tags suppressed by default; this agent captures phase, ticker
     // (which keeps its inner text in the UI), scan_list, and — in hand-off mode — kairos_pick.
     const tagCaptures = buildTagCaptures({
-        phase:       onPhaseCapture,
+        phase:       phase.capture,
         ticker:      { onCapture: onTicker, keepText: true },
         scan_list:   onScan,
         kairos_pick: onPick,
     })
 
-    const raw = await streamFn({
-        model,
-        promptOrMessages: normalized,
-        systemPrompt,
-        tools:        SCANNER_TOOLS_FOR_PROFILE(prof),
+    const raw = await runAgentStream({
+        log: LOG, requestedModel, userId,
+        messages: normalized, systemPrompt,
+        tools: SCANNER_TOOLS_FOR_PROFILE(prof),
         toolHandlers,
-        reasoningEffort,
-        signal,
-        onToken,
-        tagCaptures,
-        onToolStart,
-        onReasoning,
-        onUsage,
+        // onChart here is the <chart> TAG only — the user asking to see a chart. The scanner's
+        // vision TOOLS stay wired to onChart:null (see TOOL_HANDLERS): its own renders remain
+        // model-only. Same pipe, different judgment.
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
+        meta: { profile: prof },
     })
 
     const reply = stripEmitTags(
@@ -437,8 +220,8 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     const scan = _normalizeScan(capturedScan, editList, ledger, prof)
     const pick = _normalizeKairosPick(capturedPick)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, profile: prof, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, phase: capturedPhase })
-    return { reply, scan, phase: capturedPhase, ...(pick ? { pick } : {}) }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, profile: prof, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, phase: phase.get() })
+    return { reply, scan, phase: phase.get(), ...(pick ? { pick } : {}) }
 }
 
 // Normalize a captured <kairos_pick> (hand-off mode) — the single ticker Argus recommends back to

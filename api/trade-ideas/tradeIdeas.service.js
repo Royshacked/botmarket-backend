@@ -1,4 +1,5 @@
 import { randomUUID }       from 'crypto'
+import { LIVE_POSITION, statusesFor } from '../../services/entity/vocabulary.js'
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { minosService }     from '../../monitoring/minos.monitor.service.js'
@@ -8,19 +9,37 @@ import { routeExits, currentReferencePrice, detectNativeEntryLevel } from '../..
 import { isAssetOpen } from '../../services/market.service.js'
 import { toBrokerSymbol, normSymbol } from '../../services/brokerSymbol.service.js'
 import { computeBasisOffset }         from '../broker/brokerPrice.service.js'
+import { resolveMode }                from '../../services/venue.resolve.service.js'
 import { resolveConditionTree, extractLeaves, topOperator, firstLeafTimeframe } from '../../services/conditionTree.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
 import { placeOrdersForIdea, placeRestingEntryForIdea, triggerEntryNow } from './ideaExecution.service.js'
 import { armExitsInPosition } from './exitOrders.service.js'
 import { entityRepo }         from '../../services/entity/entityRepo.service.js'
+import { makeEntityCrud, ownsEntity } from '../../services/entity/entityCrud.service.js'
 import { kindForDoc }         from '../../services/entity/envelope.js'
 import { ENTITIES }           from '../../services/entity/entityCollection.js'
 
 const LOG = '[idea]'
 const COLLECTION = ENTITIES
 
-const LOCKED_DELETE_STATUSES = new Set(['long', 'short'])
-const VALID_STATUSES = new Set(['waiting', 'looking', 'resting', 'hit', 'long', 'short', 'closed'])
+const VALID_STATUSES = new Set(statusesFor('idea'))
+
+// Owner-scoped CRUD (the shared mechanism). The kind filter is a NEGATION, not a literal: this
+// list is ideas AND portfolio legs (kind:'portfolio_item') but never calls — a call is surfaced on
+// the Calls tab, never as a standalone idea.
+//
+// There is no `ownedBy:'hermes'` filter: that hid pre-P3b IDEA SHADOWS, the separate execution doc
+// a confirmed call used to mint. Calls have self-executed since P3b (kairos.handoff merges the
+// execution shape onto the call itself and sets no flag), and the legacy documents are gone. If a
+// stray shadow ever turns up it now SHOWS in the list — which is the safer failure: an orphaned
+// doc holding a broker position must be manageable, not invisible.
+//
+// Only a LIVE position is delete-locked; 'hit' stays deletable (confirm-gated).
+const crud = makeEntityCrud({
+    kind:       { $ne: 'call' },
+    deleteLock: LIVE_POSITION,
+    log:        LOG,
+})
 
 // A pending idea can be flipped to an immediate market entry ("go in now") from the
 // edit/build flow. Guard it tightly: only an explicit immediate flag on a still-pending
@@ -209,6 +228,12 @@ async function buildIdeaChildren(tradeIdea, userId) {
                 mainAccountId: part.mainAccountId,
                 groupId,
                 broker:        part.broker,
+                // The workspace, FROZEN at bind. This is the moment mode becomes knowable — the
+                // venue is decided right here — and it never changes afterwards, so it is stamped
+                // rather than re-derived. Per PARTITION, because a forked idea can straddle
+                // workspaces (a paper leg and a live leg are different modes of the same idea).
+                // Lets the frontend read `idea.mode` instead of re-implementing the rule.
+                mode:          resolveMode({ broker: part.broker, accounts: part.accountIds, mainAccountId: part.mainAccountId }),
                 brokerSymbol,
                 // Basis offset measured ONCE, here. Downstream (monitor candle-shift, order
                 // placement) apply this stored scalar; 0 for everything but aliased index
@@ -252,34 +277,13 @@ async function _attachImmediatePlan(idea) {
     }
 }
 
-async function getIdeaById(id, userId, isAdmin = false) {
-    try {
-        const db   = await getDb()
-        const idea = await db.collection(COLLECTION).findOne({ id })
-        if (!idea) return { ok: false, reason: 'not_found' }
-        if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
-        return { ok: true, idea: stripId(idea) }
-    } catch (err) {
-        logger.error(LOG, 'Failed to get idea by id', err)
-        return { ok: false, error: err }
-    }
+async function getIdeaById(id, userId) {
+    const res = await crud.getOwnedStripped(id, userId)
+    return res.ok ? { ok: true, idea: res.doc } : res
 }
 
-async function getIdeas(userId, isAdmin = false) {
-    try {
-        const db = await getDb()
-        const query = isAdmin ? {} : { userId }
-        // Exclude Kairos calls: a call is surfaced on the Calls tab (+ its live position), never as a
-        // standalone idea. Kind-derived now (calls are kind:'call'); the ownedBy:$ne guard is kept
-        // transitionally to also hide pre-cutover idea shadows (kind:'idea', ownedBy:'hermes').
-        query.kind    = { $ne: 'call' }
-        query.ownedBy = { $ne: 'hermes' }
-        const items = await db.collection(COLLECTION).find(query).sort({ savedAt: -1 }).toArray()
-        return items.map(stripId)
-    } catch (err) {
-        logger.error(LOG, 'Failed to get ideas', err)
-        return []
-    }
+async function getIdeas(userId) {
+    return crud.list(userId)
 }
 
 async function getAssetClassMap(userId) {
@@ -303,13 +307,12 @@ async function getAssetClassMap(userId) {
  * the live broker position (P3b). The Positions tab resolves a row's owner through the visible ideas
  * list, so a call's position has no resolvable owner and clicking it is a dead no-op. This lets the
  * /positions route stamp the owning callId onto the position → the client opens the Call pop-out.
- * The ownedBy branch covers pre-cutover calls that still execute via an idea shadow (transitional).
  */
 async function getCallPositionMap(userId) {
     try {
         const db = await getDb()
         const rows = await db.collection(COLLECTION)
-            .find({ userId, callId: { $ne: null }, $or: [{ kind: 'call' }, { ownedBy: 'hermes' }] },
+            .find({ userId, callId: { $ne: null }, kind: 'call' },
                   { projection: { callId: 1, brokerOrders: 1 } })
             .toArray()
         const map = {}
@@ -326,31 +329,21 @@ async function getCallPositionMap(userId) {
     }
 }
 
-async function deleteIdea(id, userId, isAdmin = false) {
-    try {
-        const db = await getDb()
-        const idea = await db.collection(COLLECTION).findOne({ id })
-        if (!idea) return { ok: false, reason: 'not_found' }
-        if (idea.userId && idea.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
-        if (LOCKED_DELETE_STATUSES.has(idea.status)) return { ok: false, reason: 'in_position' }
-
-        await _cancelRestingOrders(idea, idea.userId ?? userId)
-        await db.collection(COLLECTION).deleteOne({ id })
-        logger.info(LOG, 'Idea deleted', { id })
-        return { ok: true }
-    } catch (err) {
-        logger.error(LOG, 'Failed to delete idea', err)
-        return { ok: false, error: err }
-    }
+async function deleteIdea(id, userId) {
+    // Resting broker orders are cancelled only once the guards pass — remove() runs the hook
+    // after not_found / forbidden / in_position have all been cleared.
+    return crud.remove(id, userId, {
+        onBeforeDelete: idea => _cancelRestingOrders(idea, idea.userId ?? userId),
+    })
 }
 
-async function updateIdea(id, patch, userId, isAdmin = false) {
+async function updateIdea(id, patch, userId) {
     if (patch.status !== undefined && !VALID_STATUSES.has(patch.status)) {
         return { ok: false, reason: 'invalid_status' }
     }
 
     if (patch.status === 'resting') {
-        return placeRestingEntryForIdea(id, userId, isAdmin)
+        return placeRestingEntryForIdea(id, userId)
     }
 
     if (patch.invalidation !== undefined) {
@@ -393,7 +386,7 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
             { projection: { userId: 1, status: 1, brokerOrders: 1, stop_condition_tree: 1, tp_condition_tree: 1 } },
         )
         if (!existing) return { ok: false, reason: 'not_found' }
-        if (existing.userId && existing.userId !== userId && !isAdmin) return { ok: false, reason: 'forbidden' }
+        if (!ownsEntity(existing, userId)) return { ok: false, reason: 'forbidden' }
 
         if (isClosedIdeaFrozen(existing.status, patch.status)) {
             logger.info(LOG, `[${id}] Ignoring status→${patch.status} on a closed idea (terminal)`)
@@ -482,9 +475,9 @@ async function updateIdea(id, patch, userId, isAdmin = false) {
             minosService.resetIdea(id)
         }
 
-        // Ownership guard: non-admins may only patch their own idea (admins / legacy ownerless
-        // ideas pass an empty guard). The write funnels through entityRepo (P1b).
-        const ownerGuard = isAdmin || !existing.userId ? {} : { userId }
+        // Ownership guard: you may only patch your own idea (legacy ownerless ideas pass an
+        // empty guard). The write funnels through entityRepo (P1b).
+        const ownerGuard = existing.userId ? { userId } : {}
 
         const result = await entityRepo.patchAndGet(id, patch, ownerGuard)
         if (!result) return { ok: false, reason: 'not_found' }

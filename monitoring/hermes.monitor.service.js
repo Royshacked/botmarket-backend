@@ -1,11 +1,12 @@
 import { getDb } from '../providers/mongodb.provider.js'
+import { PAST_ENTRY_LEGACY, INVALIDATION } from '../services/entity/vocabulary.js'
 import { ENTITIES } from '../services/entity/entityCollection.js'
 import { getQuote }              from '../providers/yahoofinance.provider.js'
 import { getTickerAggregates }   from '../providers/candles.provider.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../services/tradeNotify.service.js'
-import { createPollLoop } from './monitorUtils.js'
+import { createPollLoop, fetchLastPrice } from './monitorUtils.js'
 import { withTimeout } from '../services/timeout.util.js'
 import { _defaultAssess, _defaultAssessPosition, _defaultAssessReentry, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses } from './hermes.assess.js'
 
@@ -25,17 +26,18 @@ const LOG          = '[hermes.monitor]'
 const COLLECTION   = ENTITIES   // calls now live in the shared entities collection as kind:'call'
 const KIND_CALL    = 'call'
 const POLL_INTERVAL_MS = 60_000
-// Only these are re-checked by the loop. `expiry_review` is triggered TIME-based on these two
-// (via _isExpiring), so 'expiring' is NOT here — like 'ready', it's an awaiting-user state (an
-// edit card was fired) that Phase 3 re-queues to 'waiting' on accept, preventing card spam.
-const ACTIVE_STATUSES  = ['waiting', 'watching']
+// Only this is re-checked by the readiness loop. `expiry_review` is triggered TIME-based off it
+// (via _isExpiring). A call whose thesis has gone stale STAYS 'looking' — the staleness lives on
+// the invalidation axis, which latches, so the edit card cannot spam.
+const ACTIVE_STATUSES  = ['looking']
 // Post-confirm statuses routed to the position path (NOT the zone-gate readiness path). P3b: the
 // call carries its own execution, so its status CONVERGES to the execution vocab after confirm —
 // 'hit' = order placed / awaiting fill; 'long'/'short' = live (reconciler-set on fill) and managed.
 // Promotion (awaiting→in-position) is detected by position_state.entry.fill_at, not a status name.
-// 'confirmed'/'in_position' are kept transitionally so calls confirmed BEFORE the P3b cutover (which
-// still link to an idea shadow) keep being managed; they never collide with idea statuses.
-const POSITION_STATUSES = ['hit', 'long', 'short', 'confirmed', 'in_position']
+// 'confirmed'/'in_position' are the PRE-P3b spellings, kept so any document still carrying them
+// keeps being managed rather than dropping out of the loop; they never collide with idea statuses.
+// Nothing writes them any more — a confirmed call converges to the execution vocab above.
+const POSITION_STATUSES = PAST_ENTRY_LEGACY
 const EXPIRY_THRESHOLD_MS = 15 * 60_000   // run the final "expiry review" within 15m of valid_until
 // A single check must never wedge the loop. If any IO inside _checkCall (vision assess / chart /
 // price fetch) hangs with no timeout, the awaited call never returns, `_running` stays true, and
@@ -118,7 +120,7 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
     // the idea monitor's isTimeBlocked. Runs before the expiry/market/price gates (a not-yet-active
     // call can't be expiring — active_from precedes valid_until).
     if (_isPreActive(call, nowMs)) {
-        const patch = _scheduledPatch(call, nowMs)               // also resets a stale 'watching' → 'waiting'
+        const patch = _scheduledPatch(call, nowMs)
         // Wake exactly when it goes active. Normalize to a Z-ISO string (like every other next_check_at
         // write) so the poll loop's lexicographic $lte holds even if active_from carried a UTC offset.
         const wakeAt = new Date(Date.parse(call.active_from)).toISOString()
@@ -134,7 +136,7 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
     // and SLEEP until the market reopens (not the normal cadence). Expiry review is exempt — a
     // call may need to roll/expire at the close.
     if (!expiring && !deps.isAssetOpen(call.asset, call.asset_class)) {
-        const patch  = _scheduledPatch(call, nowMs)   // also resets a stale 'watching' → 'waiting'
+        const patch  = _scheduledPatch(call, nowMs)
         const openMs = deps.nextOpenMs?.(call.asset, call.asset_class)
         if (Number.isFinite(openMs) && openMs > nowMs) patch['monitor_state.next_check_at'] = new Date(openMs).toISOString()
         const entry = _timelineEntry('closed', { nowMs, call, nextAt: patch['monitor_state.next_check_at'] })
@@ -623,12 +625,28 @@ export function _computeNextCheckAt(nowMs, requestedMin, cadence) {
     return new Date(nowMs + m * 60_000).toISOString()
 }
 
-// Status transition from the verdict (+ why we were looking).
-export function _nextStatus(verdict, reason) {
-    if (verdict === 'enter')      return 'ready'
-    if (verdict === 'edit')       return 'expiring'   // edit card fired; awaiting the user
-    if (verdict === 'let_expire') return 'expired'
-    return reason === 'zone_trip' ? 'watching' : 'waiting'
+/**
+ * Status transition from the verdict. Only ENTRY moves the lifecycle.
+ *
+ * `edit` and `let_expire` are about the THESIS going stale, not about entry, so they no longer
+ * mint statuses of their own — `edit` latches the invalidation axis (see _invalidationPatch) and
+ * `let_expire` closes with a reason. That is what ideas have always done, and it is why a call's
+ * language used to diverge from every other kind's.
+ */
+export function _nextStatus(verdict) {
+    return verdict === 'enter' ? 'hit' : 'looking'
+}
+
+/**
+ * The thesis went stale before entry → latch the invalidation axis and leave the lifecycle alone.
+ * Fire-once: the monitor stops re-firing until the user re-maps (editCall clears it) or lets it go.
+ */
+export function _invalidationPatch(reason = null) {
+    return {
+        invalidation_status: INVALIDATION.FIRED,
+        invalidation_edge:   'time',
+        invalidation_reason: reason,
+    }
 }
 
 // Actually past valid_until (not merely within the pre-expiry review window, which _isExpiring covers).
@@ -742,7 +760,7 @@ export function _applyAssessment(call, zone, raw, nowMs, reason) {
     const verdict  = _effectiveVerdict(rawVerdict, reason, _isPastExpiry(call, nowMs))
     const nextAt   = _computeNextCheckAt(nowMs, raw.next_check_min, call?.cadence)
     const proposal = verdict === 'enter' ? _finalizeProposal(raw.proposal, call, zone) : null
-    const status   = _nextStatus(verdict, reason)
+    const status   = _nextStatus(verdict)
     // Running memo: update only when the assessment provides one, else carry the prior note.
     const memo = raw.memo_update != null && raw.memo_update !== ''
         ? String(raw.memo_update)
@@ -767,6 +785,12 @@ export function _applyAssessment(call, zone, raw, nowMs, reason) {
 
     const set = {
         status,
+        // The thesis going stale is the INVALIDATION axis, not the lifecycle. `edit` latches it
+        // (fire-once, so the re-map card cannot spam); `let_expire` is terminal with a reason.
+        ...(verdict === 'edit' ? _invalidationPatch(raw.edit_proposal?.why ?? raw.read ?? null) : {}),
+        ...(verdict === 'let_expire'
+            ? { status: 'closed', closedReason: 'expired', closedAt: nowMs }
+            : {}),
         'monitor_state.armed_zone_id':    zone?.id ?? call?.monitor_state?.armed_zone_id ?? null,
         'monitor_state.chosen_timeframe': raw.timeframe_used ?? null,
         'monitor_state.check_count':      (call?.monitor_state?.check_count ?? 0) + 1,
@@ -775,8 +799,7 @@ export function _applyAssessment(call, zone, raw, nowMs, reason) {
         'monitor_state.last_assessment':  lastAssessment,
     }
 
-    // 'let_expire' now fires a card too (the expiry notification) — previously it was a silent
-    // terminal 'expired'. enter → ready card; edit → re-map card; let_expire → expired card.
+    // enter → ready card; edit → re-map card; let_expire → expired card. Never silent.
     return { set, fireCard: ['enter', 'edit', 'let_expire'].includes(verdict), lastAssessment }
 }
 
@@ -793,8 +816,7 @@ export function _scheduledPatch(call, nowMs, short = false, price = null) {
     const gap = short ? lo : _proximityGapMin(call, price, lo, hi)
     return {
         // No zone tripped (or market closed) → the call isn't actively being assessed, so a stale
-        // 'watching' returns to 'waiting'. Keeps 'watching' meaning exactly "price in a zone now".
-        ...(call?.status === 'watching' ? { status: 'waiting' } : {}),
+
         'monitor_state.check_count':   (call?.monitor_state?.check_count ?? 0) + 1,
         'monitor_state.next_check_at': new Date(nowMs + gap * 60_000).toISOString(),
     }
@@ -997,18 +1019,11 @@ const _deps = {
     onReentry:      _defaultOnReentry,
 }
 
+// Quote-then-candles last price. Body moved to monitorUtils.fetchLastPrice so Talos's zone gate
+// reads prices through the SAME fallback chain (a divergence here means one monitor silently
+// never fires). Behaviour is unchanged.
 async function _defaultGetPrice(call) {
-    try {
-        const q = await getQuote(call.asset)
-        const p = Number(q?.price ?? q?.regularMarketPrice ?? q?.last ?? q?.c)
-        if (Number.isFinite(p)) return p
-    } catch { /* fall through to candles */ }
-    try {
-        const rows = await getTickerAggregates(String(call.asset).toUpperCase(), { timeSpan: 'minute', multiplier: 1, from: Date.now() - 3 * 24 * 60 * 60 * 1000 })
-        const last = rows?.at(-1)
-        if (Number.isFinite(last?.close)) return last.close
-    } catch { /* give up */ }
-    return null
+    return fetchLastPrice(call.asset)
 }
 
 // Post the readiness/expiry card to social chat (notify + route to the call pop-out). `enter`

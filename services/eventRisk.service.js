@@ -5,6 +5,7 @@
 // binary. Freezing at build is intentional: cheap (one fetch), and fine over a few-days call life.
 
 import { fetchEarningsCalendarByDate } from '../providers/finnhub.provider.js'
+import { isEquityClass } from './entity/vocabulary.js'
 import { fetchFedEvents }              from '../providers/fred.provider.js'
 import { logger }                      from './logger.service.js'
 
@@ -15,7 +16,8 @@ const LOG = '[eventRisk]'
 const HORIZON_DAYS = 10
 
 // Asset classes that report earnings. Crypto/fx/futures have none, so the earnings fetch is skipped.
-const EQUITY_CLASSES = new Set(['equity', 'stock', 'stocks', 'etf'])
+// Equity-ness now comes from the shared vocabulary — this module used to keep its own
+// synonym set, which had already drifted from market.service's.
 
 // Finnhub earnings `hour`: bmo = before market open, amc = after market close, dmh = during hours.
 function _earningsWhen(hour) {
@@ -49,7 +51,7 @@ export async function buildEventRisk(
     const events = []
 
     // Earnings — equities only. The calendar is by-date-window (all symbols); filter to ours.
-    if (EQUITY_CLASSES.has(String(assetClass || '').toLowerCase())) {
+    if (isEquityClass(assetClass)) {
         try {
             const cal  = await fetchEarnings(fromISO, toISO)
             const rows = Array.isArray(cal?.earningsCalendar) ? cal.earningsCalendar : []

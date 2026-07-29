@@ -1,4 +1,6 @@
 import { fileURLToPath }  from 'url'
+import { parseEmitBlock, makePhaseCapture, runAgentStream } from './agentIO.js'
+import { toolsFor } from './agentTools.registry.js'
 import { dirname, join }  from 'path'
 import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw } from '../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar, getEarnings, getMacroSnapshot } from '../providers/fmp.provider.js'
@@ -6,7 +8,8 @@ import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
 import { formatWorkspaceLine } from '../api/portfolio/portfolioMode.util.js'
 import { logger }         from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, resolveAgentStream } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler } from './agentUtils.js'
+import { makeChartHandler } from './marketData.tools.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
 import { buildTagCaptures } from './llmStream.util.js'
 
@@ -16,123 +19,26 @@ const LOG   = '[portfolioAgent]'
 const _systemPrompt = makePromptLoader(join(__dirname, '../portfolio_system_prompt.md'), LOG)
 const MAX_MESSAGES = 10
 
-const TOOLS = [
-    { type: 'web_search_20250305', name: 'web_search' },
-    {
-        name: 'get_quote',
-        description: 'Get current price quote for a single ticker symbol.',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
-            required: ['ticker'],
-        },
+export const TOOLS = toolsFor({
+    web_search: '',
+    get_quote: `Get current price quote for a single ticker symbol.`,
+    get_quotes: `Get current prices for several tickers at once. Prefer this over calling get_quote repeatedly when sizing a multi-position portfolio.`,
+    get_risk_metrics: `Get annualized volatility and ATR (from 1y of daily prices) for a ticker. Use this to size positions by risk and to set sensible stop distances.`,
+    get_correlations: `Get the pairwise correlation matrix (1y daily returns) for a set of tickers. Use this to verify a portfolio is actually diversified before recommending it.`,
+    get_fundamentals: `Get company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B, EV/EBITDA, FCF yield, earnings yield), quality (margins, ROE, ROIC, debt/equity), growth, AND the forward analyst view — consensus price target with upside vs price, and the buy/hold/sell rating split. Use this to qualify a candidate before including it — especially for multi-month/multi-year holds. For an ETF it returns exposure/profile plus real sector look-through weights (no company statements).`,
+    get_macro_snapshot: `Hard macro read for the Phase-2 regime call: the current Treasury curve (3M/2Y/10Y/30Y with the 2s10s spread — inversion flag), key economic indicators (real GDP, CPI, inflation YoY, unemployment, Fed funds rate, consumer sentiment), and today's sector rotation (leaders/laggards). Call this alongside web_search — the snapshot is the data, web_search is the narrative. No arguments.`,
+    get_sec_filings: `Primary-source due diligence: a company's latest SEC filings — 10-K (annual) and 10-Q (quarterly) statements, plus 8-K material events (item 2.02 = the earnings release) — with dates and links. Use it to verify the fundamentals story and check for material events before committing to a multi-month/multi-year hold. US filers only; most ETFs and foreign tickers aren't in EDGAR.`,
+    get_short_interest: `Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it as crowding/sentiment context (a heavily-shorted name carries squeeze risk in either direction), not as a live read. No data for ETFs, crypto, FX or futures.`,
+    get_options_context: `Options positioning for a US equity/ETF: put/call ratio (by open interest and by volume) and at-the-money implied volatility for the nearest expiry. Use elevated IV as a flag that the market expects a large move (often around a catalyst) when sizing or timing an entry. Quotes ~15-min delayed. No data for crypto, FX or futures.`,
+    get_derivatives_context: `Crypto-perp positioning from Binance: funding rate (crowding), open interest (committed leverage), and global long/short account ratio (retail skew). The crypto analog to short-interest/options sentiment — use it when a holding/candidate is a crypto perp. Crypto perps only (BTC, ETH, SOL…), not equities/FX/futures.`,
+    get_earnings: `For a SINGLE ticker: its next earnings date + EPS estimate, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use it to judge one holding/candidate — is a print imminent (gap risk), and does the company have a history of beating or missing. For the forward "who reports when" across many names, use get_earnings_calendar. US equities only — no ETFs, crypto, FX or futures.`,
+    get_earnings_calendar: {
+        description: `Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it.`,
+        cache: true,
     },
-    {
-        name: 'get_quotes',
-        description: 'Get current prices for several tickers at once. Prefer this over calling get_quote repeatedly when sizing a multi-position portfolio.',
-        input_schema: {
-            type: 'object',
-            properties: { tickers: { type: 'array', items: { type: 'string' }, description: 'e.g. ["AAPL","NVDA","GLD"]' } },
-            required: ['tickers'],
-        },
-    },
-    {
-        name: 'get_risk_metrics',
-        description: 'Get annualized volatility and ATR (from 1y of daily prices) for a ticker. Use this to size positions by risk and to set sensible stop distances.',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
-            required: ['ticker'],
-        },
-    },
-    {
-        name: 'get_correlations',
-        description: 'Get the pairwise correlation matrix (1y daily returns) for a set of tickers. Use this to verify a portfolio is actually diversified before recommending it.',
-        input_schema: {
-            type: 'object',
-            properties: { tickers: { type: 'array', items: { type: 'string' }, description: 'two or more tickers, e.g. ["NVDA","AAPL","GLD"]' } },
-            required: ['tickers'],
-        },
-    },
-    {
-        name: 'get_fundamentals',
-        description: 'Get company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B, EV/EBITDA, FCF yield, earnings yield), quality (margins, ROE, ROIC, debt/equity), growth, AND the forward analyst view — consensus price target with upside vs price, and the buy/hold/sell rating split. Use this to qualify a candidate before including it — especially for multi-month/multi-year holds. For an ETF it returns exposure/profile plus real sector look-through weights (no company statements).',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, SPY' } },
-            required: ['ticker'],
-        },
-    },
-    {
-        name: 'get_macro_snapshot',
-        description: 'Hard macro read for the Phase-2 regime call: the current Treasury curve (3M/2Y/10Y/30Y with the 2s10s spread — inversion flag), key economic indicators (real GDP, CPI, inflation YoY, unemployment, Fed funds rate, consumer sentiment), and today\'s sector rotation (leaders/laggards). Call this alongside web_search — the snapshot is the data, web_search is the narrative. No arguments.',
-        input_schema: { type: 'object', properties: {} },
-    },
-    {
-        name: 'get_sec_filings',
-        description: "Primary-source due diligence: a company's latest SEC filings — 10-K (annual) and 10-Q (quarterly) statements, plus 8-K material events (item 2.02 = the earnings release) — with dates and links. Use it to verify the fundamentals story and check for material events before committing to a multi-month/multi-year hold. US filers only; most ETFs and foreign tickers aren't in EDGAR.",
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, FDX' } },
-            required: ['ticker'],
-        },
-    },
-    {
-        name: 'get_short_interest',
-        description: 'Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it as crowding/sentiment context (a heavily-shorted name carries squeeze risk in either direction), not as a live read. No data for ETFs, crypto, FX or futures.',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. TSLA, GME, AAPL' } },
-            required: ['ticker'],
-        },
-    },
-    {
-        name: 'get_options_context',
-        description: 'Options positioning for a US equity/ETF: put/call ratio (by open interest and by volume) and at-the-money implied volatility for the nearest expiry. Use elevated IV as a flag that the market expects a large move (often around a catalyst) when sizing or timing an entry. Quotes ~15-min delayed. No data for crypto, FX or futures.',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. NVDA, SPY, AAPL' } },
-            required: ['ticker'],
-        },
-    },
-    {
-        name: 'get_derivatives_context',
-        description: 'Crypto-perp positioning from Binance: funding rate (crowding), open interest (committed leverage), and global long/short account ratio (retail skew). The crypto analog to short-interest/options sentiment — use it when a holding/candidate is a crypto perp. Crypto perps only (BTC, ETH, SOL…), not equities/FX/futures.',
-        input_schema: {
-            type: 'object',
-            properties: { symbol: { type: 'string', description: 'e.g. BTC, ETH, SOL (or BTC-USD / BTCUSDT)' } },
-            required: ['symbol'],
-        },
-    },
-    {
-        name: 'get_earnings',
-        description: 'For a SINGLE ticker: its next earnings date + EPS estimate, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use it to judge one holding/candidate — is a print imminent (gap risk), and does the company have a history of beating or missing. For the forward "who reports when" across many names, use get_earnings_calendar. US equities only — no ETFs, crypto, FX or futures.',
-        input_schema: {
-            type: 'object',
-            properties: { ticker: { type: 'string', description: 'e.g. AAPL, NVDA, TSLA' } },
-            required: ['ticker'],
-        },
-    },
-    {
-        name: 'get_earnings_calendar',
-        description: 'Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                from:    { type: 'string', description: 'start date YYYY-MM-DD' },
-                to:      { type: 'string', description: 'end date YYYY-MM-DD' },
-                symbols: { type: 'array', items: { type: 'string' }, description: 'optional — narrow to these tickers' },
-            },
-            required: ['from', 'to'],
-        },
-        cache_control: { type: 'ephemeral' },
-    },
-    {
-        name: 'get_coverage',
-        description: "The Analyst's researched coverage — the living per-name theses you can build a book from (a variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, and the status). Prefer constructing from a RESEARCHED name (a thesis + a target) over a raw screen hit. Optionally filter by sector. Read-only.",
-        input_schema: { type: 'object', properties: { sector: { type: 'string', description: 'optional — narrow to one sector, e.g. Technology' } } },
-    },
-]
+    get_coverage: `The Analyst's researched coverage — the living per-name theses you can build a book from (a variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, and the status). Prefer constructing from a RESEARCHED name (a thesis + a target) over a raw screen hit. Optionally filter by sector. Read-only.`,
+    get_chart: `Render a candlestick chart IMAGE for ONE name and look at it directly. Your job is allocation, not entry timing, so use this for the questions a picture answers better than a number: where a candidate sits in its multi-year range, whether a holding's trend is intact or broken, how ugly a drawdown was, what a long base looks like. Prefer weekly/monthly for a multi-month or multi-year hold; a daily view is for judging whether to phase into a position now or wait. Numbers (valuation, risk metrics, correlations) still decide the WEIGHT — this only informs the read. Set show_to_user true when the picture is part of the case you're making to the user, so they see what you saw.`,
+})
 
 const TOOL_HANDLERS = {
     get_quote: makeToolHandler('get_quote',
@@ -188,9 +94,8 @@ function makeCoverageHandler(userId) {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal }) {
     const normalized   = _buildMessages(messages)
-    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
 
     // Stable base (cached) + volatile per-request sections (accounts, edit
     // context). cache_control on the base lets Anthropic cache the
@@ -217,21 +122,12 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
             : []),
     ]
 
-    logger.info(LOG, 'chatStream start', { messageCount: normalized.length, accountCount: ideaAccounts.length, editMode: !!portfolioId, model, provider })
 
     let capturedPlan    = null
     let capturedUpdate  = null
     let capturedMandate = null
     let capturedThesis  = null
-    let capturedPhase   = null
-
-    const onPhaseCapture = (p) => {
-        const n = parseInt(p, 10)
-        if (n >= 1 && n <= 6) {
-            capturedPhase = n
-            onPhase?.(n)
-        }
-    }
+    const phase = makePhaseCapture(6, onPhase)
     const onPlan    = (json) => { try { capturedPlan    = JSON.parse(json) } catch { /* malformed */ } }
     const onUpdate  = (json) => { try { capturedUpdate  = JSON.parse(json) } catch { /* malformed */ } }
     const onMandate = (json) => { try { capturedMandate = JSON.parse(json) } catch { /* malformed */ } }
@@ -239,27 +135,27 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // All known emit tags suppressed by default; this agent captures phase, ticker
     // (which keeps its inner text in the UI), and the plan/update/mandate blocks.
     const tagCaptures = buildTagCaptures({
-        phase:             onPhaseCapture,
+        phase:             phase.capture,
         ticker:            { onCapture: onTicker, keepText: true },
         portfolio_plan:    onPlan,
         portfolio_update:  onUpdate,
         portfolio_mandate: onMandate,
     })
 
-    const raw = await streamFn({
-        model,
-        promptOrMessages: normalized,
-        systemPrompt,
-        tools:            TOOLS,
-        // Per-session: get_coverage binds this user (coverage is per-user); the rest are static.
-        toolHandlers:     { ...TOOL_HANDLERS, get_coverage: makeCoverageHandler(userId) },
-        reasoningEffort,
-        signal,
-        onToken,
-        tagCaptures,
-        onToolStart,
-        onReasoning,
-        onUsage,
+    const raw = await runAgentStream({
+        log: LOG, requestedModel, userId,
+        messages: normalized, systemPrompt,
+        tools: TOOLS,
+        // Per-session: get_coverage binds this user (coverage is per-user), get_chart closes over
+        // this turn's onChart so a chart the agent flags show_to_user reaches THIS chat; the rest
+        // are static.
+        toolHandlers: {
+            ...TOOL_HANDLERS,
+            get_coverage: makeCoverageHandler(userId),
+            get_chart:    makeChartHandler({ log: LOG, onChart, readText: 'Read it as a POSITIONING question — where in the range, trend intact or broken, base or breakdown. Weights still come from the numbers.' }),
+        },
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
+        meta: { accountCount: ideaAccounts.length, editMode: !!portfolioId },
     })
 
     // <portfolio_thesis> is suppressed from the UI stream but remains in raw — pull it here.
@@ -280,8 +176,8 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequest: !!screenRequest, coverageRefresh: !!coverageRefresh, phase: capturedPhase })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: capturedPhase, ...(screenRequest ? { screenRequest } : {}), ...(coverageRefresh ? { coverageRefresh } : {}) }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequest: !!screenRequest, coverageRefresh: !!coverageRefresh, phase: phase.get() })
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequest ? { screenRequest } : {}), ...(coverageRefresh ? { coverageRefresh } : {}) }
 }
 
 // ─── Coverage-refresh extraction (pure) ─────────────────────────────────────────
@@ -290,15 +186,12 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
 // <coverage_refresh> block; needs a ticker (else null). The refresh runs async server-side and pings
 // Atlas when the rewritten coverage is ready. Mirrors _parseScreenRequest. Exported for tests.
 export function _parseCoverageRefresh(raw) {
-    const m = (raw ?? '').match(/<coverage_refresh>([\s\S]*?)<\/coverage_refresh>/)
-    if (!m) return null
-    try {
-        const o = JSON.parse(m[1].trim())
-        const ticker = String(o?.ticker ?? '').toUpperCase().trim()
-        if (!ticker) return null
-        const question = typeof o?.question === 'string' && o.question.trim() ? o.question.trim() : null
-        return { ticker, question }
-    } catch { return null }
+    const o = parseEmitBlock(raw, 'coverage_refresh', LOG)
+    if (!o) return null
+    const ticker = String(o?.ticker ?? '').toUpperCase().trim()
+    if (!ticker) return null
+    const question = typeof o?.question === 'string' && o.question.trim() ? o.question.trim() : null
+    return { ticker, question }
 }
 
 // ─── Screen-request extraction (pure) ───────────────────────────────────────────
@@ -307,10 +200,8 @@ export function _parseCoverageRefresh(raw) {
 // then researches. This pulls the <screen_request> mandate block. Needs a sector OR a style to constrain
 // (else null). Mirrors Kairos's _parseScanRequest. Exported for tests.
 export function _parseScreenRequest(raw) {
-    const m = (raw ?? '').match(/<screen_request>([\s\S]*?)<\/screen_request>/)
-    if (!m) return null
-    let obj
-    try { obj = JSON.parse(m[1].trim()) } catch (err) { logger.warn(LOG, 'screen_request parse failed:', err.message); return null }
+    const obj = parseEmitBlock(raw, 'screen_request', LOG)
+    if (!obj) return null
     const s = k => (typeof obj?.[k] === 'string' && obj[k].trim() ? obj[k].trim() : null)
     const sector = s('sector'), style = s('style')
     if (!sector && !style) return null   // a screen needs at least a sector or a style to constrain

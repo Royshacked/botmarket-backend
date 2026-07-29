@@ -8,9 +8,9 @@ import {
 
 function readyCall(extra = {}) {
     return {
-        id: 'call_TSLA_x', user_id: 'u1', asset: 'TSLA', asset_class: 'equity', bias: 'long',
+        id: 'call_TSLA_x', userId: 'u1', asset: 'TSLA', asset_class: 'equity', bias: 'long',
         broker: 'paper', accounts: ['paper-u1'], main_account_id: 'paper-u1',
-        status: 'ready',
+        status: 'hit',
         monitor_state: { last_assessment: { verdict: 'enter', proposal: {
             entry: 248.3, stop: 245.2, stop_ref: 'rl1', take_profit: [{ price: 252, ref: 'rl2' }], size: 220, rr: 2.1, rationale: 'reclaim',
         } } },
@@ -133,7 +133,7 @@ test('confirm: paper → merges execution onto the call (self-shadow), places, s
         placeOrdersForIdea: async () => { placed++ },
         notifyManualEntry:  async () => { notified++ },
     })
-    const res = await confirmCall('call_TSLA_x', 'u1', false, deps)
+    const res = await confirmCall('call_TSLA_x', 'u1', deps)
     assert.deepEqual(res, { ok: true, mode: 'paper', ideaId: 'call_TSLA_x' })   // self, not a shadow id
     assert.equal(placed, 1)
     assert.equal(notified, 0)
@@ -154,7 +154,7 @@ test('confirm: manual → notifyManualEntry with the merged call leg, no order p
         placeOrdersForIdea: async () => { placed++ },
         notifyManualEntry:  async (_u, opts) => { notifiedLegs = opts.legs },
     })
-    const res = await confirmCall('call_TSLA_x', 'u1', false, deps)
+    const res = await confirmCall('call_TSLA_x', 'u1', deps)
     assert.equal(res.mode, 'manual')
     assert.equal(placed, 0)
     assert.deepEqual(notifiedLegs, [{ ideaId: 'call_TSLA_x', asset: 'TSLA' }])   // leg built from the call itself
@@ -164,57 +164,65 @@ test('confirm: manual → notifyManualEntry with the merged call leg, no order p
 test('confirm: not ready → not_ready (no enrichment)', async () => {
     const db = fakeDb(readyCall({ status: 'watching' }))
     let built = 0
-    const res = await confirmCall('call_TSLA_x', 'u1', false, baseDeps(db, { buildIdeaChildren: async () => { built++; return { ok: true, children: [{}] } } }))
+    const res = await confirmCall('call_TSLA_x', 'u1', baseDeps(db, { buildIdeaChildren: async () => { built++; return { ok: true, children: [{}] } } }))
     assert.deepEqual(res, { ok: false, reason: 'not_ready' })
     assert.equal(built, 0)
 })
 
 test('confirm: no proposal → no_proposal', async () => {
     const db = fakeDb(readyCall({ monitor_state: { last_assessment: { verdict: 'enter' } } }))
-    const res = await confirmCall('call_TSLA_x', 'u1', false, baseDeps(db))
+    const res = await confirmCall('call_TSLA_x', 'u1', baseDeps(db))
     assert.deepEqual(res, { ok: false, reason: 'no_proposal' })
 })
 
 test('confirm: not owner → forbidden', async () => {
-    const db = fakeDb(readyCall({ user_id: 'someone_else' }))
-    const res = await confirmCall('call_TSLA_x', 'u1', false, baseDeps(db))
+    const db = fakeDb(readyCall({ userId: 'someone_else' }))
+    const res = await confirmCall('call_TSLA_x', 'u1', baseDeps(db))
     assert.deepEqual(res, { ok: false, reason: 'forbidden' })
 })
 
-test('confirm: placement throws → placement_failed, call rolled back to ready (retryable)', async () => {
+test('confirm: placement throws → placement_failed, plan kept so the user can retry', async () => {
     const db = fakeDb(readyCall())
     const deps = baseDeps(db, { placeOrdersForIdea: async () => { throw new Error('broker down') } })
-    const res = await confirmCall('call_TSLA_x', 'u1', false, deps)
+    const res = await confirmCall('call_TSLA_x', 'u1', deps)
     assert.equal(res.ok, false)
     assert.equal(res.reason, 'placement_failed')
-    // merge write happened, then a compensating reset — the call is not left stuck 'hit'.
-    assert.equal(db.updates.at(-1).status, 'ready')
+    // Stays 'hit' with its plan intact — retrying is one click. Resetting the status would have
+    // thrown away the built order plan.
+    assert.equal(db.updates.at(-1).orderState, null)
 })
 
 // ── editCall ───────────────────────────────────────────────────────────────
-test('edit: expiring + edit_proposal → applies patch', async () => {
-    const call = readyCall({ status: 'expiring', monitor_state: { last_assessment: { verdict: 'edit', edit_proposal: { why: 'roll', changes: { valid_until: '2026-07-10T20:00:00Z' } } } } })
+test('edit: an INVALIDATED call + edit_proposal → applies patch and clears the latch', async () => {
+    // A stale thesis lives on the invalidation axis; the call itself is still 'looking'.
+    const call = readyCall({
+        status: 'looking', invalidation_status: 'fired', invalidation_edge: 'time',
+        monitor_state: { last_assessment: { verdict: 'edit', edit_proposal: { why: 'roll', changes: { valid_until: '2026-07-10T20:00:00Z' } } } },
+    })
     const db = fakeDb(call)
-    const res = await editCall('call_TSLA_x', 'u1', false, baseDeps(db))
+    const res = await editCall('call_TSLA_x', 'u1', baseDeps(db))
     assert.equal(res.ok, true)
     assert.equal(db.updates[0].status, 'waiting')
     assert.equal(db.updates[0].valid_until, '2026-07-10T20:00:00Z')
+    // Latch cleared, so the fire-once watcher can flag the NEW plan if that goes stale too.
+    assert.equal(db.updates[0].invalidation_status, null)
 })
-test('edit: not expiring → not_editable', async () => {
-    const res = await editCall('call_TSLA_x', 'u1', false, baseDeps(fakeDb(readyCall())))
+test('edit: a call that is not invalidated → not_editable', async () => {
+    const res = await editCall('call_TSLA_x', 'u1', baseDeps(fakeDb(readyCall({ status: 'looking' }))))
     assert.deepEqual(res, { ok: false, reason: 'not_editable' })
 })
 
 // ── dismissCall ────────────────────────────────────────────────────────────
-test('dismiss: marks the call dismissed', async () => {
+test('dismiss: closes the call with a REASON (not a status of its own)', async () => {
     const db = fakeDb(readyCall())
-    const res = await dismissCall('call_TSLA_x', 'u1', false, baseDeps(db))
+    const res = await dismissCall('call_TSLA_x', 'u1', baseDeps(db))
     assert.equal(res.ok, true)
-    assert.equal(db.updates[0].status, 'dismissed')
+    assert.equal(db.updates[0].status, 'closed')
+    assert.equal(db.updates[0].closedReason, 'dismissed')
 })
-test('dismiss: in_position clears the management card, does NOT terminate', async () => {
+test('dismiss: a LIVE call clears the management card, does NOT terminate', async () => {
     const db = fakeDb(inPosCall())
-    const res = await dismissCall('call_TSLA_x', 'u1', false, baseDeps(db))
+    const res = await dismissCall('call_TSLA_x', 'u1', baseDeps(db))
     assert.deepEqual(res, { ok: true, dismissed: 'card' })
     assert.equal(db.updates[0]['position_state.pending_action'], null)
     assert.equal(db.updates[0].status, undefined)   // position kept
@@ -223,8 +231,10 @@ test('dismiss: in_position clears the management card, does NOT terminate', asyn
 // ── manageCall (Phase 5 slice 3 — the hands) ─────────────────────────────────
 function inPosCall(psExtra = {}, extra = {}) {
     return {
-        id: 'call_TSLA_x', user_id: 'u1', asset: 'TSLA', broker: 'paper',
-        main_account_id: 'p1', status: 'in_position', linked_idea_id: 'idea1', reference_levels: [],
+        id: 'call_TSLA_x', userId: 'u1', asset: 'TSLA', broker: 'paper',
+        // P3b: a live call converges to the execution vocab. This fixture said 'in_position' — a
+        // word nothing writes — which is precisely why the gates under test could never fire.
+        main_account_id: 'p1', status: 'long', linked_idea_id: 'idea1', reference_levels: [],
         position_state: {
             entry: { fill_price: 248, intended: 248, direction: 'long', size: 100 },
             stop:  { current: 245, initial: 245, ref: 'rl1' },
@@ -277,7 +287,7 @@ test('manage: pure helpers (link / partialQty / workingExit)', () => {
 test('manage: move_stop accept → amends the native stop, clears card, updates stop.current/phase', async () => {
     const db = mgmtDb(inPosCall())
     let amended = null, synced = null
-    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', false, mDeps(db, {
+    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', mDeps(db, {
         amendOrder:   async (_b, _u, _a, orderId, fields) => { amended = { orderId, fields }; return { orderId: 'so2' } },
         syncIdeaExit: async (_id, _acct, leg, patch) => { synced = { leg, patch } },
     }))
@@ -294,7 +304,7 @@ test('manage: move_stop accept → amends the native stop, clears card, updates 
 test('manage: take_partial → sized closePosition + taken ledger push', async () => {
     const db = mgmtDb(inPosCall({ pending_action: { verdict: 'take_partial', severity: 2, proposal: { size_pct: 50 } } }))
     let closed = null
-    const res = await manageCall('call_TSLA_x', 'u1', 'take_partial', false, mDeps(db, { closePosition: async (_b, _u, _a, _p, opts) => { closed = opts } }))
+    const res = await manageCall('call_TSLA_x', 'u1', 'take_partial', mDeps(db, { closePosition: async (_b, _u, _a, _p, opts) => { closed = opts } }))
     assert.equal(res.ok, true)
     assert.deepEqual(closed, { quantity: 50 })                         // 50% of live 100
     assert.equal(db.updates[0].$push['position_state.taken'].size, 50)
@@ -303,7 +313,7 @@ test('manage: take_partial → sized closePosition + taken ledger push', async (
 test('manage: exit_now works bare (no pending) → full close', async () => {
     const db = mgmtDb(inPosCall({ pending_action: null }))
     let called = false, opts = 'x'
-    const res = await manageCall('call_TSLA_x', 'u1', 'exit_now', false, mDeps(db, { closePosition: async (_b, _u, _a, _p, o) => { called = true; opts = o } }))
+    const res = await manageCall('call_TSLA_x', 'u1', 'exit_now', mDeps(db, { closePosition: async (_b, _u, _a, _p, o) => { called = true; opts = o } }))
     assert.equal(res.ok, true)
     assert.equal(called, true)
     assert.equal(opts, undefined)                                      // full close: no quantity
@@ -341,7 +351,7 @@ test('manage: _resolveAllLinks → one link per account (scoped to call.accounts
 test('manage: move_stop fans out → amends BOTH accounts native stops', async () => {
     const db = mgmtDb(inPosCall2())
     const amended = []
-    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', false, mDeps(db, {
+    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', mDeps(db, {
         getIdea:      async () => ideaDoc2(),
         amendOrder:   async (_b, _u, acct, orderId, fields) => { amended.push({ acct, orderId, fields }); return { orderId: orderId + 'x' } },
         syncIdeaExit: async () => {},
@@ -358,7 +368,7 @@ test('manage: move_stop fans out → amends BOTH accounts native stops', async (
 test('manage: take_partial fans out → per-account size summed into taken ledger', async () => {
     const db = mgmtDb(inPosCall2({ pending_action: { verdict: 'take_partial', severity: 2, proposal: { size_pct: 50 } } }))
     const closed = []
-    const res = await manageCall('call_TSLA_x', 'u1', 'take_partial', false, mDeps(db, {
+    const res = await manageCall('call_TSLA_x', 'u1', 'take_partial', mDeps(db, {
         getIdea:          async () => ideaDoc2(),
         findOpenPosition: async (_b, _u, acct) => ({ volume: acct === 'p2' ? 60 : 100 }),
         closePosition:    async (_b, _u, acct, _p, opts) => { closed.push({ acct, ...opts }) },
@@ -371,7 +381,7 @@ test('manage: take_partial fans out → per-account size summed into taken ledge
 test('manage: one account already flat, one open → applies to the open one only, still ok', async () => {
     const db = mgmtDb(inPosCall2())
     const amended = []
-    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', false, mDeps(db, {
+    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', mDeps(db, {
         getIdea:          async () => ideaDoc2(),
         findOpenPosition: async (_b, _u, acct) => (acct === 'p1' ? null : { volume: 60 }),
         amendOrder:       async (_b, _u, acct, orderId) => { amended.push(acct); return { orderId } },
@@ -385,7 +395,7 @@ test('manage: one account already flat, one open → applies to the open one onl
 
 test('manage: all accounts unreachable → broker_unreachable, no persist', async () => {
     const db = mgmtDb(inPosCall2())
-    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', false, mDeps(db, {
+    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', mDeps(db, {
         getIdea:          async () => ideaDoc2(),
         findOpenPosition: async () => { throw new Error('down') },
     }))
@@ -397,26 +407,38 @@ test('manage: all accounts unreachable → broker_unreachable, no persist', asyn
 test('manage: already flat → clears card, NO execution (Hermes reconciles the close)', async () => {
     const db = mgmtDb(inPosCall())
     let amended = 0
-    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', false, mDeps(db, { findOpenPosition: async () => null, amendOrder: async () => { amended++ } }))
+    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', mDeps(db, { findOpenPosition: async () => null, amendOrder: async () => { amended++ } }))
     assert.deepEqual(res, { ok: true, alreadyFlat: true })
     assert.equal(amended, 0)
     assert.equal(db.updates[0].$set['position_state.pending_action'], null)
 })
 
-test('manage: not in_position → not_in_position', async () => {
-    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', false, mDeps(mgmtDb(inPosCall({}, { status: 'ready' }))))
+test('manage: not in a position → not_in_position', async () => {
+    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', mDeps(mgmtDb(inPosCall({}, { status: 'hit' }))))
     assert.deepEqual(res, { ok: false, reason: 'not_in_position' })
 })
 
+// The regression the literal gate hid: a SHORT call is just as live as a long one, and both are
+// spelled in the execution vocab. A gate that tests one word matches neither.
+test('manage + dismiss work on a SHORT call too (both live spellings)', async () => {
+    const shortCall = inPosCall({}, { status: 'short' })
+    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', mDeps(mgmtDb(shortCall)))
+    assert.equal(res.ok, true)
+
+    const db = fakeDb(shortCall)
+    assert.deepEqual(await dismissCall('call_TSLA_x', 'u1', baseDeps(db)), { ok: true, dismissed: 'card' })
+    assert.equal(db.updates[0].status, undefined)   // position kept
+})
+
 test('manage: verb without matching pending (non-exit) → no_pending_action', async () => {
-    const res = await manageCall('call_TSLA_x', 'u1', 'take_partial', false, mDeps(mgmtDb(inPosCall())))
+    const res = await manageCall('call_TSLA_x', 'u1', 'take_partial', mDeps(mgmtDb(inPosCall())))
     assert.deepEqual(res, { ok: false, reason: 'no_pending_action' })
 })
 
 test('manage: manual mode → notifies instruction, no broker execution, records intent', async () => {
     const db = mgmtDb(inPosCall({}, { broker: 'manual', main_account_id: 'manual-u1' }))
     let notified = null, closed = 0
-    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', false, mDeps(db, { notifyManage: async (_c, card) => { notified = card }, closePosition: async () => { closed++ } }))
+    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', mDeps(db, { notifyManage: async (_c, card) => { notified = card }, closePosition: async () => { closed++ } }))
     assert.equal(res.manual, true)
     assert.equal(notified.verdict, 'move_stop')
     assert.equal(closed, 0)
@@ -424,14 +446,14 @@ test('manage: manual mode → notifies instruction, no broker execution, records
 })
 
 test('manage: bad verb → bad_action', async () => {
-    const res = await manageCall('call_TSLA_x', 'u1', 'frobnicate', false, mDeps(mgmtDb(inPosCall())))
+    const res = await manageCall('call_TSLA_x', 'u1', 'frobnicate', mDeps(mgmtDb(inPosCall())))
     assert.deepEqual(res, { ok: false, reason: 'bad_action' })
 })
 
 // ── P2: re-entry after a stop-out ──────────────────────────────────────────
 function closedReentryCall(extra = {}) {
     return {
-        id: 'call_TSLA_x', user_id: 'u1', asset: 'TSLA', trade_type: 'day', bias: 'long',
+        id: 'call_TSLA_x', userId: 'u1', asset: 'TSLA', trade_type: 'day', bias: 'long',
         status: 'closed', reentry_count: 0, linked_idea_id: 'idea1',
         position_state: { reentry: { offered: true, why: 'trend intact' }, outcome: { reason: 'stop' } },
         monitor_state: { pulse_anchor_px: 250, last_pulse_at: '2026-07-16T10:00:00Z' },
@@ -448,7 +470,7 @@ test('_reentryValidUntil: horizon by trade_type', () => {
 
 test('reviveCall: closed + offered → revives to waiting, clears position, re-seeds, bumps count', async () => {
     const db  = fakeDb(closedReentryCall())
-    const res = await reviveCall('call_TSLA_x', 'u1', false, baseDeps(db))
+    const res = await reviveCall('call_TSLA_x', 'u1', baseDeps(db))
     assert.equal(res.ok, true)
     assert.equal(res.reentry_count, 1)
     const set = db.updates[0]
@@ -461,20 +483,20 @@ test('reviveCall: closed + offered → revives to waiting, clears position, re-s
     assert.ok(typeof set.valid_until === 'string' && set.valid_until > new Date().toISOString())
 })
 test('reviveCall: not closed → not_closed', async () => {
-    const res = await reviveCall('call_TSLA_x', 'u1', false, baseDeps(fakeDb(closedReentryCall({ status: 'waiting' }))))
+    const res = await reviveCall('call_TSLA_x', 'u1', baseDeps(fakeDb(closedReentryCall({ status: 'waiting' }))))
     assert.deepEqual(res, { ok: false, reason: 'not_closed' })
 })
 test('reviveCall: no offer → no_reentry_offer', async () => {
-    const res = await reviveCall('call_TSLA_x', 'u1', false, baseDeps(fakeDb(closedReentryCall({ position_state: { reentry: { offered: false } } }))))
+    const res = await reviveCall('call_TSLA_x', 'u1', baseDeps(fakeDb(closedReentryCall({ position_state: { reentry: { offered: false } } }))))
     assert.deepEqual(res, { ok: false, reason: 'no_reentry_offer' })
 })
 test('reviveCall: other user → forbidden', async () => {
-    const res = await reviveCall('call_TSLA_x', 'u2', false, baseDeps(fakeDb(closedReentryCall())))
+    const res = await reviveCall('call_TSLA_x', 'u2', baseDeps(fakeDb(closedReentryCall())))
     assert.deepEqual(res, { ok: false, reason: 'forbidden' })
 })
 test('declineReentry: closed → clears offer + stamps declined_at, status stays closed', async () => {
     const db  = fakeDb(closedReentryCall())
-    const res = await declineReentry('call_TSLA_x', 'u1', false, baseDeps(db))
+    const res = await declineReentry('call_TSLA_x', 'u1', baseDeps(db))
     assert.equal(res.ok, true)
     assert.equal(db.updates[0]['position_state.reentry.offered'], false)
     assert.ok(db.updates[0]['position_state.reentry.declined_at'])

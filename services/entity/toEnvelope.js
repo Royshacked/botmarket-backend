@@ -1,11 +1,13 @@
-// Strangler bridge: read a LEGACY doc (an `ideas`-collection idea, a `kairos_calls` call) and
-// present it as the canonical Envelope, WITHOUT migrating storage. This is what lets P1 make the
-// execution path envelope-blind while data still lives in the old collections. The reverse
-// (envelope → collection write) is intentionally NOT here yet — it lands per-kind in P2–P4.
+// Read a stored `entities` doc and present it as the canonical Envelope, so the execution path can
+// be envelope-blind. The reverse (envelope → write) is intentionally NOT here yet — it lands
+// per-kind at P4. Both collections were folded into `entities` (P2 ideas, P3a calls), so this is no
+// longer a strangler bridge over legacy storage; it is the read adapter for the shape difference
+// that remains between an idea's payload and a call's.
 //
-// Casing note: idea docs are camelCase (userId, mainAccountId, brokerSymbol); call docs are
-// snake_case (user_id, main_account_id, broker_symbol). Canonical envelope = camelCase; the
-// adapters absorb the mismatch so no service ever branches on kind to read a field.
+// Casing note: idea docs are camelCase (userId, mainAccountId, brokerSymbol); a call's PAYLOAD is
+// snake_case (main_account_id, broker_symbol) and the adapters absorb that, so no service ever
+// branches on kind to read a field. ENVELOPE fields do not diverge: `userId` is stored under that
+// one name by every kind (see scripts/migrate-call-userid.mjs) — do not reintroduce a per-kind alias.
 
 import { KINDS, ownerForKind, blankMonitorState } from './envelope.js'
 
@@ -56,11 +58,11 @@ export function ideaToEnvelope(doc) {
 }
 
 /**
- * A legacy kairos_call doc → Envelope. The call is the entity; its broker binding lives on the
- * call, but its LIVE order state (orderState / brokerOrders) still lives on the linked idea
- * shadow until P3 drops the shadow — so those stay null/[] here by design.
+ * A call doc → Envelope. The call IS the entity, execution included: since P3b a confirmed call
+ * carries its own orderState / brokerOrders (kairos.handoff merges the execution shape onto the
+ * call rather than minting an idea shadow), so this reads them straight off the doc.
  *
- * @param {Object} doc  raw kairos_calls document (post-normalizeCall shape)
+ * @param {Object} doc  raw `entities` document, kind:'call' (post-normalizeCall shape)
  * @returns {import('./envelope.js').Envelope}
  */
 export function callToEnvelope(doc) {
@@ -69,7 +71,7 @@ export function callToEnvelope(doc) {
     return {
         id:         doc.id,
         kind:       KINDS.CALL,
-        userId:     doc.user_id ?? null,          // snake → camel
+        userId:     doc.userId ?? null,           // envelope field — camelCase on the doc too
         parentId:   null,
         status:     doc.status ?? null,
         owner:      ownerForKind(KINDS.CALL),
@@ -89,8 +91,12 @@ export function callToEnvelope(doc) {
             mainAccountId: doc.main_account_id ?? null,   // snake → camel
             brokerSymbol:  doc.broker_symbol ?? null,     // snake → camel
             basisOffset:   Number(doc.basis_offset) || 0, // snake → camel
-            orderState:    null,   // lives on the idea shadow until P3
-            brokerOrders:  [],     // idem
+            // P3b: a confirmed call carries its OWN execution — kairos.handoff merges the shape
+            // onto the call doc rather than minting an idea shadow. These read the call directly;
+            // hard-coding null/[] here (as this did pre-P3b) reports a live, linked call as
+            // unlinked, which is how a position silently loses its owner.
+            orderState:    doc.orderState ?? null,
+            brokerOrders:  Array.isArray(doc.brokerOrders) ? doc.brokerOrders : []
         },
         sizing: {
             unit:        doc.sizing?.unit ?? null,

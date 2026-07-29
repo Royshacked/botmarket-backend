@@ -1,24 +1,28 @@
 // The execution-path persistence facade (ENTITY_MODEL.md P1b). Owns the ONE place the backing
-// collection is named + the ONE place the broker-linkage match shapes live, so P2 flips the
-// target ('ideas' → 'entities', after migrating data) and every execution site follows.
+// collection is named + the ONE place the broker-linkage match shapes live, so every execution
+// site follows a single definition.
 //
-// STRANGLER WINDOW: this deliberately targets the LEGACY `ideas` collection — calls execute via
-// an idea shadow, portfolio holdings ARE ideas — so ACTIVE_STATUSES stays idea-vocab. P3 generalizes.
+// KIND-BLIND: it targets `entities` and matches on broker linkage, never on kind. Every kind
+// carries its own execution — an idea, a portfolio holding, a setup Talos triggered, and (since
+// P3b) a call, which merges the execution shape onto itself instead of minting an idea shadow.
+// That is why ACTIVE_STATUSES is sourced from the shared vocabulary rather than idea literals.
 //
 // BEHAVIOR-PRESERVING: every method reproduces the EXACT filter/update/options its caller used
 // inline (see execution.reconciler.js), including String() coercion of account/position/order ids.
 // Lookups return RAW docs (no stripId) because the reconciler operates on raw docs today.
-//
-// Separate from entityStore (which targets the FUTURE `entities` collection): during the
-// transition these are two different physical collections.
 
 import { getDb } from '../../providers/mongodb.provider.js'
+import { LIVE_POSITION } from './vocabulary.js'
 import { ENTITIES } from './entityCollection.js'
 
 /** The kind-blind entity store (P2 cutover done — was 'ideas'). */
 export const EXEC_COLLECTION = ENTITIES
 /** Idea-lifecycle "in a live position" set. P3 generalizes per kind. */
-export const ACTIVE_STATUSES = ['long', 'short']
+// The kind-blind reconciler matches on these. Sourced from the shared vocabulary so idea /
+// setup / call can never drift apart on the words that make a fill reconcilable. Imported into a
+// local const (not a bare re-export) because this module uses it in its own queries — a
+// `export { X as Y } from` binding would not exist locally.
+export const ACTIVE_STATUSES = LIVE_POSITION
 
 async function _defaultColl() {
     return (await getDb()).collection(EXEC_COLLECTION)

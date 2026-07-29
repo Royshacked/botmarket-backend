@@ -11,7 +11,8 @@
  * See docs/architecture/manual-mode.md.
  */
 
-import { postBotCard, cardActions } from '../api/chat/chat.service.js'
+import { cardActions } from '../api/chat/chat.service.js'
+import { postCard } from './notifyCard.js'
 import { logger }         from './logger.service.js'
 
 const LOG = '[manualNotify]'
@@ -50,16 +51,15 @@ export async function notifyManualEntry(userId, { legs, portfolioId = null, port
     const content = legs.length === 1
         ? `Manual entry — ${String(legs[0].direction).toUpperCase()} ${legs[0].asset}. Enter your fill at your broker, then confirm your average price and size.`
         : `Manual entry — ${portfolioName || 'portfolio'}: ${legs.length} legs. Enter each at your broker and fill in your average prices.`
-    logger.info(LOG, `Manual entry card → user ${userId}: ${legs.map(l => l.asset).join(', ')}`)
     // Attribute to the authoring agent: a portfolio basket is Atlas's, a lone idea is Idea's.
-    return postBotCard({
+    return postCard({
         userId,
         content,
         type:    'manual_entry',
         payload: { kind: 'entry', portfolioId, portfolioName, legs },
         botId:   portfolioId ? 'portfolio' : 'idea',
         actions: cardActions('Enter fills'),
-    })
+    }, { tag: `Manual entry card (${legs.map(l => l.asset).join(', ')})`, log: LOG })
 }
 
 /**
@@ -76,16 +76,15 @@ export async function notifyManualExit(userId, { legs, reason = 'manual', portfo
     const content = legs.length === 1
         ? `${label} on ${legs[0].asset} — close at your broker and confirm your exit price.`
         : `Exit ${portfolioName || 'portfolio'} — ${legs.length} open legs. Confirm your exit price for each one you've closed.`
-    logger.info(LOG, `Manual exit card → user ${userId}: ${legs.map(l => l.asset).join(', ')} (${reason})`)
     // Attribute to the authoring agent: a portfolio basket is Atlas's, a lone idea is Idea's.
-    return postBotCard({
+    return postCard({
         userId,
         content,
         type:    'manual_exit',
         payload: { kind: 'exit', reason, portfolioId, portfolioName, legs },
         botId:   portfolioId ? 'portfolio' : 'idea',
         actions: cardActions('Confirm close'),
-    })
+    }, { tag: `Manual exit card (${legs.map(l => l.asset).join(', ')}, ${reason})`, log: LOG })
 }
 
 export const manualNotifyService = { notifyManualEntry, notifyManualExit, entryLegFromIdea, exitLegFromIdea }

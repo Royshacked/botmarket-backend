@@ -1,4 +1,5 @@
 import { paperBrokerService } from '../broker/paperBroker.service.js'
+import { resolveMode } from '../../services/venue.resolve.service.js'
 
 // ── Workspace mode / broker / account derivation ────────────────────────────────
 // Shared by the review-notification path (portfolioChat.service) and the portfolio
@@ -17,11 +18,11 @@ export function _firstAccountId(accounts) {
     return typeof a === 'object' ? a.id : a
 }
 
-// 'paper' | 'manual' | 'live'. The top-level broker stamped at save time is primary;
-// the virtual-account prefix (paper-/manual-) is the fallback for legacy ideas.
+// 'paper' | 'manual' | 'live'. This WAS the only correct implementation of the dual signal, so it
+// became the shared one (services/venue.resolve.resolveMode). Kept as a named wrapper because the
+// portfolio paths and its unit tests call it by this signature.
 export function _deriveMode(broker, accountId) {
-    if (broker === 'paper' || broker === 'manual') return broker
-    return paperBrokerService.accountMode(accountId) ?? 'live'
+    return resolveMode({ broker, accountId })
 }
 
 // Batch-resolve virtual-account display names, one listAccounts per distinct user.

@@ -6,6 +6,9 @@ import { notifyManualEntry, entryLegFromIdea } from './manualNotify.service.js'
 import { notifyCallManage } from './tradeNotify.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { normalizeZones, normalizeReferenceLevels } from '../api/kairos/kairos.service.js'
+import { knownVenue } from './venue.resolve.service.js'
+import { ownsEntity } from './entity/entityCrud.service.js'
+import { isLivePosition, isAwaitingConfirm, isInvalidated } from './entity/vocabulary.js'
 import { logger } from './logger.service.js'
 
 // Kairos Phase 3 — the confirm / edit / dismiss handoff. When the user acts on a readiness card,
@@ -17,21 +20,19 @@ const LOG        = '[kairos.handoff]'
 const COLLECTION = ENTITIES   // calls live in entities as kind:'call' (all ops here are {id}-scoped)
 
 // ── Pure helpers (unit-tested) ─────────────────────────────────────────────────
-export function deriveMode(broker) {
-    if (broker === 'ctrader') return 'live'
-    if (broker === 'paper')   return 'paper'
-    if (broker === 'manual')  return 'manual'
-    return null
-}
+// A VALIDITY gate, not a workspace label: null means "not a venue I can bind execution to".
+// Distinct from venue.resolveMode, which always commits to a workspace. Delegates to the shared
+// knownVenue so the supported-broker list has one home. Exported under its historical name.
+export const deriveMode = knownVenue
 
 // Map a confirmed call + its fired proposal to a saveIdea() input: an IMMEDIATE market entry with
 // the stop + FINAL target as native `touch` exits. saveIdea builds the condition trees, resolves
 // the broker symbol, and re-measures basisOffset — so the placed idea lives in the normal system.
 //
 // Exits MUST be `touch` leaves (not bare stop_loss/take_profit strings — those resolve to NO tree,
-// nor `structured`, which routes to the software monitor): the linked idea is flagged
-// ownedBy:'hermes' and skipped by Minos, so only a broker-native order (a touch) actually protects
-// the position. The hard native bracket is stop + the FINAL target; intermediate targets are
+// nor `structured`, which routes to the software monitor): the confirmed call is kind:'call' and
+// Minos skips it on that alone, so only a broker-native order (a touch) actually protects the
+// position. The hard native bracket is stop + the FINAL target; intermediate targets are
 // discretionary Hermes scale-outs (position_state.targets), not placed as idea exits.
 export function buildIdeaFromCall(call, proposal, direction) {
     // Direction is the ARMED zone's side (a 'both'-bias call can fire either way); fall back to bias.
@@ -102,24 +103,27 @@ export function applyEditPatch(editProposal, bias = null) {
 const _deps = {
     getDb,
     buildIdeaChildren:  (input, userId)               => ideaService.buildIdeaChildren(input, userId),
-    placeOrdersForIdea: (id, orders, userId, isAdmin) => placeOrdersForIdea(id, orders, userId, isAdmin),
+    placeOrdersForIdea: (id, orders, userId) => placeOrdersForIdea(id, orders, userId),
     notifyManualEntry:  (userId, opts)                => notifyManualEntry(userId, opts),
     entryLegFromIdea,
 }
 
-async function _loadOwned(db, id, userId, isAdmin, projection = {}) {
+// Reads through the INJECTED db (this module's whole test harness is a fake db), so it can't use
+// the shared crud's own collection handle — but the ownership RULE is the shared one, so an
+// ownerless legacy call is treated identically here and on the CRUD path.
+async function _loadOwned(db, id, userId, projection = {}) {
     const call = await db.collection(COLLECTION).findOne({ id }, Object.keys(projection).length ? { projection } : undefined)
     if (!call) return { err: 'not_found' }
-    if (call.user_id && call.user_id !== userId && !isAdmin) return { err: 'forbidden' }
+    if (!ownsEntity(call, userId)) return { err: 'forbidden' }
     return { call }
 }
 
 // Confirm an enter-ready call: materialize the idea, place per mode, mark the call confirmed.
-export async function confirmCall(id, userId, isAdmin = false, deps = _deps) {
+export async function confirmCall(id, userId, deps = _deps) {
     const db = await deps.getDb()
-    const { call, err } = await _loadOwned(db, id, userId, isAdmin)
+    const { call, err } = await _loadOwned(db, id, userId)
     if (err) return { ok: false, reason: err }
-    if (call.status !== 'ready') return { ok: false, reason: 'not_ready' }
+    if (!isAwaitingConfirm(call.status)) return { ok: false, reason: 'not_ready' }
 
     const proposal = call.monitor_state?.last_assessment?.proposal
     if (!proposal) return { ok: false, reason: 'no_proposal' }
@@ -133,8 +137,8 @@ export async function confirmCall(id, userId, isAdmin = false, deps = _deps) {
     // P3b — the call carries its OWN execution (no idea shadow). Enrich the entry via the shared idea
     // engine, then MERGE the single child's execution shape onto the CALL itself (keeping its id +
     // kind:'call'). Self-link (callId / linked_idea_id → this call) so the reconciler, Hermes, and
-    // manageCall act on the call directly; keep ownedBy:'hermes' so Minos + checkInvalidation stand
-    // down exactly as they did for the shadow. Status converges to the execution vocab (hit→long/short).
+    // manageCall act on the call directly. Minos + checkInvalidation stand down on kind:'call'
+    // alone — no flag is written. Status converges to the execution vocab (hit→long/short).
     const built = await deps.buildIdeaChildren(buildIdeaFromCall(call, proposal, direction), userId)
     if (!built.ok)                     return { ok: false, reason: built.reason ?? 'idea_create_failed' }
     if (built.children.length !== 1)   return { ok: false, reason: 'multi_broker_call' }
@@ -162,13 +166,13 @@ export async function confirmCall(id, userId, isAdmin = false, deps = _deps) {
         if (mode === 'manual') {
             await deps.notifyManualEntry(userId, { legs: [deps.entryLegFromIdea(merged)] })
         } else {
-            await deps.placeOrdersForIdea(id, merged.pendingOrder?.plan ?? [], userId, isAdmin)
+            await deps.placeOrdersForIdea(id, merged.pendingOrder?.plan ?? [], userId)
         }
     } catch (placeErr) {
         logger.error(LOG, `handoff placement failed for ${id}:`, placeErr.message)
-        // Roll the call back to 'ready' so it isn't stuck 'hit' with no orders — the user can retry
-        // confirm. (The old flow left an orphaned shadow; here the call is the entity, so we reset it.)
-        await db.collection(COLLECTION).updateOne({ id }, { $set: { status: 'ready' } })
+        // Leave it at 'hit' (plan built, awaiting confirm) so the user can retry — resetting it
+        // would discard the plan. (The old flow left an orphaned shadow; here the call IS the entity.)
+        await db.collection(COLLECTION).updateOne({ id }, { $set: { orderState: null } })
         return { ok: false, reason: 'placement_failed', ideaId: id }
     }
 
@@ -177,33 +181,47 @@ export async function confirmCall(id, userId, isAdmin = false, deps = _deps) {
 }
 
 // Accept the expiry edit: re-map + re-queue the call to 'waiting'.
-export async function editCall(id, userId, isAdmin = false, deps = _deps) {
+export async function editCall(id, userId, deps = _deps) {
     const db = await deps.getDb()
-    const { call, err } = await _loadOwned(db, id, userId, isAdmin)
+    const { call, err } = await _loadOwned(db, id, userId)
     if (err) return { ok: false, reason: err }
-    if (call.status !== 'expiring') return { ok: false, reason: 'not_editable' }
+    // Gated on the INVALIDATION latch, not a lifecycle status: a stale thesis leaves the call
+    // 'looking' and sets invalidation_status. Accepting the re-map clears the latch so the
+    // fire-once watcher can fire again on the new plan.
+    if (!isInvalidated(call.invalidation_status)) return { ok: false, reason: 'not_editable' }
 
     const editProposal = call.monitor_state?.last_assessment?.edit_proposal
     if (!editProposal) return { ok: false, reason: 'no_edit_proposal' }
 
-    await db.collection(COLLECTION).updateOne({ id }, { $set: applyEditPatch(editProposal, call.bias) })
+    await db.collection(COLLECTION).updateOne({ id }, { $set: {
+        ...applyEditPatch(editProposal, call.bias),
+        invalidation_status: null, invalidation_edge: null, invalidation_reason: null,
+    } })
     logger.info(LOG, `call ${id} edited → re-queued`)
     return { ok: true }
 }
 
 // Dismiss any surfaced card. Context-aware: an in-position management card only clears the pending
 // suggestion (the live position keeps running); any other card is the terminal readiness dismiss.
-export async function dismissCall(id, userId, isAdmin = false, deps = _deps) {
+export async function dismissCall(id, userId, deps = _deps) {
     const db = await deps.getDb()
-    const { call, err } = await _loadOwned(db, id, userId, isAdmin, { user_id: 1, status: 1 })
+    const { call, err } = await _loadOwned(db, id, userId, { userId: 1, status: 1 })
     if (err) return { ok: false, reason: err }
-    if (call.status === 'in_position') {
+    // A LIVE call: dismiss clears the management card only — the position keeps running. Gating
+    // this on the literal 'in_position' meant it never fired after P3b (a live call is long/short),
+    // so dismissing a management card fell through and marked a call with an OPEN broker position
+    // 'dismissed'.
+    if (isLivePosition(call.status)) {
         await db.collection(COLLECTION).updateOne({ id }, { $set: { 'position_state.pending_action': null } })
         logger.info(LOG, `call ${id} management card dismissed (position kept)`)
         return { ok: true, dismissed: 'card' }
     }
-    await db.collection(COLLECTION).updateOne({ id }, { $set: { status: 'dismissed' } })
-    logger.info(LOG, `call ${id} dismissed`)
+    // Terminal, with the reason in a field — 'dismissed' was a lifecycle status only for calls,
+    // which is exactly the divergence being removed. Ideas have always closed with a reason.
+    await db.collection(COLLECTION).updateOne({ id }, { $set: {
+        status: 'closed', closedReason: 'dismissed', closedAt: Date.now(),
+    } })
+    logger.info(LOG, `call ${id} dismissed → closed`)
     return { ok: true }
 }
 
@@ -219,9 +237,9 @@ export function _reentryValidUntil(call, nowMs = Date.now()) {
 // monitor watches the ORIGINAL plan again. The finished position is cleared (a new entry mints a fresh
 // idea); the pulse anchor re-seeds; valid_until is extended so it isn't instantly expired. There is no
 // coded re-entry budget — the human tap is the budget — but reentry_count is bumped for observability.
-export async function reviveCall(id, userId, isAdmin = false, deps = _deps) {
+export async function reviveCall(id, userId, deps = _deps) {
     const db = await deps.getDb()
-    const { call, err } = await _loadOwned(db, id, userId, isAdmin)
+    const { call, err } = await _loadOwned(db, id, userId)
     if (err) return { ok: false, reason: err }
     if (call.status !== 'closed')                        return { ok: false, reason: 'not_closed' }
     if (call.position_state?.reentry?.offered !== true)  return { ok: false, reason: 'no_reentry_offer' }
@@ -247,9 +265,9 @@ export async function reviveCall(id, userId, isAdmin = false, deps = _deps) {
 // [Close] on a re-entry offer: keep the call terminal-closed, just record the decline + clear the
 // offer (so the card doesn't re-surface). NOT `dismiss` — that would flip status 'closed' → 'dismissed'
 // and lose the trade outcome.
-export async function declineReentry(id, userId, isAdmin = false, deps = _deps) {
+export async function declineReentry(id, userId, deps = _deps) {
     const db = await deps.getDb()
-    const { call, err } = await _loadOwned(db, id, userId, isAdmin, { user_id: 1, status: 1 })
+    const { call, err } = await _loadOwned(db, id, userId, { userId: 1, status: 1 })
     if (err) return { ok: false, reason: err }
     if (call.status !== 'closed') return { ok: false, reason: 'not_closed' }
     await db.collection(COLLECTION).updateOne({ id }, { $set: {
@@ -363,7 +381,7 @@ export function _manageAppliedUpdate(verb, proposal, ps, extra, nowMs) {
 
 // Execute the resolved proposal against the broker. Returns { qty } (executed partial size) for the
 // applied-update. Throws on a broker failure (caller maps to execution_failed).
-async function _executeManage(verb, proposal, idea, link, open, userId, isAdmin, deps) {
+async function _executeManage(verb, proposal, idea, link, open, userId, deps) {
     const { broker, accountId, positionId } = link
     if (verb === 'move_stop' || verb === 'let_run') {
         const leg = verb === 'move_stop' ? 'stop' : 'tp'
@@ -394,12 +412,14 @@ async function _executeManage(verb, proposal, idea, link, open, userId, isAdmin,
 
 // Handle an in-position management action. verb ∈ MANAGE_VERBS. Accept executes the pending proposal
 // (exit_now also works bare); dismiss clears the card.
-export async function manageCall(id, userId, verb, isAdmin = false, deps = _mdeps) {
+export async function manageCall(id, userId, verb, deps = _mdeps) {
     if (!MANAGE_VERBS.has(verb)) return { ok: false, reason: 'bad_action' }
     const db = await deps.getDb()
-    const { call, err } = await _loadOwned(db, id, userId, isAdmin)
+    const { call, err } = await _loadOwned(db, id, userId)
     if (err) return { ok: false, reason: err }
-    if (call.status !== 'in_position') return { ok: false, reason: 'not_in_position' }
+    // Post-P3b a live call is 'long'/'short'; the old 'in_position' literal matched nothing, which
+    // rejected every management action Hermes had just proposed.
+    if (!isLivePosition(call.status)) return { ok: false, reason: 'not_in_position' }
 
     const ps  = call.position_state ?? {}
     const now = Date.now()
@@ -437,7 +457,7 @@ export async function manageCall(id, userId, verb, isAdmin = false, deps = _mdep
         if (open === null) { perAccount.push({ accountId: link.accountId, alreadyFlat: true }); continue }
         anyOpen = true
         try {
-            const applied = await _executeManage(verb, proposal, idea, link, open, userId, isAdmin, deps)
+            const applied = await _executeManage(verb, proposal, idea, link, open, userId, deps)
             anyApplied = true
             totalQty += Number(applied?.qty) || 0
             perAccount.push({ accountId: link.accountId, ok: true })

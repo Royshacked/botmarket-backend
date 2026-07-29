@@ -84,10 +84,10 @@ test('ideaToEnvelope(null) → null', () => {
     assert.equal(ideaToEnvelope(null), null)
 })
 
-// ── call → envelope (snake_case → camelCase) ────────────────────────────────────────────────
+// ── call → envelope (snake_case payload → camelCase) ────────────────────────────────────────
 test('callToEnvelope absorbs the snake_case field names', () => {
     const doc = {
-        id: 'call_TSLA_abc', user_id: 'u9', status: 'watching', asset: 'TSLA', asset_class: 'equity',
+        id: 'call_TSLA_abc', userId: 'u9', status: 'watching', asset: 'TSLA', asset_class: 'equity',
         bias: 'long', savedAt: 2000, broker: 'paper', accounts: ['pa1'], main_account_id: 'pa1',
         broker_symbol: 'TSLA', basis_offset: 0, sizing: { max_size: 50, unit: 'shares' },
         monitor_state: { next_check_at: 5, check_count: 3, memo: 'mm', timeline: [{ t: 1 }] },
@@ -95,19 +95,31 @@ test('callToEnvelope absorbs the snake_case field names', () => {
     const e = callToEnvelope(doc)
     assert.equal(e.kind, KINDS.CALL)
     assert.equal(e.owner, 'hermes')
-    assert.equal(e.userId, 'u9')                       // ← user_id
+    assert.equal(e.userId, 'u9')                       // envelope field — one name for every kind
     assert.equal(e.direction, 'long')                  // ← bias
     assert.equal(e.execution.mainAccountId, 'pa1')     // ← main_account_id
     assert.equal(e.execution.brokerSymbol, 'TSLA')     // ← broker_symbol
-    // orderState/brokerOrders live on the idea shadow until P3 — null/[] by design:
-    assert.equal(e.execution.orderState, null)
+    // Pre-P3b these were hard-coded null/[] because execution lived on an idea shadow. A confirmed
+    // call now carries its own, and reporting a linked call as unlinked is how a live position
+    // loses its owner — so they must read THROUGH.
+    assert.equal(e.execution.orderState, null)          // this fixture is pre-entry
     assert.deepEqual(e.execution.brokerOrders, [])
     assert.deepEqual(e.sizing, { unit: 'shares', requested: 50, resolvedQty: null })
     assert.deepEqual(e.monitorState, { nextCheckAt: 5, checkCount: 3, memo: 'mm', timeline: [{ t: 1 }] })
 })
 
+test('callToEnvelope reads a CONFIRMED call\'s own execution (no idea shadow since P3b)', () => {
+    const e = callToEnvelope({
+        id: 'call_TSLA_abc', userId: 'u9', status: 'long', asset: 'TSLA',
+        orderState: 'placed',
+        brokerOrders: [{ broker: 'paper', accountId: 'pa1', positionId: 'p9' }],
+    })
+    assert.equal(e.execution.orderState, 'placed')
+    assert.deepEqual(e.execution.brokerOrders, [{ broker: 'paper', accountId: 'pa1', positionId: 'p9' }])
+})
+
 test('toEnvelope dispatches by source tag', () => {
-    assert.equal(toEnvelope({ id: 'c', user_id: 'u' }, 'call').kind, KINDS.CALL)
+    assert.equal(toEnvelope({ id: 'c', userId: 'u' }, 'call').kind, KINDS.CALL)
     assert.equal(toEnvelope({ id: 'i', userId: 'u' }, 'idea').kind, KINDS.IDEA)
     assert.equal(toEnvelope({ id: 'x', userId: 'u' }).kind, KINDS.IDEA)   // default
 })

@@ -1,13 +1,13 @@
 import { fileURLToPath } from 'url'
+import { makePhaseCapture, runAgentStream } from './agentIO.js'
+import { parseEmitBlock, mergeDraft } from './agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveAgentStream, resolveMainAccountId, TRADE_HORIZONS } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveMainAccountId, TRADE_HORIZONS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS_FOR_MODE, buildKairosToolHandlers } from './kairos.tools.js'
 import { normalizeMode } from './kairos.modes.js'
 import { kairosService } from '../api/kairos/kairos.service.js'
-import { toBrokerSymbol } from './brokerSymbol.service.js'
-import { brokerService } from '../api/broker/broker.service.js'
-import { computeBasisOffset } from '../api/broker/brokerPrice.service.js'
+import { resolveVenue as _resolveVenue } from './venue.resolve.service.js'
 import { logger } from './logger.service.js'
 
 // Kairos build agent: a conversation → a DRAFT trading "call" (see KAIROS_PLAN.md, Phase 1).
@@ -44,8 +44,6 @@ async function chatStream({
     model: requestedModel, reasoningEffort, userId,
     onToken, onChart, onToolStart, onReasoning, onPhase, signal,
 }) {
-    const { model, streamFn, provider, onUsage } = resolveAgentStream(requestedModel, userId)
-
     const mode         = normalizeMode(chatState?.mode)   // build-time lens (KAIROS_MODES.md)
     const tools        = KAIROS_TOOLS_FOR_MODE(mode)
     const toolHandlers = buildKairosToolHandlers(onChart, userId)
@@ -53,23 +51,18 @@ async function chatStream({
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext, mode, seed, mainAccountId)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
-    logger.info(LOG, 'chatStream start', { userPrompt, messageCount: builtMessages.length, model, provider, accounts: accounts?.length ?? 0 })
-
     // The model emits <phase>N</phase> (1–7) at the start of each turn; capture it for the UI
     // progress + next-turn model routing. <call> is suppressed from the token stream and parsed
     // from `raw`.
-    let capturedPhase = null
-    const onPhaseCapture = (p) => {
-        const n = parseInt(p, 10)
-        if (n >= 1 && n <= 7) { capturedPhase = n; logger.info(LOG, 'phase', n); onPhase?.(n) }
-    }
+    const phase = makePhaseCapture(7, onPhase)
     // All known emit tags suppressed by default; this agent captures phase. <call> is
     // suppressed from the token stream and parsed from `raw` afterward.
-    const tagCaptures = buildTagCaptures({ phase: onPhaseCapture })
+    const tagCaptures = buildTagCaptures({ phase: phase.capture })
 
-    const raw = await streamFn({
-        model, promptOrMessages: builtMessages, systemPrompt, tools, toolHandlers,
-        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onUsage,
+    const raw = await runAgentStream({
+        log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers,
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
+        meta: { userPrompt, accounts: accounts?.length ?? 0 },
     })
 
     const { reply, call } = _parseKairosResponse(raw)
@@ -98,7 +91,7 @@ async function chatStream({
     }
 
     // The call is a DRAFT — returned for preview, NOT saved. The user clicks Generate to persist.
-    return { reply, phase: capturedPhase, ...(mergedCall ? { call: mergedCall } : {}), ...(scanRequest ? { scanRequest } : {}) }
+    return { reply, phase: phase.get(), ...(mergedCall ? { call: mergedCall } : {}), ...(scanRequest ? { scanRequest } : {}) }
 }
 
 // ─── Draft carry-forward (pure) ───────────────────────────────────────────────
@@ -111,11 +104,7 @@ async function chatStream({
 // value, so the model can still edit or DROP a zone/pattern, and can clear a field by emitting null
 // — only omission is protected. Returns null when there is no new call this turn (client keeps its
 // existing draft untouched).
-export function _mergeCallDraft(prevDraft, call) {
-    if (!call) return null
-    if (!prevDraft || typeof prevDraft !== 'object' || Array.isArray(prevDraft)) return call
-    return { ...prevDraft, ...call }
-}
+export const _mergeCallDraft = mergeDraft
 
 // ─── Call extraction (pure) ───────────────────────────────────────────────────
 // Pull the <call> JSON block out of the raw model output. Returns the user-visible reply
@@ -124,15 +113,7 @@ export function _parseKairosResponse(raw) {
     const text  = raw ?? ''
     const reply = stripEmitTags(text, ['call', 'phase', 'scan_request']).trim()
 
-    const m = text.match(/<call>([\s\S]*?)<\/call>/)
-    if (!m) return { reply, call: null }
-
-    try {
-        return { reply, call: JSON.parse(m[1].trim()) }
-    } catch (err) {
-        logger.warn(LOG, 'call JSON parse failed:', err.message)
-        return { reply, call: null }
-    }
+    return { reply, call: parseEmitBlock(text, 'call', LOG) }
 }
 
 // ─── Scan-request extraction (pure) ────────────────────────────────────────────
@@ -143,15 +124,8 @@ export function _parseKairosResponse(raw) {
 // `ticker` (optional) flips Argus into VALIDATE-A-NAME mode: when the user already has a name, Kairos
 // hands it to Argus for the feasibility + lens gate (Pipeline-B "B1") instead of open discovery.
 export function _parseScanRequest(raw) {
-    const m = (raw ?? '').match(/<scan_request>([\s\S]*?)<\/scan_request>/)
-    if (!m) return null
-    let obj
-    try {
-        obj = JSON.parse(m[1].trim())
-    } catch (err) {
-        logger.warn(LOG, 'scan_request JSON parse failed:', err.message)
-        return null
-    }
+    const obj = parseEmitBlock(raw, 'scan_request', LOG)
+    if (!obj) return null
     const direction = obj?.direction === 'short' ? 'short' : obj?.direction === 'long' ? 'long' : null
     if (!direction) return null
     return {
@@ -164,40 +138,13 @@ export function _parseScanRequest(raw) {
     }
 }
 
-// ─── Venue resolution (cTrader symbol gate, copied from the Idea flow) ─────────
-// Bind the call to the selected account's venue and resolve the broker-native symbol +
-// basis offset. Only cTrader needs resolution (NQ→US100→US100.cash + index basis); paper and
-// manual trade in chart space (symbol == asset, offset 0). Never throws — falls back to the
-// static map / zero offset. Deps are injectable for testing.
-export async function _resolveVenue(broker, userId, accountId, asset, deps = {}) {
-    const {
-        toBrokerSymbol:     _toBrokerSymbol     = toBrokerSymbol,
-        // Wrapped (not detached) so the real brokerService method keeps its receiver.
-        resolveSymbol:      _resolveSymbol      = (...args) => brokerService.resolveSymbol(...args),
-        computeBasisOffset: _computeBasisOffset = computeBasisOffset,
-    } = deps
-
-    if (broker !== 'ctrader') return { broker_symbol: asset, basis_offset: 0 }
-
-    const mapped = _toBrokerSymbol('ctrader', asset)
-    let brokerSymbol = mapped
-    try {
-        const res = await _resolveSymbol('ctrader', userId, accountId, mapped)
-        if (res?.found && res.symbol) brokerSymbol = res.symbol
-    } catch (err) {
-        logger.warn(LOG, `resolveSymbol ${asset}→${mapped} failed — using static map: ${err.message}`)
-    }
-
-    let basis_offset = 0
-    try {
-        const { offset } = await _computeBasisOffset({ brokerSymbol, asset })
-        basis_offset = offset || 0
-    } catch (err) {
-        logger.warn(LOG, `basis offset failed for ${asset}→${brokerSymbol}: ${err.message}`)
-    }
-
-    return { broker_symbol: brokerSymbol, basis_offset }
-}
+// ─── Venue resolution (cTrader symbol gate) ───────────────────────────────────
+// Moved to services/venue.resolve.service.js so the `setup` kind binds through the SAME symbol
+// gate instead of forking the cTrader basis logic (docs/setup-entity.md §8). Re-exported under
+// its historical name so existing importers and tests resolve unchanged. Imported (not just
+// re-exported) because _finalizeCall calls it in-file — a bare `export … from` creates no local
+// binding.
+export { _resolveVenue }
 
 // Called on Generate (and on the "Update call" edit — pass `updateId`). Bind venue from the marked
 // accounts (bank icon), resolve the symbol gate, then validate + persist. Multi-broker forking is

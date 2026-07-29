@@ -19,8 +19,8 @@ async function run() {
     const db    = await getDb()
     const names = (await db.listCollections().toArray()).map(c => c.name)
 
-    // Calls query by user_id (snake) — ensure that index exists on entities alongside the idea ones.
-    await db.collection(ENTITIES).createIndex({ user_id: 1 })
+    // Every kind queries by the envelope's `userId` — the same index the ideas use.
+    await db.collection(ENTITIES).createIndex({ userId: 1 })
 
     if (!names.includes(SOURCE)) {
         const n = await db.collection(ENTITIES).countDocuments({ kind: 'call' })
@@ -36,9 +36,14 @@ async function run() {
     logger.info(LOG, `Stamped kind:'call'/parentId on ${stamp.modifiedCount} call(s)`)
 
     // 2. Copy → entities, idempotent upsert by id (leaves kairos_calls as backup).
+    // The owner is renamed to the envelope's `userId` on the way in, so re-running this AFTER
+    // migrate-call-userid.mjs cannot resurrect the old `user_id` from the backup collection.
     const docs = await db.collection(SOURCE).find({}).toArray()
     if (docs.length) {
-        const ops = docs.map(d => ({ replaceOne: { filter: { id: d.id }, replacement: d, upsert: true } }))
+        const ops = docs.map(({ user_id, ...rest }) => {
+            const replacement = { ...rest, userId: rest.userId ?? user_id ?? null }
+            return { replaceOne: { filter: { id: replacement.id }, replacement, upsert: true } }
+        })
         const res = await db.collection(ENTITIES).bulkWrite(ops, { ordered: false })
         logger.info(LOG, `Copied ${docs.length} call(s) → \`${ENTITIES}\` (upserted ${res.upsertedCount}, replaced ${res.matchedCount})`)
     }

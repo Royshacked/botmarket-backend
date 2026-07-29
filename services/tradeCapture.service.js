@@ -20,6 +20,7 @@
 import { randomUUID }   from 'crypto'
 import { getDb }        from '../providers/mongodb.provider.js'
 import { brokerService } from '../api/broker/broker.service.js'
+import { resolveMode } from './venue.resolve.service.js'
 import { logger }       from './logger.service.js'
 import { ENTITIES }     from './entity/entityCollection.js'
 
@@ -52,8 +53,11 @@ export async function ensureTradeIndexes() {
     }
 }
 
-/** paper → 'paper', manual (broker-less real money) → 'manual', everything else → 'live'. */
-const modeOf = broker => (broker === 'paper' ? 'paper' : broker === 'manual' ? 'manual' : 'live')
+// The workspace stamped on the canonical ledger row. Uses the SHARED resolver, which also reads
+// the paper-/manual- account prefix: the old broker-only version recorded a legacy paper fill
+// (no `broker` field, `paper-<userId>` account) as a LIVE trade, mixing simulated fills into the
+// real-money track record.
+const modeOf = (broker, accountId) => resolveMode({ broker, accountId })
 
 /**
  * The origin block — what spawned this trade, frozen at fill. `ideaId` is the execution
@@ -171,7 +175,7 @@ async function captureOpen(idea, exec) {
                     tradeId:    randomUUID(),
                     origin:     buildOrigin(idea),
                     userId:     idea.userId ?? null,
-                    mode:       modeOf(broker),
+                    mode:       modeOf(broker, accountId),
                     broker, accountId, positionId,
                     symbol:     idea.asset,
                     asset_class: idea.asset_class ?? null,
@@ -207,7 +211,7 @@ async function captureOpen(idea, exec) {
             },
             { upsert: true },
         )
-        logger.info(LOG, `Captured OPEN ${modeOf(broker)} trade — ${idea.asset} ${exec.direction ?? idea.direction} pos ${positionId} @ ${exec.price ?? '?'}`)
+        logger.info(LOG, `Captured OPEN ${modeOf(broker, accountId)} trade — ${idea.asset} ${exec.direction ?? idea.direction} pos ${positionId} @ ${exec.price ?? '?'}`)
     } catch (err) {
         logger.error(LOG, `captureOpen failed (pos ${exec?.positionId}): ${err.message}`)
     }
@@ -235,7 +239,7 @@ async function captureOpenBare(exec) {
                     tradeId:    randomUUID(),
                     origin:     buildOrigin(),          // idealess → all-null origin (type: null)
                     userId:     String(exec.userId),
-                    mode:       modeOf(exec.broker),
+                    mode:       modeOf(exec.broker, accountId),
                     broker:     exec.broker ?? null, accountId, positionId,
                     symbol:     exec.symbol ?? null,
                     asset_class: null,
@@ -253,7 +257,7 @@ async function captureOpenBare(exec) {
             },
             { upsert: true },
         )
-        logger.info(LOG, `Captured OPEN ${modeOf(exec.broker)} trade (idealess) — ${exec.symbol} ${exec.direction} pos ${positionId} @ ${exec.price ?? '?'}`)
+        logger.info(LOG, `Captured OPEN ${modeOf(exec.broker, accountId)} trade (idealess) — ${exec.symbol} ${exec.direction} pos ${positionId} @ ${exec.price ?? '?'}`)
     } catch (err) {
         logger.error(LOG, `captureOpenBare failed (pos ${exec?.positionId}): ${err.message}`)
     }

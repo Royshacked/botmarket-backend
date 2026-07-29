@@ -12,22 +12,23 @@
  */
 
 import { stripId }               from '../../providers/mongodb.provider.js'
+import { STATUS } from '../../services/entity/vocabulary.js'
 import { logger }                from '../../services/logger.service.js'
 import { routeExits }            from '../../services/protectionPlan.service.js'
 import { openManualPosition, closeManualPosition, reduceManualPosition, addToManualPosition } from '../broker/manualExecution.service.js'
 import { notifyManualEntry, notifyManualExit, entryLegFromIdea, exitLegFromIdea } from '../../services/manualNotify.service.js'
 import { tradeCaptureService } from '../../services/tradeCapture.service.js'
 import { entityRepo }          from '../../services/entity/entityRepo.service.js'
+import { ownsEntity }          from '../../services/entity/entityCrud.service.js'
 
 const LOG = '[manualIdea]'
 
 // Statuses from which a manual leg can still be activated into an entry (not already in a
 // position or done).
-const ACTIVATABLE = new Set(['waiting', 'looking', 'hit'])
+// Bespoke group (manual mode can be activated from any of these), but the WORDS come from
+// the shared enum so a status rename can't leave this set silently matching nothing.
+const ACTIVATABLE = new Set([STATUS.WAITING, STATUS.LOOKING, STATUS.HIT])
 
-function _own(idea, userId, isAdmin) {
-    return !idea.userId || idea.userId === userId || isAdmin
-}
 
 function _accountId(idea) {
     return idea.mainAccountId ?? (idea.accounts ?? [])[0] ?? null
@@ -40,11 +41,11 @@ function _accountId(idea) {
  * @param {string} id
  * @param {{ price:number, quantity?:number }} fill
  */
-export async function confirmManualEntry(id, { price, quantity } = {}, userId, isAdmin = false) {
+export async function confirmManualEntry(id, { price, quantity } = {}, userId) {
     try {
         const idea = await entityRepo.getById(id)
         if (!idea)                                     return { ok: false, reason: 'not_found' }
-        if (!_own(idea, userId, isAdmin))              return { ok: false, reason: 'forbidden' }
+        if (!ownsEntity(idea, userId))              return { ok: false, reason: 'forbidden' }
         if (idea.broker !== 'manual')                  return { ok: false, reason: 'not_manual' }
         if (idea.ordersPlacedAt)                       return { ok: false, reason: 'already_placed' }
         if (idea.orderState !== 'awaiting_manual_fill')return { ok: false, reason: 'not_awaiting_fill' }
@@ -118,11 +119,11 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId, i
  * @param {string} id
  * @param {{ price:number, quantity?:number }} fill
  */
-export async function confirmManualExit(id, { price, quantity } = {}, userId, isAdmin = false) {
+export async function confirmManualExit(id, { price, quantity } = {}, userId) {
     try {
         const idea = await entityRepo.getById(id)
         if (!idea)                        return { ok: false, reason: 'not_found' }
-        if (!_own(idea, userId, isAdmin)) return { ok: false, reason: 'forbidden' }
+        if (!ownsEntity(idea, userId)) return { ok: false, reason: 'forbidden' }
         if (idea.broker !== 'manual')     return { ok: false, reason: 'not_manual' }
         if (idea.status !== 'long' && idea.status !== 'short') return { ok: false, reason: 'not_in_position' }
 
@@ -188,11 +189,11 @@ export async function confirmManualExit(id, { price, quantity } = {}, userId, is
  * @param {string} id
  * @param {{ price:number, quantity?:number }} fill
  */
-export async function confirmManualAdd(id, { price, quantity } = {}, userId, isAdmin = false) {
+export async function confirmManualAdd(id, { price, quantity } = {}, userId) {
     try {
         const idea = await entityRepo.getById(id)
         if (!idea)                        return { ok: false, reason: 'not_found' }
-        if (!_own(idea, userId, isAdmin)) return { ok: false, reason: 'forbidden' }
+        if (!ownsEntity(idea, userId)) return { ok: false, reason: 'forbidden' }
         if (idea.broker !== 'manual')     return { ok: false, reason: 'not_manual' }
         if (idea.status !== 'long' && idea.status !== 'short') return { ok: false, reason: 'not_in_position' }
 
@@ -226,9 +227,9 @@ export async function confirmManualAdd(id, { price, quantity } = {}, userId, isA
  * entry the user executes), so legs skip condition monitoring for entry.
  * @param {string} portfolioId
  */
-export async function activateManualPortfolio(portfolioId, userId, isAdmin = false) {
+export async function activateManualPortfolio(portfolioId, userId) {
     try {
-        const legs = await entityRepo.listByPortfolio(portfolioId, isAdmin ? null : userId)
+        const legs = await entityRepo.listByPortfolio(portfolioId, userId)
         if (!legs.length) return { ok: false, reason: 'not_found' }
 
         const pending = legs.filter(l => l.broker === 'manual' && !l.ordersPlacedAt && ACTIVATABLE.has(l.status))
@@ -260,9 +261,9 @@ export async function activateManualPortfolio(portfolioId, userId, isAdmin = fal
  * stay open). No monitor drives this — it's the user's call. See manual-mode.md §4b.
  * @param {string} portfolioId
  */
-export async function requestManualPortfolioExit(portfolioId, userId, isAdmin = false) {
+export async function requestManualPortfolioExit(portfolioId, userId) {
     try {
-        const legs = await entityRepo.listByPortfolio(portfolioId, isAdmin ? null : userId)
+        const legs = await entityRepo.listByPortfolio(portfolioId, userId)
         if (!legs.length) return { ok: false, reason: 'not_found' }
 
         const open = legs.filter(l => l.broker === 'manual' && (l.status === 'long' || l.status === 'short'))

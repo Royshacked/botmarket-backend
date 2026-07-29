@@ -1,4 +1,5 @@
 import { getDb, stripId }   from '../../providers/mongodb.provider.js'
+import { LIVE_POSITION } from '../../services/entity/vocabulary.js'
 import { ENTITIES }         from '../../services/entity/entityCollection.js'
 import { logger }  from '../../services/logger.service.js'
 import { getPortfolioStateCached } from '../../services/portfolioState.service.js'
@@ -376,7 +377,7 @@ async function getPendingThemisChecks(now = Date.now()) {
                     broker:        { $first: '$broker' },
                     mainAccountId: { $first: '$mainAccountId' },
                     accounts:      { $first: '$accounts' },
-                    liveCount:     { $sum: { $cond: [{ $in: ['$status', ['long', 'short']] }, 1, 0] } },
+                    liveCount:     { $sum: { $cond: [{ $in: ['$status', LIVE_POSITION] }, 1, 0] } },
                 } },
             ])
             .toArray()

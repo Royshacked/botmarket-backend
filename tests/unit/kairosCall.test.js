@@ -229,7 +229,10 @@ test('normalize: fresh call starts waiting with empty monitor_state', () => {
     const doc = normalizeCall(call(), 'u_abc')
     assert.equal(doc.status, 'waiting')
     assert.equal(doc.strategy, 'kairos')
-    assert.equal(doc.user_id, 'u_abc')
+    assert.equal(doc.userId, 'u_abc')
+    // Envelope field, ONE name across kinds. A call reverting to `user_id` silently breaks every
+    // kind-blind reader that filters by owner (getCallPositionMap, getAssetClassMap, toEnvelope).
+    assert.equal(doc.user_id, undefined)
     assert.deepEqual(doc.monitor_state, {
         next_check_at: null, armed_zone_id: null, chosen_timeframe: null,
         check_count: 0, memo: '', last_assessment: null,

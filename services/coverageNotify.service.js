@@ -1,9 +1,10 @@
 // Coverage-event notifications (P5) — the Analyst bot posts to social chat when the coverage monitor
 // reaches a material verdict on a living thesis (target hit, thesis broken, validating, diverging).
-// Mirrors tradeNotify: a PURE builder (unit-tested) + a thin async wrapper over postBotCard. Each
+// Mirrors tradeNotify: a PURE builder (unit-tested) + a thin wrapper over the shared postCard. Each
 // agent owns its own notifications (Idea→invalidation, Kairos→readiness, Analyst→coverage events).
 
-import { postBotCard, cardActions } from '../api/chat/chat.service.js'
+import { cardActions } from '../api/chat/chat.service.js'
+import { postCard } from './notifyCard.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[coverageNotify]'
@@ -14,7 +15,7 @@ const LOG = '[coverageNotify]'
  * verdict = { state, reason, edge_gone } from coverage.assess.classifyGapState.
  */
 export function buildCoverageEvent(coverage, verdict) {
-    if (!coverage?.user_id || !verdict?.state) return null
+    if (!coverage?.userId || !verdict?.state) return null
     const sym = coverage.symbol
     const pt  = coverage.price_target?.value
     const state = verdict.state
@@ -36,7 +37,7 @@ export function buildCoverageEvent(coverage, verdict) {
     }
 
     return {
-        userId:  coverage.user_id,
+        userId:  coverage.userId,
         content,
         type:    'coverage_event',
         payload: { kind: 'coverage', symbol: sym, coverageId: coverage.id, state, edge_gone: !!verdict.edge_gone },
@@ -47,14 +48,7 @@ export function buildCoverageEvent(coverage, verdict) {
 
 /** Post the coverage-event card (fire-and-forget; never throws into the monitor loop). */
 export async function notifyCoverageEvent(coverage, verdict) {
-    const card = buildCoverageEvent(coverage, verdict)
-    if (!card) return null
-    try {
-        return await postBotCard(card)
-    } catch (err) {
-        logger.warn(LOG, 'notify failed', err.message)
-        return null
-    }
+    return postCard(buildCoverageEvent(coverage, verdict), { tag: 'Coverage-event card', log: LOG })
 }
 
 // ─── Coverage refresh (G1) ──────────────────────────────────────────────────────
@@ -88,12 +82,5 @@ export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, por
 
 /** Post the coverage-refresh card (fire-and-forget; never throws into the refresh hop). */
 export async function notifyCoverageRefreshed(args) {
-    const card = buildCoverageRefreshed(args)
-    if (!card) return null
-    try {
-        return await postBotCard(card)
-    } catch (err) {
-        logger.warn(LOG, 'refresh notify failed', err.message)
-        return null
-    }
+    return postCard(buildCoverageRefreshed(args), { tag: 'Coverage-refresh card', log: LOG })
 }
