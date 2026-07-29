@@ -94,7 +94,9 @@ function makeCoverageHandler(userId) {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal }) {
+async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+    _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
+}) {
     const normalized   = _buildMessages(messages)
 
     // Stable base (cached) + volatile per-request sections (accounts, edit
@@ -142,7 +144,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
         portfolio_mandate: onMandate,
     })
 
-    const raw = await runAgentStream({
+    const raw = await _run({
         log: LOG, requestedModel, userId,
         messages: normalized, systemPrompt,
         tools: TOOLS,

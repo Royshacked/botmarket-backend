@@ -40,6 +40,7 @@ async function chatStream({
     brokerContext = null, clientTime = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, signal,
+    _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
 
     const tools        = KAIROS_TOOLS
@@ -65,7 +66,7 @@ async function chatStream({
         coverage: onCoverageCapture,
     })
 
-    const raw = await runAgentStream({
+    const raw = await _run({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers,
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
         meta: { userPrompt, asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },

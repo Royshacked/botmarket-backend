@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _parseAnalystResponse } from '../../services/analyst.agent.service.js'
+import { _parseAnalystResponse, analystAgentService } from '../../services/analyst.agent.service.js'
 import { _sanitizeAnalystSeed } from '../../api/analyst/analyst.controller.js'
 
 // Analyst P3 — <coverage> extraction from the streamed research turn (pure).
@@ -41,6 +41,36 @@ test('parse: no coverage tag at all → { reply, coverage:null }', () => {
     const { reply, coverage } = _parseAnalystResponse('Just discussing the name, no pitch yet.')
     assert.equal(coverage, null)
     assert.equal(reply, 'Just discussing the name, no pitch yet.')
+})
+
+// ── chatStream, analyst-specific ──────────────────────────────────────────────
+// The generic argument-bag contract (tools, handlers, prompt, Stop wiring) is asserted for EVERY
+// agent in agentStreamContract.test.js — this covers only what's the analyst's own: its seed
+// block, its phase bound, its coverage draft.
+
+test('chatStream: the turn flows through — messages, system prompt, phase + coverage draft', async () => {
+    let got = null
+    const phases = []
+    const result = await analystAgentService.chatStream({
+        messages: [{ role: 'user', content: 'what do you make of nvda' }],
+        chatState: { active_symbol: 'NVDA' },
+        seed: { ticker: 'NVDA', sector: 'Technology', thesis: 'screened cheap' },
+        onPhase: p => phases.push(p),
+        _run: async (args) => {
+            got = args
+            args.tagCaptures.find(t => t.open === '<phase>').onCapture('6')
+            return 'Pitch. <coverage>{ "symbol": "nvda", "rating": "buy" }</coverage>'
+        },
+    })
+
+    assert.equal(got.messages[0].content, 'what do you make of nvda')
+    assert.equal(got.systemPrompt.length, 2, 'cached base prompt + the dynamic block')
+    assert.match(got.systemPrompt[1].text, /Active name: NVDA/)
+    assert.match(got.systemPrompt[1].text, /ARGUS SEED .*ticker=NVDA/)
+    assert.deepEqual(phases, [6])
+    assert.equal(result.phase, 6)
+    assert.equal(result.reply, 'Pitch.')
+    assert.equal(result.coverage.symbol, 'NVDA')   // draft only — persistence happens at initiate
 })
 
 // ── _sanitizeAnalystSeed (Argus investing candidate → research hand-off, P4b) ──

@@ -59,6 +59,7 @@ async function chatStream({
     messages, userPrompt, chatState = {}, brokerContext = null, seed = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onToolStart, onReasoning, onPhase, onChart, signal,
+    _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
     const systemPrompt  = _buildSystemPrompt(chatState, brokerContext, seed)
     const builtMessages = _buildMessages({ messages, userPrompt })
@@ -69,8 +70,9 @@ async function chatStream({
     // parsed from `raw` afterward (same as Kairos parses <call>).
     const tagCaptures = buildTagCaptures({ phase: phase.capture })
 
-    const raw = await runAgentStream({
-        log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers,
+    const raw = await _run({
+        log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
+        tools: TOOLS, toolHandlers: TOOL_HANDLERS,
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
         meta: { userPrompt },
     })

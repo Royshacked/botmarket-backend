@@ -30,7 +30,9 @@ const TOOL_HANDLERS = {}
 
 export const axlAgentService = { chatStream }
 
-async function chatStream({ messages = [], model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal } = {}) {
+async function chatStream({ messages = [], model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
+    _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
+} = {}) {
     const normalized = normalizeMessages(messages, MAX_MESSAGES)
 
     // Stable cached base + volatile tail (today's date, so "this week" resolves).
@@ -47,7 +49,7 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
     // consumer that would otherwise hand the client "…to the trading desk. <route>trade</route>".
     let chartRow = null
     let routeCapture = null
-    const raw = await runAgentStream({
+    const raw = await _run({
         log: LOG, requestedModel, userId,
         messages: normalized, systemPrompt,
         tools: TOOLS, toolHandlers: TOOL_HANDLERS,

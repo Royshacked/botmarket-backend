@@ -256,6 +256,12 @@ export function makeChartChatPipe(onChart, { log = '[agentIO]' } = {}) {
  * Deliberately does NOT parse otherwise: what comes back out of the stream is the agent's own
  * contract.
  */
+// Every agent's `chatStream` takes `_run = runAgentStream` and calls `_run(...)` here. That one
+// seam is what lets the SHARED contract test (tests/unit/agentStreamContract.test.js) drive every
+// agent's real chatStream with no provider and no model id — the assertions live once, not per
+// agent. It exists because the prelude a chatStream runs before this call is the one stretch of
+// agent code nothing else covers: a bad reference there throws before the first token, and the
+// client only ever sees the generic "Streaming failed".
 export async function runAgentStream({
     log = '[agentIO]', requestedModel, userId,
     messages, systemPrompt, tools, toolHandlers,

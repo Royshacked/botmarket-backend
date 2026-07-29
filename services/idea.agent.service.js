@@ -1,3 +1,19 @@
+/**
+ * The Idea agent — the original conversational trade builder (the `idea` kind: condition trees).
+ *
+ * ⚠ ARCHIVED 2026-07-29 — UNREACHABLE. Superseded by Kairos (builds a `call`) and Mentor (builds
+ * a `setup`). server.js no longer mounts `/api/idea`, so neither this agent's stream nor its
+ * non-streaming chat can be reached; its monitor, Minos, is archived alongside it.
+ *
+ * Kept in place rather than deleted: idea.stateParser.js and several agentUtils/marketData
+ * helpers are shared with the live agents, and the module is still imported by its tests.
+ *
+ * To revive: uncomment the import + app.use('/api/idea', ideaRoutes) in server.js.
+ *
+ * NOTE for whoever revives it — its chatStream logged an undeclared `model`/`provider` after the
+ * agentIO refactor (5a096e7), which threw before the first token and surfaced to the client as
+ * "Streaming failed". Fixed 2026-07-29; the shared contract test now covers this agent too.
+ */
 import { fileURLToPath } from 'url'
 import { makePhaseCapture, runAgentStream } from './agentIO.js'
 import { toolsFor } from './agentTools.registry.js'
@@ -137,7 +153,9 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], mainAccountId = null, clientTime = null, model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, signal }) {
+async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], mainAccountId = null, clientTime = null, model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, signal,
+    _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
+}) {
 
     const tools        = TOOLS
     const toolHandlers = _buildToolHandlers(onChart)
@@ -145,13 +163,8 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
     const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts, clientTime, mainAccountId)
     const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
 
-    logger.info(LOG, 'chatStream start', {
-        userPrompt,
-        messageCount:  builtMessages.length,
-        activeAsset:   analysisState?.structured_state?.active_asset ?? '',
-        model,
-        provider,
-    })
+    // (the 'chatStream start' line lives in runAgentStream now — it's the one that knows the
+    // resolved model + provider; `meta` below carries this agent's extra fields)
 
     const phase = makePhaseCapture(5, onPhase)
 
@@ -160,7 +173,7 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
     // tag reaches the UI.
     const tagCaptures = buildTagCaptures({ asset: onAsset, interval: onInterval, phase: phase.capture })
 
-    const raw = await runAgentStream({
+    const raw = await _run({
         log: LOG, requestedModel, userId,
         messages: builtMessages, systemPrompt, tools, toolHandlers,
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
