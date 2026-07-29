@@ -30,6 +30,16 @@ const TOOL_HANDLERS = {}
 
 export const axlAgentService = { chatStream }
 
+// The route tag may carry the name the user is here for: `<route>research NVDA</route>`. Desk and
+// symbol travel as ONE capture because they are one decision — a desk that opens on a name the
+// router never picked is worse than a desk that opens empty. Split only; the controller validates
+// both (an unknown desk or a junk symbol must not reach the client).
+export function _splitRoute(raw) {
+    if (typeof raw !== 'string') return { desk: null, symbol: null }
+    const [desk = null, symbol = null] = raw.trim().split(/[\s:,]+/)
+    return { desk: desk ? desk.toLowerCase() : null, symbol: symbol || null }
+}
+
 async function chatStream({ messages = [], model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 } = {}) {
@@ -60,12 +70,14 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
     })
 
     const reply = stripEmitTags(raw ?? '', ['route']).trim()
-    logger.info(LOG, 'chatStream done', { route: routeCapture, replyLength: reply.length })
+    const { desk, symbol } = _splitRoute(routeCapture)
+    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, replyLength: reply.length })
     // `chart` on the return is the REQUEST, never the image: the row already went out on its own
     // event and doubling it here would double the bytes on the wire.
     return {
         reply,
-        route: routeCapture,
+        route: desk,
+        routeSymbol: symbol,
         chart: chartRow ? { ticker: chartRow.symbol, timeframe: chartRow.timeframe } : null,
     }
 }

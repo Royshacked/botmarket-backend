@@ -3,6 +3,7 @@ import { ENTITIES } from '../services/entity/entityCollection.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { createPollLoop, fetchLastPrice } from './monitorUtils.js'
+import { journalEntry, withJournal } from './monitorJournal.js'
 import { withTimeout } from '../services/timeout.util.js'
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
@@ -125,7 +126,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
             status: 'waiting',
             'monitor_state.next_check_at': wakeAt,
             'monitor_state.check_count': (setup.monitor_state?.check_count ?? 0) + 1,
-        }, _entry('pre_active', { nowMs, nextAt: wakeAt }))
+        }, _entry('pre_active', { setup, nowMs, nextAt: wakeAt }))
         return { reason: 'pre_active' }
     }
 
@@ -138,7 +139,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
         const patch = _reschedule(setup, nowMs, null)
         const openMs = deps.nextOpenMs(setup.asset, setup.asset_class)
         if (Number.isFinite(openMs) && openMs > nowMs) patch['monitor_state.next_check_at'] = new Date(openMs).toISOString()
-        await _persist(setup.id, patch, _entry('closed', { nowMs, nextAt: patch['monitor_state.next_check_at'] }))
+        await _persist(setup.id, patch, _entry('closed', { setup, nowMs, nextAt: patch['monitor_state.next_check_at'] }))
         return { reason: 'closed' }
     }
 
@@ -149,7 +150,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     // reschedule that tightens as price approaches the nearest zone.
     if (!zone && !expiring) {
         const patch = _reschedule(setup, nowMs, price)
-        await _persist(setup.id, patch, _entry('scheduled', { nowMs, price, nextAt: patch['monitor_state.next_check_at'] }))
+        await _persist(setup.id, patch, _entry('scheduled', { setup, nowMs, price, nextAt: patch['monitor_state.next_check_at'] }))
         return { reason: 'scheduled' }
     }
 
@@ -158,7 +159,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
 
     if (!raw || raw._failReason) {
         const patch = _reschedule(setup, nowMs, price)
-        await _persist(setup.id, patch, _entry(reason, { nowMs, price, nextAt: patch['monitor_state.next_check_at'], failed: true, failReason: raw?._failReason }))
+        await _persist(setup.id, patch, _entry(reason, { setup, nowMs, price, nextAt: patch['monitor_state.next_check_at'], failed: true, failReason: raw?._failReason }))
         return { reason, failed: true }
     }
 
@@ -207,7 +208,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
     // the user can act. Never a silent auto-close.
     if (reason === 'expiry_review' && raw.verdict === 'let_expire') {
         await _persist(setup.id, { ...base, status: 'closed', closedReason: 'expired', closedAt: nowMs },
-            _entry(reason, { nowMs, price, verdict: raw.verdict, read: raw.read }))
+            _entry(reason, { setup, nowMs, price, verdict: raw.verdict, read: raw.read }))
         return { reason, verdict: raw.verdict, closed: true }
     }
 
@@ -217,7 +218,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
     // confirm an entry Talos just declined is the one thing this gate exists to prevent.
     if (zone && raw.verdict !== 'enter') {
         await _persist(setup.id, { ...base, status: _nextStatus(raw.verdict, reason), armed_zone_id: zone.id },
-            _entry(reason, { nowMs, price, zone: zone.id, verdict: raw.verdict, read: raw.read }))
+            _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
         return { reason, verdict: raw.verdict, watching: true }
     }
 
@@ -231,7 +232,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
         // reports the fill. Its own card, not the confirm dialog.
         if (setup.broker === 'manual') {
             patch.orderState = 'awaiting_manual_fill'
-            await _persist(setup.id, patch, _entry(reason, { nowMs, price, zone: zone.id, verdict: raw.verdict, read: raw.read }))
+            await _persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
             try { await deps.onManualCard(setup) }
             catch (err) { logger.warn(LOG, `manual entry card failed for ${setup.id}:`, err.message) }
             return { reason, verdict: raw.verdict, fired: true, manual: true }
@@ -250,7 +251,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
             logger.info(LOG, `[${setup.id}] zone tripped with no placeable accounts — alert only`)
         }
 
-        await _persist(setup.id, patch, _entry(reason, { nowMs, price, zone: zone.id, verdict: raw.verdict, read: raw.read }))
+        await _persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
 
         // Only an order actually awaiting confirmation gets the confirm card. 'awaiting_market'
         // defers silently until the market sweep surfaces it, matching Minos.
@@ -262,7 +263,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
         return { reason, verdict: raw.verdict, fired: true, orderState: patch.orderState ?? null }
     }
 
-    await _persist(setup.id, base, _entry(reason, { nowMs, price, verdict: raw.verdict, read: raw.read }))
+    await _persist(setup.id, base, _entry(reason, { setup, nowMs, price, verdict: raw.verdict, read: raw.read }))
     return { reason, verdict: raw.verdict }
 }
 
@@ -351,25 +352,18 @@ function _reschedule(setup, nowMs, price) {
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
 
-function _entry(kind, { nowMs, price = null, nextAt = null, zone = null, verdict = null, read = null, failed = false, failReason = null }) {
-    return {
-        at: new Date(nowMs).toISOString(),
-        kind,
-        ...(price   != null ? { price } : {}),
-        ...(zone    != null ? { zone } : {}),
-        ...(verdict != null ? { verdict } : {}),
-        ...(read    != null ? { read } : {}),
-        ...(nextAt  != null ? { next_at: nextAt } : {}),
-        ...(failed ? { failed: true, fail_reason: failReason } : {}),
-    }
+// One journal entry for a wake, through the shared builder (monitorJournal.js). This used to be a
+// copy of Hermes's with the SENTENCES REMOVED — it wrote `{at, kind, price, next_at}`, which no
+// reader could turn into a line of prose, so a setup's journal could only ever be rendered as JSON.
+// Talos's own contribution is the model's `read`; the arithmetic wakes word themselves.
+function _entry(reason, { setup, read = null, verdict = null, ...rest }) {
+    return journalEntry(reason, { ...rest, entity: setup, note: read, raw: { verdict, read } })
 }
 
 async function _persist(id, $set, logEntry) {
     try {
         const db = await getDb()
-        const update = { $set }
-        if (logEntry) update.$push = { 'monitor_state.timeline': { $each: [logEntry], $slice: -TIMELINE_MAX } }
-        await db.collection(COLLECTION).updateOne({ id, kind: KIND }, update)
+        await db.collection(COLLECTION).updateOne({ id, kind: KIND }, withJournal($set, logEntry, TIMELINE_MAX))
     } catch (err) {
         logger.error(LOG, `persist failed for ${id}:`, err.message)
     }

@@ -5,6 +5,7 @@ import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../services/tradeNotify.service.js'
 import { createPollLoop, fetchLastPrice } from './monitorUtils.js'
+import { journalEntry, withJournal, zonesLabel, failNote } from './monitorJournal.js'
 import { withTimeout } from '../services/timeout.util.js'
 import { _defaultAssess, _defaultAssessPosition, _defaultAssessReentry, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses } from './hermes.assess.js'
 
@@ -226,9 +227,7 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
 
 // Persist the $set patch and, when given, APPEND a journal entry (capped to the last TIMELINE_MAX).
 async function _persist(db, id, set, logEntry = null) {
-    const update = { $set: set }
-    if (logEntry) update.$push = { 'monitor_state.timeline': { $each: [logEntry], $slice: -TIMELINE_MAX } }
-    await db.collection(COLLECTION).updateOne({ id }, update)
+    await db.collection(COLLECTION).updateOne({ id }, withJournal(set, logEntry, TIMELINE_MAX))
 }
 
 // ─── In-position path (Phase 5, slice 1: lifecycle reconcile only — no brain yet) ──────────────
@@ -567,7 +566,7 @@ async function _managePosition(db, call, idea, nowMs, deps) {
             'monitor_state.next_check_at': nextAt,
             'monitor_state.check_count':   (call?.monitor_state?.check_count ?? 0) + 1,
         }, { at: new Date(nowMs).toISOString(), reason: 'in_position', phase: 'in_position', price: _num(price), verdict: null,
-             note: _failNote('reassess', call.asset, raw?._failReason), next_check_at: nextAt })
+             note: failNote('reassess', call.asset, raw?._failReason), next_check_at: nextAt })
         return { reason, failed: true }
     }
 
@@ -891,32 +890,19 @@ export function _shouldPulse(call, price, nowMs) {
 }
 
 // ─── Timeline / monologue (the monitor journal) ────────────────────────────────
-// An append-only, first-person log of EVERY wake — the "brain" the call pop-out reads. Cheap
-// wakes (closed / not-near-a-zone) get a one-line arithmetic note; a real assessment carries the
-// model's own first-person `read` + the four-axis detail. Kept compact and capped on the doc.
-// Bumped 50→80 (Phase 5): the journal now spans readiness + entry + the in-position management era,
-// so the rolling monologue needs more room before old idle wakes roll off. The durable factual
-// spine (fill / actions / outcome) lives structurally in position_state and never rolls off.
+// The shape, the cap mechanics and the cheap-wake prose now live in monitorJournal.js — Talos kept
+// a sentence-less copy of all of it, so setups had a journal nothing could read. What stays here is
+// Hermes's own: how long its log runs, what a read PULLED, and the four-axis payload of an
+// assessment. Re-exported under their historical names so the unit tests' import path is unchanged.
+//
+// 50→80 (Phase 5): the journal spans readiness + entry + the in-position management era, so the
+// rolling monologue needs more room before old idle wakes roll off. The durable factual spine
+// (fill / actions / outcome) lives structurally in position_state and never rolls off.
 const TIMELINE_MAX = 80
 
-function _fmt(n) { return Number.isFinite(Number(n)) ? String(Number(n)) : '?' }
+export { zonesLabel as _zonesLabel, failNote as _failNote }
+
 function _num(n) { return Number.isFinite(Number(n)) ? Number(n) : null }
-
-// "188–189" (single) or "188–189, 192–193" (multi). { text, multi }.
-export function _zonesLabel(call) {
-    const zones = Array.isArray(call?.entry_zones) ? call.entry_zones : []
-    const parts = zones
-        .filter(z => Number.isFinite(Number(z?.lower)) && Number.isFinite(Number(z?.upper)))
-        .map(z => `${_fmt(z.lower)}–${_fmt(z.upper)}`)
-    return { text: parts.length ? parts.join(', ') : '(no zones)', multi: parts.length > 1 }
-}
-
-// Whole-minute gap between now and an ISO next-check (≥1), or null if unparseable.
-function _gapMin(nextAt, nowMs) {
-    const t = Date.parse(nextAt)
-    if (!Number.isFinite(t)) return null
-    return Math.max(1, Math.round((t - nowMs) / 60_000))
-}
 
 // What the assessment deterministically pulls (mirrors _defaultAssess) — the "fetched" line.
 function _fetchedLabel(call) {
@@ -924,71 +910,24 @@ function _fetchedLabel(call) {
     return `chart ${tf} (vwap+ema50+vol) · ~30 candles · price`
 }
 
-// When the model gives no first-person note, synthesize one from the verdict so the log still reads.
-function _verdictFallbackNote(raw) {
-    switch (raw?.verdict) {
-        case 'enter':       return 'This finally looks ready — proposing an entry.'
-        case 'wait':        return "In the zone, but the trigger isn't here yet — waiting."
-        case 'stand_aside': return 'Conditions are against this one right now — standing aside.'
-        case 'let_expire':  return 'Nothing materialized — letting it expire.'
-        case 'edit':        return 'The setup has drifted — proposing a re-map.'
-        default:            return 'Read the chart; no change.'
-    }
-}
-
-// Honest one-line note for a failed wake, by failure kind. 'truncated'/'malformed' = the model
-// replied but we couldn't parse it (a bad reply, not a data/vision fetch failure); 'io'/unknown =
-// the read itself couldn't complete. Shared by the readiness and in-position failure paths. Pure.
-export function _failNote(verb, asset, failReason) {
-    const who = asset ?? 'the chart'
-    return (failReason === 'truncated' || failReason === 'malformed')
-        ? `Went to ${verb} ${who} but its reply came back malformed — retrying shortly.`
-        : `Went to ${verb} ${who} but the read didn't complete — retrying shortly.`
-}
-
-// Build one compact append-only journal entry for a wake. Pure — `at` derives from nowMs so tests
-// are deterministic. reason ∈ pre_active | closed | scheduled | zone_trip | expiry_review.
-export function _timelineEntry(reason, { nowMs, price = null, zone = null, call, raw = null, nextAt = null, fetched = null, failed = false, failReason = null }) {
-    const at  = new Date(nowMs).toISOString()
-    const gap = _gapMin(nextAt, nowMs)
-
-    if (reason === 'closed') {
-        return { at, reason, price: null, verdict: null,
-            note: `Market's closed for ${call?.asset ?? 'this asset'} — holding. I'll look again at the open.`,
-            next_check_at: nextAt }
-    }
-    if (reason === 'pre_active') {
-        return { at, reason, price: null, verdict: null,
-            note: `Not live yet for ${call?.asset ?? 'this call'} — I start watching at ${call?.active_from ?? '?'}.`,
-            next_check_at: nextAt }
-    }
-    if (reason === 'scheduled') {
-        const zl = _zonesLabel(call)
-        return { at, reason, price: _num(price), verdict: null,
-            note: `Price ${_fmt(price)} is outside my zone${zl.multi ? 's' : ''} ${zl.text}. No setup forming${gap ? ` — checking back in ${gap}m` : ''}.`,
-            next_check_at: nextAt }
-    }
-    if (failed) {
-        return { at, reason, price: _num(price), verdict: null,
-            note: _failNote('read', call?.asset, failReason),
-            next_check_at: nextAt }
-    }
-    // A real assessment (zone tripped or expiry review) — the model's own read + four-axis detail.
-    return {
-        at, reason,
-        price:   _num(price),
-        zone_id: zone?.id ?? null,
-        fetched,
-        verdict: raw?.verdict ?? null,
-        note:    (raw?.read && String(raw.read).trim()) ? String(raw.read).trim() : _verdictFallbackNote(raw),
-        axes: {
-            market:        raw?.market ?? null,
-            news:          raw?.news ?? null,
-            price_action:  raw?.price_action ?? null,
-            patterns_seen: Array.isArray(raw?.patterns_seen) ? raw.patterns_seen : [],
-        },
-        next_check_at: nextAt,
-    }
+// One journal entry for a wake — the shared builder, plus the part that is Hermes's alone: the
+// four-axis payload of an assessment. `call` rather than `entity` in the signature because every
+// call site here (and the tests) speaks calls; the shared builder is kind-agnostic.
+// reason ∈ pre_active | closed | scheduled | momentum_pulse | zone_trip | expiry_review.
+export function _timelineEntry(reason, { call, raw = null, ...rest }) {
+    return journalEntry(reason, {
+        ...rest,
+        entity: call,
+        raw,
+        // Built here, not in the shared service: only Hermes assesses on four axes. The cheap and
+        // failed branches return before this is looked at.
+        axes: raw ? {
+            market:        raw.market ?? null,
+            news:          raw.news ?? null,
+            price_action:  raw.price_action ?? null,
+            patterns_seen: Array.isArray(raw.patterns_seen) ? raw.patterns_seen : [],
+        } : null,
+    })
 }
 
 // ─── Default IO deps (real price / LLM assessment / card) ───────────────────────
