@@ -9,6 +9,7 @@ import { cleanConviction } from './conviction.util.js'
 import { formatWorkspaceLine } from '../api/portfolio/portfolioMode.util.js'
 import { logger }         from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler } from './agentUtils.js'
+import { makeTradingContextHandlers } from './tradingContext.tools.js'
 import { makeChartHandler } from './marketData.tools.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
 import { buildTagCaptures } from './llmStream.util.js'
@@ -21,6 +22,8 @@ const MAX_MESSAGES = 10
 
 export const TOOLS = toolsFor({
     web_search: '',
+    get_trading_context: `The book's trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities, whether it is selected, and what is already open in it. The capital base and existing exposure a construction or rebalance must be sized against — read it, never assume it. No arguments.`,
+    check_broker_symbol: `Check whether a name is actually TRADABLE at the user's connected live broker, and what the broker calls it. A holding the broker does not list cannot be bought, so check before adding a new name to a live book. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.`,
     get_quote: `Get current price quote for a single ticker symbol.`,
     get_quotes: `Get current prices for several tickers at once. Prefer this over calling get_quote repeatedly when sizing a multi-position portfolio.`,
     get_risk_metrics: `Get annualized volatility and ATR (from 1y of daily prices) for a ticker. Use this to size positions by risk and to set sensible stop distances.`,
@@ -153,6 +156,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
         // are static.
         toolHandlers: {
             ...TOOL_HANDLERS,
+            ...makeTradingContextHandlers(userId),
             get_coverage: makeCoverageHandler(userId),
             get_chart:    makeChartHandler({ log: LOG, onChart, readText: 'Read it as a POSITIONING question — where in the range, trend intact or broken, base or breakdown. Weights still come from the numbers.' }),
         },

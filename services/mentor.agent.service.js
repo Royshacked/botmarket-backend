@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'url'
 import { parseEmitBlock, mergeDraft, runAgentStream } from './agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, buildTimeSection } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, buildTimeSection } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS, buildKairosToolHandlers } from './kairos.tools.js'
 import { normalizeSetup, setupReadiness, computeRR } from './setup.schema.js'
@@ -37,7 +37,7 @@ export const mentorAgentService = { chatStream }
 
 async function chatStream({
     messages, userPrompt, chatState = emptyMentorState(), accounts = [], mainAccountId = null,
-    brokerContext = null, clientTime = null,
+    clientTime = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
@@ -46,7 +46,7 @@ async function chatStream({
     const tools        = KAIROS_TOOLS
     const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
-    const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext, mainAccountId, clientTime)
+    const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, clientTime)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
@@ -176,7 +176,7 @@ export function _parseCandidates(text) {
 
 // ─── Prompt / messages ────────────────────────────────────────────────────────
 
-function _buildSystemPrompt(chatState, accounts, brokerContext, mainAccountId, clientTime) {
+function _buildSystemPrompt(chatState, accounts, mainAccountId, clientTime) {
     const asset = chatState?.active_asset || 'none'
     const draft = chatState?.draft
         ? `\nSetup so far (carry every settled field forward; change only what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
@@ -192,7 +192,7 @@ CURRENT DATE: ${today}. Resolve relative dates (today, next week, this month) ag
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
 COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.
 CONVERSATION CONTEXT:
-Active asset: ${asset}${draft}${buildPositionsSection(brokerContext)}${_buildAccountsSection(accounts, mainAccountId)}`
+Active asset: ${asset}${draft}${_buildAccountsSection(accounts, mainAccountId)}`
 
     return [
         { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },

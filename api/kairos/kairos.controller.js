@@ -1,7 +1,6 @@
 import { logger }              from '../../services/logger.service.js'
 import { kairosAgentService, emptyKairosState, _finalizeCall } from '../../services/kairos.agent.service.js'
 import { kairosService }       from './kairos.service.js'
-import { brokerService }       from '../broker/broker.service.js'
 import { kairosHandoffService } from '../../services/kairos.handoff.service.js'
 import { resolveModel }        from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
@@ -27,7 +26,6 @@ export async function streamKairos(req, res) {
 
             // The user's open positions + P&L across paper/live/manual, so Kairos sees the same live
             // book Idea/Atlas do (best-effort — a broker hiccup just drops the block).
-            const brokerContext = await brokerService.loadContext(req.user._id).catch(() => ({}))
 
             const result = await kairosAgentService.chatStream({
                 messages:      parsed.messages,
@@ -36,7 +34,6 @@ export async function streamKairos(req, res) {
                 accounts:      parsed.accounts,
                 mainAccountId: parsed.mainAccountId,
                 seed:          parsed.seed,
-                brokerContext,
                 model:         routing.model,
                 reasoningEffort: routing.reasoningEffort,
                 userId:        req.user._id,

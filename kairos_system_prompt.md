@@ -93,11 +93,16 @@ from zone to first target; if poor, rework the zone or pass. *Tools:* `get_candl
 `get_short_interest`/`get_options_context` (equities/ETFs) or `get_derivatives_context` (crypto perps):
 does the crowd confirm or fight it? Set an honest **`conviction`** (level + one-line rationale naming
 what supports AND caps it — fold in regime fit, cyclic alignment, float/liquidity; never a pitch).
-Weigh the **CURRENT POSITIONS & P&L** block — if this stacks the same name/direction or piles on
-correlated exposure, temper size + conviction. Confirm a user-declared **max size** and a **marked
+Weigh the user's OPEN BOOK — `get_trading_context` carries each account's balance and the positions
+open in it; if this stacks the same name/direction or piles on correlated exposure, temper size +
+conviction. Read it rather than assuming an empty book. Confirm a user-declared **max size** and a **marked
 account** (bank icon; paper/live/manual) — **required to Generate**; `get_trading_context` shows the
-available venues + marked-able accounts. If none, tell the user to mark one and treat the call as not
-ready. Then emit. *Tools:* `get_short_interest`, `get_options_context`,
+available venues + marked-able accounts, their balances and what each already holds. If none, tell the
+user to mark one and treat the call as not ready. **Tradability is a gate, not a footnote:** every
+`get_quote` on a live book returns `broker_availability` — if the connected broker does not list the
+instrument, say so and do NOT emit the call; `tradable: null` means the broker was unreachable, which
+is UNKNOWN (flag it, never read it as a no). `check_broker_symbol` checks a name you haven't quoted.
+Then emit. *Tools:* `get_short_interest`, `get_options_context`,
 `get_derivatives_context`.
 - **Fit signal — set `lens_fit`.** Did your mode's lens find a clean read here? `fit: "good"` when the
   setup genuinely belongs in this mode. `fit: "weak"` + `suggested_mode` ONLY when it clearly belongs in a

@@ -24,7 +24,8 @@ import { getSecFilings } from '../providers/sec.provider.js'
 import { getEarningsCalendar, getFundamentals } from '../providers/fmp.provider.js'
 import { getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
 import { logger } from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, buildPositionsSection, makeToolHandler, buildTimeSection, formatClientTime } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, makeToolHandler, buildTimeSection, formatClientTime } from './agentUtils.js'
+import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
 
 // Re-exported under its historical name so the existing unit test resolves unchanged; the
 // implementation now lives in agentUtils (Mentor authors UTC bounds the same way).
@@ -51,6 +52,8 @@ const MAX_RECENT_MESSAGES = 6
 
 export const TOOLS = toolsFor({
     web_search: '',
+    get_trading_context: TRADING_CONTEXT_TOOL_SPEC.get_trading_context,
+    check_broker_symbol: TRADING_CONTEXT_TOOL_SPEC.check_broker_symbol,
     get_quote: `Get the current real-time price quote for a stock ticker. Call this when the user asks about current price, today's levels, or when you need live price data to answer accurately.`,
     get_candles: `Fetch recent OHLCV candles for a ticker. Use this whenever the user asks about orderblocks, support/resistance, chart patterns, price levels, or any question that requires seeing recent price action. Never say you cannot see live data — call this tool first.`,
     get_price_action: `Momentum/positioning snapshot for a ticker: 1d/5d/1m/3m % moves, position within the 1y range, and relative volume. A fast read early in formation on whether the name is actually moving the way the thesis claims and whether volume backs it — before drilling into exact candles.`,
@@ -74,7 +77,6 @@ export const TOOLS = toolsFor({
 // Candle config / aggregation / chart caching / the get_quote·candles·earnings·chart
 // handlers are shared with Kairos — see services/marketData.tools.js.
 const TOOL_HANDLERS = {
-    get_quote:      makeQuoteHandler(LOG),
     get_candles:    makeCandlesHandler(LOG),
     get_earnings:   makeEarningsHandler(LOG),
     get_indicators: makeIndicatorsHandler(LOG),
@@ -109,9 +111,12 @@ const TOOL_HANDLERS = {
 // surface the rendered chart to the user's chat when the agent flags show_to_user;
 // pass onChart = null (non-stream path) to keep get_chart model-only — the image
 // still reaches the LLM, it just isn't shown to the user.
-function _buildToolHandlers(onChart) {
+function _buildToolHandlers(onChart, userId = null) {
     return {
         ...TOOL_HANDLERS,
+        // Bound to the user: the venue reads, and the quote (which carries broker availability).
+        ...makeTradingContextHandlers(userId),
+        get_quote: makeQuoteHandler(LOG, userId),
         get_chart: makeChartHandler({ log: LOG, onChart, readText: 'Analyze the price structure visually — patterns, S/R, orderblocks, false breaks first; indicators only confirm.' }),
         // Vision-backed price-action tools — need onChart to (optionally) surface the analyzed chart.
         get_orderblocks:  makeStructureVisionHandler({ log: LOG, kind: 'orderblocks',  vision: OB_VISION, onChart }),
@@ -124,8 +129,8 @@ export const ideaAgentService = {
     chatStream,
 }
 
-async function chat({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, clientTime = null }) {
-    const systemPrompt = _buildSystemPrompt(analysisState, brokerContext, [], clientTime)
+async function chat({ messages, userPrompt, analysisState = emptyAnalysisState(), clientTime = null }) {
+    const systemPrompt = _buildSystemPrompt(analysisState, [], clientTime)
     const builtMessages = _buildMessages({ messages, userPrompt, analysisState })
 
     logger.info(LOG, 'chat start', {
@@ -153,14 +158,14 @@ async function chat({ messages, userPrompt, analysisState = emptyAnalysisState()
     return { reply, analysisState: updatedState, ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), brokerContext = null, ideaAccounts = [], mainAccountId = null, clientTime = null, model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, signal,
+async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisState(), ideaAccounts = [], mainAccountId = null, clientTime = null, model: requestedModel, reasoningEffort, userId, onToken, onAsset, onInterval, onChart, onPhase, onToolStart, onReasoning, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
 
     const tools        = TOOLS
-    const toolHandlers = _buildToolHandlers(onChart)
+    const toolHandlers = _buildToolHandlers(onChart, userId)
 
-    const systemPrompt   = _buildSystemPrompt(analysisState, brokerContext, ideaAccounts, clientTime, mainAccountId)
+    const systemPrompt   = _buildSystemPrompt(analysisState, ideaAccounts, clientTime, mainAccountId)
     const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
 
     // (the 'chatStream start' line lives in runAgentStream now — it's the one that knows the
@@ -192,7 +197,7 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
     return { reply, analysisState: updatedState, phase: phase.get(), ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-function _buildSystemPrompt(analysisState, brokerContext, ideaAccounts = [], clientTime = null, mainAccountId = null) {
+function _buildSystemPrompt(analysisState, ideaAccounts = [], clientTime = null, mainAccountId = null) {
     const asset   = analysisState?.structured_state?.active_asset || 'none'
     const summary = analysisState?.recent_chat_summary || 'No prior context.'
     const pt      = analysisState?.structured_state?.pending_trade
@@ -213,7 +218,7 @@ CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this mont
 ${buildTimeSection(clientTime, 'a time condition')}
 CONVERSATION CONTEXT:
 ${summary}
-Active asset: ${asset}${stateSection}${buildPositionsSection(brokerContext)}${_buildIdeaAccountsSection(ideaAccounts, mainAccountId)}`
+Active asset: ${asset}${stateSection}${_buildIdeaAccountsSection(ideaAccounts, mainAccountId)}`
 
     return [
         { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },

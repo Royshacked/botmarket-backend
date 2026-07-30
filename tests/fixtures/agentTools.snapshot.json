@@ -5,6 +5,30 @@
       "name": "web_search"
     },
     {
+      "name": "get_trading_context",
+      "description": "The user's live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities, whether it is the SELECTED one, and the positions currently open in it. Call it before you size anything, commit to a venue, or answer any question about accounts, balances, buying power or what the user is already holding — never guess these.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "check_broker_symbol",
+      "description": "Check whether a specific instrument is actually TRADABLE at the user's connected live broker, and what the broker calls it (e.g. NQ → US100.cash). Three answers: tradable true (with brokerSymbol), false (the broker answered and does not list it), or null (the broker could not be reached — UNKNOWN, never treat as unavailable). Call it before recommending or building anything on a live book: a perfect setup on an instrument the broker does not list cannot be traded. Paper and manual accept anything the app can price, so this is a live-broker question.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "The instrument to check, as the user says it e.g. AVGO, NQ, BTCUSD"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
       "name": "get_quote",
       "description": "Get the current real-time price quote for a stock ticker. Call this when the user asks about current price, today's levels, or when you need live price data to answer accurately.",
       "input_schema": {
@@ -424,6 +448,30 @@
       "name": "web_search"
     },
     {
+      "name": "get_trading_context",
+      "description": "The book's trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities, whether it is selected, and what is already open in it. The capital base and existing exposure a construction or rebalance must be sized against — read it, never assume it. No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "check_broker_symbol",
+      "description": "Check whether a name is actually TRADABLE at the user's connected live broker, and what the broker calls it. A holding the broker does not list cannot be bought, so check before adding a new name to a live book. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "The instrument to check, as the user says it e.g. AVGO, NQ, BTCUSD"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
       "name": "get_quote",
       "description": "Get current price quote for a single ticker symbol.",
       "input_schema": {
@@ -431,7 +479,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. AAPL, NVDA, SPY"
+            "description": "Stock ticker symbol e.g. AAPL, NVDA"
           }
         },
         "required": [
@@ -525,7 +573,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. AAPL, NVDA, FDX"
+            "description": "e.g. AAPL, NVDA, TSLA"
           }
         },
         "required": [
@@ -541,7 +589,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. TSLA, GME, AAPL"
+            "description": "e.g. GME, TSLA, AAPL"
           }
         },
         "required": [
@@ -689,6 +737,30 @@
       "name": "web_search"
     },
     {
+      "name": "get_trading_context",
+      "description": "The user's trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities and open positions. Use it to keep a list ACTIONABLE — the account size a name has to be sizeable in, and what the user already holds. No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "check_broker_symbol",
+      "description": "Check whether a candidate is actually TRADABLE at the user's connected live broker, and what the broker calls it. A name that screens beautifully but the broker does not list is a dead candidate — check before you commit it to the list, and drop or flag it if it is unavailable. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "The instrument to check, as the user says it e.g. AVGO, NQ, BTCUSD"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
       "name": "screen_candidates",
       "description": "Screen the US universe for names that fit the scan's shape — the grounded discovery leg (Phase 2). Filter by sector, market cap, price, beta, dividend, and a liquidity floor (volume). NOTE: this is a FUNDAMENTAL & liquidity screen — it CANNOT filter for chart setups (52-week-high, base, RSI). For a technical angle, use it to define a liquid, in-sector universe, then confirm the setup per-name with get_candles/get_indicators. Returns a compact list; qualify each hit before listing it.",
       "input_schema": {
@@ -829,7 +901,7 @@
             "items": {
               "type": "string"
             },
-            "description": "e.g. [\"AAPL\",\"NVDA\",\"FDX\"]"
+            "description": "e.g. [\"AAPL\",\"NVDA\",\"GLD\"]"
           }
         },
         "required": [
@@ -861,7 +933,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. AAPL, NVDA, SPY"
+            "description": "Stock ticker symbol e.g. AAPL, NVDA"
           },
           "timeframe": {
             "type": "string",
@@ -877,7 +949,7 @@
               "week",
               "month"
             ],
-            "description": "Candle timeframe. 2hr/4hr are aggregated from native 1hr bars; every other resolution is native. Match it to the scan's trade style — intraday/day → minutes/hours, swing → day, long term → day/week."
+            "description": "Candle timeframe. 2hr and 4hr are aggregated server-side from native 1hr bars into true 2hr/4hr OHLCV (Yahoo has no native 2hr/4hr); every other resolution is a native interval. Sub-hour history is limited (1min ~5 days, 5/15/30min ~weeks) — match the timeframe to the setup."
           }
         },
         "required": [
@@ -894,7 +966,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. AAPL, NVDA"
+            "description": "Stock ticker symbol e.g. AAPL, NVDA"
           },
           "timeframe": {
             "type": "string",
@@ -932,7 +1004,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "Ticker symbol e.g. AAPL, NVDA"
+            "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
           },
           "timeframe": {
             "type": "string",
@@ -948,11 +1020,11 @@
               "week",
               "month"
             ],
-            "description": "Chart timeframe — match the scan's trade style."
+            "description": "Chart timeframe. All resolutions render natively via TradingView."
           },
           "indicators": {
             "type": "string",
-            "description": "Optional overlays, e.g. \"ema(50), vwap, volume\". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure without moving-average clutter."
+            "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
           }
         },
         "required": [
@@ -969,7 +1041,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "Ticker symbol e.g. AAPL, NVDA"
+            "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
           },
           "timeframe": {
             "type": "string",
@@ -985,7 +1057,7 @@
               "week",
               "month"
             ],
-            "description": "Chart timeframe to read the orderblocks on."
+            "description": "Chart timeframe — read the orderblocks on the timeframe(s) you trade on."
           }
         },
         "required": [
@@ -1002,7 +1074,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "Ticker symbol e.g. AAPL, NVDA"
+            "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
           },
           "timeframe": {
             "type": "string",
@@ -1018,7 +1090,7 @@
               "week",
               "month"
             ],
-            "description": "Chart timeframe to read the sweeps on."
+            "description": "Chart timeframe — read the sweeps on the timeframe(s) you trade on."
           }
         },
         "required": [
@@ -1095,7 +1167,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. AAPL, FDX, NKE"
+            "description": "e.g. AAPL, NVDA, TSLA"
           }
         },
         "required": [
@@ -1148,7 +1220,7 @@
           },
           "lookback_years": {
             "type": "number",
-            "description": "Years of history to use (default 4, max 6). More years = more reliable pattern but older data."
+            "description": "Years of history to use (default 4, max 6)."
           }
         },
         "required": [
@@ -1315,7 +1387,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. AAPL, NVDA"
+            "description": "e.g. AAPL, NVDA, SPY"
           }
         },
         "required": [
@@ -1331,7 +1403,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. AAPL, NKE"
+            "description": "e.g. AAPL, NVDA, TSLA"
           }
         },
         "required": [
@@ -1347,7 +1419,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. AAPL, NVDA"
+            "description": "e.g. AAPL, NVDA, TSLA"
           }
         },
         "required": [
@@ -1395,7 +1467,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. GME, TSLA"
+            "description": "e.g. GME, TSLA, AAPL"
           }
         },
         "required": [
@@ -1411,7 +1483,31 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. NVDA, SPY"
+            "description": "e.g. NVDA, SPY, AAPL"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
+      "name": "get_trading_context",
+      "description": "The user's live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities, whether it is the SELECTED one, and the positions currently open in it. Call it before you size anything, commit to a venue, or answer any question about accounts, balances, buying power or what the user is already holding — never guess these.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "check_broker_symbol",
+      "description": "Check whether a name is actually TRADABLE at the user's connected live broker, and what the broker calls it. Coverage on a name the user physically cannot buy is research nobody can act on — check before initiating, and say so in the thesis if the name is unavailable. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "The instrument to check, as the user says it e.g. AVGO, NQ, BTCUSD"
           }
         },
         "required": [
@@ -1433,7 +1529,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "Ticker symbol e.g. AAPL, NVDA"
+            "description": "Stock ticker symbol e.g. AAPL, NVDA"
           }
         },
         "required": [
@@ -1449,7 +1545,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "Ticker symbol e.g. AAPL, NVDA"
+            "description": "Stock ticker symbol e.g. AAPL, NVDA"
           },
           "timeframe": {
             "type": "string",
@@ -1465,7 +1561,7 @@
               "week",
               "month"
             ],
-            "description": "Candle timeframe. 2hr/4hr are aggregated server-side from native 1hr bars; every other resolution is native. Sub-hour history is limited — match the timeframe to the horizon."
+            "description": "Candle timeframe. 2hr and 4hr are aggregated server-side from native 1hr bars into true 2hr/4hr OHLCV (Yahoo has no native 2hr/4hr); every other resolution is a native interval. Sub-hour history is limited (1min ~5 days, 5/15/30min ~weeks) — match the timeframe to the setup."
           }
         },
         "required": [
@@ -1524,10 +1620,26 @@
     },
     {
       "name": "get_trading_context",
-      "description": "The user's live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and the marked-able accounts (id, broker, name, balance, capabilities). Use it to confirm a venue exists before finalizing, to feed sizing, and to tell the user what to mark. No arguments.",
+      "description": "The user's live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and the marked-able accounts (id, broker, name, balance, capabilities, which is selected, and what is currently open in each). Use it to confirm a venue exists before finalizing, to feed sizing, to weigh existing exposure, and to tell the user what to mark. No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}
+      }
+    },
+    {
+      "name": "check_broker_symbol",
+      "description": "Check whether a specific instrument is actually TRADABLE at the user's connected live broker, and what the broker calls it (e.g. NQ → US100.cash). Three answers: tradable true (with brokerSymbol), false (the broker answered and does not list it), or null (the broker could not be reached — UNKNOWN, never treat as unavailable). Call it before recommending or building anything on a live book: a perfect setup on an instrument the broker does not list cannot be traded. Paper and manual accept anything the app can price, so this is a live-broker question.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "The instrument to check, as the user says it e.g. AVGO, NQ, BTCUSD"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
       }
     },
     {
@@ -1541,7 +1653,7 @@
             "items": {
               "type": "string"
             },
-            "description": "two or more tickers — the asset PLUS its suspected drivers, e.g. [\"NVDA\",\"SMH\",\"QQQ\"]"
+            "description": "two or more tickers, e.g. [\"NVDA\",\"AAPL\",\"GLD\"]"
           }
         },
         "required": [
@@ -1573,15 +1685,15 @@
               "week",
               "month"
             ],
-            "description": "Chart timeframe. All resolutions render natively."
+            "description": "Chart timeframe. All resolutions render natively via TradingView."
           },
           "indicators": {
             "type": "string",
-            "description": "Optional overlays to draw, e.g. \"vwap, ema(50), volume\". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure, orderblocks, sweeps and false breaks without moving-average clutter. Add an overlay ONLY when you want to confirm a read against it."
+            "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
           },
           "show_to_user": {
             "type": "boolean",
-            "description": "Set true when this chart informs the actual playbook (zones/levels/patterns) — the user wants to see what you are reading. Leave false only for a throwaway internal peek."
+            "description": "Set true whenever this chart relates to the user's ACTUAL setup — you are defining, validating, or refining their entry / stop / take-profit or reading the market structure behind it, or they asked to see it. In those cases the user wants to see what you are looking at, so show it. Leave false / omit ONLY for a quick throwaway internal peek that does not inform the setup under discussion; such a check must NOT appear in the chat."
           }
         },
         "required": [
@@ -1672,7 +1784,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "Ticker symbol e.g. AAPL, NVDA"
+            "description": "Stock ticker symbol e.g. AAPL, NVDA"
           },
           "timeframe": {
             "type": "string",
@@ -1732,7 +1844,7 @@
               "week",
               "month"
             ],
-            "description": "For \"price\" mode: the cycle resolution. 1min–1hr = intraday cycle (bars); day (default)/week/month = multi-day swing cycle. Ignored for \"calendar\" (always daily/yearly)."
+            "description": "For \"price\" mode: the cycle resolution. 1min–1hr = intraday cycle (bars); day (default)/week/month = multi-day swing cycle. Ignored for \"calendar\"."
           },
           "calendar_window": {
             "type": "object",
@@ -1854,7 +1966,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. GME, TSLA"
+            "description": "e.g. GME, TSLA, AAPL"
           }
         },
         "required": [
@@ -1870,7 +1982,7 @@
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "e.g. NVDA, SPY"
+            "description": "e.g. NVDA, SPY, AAPL"
           }
         },
         "required": [
@@ -1886,7 +1998,7 @@
         "properties": {
           "symbol": {
             "type": "string",
-            "description": "e.g. BTC, ETH, SOL"
+            "description": "e.g. BTC, ETH, SOL (or BTC-USD / BTCUSDT)"
           }
         },
         "required": [

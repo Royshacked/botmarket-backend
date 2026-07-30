@@ -297,7 +297,7 @@ below is plumbing it inherits unchanged.
 | need | reuse |
 |---|---|
 | model routing | `modelRouter.service.js` **classifier mode** — no `PHASE_TABLES` entry (Mentor has no phases; `axl: {}` is the precedent) |
-| agent scaffolding | `agentUtils.js` — `makePromptLoader`, `resolveAgentStream`, `buildPositionsSection`, `buildAccountLines`, `makeToolHandler`, `COMMON_TOOL_HANDLERS` |
+| agent scaffolding | `agentUtils.js` — `makePromptLoader`, `resolveAgentStream`, `buildAccountLines`, `makeToolHandler`, `COMMON_TOOL_HANDLERS` |
 | market tools | `marketData.tools.js` — quote / candles / earnings / chart / indicators handlers |
 | SMC toolkit | `smc.tools.js` — `SMC_TOOLS` + `SMC_TOOL_HANDLERS` (same engine at build AND at assess) |
 | structure vision | `priceStructure.tools.js` — `makeStructureVisionHandler`, `OB_VISION`, `FB_VISION` |

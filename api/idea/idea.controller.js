@@ -2,7 +2,6 @@ import { logger }           from '../../services/logger.service.js'
 // ⚠ ARCHIVED 2026-07-29 — these handlers are no longer reachable: server.js does not mount
 // `/api/idea`. See the header of services/idea.agent.service.js for the why and how to revive.
 import { ideaAgentService, emptyAnalysisState } from '../../services/idea.agent.service.js'
-import { brokerService }     from '../broker/broker.service.js'
 import { resolveModel }      from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
@@ -20,8 +19,6 @@ export async function streamIdea(req, res) {
     await streamAgentResponse(req, res, {
         log: LOG,
         handler: async ({ sendEvent, signal }) => {
-            const brokerContext = await brokerService.loadContext(req.user._id)
-
             const { routingMode, currentPhase, model, reasoningEffort } = req.body ?? {}
             const lastMessage = parsed.messages?.at(-1)?.content ?? parsed.userPrompt ?? ''
             const routing = await resolveModel({ routingMode, agent: 'idea', phase: currentPhase, model, reasoningEffort, lastMessage })
@@ -30,7 +27,6 @@ export async function streamIdea(req, res) {
                 messages:      parsed.messages,
                 userPrompt:    parsed.userPrompt,
                 analysisState: parsed.analysisState ?? emptyAnalysisState(),
-                brokerContext,
                 ideaAccounts:  parsed.ideaAccounts ?? [],
                 mainAccountId: parsed.mainAccountId ?? null,
                 clientTime:    parsed.clientTime ?? null,
@@ -64,13 +60,10 @@ export async function getIdea(req, res) {
             return res.status(400).send({ error: parsed.error })
         }
 
-        const brokerContext = await brokerService.loadContext(req.user._id)
-
         const result = await ideaAgentService.chat({
             messages:      parsed.messages,
             userPrompt:    parsed.userPrompt,
             analysisState: parsed.analysisState ?? emptyAnalysisState(),
-            brokerContext,
             clientTime:    parsed.clientTime ?? null,
         })
 

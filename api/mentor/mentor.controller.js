@@ -1,5 +1,4 @@
 import { mentorAgentService, emptyMentorState } from '../../services/mentor.agent.service.js'
-import { brokerService }       from '../broker/broker.service.js'
 import { resolveModel }        from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
@@ -28,7 +27,6 @@ export async function streamMentor(req, res) {
 
             // The user's live book across paper/live/manual — so Mentor can say "this stacks the
             // same name" before it sizes. Best-effort: a broker hiccup just drops the block.
-            const brokerContext = await brokerService.loadContext(req.user._id).catch(() => ({}))
 
             const result = await mentorAgentService.chatStream({
                 messages:      parsed.messages,
@@ -37,7 +35,6 @@ export async function streamMentor(req, res) {
                 accounts:      parsed.accounts,
                 mainAccountId: parsed.mainAccountId,
                 clientTime:    parsed.clientTime,
-                brokerContext,
                 model:           routing.model,
                 reasoningEffort: routing.reasoningEffort,
                 userId:          req.user._id,

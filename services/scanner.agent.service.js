@@ -11,6 +11,7 @@ import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructu
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, TRADE_HORIZONS } from './agentUtils.js'
+import { makeTradingContextHandlers } from './tradingContext.tools.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { isToolError } from './toolResult.util.js'
 import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS } from './scanner.grounding.js'
@@ -27,6 +28,8 @@ const MAX_MESSAGES = 10
 
 export const TOOLS = toolsFor({
     web_search: '',
+    get_trading_context: `The user's trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities and open positions. Use it to keep a list ACTIONABLE — the account size a name has to be sizeable in, and what the user already holds. No arguments.`,
+    check_broker_symbol: `Check whether a candidate is actually TRADABLE at the user's connected live broker, and what the broker calls it. A name that screens beautifully but the broker does not list is a dead candidate — check before you commit it to the list, and drop or flag it if it is unavailable. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.`,
     screen_candidates: `Screen the US universe for names that fit the scan's shape — the grounded discovery leg (Phase 2). Filter by sector, market cap, price, beta, dividend, and a liquidity floor (volume). NOTE: this is a FUNDAMENTAL & liquidity screen — it CANNOT filter for chart setups (52-week-high, base, RSI). For a technical angle, use it to define a liquid, in-sector universe, then confirm the setup per-name with get_candles/get_indicators. Returns a compact list; qualify each hit before listing it.`,
     get_market_movers: `Today's biggest movers — the momentum / gap / "what's moving" starting pool for Phase-2 discovery. kind="gainers" (biggest % up), "losers" (biggest % down — short pool), or "active" (highest volume). Grounded discovery, not a watchlist: qualify every name (relative strength, tradability, a real catalyst) before it makes the list. US-listed.`,
     get_sector_snapshot: `Today's sector rotation — every sector ranked leaders→laggards by average move. Use it in Phase 2 for a sector-rotation angle (find the leading/lagging groups, then screen_candidates INSIDE them), and in Phase 3 as the sector leg of the relative-strength check (is the name's sector leading?). No arguments.`,
@@ -167,7 +170,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     // Per-session grounding ledger — records which tickers a real, successful tool
     // engaged, so a fabricated candidate that no tool touched is dropped at normalize.
     const ledger = makeGroundingLedger()
-    const toolHandlers = _wrapForGrounding(TOOL_HANDLERS, ledger)
+    const toolHandlers = _wrapForGrounding({ ...TOOL_HANDLERS, ...makeTradingContextHandlers(userId) }, ledger)
 
     // Stable cached base + volatile tail: today's date (so "next week" resolves)
     // and, when editing an existing list, that list's current contents so the

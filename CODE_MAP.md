@@ -85,6 +85,14 @@ services/
                             feeds; pure LLM-ready formatters (edge classified above/below/thin vs Street). (P2)
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue
+  tradingContext.service.js  ONE venue read for every desk: getTradingContext (mode paper/live/manual,
+                          connected brokers, each account's balance + capabilities + selected + open
+                          positions) and checkBrokerSymbol (is this tradable HERE, and what does the
+                          broker call it — 3-state: true / false / null=unreachable, never merged).
+                          withBrokerAvailability rides on get_quote so a live-book desk is TOLD
+                          tradability rather than asked to remember to check (TTL-cached per user+ticker)
+  tradingContext.tools.js  get_trading_context + check_broker_symbol handlers (userId-bound, built
+                          per request) + the shared tool descriptions. Wired into all 7 agents
   llmStream.util.js       createTagSuppressor({ onToken, captures })
   modelRouter.service.js  resolveModel(); REASONING_EFFORT enum
   conditionTree.service.js  resolve/collect/normalize condition trees

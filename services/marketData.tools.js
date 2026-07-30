@@ -7,6 +7,7 @@ import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSer
 import { sessionStartMs } from './market.service.js'
 import { toolError } from './toolResult.util.js'
 import { makeToolHandler } from './agentUtils.js'
+import { withBrokerAvailability } from './tradingContext.service.js'
 import { logger } from './logger.service.js'
 
 // Shared market-data toolset for the chart-reading agents (Idea, Kairos, and any
@@ -85,10 +86,17 @@ export { cachedChartImage }
 // Each returns a tool handler wrapped in the standard makeToolHandler try/catch so
 // the model-visible failure string stays identical to what the agents returned before.
 
-export function makeQuoteHandler(log) {
+/**
+ * `userId` (optional) turns on the venue check: every quote comes back carrying whether the
+ * instrument is actually listed at the user's live broker. Wired here rather than left to a prompt
+ * because availability is a FACT about the venue, not a judgment about the trade — a desk must not
+ * be able to work up a live setup on an instrument the broker doesn't list. Omit it (monitors,
+ * non-user contexts) and the quote is returned untouched. See withBrokerAvailability.
+ */
+export function makeQuoteHandler(log, userId = null) {
     return makeToolHandler(
         'get_quote',
-        ({ ticker }) => getQuote(ticker),
+        async ({ ticker }) => withBrokerAvailability(await getQuote(ticker), userId, ticker),
         (err, { ticker }) => `Could not fetch quote for ${ticker}: ${err.message}`,
         log,
     )

@@ -12,7 +12,8 @@ import { dirname, join } from 'path'
 
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
-import { makePromptLoader, stripEmitTags, buildPositionsSection, normalizeMessages, makeToolHandler, COMMON_TOOL_HANDLERS } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, COMMON_TOOL_HANDLERS } from './agentUtils.js'
+import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from './valuation.tools.js'
 import { logger } from './logger.service.js'
@@ -39,6 +40,8 @@ export const TOOLS = [
         get_macro_snapshot: `Hard macro regime: treasury curve, key econ indicators, sector move. The top-down backdrop for a long-horizon thesis. No arguments.`,
         get_short_interest: `Short % of float + days-to-cover for a US single stock (FINRA, ~2-week lag). Crowded-bearish / squeeze context for the thesis. No ETFs/crypto.`,
         get_options_context: `Options positioning for a US equity/ETF: put/call ratio + ATM implied vol (nearest expiry). How big a move the market is pricing around a catalyst.`,
+        get_trading_context: TRADING_CONTEXT_TOOL_SPEC.get_trading_context,
+        check_broker_symbol: `Check whether a name is actually TRADABLE at the user's connected live broker, and what the broker calls it. Coverage on a name the user physically cannot buy is research nobody can act on — check before initiating, and say so in the thesis if the name is unavailable. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.`,
     }),
 ]
 
@@ -56,12 +59,12 @@ const TOOL_HANDLERS = {
 export const analystAgentService = { chatStream }
 
 async function chatStream({
-    messages, userPrompt, chatState = {}, brokerContext = null, seed = null,
+    messages, userPrompt, chatState = {}, seed = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onToolStart, onReasoning, onPhase, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
-    const systemPrompt  = _buildSystemPrompt(chatState, brokerContext, seed)
+    const systemPrompt  = _buildSystemPrompt(chatState, seed)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
 
@@ -72,7 +75,7 @@ async function chatStream({
 
     const raw = await _run({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
-        tools: TOOLS, toolHandlers: TOOL_HANDLERS,
+        tools: TOOLS, toolHandlers: { ...TOOL_HANDLERS, ...makeTradingContextHandlers(userId) },
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
         meta: { userPrompt },
     })
@@ -99,7 +102,7 @@ function _cleanDraft(c) {
     return { ...c, symbol: c.symbol.toUpperCase().trim() }
 }
 
-function _buildSystemPrompt(chatState, brokerContext = null, seed = null) {
+function _buildSystemPrompt(chatState, seed = null) {
     const today  = new Date().toISOString().slice(0, 10)
     const active = chatState?.active_symbol || 'none'
     const draft  = chatState?.draft
@@ -117,7 +120,7 @@ function _buildSystemPrompt(chatState, brokerContext = null, seed = null) {
         : ''
     const dynamic = `---
 CURRENT DATE: ${today}. Resolve relative dates (this quarter, next earnings) against it.
-Active name: ${active}${seedBlock}${draft}${existingBlock}${buildPositionsSection(brokerContext)}`
+Active name: ${active}${seedBlock}${draft}${existingBlock}`
     return [
         { type: 'text', text: _systemPrompt(), cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamic },

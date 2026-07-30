@@ -2,7 +2,7 @@ import { fileURLToPath } from 'url'
 import { makePhaseCapture, runAgentStream } from './agentIO.js'
 import { parseEmitBlock, mergeDraft } from './agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, buildPositionsSection, normalizeMessages, resolveMainAccountId, TRADE_HORIZONS } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, resolveMainAccountId, TRADE_HORIZONS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS_FOR_MODE, buildKairosToolHandlers } from './kairos.tools.js'
 import { normalizeMode } from './kairos.modes.js'
@@ -40,7 +40,7 @@ export const kairosAgentService = {
 }
 
 async function chatStream({
-    messages, userPrompt, chatState = emptyKairosState(), accounts = [], mainAccountId = null, seed = null, brokerContext = null,
+    messages, userPrompt, chatState = emptyKairosState(), accounts = [], mainAccountId = null, seed = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onChart, onToolStart, onReasoning, onPhase, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
@@ -49,7 +49,7 @@ async function chatStream({
     const tools        = KAIROS_TOOLS_FOR_MODE(mode)
     const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
-    const systemPrompt  = _buildSystemPrompt(chatState, accounts, brokerContext, mode, seed, mainAccountId)
+    const systemPrompt  = _buildSystemPrompt(chatState, accounts, mode, seed, mainAccountId)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
     // The model emits <phase>N</phase> (1–7) at the start of each turn; capture it for the UI
@@ -175,7 +175,7 @@ export async function _finalizeCall(call, { userId = null, accounts = [], mainAc
 }
 
 // ─── Prompt / messages ────────────────────────────────────────────────────────
-function _buildSystemPrompt(chatState, accounts, brokerContext = null, mode = normalizeMode(), seed = null, mainAccountId = null) {
+function _buildSystemPrompt(chatState, accounts, mode = normalizeMode(), seed = null, mainAccountId = null) {
     const asset = chatState?.active_asset || 'none'
     const draft = chatState?.draft
         ? `\nDraft call so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
@@ -203,7 +203,7 @@ function _buildSystemPrompt(chatState, accounts, brokerContext = null, mode = no
 CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar or setting valid_until.
 ACTIVE MODE: ${mode} — build this call THROUGH the ${mode} lens (committed; do not switch lenses mid-build).
 CONVERSATION CONTEXT:
-Active asset: ${asset}${seedBlock}${draft}${buildPositionsSection(brokerContext)}${_buildAccountsSection(accounts, mainAccountId)}`
+Active asset: ${asset}${seedBlock}${draft}${_buildAccountsSection(accounts, mainAccountId)}`
 
     const modeModule = (_modePrompt[mode] ?? _modePrompt.discretionary)()
     return [

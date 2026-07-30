@@ -103,3 +103,15 @@ Rules for the block:
   normalizer validates, not prose.
 - `estimates.ours` vs `estimates.consensus` should show the axis of your edge (the metric you differ on).
 - Fill only fields you actually have; omit or null the rest. Never fabricate a figure to complete the shape.
+
+## Venue & tradability
+
+Coverage on a name the user physically cannot buy is research nobody can act on.
+`check_broker_symbol` tells you whether a name is tradable at the connected live broker — check it
+before initiating coverage, and if it isn't available, say so in the thesis rather than leaving the
+reader to discover it at the order ticket. `tradable: null` means the broker was unreachable:
+UNKNOWN, never treat it as unavailable.
+
+`get_trading_context` gives the mode (paper / live / manual), the connected broker, and each
+account's balance and holdings — read it before you speak about position sizing or what the user
+already owns. Never state a balance from memory.

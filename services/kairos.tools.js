@@ -1,7 +1,7 @@
 import { getPriceAction, getCycleAnalysis, getCorrelations } from '../providers/yahoofinance.provider.js'
 import { toolsFor } from './agentTools.registry.js'
 import { getEarningsCalendar, getFundamentals, getStockPeers, getMacroSnapshot, getSectorSnapshot } from '../providers/fmp.provider.js'
-import { getTradingContext } from './tradingContext.service.js'
+import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { COMMON_TOOL_HANDLERS, makeToolHandler } from './agentUtils.js'
 import {
@@ -28,7 +28,8 @@ export const KAIROS_TOOLS = [
         get_peers: `Fetch the fundamental PEER SET for a ticker (same sector/size cohort) — the candidate names it may move with. Use it in the Phase 2 correlation read to STOP GUESSING peers: pull the set, pick the ones that matter (close competitors, the sector/industry ETF, a lead-lag driver), then feed those into get_correlations to measure how tightly the asset ACTUALLY tracks each. US-listed equities/ETFs.`,
         get_macro_snapshot: `Hard macro read for the Phase 2 regime call: the current Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today's sector rotation (leaders/laggards). The DATA half of the regime read — pair it with web_search for the narrative. Weight by horizon: real weight for swing, a lighter backdrop for intraday/day. No arguments.`,
         get_sector_snapshot: `Today's sector rotation — every sector ranked leaders→laggards by average move. Institutional mode: the sector leg of the relative-strength read (is the name's sector rotating IN or OUT?). No arguments.`,
-        get_trading_context: `The user's live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and the marked-able accounts (id, broker, name, balance, capabilities). Use it to confirm a venue exists before finalizing, to feed sizing, and to tell the user what to mark. No arguments.`,
+        get_trading_context: `The user's live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and the marked-able accounts (id, broker, name, balance, capabilities, which is selected, and what is currently open in each). Use it to confirm a venue exists before finalizing, to feed sizing, to weigh existing exposure, and to tell the user what to mark. No arguments.`,
+        check_broker_symbol: TRADING_CONTEXT_TOOL_SPEC.check_broker_symbol,
         get_correlations: `Pairwise correlation matrix (1y daily returns) for a set of tickers. Use it in the Phase 2 correlation read: include the traded asset alongside the names you suspect drive it — its sector/industry ETF, close peers (from get_peers), an index (SPY/QQQ), or a lead-lag driver (e.g. SMH for a chip name, BTC for a high-beta alt, a crude proxy for an E&P) — to measure how tightly it actually moves with each, beyond eyeballing charts. The numbers ground the market_sensitivity level + drivers you emit.`,
         get_chart: `Render an actual TradingView candlestick chart IMAGE (with indicator overlays) and look at it directly, for VISUAL / structural analysis — chart patterns, false breaks, orderblocks, trendlines, where price sits vs moving averages / VWAP. Use this to decide which patterns work for the asset. For EXACT numeric levels prefer get_candles. One asset, setup stage only.`,
         get_orderblocks: `Detect ORDER BLOCKS on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: the last opposing candle/cluster before an impulsive structure break (bullish OB = last down-candle before a rally; bearish OB = last up-candle before a selloff), whether each is fresh/untested or mitigated, and its zone vs current price. Reach for this in Phase 2/4 to find price-action entry zones and triggers — as easily as you would an indicator value. Levels are approximate; confirm exact prices with get_candles.`,
@@ -105,7 +106,7 @@ const _STATIC_HANDLERS = {
 // The model only sees the tool LIST, so subsetting the list is what gates a mode's toolset;
 // the handler map can stay full (extra handlers are never reached). UNIVERSAL tools are shared
 // by all modes (DRY). NEW numeric SMC tools (K2) + get_sector_snapshot/get_rs_chart join later.
-const UNIVERSAL = ['web_search', 'get_quote', 'get_candles', 'get_chart', 'get_trading_context']
+const UNIVERSAL = ['web_search', 'get_quote', 'get_candles', 'get_chart', 'get_trading_context', 'check_broker_symbol']
 // SMC-lens numeric tools (smc only). get_key_levels is SHARED (classical prior-day levels + SMC session liquidity).
 const SMC_ONLY = ['get_orderblocks', 'get_fvg', 'get_structure', 'get_liquidity']
 const MODE_TOOLS = {
@@ -133,9 +134,9 @@ export function KAIROS_TOOLS_FOR_MODE(mode) {
 export function buildKairosToolHandlers(onChart, userId = null) {
     return {
         ..._STATIC_HANDLERS,
-        get_trading_context: makeToolHandler('get_trading_context',
-            () => getTradingContext(userId),
-            (err) => `Could not fetch trading context: ${err.message}`, LOG),
+        // Bound to the user: the venue reads, and the quote (which carries broker availability).
+        ...makeTradingContextHandlers(userId),
+        get_quote: makeQuoteHandler(LOG, userId),
         get_chart: makeChartHandler({
             log: LOG,
             onChart,

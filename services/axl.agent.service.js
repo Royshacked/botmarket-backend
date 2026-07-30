@@ -4,6 +4,8 @@ import { logger }         from './logger.service.js'
 import { normalizeMessages, makePromptLoader, stripEmitTags } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { runAgentStream } from './agentIO.js'
+import { toolsFor } from './agentTools.registry.js'
+import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -17,9 +19,13 @@ const MAX_MESSAGES = 12
 // discipline is what keeps it from becoming a superset of the three specialists;
 // anything about forming or changing a trade/portfolio/scan routes to that
 // specialist's own chat. Roles beyond #1 (social bot) + #5 (app help) need
-// account/trade data + tools and are added one by one — no tools yet.
-const TOOLS = []
-const TOOL_HANDLERS = {}
+// account/trade data + tools and are added one by one — the VENUE reads are the
+// first, since "which account am I on / what am I holding / can I trade this
+// here" is a question ABOUT the app, which is Axl's own job, not a desk's.
+const TOOLS = toolsFor({
+    get_trading_context: TRADING_CONTEXT_TOOL_SPEC.get_trading_context,
+    check_broker_symbol: TRADING_CONTEXT_TOOL_SPEC.check_broker_symbol,
+})
 
 // ONE Axl. This turn both converses and routes, which used to be two agents: a `routeIntent` doorman
 // on its own tight prompt (no history, no app knowledge) answered the landing box, while the real
@@ -62,7 +68,7 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
     const raw = await _run({
         log: LOG, requestedModel, userId,
         messages: normalized, systemPrompt,
-        tools: TOOLS, toolHandlers: TOOL_HANDLERS,
+        tools: TOOLS, toolHandlers: makeTradingContextHandlers(userId),
         reasoningEffort, signal, onToken,
         tagCaptures: buildTagCaptures({ route: (text) => { routeCapture = text.trim() } }),
         onToolStart, onReasoning,

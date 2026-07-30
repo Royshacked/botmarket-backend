@@ -372,6 +372,16 @@ export const TOOL_SCHEMAS = {
         "type": "object",
         "properties": {}
     },
+    check_broker_symbol: {
+        "type": "object",
+        "properties": {
+            "ticker": {
+                "type": "string",
+                "description": "The instrument to check, as the user says it e.g. AVGO, NQ, BTCUSD"
+            }
+        },
+        "required": ["ticker"]
+    },
     screen_candidates: {
         "type": "object",
         "properties": {
