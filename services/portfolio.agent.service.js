@@ -8,7 +8,7 @@ import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
 import { formatWorkspaceLine } from '../api/portfolio/portfolioMode.util.js'
 import { logger }         from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildObjectiveSection } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildObjectiveSection, buildAudienceSection } from './agentUtils.js'
 import { makeTradingContextHandlers } from './tradingContext.tools.js'
 import { makeChartHandler } from './marketData.tools.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
@@ -97,7 +97,7 @@ function makeCoverageHandler(userId) {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, objective = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, objective = null, audience = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
     const normalized   = _buildMessages(messages)
@@ -113,6 +113,9 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // Ahead of the mandate deliberately: the objective is what the user actually said on the way in,
     // and the mandate below may have been DERIVED from it (see portfolioChat.service loadStreamContext).
     // Reading the source first makes a mandate that drifted from it visible rather than invisible.
+    // Who we're talking to comes FIRST: it frames how everything below is said.
+    const audienceSection = buildAudienceSection(audience)
+    if (audienceSection) dynamicSections.push(audienceSection)
     const objectiveSection = buildObjectiveSection(objective)
     if (objectiveSection) dynamicSections.push(objectiveSection)
     if (mandate)    dynamicSections.push(_buildMandateSection(mandate))

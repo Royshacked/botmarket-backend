@@ -2,6 +2,7 @@ import { axlAgentService } from '../../services/axl.agent.service.js'
 import { resolveModel }    from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages } from '../_shared/parse.util.js'
+import { getExperienceLevel } from '../../services/experience.service.js'
 
 // The desks a reply may hand the user to. Validated here rather than trusted from the model: an
 // unknown key would leave the client trying to navigate to a tab that doesn't exist, so it becomes
@@ -41,6 +42,7 @@ export async function streamAxl(req, res) {
 
             const result = await axlAgentService.chatStream({
                 messages,
+                audience: await getExperienceLevel(req.user._id),
                 model:           routing.model,
                 reasoningEffort: routing.reasoningEffort,
                 userId:  req.user._id,

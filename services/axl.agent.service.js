@@ -1,7 +1,7 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { logger }         from './logger.service.js'
-import { normalizeMessages, makePromptLoader, stripEmitTags } from './agentUtils.js'
+import { normalizeMessages, makePromptLoader, stripEmitTags, buildAudienceSection } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { runAgentStream } from './agentIO.js'
 import { toolsFor } from './agentTools.registry.js'
@@ -11,6 +11,7 @@ import { getOpenObjective, markRouted } from './objective.service.js'
 import { toObjectiveSummary } from '../api/objectives/objective.model.js'
 import { makeUserDataHandlers, USER_DATA_TOOL_SPEC } from './userData.tools.js'
 import { makeConceptHandlers, CONCEPT_TOOL_SPEC } from './concepts.tools.js'
+import { makeExperienceHandlers, EXPERIENCE_TOOL_SPEC } from './experience.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -41,6 +42,7 @@ export const TOOLS = toolsFor({
     get_performance: USER_DATA_TOOL_SPEC.get_performance,
     get_upcoming_events: USER_DATA_TOOL_SPEC.get_upcoming_events,
     explain_concept: CONCEPT_TOOL_SPEC.explain_concept,
+    set_experience_level: EXPERIENCE_TOOL_SPEC.set_experience_level,
 })
 
 // ONE Axl. This turn both converses and routes, which used to be two agents: a `routeIntent` doorman
@@ -62,7 +64,7 @@ export function _splitRoute(raw) {
     return { desk: desk ? desk.toLowerCase() : null, symbol: symbol || null }
 }
 
-async function chatStream({ messages = [], model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], audience = null, model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     // The objective collaborators are seams too: intake is the one part of Axl that touches the
     // database, and a unit test of the turn should not need one.
@@ -70,6 +72,7 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
     _tradingContextHandlers = makeTradingContextHandlers,
     _userDataHandlers = makeUserDataHandlers,
     _conceptHandlers = makeConceptHandlers,
+    _experienceHandlers = makeExperienceHandlers,
     _getOpenObjective = getOpenObjective,
     _markRouted = markRouted,
 } = {}) {
@@ -77,9 +80,12 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
 
     // Stable cached base + volatile tail (today's date, so "this week" resolves).
     const today = new Date().toISOString().slice(0, 10)
+    const audienceBlock = buildAudienceSection(audience)
     const systemPrompt = [
         { type: 'text', text: _systemPrompt(), cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: `CURRENT DATE: ${today}. Resolve relative timeframes (today, this week, this month) against this date.` },
+        { type: 'text', text: `CURRENT DATE: ${today}. Resolve relative timeframes (today, this week, this month) against this date.${audienceBlock ? `
+
+${audienceBlock}` : ''}` },
     ]
 
     // The chart tag is captured and emitted by runAgentStream (shared protocol) — Axl only forwards
@@ -100,6 +106,7 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
         ..._userDataHandlers(userId),
         // Unbound: an explanation is the same for everyone, which is why it can be authored once.
         ..._conceptHandlers(),
+        ..._experienceHandlers(userId),
         ...objectiveHandlers,
         save_objective: async (args) => {
             const result = await objectiveHandlers.save_objective(args)

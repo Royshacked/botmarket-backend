@@ -3,6 +3,7 @@ import { logger } from '../../services/logger.service.js'
 import { axlAgentService } from '../../services/axl.agent.service.js'
 import { resolveModel }    from '../../services/modelRouter.service.js'
 import { toAgentMessages } from './axlReply.util.js'
+import { getExperienceLevel } from '../../services/experience.service.js'
 
 const LOG   = '[chat]'
 const CONVS = 'chat_conversations'
@@ -173,6 +174,9 @@ export async function triggerAxlReply(userId, conversationId, aiPref = {}) {
 
         const { reply } = await axlAgentService.chatStream({
             messages:        agentMessages,
+            // The SAME Axl answers here and in the hub, so it has to read the room the same way in
+            // both. Without this, someone gets plain language in one surface and jargon in the other.
+            audience:        await getExperienceLevel(userId),
             model:           routing.model,
             reasoningEffort: routing.reasoningEffort,
             userId,

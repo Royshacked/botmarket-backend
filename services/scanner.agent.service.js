@@ -10,7 +10,7 @@ import { isMode } from './kairos.modes.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildObjectiveSection, TRADE_HORIZONS } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildObjectiveSection, buildAudienceSection, TRADE_HORIZONS } from './agentUtils.js'
 import { makeTradingContextHandlers } from './tradingContext.tools.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { isToolError } from './toolResult.util.js'
@@ -161,7 +161,7 @@ function SCANNER_TOOLS_FOR_PROFILE(profile) {
 // KAIROS HAND-OFF MODE section). The bias/horizon ride in the seeded opening message.
 const HANDOFF_CONTEXT = 'KAIROS HAND-OFF MODE: the user was sent here by Kairos to find ONE ticker for a single call. Follow the KAIROS HAND-OFF MODE section — converge to a single best pick, do NOT ask whether they are ready for Kairos, and end with a <kairos_pick> block (not a <scan_list>).'
 
-async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, profile = 'trading', objective = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, profile = 'trading', objective = null, audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
     const prof = profile === 'investing' ? 'investing' : 'trading'
@@ -177,6 +177,8 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     // agent can add / remove / change names against it.
     const today = new Date().toISOString().slice(0, 10)
     const dynamic = [`CURRENT DATE: ${today}. Resolve all relative timeframes (today, next week, this month) against this date.`]
+    const audienceSection = buildAudienceSection(audience)
+    if (audienceSection) dynamic.push(audienceSection)
     const objectiveSection = buildObjectiveSection(objective)
     if (objectiveSection) dynamic.push(objectiveSection)
     const editSection = _buildEditSection(editList)

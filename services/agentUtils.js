@@ -242,6 +242,35 @@ export function buildObjectiveSection(objective) {
     return lines.join('\n')
 }
 
+/**
+ * WHO you are talking to, as a system-prompt block — see api/experience/experience.model.js.
+ *
+ * This is a VOICE parameter and the block says so in the strongest terms available, because it is
+ * the one way this feature could do real harm. Every desk in this app is written practitioner-to-
+ * practitioner; a beginner needs different WORDS, not a different trade. If a desk ever reads this
+ * as licence to widen a stop, shrink a size or soften a risk number "because they're new", it has
+ * stopped adapting its voice and started adapting its judgment — and the user is now getting a
+ * worse trade for being honest about their experience.
+ *
+ * Returns null when there is no view, so an un-inferred user's prompt is byte-identical to today's.
+ *
+ * @returns {string|null}
+ */
+export function buildAudienceSection(level) {
+    if (level === 'beginner') {
+        return [
+            'WHO YOU ARE TALKING TO: someone new to trading.',
+            'Say the same things in plainer words. Define a term the first time you use it, in half a sentence, and move on. Prefer proposing to interrogating — offer a level and explain what it does rather than asking them to supply one they have no way to choose. Skip the shorthand: no bare R, R:R, FVG, BOS/CHoCH, "invalidation", "the structure broke" without saying what it means.',
+            'This changes your WORDS ONLY. The analysis, the levels, the size, the risk and your verdict are exactly what they would have been for anyone else. Never soften a number, never widen a stop, never talk someone out of a real risk because they are new — tell them plainly what it is instead. Being new is a reason to explain more, never a reason to decide differently.',
+            'Do not lecture. If they want to act, help them act and explain alongside, not in front.',
+        ].join('\n')
+    }
+    if (level === 'experienced') {
+        return 'WHO YOU ARE TALKING TO: an experienced trader who has asked to be spoken to normally. Use the standard vocabulary without glossing it, and keep it tight.'
+    }
+    return null
+}
+
 // ─── Emit-tag cleanup ─────────────────────────────────────────────────────────
 // Strip the given emit blocks (<name>…</name>) from a raw model reply. Each name
 // is removed globally, matching the per-agent hand-written `.replace(...)` chains.

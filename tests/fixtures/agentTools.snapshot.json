@@ -2268,6 +2268,36 @@
           "concept"
         ]
       }
+    },
+    {
+      "name": "set_experience_level",
+      "description": "Record how much trading experience this user has, so every desk knows how to talk to them. Set 'beginner' when it is clear from how they write — they ask what a basic term means, describe a goal with no mechanics, or say outright they are new. Set 'experienced' ONLY when they tell you so themselves (\"talk to me normally\", \"I've traded for years\"); you may not conclude it from jargon, and the attempt will be refused. Use 'unset' if they ask you to forget it. Pass source 'declared' when the user said it in their own words, 'inferred' when you worked it out. This changes how the desks WORD things — never what they decide, never a level or a size. Call it once when it becomes clear, not every turn.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "beginner",
+              "experienced",
+              "unset"
+            ],
+            "description": "'experienced' is only accepted with source 'declared' — you may not conclude it yourself."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "declared",
+              "inferred"
+            ],
+            "description": "'declared' = the user said so in their own words. 'inferred' = you worked it out from how they write."
+          }
+        },
+        "required": [
+          "level",
+          "source"
+        ]
+      }
     }
   ]
 }

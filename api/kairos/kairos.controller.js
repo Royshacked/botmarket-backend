@@ -8,6 +8,7 @@ import { sendReason }         from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { parseChatMessages }   from '../_shared/parse.util.js'
 import { getOpenObjective } from '../../services/objective.service.js'
+import { getExperienceLevel } from '../../services/experience.service.js'
 
 const LOG = '[kairos:controller]'
 const MAX_RECENT_CHAT_TURNS = 4
@@ -30,6 +31,7 @@ export async function streamKairos(req, res) {
 
             const result = await kairosAgentService.chatStream({
                 objective:     await getOpenObjective(req.user._id),
+                audience:      await getExperienceLevel(req.user._id),
                 messages:      parsed.messages,
                 userPrompt:    parsed.userPrompt,
                 chatState:     parsed.chatState ?? emptyKairosState(),

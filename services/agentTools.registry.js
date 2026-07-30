@@ -382,6 +382,22 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["ticker"]
     },
+    set_experience_level: {
+        "type": "object",
+        "properties": {
+            "level": {
+                "type": "string",
+                "enum": ["beginner", "experienced", "unset"],
+                "description": "'experienced' is only accepted with source 'declared' — you may not conclude it yourself."
+            },
+            "source": {
+                "type": "string",
+                "enum": ["declared", "inferred"],
+                "description": "'declared' = the user said so in their own words. 'inferred' = you worked it out from how they write."
+            }
+        },
+        "required": ["level", "source"]
+    },
     explain_concept: {
         "type": "object",
         "properties": {

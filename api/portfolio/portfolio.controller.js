@@ -11,6 +11,7 @@ import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util
 import { threadService }          from '../../services/thread.service.js'
 import { resolvePortfolioReviewCard } from '../chat/chat.service.js'
 import { getOpenObjective } from '../../services/objective.service.js'
+import { getExperienceLevel } from '../../services/experience.service.js'
 
 const LOG = '[portfolio:controller]'
 
@@ -53,6 +54,7 @@ export async function streamPortfolio(req, res) {
                 lifecycle,
                 mandate,
                 objective,
+                audience: await getExperienceLevel(req.user._id),
                 thesis: storedThesis,
                 model:           routing.model,
                 reasoningEffort: routing.reasoningEffort,

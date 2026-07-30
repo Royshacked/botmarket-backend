@@ -24,6 +24,7 @@ import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
 import { ensureKairosIndexes } from './api/kairos/kairos.service.js'
 import { ensureTradeIndexes } from './services/tradeCapture.service.js'
 import { ensureObjectiveIndexes } from './api/objectives/objective.model.js'
+import { ensureExperienceIndexes } from './api/experience/experience.model.js'
 import { threadService } from './services/thread.service.js'
 // import { ideaRoutes } from './api/idea/idea.routes.js'   // ARCHIVED — see the mount below
 import { kairosRoutes } from './api/kairos/kairos.routes.js'
@@ -123,6 +124,7 @@ ensureIdeaIndexes()
 ensureKairosIndexes()
 ensureTradeIndexes()
 ensureObjectiveIndexes()
+ensureExperienceIndexes()
 threadService.ensureThreadIndexes()
 
 // ARCHIVED 2026-07-29 — Minos watched the legacy `idea` kind, which nothing builds any more, and
