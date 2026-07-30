@@ -2166,6 +2166,92 @@
           "horizon_days"
         ]
       }
+    },
+    {
+      "name": "get_watched_items",
+      "description": "Everything the user keeps in the app: Kairos calls, Mentor setups, portfolios (as books), Prometheus coverage, and Argus scans — with status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Call it for \"what am I watching / what have I got going / what's still open\", and before saying the user has nothing. Finished items are excluded unless asked for.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "kinds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "call",
+                "setup",
+                "portfolio",
+                "coverage",
+                "scan"
+              ]
+            },
+            "description": "optional — narrow to these kinds. Omit for everything, which is the usual case."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "optional — only items on this one name e.g. NVDA"
+          },
+          "include_finished": {
+            "type": "boolean",
+            "description": "include closed/finished items. Default false — finished work is history, not something being watched."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_performance",
+      "description": "The user's CLOSED-trade record: how many, win rate, net P&L, profit factor and expectancy, split by mode (paper/live/manual), by origin and by symbol — plus Kairos's own R-multiple record for closed calls. Optionally narrowed to a mode, a symbol or a date window. Win rates come back as PERCENTAGES already — never multiply them again. Use it for \"how have I done\", \"is paper working\", \"what's my win rate\". It reports history only; open positions and unrealized P&L are get_trading_context.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "paper",
+              "live",
+              "manual"
+            ],
+            "description": "optional — only trades in this mode. Omit to cover all of them."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "optional — only trades on this name e.g. NVDA"
+          },
+          "from": {
+            "type": "string",
+            "description": "optional window start, YYYY-MM-DD"
+          },
+          "to": {
+            "type": "string",
+            "description": "optional window end, YYYY-MM-DD"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_upcoming_events",
+      "description": "Dated events in a window (default the next 30 days): company earnings plus Fed and macro releases. By default scoped to the USER'S OWN names — the calls, setups, coverage and holdings they have in the app — so the answer is about their book, not the whole market; pass scope 'market' for everything. Use it for \"anything coming up\", \"what's the risk this week\", or before discussing timing around a name they hold.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "mine",
+              "market"
+            ],
+            "description": "'mine' (default) = only the user's own names; 'market' = everything reporting in the window."
+          },
+          "from": {
+            "type": "string",
+            "description": "optional window start, YYYY-MM-DD. Defaults to today."
+          },
+          "to": {
+            "type": "string",
+            "description": "optional window end, YYYY-MM-DD. Defaults to 30 days out."
+          }
+        }
+      }
     }
   ]
 }

@@ -206,8 +206,8 @@ async function getSetup(id, userId) {
     return crud.getOwnedStripped(id, userId)
 }
 
-async function listSetups(userId, { status = null } = {}) {
-    return crud.list(userId, { filter: status ? { status } : {} })
+async function listSetups(userId, { status = null, onError } = {}) {
+    return crud.list(userId, { filter: status ? { status } : {}, onError })
 }
 
 /**

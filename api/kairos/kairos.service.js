@@ -404,8 +404,10 @@ async function getKairosCall(id, userId) {
     return crud.getOwnedStripped(id, userId)
 }
 
-async function listKairosCalls(userId) {
-    return crud.list(userId)
+// `onError` rides through to the shared crud: a reporting caller needs a failed read to LOOK
+// failed, where a list panel would rather degrade to empty. See entityCrud's list().
+async function listKairosCalls(userId, { onError } = {}) {
+    return crud.list(userId, { onError })
 }
 
 async function deleteKairosCall(id, userId) {

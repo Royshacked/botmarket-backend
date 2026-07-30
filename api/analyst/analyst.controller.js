@@ -65,8 +65,13 @@ const crud = makeEntityController({
     log: LOG, noun: 'coverage', overrides: COVERAGE_REASONS,
     service: {
         // `?sector=` / `?status=` — the service validates them; a raw query param must never reach
-        // Mongo as an operator.
-        list: (userId, req) => coverageService.getCoverage(userId, req.query ?? {}),
+        // Mongo as an operator. Named explicitly rather than spread: the options bag now also
+        // carries `onError`, which decides whether a failed read degrades to [] or 500s, and that
+        // is a caller's decision — not something a client gets to flip from the URL.
+        list: (userId, req) => coverageService.getCoverage(userId, {
+            sector: req.query?.sector ?? null,
+            status: req.query?.status ?? null,
+        }),
         get:  (id, userId)  => coverageService.getCoverageById(id, userId),
     },
 })

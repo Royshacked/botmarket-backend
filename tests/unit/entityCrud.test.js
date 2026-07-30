@@ -110,6 +110,33 @@ test('list degrades to [] when the collection throws — a list surface never 50
     assert.deepEqual(await make(coll).list('u1'), [])
 })
 
+// The two live surfaces want opposite things from a failed read, so the caller says which.
+// A panel would rather show nothing than an error; a REPORTING caller must be able to tell "you
+// have nothing" from "I could not look", because only one of those is safe to say to a user who
+// is about to act on it. Same rule the venue read already follows — an unreachable broker reports
+// UNKNOWN (`tradable: null`), never a confident "no".
+
+test('list can be asked to THROW instead, so a reporting caller can tell empty from broken', async () => {
+    const coll = spyColl()
+    coll.find = () => { throw new Error('mongo down') }
+    await assert.rejects(() => make(coll).list('u1', { onError: 'throw' }), /mongo down/)
+})
+
+test('the default is unchanged — every existing caller still degrades to []', async () => {
+    const coll = spyColl()
+    coll.find = () => { throw new Error('mongo down') }
+    assert.deepEqual(await make(coll).list('u1', {}), [])
+    assert.deepEqual(await make(coll).list('u1', { filter: { status: 'looking' } }), [])
+    assert.deepEqual(await make(coll).list('u1', { onError: 'empty' }), [])
+})
+
+test('onError does not leak into the query', async () => {
+    const coll = spyColl({ find: [] })
+    await make(coll).list('u1', { onError: 'throw' })
+    const [, query] = coll.calls.find(c => c[0] === 'find')
+    assert.deepEqual(query, { kind: 'setup', userId: 'u1' })
+})
+
 // ── delete lock + the before-delete hook ──────────────────────────────────────
 
 test('remove refuses a live position and does NOT run the cleanup hook', async () => {

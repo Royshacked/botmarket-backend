@@ -71,9 +71,18 @@ export function makeEntityCrud({
         /**
          * The kind's list for this user, newest first, `_id` stripped.
          * `filter` adds caller-supplied criteria (e.g. { status }).
-         * Returns [] on failure — a list surface degrades to empty rather than 500ing.
+         *
+         * `onError` picks what a failure means to THIS caller, because the two live surfaces want
+         * opposite things:
+         *   'empty' (default) — a list panel degrades to empty rather than 500ing. Unchanged.
+         *   'throw'           — the caller must be able to tell "you have nothing" from "the
+         *                       database is down". A reporting surface that silently returns []
+         *                       tells the user they are watching nothing, confidently and wrongly.
+         *                       Same rule the venue read already follows: an unreachable source
+         *                       reports UNKNOWN, never a confident negative (see checkBrokerSymbol's
+         *                       `tradable: null`).
          */
-        async list(userId, { filter = {} } = {}) {
+        async list(userId, { filter = {}, onError = 'empty' } = {}) {
             try {
                 const c = await _coll()
                 return (await c.find({ ..._scope(userId), ...filter })
@@ -82,6 +91,7 @@ export function makeEntityCrud({
                     .map(stripId)
             } catch (err) {
                 logger.error(log, 'list failed', err)
+                if (onError === 'throw') throw err
                 return []
             }
         },

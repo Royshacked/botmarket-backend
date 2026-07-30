@@ -61,11 +61,11 @@ async function saveScan(scan, userId) {
     }
 }
 
-async function getScans(userId) {
+async function getScans(userId, { onError } = {}) {
     const today = new Date().toISOString().slice(0, 10)
     // Staleness is DERIVED on read, never stored — so it is stamped here rather than in the
     // shared crud, which knows nothing about periods.
-    return (await crud.list(userId)).map(r => _stampStale(r, today))
+    return (await crud.list(userId, { onError })).map(r => _stampStale(r, today))
 }
 
 // `{ ok, doc }` like every other service here — staleness stamped on the way out, since it is

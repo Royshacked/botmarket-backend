@@ -207,12 +207,12 @@ async function initiateCoverage(raw, userId) {
     }
 }
 
-async function getCoverage(userId, { sector = null, status = null } = {}) {
+async function getCoverage(userId, { sector = null, status = null, onError } = {}) {
     // Validate/coerce the filters — never let a raw query param (e.g. status[$ne]) inject a Mongo operator.
     const filter = {}
     if (typeof sector === 'string' && sector.trim()) filter.sector = sector.trim()
     if (typeof status === 'string' && STATUSES.includes(status)) filter.status = status
-    return crud.list(userId, { filter })
+    return crud.list(userId, { filter, onError })
 }
 
 // The shared crud's shape, `{ ok, doc }` — the same one every other kind's service answers in.

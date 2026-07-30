@@ -382,6 +382,67 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["ticker"]
     },
+    get_watched_items: {
+        "type": "object",
+        "properties": {
+            "kinds": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": ["call", "setup", "portfolio", "coverage", "scan"]
+                },
+                "description": "optional — narrow to these kinds. Omit for everything, which is the usual case."
+            },
+            "symbol": {
+                "type": "string",
+                "description": "optional — only items on this one name e.g. NVDA"
+            },
+            "include_finished": {
+                "type": "boolean",
+                "description": "include closed/finished items. Default false — finished work is history, not something being watched."
+            }
+        }
+    },
+    get_performance: {
+        "type": "object",
+        "properties": {
+            "mode": {
+                "type": "string",
+                "enum": ["paper", "live", "manual"],
+                "description": "optional — only trades in this mode. Omit to cover all of them."
+            },
+            "symbol": {
+                "type": "string",
+                "description": "optional — only trades on this name e.g. NVDA"
+            },
+            "from": {
+                "type": "string",
+                "description": "optional window start, YYYY-MM-DD"
+            },
+            "to": {
+                "type": "string",
+                "description": "optional window end, YYYY-MM-DD"
+            }
+        }
+    },
+    get_upcoming_events: {
+        "type": "object",
+        "properties": {
+            "scope": {
+                "type": "string",
+                "enum": ["mine", "market"],
+                "description": "'mine' (default) = only the user's own names; 'market' = everything reporting in the window."
+            },
+            "from": {
+                "type": "string",
+                "description": "optional window start, YYYY-MM-DD. Defaults to today."
+            },
+            "to": {
+                "type": "string",
+                "description": "optional window end, YYYY-MM-DD. Defaults to 30 days out."
+            }
+        }
+    },
     save_objective: {
         "type": "object",
         "properties": {

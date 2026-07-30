@@ -9,6 +9,7 @@ import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './trading
 import { makeObjectiveHandlers, OBJECTIVE_TOOL_SPEC } from './objective.tools.js'
 import { getOpenObjective, markRouted } from './objective.service.js'
 import { toObjectiveSummary } from '../api/objectives/objective.model.js'
+import { makeUserDataHandlers, USER_DATA_TOOL_SPEC } from './userData.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -28,10 +29,16 @@ const MAX_MESSAGES = 12
 // save_objective is the one WRITE Axl has, and it does not breach the boundary above: it records
 // what the user said they want, which is intake, not authoring. No level, size, order or artifact
 // comes out of it — those stay with the desks.
+// The reporting reads are APPENDED, never inserted: the snapshot compares by index and prompt
+// caching keys off the array prefix, so a mid-array addition both fails three tests instead of one
+// and invalidates Axl's cached tool block on every request until it re-warms.
 export const TOOLS = toolsFor({
     get_trading_context: TRADING_CONTEXT_TOOL_SPEC.get_trading_context,
     check_broker_symbol: TRADING_CONTEXT_TOOL_SPEC.check_broker_symbol,
     save_objective: OBJECTIVE_TOOL_SPEC.save_objective,
+    get_watched_items: USER_DATA_TOOL_SPEC.get_watched_items,
+    get_performance: USER_DATA_TOOL_SPEC.get_performance,
+    get_upcoming_events: USER_DATA_TOOL_SPEC.get_upcoming_events,
 })
 
 // ONE Axl. This turn both converses and routes, which used to be two agents: a `routeIntent` doorman
@@ -59,6 +66,7 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
     // database, and a unit test of the turn should not need one.
     _objectiveHandlers = makeObjectiveHandlers,
     _tradingContextHandlers = makeTradingContextHandlers,
+    _userDataHandlers = makeUserDataHandlers,
     _getOpenObjective = getOpenObjective,
     _markRouted = markRouted,
 } = {}) {
@@ -86,6 +94,7 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
     const objectiveHandlers = _objectiveHandlers(userId)
     const toolHandlers = {
         ..._tradingContextHandlers(userId),
+        ..._userDataHandlers(userId),
         ...objectiveHandlers,
         save_objective: async (args) => {
             const result = await objectiveHandlers.save_objective(args)

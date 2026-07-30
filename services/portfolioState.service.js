@@ -48,6 +48,58 @@ export function invalidatePortfolioState(portfolioId, userId) {
 }
 
 /**
+ * The user's portfolios — just the books, newest first. No prices, no broker calls.
+ *
+ * Until now only the CLIENT could answer "which portfolios do I have": it derives the list by
+ * grouping ideas on portfolioId (botmarket-frontend tradeIdea.utils.js `portfoliosFromIdeas`).
+ * That makes it a general app fact with no server-side home, so anything else that needs it —
+ * a chat report, a future route, a mobile client — would have written its own copy. It lives
+ * here because this module already owns the read-side truth about a portfolio; enumerating the
+ * books is the same mechanism one level up.
+ *
+ * Deliberately CHEAP. `computePortfolioState` costs a broker `getPositions` plus FMP round-trips
+ * per book; doing that inside an enumeration would put N of them behind one question. Names and
+ * counts come from the projection alone — per-book P&L stays an explicit second read.
+ *
+ * The sort matches the client's (`savedAt` desc) so the two orderings never disagree.
+ *
+ * @returns {Promise<Array<{portfolioId, name, holdings, savedAt, statuses}>>}
+ */
+export async function listPortfolios(userId) {
+    if (!userId) return []
+    const db = await getDb()
+    const rows = await db.collection(ENTITIES)
+        .find(
+            { userId, portfolioId: { $ne: null } },
+            { projection: { _id: 0, portfolioId: 1, portfolioName: 1, savedAt: 1, status: 1, asset: 1 } },
+        )
+        .toArray()
+
+    const books = new Map()
+    for (const row of rows) {
+        // `$ne: null` already excludes both null and a missing field; this catches the empty
+        // string, which would otherwise group every unassigned holding into one nameless book.
+        if (!row.portfolioId) continue
+        let book = books.get(row.portfolioId)
+        if (!book) {
+            book = { portfolioId: row.portfolioId, name: row.portfolioName || 'Portfolio', holdings: 0, savedAt: row.savedAt ?? 0, statuses: {}, symbols: [] }
+            books.set(row.portfolioId, book)
+        }
+        book.holdings++
+        // A count per status, so a reader can say "4 held, 2 waiting" without a second query.
+        if (row.status) book.statuses[row.status] = (book.statuses[row.status] ?? 0) + 1
+        // The names in the book. Free here (already projected) and it is what an events lookup
+        // joins against — without it every caller wanting "what's coming up on my holdings" would
+        // re-query the same documents.
+        if (row.asset && !book.symbols.includes(row.asset)) book.symbols.push(row.asset)
+        // Keep the newest savedAt in the book, so ordering matches the client's newest-first.
+        if ((row.savedAt ?? 0) > book.savedAt) book.savedAt = row.savedAt ?? 0
+    }
+
+    return [...books.values()].sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
+}
+
+/**
  * Compute the live state of a portfolio: actual weights, drift vs target,
  * unrealized P&L, thesis age, and upcoming earnings per holding.
  *
