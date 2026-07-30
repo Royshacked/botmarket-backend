@@ -17,6 +17,27 @@
 // Deliberately NOT a trigger: price. Research has no position and therefore no stop; a thesis whose
 // price fell is cheaper, not wrong. And not raw consensus-PT drift either — that is the daily card's
 // job (validating/diverging), and for a contrarian thesis the Street moving away is the view working.
+//
+// Nor SECTOR ROTATION (asked + declined 2026-07-30). Three reasons, and they stack:
+//   • It is the cause, not the effect. Rotation moves neither our PT nor the Street's, so it cannot
+//     move the gap. When it genuinely matters the analysts cut numbers, consensus moves, and
+//     `diverging` fires on its own — precisely, and a beat later.
+//   • It is not name-specific and has no ratchet. Every coverage in the sector would fire the same
+//     revision the same day, and unlike consensus (each write moves `gap.consensus_pt`, so a state
+//     can only re-fire on a FURTHER move) sector rank has no stored baseline — it would re-ring
+//     daily for as long as the group stayed out of favour.
+//   • It already has a home, at the right tier. `portfolioReview.computeReviewTriggers` fires Themis
+//     on ≥2 sectors rotating. Rotation asks whether the ALLOCATION still fits the regime — Atlas's
+//     question. Whether the NAME is worth the number is Prometheus's. Wiring it here would be the
+//     wrong desk answering, twice.
+//
+// CANDIDATE (unbuilt) — the real sector effect that DOES clear the bar above is a de-rating, not a
+// rotation: the comp set's multiple compressing and STAYING compressed contradicts the `multiple`
+// half of the model outright. Shaped honestly that is trigger #4 = PEER-MULTIPLE COMPRESSION, and it
+// belongs in this file (the model is stale) rather than in the daily classifier (the gap moved). It
+// needs a baseline multiple persisted at model time — the same trick `monitor.edge_category` uses to
+// make change detectable at all — plus a threshold chosen to clear tape noise. Inputs already exist
+// (get_stock_peers + get_fundamentals); the cooldown and per-tick cap already bound the spend.
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
