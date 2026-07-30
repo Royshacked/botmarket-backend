@@ -1,8 +1,17 @@
-# Live-Verify Checklist — Themis / Portfolio order layer / Prometheus (2026-07-24)
+# Live-Verify Checklist
 
-Verification queue for this session's work (branch `institution-proj`, BE + FE committed,
-**served bundle NOT yet rebuilt**). Nothing here is auto-verified — the unit tests lock the
-logic, but broker execution and the end-to-end loop need a running app.
+Running verification queue. Nothing here is auto-verified — the unit tests lock the logic, but
+broker execution, agent behaviour and the end-to-end loop need a running app.
+
+- **§A–C — Themis / Portfolio order layer / Prometheus** (2026-07-24, branch `institution-proj`)
+- **§D–E — Review orders + agent venue awareness** (2026-07-30, branch
+  `feat/agent-venue-and-review-orders`)
+
+---
+
+## Themis / Portfolio order layer / Prometheus (2026-07-24)
+
+Branch `institution-proj`, BE + FE committed, **served bundle NOT yet rebuilt**.
 
 **Preconditions legend**
 `[MKT]` needs an open market · `[CTR]` needs a real cTrader account · `[PAPER]` paper venue is
@@ -84,3 +93,86 @@ now.
   dialog needs the `add_to_item` row).
 - G4/G3 are the only genuinely market-blocked items; everything in B can proceed now, and the
   `[PAPER]` crypto path can exercise the trim/scale-in logic end-to-end without waiting for equities.
+
+---
+
+# Review orders + agent venue awareness (2026-07-30)
+
+Branch `feat/agent-venue-and-review-orders` (BE `5a20a51` + `c06842c`, FE `d83c821`). Same
+preconditions legend as above. **No FE change was needed for either feature** — the confirm dialog's
+`confirmIdea` derivation is kind-blind, so nothing here is `[DEPLOY]`-blocked except where noted.
+
+## D. An accepted review actually buys the name (`add_item`)
+
+The headline case first — this is the bug the change exists to fix.
+
+- [ ] **The swap works end to end** `[PAPER]` (use a **crypto** holding so it fills 24/7) — in a
+  review, get Atlas to propose a trim on one name and an `add_item` on another, then Accept.
+  The trim should execute AND the new name should surface the **OrderConfirmDialog**. Before the
+  fix the add silently became a `waiting` doc. Confirm the dialog appears within a poll cycle
+  without touching the portfolio list.
+- [ ] **The size is right** `[PAPER]` — the proposed quantity should be
+  `floor(bookValue × allocationRatio / livePrice)`, where `bookValue` is the book's live notional.
+  Sanity-check it against the account: a 20% weight on a $50k book at $200 ≈ 50 shares. A wildly
+  wrong number here is the most expensive failure mode in the change.
+- [ ] **Sizing is measured BEFORE the block applies** `[PAPER]` — propose an `exit_item` **and** an
+  `add_item` in the same review. The add must be sized off the PRE-exit book value; if it shrinks
+  because the exit ran first, the "measure once up front" guard is not holding.
+- [ ] **Confirming actually places** `[MKT][CTR]` — confirm the dialog on a real cTrader book and
+  verify the order goes in, `brokerOrders` is written, and the reconciler links the fill. This is
+  the ordinary `placeOrdersForIdea` path, but it has never run for a `portfolio_item` from a review.
+- [ ] **Market closed → parks, then surfaces at open** `[MKT]` — accept a review with an add while
+  the market is shut. Expect `orderState: 'awaiting_market'` and NO dialog; then at open, Minos's
+  `_marketSweep` should flip it to `awaiting_confirm` and post the `entry_confirm` card. Worth
+  catching: the sweep is kind-blind, so a portfolio item should ride it, but that is untested live.
+- [ ] **Manual book** `[ANY]` — same flow on a **manual** portfolio: no order plan, an ENTRY Fill
+  card instead; submitting price + qty opens the holding. Check the leg is NOT flagged `add` (that
+  flag routes to `/manual-add`, which is for scale-ins — a new holding must go to `/manual-entry`).
+- [ ] **A conditional add is armed, not parked** `[ANY]` — get Atlas to emit an `add_item` carrying
+  `entry_conditions`. It must land as `looking` (monitored), not `waiting`, and later confirm via
+  the normal `entry_confirm` card. `waiting` here means the fix regressed.
+- [ ] **Duplicate guard** `[ANY]` — propose `add_item` for a name the book already holds in the same
+  direction. Expect a refusal (`already_held_use_add_to_item`) and **nothing written** — now that
+  add opens a real order, a duplicate add would be a duplicate position. An opposite-direction add,
+  and a re-entry into a `closed` name, must still be allowed.
+- [ ] **Honest degradation** `[ANY]` — with the price feed failing (or a book of zero live notional),
+  the holding should still be recorded, `unsized: true`, and no invented quantity. Same for a book
+  with no resolvable accounts: recorded, `planned: false`, nothing pretending to await confirmation.
+
+## E. Every desk reads the venue
+
+The behavioural half. The injected live-book block is **gone**, so the risk is no longer a wrong
+number — it is an agent that never looks and reasons as if the book were empty.
+
+- [ ] **Desks actually call `get_trading_context`** `[ANY]` — **the most important item here.** Drive
+  a sizing turn on each desk (Kairos Phase 7, Idea's risk-budget step, Atlas Phase 5, Mentor's
+  sizing) and confirm the tool is called before the size is stated. Prompts are the only thing
+  carrying this now and prompts are what tests cannot verify. If a desk skips it, the fix is the
+  lever already used for tradability: enforce it in code rather than ask.
+- [ ] **Balances cover EVERY account** `[ANY]` — with ≥2 accounts on a broker, all of them report a
+  balance. The retired `loadContext` used `getAccount`, which only ever returned the selected one;
+  this is the gap that closed, so it is worth actually looking at.
+- [ ] **Positions land on the right account** `[ANY]` — open positions across paper + manual (and
+  live if available) appear under their own account, with `pnlPct` signed correctly for shorts.
+- [ ] **`check_broker_symbol` — listed** `[CTR]` — a name the broker carries returns
+  `tradable: true` with the broker's real name. Include an aliased one: `NQ` should come back as
+  `US100.cash` with `mappedFrom: 'NQ'`.
+- [ ] **`check_broker_symbol` — not listed** `[CTR]` — a name the account genuinely does not carry
+  returns `tradable: false`. (A US small-cap is a good probe on a CFD account.)
+- [ ] **`check_broker_symbol` — UNREACHABLE is not "no"** `[CTR]` — kill the cTrader session / pull
+  the network mid-call and confirm `tradable: null` with the "availability unknown" note, and that
+  the agent SAYS unknown rather than telling the user the instrument is unavailable. This is the
+  state the whole three-way split exists for and the one most likely to be got wrong.
+- [ ] **Availability rides on the quote** `[MKT][CTR]` — on a live book, ask any desk about a ticker
+  and confirm the `get_quote` result carries `broker_availability` **without the agent asking for
+  it**, and that a `tradable: false` actually stops the desk building the setup. Then check the
+  5-minute cache: a second quote on the same ticker must not re-hit the broker, and a different
+  user must not be served the first user's answer.
+- [ ] **Axl answers account questions** `[ANY]` — ask Axl "which account am I on / what am I holding
+  / what's my balance". It has tools for the first time; confirm it reads them instead of deflecting
+  or inventing, and still routes to a desk the moment the question turns into "should I buy it".
+- [ ] **No desk still expects the removed block** `[ANY]` — skim each desk's first reply for
+  references to a positions block that no longer exists, and confirm none of them assert an empty
+  book without having called the tool. Analyst especially: it was reading `brokerContext` from the
+  request body (always empty in practice), so this is the first time Prometheus can see the book at
+  all.
