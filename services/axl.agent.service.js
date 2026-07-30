@@ -10,6 +10,7 @@ import { makeObjectiveHandlers, OBJECTIVE_TOOL_SPEC } from './objective.tools.js
 import { getOpenObjective, markRouted } from './objective.service.js'
 import { toObjectiveSummary } from '../api/objectives/objective.model.js'
 import { makeUserDataHandlers, USER_DATA_TOOL_SPEC } from './userData.tools.js'
+import { makeConceptHandlers, CONCEPT_TOOL_SPEC } from './concepts.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -39,6 +40,7 @@ export const TOOLS = toolsFor({
     get_watched_items: USER_DATA_TOOL_SPEC.get_watched_items,
     get_performance: USER_DATA_TOOL_SPEC.get_performance,
     get_upcoming_events: USER_DATA_TOOL_SPEC.get_upcoming_events,
+    explain_concept: CONCEPT_TOOL_SPEC.explain_concept,
 })
 
 // ONE Axl. This turn both converses and routes, which used to be two agents: a `routeIntent` doorman
@@ -67,6 +69,7 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
     _objectiveHandlers = makeObjectiveHandlers,
     _tradingContextHandlers = makeTradingContextHandlers,
     _userDataHandlers = makeUserDataHandlers,
+    _conceptHandlers = makeConceptHandlers,
     _getOpenObjective = getOpenObjective,
     _markRouted = markRouted,
 } = {}) {
@@ -95,6 +98,8 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
     const toolHandlers = {
         ..._tradingContextHandlers(userId),
         ..._userDataHandlers(userId),
+        // Unbound: an explanation is the same for everyone, which is why it can be authored once.
+        ..._conceptHandlers(),
         ...objectiveHandlers,
         save_objective: async (args) => {
             const result = await objectiveHandlers.save_objective(args)

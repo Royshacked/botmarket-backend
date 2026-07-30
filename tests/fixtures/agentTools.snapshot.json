@@ -2252,6 +2252,22 @@
           }
         }
       }
+    },
+    {
+      "name": "explain_concept",
+      "description": "A plain-language explanation of a trading concept, written for someone who has never traded — what it is, why it exists, what it costs them, and the mistake beginners make. Call it whenever the user asks what something means, or when you are about to use a term they may not know. Authored explanations cover the basics a beginner meets in this app: stops, targets, entries, risk, position size, drawdown, R, risk-reward, long vs short, order types, fills, invalidation, thesis, conviction, paper vs live, and why a stop being hit is not a failure. Anything else returns guidance on explaining it yourself. Use the text it gives you AS-IS rather than rewriting it. This is TEACHING, not advice: it explains what a stop is, it never says where the user's stop should go.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "concept": {
+            "type": "string",
+            "description": "The term to explain, as the user said it e.g. \"stop loss\", \"R\", \"drawdown\", \"limit order\". Spelling and plurals are handled."
+          }
+        },
+        "required": [
+          "concept"
+        ]
+      }
     }
   ]
 }

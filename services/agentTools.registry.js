@@ -382,6 +382,16 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["ticker"]
     },
+    explain_concept: {
+        "type": "object",
+        "properties": {
+            "concept": {
+                "type": "string",
+                "description": "The term to explain, as the user said it e.g. \"stop loss\", \"R\", \"drawdown\", \"limit order\". Spelling and plurals are handled."
+            }
+        },
+        "required": ["concept"]
+    },
     get_watched_items: {
         "type": "object",
         "properties": {
