@@ -111,9 +111,17 @@ verbatim to the apply endpoint. **Renamed off the legacy `_idea` vocabulary** (a
 | `exit_item`   | `itemId` | —                 | LIVE position      | full close, all accounts |
 | `trim_item`   | `itemId` | `reduceFraction` (0–1) | LIVE position | partial close |
 | `add_to_item` | `itemId` | `addFraction` (>0, may exceed 1) | LIVE position | **scale in (NEW)** |
-| `add_item`    | — (`item` spec) | `allocationRatio` | new name       | create a `waiting` holding |
+| `add_item`    | — (`item` spec) | `allocationRatio` | new name       | open a holding → order-confirm dialog |
 
 - **swap** = `exit_item`/`trim_item` + `add_item` in the same `changes` array (a convention, not an action).
+- `add_item` is sized server-side — `floor(bookValue × allocationRatio / livePrice)`, the arithmetic
+  construction's `_sizePlan` does — and then goes down the ordinary immediate-entry path: `status:'hit'`
+  + `pendingOrder.plan` + `orderState:'awaiting_confirm'`, which is what surfaces the **OrderConfirmDialog**.
+  Nothing is placed until the user confirms there (`POST /api/trade-ideas/:id/orders`). A spec carrying
+  gating `entry_conditions` is armed to `looking` instead, and confirms via Minos's `entry_confirm` card.
+  A **manual** book has no plan to build: the leg is marked `awaiting_manual_fill` and folded into the
+  block's one entry FillCard. Adding a name the book already holds is refused
+  (`already_held_use_add_to_item`) — that is what `add_to_item` is for.
 - `targetAllocationRatio` on trim/add is **advisory** — weights are Atlas's; the platform does **not**
   force them to sum to 1.0 (freed cash may redeploy or sit as cash per the review).
 

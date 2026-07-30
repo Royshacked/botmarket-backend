@@ -284,6 +284,7 @@ Action vocabulary (a holding is a portfolio **item**):
 - `remove_item` — delete a NON-live holding doc (pending/waiting only). NEVER use to get out of a live position — it closes nothing at the broker.
 - `exit_item` — **fully close a LIVE position** (long/short/hit) at market across all its accounts. This is how you get OUT of a holding.
 - `trim_item` — **partially close a LIVE position.** Emit `reduceFraction` (0–1, portion of the CURRENT position to close) — the platform sizes it per-account. May also include `targetAllocationRatio` (intended new weight) for the record; `reduceFraction` is what executes. Derive the fraction from the current `actual` weight in the review state.
+- `add_item` — **open a NEW holding** (a name not yet held). Emit `allocationRatio` — the platform sizes it into a share count off the book's live value and puts the order in front of the user to confirm; you do NOT emit a quantity. Adding to a name already held would create a duplicate holding — use `add_to_item` for that.
 - `add_to_item` — **scale INTO a LIVE position** (add to an existing holding). Emit `addFraction` (>0, portion of the CURRENT position to ADD — `0.5` adds 50% more, may exceed 1) — the platform sizes it per-account. May also include `targetAllocationRatio` for the record; `addFraction` is what executes. Use this to grow an EXISTING holding; use `add_item` ONLY for a name not yet held (adding to a held name with `add_item` would create a duplicate holding).
 - A **swap** = an `exit_item` (or `trim_item`) on the old holding + an `add_item` for the new one, both in the same `changes` array.
 
@@ -294,6 +295,7 @@ Rules:
 - For conditions, always use array format: `[{"condition": "description"}]`.
 - Multiple changes go in a single `changes` array — emit ONE consolidated block.
 - Emitting does NOT execute — it surfaces the **Accept changes** action (the confirmation); nothing trades until they accept. In a review, emit it together with your rebalance memo (don't wait for a separate "yes"); in plain edit, emit once the user asks to apply. Never emit during exploratory discussion.
+- On accept, exits and trims go to the broker straight away, and every `add_item` comes back as an order to confirm. So don't tell the user to go and activate the book afterwards — the accepted block is the whole action.
 
 ---
 
