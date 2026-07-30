@@ -103,3 +103,85 @@ test('turn: a clarifying question (no tag) keeps the user with Axl', async () =>
     assert.equal(result.routeSymbol, null)
     assert.equal(result.reply, 'A tradeable setup on it, or a research thesis?')
 })
+
+// ── intake: the goal the user states on the way in ────────────────────────────
+//
+// The objective is what survives the hop to a desk, so the turn has to surface its id (the client
+// shows the captured goal back to the user) and stamp which desk took it. The collaborators are
+// injected here — intake is the one part of Axl that touches a database, and this seam is what
+// keeps a unit test of the turn from needing one.
+
+/** Like runWith, but the model calls save_objective before it answers. */
+function runWithIntake(reply, args = { target_pct: 5, horizon_days: 7 }) {
+    return async ({ tagCaptures, toolHandlers }) => {
+        await toolHandlers.save_objective(args)
+        const routeTag = reply.match(/<route>([\s\S]*?)<\/route>/)
+        const capture = (tagCaptures ?? []).find(c => c.open === '<route>')
+        if (routeTag) capture?.onCapture?.(routeTag[1])
+        return reply
+    }
+}
+
+const summary = (id) => ({ id, target: { pct: 5 }, horizon: { days: 7, until: '2026-08-06' }, risk: {}, scope: null, symbol: null })
+const stubHandlers = (id = 'obj_1') => () => ({
+    save_objective: async () => ({ saved: true, id, deadline: '2026-08-06', objective: summary(id) }),
+})
+
+test('turn: an objective captured this turn rides out on the result', async () => {
+    const result = await axlAgentService.chatStream({
+        userId: 'u1',
+        messages: [{ role: 'user', content: 'I want to make 5% in the next week' }],
+        _run: runWithIntake('Noted — 5% by August 6th. One position or several?'),
+        _objectiveHandlers: stubHandlers('obj_1'),
+        _tradingContextHandlers: () => ({}),
+    })
+    assert.equal(result.objective?.id, 'obj_1')
+    assert.equal(result.objective?.horizon.until, '2026-08-06', 'the chip needs the goal, not just its id')
+    assert.equal(result.route, null, 'capturing a goal is not the same as handing it to a desk')
+})
+
+test('turn: routing a turn LATER still finds the open objective and stamps the desk', async () => {
+    // The goal is usually captured a turn or two before the hand-off, so the id from this turn is
+    // null while an open objective still exists. Without the lookup the stamp would just be missed.
+    const marked = []
+    const result = await axlAgentService.chatStream({
+        userId: 'u1',
+        messages: [{ role: 'user', content: 'one position' }],
+        _run: runWith('Taking you to the trading desk. <route>trade NVDA</route>'),
+        _objectiveHandlers: stubHandlers(),
+        _tradingContextHandlers: () => ({}),
+        _getOpenObjective: async () => summary('obj_earlier'),
+        _markRouted: async (id, desk) => { marked.push([id, desk]) },
+    })
+    assert.equal(result.objective?.id, 'obj_earlier')
+    assert.deepEqual(marked, [['obj_earlier', 'trade']])
+})
+
+test('turn: a reply that does not route never pays for the objective lookup', async () => {
+    // Every Axl turn would otherwise carry a database read for a stamp only a hand-off needs.
+    let looked = 0
+    const result = await axlAgentService.chatStream({
+        userId: 'u1',
+        messages: [{ role: 'user', content: 'what is a stop loss?' }],
+        _run: runWith('A stop is the price where you accept the idea was wrong.'),
+        _objectiveHandlers: stubHandlers(),
+        _tradingContextHandlers: () => ({}),
+        _getOpenObjective: async () => { looked++; return summary('obj_1') },
+    })
+    assert.equal(looked, 0)
+    assert.equal(result.objective, null)
+})
+
+test('turn: routing with no objective at all is fine — the desk simply asks', async () => {
+    const result = await axlAgentService.chatStream({
+        userId: 'u1',
+        messages: [{ role: 'user', content: 'find me a trade on tsla' }],
+        _run: runWith('Off to Kairos. <route>trade TSLA</route>'),
+        _objectiveHandlers: stubHandlers(),
+        _tradingContextHandlers: () => ({}),
+        _getOpenObjective: async () => null,
+        _markRouted: async () => { throw new Error('must not stamp a goal that does not exist') },
+    })
+    assert.equal(result.objective, null)
+    assert.equal(result.route, 'trade')
+})

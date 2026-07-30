@@ -8,6 +8,7 @@ import { TOOLS as IDEA_TOOLS }      from '../../services/idea.agent.service.js'
 import { TOOLS as PORTFOLIO_TOOLS } from '../../services/portfolio.agent.service.js'
 import { TOOLS as SCANNER_TOOLS }   from '../../services/scanner.agent.service.js'
 import { TOOLS as ANALYST_TOOLS }   from '../../services/analyst.agent.service.js'
+import { TOOLS as AXL_TOOLS }       from '../../services/axl.agent.service.js'
 import { KAIROS_TOOLS }             from '../../services/kairos.tools.js'
 import { SMC_TOOLS }                from '../../services/smc.tools.js'
 import { VALUATION_TOOLS }          from '../../services/valuation.tools.js'
@@ -34,12 +35,17 @@ import { VALUATION_TOOLS }          from '../../services/valuation.tools.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SNAPSHOT  = JSON.parse(fs.readFileSync(join(__dirname, '../fixtures/agentTools.snapshot.json'), 'utf8'))
 
+// Axl joined late and had no row here at all — it picked up get_trading_context and
+// check_broker_symbol in c06842c while every other agent's tool list was change-detected and its
+// wasn't. Its tools are now covered like everyone else's, which is also what stops save_objective
+// reading as an orphan schema below.
 const LIVE = {
     idea:      IDEA_TOOLS,
     portfolio: PORTFOLIO_TOOLS,
     scanner:   SCANNER_TOOLS,
     analyst:   ANALYST_TOOLS,
     kairos:    KAIROS_TOOLS,
+    axl:       AXL_TOOLS,
 }
 
 /** Structure only — everything a model can ACT on, with human prose stripped out. */

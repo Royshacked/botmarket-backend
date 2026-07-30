@@ -12,7 +12,7 @@ import { dirname, join } from 'path'
 
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
-import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, COMMON_TOOL_HANDLERS } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, buildObjectiveSection, COMMON_TOOL_HANDLERS } from './agentUtils.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from './valuation.tools.js'
@@ -59,12 +59,12 @@ const TOOL_HANDLERS = {
 export const analystAgentService = { chatStream }
 
 async function chatStream({
-    messages, userPrompt, chatState = {}, seed = null,
+    messages, userPrompt, chatState = {}, seed = null, objective = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onToolStart, onReasoning, onPhase, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
-    const systemPrompt  = _buildSystemPrompt(chatState, seed)
+    const systemPrompt  = _buildSystemPrompt(chatState, seed, objective)
     const builtMessages = _buildMessages({ messages, userPrompt })
 
 
@@ -102,7 +102,7 @@ function _cleanDraft(c) {
     return { ...c, symbol: c.symbol.toUpperCase().trim() }
 }
 
-function _buildSystemPrompt(chatState, seed = null) {
+function _buildSystemPrompt(chatState, seed = null, objective = null) {
     const today  = new Date().toISOString().slice(0, 10)
     const active = chatState?.active_symbol || 'none'
     const draft  = chatState?.draft
@@ -118,9 +118,10 @@ function _buildSystemPrompt(chatState, seed = null) {
             + `${seed.thesis ? `\n  Argus's screen rationale: ${seed.thesis}` : ''}${seed.analysis ? `\n  Argus's fundamental read: ${seed.analysis}` : ''}`
             + `\n  → Start here, verify Argus's read against the tools, then form your own variant view.`
         : ''
+    const objectiveBlock = buildObjectiveSection(objective)
     const dynamic = `---
 CURRENT DATE: ${today}. Resolve relative dates (this quarter, next earnings) against it.
-Active name: ${active}${seedBlock}${draft}${existingBlock}`
+${objectiveBlock ? `\n${objectiveBlock}\n\n` : ''}Active name: ${active}${seedBlock}${draft}${existingBlock}`
     return [
         { type: 'text', text: _systemPrompt(), cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamic },

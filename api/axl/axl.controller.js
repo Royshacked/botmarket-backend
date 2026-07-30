@@ -57,6 +57,12 @@ export async function streamAxl(req, res) {
                 route,
                 // A symbol only rides along WITH a desk — with no route it has nowhere to land.
                 routeSymbol: route ? _sanitizeRouteSymbol(result.routeSymbol) : null,
+                // Unlike routeSymbol this stands alone: an objective captured on a turn that does
+                // NOT route is the normal case (intake first, hand-off once they're ready), and the
+                // client shows it back to the user so they can see what was understood — and correct
+                // it if we got it wrong. Built by us from the stored record, not from model output,
+                // so there is nothing here to re-validate.
+                objective: result.objective ?? null,
                 chart: result.chart ?? null,
             }
         },

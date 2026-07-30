@@ -6,6 +6,9 @@ import { buildTagCaptures } from './llmStream.util.js'
 import { runAgentStream } from './agentIO.js'
 import { toolsFor } from './agentTools.registry.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
+import { makeObjectiveHandlers, OBJECTIVE_TOOL_SPEC } from './objective.tools.js'
+import { getOpenObjective, markRouted } from './objective.service.js'
+import { toObjectiveSummary } from '../api/objectives/objective.model.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -22,9 +25,13 @@ const MAX_MESSAGES = 12
 // account/trade data + tools and are added one by one — the VENUE reads are the
 // first, since "which account am I on / what am I holding / can I trade this
 // here" is a question ABOUT the app, which is Axl's own job, not a desk's.
-const TOOLS = toolsFor({
+// save_objective is the one WRITE Axl has, and it does not breach the boundary above: it records
+// what the user said they want, which is intake, not authoring. No level, size, order or artifact
+// comes out of it — those stay with the desks.
+export const TOOLS = toolsFor({
     get_trading_context: TRADING_CONTEXT_TOOL_SPEC.get_trading_context,
     check_broker_symbol: TRADING_CONTEXT_TOOL_SPEC.check_broker_symbol,
+    save_objective: OBJECTIVE_TOOL_SPEC.save_objective,
 })
 
 // ONE Axl. This turn both converses and routes, which used to be two agents: a `routeIntent` doorman
@@ -48,6 +55,12 @@ export function _splitRoute(raw) {
 
 async function chatStream({ messages = [], model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
+    // The objective collaborators are seams too: intake is the one part of Axl that touches the
+    // database, and a unit test of the turn should not need one.
+    _objectiveHandlers = makeObjectiveHandlers,
+    _tradingContextHandlers = makeTradingContextHandlers,
+    _getOpenObjective = getOpenObjective,
+    _markRouted = markRouted,
 } = {}) {
     const normalized = normalizeMessages(messages, MAX_MESSAGES)
 
@@ -65,10 +78,26 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
     // consumer that would otherwise hand the client "…to the trading desk. <route>trade</route>".
     let chartRow = null
     let routeCapture = null
+
+    // The objective handler is wrapped rather than passed straight through, so the turn knows an
+    // intake happened without a second read: the id it returns rides out on the `done` payload and
+    // is what the client confirms back to the user.
+    let savedObjective = null
+    const objectiveHandlers = _objectiveHandlers(userId)
+    const toolHandlers = {
+        ..._tradingContextHandlers(userId),
+        ...objectiveHandlers,
+        save_objective: async (args) => {
+            const result = await objectiveHandlers.save_objective(args)
+            if (result?.saved && result.objective) savedObjective = result.objective
+            return result
+        },
+    }
+
     const raw = await _run({
         log: LOG, requestedModel, userId,
         messages: normalized, systemPrompt,
-        tools: TOOLS, toolHandlers: makeTradingContextHandlers(userId),
+        tools: TOOLS, toolHandlers,
         reasoningEffort, signal, onToken,
         tagCaptures: buildTagCaptures({ route: (text) => { routeCapture = text.trim() } }),
         onToolStart, onReasoning,
@@ -77,13 +106,24 @@ async function chatStream({ messages = [], model: requestedModel, reasoningEffor
 
     const reply = stripEmitTags(raw ?? '', ['route']).trim()
     const { desk, symbol } = _splitRoute(routeCapture)
-    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, replyLength: reply.length })
+
+    // Stamp which desk took the goal. Only on a routing turn, and only then do we pay for a read —
+    // the objective is usually captured a turn or two before the hand-off, so the id from THIS turn
+    // is often null while an open objective still exists.
+    let objective = savedObjective
+    if (desk && userId) {
+        objective ??= toObjectiveSummary(await _getOpenObjective(userId))
+        if (objective?.id) await _markRouted(objective.id, desk)
+    }
+
+    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, objectiveId: objective?.id ?? null, replyLength: reply.length })
     // `chart` on the return is the REQUEST, never the image: the row already went out on its own
     // event and doubling it here would double the bytes on the wire.
     return {
         reply,
         route: desk,
         routeSymbol: symbol,
+        objective,
         chart: chartRow ? { ticker: chartRow.symbol, timeframe: chartRow.timeframe } : null,
     }
 }

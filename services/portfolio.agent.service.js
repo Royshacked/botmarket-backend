@@ -8,7 +8,7 @@ import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
 import { formatWorkspaceLine } from '../api/portfolio/portfolioMode.util.js'
 import { logger }         from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildObjectiveSection } from './agentUtils.js'
 import { makeTradingContextHandlers } from './tradingContext.tools.js'
 import { makeChartHandler } from './marketData.tools.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
@@ -97,7 +97,7 @@ function makeCoverageHandler(userId) {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, objective = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
     const normalized   = _buildMessages(messages)
@@ -110,6 +110,11 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     const dynamicSections = [`CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.`]
     if (ideaAccounts.length > 0) dynamicSections.push(_buildAccountsSection(ideaAccounts, mainAccountId))
     if (portfolioId && portfolioIdeas.length > 0) dynamicSections.push(_buildPortfolioContext(portfolioId, portfolioIdeas))
+    // Ahead of the mandate deliberately: the objective is what the user actually said on the way in,
+    // and the mandate below may have been DERIVED from it (see portfolioChat.service loadStreamContext).
+    // Reading the source first makes a mandate that drifted from it visible rather than invisible.
+    const objectiveSection = buildObjectiveSection(objective)
+    if (objectiveSection) dynamicSections.push(objectiveSection)
     if (mandate)    dynamicSections.push(_buildMandateSection(mandate))
     if (thesis)     dynamicSections.push(_buildThesisSection(thesis))
     if (lifecycle)  dynamicSections.push(_buildLifecycleSection(lifecycle))

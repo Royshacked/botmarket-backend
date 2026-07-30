@@ -10,6 +10,7 @@ import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { threadService }          from '../../services/thread.service.js'
 import { resolvePortfolioReviewCard } from '../chat/chat.service.js'
+import { getOpenObjective } from '../../services/objective.service.js'
 
 const LOG = '[portfolio:controller]'
 
@@ -32,8 +33,9 @@ export async function streamPortfolio(req, res) {
             const bodyMandate  = (req.body?.mandate && typeof req.body.mandate === 'object') ? req.body.mandate : null
 
             // Pre-stream context load + mandate carry-forward (business logic → service).
-            const { portfolioState, lifecycle, mandate, storedThesis, reviewDelta } = await portfolioChatService.loadStreamContext({
+            const { portfolioState, lifecycle, mandate, statedMandate, storedThesis, reviewDelta, objective } = await portfolioChatService.loadStreamContext({
                 userId: req.user._id, portfolioId, threadId, isReviewMode, bodyMandate,
+                objective: await getOpenObjective(req.user._id),
             })
 
             const lastMessage = messages.at(-1)?.content ?? ''
@@ -50,6 +52,7 @@ export async function streamPortfolio(req, res) {
                 reviewDelta,
                 lifecycle,
                 mandate,
+                objective,
                 thesis: storedThesis,
                 model:           routing.model,
                 reasoningEffort: routing.reasoningEffort,
@@ -67,7 +70,10 @@ export async function streamPortfolio(req, res) {
             // still listening, matching the previous "after finish, if not aborted" gate.
             if (signal.aborted) return undefined
             portfolioChatService.persistStreamOutcome({
-                userId: req.user._id, portfolioId, threadId, isReviewMode, messages, mandate, storedThesis, result,
+                // statedMandate, not mandate: a mandate DERIVED from the intake objective is context
+                // for the prompt, never something to write back as though the user established it here.
+                userId: req.user._id, portfolioId, threadId, isReviewMode, messages,
+                mandate: statedMandate, storedThesis, result,
             })
 
             // G1: Atlas asked Prometheus to re-research a held name. Fire the async refresh-by-hop

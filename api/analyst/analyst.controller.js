@@ -6,6 +6,7 @@ import { parseChatMessages }   from '../_shared/parse.util.js'
 import { sendReason }          from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { logger }             from '../../services/logger.service.js'
+import { getOpenObjective } from '../../services/objective.service.js'
 
 const LOG = '[analystCtrl]'
 
@@ -31,6 +32,7 @@ export async function streamAnalyst(req, res) {
         log: LOG,
         handler: async ({ sendEvent, signal }) => {
             const result = await analystAgentService.chatStream({
+                objective: await getOpenObjective(req.user._id),
                 messages,
                 userPrompt,
                 chatState:     (chatState && typeof chatState === 'object') ? chatState : {},

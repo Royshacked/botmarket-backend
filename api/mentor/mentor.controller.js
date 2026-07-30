@@ -2,6 +2,7 @@ import { mentorAgentService, emptyMentorState } from '../../services/mentor.agen
 import { resolveModel }        from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
+import { getOpenObjective } from '../../services/objective.service.js'
 
 const LOG = '[mentor:controller]'
 const MAX_RECENT_CHAT_TURNS = 4
@@ -29,6 +30,7 @@ export async function streamMentor(req, res) {
             // same name" before it sizes. Best-effort: a broker hiccup just drops the block.
 
             const result = await mentorAgentService.chatStream({
+                objective:     await getOpenObjective(req.user._id),
                 messages:      parsed.messages,
                 userPrompt:    parsed.userPrompt,
                 chatState:     parsed.chatState ?? emptyMentorState(),
