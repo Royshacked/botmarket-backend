@@ -55,9 +55,15 @@ function _openPnl(positions) {
     return { sum, priced, unpriced: positions.length - priced }
 }
 
-function _accountBlock(a) {
+function _accountBlock(a, workspace = null) {
     const caps = Object.entries(a.capabilities ?? {}).filter(([, on]) => on).map(([k]) => k)
+    // Which side of the workspace line this account sits on. Stamped per account because the header
+    // alone was not enough: a desk reading a flat list of accounts, one of them marked SELECTED,
+    // will happily answer about the live book while the user is sat in paper.
+    const here = workspace ? (a.mode === workspace ? ' · THIS IS THE USER’S CURRENT WORKSPACE'
+                                                   : ` · NOT the current workspace (user is in ${workspace})`) : ''
     const head = `[${a.mode}${a.broker !== a.mode ? ` · ${a.broker}` : ''}] ${a.id}${a.name != null && String(a.name) !== a.id ? ` "${a.name}"` : ''}`
+        + here
         + `${a.selected ? ' · SELECTED (where a live order goes today)' : ''}`
         + ` · balance ${_fixed(a.balance) ?? 'unknown'}${a.currency ? ` ${a.currency}` : ''}`
 
@@ -81,19 +87,32 @@ function _accountBlock(a) {
  * whose auth failed returns an empty book that looks exactly like a flat one, and telling a trader
  * they hold nothing when we simply could not ask is the one failure mode worth being loud about.
  */
-export function formatTradingContext({ modes = {}, accounts = [], unavailable = [] } = {}) {
+export function formatTradingContext({ modes = {}, workspace = null, accounts = [], unavailable = [] } = {}) {
     const live = modes.live_brokers?.length ? modes.live_brokers.join(', ') : 'none connected'
     const header = `Venue: paper ${modes.paper ? 'ON' : 'off'} · manual ${modes.manual ? 'ON' : 'off'} · live brokers: ${live}.`
+
+    // WHICH BOOK THE USER IS LOOKING AT. The line above says what EXISTS; on its own it reads as a
+    // menu, and a desk asked "how am I doing" would answer about the live cTrader account while the
+    // user sat in the paper workspace — every number true, none of them theirs. Stated first, and in
+    // the imperative, because it governs how everything below should be read.
+    const ws = workspace
+        ? workspace === 'paper'
+            ? `CURRENT WORKSPACE: PAPER (simulated money). The user is working in the paper workspace right now — "my account", "my positions" and "my P&L" mean the PAPER account. Any live account below is listed for completeness only: do not present it as their book, and do not describe an order as going to a real broker unless they ask to switch to live.`
+            : `CURRENT WORKSPACE: LIVE (real money). "My account" means the live account below.`
+        : null
 
     const warn = unavailable.length
         ? `WARNING — could not read positions at: ${unavailable.join(', ')}. Those accounts show empty here because the read FAILED, not because they are flat. Say so; do not report them as having no positions.`
         : null
 
-    if (!accounts.length) return [header, warn, 'No trading accounts available.'].filter(Boolean).join('\n')
+    if (!accounts.length) return [header, ws, warn, 'No trading accounts available.'].filter(Boolean).join('\n')
 
-    // Totals per currency, so two books in different currencies are never added together.
+    // Totals per currency, so two books in different currencies are never added together — and only
+    // over the workspace the user is in, so "what's my P&L" in paper is never answered with a number
+    // that quietly folds in the live book.
+    const counted = workspace ? accounts.filter(a => a.mode === workspace) : accounts
     const byCcy = new Map()
-    for (const a of accounts) {
+    for (const a of counted) {
         const { sum, priced } = _openPnl(Array.isArray(a.positions) ? a.positions : [])
         if (!priced) continue
         const ccy = a.currency ?? ''
@@ -103,10 +122,11 @@ export function formatTradingContext({ modes = {}, accounts = [], unavailable = 
 
     return [
         header,
+        ws,
         warn,
         `${accounts.length} account${accounts.length === 1 ? '' : 's'}.`,
-        ...accounts.map(_accountBlock),
-        totals ? `Total open P&L across all accounts: ${totals}.` : null,
+        ...accounts.map(a => _accountBlock(a, workspace)),
+        totals ? `Total open P&L ${workspace ? `in the ${workspace} workspace` : 'across all accounts'}: ${totals}.` : null,
     ].filter(Boolean).join('\n')
 }
 

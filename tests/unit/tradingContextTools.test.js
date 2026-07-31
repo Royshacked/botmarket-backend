@@ -120,6 +120,61 @@ test('only the capabilities a venue HAS are listed', () => {
     assert.doesNotMatch(out, /nativeProtection/)
 })
 
+// ─── which book the user is actually looking at ───────────────────────────────
+// A user sat in the paper workspace asked Axl about trading and was told about their live cTrader
+// account. Nothing was wrong with the numbers — the context listed every account the user HAS, one
+// of them flagged SELECTED, with no signal about which one they were standing in front of.
+
+const bothBooks = (workspace) => ({
+    modes: { paper: true, manual: false, live_brokers: ['ctrader'] },
+    workspace,
+    accounts: [
+        account({ id: 'paper-1-abc', broker: 'paper',   mode: 'paper', currency: 'USD', positions: [position({ pnl: -100 })] }),
+        account({ id: '437',         broker: 'ctrader', mode: 'live',  currency: 'USD', selected: true, positions: [position({ symbol: 'JPM', pnl: 900 })] }),
+    ],
+    unavailable: [],
+})
+
+test('in paper, the context says so before it says anything else', () => {
+    const out = formatTradingContext(bothBooks('paper'))
+    assert.match(out, /CURRENT WORKSPACE: PAPER \(simulated money\)/)
+    assert.match(out, /"my account", "my positions" and "my P&L" mean the PAPER account/)
+})
+
+test('each account is stamped with which side of the workspace line it sits on', () => {
+    const out = formatTradingContext(bothBooks('paper'))
+    assert.match(out, /\[paper\] paper-1-abc.*CURRENT WORKSPACE/)
+    assert.match(out, /\[live · ctrader\] 437.*NOT the current workspace \(user is in paper\)/)
+})
+
+test('the live account stays visible — it is out of scope, not hidden', () => {
+    // Hiding it would make "do I have a live account?" unanswerable, and the model would have to
+    // guess. The fix is framing, not omission.
+    const out = formatTradingContext(bothBooks('paper'))
+    assert.match(out, /\[live · ctrader\] 437/)
+    assert.match(out, /JPM/)
+})
+
+test('P&L in paper does not quietly fold in the live book', () => {
+    const out = formatTradingContext(bothBooks('paper'))
+    assert.match(out, /Total open P&L in the paper workspace: -100\.00 USD/)
+    assert.doesNotMatch(out, /Total open P&L.*\+800/)   // -100 + 900 across both books
+})
+
+test('in live the framing flips, and the live book is the one totalled', () => {
+    const out = formatTradingContext(bothBooks('live'))
+    assert.match(out, /CURRENT WORKSPACE: LIVE \(real money\)/)
+    assert.match(out, /Total open P&L in the live workspace: \+900\.00 USD/)
+    assert.match(out, /\[paper\] paper-1-abc.*NOT the current workspace \(user is in live\)/)
+})
+
+test('a context with no workspace behaves exactly as before', () => {
+    // Every existing caller keeps working: no line, no per-account stamp, total across all accounts.
+    const out = formatTradingContext(ctx())
+    assert.doesNotMatch(out, /CURRENT WORKSPACE/)
+    assert.match(out, /Total open P&L across all accounts/)
+})
+
 // ─── tradability stays three-state in words ───────────────────────────────────
 
 test('tradable, not listed and unreachable stay three distinct answers', () => {

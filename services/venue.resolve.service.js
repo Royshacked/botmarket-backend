@@ -102,6 +102,27 @@ export function resolveMode(source = {}) {
 }
 
 /**
+ * The workspace the user is WORKING IN right now — a different question from resolveMode(), which
+ * answers where an existing trade LIVES. A user with a cTrader account connected can still be sat
+ * in the paper workspace, and everything an agent says should be about the book in front of them.
+ *
+ * Paper being connected IS the switch: the frontend's useWorkspaceMode derives the workspace the
+ * same way (paper ON ⇔ the paper workspace, straight off this flag), so the two stay in step
+ * without the client having to tell us. Kept here beside resolveMode so the two "which world is
+ * this" answers live together.
+ *
+ * KNOWN GAP: 'manual' is a frontend-local overlay (localStorage) with no server-side flag, so a
+ * user sitting in the manual workspace reads as 'live' here. Closing that needs the client to send
+ * its workspace on the chat request; paper — the reported case — needs nothing.
+ *
+ * @param {object} connections  brokerService.listConnections(userId)
+ * @returns {'paper'|'live'}
+ */
+export function activeWorkspace(connections = {}) {
+    return connections?.paper ? 'paper' : 'live'
+}
+
+/**
  * Every account id on a source, in precedence order (main first). Accepts the several shapes the
  * codebase stores accounts in: a bare id, an { id } object, or an { accountId }.
  */

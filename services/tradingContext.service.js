@@ -5,6 +5,7 @@
 //
 // Returns:
 //   { modes: { paper: bool, manual: bool, live_brokers: [name] },
+//     workspace: 'paper'|'live',   ← the one the user is SITTING IN (see activeWorkspace)
 //     accounts: [ { id, broker, mode, name, balance, currency, capabilities, selected, positions } ],
 //     unavailable: [broker] }   ← brokers whose position read failed; their book is UNKNOWN, not flat
 //
@@ -16,6 +17,7 @@
 
 import { brokerService } from '../api/broker/broker.service.js'
 import { paperBrokerService, VIRTUAL_MODES } from '../api/broker/paperBroker.service.js'
+import { activeWorkspace } from './venue.resolve.service.js'
 import { toBrokerSymbol } from './brokerSymbol.service.js'
 import { positionPnlPct } from './agentUtils.js'
 import { logger } from './logger.service.js'
@@ -66,7 +68,7 @@ async function _positionsByAccount(userId, brokers) {
 const _round = (v) => (v == null || !Number.isFinite(Number(v))) ? null : Number(Number(v).toFixed(2))
 
 export async function getTradingContext(userId) {
-    const empty = { modes: { paper: false, manual: false, live_brokers: [] }, accounts: [], unavailable: [] }
+    const empty = { modes: { paper: false, manual: false, live_brokers: [] }, workspace: 'live', accounts: [], unavailable: [] }
     if (!userId) return empty
 
     let connections
@@ -123,6 +125,10 @@ export async function getTradingContext(userId) {
 
     return {
         modes: { paper: !!connections.paper, manual: !!connections.manual, live_brokers: liveBrokers },
+        // Which workspace the user is SITTING IN, not merely which are available. Without it the
+        // menu reads as a flat list and a desk answers about the live cTrader book while the user
+        // is in paper — the accounts are all true, just not the ones they are looking at.
+        workspace: activeWorkspace(connections),
         accounts,
         // Brokers whose position read failed — their accounts appear with an empty book that is NOT
         // a flat one. Additive: existing consumers that only read modes/accounts are unaffected.
