@@ -225,13 +225,25 @@ export async function callAnthropicWithTools({
 }
 
 // Allow tool handlers to return either a plain string or rich content blocks
-// (e.g. an image). Strings stay strings; arrays/objects pass through as-is so
-// the Anthropic API renders them as tool_result content blocks.
-function _toToolResultContent(ret) {
+// (e.g. an image). Strings stay strings; arrays/content blocks pass through as-is
+// so the Anthropic API renders them as tool_result content blocks.
+//
+// A PLAIN OBJECT is serialized, never String()-ed. `String({a:1})` is
+// "[object Object]" — a valid, silent, information-free tool result: the call
+// succeeds, the model is told nothing, and it answers "I don't know" about data
+// the app had in hand. Tools here are expected to return model-ready TEXT (see
+// userData.tools.js on the adapter/read split), but a handler that returns its
+// service's object must degrade to readable JSON, not to a placeholder.
+// Exported for testing — this is the seam where a tool's return value becomes what the model reads,
+// and it had no coverage at all while it was quietly emitting "[object Object]".
+export function _toToolResultContent(ret) {
     if (ret == null) return ''
     if (typeof ret === 'string') return ret
     if (Array.isArray(ret)) return ret          // already a list of content blocks
     if (ret.type) return [ret]                  // single content block → wrap
+    if (typeof ret === 'object') {
+        try { return JSON.stringify(ret) } catch { return String(ret) }   // circular → last resort
+    }
     return String(ret)
 }
 

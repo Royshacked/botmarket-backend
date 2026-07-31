@@ -1,7 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { checkBrokerSymbol, withBrokerAvailability, _clearAvailabilityCache } from '../../services/tradingContext.service.js'
+import { checkBrokerSymbol } from '../../services/tradingContext.service.js'
+// The enforcement moved to the TOOL layer, where the renderer it shares with check_broker_symbol
+// lives — see the note in tradingContext.service.js on why sitting next to the read broke it.
+import { withBrokerAvailability, _clearAvailabilityCache } from '../../services/tradingContext.tools.js'
+import { toolError } from '../../services/toolResult.util.js'
 
 // "Can I actually trade this here?" — the venue fact a desk must never guess at.
 // The load-bearing case is the THIRD state: an unreachable broker is UNKNOWN, not "unavailable".
@@ -146,10 +150,44 @@ test('a failing availability check never takes the quote down with it', async ()
     assert.deepEqual(out, { price: 312.4 })
 })
 
-test('a non-object payload (a tool error string) passes straight through', async () => {
+// ─── THE REGRESSION: the enforced half never actually fired ───────────────────
+// This block used to assert the opposite — "a non-object payload passes straight through" — written
+// on the belief that a string payload meant a tool ERROR. But get_quote, the ONLY caller, returns a
+// formatted STRING on success, so the early return swallowed every real quote and the rule that a
+// desk "cannot discuss AVGO without being told whether AVGO is listed" never once ran.
+
+test('a QUOTE (text, the real shape) comes back carrying availability', async () => {
     _clearAvailabilityCache()
     const broker = fakeBroker({ connections: { ctrader: true }, resolve: { ctrader: true } })
-    assert.equal(await withBrokerAvailability('Could not fetch quote', 'u1', 'AVGO', { broker }), 'Could not fetch quote')
+    const quote = 'AVGO (Broadcom)\nPrice : $312.40'
+    const out = await withBrokerAvailability(quote, 'u1', 'AVGO', { broker, mapSymbol: identity })
+
+    assert.ok(out.startsWith(quote), 'the quote itself is untouched')
+    assert.match(out, /At the user's live broker — ctrader: TRADABLE as AVGO\.cash/)
+})
+
+test('a quote for an instrument the broker does not list says so, on the quote', async () => {
+    _clearAvailabilityCache()
+    const broker = fakeBroker({ connections: { ctrader: true }, resolve: { ctrader: false } })
+    const out = await withBrokerAvailability('AVGO\nPrice : $312.40', 'u1', 'AVGO', { broker, mapSymbol: identity })
+    assert.match(out, /ctrader: NOT LISTED/)
+})
+
+test('an unreachable broker rides along as UNKNOWN, never as "not listed"', async () => {
+    // The third state has to survive this trip too — it is the whole reason the state exists.
+    _clearAvailabilityCache()
+    const broker = fakeBroker({ connections: { ctrader: true }, resolve: { ctrader: 'throw' } })
+    const out = await withBrokerAvailability('AVGO\nPrice : $312.40', 'u1', 'AVGO', { broker, mapSymbol: identity })
+    assert.match(out, /ctrader: UNKNOWN/)
+    assert.match(out, /NEVER as unavailable/)
+    assert.doesNotMatch(out, /NOT LISTED/)
+})
+
+test('a FAILED call is never decorated — an error must not be dressed up as data', async () => {
+    _clearAvailabilityCache()
+    const broker = fakeBroker({ connections: { ctrader: true }, resolve: { ctrader: true } })
+    const err = toolError('Could not fetch quote for AVGO')
+    assert.equal(await withBrokerAvailability(err, 'u1', 'AVGO', { broker, mapSymbol: identity }), err)
     assert.equal(await withBrokerAvailability(null, 'u1', 'AVGO', { broker }), null)
 })
 

@@ -7,7 +7,7 @@ import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSer
 import { sessionStartMs } from './market.service.js'
 import { toolError } from './toolResult.util.js'
 import { makeToolHandler } from './agentUtils.js'
-import { withBrokerAvailability } from './tradingContext.service.js'
+import { withBrokerAvailability } from './tradingContext.tools.js'
 import { logger } from './logger.service.js'
 
 // Shared market-data toolset for the chart-reading agents (Idea, Kairos, and any
