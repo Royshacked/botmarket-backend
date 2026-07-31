@@ -1,0 +1,112 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { touchLeaf, routeExits } from '../../services/protectionPlan.service.js'
+import { applyPriceLevels } from '../../api/trade-ideas/tradeIdeas.service.js'
+import { isRestingEntry, RESTING_ENTRY_TYPES } from '../../services/entity/vocabulary.js'
+import { buildIdeaFromCall } from '../../services/kairos.handoff.service.js'
+import { restingEntryPrice } from '../../api/trade-ideas/ideaExecution.service.js'
+
+// The immediate-trade ticket states its levels as PRICES — that is the whole gesture. These tests
+// cover the seam that turns a number into something the broker can rest, because every step of it
+// is silent when it goes wrong: a leaf typed `structured` instead of `touch` doesn't error, it
+// just quietly leaves the position unprotected on the software monitor.
+
+// ── touchLeaf: the writer paired with the parser ──────────────────────────────
+
+test('a bare price becomes a leaf that ROUTES to the broker, not to the monitor', async () => {
+    // The round trip is the contract: what touchLeaf writes, routeExits must read back as a
+    // native order. Asserting the string alone would pass even if the parser stopped agreeing.
+    const route = await routeExits({
+        direction: 'long', quantity: 10,
+        stop_conditions: [touchLeaf(21500)],
+        tp_conditions:   [touchLeaf(22000)],
+    })
+    assert.equal(route.stop.nativeOrders[0].level, 21500)
+    assert.equal(route.tp.nativeOrders[0].level, 22000)
+    assert.equal(route.stop.monitorTree, null, 'a bare price has no residual for the monitor')
+})
+
+test('the leaf is typed `touch` — the single source of truth for resting at the broker', () => {
+    const leaf = touchLeaf(150.25)
+    assert.equal(leaf.type, 'touch')
+    assert.equal(leaf.timeframe, null, 'a price level is intra-candle; a timeframe would imply a close')
+})
+
+test('Kairos and the ticket emit the SAME leaf — one builder, not two spellings', () => {
+    // buildIdeaFromCall used to carry its own private _touch. If that copy ever drifts back,
+    // confirmed calls and ticket trades would route differently for identical prices.
+    const idea = buildIdeaFromCall(
+        { asset: 'NQ', bias: 'long', accounts: ['a1'] },
+        { stop: 21000, take_profit: [{ price: 21800 }], size: 1 },
+        'long',
+    )
+    assert.deepEqual(idea.stop_conditions, [touchLeaf(21000)])
+    assert.deepEqual(idea.tp_conditions,   [touchLeaf(21800)])
+})
+
+// ── applyPriceLevels: the numeric API the client actually uses ────────────────
+
+test('a bare *_price expands into the leg the rest of the system reads', () => {
+    const out = applyPriceLevels({ asset: 'AAPL', stop_price: 185.5, tp_price: 210 })
+    assert.deepEqual(out.stop_conditions, [touchLeaf(185.5)])
+    assert.deepEqual(out.tp_conditions,   [touchLeaf(210)])
+    assert.equal(out.stop_price, undefined, 'the numeric field is consumed, never persisted')
+    assert.equal(out.asset, 'AAPL', 'everything else passes through untouched')
+})
+
+test('authored conditions WIN over a stray price field', () => {
+    // The agents and the chat build path send real conditions that say things a price cannot.
+    // A price field arriving alongside them must never overwrite that.
+    const authored = [{ condition: 'RSI closes below 30', type: 'structured' }]
+    const out = applyPriceLevels({ stop_price: 100, stop_conditions: authored })
+    assert.deepEqual(out.stop_conditions, authored)
+})
+
+test('null clears a leg; nonsense is ignored rather than persisted', () => {
+    assert.deepEqual(applyPriceLevels({ stop_price: null }).stop_conditions, [])
+    const junk = applyPriceLevels({ tp_price: 'soon' })
+    assert.equal(junk.tp_conditions, undefined, 'a leg nothing can evaluate is worse than no leg')
+    assert.equal(junk.tp_price, undefined)
+})
+
+test('the caller\'s request body is never mutated', () => {
+    const body = { stop_price: 99 }
+    applyPriceLevels(body)
+    assert.equal(body.stop_price, 99)
+    assert.equal(body.stop_conditions, undefined)
+})
+
+test('an absent leg is left alone — a stop edit must not wipe the target', () => {
+    // handleTicketAttachExits sends ONE leg. If the other came back as [] the server would cancel
+    // a target the user never touched.
+    const out = applyPriceLevels({ stop_price: 185 })
+    assert.equal(out.tp_conditions, undefined)
+    assert.equal(out.entry_conditions, undefined)
+})
+
+// ── Resting entry types ───────────────────────────────────────────────────────
+
+test('both limit and stop rest at the broker; a monitored entry does not', () => {
+    assert.equal(isRestingEntry('stop'), true)
+    assert.equal(isRestingEntry('limit'), true, 'the pullback entry rests too — it is still just a level')
+    assert.equal(isRestingEntry(null), false)
+    assert.equal(isRestingEntry('market'), false, 'a market order has no level to leave anywhere')
+    assert.equal(RESTING_ENTRY_TYPES.size, 2)
+})
+
+test('a resting entry carries the price field its own order type reads', () => {
+    // The adapters read limitPrice for a limit and stopPrice for a stop, and IGNORE the other.
+    // Sending the wrong one doesn't error — the order just arrives with no trigger, which is the
+    // failure this mapping exists to prevent.
+    assert.deepEqual(restingEntryPrice('limit', 21500), { limitPrice: 21500 })
+    assert.deepEqual(restingEntryPrice('stop',  21500), { stopPrice:  21500 })
+})
+
+test('the resting price is the SHIFTED one — the basis offset is applied once, by the caller', () => {
+    // Aliased index futures (NQ vs US100) live in two price spaces. The persisted trigger stays
+    // the real level for display; only the order carries the shift, and it must not be applied
+    // a second time here.
+    const authored = 21500
+    const offset   = 12.5
+    assert.deepEqual(restingEntryPrice('stop', authored + offset), { stopPrice: 21512.5 })
+})

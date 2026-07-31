@@ -121,6 +121,26 @@ export const isPastEntry = (status, includeLegacy = true) =>
 /** Terminal: no further transition is legal. A closed entity must never be resurrected. */
 export const isTerminal = (status) => TERMINAL.includes(status)
 
+// ─── Entry order types ────────────────────────────────────────────────────────
+//
+// WHERE an entry waits, which is a different question from what it waits FOR. A resting type
+// hands the level to the broker; the absent value leaves the entry on the software monitor.
+//
+//   • stop  — breakout: the trigger sits BEYOND the current price (above for a long).
+//   • limit — pullback: the trigger sits BACK THROUGH it (below for a long).
+//
+// Both need a bare price level and nothing else, which is exactly what makes them restable —
+// so they are one set, not two code paths. A monitored entry is the richer case (indicators,
+// news, time, cross-asset), and it stays monitored precisely because a broker can't hold it.
+//
+// This lives here rather than with the idea kind because two modules already need to agree on
+// it — the builder that stamps `entryOrderType` and the executor that reads it back — and they
+// import each other, so neither can own the word.
+export const RESTING_ENTRY_TYPES = new Set(['stop', 'limit'])
+
+/** Does this entry rest AT the broker (vs. on the software monitor)? */
+export const isRestingEntry = (type) => RESTING_ENTRY_TYPES.has(type)
+
 // ─── Trade horizons ───────────────────────────────────────────────────────────
 //
 // One ladder, coarse→fine in holding period. Agents take a SUBSET where their remit is narrower.

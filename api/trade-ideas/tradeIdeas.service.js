@@ -1,11 +1,11 @@
 import { randomUUID }       from 'crypto'
-import { LIVE_POSITION, statusesFor } from '../../services/entity/vocabulary.js'
+import { LIVE_POSITION, statusesFor, isRestingEntry } from '../../services/entity/vocabulary.js'
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { minosService }     from '../../monitoring/minos.monitor.service.js'
 import { brokerService }   from '../broker/broker.service.js'
 import { buildOrderPlanForIdea, resolveUserAccounts } from '../../services/orderPlan.service.js'
-import { routeExits, detectNativeEntryLevel } from '../../services/protectionPlan.service.js'
+import { routeExits, detectNativeEntryLevel, touchLeaf } from '../../services/protectionPlan.service.js'
 import { isAssetOpen } from '../../services/market.service.js'
 import { toBrokerSymbol, normSymbol } from '../../services/brokerSymbol.service.js'
 import { computeBasisOffset }         from '../broker/brokerPrice.service.js'
@@ -107,6 +107,42 @@ export function isClosedIdeaFrozen(existingStatus, patchStatus) {
     return existingStatus === 'closed' && patchStatus != null && patchStatus !== 'closed'
 }
 
+// Legs that can be stated as a BARE PRICE, with the numeric field a caller may send instead of
+// a condition. Ordered entry → stop → tp only for readable logs; the mapping is what matters.
+const PRICE_LEVEL_LEGS = [
+    ['entry_price', 'entry_conditions'],
+    ['stop_price',  'stop_conditions'],
+    ['tp_price',    'tp_conditions'],
+]
+
+/**
+ * Accept a bare NUMBER for any exit/entry leg and expand it into the `touch` leaf the rest of
+ * the system already speaks. The order ticket states its levels as prices — that is the whole
+ * gesture — and a client should not have to know the sentence the condition parser expects, nor
+ * which leaf `type` makes a level rest at the broker rather than sit on the monitor.
+ *
+ * An explicit `*_conditions` always WINS: a caller that authored real conditions (the agents, the
+ * chat build path) is saying something a price can't, so a stray price field must not overwrite it.
+ * Returns a NEW object — the input is a request body and stays untouched.
+ *
+ * @param {object} input
+ * @returns {object}
+ */
+export function applyPriceLevels(input = {}) {
+    const out = { ...input }
+    for (const [priceKey, condKey] of PRICE_LEVEL_LEGS) {
+        if (out[priceKey] === undefined) continue
+        const level = out[priceKey]
+        delete out[priceKey]
+        if (out[condKey] !== undefined) continue          // authored conditions win
+        // null clears the leg (remove a stop); a number sets it. Anything else is ignored
+        // rather than persisted as a leg nothing can evaluate.
+        if (level === null)              out[condKey] = []
+        else if (Number.isFinite(Number(level))) out[condKey] = [touchLeaf(Number(level))]
+    }
+    return out
+}
+
 /**
  * Enrich + broker-partition an idea input into its child doc(s) — WITHOUT inserting. This is the
  * idea-creation engine (condition trees, brokerSymbol resolution, basisOffset, immediate plan)
@@ -114,7 +150,8 @@ export function isClosedIdeaFrozen(existingStatus, patchStatus) {
  * execution fields onto the call entity instead of minting a shadow). Returns
  * { ok, children, forked } or { ok:false, reason?, error }.
  */
-async function buildIdeaChildren(tradeIdea, userId) {
+async function buildIdeaChildren(rawIdea, userId) {
+    const tradeIdea = applyPriceLevels(rawIdea)
     const entryTree = resolveConditionTree(tradeIdea.entry_condition,  tradeIdea.entry_conditions, tradeIdea.entry_logic ?? 'AND')
     const stopTree  = resolveConditionTree(tradeIdea.stop_loss,        tradeIdea.stop_conditions,  tradeIdea.stop_logic  ?? 'OR')
     const tpTree    = resolveConditionTree(tradeIdea.take_profit,      tradeIdea.tp_conditions,    tradeIdea.tp_logic    ?? 'OR')
@@ -153,7 +190,10 @@ async function buildIdeaChildren(tradeIdea, userId) {
         type:            tradeIdea.type            ?? null,
         quantity:        tradeIdea.quantity        != null ? Number(tradeIdea.quantity) : null,
 
-        entryOrderType:    tradeIdea.entry_order_type === 'stop' ? 'stop' : null,
+        // Which broker order type the entry rests as. 'stop' is the breakout entry (trigger
+        // ABOVE for a long); 'limit' is the pullback entry (trigger BELOW). Both rest at the
+        // broker rather than on the monitor, so both need a bare price level — resolved below.
+        entryOrderType:    isRestingEntry(tradeIdea.entry_order_type) ? tradeIdea.entry_order_type : null,
         entryTriggerPrice: null,
 
         entry_timeframe: tradeIdea.entry_timeframe ?? null,
@@ -192,12 +232,12 @@ async function buildIdeaChildren(tradeIdea, userId) {
     }
 
     try {
-        if (enriched.entryOrderType === 'stop') {
+        if (enriched.entryOrderType) {
             const level = await detectNativeEntryLevel(enriched)
             if (level != null) {
                 enriched.entryTriggerPrice = level
             } else {
-                logger.warn(LOG, 'entry_order_type=stop but entry is not a bare price level — falling back to monitored', { asset: enriched.asset })
+                logger.warn(LOG, `entry_order_type=${enriched.entryOrderType} but entry is not a bare price level — falling back to monitored`, { asset: enriched.asset })
                 enriched.entryOrderType = null
             }
         }
@@ -338,7 +378,12 @@ async function deleteIdea(id, userId) {
     })
 }
 
-async function updateIdea(id, patch, userId) {
+async function updateIdea(id, rawPatch, userId) {
+    // Bare price levels expand to touch leaves BEFORE anything reads the legs — the in-position
+    // exit-arming branch below keys off `patch.stop_conditions !== undefined`, so a ticket that
+    // sent only `stop_price` would otherwise be seen as touching no exits at all.
+    const patch = applyPriceLevels(rawPatch)
+
     if (patch.status !== undefined && !VALID_STATUSES.has(patch.status)) {
         return { ok: false, reason: 'invalid_status' }
     }
