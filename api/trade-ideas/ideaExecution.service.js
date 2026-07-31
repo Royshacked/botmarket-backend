@@ -10,7 +10,7 @@ import { orderSymbol }          from '../../monitoring/exitOrders.util.js'
 import { exitFields, basisReferenceQuote } from './exitOrders.service.js'
 import { entityRepo }          from '../../services/entity/entityRepo.service.js'
 import { ownsEntity }          from '../../services/entity/entityCrud.service.js'
-import { AWAITING_CONFIRM }    from '../../services/entity/vocabulary.js'
+import { AWAITING_CONFIRM, isRestingEntry } from '../../services/entity/vocabulary.js'
 import { coverageService }     from '../analyst/coverage.service.js'
 
 const LOG = '[ideaExecution]'
@@ -22,6 +22,19 @@ const PLACEABLE = new Set(AWAITING_CONFIRM)
 
 const ORDER_EXEC_TYPES = new Set(['market', 'limit', 'stop'])
 const toExecType = t => (ORDER_EXEC_TYPES.has(t) ? t : 'market')
+
+/**
+ * WHICH price field a resting entry carries. The adapters read `limitPrice` for a limit and
+ * `stopPrice` for a stop and ignore the other, so sending the wrong one is not an error — the
+ * order simply arrives with no trigger at all. Pure, so the mapping is testable without a broker.
+ *
+ * @param {'limit'|'stop'} entryOrderType
+ * @param {number} price  already shifted into broker price space by the caller
+ * @returns {{ limitPrice: number }|{ stopPrice: number }}
+ */
+export function restingEntryPrice(entryOrderType, price) {
+    return entryOrderType === 'limit' ? { limitPrice: price } : { stopPrice: price }
+}
 
 /**
  * Place broker orders for a triggered ('hit') idea after the user confirms.
@@ -137,15 +150,20 @@ export async function triggerEntryNow(id, userId) {
 }
 
 /**
- * Activate a resting (broker-native stop-market) entry: place a working STOP order
- * at the trigger price on each account. The idea moves to 'resting'.
+ * Activate a resting (broker-native) entry: place a working order at the trigger price on
+ * each account. The idea moves to 'resting'.
+ *
+ * The order type is the idea's own `entryOrderType` — a STOP for a breakout entry (trigger
+ * beyond the current price) or a LIMIT for a pullback entry (trigger back through it). Both
+ * are the same gesture, "leave this level with the broker"; only the side of the market the
+ * trigger sits on differs, and the broker is the one that knows which it is.
  */
 export async function placeRestingEntryForIdea(id, userId) {
     try {
         const idea = await entityRepo.getById(id)
         if (!idea) return { ok: false, reason: 'not_found' }
         if (!ownsEntity(idea, userId)) return { ok: false, reason: 'forbidden' }
-        if (idea.entryOrderType !== 'stop')              return { ok: false, reason: 'not_resting' }
+        if (!isRestingEntry(idea.entryOrderType))         return { ok: false, reason: 'not_resting' }
         if (idea.ordersPlacedAt || idea.restingPlacedAt) return { ok: false, reason: 'already_placed' }
 
         const triggerPrice = idea.entryTriggerPrice ?? await detectNativeEntryLevel(idea)
@@ -162,20 +180,21 @@ export async function placeRestingEntryForIdea(id, userId) {
         const results      = []
         const brokerOrders = []
         for (const order of plan) {
+            // Shift authored (real) price → broker space by the fork-measured offset (0 for all
+            // but aliased index futures). Persisted entryTriggerPrice below stays the real level
+            // (app display); only the order carries the shift.
+            const brokerPrice = triggerPrice + (Number(idea.basisOffset) || 0)
             const brokerOrder = {
                 symbol:    orderSymbol(idea),
                 direction: idea.direction,
                 quantity:  order.quantity,
-                type:      'stop',
-                // Shift authored (real) price → broker space by the fork-measured offset
-                // (0 for all but aliased index futures). Persisted entryTriggerPrice below
-                // stays the real level (app display); only the order carries the shift.
-                stopPrice: triggerPrice + (Number(idea.basisOffset) || 0),
+                type:      idea.entryOrderType,
+                ...restingEntryPrice(idea.entryOrderType, brokerPrice),
                 ...(referenceQuote != null && { referenceQuote }),
             }
             try {
                 const result = await brokerService.placeOrder(order.broker, userId, order.accountId, brokerOrder)
-                logger.info(LOG, 'Resting entry placed', { id, broker: order.broker, accountId: order.accountId, stopPrice: triggerPrice, orderId: result?.orderId })
+                logger.info(LOG, 'Resting entry placed', { id, broker: order.broker, accountId: order.accountId, type: idea.entryOrderType, triggerPrice, orderId: result?.orderId })
                 results.push({ accountId: order.accountId, ok: true, orderId: result?.orderId ?? null })
                 brokerOrders.push({
                     broker:     order.broker,

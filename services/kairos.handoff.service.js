@@ -7,6 +7,7 @@ import { notifyCallManage } from './tradeNotify.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { normalizeZones, normalizeReferenceLevels } from '../api/kairos/kairos.service.js'
 import { knownVenue } from './venue.resolve.service.js'
+import { touchLeaf as _touch } from './protectionPlan.service.js'
 import { ownsEntity } from './entity/entityCrud.service.js'
 import { isLivePosition, isAwaitingConfirm, isInvalidated } from './entity/vocabulary.js'
 import { logger } from './logger.service.js'
@@ -52,11 +53,6 @@ export function buildIdeaFromCall(call, proposal, direction) {
         callId:        call?.id ?? null,                          // origin back-reference → survives onto the trade
         notes:         `Kairos call ${call?.id}${proposal?.rationale ? ` — ${proposal.rationale}` : ''}`,
     }
-}
-
-// A single native price-touch leaf (rests at the broker as a closing STOP/LIMIT). Pure.
-function _touch(level) {
-    return { condition: `price touches ${level}`, type: 'touch', timeframe: null }
 }
 
 // The in-position scaffold (Phase 5), initialized at confirm. `entry.fill_price` is filled when
