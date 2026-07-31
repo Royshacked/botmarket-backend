@@ -80,12 +80,70 @@ export async function currentReferencePrice(asset, timeframe = 'day') {
  *                  monitorTree:object|null, hasAny:boolean }
  */
 export async function routeExits(idea) {
+    // A `setup` states its exits as ZONES, not condition trees, so there are no leaves to inspect
+    // and nothing to leave on the monitor — every zone edge is a price, which is precisely what
+    // rests at the broker. Routing it through the tree path returned an empty plan, which is how a
+    // confirmed setup came to place a NAKED entry: no nativeExit, no monitorStop/Tp, and
+    // placeExits no-opping because `idea.nativeExit` was undefined.
+    //
+    // Dispatched HERE rather than at the call site so the execution path stays kind-blind — it asks
+    // one function for a routing and gets the same shape back whatever authored the exits.
+    if (idea?.kind === 'setup') return routeSetupZones(idea)
+
     const totalQty = Number(idea.quantity) || 0
     const [stop, tp] = await Promise.all([
         _routeLeg(idea.stop_condition_tree, idea.stop_conditions, totalQty),
         _routeLeg(idea.tp_condition_tree,   idea.tp_conditions,   totalQty),
     ])
     return { stop, tp }
+}
+
+/**
+ * WHICH EDGE of a zone becomes the order price. One rule for both legs, and it is the same edge
+ * `computeRR` already prices risk from — so the R:R the user was shown at build is the R:R the
+ * broker orders actually express, rather than a flattering version of it.
+ *
+ *   long  → `lower`   stop: the FAR side (the zone gets room to be a zone, not a hair trigger)
+ *                     tp:   the NEAR side (the first target edge price reaches — the one that fills)
+ *   short → `upper`   mirrored.
+ *
+ * Both legs landing on the same edge is not a coincidence: for a long, "the pessimistic stop" and
+ * "the first-touched target" are both the low side of their band. Pure.
+ */
+export function zoneExitLevel(zone, isLong) {
+    const level = isLong ? zone?.lower : zone?.upper
+    return Number.isFinite(level) ? level : null
+}
+
+/**
+ * A setup's stop/tp ZONES → the same LegRouting shape the tree path returns, so `exitFields`,
+ * `placeExits` and the reconciler consume it untouched.
+ *
+ * `monitorTree` is always null: there is no residual software-monitored condition, because a zone
+ * IS a price. Every leg rests at the broker, which is what protects a position nobody is watching.
+ *
+ * Quantities come from the SAME rule the tree path uses (`_assignSlotQuantities`): an explicit
+ * per-zone quantity wins, and the rest split the remainder equally with the residue going to the
+ * first defaulted slot. So multi-target scale-outs behave identically whichever kind authored them.
+ * Pure — no IO, unlike the tree path which may fetch candles to resolve a leaf.
+ */
+export function routeSetupZones(setup) {
+    const isLong   = setup?.direction === 'long'
+    const totalQty = Number(setup?.quantity) || 0
+
+    const leg = (zones) => {
+        const list = (Array.isArray(zones) ? zones : []).filter(z => Number.isFinite(zoneExitLevel(z, isLong)))
+        if (!list.length) return { single: null, nativeOrders: [], monitorTree: null, hasAny: false }
+
+        const quantities = _assignSlotQuantities(list, totalQty)
+        const nativeOrders = list
+            .map((z, i) => ({ level: zoneExitLevel(z, isLong), quantity: quantities[i] }))
+            // A zero-quantity leg would be sent to the broker as an order for nothing.
+            .filter(o => o.quantity > 0)
+        return { single: null, nativeOrders, monitorTree: null, hasAny: nativeOrders.length > 0 }
+    }
+
+    return { stop: leg(setup?.stop_zones), tp: leg(setup?.tp_zones) }
 }
 
 // ─── internals ──────────────────────────────────────────────────────────────

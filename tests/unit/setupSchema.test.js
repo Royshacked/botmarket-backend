@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     buildLadder, buildCadence, normalizeZone, normalizeZones, totalQuantity,
-    normalizeWatch, watchKinds, normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
+    normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems,
+    normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
 } from '../../services/setup.schema.js'
 
 // The `setup` entity contract (docs/setup-entity.md §3). Mentor authors loosely, Talos monitors
@@ -99,41 +100,125 @@ test('total quantity sums the scale-in legs, and is null when nothing is sized',
     assert.equal(totalQuantity([]), null)
 })
 
-// ─── watch[] ──────────────────────────────────────────────────────────────────
+// ─── conditions[] ─────────────────────────────────────────────────────────────
 
-test('an unknown watch kind is dropped, not defaulted', () => {
-    // A bogus kind would mount the wrong tools (or none) — an absent factor is safer.
-    const watch = normalizeWatch([
-        { kind: 'vibes',     look_for: 'feels good' },
-        { kind: 'structure', look_for: 'CHoCH up' },
-    ])
-    assert.deepEqual(watchKinds(watch), ['structure'])
-})
-
-test('a factor with no look_for is dropped — the assessment would have nothing to verify', () => {
-    assert.equal(normalizeWatch([{ kind: 'news' }]).length, 0)
-    assert.equal(normalizeWatch([{ kind: 'news', look_for: '   ' }]).length, 0)
+test('a condition with no text is dropped — the monitor would have nothing to check', () => {
+    assert.equal(normalizeConditions([{ id: 'c1' }]).length, 0)
+    assert.equal(normalizeConditions([{ id: 'c1', text: '   ' }]).length, 0)
 })
 
 test('weight defaults to confirming, never to primary', () => {
-    // Defaulting to primary would silently promote a throwaway factor into the trigger.
-    assert.equal(normalizeWatch([{ kind: 'market', look_for: 'tape holding' }])[0].weight, 'confirming')
-    assert.equal(normalizeWatch([{ kind: 'market', look_for: 'x', weight: 'primary' }])[0].weight, 'primary')
+    // Defaulting to primary would silently promote a throwaway condition into the trigger.
+    assert.equal(normalizeConditions([{ text: 'tape holding' }])[0].weight, 'confirming')
+    assert.equal(normalizeConditions([{ text: 'x', weight: 'primary' }])[0].weight, 'primary')
 })
 
-test('correlation symbols are upper-cased and de-duplicated', () => {
-    const [w] = normalizeWatch([{ kind: 'correlation', look_for: 'leading', symbols: ['smh', 'SMH', ' qqq '] }])
-    assert.deepEqual(w.symbols, ['SMH', 'QQQ'])
+test('an unstamped condition re-checks and claims no test — the safe defaults', () => {
+    // live: caching something that could flip is a WRONG ANSWER; re-checking is merely a wasted call.
+    // discretionary: claiming "measured" without a named test would overstate how hard the check is.
+    const [c] = normalizeConditions([{ text: 'NVDA weak' }])
+    assert.equal(c.persistence, 'live')
+    assert.equal(c.mode, 'discretionary')
+    assert.equal(normalizeConditions([{ text: 'x', persistence: 'latching' }])[0].persistence, 'latching')
+    assert.equal(normalizeConditions([{ text: 'x', mode: 'measured' }])[0].mode, 'measured')
+    assert.equal(normalizeConditions([{ text: 'x', persistence: 'sometimes' }])[0].persistence, 'live')
 })
 
-test('symbols is omitted rather than left empty when none are named', () => {
-    assert.equal('symbols' in normalizeWatch([{ kind: 'news', look_for: 'no downgrade' }])[0], false)
+// The monitor latches resolved conditions BY ID, so an id that moves re-points a past finding at a
+// different condition. These three properties are what make that safe.
+test('authored ids win, so a re-emit keeps its findings attached', () => {
+    const out = normalizeConditions([{ id: 'c7', text: 'a' }, { id: 'c9', text: 'b' }])
+    assert.deepEqual(out.map(c => c.id), ['c7', 'c9'])
 })
 
-test('a non-array watch degrades to an empty list', () => {
+test('the positional fallback keys off the original index, so dropping one never renumbers the rest', () => {
+    const out = normalizeConditions([{ text: 'a' }, { text: '' }, { text: 'c' }])
+    assert.deepEqual(out.map(c => c.id), ['c1', 'c3'], 'c3 stays c3 even though c2 vanished')
+})
+
+test('duplicate ids are suffixed, never silently merged', () => {
+    const out = normalizeConditions([{ id: 'c1', text: 'a' }, { id: 'c1', text: 'b' }])
+    assert.deepEqual(out.map(c => c.id), ['c1', 'c1_2'])
+    assert.equal(new Set(out.map(c => c.id)).size, 2)
+})
+
+test('a non-array conditions degrades to an empty list', () => {
     for (const bad of [null, undefined, 'structure', {}]) {
-        assert.deepEqual(normalizeWatch(bad), [])
+        assert.deepEqual(normalizeConditions(bad), [])
     }
+})
+
+test('referenced symbols are upper-cased, de-duplicated and capped', () => {
+    assert.deepEqual(normalizeSymbols(['smh', 'SMH', ' qqq ']), ['SMH', 'QQQ'])
+    assert.equal(normalizeSymbols(['a', 'b', 'c', 'd', 'e', 'f', 'g']).length, 6)
+    assert.deepEqual(normalizeSymbols('SMH'), [])
+})
+
+// ─── validity ─────────────────────────────────────────────────────────────────
+
+test('validity sorts flipped edges and defaults on_break to revise', () => {
+    const v = normalizeValidity({ lower: 244, upper: 234 })
+    assert.equal(v.lower, 234)
+    assert.equal(v.upper, 244)
+    assert.equal(v.on_break, 'revise')
+    assert.equal(normalizeValidity({ lower: 1, upper: 2, on_break: 'close' }).on_break, 'close')
+    assert.equal(normalizeValidity({ lower: 1, upper: 2, on_break: 'burn it' }).on_break, 'revise')
+})
+
+test('validity with no usable edge is null — an absent range, not a broken one', () => {
+    for (const bad of [null, undefined, {}, [], { lower: 'x' }, 'wide']) {
+        assert.equal(normalizeValidity(bad), null)
+    }
+    assert.equal(normalizeValidity({ lower: 234 }).upper, null, 'one edge is still a range')
+})
+
+// ─── validity coherence ───────────────────────────────────────────────────────
+// A range that contradicts the plan is worse than no range: it reports "still valid" at a price
+// where the setup's own stop is already blown.
+
+const COHERENT = {
+    direction: 'long',
+    stop_zones: [{ lower: 234.8, upper: 235.9 }],
+    validity:   { lower: 235.5, upper: 244, approach: 246, on_break: 'revise' },
+}
+
+test('a coherent validity range raises no problem', () => {
+    assert.deepEqual(validityProblems(COHERENT), [])
+    assert.deepEqual(validityProblems({ direction: 'long' }), [], 'no range is not a problem')
+})
+
+test('a validity floor below the stop is refused on a long', () => {
+    const p = validityProblems({ ...COHERENT, validity: { ...COHERENT.validity, lower: 230 } })
+    assert.equal(p.length, 1)
+    assert.match(p[0], /floor sits below the stop/)
+})
+
+test('a validity ceiling above the stop is refused on a short', () => {
+    const p = validityProblems({
+        direction: 'short',
+        stop_zones: [{ lower: 244, upper: 245 }],
+        validity:   { lower: 230, upper: 250, approach: 228 },
+    })
+    assert.equal(p.length, 1)
+    assert.match(p[0], /ceiling sits above the stop/)
+})
+
+test('an away pivot inside the range can never fire, so it is refused', () => {
+    const p = validityProblems({ ...COHERENT, validity: { ...COHERENT.validity, approach: 240 } })
+    assert.match(p[0], /inside the validity range/)
+})
+
+test('readiness reports coherence problems separately from missing fields', () => {
+    const r = setupReadiness({
+        asset: 'NVDA', direction: 'long', type: 'swing', quantity: 100,
+        conditions:  [{ id: 'c1', text: 'CHoCH up on the 15m' }],
+        entry_zones: [{ lower: 237.8, upper: 238.6 }],
+        stop_zones:  [{ lower: 234.8, upper: 235.9 }],
+        validity:    { lower: 230, upper: 244 },
+    }, true)
+    assert.equal(r.ready, false)
+    assert.deepEqual(r.missing, [], 'nothing is missing — the range is wrong, not absent')
+    assert.equal(r.problems.length, 1)
 })
 
 // ─── normalizeSetup ───────────────────────────────────────────────────────────
@@ -141,7 +226,7 @@ test('a non-array watch degrades to an empty list', () => {
 const DRAFT = {
     asset: 'nvda', direction: 'long', type: 'swing', trade_mode: 'smc', timeframe: '1hr',
     thesis: 'Sweep and reclaim of the shelf.',
-    watch: [{ kind: 'structure', look_for: 'CHoCH up', timeframe: '15min', weight: 'primary' }],
+    conditions: [{ id: 'c1', text: 'CHoCH up on the 15m', weight: 'primary' }],
     entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
     stop_zones:  [{ lower: 234.8, upper: 235.9, quantity: 100 }],
     tp_zones:    [{ lower: 246.0, upper: 247.2, quantity: 100 }],
@@ -194,7 +279,7 @@ test('a half-built setup normalises without throwing — it renders every turn',
 // ─── Readiness ────────────────────────────────────────────────────────────────
 
 test('a complete setup with a marked account is ready', () => {
-    assert.deepEqual(setupReadiness(normalizeSetup(DRAFT), true), { ready: true, missing: [] })
+    assert.deepEqual(setupReadiness(normalizeSetup(DRAFT), true), { ready: true, missing: [], problems: [] })
 })
 
 test('readiness names what is missing, so the UI never shows a dead button', () => {

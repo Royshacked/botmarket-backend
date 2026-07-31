@@ -79,12 +79,15 @@ setup that reaches a position reconciles with no reconciler change.
 
   "thesis": "Sweep of the 238 shelf that fails and reclaims, semis holding up.",
 
-  "watch": [
-    { "kind": "structure",   "look_for": "sweep below 238 that closes back inside, then CHoCH up",
-      "timeframe": "15min", "weight": "primary" },
-    { "kind": "correlation", "look_for": "SMH leading, not diverging",
-      "symbols": ["SMH"], "weight": "confirming" }
+  "conditions": [
+    { "id": "c1", "text": "sweep below 238 that closes back inside, then a CHoCH up on the 15m",
+      "weight": "primary",    "mode": "measured",      "persistence": "live" },
+    { "id": "c2", "text": "SMH leading, not diverging",
+      "weight": "confirming", "mode": "discretionary", "persistence": "live" }
   ],
+  "referenced_symbols": ["SMH"],
+  "validity": { "lower": 234.0, "upper": 244.0, "approach": 246.0,
+                "timeframe": "1hr", "on_break": "revise" },
 
   "entry_zones": [
     { "id": "ez1", "lower": 237.8, "upper": 238.6, "quantity": 100, "note": "the shelf" },
@@ -119,31 +122,62 @@ Field notes:
   It modulates assessment strictness — see §5.
 - No condition trees. No leaves. Nothing in this payload is a `ConditionNode`.
 
-## 4. `watch[]` — the switchboard
+## 4. `conditions[]` — the instruction sheet
 
-This is what makes the setup cheaper than a call. The assessment mounts **only**
-the tools its `watch[]` declares; an undeclared dimension is never fetched.
+> **SUPERSEDED 2026-07-31.** The typed `watch[]` switchboard described here was replaced
+> by free-text conditions. See `docs/mentor-talos-refactor.md` §2 for the reasoning; this
+> section records the current shape.
 
-| `kind` | monitor fetches |
+A condition is **text** — the sentence a trader would say out loud. There is no taxonomy:
+the monitor reads it, works out what would confirm or deny it, and calls the tools it
+needs. An enum could only ever narrow what is checkable.
+
+```js
+{ id: 'c1', text: 'orderblock touch at 100', weight: 'primary', mode: 'measured', persistence: 'live' }
+```
+
+| field | meaning |
 |---|---|
-| `price_action` | chart image + candles, `get_orderblocks`, `get_false_breaks` |
-| `structure` | `get_structure` / `get_fvg` / `get_liquidity` — the same engine it was built on |
-| `correlation` | live quotes for the named `symbols` only |
-| `market` | SPY / QQQ / ^VIX |
-| `news` | headlines for the ticker |
-| `positioning` | `get_short_interest` / `get_options_context` / `get_derivatives_context` |
-| `fundamental` | `get_fundamentals`, `get_sec_filings` |
+| `id` | the ledger key. The monitor answers `{id, met, note}` per condition, and **latches by id** — so ids must stay stable across re-emits or a past finding re-points at a different condition |
+| `weight` | `primary` (the trigger itself) · `confirming` (supports, doesn't veto) |
+| `mode` | `measured` (the user named a test — apply THAT one) · `discretionary` (the user handed the judgment over — use your eyes). Mentor's record of the build conversation; changes the monitor's VOICE, never the verdict |
+| `persistence` | `latching` (an event — checked once, then remembered) · `live` (a state that can flip — re-checked every wake). Unstamped defaults to `live`: re-checking needlessly costs a call, but caching wrongly is a wrong answer |
 
-No `news` factor → no headline fetch. No `market` factor → no index quote. A purely
-structural setup costs one chart + candles per wake.
+**Checkability is Mentor's gate, not Talos's.** A condition nobody can observe never
+reaches the monitor: Mentor asks the user, and accepts either a named test *or*
+explicitly handed-over discretion. What it refuses is the third case — vague by
+accident, where neither party ever decided which it was.
 
-`trade_mode` biases which structural toolkit a `price_action`/`structure` factor
-mounts (classical → orderblocks/false-breaks; smc → the numeric SMC engine) and
-injects the matching lens instruction, mirroring `_modeLensBlock`.
+`met` is three-state: `yes` / `no` / **`unchecked`**. Collapsing that to a boolean would
+make "the provider was down" indistinguishable from "I looked and it isn't happening" —
+one is a reason to wait, the other a reason to go get the data.
+
+`referenced_symbols` bounds which other tickers a setup can pull the monitor onto (max 6).
 
 **One always-on exception: `event_risk`.** A frozen date list stamped server-side by
 `eventRisk.service.js` — a lookup, not an LLM axis. It's the only thing that catches
-what the setup *couldn't* declare (earnings landing mid-hold). Everything else opt-in.
+what the setup *couldn't* declare (earnings landing mid-hold).
+
+## 4b. `validity` — the range outside which the setup is dead
+
+The second arithmetic gate, and the only thing Talos can say when price is nowhere near
+a zone (otherwise the journal is a metronome: *"price is outside my zones"*, forever).
+
+```js
+validity: { lower: 234, upper: 244, approach: 246, timeframe: '1hr', on_break: 'revise' }
+```
+
+The edges are **not** symmetric. For a long: below `lower` the premise **broke**; above
+`approach` it **ran away** — nothing was wrong with the read, it was missed, which is a
+different conversation. `approach` therefore sits outside the range on the away side.
+
+`timeframe` names whose **close** decides — a wick must not kill a setup. `on_break` is
+authored, never assumed: `revise` (ping the user to re-draw) · `close` (let it die) ·
+`notify_only`.
+
+The range must agree with the stop: a long whose `validity.lower` sits below its stop
+would read "valid" at a price where the plan is already dead. `validityProblems()` blocks
+Generate, and the FE reads the same function so the button and the refusal can't disagree.
 
 ## 5. Talos — the monitor contract
 
@@ -307,7 +341,7 @@ below is plumbing it inherits unchanged.
 | event risk | `eventRisk.service.js` (already server-stamped) |
 | notifications | the unified notification service — `postBotCard` / `cardActions` shell; Mentor writes its own card copy |
 | persistence | `entityRepo` + `entityCollection.js` |
-| execution | `orderPlan.service.js`, `execution.reconciler.js`, `exitOrders.util.js` — already kind-blind, **zero change** |
+| execution | `orderPlan.service.js`, `execution.reconciler.js`, `exitOrders.util.js` — kind-blind, zero change. **CORRECTED 2026-07-31:** `protectionPlan.routeExits` was NOT — it read condition trees, so a setup's zones produced no exit orders and a confirmed setup placed a naked entry. It now dispatches to `routeSetupZones` |
 | market hours | `market.service.js` — `isAssetOpen`, `sessionPhase` |
 
 **Frontend**

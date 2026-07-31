@@ -1,14 +1,17 @@
-import { getDb } from '../providers/mongodb.provider.js'
 import { ENTITIES } from '../services/entity/entityCollection.js'
+import { INVALIDATION, isInvalidated, PAST_ENTRY } from '../services/entity/vocabulary.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
-import { createPollLoop, fetchLastPrice } from './monitorUtils.js'
-import { journalEntry, withJournal } from './monitorJournal.js'
-import { withTimeout } from '../services/timeout.util.js'
+import { fetchLastPrice, fetchCandles } from './monitorUtils.js'
+import { createDueLoop, makePersist } from './dueLoop.js'
+import { journalEntry } from './monitorJournal.js'
+import {
+    isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap, gradedGap,
+} from './readinessGates.js'
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, READINESS_VERDICTS } from './talos.assess.js'
-import { notifySetupEntryConfirm } from '../services/tradeNotify.service.js'
+import { notifySetupEntryConfirm, notifySetupInvalidation } from '../services/tradeNotify.service.js'
 
 // Talos — the guardian of the `setup` kind (docs/setup-entity.md §5).
 //
@@ -21,10 +24,11 @@ import { notifySetupEntryConfirm } from '../services/tradeNotify.service.js'
 // Shares NO mutable state with Minos (legacy tree-ideas) or Hermes (calls). It polls kind:'setup'
 // exclusively, so the three monitors can never contend for the same document.
 //
-// v1 SCOPE: pre-position readiness only. Post-confirm setups are NOT polled at all — in-position
-// management (stop/tp zone trips → exit cards) needs the order layer and lands next, mirroring how
-// Hermes was phased. Until then the execution reconciler owns a live position, exactly as it does
-// for ideas.
+// SCOPE. Readiness is the whole brain here. Past entry the loop still runs (_checkPosition) but only
+// to keep the journal honest through the fill — the position itself is protected by the stop/tp
+// orders RESTING AT THE BROKER, built from the setup's zones by protectionPlan.routeSetupZones.
+// In-position management (re-reading the thesis, scaling, moving stops) is not built and is not
+// pretended: see docs/mentor-talos-refactor.md.
 
 const LOG        = '[talos.monitor]'
 const COLLECTION = ENTITIES
@@ -32,7 +36,6 @@ const KIND       = 'setup'
 
 const POLL_INTERVAL_MS    = 60_000
 const CHECK_TIMEOUT_MS    = 90_000
-const CLAIM_LEASE_MS      = CHECK_TIMEOUT_MS
 const EXPIRY_THRESHOLD_MS = 15 * 60_000   // run the expiry review within 15m of valid_until
 const TIMELINE_MAX        = 50
 
@@ -40,73 +43,36 @@ const TIMELINE_MAX        = 50
 //   'waiting'  persisted but NOT monitored (Arm is the user's separate act) — never polled
 //   'looking'  armed — polled. Price sitting INSIDE a zone is `armed_zone_id`, not a status:
 //              being in a zone is a detail of looking, not a different lifecycle rung.
-//   'hit'      fulfilled; the user is being asked to confirm — hands over to the execution path
-// Everything from 'hit' onward belongs to execution, not readiness, so it leaves the loop.
 const ACTIVE_STATUSES = ['looking']
 
-const _loop = createPollLoop({ intervalMs: POLL_INTERVAL_MS, tick: _tick, eager: true, log: LOG, name: 'talos monitor' })
+// PAST ENTRY — 'hit' (awaiting the user's confirm / a fill) and 'long'/'short' (live at the broker).
+//
+// These used to be excluded, which is why a setup's journal STOPPED DEAD at the entry card: the
+// moment it mattered most, the record went quiet. Hermes has always polled its past-entry statuses
+// for the same reason. What Talos does with them here is deliberately small — see _checkPosition.
+const POSITION_STATUSES = [...PAST_ENTRY]
+
+// The wake-up chore lives in dueLoop.js — find what's due, claim it against a lease, check it
+// under a timeout. What stays here is only what makes this Talos's loop: the kind, the statuses,
+// and the venue filter.
+const _loop = createDueLoop({
+    collection: COLLECTION,
+    kind:       KIND,
+    statuses:   [...ACTIVE_STATUSES, ...POSITION_STATUSES],
+    // A setup with no trading venue can be detected but never executed, so it is not worth a price
+    // fetch — let alone an assessment. A query filter, so skipping it costs nothing.
+    // NOTE: `$ne: null` does NOT match a missing field — Mongo treats absent as null, so a doc with
+    // no `broker` key is excluded too. That is what we want (generate always stamps one), but it
+    // fails SILENTLY: such a setup is never selected, never journals, and logs nothing. If a
+    // `looking` setup looks inert, check `broker` first.
+    filter:     { broker: { $ne: null } },
+    check:      (setup, nowMs) => _checkSetup(setup, nowMs),
+    intervalMs: POLL_INTERVAL_MS,
+    checkTimeoutMs: CHECK_TIMEOUT_MS,
+    log: LOG, name: 'talos monitor',
+})
 
 export const talosService = { start: _loop.start, stop: _loop.stop }
-
-// ─── Poll loop ────────────────────────────────────────────────────────────────
-
-async function _tick() {
-    let setups
-    try {
-        const db  = await getDb()
-        const now = new Date().toISOString()
-        // Due = active AND (never checked OR next_check_at has passed). Same-format UTC ISO
-        // strings compare lexicographically, so $lte on the string is correct.
-        setups = await db.collection(COLLECTION).find({
-            kind:   KIND,
-            status: { $in: ACTIVE_STATUSES },
-            // A setup with no trading venue can be detected but never executed, so it is not worth
-            // a price fetch — let alone an assessment. Mirrors Minos's broker===null skip, but as a
-            // query filter so it costs nothing. `$ne: null` also matches a missing field (legacy).
-            broker: { $ne: null },
-            $or: [
-                { 'monitor_state.next_check_at': null },
-                { 'monitor_state.next_check_at': { $lte: now } },
-            ],
-        }).toArray()
-    } catch (err) {
-        logger.error(LOG, 'DB read error in tick:', err.message)
-        return
-    }
-
-    if (!setups.length) return
-    logger.info(LOG, `checking ${setups.length} due setup(s)`)
-
-    for (const setup of setups) {
-        // Claim before assessing. withTimeout ABANDONS but cannot CANCEL a slow check, so without
-        // a lease the next tick would re-select a still-running setup and double-fire its card.
-        if (!(await _claim(setup, Date.now()))) {
-            logger.info(LOG, `setup ${setup.id} already claimed — skipping`)
-            continue
-        }
-        try { await withTimeout(_checkSetup(setup, Date.now()), CHECK_TIMEOUT_MS) }
-        catch (err) { logger.error(LOG, `check failed for ${setup.id}:`, err.message) }
-    }
-}
-
-// Atomically claim a due setup by pushing next_check_at a lease-horizon forward, conditional on
-// it STILL being due (so a fresher schedule is never clobbered). The real cadence overwrites the
-// lease when the check persists.
-async function _claim(setup, nowMs) {
-    const db = await getDb()
-    const res = await db.collection(COLLECTION).updateOne(
-        {
-            id: setup.id,
-            status: setup.status,
-            $or: [
-                { 'monitor_state.next_check_at': null },
-                { 'monitor_state.next_check_at': { $lte: new Date(nowMs).toISOString() } },
-            ],
-        },
-        { $set: { 'monitor_state.next_check_at': new Date(nowMs + CLAIM_LEASE_MS).toISOString() } },
-    )
-    return res.modifiedCount === 1
-}
 
 // ─── One setup ────────────────────────────────────────────────────────────────
 
@@ -118,12 +84,22 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
         return { reason: 'no_venue' }
     }
 
+    // Past entry → the position path, never the readiness gate. A live setup has no use for a zone
+    // trip: the zones already did their job.
+    if (POSITION_STATUSES.includes(setup.status)) return _checkPosition(setup, nowMs, deps)
+
     // Not live yet — sleep until it opens. No price fetch, no LLM. Runs before every other gate
     // because a not-yet-active setup cannot be expiring (active_from precedes valid_until).
+    //
+    // ONLY the schedule is written. This used to also set `status:'waiting'`, which ORPHANED the
+    // setup permanently: 'waiting' is not in ACTIVE_STATUSES, so the wake-up time it had just
+    // stamped was on a document the poll query could never select again. One "not live yet" line,
+    // then silence forever. Hermes's twin branch (_checkCall) writes the schedule and leaves the
+    // status alone for exactly this reason — being pre-active is a fact about the CLOCK, not a
+    // lifecycle rung, and the UI derives it from `active_from` rather than from a status.
     if (_isPreActive(setup, nowMs)) {
         const wakeAt = new Date(Date.parse(setup.active_from)).toISOString()
-        await _persist(setup.id, {
-            status: 'waiting',
+        await deps.persist(setup.id, {
             'monitor_state.next_check_at': wakeAt,
             'monitor_state.check_count': (setup.monitor_state?.check_count ?? 0) + 1,
         }, _entry('pre_active', { setup, nowMs, nextAt: wakeAt }))
@@ -139,7 +115,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
         const patch = _reschedule(setup, nowMs, null)
         const openMs = deps.nextOpenMs(setup.asset, setup.asset_class)
         if (Number.isFinite(openMs) && openMs > nowMs) patch['monitor_state.next_check_at'] = new Date(openMs).toISOString()
-        await _persist(setup.id, patch, _entry('closed', { setup, nowMs, nextAt: patch['monitor_state.next_check_at'] }))
+        await deps.persist(setup.id, patch, _entry('closed', { setup, nowMs, nextAt: patch['monitor_state.next_check_at'] }))
         return { reason: 'closed' }
     }
 
@@ -149,8 +125,14 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     // Nothing tripped and not expiring → the cheap path. No LLM, just a proximity-aware
     // reschedule that tightens as price approaches the nearest zone.
     if (!zone && !expiring) {
+        // The second arithmetic gate. Only reached when price is OUTSIDE every zone — a setup
+        // sitting in its own zone is doing exactly what it was built to do, whatever the range
+        // says, so a trip can never be overridden by an invalidation.
+        const breached = await _checkValidity(setup, price, nowMs, deps)
+        if (breached) return breached
+
         const patch = _reschedule(setup, nowMs, price)
-        await _persist(setup.id, patch, _entry('scheduled', { setup, nowMs, price, nextAt: patch['monitor_state.next_check_at'] }))
+        await deps.persist(setup.id, patch, _entry('scheduled', { setup, nowMs, price, nextAt: patch['monitor_state.next_check_at'] }))
         return { reason: 'scheduled' }
     }
 
@@ -159,14 +141,124 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
 
     if (!raw || raw._failReason) {
         const patch = _reschedule(setup, nowMs, price)
-        await _persist(setup.id, patch, _entry(reason, { setup, nowMs, price, nextAt: patch['monitor_state.next_check_at'], failed: true, failReason: raw?._failReason }))
+        await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, nextAt: patch['monitor_state.next_check_at'], failed: true, failReason: raw?._failReason }))
         return { reason, failed: true }
     }
 
-    const verdict = READINESS_VERDICTS.has(raw.verdict) ? raw.verdict : 'wait'
-    if (verdict !== raw.verdict) logger.warn(LOG, `off-menu verdict "${raw.verdict}" for ${setup.id} — treating as wait`)
+    const onMenu = READINESS_VERDICTS.has(raw.verdict) ? raw.verdict : 'wait'
+    if (onMenu !== raw.verdict) logger.warn(LOG, `off-menu verdict "${raw.verdict}" for ${setup.id} — treating as wait`)
+
+    const verdict = _effectiveVerdict(onMenu, reason, _isPastExpiry(setup, nowMs))
+    if (verdict !== onMenu) logger.info(LOG, `[${setup.id}] verdict "${onMenu}" → "${verdict}" (${reason}${_isPastExpiry(setup, nowMs) ? ', past expiry' : ''})`)
 
     return _applyVerdict(setup, zone, { ...raw, verdict }, nowMs, reason, price, deps)
+}
+
+/**
+ * A setup that is past entry.
+ *
+ * DELIBERATELY SMALL. The exits now rest at the broker (protectionPlan.routeSetupZones → placeExits),
+ * so the position is PROTECTED without anyone watching it — which is exactly why this doesn't need
+ * to be a management brain to be worth running. What it does is close the hole that started all of
+ * this: the journal used to stop dead at the entry card, so the record went silent at the moment it
+ * mattered most.
+ *
+ *   'hit'         awaiting the user's confirm, or a fill. Nothing to say that the card didn't
+ *                 already say — reschedule quietly rather than writing "still waiting" every wake.
+ *   long/short    the first wake after the fill writes the fill line and stamps position_state, so
+ *                 the timeline reads through the entry. After that it parks on the lazy cadence.
+ *
+ * NOT HERE, and not pretended: no stop/tp management, no scaling, no re-reads. And no CLOSE line —
+ * the reconciler flips a closed setup to 'closed', which drops it out of the polled statuses before
+ * this ever sees it, so the exit is recorded by the trades ledger and not by the journal. Both want
+ * the in-position brain (docs/mentor-talos-refactor.md, deferred).
+ */
+async function _checkPosition(setup, nowMs, deps) {
+    const ps     = setup.position_state ?? {}
+    const inPos  = setup.status === 'long' || setup.status === 'short'
+    // Park on the lazy end of the cadence: nothing here is time-critical, and the broker is holding
+    // the protective orders.
+    const gap    = Number(setup.cadence?.max) || 30
+    const nextAt = new Date(nowMs + gap * 60_000).toISOString()
+    const base   = {
+        'monitor_state.next_check_at': nextAt,
+        'monitor_state.check_count':   (setup.monitor_state?.check_count ?? 0) + 1,
+    }
+
+    // Awaiting confirm/fill, or already promoted → just keep the schedule moving. No journal entry:
+    // an idle wake that writes a line turns the monologue into noise.
+    if (!inPos || ps.entry?.fill_at != null) {
+        await deps.persist(setup.id, base, null)
+        return { reason: inPos ? 'in_position_idle' : 'awaiting_fill' }
+    }
+
+    // First wake after the fill. `entryTriggeredAt` is when the zone tripped; the broker's own fill
+    // price isn't on the setup, so the intended entry stands in until the ledger has it.
+    const fillPrice = _num(ps.entry?.intended) ?? _num(setup.armed_zone_id ? _zoneById(setup, setup.armed_zone_id)?.upper : null)
+    const fillAtMs  = setup.ordersPlacedAt ?? setup.entryTriggeredAt ?? nowMs
+    const stop      = _num(setup.stop_zones?.[0]?.lower) ?? _num(setup.stop_zones?.[0]?.upper)
+
+    const patch = {
+        ...base,
+        'position_state.entry.fill_price': fillPrice,
+        'position_state.entry.fill_at':    new Date(fillAtMs).toISOString(),
+        'position_state.entry.size':       setup.quantity ?? null,
+        'position_state.entry.direction':  setup.direction ?? (setup.status === 'short' ? 'short' : 'long'),
+        'position_state.phase':            'running',
+    }
+    const note = `In on ${setup.asset}${fillPrice != null ? ` around ${fillPrice}` : ''}${stop != null ? `, stop resting at ${stop}` : ''}. The broker is holding the exits from here.`
+    await deps.persist(setup.id, patch, { at: new Date(nowMs).toISOString(), reason: 'entry', price: fillPrice, verdict: null, note, next_check_at: nextAt })
+
+    logger.info(LOG, `[${setup.id}] position opened (${setup.status}) — journal continues`)
+    return { reason: 'entry', promoted: true }
+}
+
+function _num(n) { return Number.isFinite(Number(n)) ? Number(n) : null }
+function _zoneById(setup, id) { return (setup?.entry_zones ?? []).find(z => z.id === id) ?? null }
+
+/**
+ * The validity gate for one wake. Returns a result when the setup's fate changed, else null so the
+ * caller falls through to its normal reschedule.
+ *
+ * TWO STEPS, and the order is the whole reason this is affordable. The live tick is a FILTER, not
+ * the verdict: it costs nothing (already fetched for the zone gate) and it is wrong often enough
+ * that acting on it would kill setups on wicks. Only when the tick says "possibly breached" do we
+ * pay for candles and ask the real question — did a bar CLOSE out there?
+ *
+ * A candle fetch that fails returns null: unknown is not "broken". Silence beats killing a live
+ * plan on a provider hiccup.
+ */
+async function _checkValidity(setup, price, nowMs, deps) {
+    if (!setup?.validity) return null
+
+    const suspected = validityBreach(setup, price)
+    if (!suspected) return null
+
+    const tf    = setup.validity.timeframe || setup.ladder?.[0] || setup.timeframe
+    const close = await deps.getClose(setup, tf)
+    if (!Number.isFinite(close)) {
+        logger.info(LOG, `[${setup.id}] tick ${price} looks past the ${suspected} edge but no ${tf} close available — leaving it alone`)
+        return null
+    }
+
+    // The close is the verdict, and it may disagree with the tick: that IS the wick guard working.
+    const side = validityBreach(setup, close)
+    if (!side) return null
+
+    const { set, card } = breachPatch(setup, side, close, nowMs)
+    if (!card) return null   // already latched — stay quiet, don't re-announce every wake
+
+    const patch = { ..._reschedule(setup, nowMs, price), ...set }
+    await deps.persist(setup.id, patch, _entry('invalidation', {
+        setup, nowMs, price: close, nextAt: patch['monitor_state.next_check_at'],
+        read: set.invalidation_reason,
+    }))
+
+    try { await deps.onInvalidation(setup, { card, side, price: close, edge: set.invalidation_edge, reason: set.invalidation_reason }) }
+    catch (err) { logger.warn(LOG, `invalidation card failed for ${setup.id}:`, err.message) }
+
+    logger.info(LOG, `[${setup.id}] validity ${side} breach at ${close} → ${set.invalidation_status}${set.status === 'closed' ? ' (closed)' : ''}`)
+    return { reason: 'invalidation', side, status: set.invalidation_status, closed: set.status === 'closed' }
 }
 
 /**
@@ -174,7 +266,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
  *
  * THE ENTRY GATE IS THE SETUP, NOT THE ZONE. A zone trip is only the first of two gates: it says
  * price is WHERE the setup lives, which is what makes an assessment worth paying for. Whether the
- * setup is actually fulfilled is the second gate, and that is what `watch[]` is for — so only an
+ * setup is actually fulfilled is the second gate, and that is what `conditions[]` is for — so only an
  * `enter` verdict ("this is the moment") asks the user to confirm an entry.
  *
  * Anything else means the setup has not fulfilled: the card would be asking the user to enter a
@@ -184,6 +276,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
  * Card spam isn't a risk: firing moves the setup to 'hit', which leaves the polled statuses.
  */
 async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
+    const conditions = normalizeConditionResults(raw.conditions, setup.conditions)
     const assessment = {
         at:             new Date(nowMs).toISOString(),
         reason,
@@ -191,7 +284,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
         verdict:        raw.verdict,
         read:           raw.read ?? null,
         warning:        raw.verdict === 'enter' ? null : (raw.warning ?? raw.read ?? null),
-        factors:        Array.isArray(raw.factors) ? raw.factors : [],
+        conditions,
         timeframe_used: raw.timeframe_used ?? null,
         price:          Number.isFinite(price) ? price : null,
         ...(raw.edit_proposal ? { edit_proposal: raw.edit_proposal } : {}),
@@ -202,14 +295,39 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
         'monitor_state.memo':            raw.memo_update ?? setup.monitor_state?.memo ?? null,
         'monitor_state.last_assessment': assessment,
         'monitor_state.next_check_at':   _nextCheckAt(setup, nowMs, raw.next_check_min),
+        ...latchPatch(setup, conditions, nowMs),
+        ...costPatch(setup, raw._calls),
     }
 
     // Expiry review: let_expire closes it; anything else keeps it alive on the normal cadence so
     // the user can act. Never a silent auto-close.
     if (reason === 'expiry_review' && raw.verdict === 'let_expire') {
-        await _persist(setup.id, { ...base, status: 'closed', closedReason: 'expired', closedAt: nowMs },
+        await deps.persist(setup.id, { ...base, status: 'closed', closedReason: 'expired', closedAt: nowMs },
             _entry(reason, { setup, nowMs, price, verdict: raw.verdict, read: raw.read }))
         return { reason, verdict: raw.verdict, closed: true }
+    }
+
+    // `edit` — the map itself is stale, whether or not price is in a zone. This used to be
+    // PERSISTED AND SWALLOWED: the verdict was on the menu, `edit_proposal` was written to the
+    // document, and absolutely nothing told the user. Now it fires the re-map card, and it LATCHES
+    // the invalidation axis to fire once — the same fire-once rule Hermes uses, and the reason the
+    // card can't repeat on every wake while the map stays stale.
+    //
+    // Lifecycle is untouched: a stale map is the INVALIDATION axis, not a lifecycle rung, so the
+    // setup stays exactly where it was and the user re-maps it (which clears the latch) or lets it
+    // go. Only an edit carrying a usable proposal counts — a blank re-map card is worse than none.
+    if (raw.verdict === 'edit' && !isInvalidated(setup.invalidation_status) && _hasEditProposal(raw)) {
+        const patch = {
+            ...base,
+            ...(zone ? { armed_zone_id: zone.id } : {}),
+            invalidation_status: INVALIDATION.FIRED,
+            invalidation_edge:   'time',
+            invalidation_reason: raw.edit_proposal?.why ?? raw.read ?? null,
+        }
+        await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
+        try { await deps.onEditCard(setup, assessment) }
+        catch (err) { logger.warn(LOG, `edit card failed for ${setup.id}:`, err.message) }
+        return { reason, verdict: raw.verdict, edited: true }
     }
 
     // Price is in a zone but the setup did NOT fulfil — the second gate is the point of the
@@ -217,7 +335,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
     // and let Talos's self-chosen cadence decide when to look again. No card: asking the user to
     // confirm an entry Talos just declined is the one thing this gate exists to prevent.
     if (zone && raw.verdict !== 'enter') {
-        await _persist(setup.id, { ...base, status: _nextStatus(raw.verdict, reason), armed_zone_id: zone.id },
+        await deps.persist(setup.id, { ...base, status: _nextStatus(raw.verdict, reason), armed_zone_id: zone.id },
             _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
         return { reason, verdict: raw.verdict, watching: true }
     }
@@ -232,7 +350,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
         // reports the fill. Its own card, not the confirm dialog.
         if (setup.broker === 'manual') {
             patch.orderState = 'awaiting_manual_fill'
-            await _persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
+            await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
             try { await deps.onManualCard(setup) }
             catch (err) { logger.warn(LOG, `manual entry card failed for ${setup.id}:`, err.message) }
             return { reason, verdict: raw.verdict, fired: true, manual: true }
@@ -251,7 +369,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
             logger.info(LOG, `[${setup.id}] zone tripped with no placeable accounts — alert only`)
         }
 
-        await _persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
+        await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
 
         // Only an order actually awaiting confirmation gets the confirm card. 'awaiting_market'
         // defers silently until the market sweep surfaces it, matching Minos.
@@ -263,7 +381,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
         return { reason, verdict: raw.verdict, fired: true, orderState: patch.orderState ?? null }
     }
 
-    await _persist(setup.id, base, _entry(reason, { setup, nowMs, price, verdict: raw.verdict, read: raw.read }))
+    await deps.persist(setup.id, base, _entry(reason, { setup, nowMs, price, verdict: raw.verdict, read: raw.read }))
     return { reason, verdict: raw.verdict }
 }
 
@@ -289,15 +407,225 @@ export function zoneDistance(zones, price) {
     }))
 }
 
-export function _isPreActive(setup, nowMs) {
-    const from = setup?.active_from ? Date.parse(setup.active_from) : null
-    return Number.isFinite(from) && from > nowMs
+// ─── The validity gate ─────────────────────────────────────────────────────────
+//
+// The SECOND arithmetic question every wake asks, alongside "is price in a zone?". Without it the
+// only thing Talos can ever say while price is far away is "outside my zones, checking back in
+// 30m" — forever, on a setup whose premise died an hour ago.
+//
+// The two edges are NOT the same event, and collapsing them loses the whole point (long shown;
+// mirrored for a short):
+//
+//   close BELOW `lower`     → the premise BROKE. Structure went the other way. Latches `fired`,
+//                             and `on_break` decides what happens next.
+//   close ABOVE `approach`  → it RAN AWAY. Nothing was wrong with the read — it was missed, which
+//     (or `upper`)            is a different conversation entirely. Marks `drifting`. Never closes
+//                             a setup: price can come back, and "you missed it" is not "you were
+//                             wrong".
+//
+// CLOSES, NOT TOUCHES. A wick through the line must not kill a plan, so the live tick only decides
+// whether it is worth PAYING for a candle; the candle's close is what decides the setup's fate.
+// That two-step is why this stays cheap enough to run every wake.
+
+/**
+ * An `edit` verdict is only actionable with a proposal describing the re-map — otherwise the card
+ * fires with an empty "why" and the user is told their plan is stale with no way to act. Mirrors
+ * hermes._hasEditProposal. Pure.
+ */
+export function _hasEditProposal(raw) {
+    const ep = raw?.edit_proposal
+    if (!ep || typeof ep !== 'object') return false
+    const hasWhy     = typeof ep.why === 'string' && ep.why.trim() !== ''
+    const hasChanges = ep.changes && typeof ep.changes === 'object' && Object.keys(ep.changes).length > 0
+    return Boolean(hasWhy || hasChanges)
 }
 
-export function _isExpiring(setup, nowMs) {
-    const until = setup?.valid_until ? Date.parse(setup.valid_until) : null
-    return Number.isFinite(until) && (until - nowMs) <= EXPIRY_THRESHOLD_MS
+/** The edge whose breach means the premise broke. Pure. */
+export function adverseEdge(setup) {
+    const v = setup?.validity
+    if (!v) return null
+    return setup?.direction === 'long' ? v.lower ?? null : v.upper ?? null
 }
+
+/**
+ * The edge whose breach means price ran away. `approach` is the authored away-pivot; the envelope's
+ * far side stands in when none was given, so a range with only two edges still reports a runaway
+ * rather than staying silent. Pure.
+ */
+export function awayEdge(setup) {
+    const v = setup?.validity
+    if (!v) return null
+    const long = setup?.direction === 'long'
+    return v.approach ?? (long ? v.upper ?? null : v.lower ?? null)
+}
+
+/**
+ * Which side of the validity range a price sits beyond — 'adverse' | 'away' | null.
+ *
+ * ADVERSE WINS a tie. If a malformed range somehow makes both true, "the premise broke" is the
+ * safer of the two to report: it asks the user to look, where "it ran away" is only ever an FYI.
+ * Pure — used with the live tick as the cheap pre-filter AND with the candle close as the verdict.
+ */
+export function validityBreach(setup, price) {
+    if (!Number.isFinite(price) || !setup?.validity) return null
+    const long = setup?.direction === 'long'
+
+    const adverse = adverseEdge(setup)
+    if (Number.isFinite(adverse) && (long ? price < adverse : price > adverse)) return 'adverse'
+
+    const away = awayEdge(setup)
+    if (Number.isFinite(away) && (long ? price > away : price < away)) return 'away'
+
+    return null
+}
+
+/**
+ * The $set for a confirmed breach, plus whether a card should fire.
+ *
+ * FIRE-ONCE, both sides. Price oscillating around an edge would otherwise notify on every wake —
+ * the single most likely way for this feature to become something the user mutes. `fired` is
+ * terminal for the latch (only a re-map clears it, exactly as the call path does); `drifting` is
+ * announced once and then stays quiet, and can still escalate to `fired` if price later breaks the
+ * other way.
+ *
+ * `on_break` is the user's authored choice and is honoured verbatim — 'close' is the one branch
+ * that touches the lifecycle, and only on the ADVERSE side. Pure.
+ */
+export function breachPatch(setup, side, price, nowMs) {
+    const prior = setup?.invalidation_status ?? null
+    const edge  = setup?.direction === 'long'
+        ? (side === 'adverse' ? 'lower' : 'upper')
+        : (side === 'adverse' ? 'upper' : 'lower')
+
+    if (side === 'away') {
+        // Already announced (or already dead) → nothing to say.
+        if (prior != null) return { set: {}, card: null }
+        return {
+            set: {
+                invalidation_status: INVALIDATION.DRIFTING,
+                invalidation_edge:   edge,
+                invalidation_reason: `price ran to ${price} — past the ${edge} edge of where this setup works`,
+            },
+            card: 'ran_away',
+        }
+    }
+
+    if (prior === INVALIDATION.FIRED) return { set: {}, card: null }
+
+    const set = {
+        invalidation_status: INVALIDATION.FIRED,
+        invalidation_edge:   edge,
+        invalidation_reason: `closed at ${price}, past the ${edge} edge — the premise is broken`,
+    }
+    // The ONE branch that ends the setup, and only because the user asked for it at build time.
+    if (setup?.validity?.on_break === 'close') {
+        Object.assign(set, { status: 'closed', closedReason: 'invalidated', closedAt: nowMs })
+    }
+    return { set, card: setup?.validity?.on_break === 'notify_only' ? 'invalidated_fyi' : 'invalidated' }
+}
+
+// ─── Condition results ─────────────────────────────────────────────────────────
+
+/**
+ * Coerce the model's per-condition answers onto the conditions the setup actually declared.
+ *
+ * Keyed by ID, and an answer for an id the setup doesn't have is DROPPED — a hallucinated id must
+ * never latch, and it must never be counted as a check. A declared condition the model said
+ * nothing about comes back 'unchecked' rather than absent, so the record always has one row per
+ * condition and "it didn't answer" is visible instead of silent.
+ *
+ * `met` is a THREE-state word, not a boolean: yes / no / unchecked. Collapsing it would make "the
+ * provider was down" indistinguishable from "I looked and it isn't happening" — the single most
+ * dangerous confusion available here, because one of those is a reason to wait and the other is a
+ * reason to go get the data. Pure.
+ */
+export function normalizeConditionResults(rawResults, declared) {
+    const list = Array.isArray(declared) ? declared : []
+    if (!list.length) return []
+
+    const byId = new Map()
+    for (const r of (Array.isArray(rawResults) ? rawResults : [])) {
+        if (r && typeof r === 'object' && typeof r.id === 'string') byId.set(r.id.trim(), r)
+    }
+
+    return list.map(c => {
+        const r   = byId.get(c.id)
+        const met = r?.met === true ? 'yes' : r?.met === false ? 'no' : String(r?.met ?? '').toLowerCase()
+        return {
+            id:   c.id,
+            met:  ['yes', 'no', 'unchecked'].includes(met) ? met : 'unchecked',
+            note: typeof r?.note === 'string' && r.note.trim() ? r.note.trim() : null,
+        }
+    })
+}
+
+/**
+ * Latch the conditions that have RESOLVED and stay resolved — see docs/mentor-talos-refactor.md
+ * §2.4. Only `latching` + `met:'yes'` is written, and only once: a settled event should never be
+ * re-searched, both because it wastes the call and because a re-run can come back different and
+ * talk the model out of a fact it already established.
+ *
+ * A `live` condition is never latched (it can flip on the next candle), and an 'unchecked' result
+ * never latches at ALL — caching a failed look as a finding is the bug this three-state exists to
+ * prevent. Returns dotted $set keys so it merges into the wake's single write. Pure.
+ */
+export function latchPatch(setup, results, nowMs) {
+    const byId  = new Map((setup?.conditions ?? []).map(c => [c.id, c]))
+    const prior = setup?.monitor_state?.conditions ?? {}
+    const patch = {}
+
+    for (const r of results ?? []) {
+        if (r.met !== 'yes') continue
+        if (byId.get(r.id)?.persistence !== 'latching') continue
+        if (prior[r.id]?.met === true) continue   // already latched — never re-stamp the timestamp
+        patch[`monitor_state.conditions.${r.id}`] = { met: true, at: new Date(nowMs).toISOString(), note: r.note }
+    }
+    return patch
+}
+
+/**
+ * What this wake actually spent, as a running tally.
+ *
+ * A typed watch list could be priced BEFORE it was saved ("this setup costs one chart + candles"),
+ * and the FE showed that at build time. Free-text conditions can't be: the model decides what to
+ * reach for once it has read them, which is the whole point. So the estimate is replaced by a
+ * measurement — one that gets more accurate with every wake instead of being a guess frozen at
+ * Generate, and that the eventual round cap can be sized from (docs/mentor-talos-refactor.md §5).
+ *
+ * `assessments` counts only the wakes that PAID for a read, not every poll: dividing tool calls by
+ * check_count would blend in the free arithmetic wakes and quietly understate what a read costs.
+ * Pure. No calls (a cheap wake, or a failed one that never reached a tool) → no patch.
+ */
+export function costPatch(setup, calls) {
+    if (!Array.isArray(calls) || !calls.length) return {}
+    const prior = setup?.monitor_state?.cost ?? {}
+    return {
+        'monitor_state.cost': {
+            tool_calls:  (Number(prior.tool_calls)  || 0) + calls.length,
+            assessments: (Number(prior.assessments) || 0) + 1,
+            last:        calls,
+        },
+    }
+}
+
+// The shared clock chores (readinessGates.js), bound to this monitor's own constants. Named
+// re-exports rather than direct imports so the call sites and tests keep reading as Talos's.
+export const _isPreActive  = isPreActive
+export const _isPastExpiry = isPastExpiry
+export const _isExpiring   = (setup, nowMs) => isExpiring(setup, nowMs, EXPIRY_THRESHOLD_MS)
+
+/**
+ * A setup does NOT spare `edit` from the past-expiry cutoff, and Hermes does. Hermes can afford to:
+ * its edit latches the invalidation axis and so cannot re-fire. Talos latches too now (Phase 3), but
+ * only on the branch that fires the card — a latched setup whose model keeps answering `edit` falls
+ * through to the normal path, so sparing it here would reopen the exact forever-loop the cutoff
+ * exists to close. The `edit_proposal` still rides on the closed document's last_assessment, so
+ * nothing the model proposed is lost.
+ */
+const SPARE_PAST_EXPIRY = ['enter']
+export const _effectiveVerdict = (verdict, reason, pastExpiry) =>
+    effectiveVerdict(verdict, reason, pastExpiry, SPARE_PAST_EXPIRY)
+
 
 /**
  * Proximity-aware cadence: poll at the setup's max gap when price is far from every zone, and
@@ -320,24 +648,26 @@ export function _isExpiring(setup, nowMs) {
  * ahead of this in _applyVerdict (let_expire closes it, anything else stays alive on cadence), so
  * by the time status is derived the only question left is whether the setup fulfilled.
  */
-export function _nextStatus(verdict, reason) {
-    return verdict === 'enter' ? 'hit' : 'looking'
-}
+export const _nextStatus = nextStatus
 
+// Talos's bands. Tighter than Hermes's (1/8 vs 2/10) because a setup's cadence is already
+// horizon-scaled, so its floor is cheap. The DISTANCE is measured locally too: zoneDistance treats
+// a zero-width zone as an exact level worth measuring to, where Hermes ignores such a band entirely
+// — a real difference, test-locked on both sides, and not something an extraction should quietly
+// settle. Only the interpolation between the bands is shared.
+const NEAR_WIDTHS = 1
+const FAR_WIDTHS  = 8
 export function proximityGapMin(setup, price) {
     const { min = 5, max = 30 } = setup?.cadence ?? {}
-    const d = zoneDistance(setup?.entry_zones, price)
-    if (d == null) return max
-    if (d <= 1) return min
-    if (d >= 8) return max
-    return Math.round(min + ((d - 1) / 7) * (max - min))
+    return gradedGap(zoneDistance(setup?.entry_zones, price), { min, max, near: NEAR_WIDTHS, far: FAR_WIDTHS })
 }
 
 /** Clamp the model's self-chosen next check into the setup's cadence band. */
 export function _nextCheckAt(setup, nowMs, nextCheckMin) {
     const { min = 5, max = 30 } = setup?.cadence ?? {}
-    const asked = Number(nextCheckMin)
-    const gap   = Number.isFinite(asked) ? Math.min(Math.max(asked, min), max) : min
+    // fallback = the EAGER end: a setup's band is horizon-scaled, so its floor is already cheap.
+    // A call falls back the other way. See clampGap.
+    const gap = clampGap(nextCheckMin, { min, max, fallback: min })
     return new Date(nowMs + gap * 60_000).toISOString()
 }
 
@@ -360,14 +690,14 @@ function _entry(reason, { setup, read = null, verdict = null, ...rest }) {
     return journalEntry(reason, { ...rest, entity: setup, note: read, raw: { verdict, read } })
 }
 
-async function _persist(id, $set, logEntry) {
-    try {
-        const db = await getDb()
-        await db.collection(COLLECTION).updateOne({ id, kind: KIND }, withJournal($set, logEntry, TIMELINE_MAX))
-    } catch (err) {
-        logger.error(LOG, `persist failed for ${id}:`, err.message)
-    }
-}
+// The wake's write, from the shared writer (dueLoop.makePersist) — the monitor's $set plus the
+// journal line, appended and capped, and it RETHROWS on failure.
+//
+// Reached through `deps.persist` rather than called directly so tests can observe what a wake
+// WRITES. They could not before: the old local copy closed over the real getDb(), and its swallowed
+// error is the only reason 31 DB-less tests passed. That is how the pre-active status bug stayed
+// invisible in a file with full coverage.
+const _persist = makePersist({ collection: COLLECTION, kind: KIND, timelineMax: TIMELINE_MAX, log: LOG })
 
 // ─── Injectable IO ────────────────────────────────────────────────────────────
 
@@ -378,12 +708,33 @@ const _deps = {
     // can never trip, so this must not diverge (monitorUtils.fetchLastPrice).
     getPrice:   (setup) => fetchLastPrice(setup.asset),
     assess:     assessSetup,
+    persist:    _persist,
+    // The CLOSE of the last completed candle on a timeframe — the validity gate's verdict, as
+    // opposed to `getPrice`'s live tick which is only its trigger. Deliberately the SECOND-TO-LAST
+    // row: the last one is the bar still forming, and using it would reintroduce exactly the
+    // intrabar wick sensitivity that "close, not touch" exists to avoid. Null on any failure, and
+    // the caller reads null as "don't know" rather than "not breached".
+    getClose: async (setup, tf) => {
+        const rows = await fetchCandles(setup.id, setup.asset, tf, 3)
+        const closed = rows?.at(-2)
+        return Number.isFinite(closed?.c) ? closed.c : null
+    },
     // The setup doc carries the flat camelCase execution fields ideaToEnvelope reads
     // (accounts / mainAccountId / quantity / userId), so the shared plan builder works unchanged.
     buildOrderPlan: buildOrderPlanForIdea,
     // The entry card — its own copy so a non-"enter" verdict LEADS with the warning. The
     // transport (postBotCard) is the shared piece; the wording is Mentor's.
     onCard:       notifySetupEntryConfirm,
+    // Price left the range Mentor drew. Its own copy per event (ran away vs broke vs FYI) — the
+    // transport is the one shared card pipe.
+    onInvalidation: notifySetupInvalidation,
+    // Talos's own read that the MAP is stale, carrying the re-map proposal. Same card family, so
+    // the user sees one consistent "this plan needs a look" shape however it was reached.
+    onEditCard: (setup, assessment) => notifySetupInvalidation(setup, {
+        card: 'stale_map',
+        reason: assessment?.edit_proposal?.why ?? assessment?.read ?? null,
+        edit_proposal: assessment?.edit_proposal ?? null,
+    }),
     onManualCard: (setup) => notifyManualEntry(setup.userId, { legs: [entryLegFromIdea(setup)] }),
 }
 

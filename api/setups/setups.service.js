@@ -47,13 +47,16 @@ const POSITION_STATUSES = new Set(PAST_ENTRY)
 // linkage are never in the $set.
 const PLAN_FIELDS = [
     'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe', 'ladder', 'cadence',
-    'thesis', 'watch', 'entry_zones', 'stop_zones', 'tp_zones', 'quantity',
+    'thesis', 'conditions', 'validity', 'referenced_symbols',
+    'entry_zones', 'stop_zones', 'tp_zones', 'quantity',
     'active_from', 'valid_until', 'event_risk', 'rr', 'conviction',
     'mode', 'broker', 'accounts', 'mainAccountId', 'brokerSymbol', 'basisOffset',
 ]
 
 // In-position edits touch CONTEXT only — never the zones, size or venue a live position depends on.
-const LIGHT_FIELDS = ['thesis', 'watch', 'tp_zones', 'valid_until', 'rr', 'conviction', 'cadence']
+// `validity` is context: it governs whether the PLAN is still worth watching, not what the live
+// position does, so re-drawing it can't disturb an open trade.
+const LIGHT_FIELDS = ['thesis', 'conditions', 'validity', 'referenced_symbols', 'tp_zones', 'valid_until', 'rr', 'conviction', 'cadence']
 
 export const setupService = {
     generateSetup,
@@ -73,8 +76,11 @@ export const setupService = {
  * Returns { ok } or { ok:false, reason } — single-reason style, matching the idea/call services.
  */
 export function validateSetup(setup, broker, accounts) {
-    const { ready, missing } = setupReadiness(setup, true)   // account checked separately below
-    if (!ready) return { ok: false, reason: `missing_${missing[0].replace(/\s+/g, '_')}` }
+    const { missing, problems } = setupReadiness(setup, true)   // account checked separately below
+    if (missing.length)  return { ok: false, reason: `missing_${missing[0].replace(/\s+/g, '_')}` }
+    // Coherence, not absence: the validity range contradicts the plan it is meant to outlive. Same
+    // source as the FE's readiness, so the button and this refusal cannot disagree.
+    if (problems.length) return { ok: false, reason: `invalid_${problems[0].replace(/\s+/g, '_')}` }
 
     if (!BROKERS.has(broker)) return { ok: false, reason: 'no_venue' }
     // Paper derives its own account (paper-<userId>); live and manual must be marked explicitly.
@@ -157,14 +163,38 @@ async function _insert(bound, userId) {
         status:  'waiting',
         savedAt: now,
         ...bound,
-        monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [] },
+        monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {} },
         armed_zone_id:   null,
         pulse_anchor_px: null,
+        // The invalidation axis, declared at birth so every consumer can read it without an
+        // existence check — a setup is not invalidated, it simply hasn't been yet.
+        invalidation_status: null,
+        invalidation_edge:   null,
+        invalidation_reason: null,
     }
 
     const saved = await crud.insert(doc)
     logger.info(LOG, `saved setup ${doc.id} (${doc.asset} ${doc.direction} ${doc.type}, ${doc.mode})`)
     return { ok: true, doc: saved }
+}
+
+/**
+ * Which resolved conditions carry across a re-draw: those whose id AND text are byte-identical.
+ * Anything reworded starts unresolved, because the finding was about the old sentence.
+ *
+ * Returns `undefined` when there is nothing to change (no prior findings, or the conditions weren't
+ * touched), so an untouched edit doesn't write a redundant key. Pure.
+ */
+export function carryConditions(resolved, curConditions, nextConditions) {
+    if (!resolved || !Object.keys(resolved).length) return undefined
+    if (!Array.isArray(nextConditions)) return undefined   // conditions untouched → findings stand
+
+    const textById = new Map((curConditions ?? []).map(c => [c.id, c.text]))
+    const kept = {}
+    for (const c of nextConditions) {
+        if (resolved[c.id] && textById.get(c.id) === c.text) kept[c.id] = resolved[c.id]
+    }
+    return kept
 }
 
 async function _update(id, bound, userId) {
@@ -188,6 +218,21 @@ async function _update(id, bound, userId) {
         $set.pulse_anchor_px = null
         $set['monitor_state.next_check_at'] = null
     }
+
+    // Re-drawing is what CLEARS the invalidation latch — the same rule the call path applies
+    // (kairos.handoff acceptEdit). The latch is fire-once by design, so without this a setup that
+    // was invalidated (or whose map Talos read as stale) stays latched after the user fixes it and
+    // can never raise a hand again. Applies in-position too: an in-position edit is the user
+    // acknowledging the warning just as much as a full re-map is.
+    if (cur.invalidation_status != null) {
+        Object.assign($set, { invalidation_status: null, invalidation_edge: null, invalidation_reason: null })
+    }
+
+    // A resolved condition survives only while its id AND its text are unchanged. Keyed by id
+    // alone, a finding would ride onto a REWORDED condition — "FDA approval landed", already
+    // latched true, silently satisfying "FDA approval landed AND the stock held 240".
+    const kept = carryConditions(cur.monitor_state?.conditions, cur.conditions, bound.conditions)
+    if (kept !== undefined) $set['monitor_state.conditions'] = kept
 
     const res = await crud.patchOwned(id, userId, $set)
     if (!res.ok) return res

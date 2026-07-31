@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildSetupEntryConfirm } from '../../services/tradeNotify.service.js'
+import { buildSetupEntryConfirm, buildSetupInvalidation } from '../../services/tradeNotify.service.js'
 
 // The setup entry card. It fires ONLY on an `enter` verdict — a fulfilled setup, not merely a
 // tripped zone (talos.monitor holds every other verdict at 'watching' and posts nothing). So the
@@ -45,4 +45,45 @@ test('the zone falls back to the armed one when no assessment is attached', () =
 
 test('a card with no owner is built but carries a null userId for the poster to drop', () => {
     assert.equal(buildSetupEntryConfirm({ asset: 'NVDA' }, null).userId, null)
+})
+
+// ─── Invalidation cards ───────────────────────────────────────────────────────
+// Four events, four messages. Merging them would produce copy that is wrong for three of the four:
+// "you missed it" is not a problem to solve, and "the premise broke" is not an FYI.
+
+test('a runaway says nothing was wrong, and asks for nothing', () => {
+    const card = buildSetupInvalidation(SETUP, { card: 'ran_away', side: 'away', price: 247, edge: 'upper' })
+    assert.match(card.content, /ran past 247/)
+    assert.match(card.content, /Nothing was wrong with the read/)
+    assert.equal(card.actions, undefined, 'a missed entry is not a task')
+    assert.equal(card.payload.event, 'ran_away')
+})
+
+test('an invalidation offers the re-draw, and quotes the close', () => {
+    const card = buildSetupInvalidation(SETUP, { card: 'invalidated', side: 'adverse', price: 233, edge: 'lower' })
+    assert.match(card.content, /no longer valid/)
+    assert.match(card.content, /closed at 233/)
+    assert.ok(card.actions, 'revise means the user is being offered the re-draw')
+})
+
+test('notify_only tells without asking', () => {
+    const card = buildSetupInvalidation(SETUP, { card: 'invalidated_fyi', side: 'adverse', price: 233, edge: 'lower' })
+    assert.match(card.content, /Heads up/)
+    assert.equal(card.actions, undefined, 'the user chose to be told, not asked')
+})
+
+test('a stale map leads with WHY, since that is the whole content of the offer', () => {
+    const card = buildSetupInvalidation(SETUP, { card: 'stale_map', reason: 'the 238 shelf is now 242', edit_proposal: { why: 'x' } })
+    assert.match(card.content, /the 238 shelf is now 242/)
+    assert.ok(card.actions)
+    assert.ok(card.payload.edit_proposal, 'the proposal rides along so the re-draw has somewhere to start')
+})
+
+test('every invalidation card is owner-scoped and routes to Mentor', () => {
+    for (const kind of ['ran_away', 'invalidated', 'invalidated_fyi', 'stale_map']) {
+        const card = buildSetupInvalidation(SETUP, { card: kind })
+        assert.equal(card.userId, SETUP.userId, kind)
+        assert.equal(card.botId, 'mentor', kind)
+        assert.equal(card.payload.setupId, SETUP.id, kind)
+    }
 })

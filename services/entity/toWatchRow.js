@@ -40,12 +40,21 @@ function _title(text, fallback = '', max = 120) {
     return s.length > max ? `${s.slice(0, max - 1)}…` : s
 }
 
-/** The zone nearest to being actionable, as plain bounds. Zone shapes differ; only bounds are read. */
+/**
+ * The zone nearest to being actionable, as plain bounds. Zone shapes differ; only bounds are read.
+ *
+ * A zone's edges are `lower`/`upper` — BOTH normalizers emit that spelling (setup.schema
+ * normalizeZone and kairos.service normalizeZones). This read `low`/`high`, which no zone has ever
+ * carried, so `nearestEntry` / `stop` / `firstTp` were null on every setup AND call row ever
+ * projected — including the agent-facing watch list, where the levels simply went missing rather
+ * than reading wrong. `low`/`high` stay accepted as a fallback in case an unnormalized zone reaches
+ * here; the OUTPUT keys are unchanged because userData.tools._zone reads them.
+ */
 function _firstZone(zones) {
     const z = Array.isArray(zones) ? zones.find(Boolean) : null
     if (!z) return null
-    const low = typeof z.low === 'number' ? z.low : null
-    const high = typeof z.high === 'number' ? z.high : null
+    const low  = typeof z.lower === 'number' ? z.lower : (typeof z.low  === 'number' ? z.low  : null)
+    const high = typeof z.upper === 'number' ? z.upper : (typeof z.high === 'number' ? z.high : null)
     if (low == null && high == null) return null
     return { low, high }
 }

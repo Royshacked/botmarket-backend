@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
     callToWatchRow, setupToWatchRow, portfolioToWatchRow, scanToWatchRow, coverageToWatchRow,
 } from '../../services/entity/toWatchRow.js'
+import { normalizeZone } from '../../services/setup.schema.js'
 
 // The reporting-tier projection: any owner-scoped artifact → one watch-list row.
 //
@@ -14,7 +15,7 @@ import {
 const call = {
     id: 'c1', asset: 'NVDA', bias: 'long', status: 'looking', savedAt: 1000,
     thesis: 'reclaim of the range high', rr: 2.4, conviction: 'high', valid_until: '2026-08-30', mode: 'discretionary',
-    entry_zones: [{ id: 'z1', low: 170, high: 172 }, { id: 'z2', low: 165, high: 166 }],
+    entry_zones: [{ id: 'z1', lower: 170, upper: 172 }, { id: 'z2', lower: 165, upper: 166 }],
     // Everything below must NOT survive the projection.
     chat_state: { messages: [{ role: 'user', content: 'a whole past conversation' }] },
     reference_levels: [{ px: 180 }], patterns: ['bull flag'],
@@ -60,7 +61,7 @@ test('no thesis falls back to something readable rather than empty', () => {
 test('a setup carries its own stop and target, which a call leaves to its tree', () => {
     const row = setupToWatchRow({
         id: 's1', asset: 'SPY', direction: 'long', status: 'waiting', savedAt: 2000,
-        entry_zones: [{ low: 500, high: 502 }], stop_zones: [{ low: 495, high: 495 }], tp_zones: [{ low: 520, high: 522 }],
+        entry_zones: [{ lower: 500, upper: 502 }], stop_zones: [{ lower: 495, upper: 495 }], tp_zones: [{ lower: 520, upper: 522 }],
         rr: 3, timeframe: '4h',
     })
     assert.deepEqual(row.detail.stop, { low: 495, high: 495 })
@@ -117,6 +118,23 @@ test('a doc with no id is dropped rather than becoming an unaddressable row', ()
     assert.equal(callToWatchRow({ asset: 'NVDA' }), null)
     assert.equal(callToWatchRow(null), null)
     assert.equal(portfolioToWatchRow({ name: 'no id' }), null)
+})
+
+// REGRESSION. _firstZone read `low`/`high`, but a zone's edges are `lower`/`upper` — the spelling
+// BOTH normalizers emit (setup.schema.normalizeZone, kairos.service.normalizeZones). Every level on
+// every setup and call row was therefore null, including the agent-facing watch list, where they
+// went missing rather than reading wrong. The fixtures above used to say low/high as well, so the
+// test agreed with the bug and only production data disagreed — hence the shape is asserted here
+// against the normalizer's own output rather than a hand-written literal.
+test('zone bounds are read from the shape the normalizers actually emit', () => {
+    const zone = normalizeZone({ lower: 188, upper: 190.5 }, 0, 'ez')
+    assert.deepEqual(zone.lower, 188)   // guard: if the normalizer ever renames its edges, this fails first
+
+    const setup = setupToWatchRow({ id: 's', asset: 'NVDA', direction: 'long', entry_zones: [zone] })
+    assert.deepEqual(setup.detail.nearestEntry, { low: 188, high: 190.5 })
+
+    const call = callToWatchRow({ id: 'c', asset: 'NVDA', bias: 'long', entry_zones: [zone] })
+    assert.deepEqual(call.detail.nearestEntry, { low: 188, high: 190.5 })
 })
 
 test('missing zones degrade to null, not to a half-built object', () => {

@@ -104,3 +104,12 @@ test('withJournal: appends under the cap, and a wake with no entry writes no $pu
 
     assert.equal(withJournal({ status: 'looking' }, null).$push, undefined)
 })
+
+test('a runaway read is described honestly, not as a broken reply', () => {
+    // 'runaway' means the model kept calling tools and never decided — a different failure from a
+    // malformed reply or a dead provider, and the journal is the only place it surfaces.
+    const note = failNote('read', 'NVDA', 'runaway')
+    assert.match(note, /kept digging/)
+    assert.notEqual(note, failNote('read', 'NVDA', 'io'))
+    assert.notEqual(note, failNote('read', 'NVDA', 'malformed'))
+})

@@ -1,126 +1,113 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { getQuotes, getShortInterest, getOptionsContext } from '../providers/yahoofinance.provider.js'
-import { getDerivativesContext } from '../providers/binance.provider.js'
-import { getFundamentals }       from '../providers/fmp.provider.js'
+import { getQuotes }             from '../providers/yahoofinance.provider.js'
 import { buildStudies }          from './evaluators/chart.evaluator.js'
 import { sessionPhase }          from '../services/market.service.js'
 import { cachedChartImage }      from '../services/chartImgCache.service.js'
-import { newsService }           from '../services/news.service.js'
 import { logger }                from '../services/logger.service.js'
 import { extractFirstJSON }      from './monitorUtils.js'
-import { assessRouting, candlesText as _candlesText, BROAD_INDICES,
+import { assessRouting, candlesText as _candlesText,
     ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING } from './assess.shared.js'
-import {
-    _thinkingConfig, _allText, _formatHeadlines, _formatEventRisk,
-    _chartTool, _structureTools, _smcTools, _institutionalTools, _handleAssessToolUses,
-} from './hermes.assess.js'
+import { _thinkingConfig, _allText, _formatEventRisk } from './hermes.assess.js'
+import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
 
-// Talos's assessment — the setup-driven counterpart to Hermes's four-axis read.
+// Talos's assessment — the condition-driven counterpart to Hermes's four-axis read.
 //
-// SHARED with Hermes (docs/setup-entity.md §8): every tool builder (_chartTool / _structureTools /
-// _smcTools / _institutionalTools), the ladder-locked tool-use handler, the thinking config and the
+// SHARED: the tool kit and its dispatch (monitoring/assessTools.js, built on the same registry
+// schemas and handler factories every agent uses), the thinking config, the model routing and the
 // text extraction. Those are the pipe.
 //
-// NOT shared — deliberately, and this is the whole point of the kind: the GATHER step. Hermes
-// fetches chart + candles + headlines + market on every wake because a call always scores four
-// fixed axes. A setup declares what matters in `watch[]`, so Talos fetches only what was declared.
-// A purely structural setup costs one chart + candles; it never pays for headlines or index quotes.
+// NOT shared: the system prompt and what a wake actually costs. Hermes fetches chart + candles +
+// headlines + market on EVERY wake because a call always scores four fixed axes. Talos fetches the
+// base (chart + candles + any referenced symbols) and nothing else — a setup's conditions are prose,
+// so what else is worth pulling is a decision only the model can make once it has read them, and it
+// makes it with tools. A purely structural setup costs one chart + candles and never pays for a
+// headline sweep it would not have read.
 
 const LOG = '[talos.assess]'
 
 const _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-const MAX_TOOL_ROUNDS = 3
 
 // Verdicts Talos may return pre-entry. Anything off-menu is coerced to 'wait' by the monitor.
 export const READINESS_VERDICTS = new Set(['enter', 'wait', 'stand_aside', 'edit', 'let_expire'])
 
-/** The distinct kinds declared on a setup. */
-export function declaredKinds(setup) {
-    return new Set((setup?.watch ?? []).map(w => w.kind))
-}
-
 /**
- * The tool set for a setup: the chart is always available (the read is visual at heart), plus
- * exactly the toolkits its declared factors need.
+ * The tool set for a setup — the shared monitor kit (monitoring/assessTools.js), unfiltered.
  *
- * `structure` mounts the numeric SMC engine — the SAME computations the setup was built on, so
- * an SMC setup is verified against its own levels rather than a re-eyeballed chart. `price_action`
- * mounts the classical vision reads. A setup declaring neither still gets the chart.
+ * Conditions are TEXT, so there is no declared `kind` to gate on — and gating never served the
+ * model anyway: it read the factors back as prose either way (see _conditionsBlock). What bounds
+ * the cost is not which tools are MOUNTED but which SYMBOLS may be read, and that lives in the
+ * runner (`symbolScope` below).
  */
-export function buildToolsFor(setup) {
-    const ladder = setup?.ladder?.length ? setup.ladder : ['15min']
-    const kinds  = declaredKinds(setup)
-    return [
-        ..._chartTool(ladder),
-        ...(kinds.has('price_action') ? _structureTools(ladder) : []),
-        ...(kinds.has('structure')    ? _smcTools(ladder)       : []),
-        ...(kinds.has('positioning')  ? _institutionalTools()   : []),
-    ]
-}
-
-// ─── Gather (only what was declared) ──────────────────────────────────────────
-
-async function _positioningText(asset, assetClass) {
-    const isCrypto = String(assetClass || '').toLowerCase() === 'crypto'
-    const reads = isCrypto
-        ? [['derivatives', getDerivativesContext(asset)]]
-        : [['short interest', getShortInterest(asset)], ['options', getOptionsContext(asset)]]
-    const out = await Promise.all(reads.map(async ([label, p]) => {
-        try { return `${label}: ${await p}` } catch { return '' }
-    }))
-    return out.filter(Boolean).join('\n')
+export function buildToolsFor(_setup) {
+    return buildAssessTools()
 }
 
 /**
- * Fetch exactly the blocks this setup's `watch[]` asks for, in parallel. Every read is
- * independently guarded — one failed provider degrades its own block to empty rather than
- * killing the assessment, because a partial read is still worth judging.
+ * Everything this wake is allowed to look at: the setup's own asset plus whatever Mentor extracted
+ * from the condition text at build. Free text can name any ticker; the fetch stays bounded by what
+ * was actually authored. Pure.
+ */
+export function symbolScope(setup) {
+    return [...new Set([
+        String(setup?.asset ?? '').toUpperCase().trim(),
+        ...(setup?.referenced_symbols ?? []).map(s => String(s).toUpperCase().trim()),
+    ].filter(Boolean))]
+}
+
+// ─── Gather ───────────────────────────────────────────────────────────────────
+
+
+/**
+ * The always-on base every read starts from: the chart, recent candles, and any symbols the setup
+ * leans on. Both reads are independently guarded — a failed provider degrades its own block to
+ * empty rather than killing the assessment, because a partial read is still worth judging.
  *
- * Deps injectable so the monitor's tests exercise the gating without network IO.
+ * THE SPECULATIVE PRE-FETCH IS GONE. This used to pull headlines / index quotes / positioning /
+ * fundamentals up front for every kind the setup declared, whether or not the model would have
+ * looked at them — a setup declaring `news` paid for a headline sweep on every single wake, even
+ * with price nowhere near a zone. Those are tools now: the model asks when the sentence needs it.
+ * That trades predictable cost for lower expected cost (see the refactor plan §5), which is why
+ * per-wake call accounting replaces the build-time estimate.
+ *
+ * Deps injectable so the monitor's tests exercise this without network IO.
  */
 export async function gatherFor(setup, tf, deps = {}) {
     const {
         renderChart = cachedChartImage,
         candlesText = _candlesText,
         quotes      = getQuotes,
-        news        = (sym) => newsService.getOrFetch({ category: 'companies', subject: sym, query: sym }),
-        positioning = _positioningText,
-        fundamentals = getFundamentals,
     } = deps
 
     const asset = String(setup.asset).toUpperCase()
-    const kinds = declaredKinds(setup)
-    const want  = (k) => kinds.has(k)
+    // Bounded by what Mentor extracted at build — free text can name anything, the fetch cannot.
+    const refSymbols = (setup.referenced_symbols ?? []).slice(0, 6)
 
-    // Correlation names only the symbols the setup actually leans on — never a blanket sweep.
-    const corrSymbols = [...new Set((setup.watch ?? [])
-        .filter(w => w.kind === 'correlation')
-        .flatMap(w => w.symbols ?? []))].slice(0, 6)
-
-    const [png, candles, marketQ, corrQ, headlines, posText, fundText] = await Promise.all([
+    const [png, candles, refQ] = await Promise.all([
         renderChart(asset, tf, buildStudies('vwap, ema(50), volume', { fillDefaults: false })).catch(() => null),
         candlesText(asset, tf).catch(() => ''),
-        want('market')      ? quotes(BROAD_INDICES).catch(() => '') : Promise.resolve(''),
-        corrSymbols.length  ? quotes(corrSymbols).catch(() => '')   : Promise.resolve(''),
-        want('news')        ? news(asset).then(r => _formatHeadlines(r?.articles)).catch(() => '') : Promise.resolve(''),
-        want('positioning') ? positioning(asset, setup.asset_class).catch(() => '') : Promise.resolve(''),
-        want('fundamental') ? fundamentals(asset).then(String).catch(() => '')      : Promise.resolve(''),
+        refSymbols.length ? quotes(refSymbols).catch(() => '') : Promise.resolve(''),
     ])
 
-    return { png, candles, marketQ, corrQ, headlines, posText, fundText }
+    return { png, candles, refQ }
 }
 
 // ─── Prompt assembly ──────────────────────────────────────────────────────────
 
 const _SYSTEM = `You are Talos, the guardian watching a trade SETUP the user built with Mentor. Price has reached one of the setup's zones (or the setup is near expiry) and you were woken to judge the moment.
 
-You are given the setup — its THESIS, its zones, and its WATCH LIST — plus a chart, recent candles, the current price, and only the market data the watch list asked for.
+You are given the setup — its THESIS, its zones, and its CONDITIONS — plus a chart, recent candles and the current price. Anything else you want, you go and get with your tools.
 
-THE WATCH LIST IS YOUR MANDATE. Judge each declared factor against what price is doing NOW, by its own look_for cue and its own timeframe. A factor marked "primary" is the trigger itself: if it is not happening, this is not the moment. A "confirming" factor that fails weakens the read but does not by itself veto it.
+THE CONDITIONS ARE YOUR MANDATE. They are written in plain language, the way a trader would say them. Read each one, work out what would actually confirm or deny it, and go check — call the tools you need, and pull another timeframe if the first look leaves you unsure. A condition marked "primary" is the trigger itself: if it is not happening, this is not the moment. A "confirming" condition that fails weakens the read but does not by itself veto it.
 
-Do NOT grade dimensions the setup did not declare. If it says nothing about news or the broad market, their absence is deliberate — the user judged them immaterial. Say nothing about them and do not go looking.
+Each condition carries how it should be judged:
+- "measured" — the user named a specific test. Apply THAT test, not your own.
+- "discretionary" — the user deliberately handed you the judgment ("weak = how the price action looks"). Use your eyes and say plainly what you see. Two traders can disagree here and both be doing their job; that is expected, not a failure.
 
-The one exception is SCHEDULED EVENT RISK, which is always checked. A high-impact event landing before this trade's expected exit, when the thesis is not itself an event play, is a real reason to prefer "wait" — do not walk into an unresolved binary just because price tagged the zone.
+Judge ONLY the declared conditions. If the setup says nothing about news or the broad market, that silence is deliberate — the user judged them immaterial. Don't grade them and don't go looking.
+
+If you genuinely cannot check a condition this wake — a tool failed, a search came back empty, a symbol won't quote — mark it "unchecked" and say so. NEVER mark a condition met because it is probably true or because you couldn't look. Unchecked is an honest answer; a guess dressed as a check is not.
+
+The one always-on exception is SCHEDULED EVENT RISK. A high-impact event landing before this trade's expected exit, when the thesis is not itself an event play, is a real reason to prefer "wait" — do not walk into an unresolved binary just because price tagged the zone.
 
 Weight price action over indicators. Be strict: most checks should NOT be "enter". Judge the whole picture, not a checklist — if material new information appears that the setup never mapped, say so and factor it in.
 
@@ -130,37 +117,39 @@ Always include "read": ONE short, plain first-person sentence — what you see a
 
 Verdicts: "enter" (this is the moment), "wait" (not yet, keep watching), "stand_aside" (the premise is damaged — don't take it now), "edit" (the map is stale and needs re-drawing; provide edit_proposal), "let_expire" (expiry review only).
 
-Output ONLY a JSON object, no prose:
-{"timeframe_used":"15min","read":"<one first-person sentence>","factors":[{"kind":"structure","present":true,"note":"..."}],"verdict":"enter|wait|stand_aside|edit|let_expire","warning":"<one line, ONLY when the verdict is not enter: what is missing or wrong, for the setup's record — the user is NOT asked to enter on a non-enter verdict, so this is not pre-confirmation copy>","next_check_min":15,"memo_update":"..."}
+Output ONLY a JSON object, no prose. Return one entry per declared condition, keyed by its id:
+{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw, or why you couldn't look"}],"verdict":"enter|wait|stand_aside|edit|let_expire","warning":"<one line, ONLY when the verdict is not enter: what is missing or wrong, for the setup's record — the user is NOT asked to enter on a non-enter verdict, so this is not pre-confirmation copy>","next_check_min":15,"memo_update":"..."}
 Include "edit_proposal":{"why":"...","changes":{}} only when the verdict is "edit".`
 
-function _watchBlock(setup) {
-    const watch = setup?.watch ?? []
-    if (!watch.length) {
-        return 'WATCH LIST: (empty — the setup declares no factors, so judge on price structure at the zone alone)'
+/**
+ * The conditions, as prose with their ids. Note this is what the STRUCTURED watch[] was reduced to
+ * anyway — the taxonomy was never something the model consumed, only something the code gated
+ * tools on. The ids are here because the answer comes back keyed by them.
+ *
+ * An already-resolved LATCHING condition is presented as settled rather than re-asked: re-running
+ * a search for a fact established three wakes ago both wastes the call and risks the model talking
+ * itself out of it when results shift.
+ */
+function _conditionsBlock(setup) {
+    const conditions = setup?.conditions ?? []
+    if (!conditions.length) {
+        return 'CONDITIONS: (none declared — judge on price structure at the zone alone)'
     }
-    const lines = watch.map(w => {
-        const where = w.timeframe ? ` @${w.timeframe}` : (w.symbols?.length ? ` [${w.symbols.join(', ')}]` : '')
-        return `- ${w.kind}${where} (${w.weight}): ${w.look_for}`
+    const resolved = setup?.monitor_state?.conditions ?? {}
+    const lines = conditions.map(c => {
+        const prior = resolved[c.id]
+        if (c.persistence === 'latching' && prior?.met === true) {
+            return `- [${c.id}] (${c.weight}) ${c.text}\n    ALREADY ESTABLISHED on ${prior.at ?? 'an earlier wake'}${prior.note ? ` — ${prior.note}` : ''}. Do not re-check; treat as met.`
+        }
+        return `- [${c.id}] (${c.weight}, ${c.mode}) ${c.text}`
     })
-    return `WATCH LIST — judge exactly these, nothing else:\n${lines.join('\n')}`
+    return `CONDITIONS — judge exactly these, nothing else:\n${lines.join('\n')}`
 }
 
 function _dataBlocks(setup, g, tf) {
-    const kinds = declaredKinds(setup)
     const out = []
-    if (g.candles)  out.push(`RECENT CANDLES (${tf}):\n${g.candles}`)
-    if (kinds.has('correlation')) {
-        out.push(g.corrQ ? `CORRELATED NAMES (live):\n${g.corrQ}` : 'CORRELATED NAMES: (live read unavailable — weigh this factor cautiously)')
-    }
-    if (kinds.has('market')) {
-        out.push(g.marketQ ? `BROAD MARKET (live SPY/QQQ/VIX):\n${g.marketQ}` : 'BROAD MARKET: (live read unavailable)')
-    }
-    if (kinds.has('news')) {
-        out.push(g.headlines ? `RECENT HEADLINES (newest first):\n${g.headlines}` : 'RECENT HEADLINES: (none available — the news factor is unsourced; lean neutral and say so)')
-    }
-    if (kinds.has('positioning') && g.posText)  out.push(`POSITIONING:\n${g.posText}`)
-    if (kinds.has('fundamental') && g.fundText) out.push(`FUNDAMENTALS:\n${g.fundText}`)
+    if (g.candles) out.push(`RECENT CANDLES (${tf}):\n${g.candles}`)
+    if (g.refQ)    out.push(`REFERENCED NAMES (live quotes):\n${g.refQ}`)
 
     const ev = _formatEventRisk(setup?.event_risk)
     out.push(ev
@@ -187,7 +176,7 @@ export async function assessSetup(setup, zone, ctx = {}) {
                 entry_zones: setup.entry_zones, stop_zones: setup.stop_zones, tp_zones: setup.tp_zones,
                 conviction: setup.conviction, rr: setup.rr, valid_until: setup.valid_until,
             })}`,
-            _watchBlock(setup),
+            _conditionsBlock(setup),
             `ARMED ZONE: ${zone ? JSON.stringify(zone) : '(none — expiry review)'}`,
             `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
             `SESSION NOW: ${sessionPhase(setup.asset, setup.asset_class)}`,
@@ -210,27 +199,66 @@ export async function assessSetup(setup, zone, ctx = {}) {
         const tools     = buildToolsFor(setup)
         const messages  = [{ role: 'user', content: primary }]
 
-        // Adaptive-timeframe loop: the read may pull extra ladder-rung views before deciding.
-        // On the final allowed round the tools are dropped, forcing a JSON answer rather than
-        // another request.
+        // What this wake actually spent. With no round cap (below) this record IS the cost control:
+        // measure what the reads really reach for, then set a ceiling from data rather than a guess.
+        const calls = []
+        const runToolUses = makeAssessToolRunner({
+            symbols: symbolScope(setup),
+            log: LOG,
+            onCall: (name) => calls.push(name),
+        })
+
+        // The verification loop: the model checks each condition with whatever tools the sentence
+        // needs, pulling another view when the first leaves it unsure.
+        //
+        // NO QUALITY CAP while developing (docs/mentor-talos-refactor.md §4.2). A four-condition
+        // setup spanning two symbols does not fit in the three rounds this used to allow, and
+        // capping to a guessed number silently truncates the read into a verdict formed on partial
+        // evidence — an invisible failure, because the model still answers. Measure with `calls`
+        // first; size the real ceiling from that.
+        //
+        // RUNAWAY_ROUNDS is NOT that ceiling — it is a backstop set far above any honest read. The
+        // caller's withTimeout ABANDONS a slow check but cannot CANCEL it, so a model that loops
+        // (e.g. retrying a blocked symbol instead of marking it unchecked) would keep billing in a
+        // detached promise long after the wake was given up on. Hitting this is a bug, and it logs
+        // like one.
+        const RUNAWAY_ROUNDS = 25
         let msg
-        for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+        for (let round = 0; ; round++) {
             msg = await _client.messages.create({
-                model, max_tokens: maxTokens, system, messages,
-                ...(round < MAX_TOOL_ROUNDS ? { tools } : {}),
+                model, max_tokens: maxTokens, system, messages, tools,
                 ...(thinking ?? {}),
             })
             if (msg.stop_reason !== 'tool_use') break
+
+            const results = await runToolUses(msg.content)
+            // `web_search` is server-side: Anthropic runs it and the blocks come back as
+            // `server_tool_use`, which the runner correctly ignores. If a turn contained ONLY those,
+            // there is nothing for us to answer — and posting an empty user turn is both an API
+            // error and an infinite loop, since the next reply would stop for the same reason.
+            if (!results.length) {
+                logger.info(LOG, `[${setup.id}] tool turn with no client-side calls — taking the reply as final`)
+                break
+            }
+
             messages.push({ role: 'assistant', content: msg.content })
-            // The handler only reads `.asset` off its first argument, so the setup stands in for a call.
-            messages.push({ role: 'user', content: await _handleAssessToolUses(setup, msg.content, ladder) })
+            messages.push({ role: 'user', content: results })
+
+            if (round >= RUNAWAY_ROUNDS) {
+                logger.error(LOG, `[${setup.id}] RUNAWAY: ${round + 1} tool rounds (${calls.join(', ')}) — abandoning the read`)
+                return { _failReason: 'runaway', _calls: calls }
+            }
         }
 
+        if (calls.length) logger.info(LOG, `[${setup.id}] ${calls.length} tool call(s): ${calls.join(', ')}`)
+
         try {
-            return extractFirstJSON(_allText(msg))
+            // `_calls` rides back on the assessment so the monitor can record per-wake cost. Prefixed
+            // like _failReason: it is envelope, not something the model authored.
+            return { ...extractFirstJSON(_allText(msg)), _calls: calls }
         } catch (parseErr) {
             logger.warn(LOG, `reply unparseable for ${setup.id} (stop_reason=${msg?.stop_reason}):`, parseErr.message)
-            return { _failReason: msg?.stop_reason === 'max_tokens' ? 'truncated' : 'malformed' }
+            return { _failReason: msg?.stop_reason === 'max_tokens' ? 'truncated' : 'malformed', _calls: calls }
         }
     } catch (err) {
         logger.warn(LOG, `assessment failed for ${setup?.id}:`, err.message)

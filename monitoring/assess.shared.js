@@ -8,7 +8,7 @@ import { userService } from '../api/user/user.service.js'
 //
 // What is deliberately NOT here: the system prompts, the gather strategy, and the verdict menus.
 // Those ARE the judgment, and they differ by design — Hermes always scores four fixed axes, while
-// Talos fetches only what a setup's `watch[]` declares.
+// Talos fetches only the base and reaches for the rest with tools.
 
 export const ASSESS_MODEL    = 'claude-sonnet-4-6'
 export const ALLOWED_MODELS  = new Set(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-8'])

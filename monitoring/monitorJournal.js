@@ -8,7 +8,7 @@
 // therefore had a journal that could only be rendered as JSON. The prose here is not per-monitor
 // judgment: "price is outside my zones, checking back in 30m" is arithmetic, and every monitor that
 // watches zones says it the same way. What IS judgment — Hermes's four-axis assessment payload,
-// Talos's watch-list read — stays with the monitor and rides in as `note` / `axes`.
+// Talos's per-condition read — stays with the monitor and rides in as `note` / `axes`.
 //
 // The entry shape is Hermes's, because the call pop-out already renders it and Hermes's histories
 // are the long ones. Talos's older `{kind, next_at}` entries stay readable — the client tolerates
@@ -41,13 +41,17 @@ export function gapMin(nextAt, nowMs) {
 }
 
 // Honest one-line note for a failed wake, by failure kind. 'truncated'/'malformed' = the model
-// replied but we couldn't parse it (a bad reply, not a data/vision fetch failure); 'io'/unknown =
-// the read itself couldn't complete.
+// replied but we couldn't parse it (a bad reply, not a data/vision fetch failure); 'runaway' = it
+// kept calling tools and never answered; 'io'/unknown = the read itself couldn't complete.
 export function failNote(verb, asset, failReason) {
     const who = asset ?? 'the chart'
-    return (failReason === 'truncated' || failReason === 'malformed')
-        ? `Went to ${verb} ${who} but its reply came back malformed — retrying shortly.`
-        : `Went to ${verb} ${who} but the read didn't complete — retrying shortly.`
+    if (failReason === 'truncated' || failReason === 'malformed') {
+        return `Went to ${verb} ${who} but its reply came back malformed — retrying shortly.`
+    }
+    if (failReason === 'runaway') {
+        return `Went to ${verb} ${who} and kept digging without reaching a decision — stopping this look and retrying shortly.`
+    }
+    return `Went to ${verb} ${who} but the read didn't complete — retrying shortly.`
 }
 
 // When the model gives no first-person note, synthesize one from the verdict so the log still reads.

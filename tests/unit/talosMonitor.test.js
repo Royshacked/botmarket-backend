@@ -2,9 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     zoneGate, zoneDistance, proximityGapMin, _isPreActive, _isExpiring, _nextCheckAt, _checkSetup,
-    _nextStatus,
+    _nextStatus, _isPastExpiry, _effectiveVerdict, normalizeConditionResults, latchPatch, costPatch,
+    validityBreach, breachPatch, awayEdge, adverseEdge,
 } from '../../monitoring/talos.monitor.service.js'
-import { buildToolsFor, declaredKinds } from '../../monitoring/talos.assess.js'
+import { buildToolsFor, symbolScope } from '../../monitoring/talos.assess.js'
 import { statusesFor, AWAITING_CONFIRM } from '../../services/entity/vocabulary.js'
 
 // Talos's gates. Everything here runs on EVERY wake for free — the expensive assessment only fires
@@ -18,7 +19,7 @@ const SETUP = {
     status: 'looking',   // armed — the setup ladder's spelling, shared with calls
     entry_zones: [{ id: 'ez1', lower: 237.8, upper: 238.6, quantity: 100 }],
     stop_zones:  [{ id: 'sz1', lower: 234.8, upper: 235.9, quantity: 100 }],
-    watch: [{ kind: 'structure', look_for: 'CHoCH up', timeframe: '15min', weight: 'primary' }],
+    conditions: [{ id: 'c1', text: 'CHoCH up on the 15m', weight: 'primary', mode: 'measured', persistence: 'live' }],
     monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [] },
 }
 
@@ -111,54 +112,313 @@ test('a missing or junk next_check_min falls back to the floor', () => {
 })
 
 // ─── Tool mounting ────────────────────────────────────────────────────────────
+// Conditions are TEXT — there is no declared `kind` left to gate on, and gating never served the
+// model anyway (it read the factors back as prose either way). Everything is mounted and the model
+// picks what the sentence needs.
 
 const toolNames = (setup) => buildToolsFor(setup).map(t => t.name)
 
-test('the chart is always available even when nothing is declared', () => {
-    assert.deepEqual(toolNames({ ...SETUP, watch: [] }), ['get_chart'])
+test('every read is mounted regardless of what the conditions say', () => {
+    const bare = toolNames({ ...SETUP, conditions: [] })
+    const rich = toolNames(SETUP)
+    assert.deepEqual(bare, rich, 'the tool set no longer varies with the setup')
+    for (const t of ['get_chart', 'get_structure', 'get_fvg', 'get_liquidity',
+                     'get_orderblocks', 'get_false_breaks', 'get_short_interest']) {
+        assert.ok(bare.includes(t), `${t} must be available`)
+    }
 })
 
-test('a structure factor mounts the numeric SMC engine and nothing else', () => {
+test('the mounted set is still bounded — no duplicate schemas reach the model', () => {
     const names = toolNames(SETUP)
-    assert.ok(names.includes('get_structure') && names.includes('get_fvg') && names.includes('get_liquidity'))
-    assert.ok(!names.includes('get_short_interest'), 'undeclared positioning must not be mounted')
+    assert.equal(new Set(names).size, names.length, 'a duplicated tool name is an API error')
 })
 
-test('a price_action factor mounts the classical vision reads instead', () => {
-    const names = toolNames({ ...SETUP, watch: [{ kind: 'price_action', look_for: 'bull flag', weight: 'primary' }] })
-    assert.ok(names.includes('get_orderblocks') && names.includes('get_false_breaks'))
-    assert.ok(!names.includes('get_structure'), 'the SMC engine is not mounted for a classical setup')
+// What bounds a wake is not which tools are mounted but which SYMBOLS may be read.
+test('the read is scoped to the setup\'s own asset plus what it declared it leans on', () => {
+    assert.deepEqual(symbolScope({ ...SETUP, referenced_symbols: ['SMH', 'smh'] }), ['NVDA', 'SMH'])
+    assert.deepEqual(symbolScope(SETUP), ['NVDA'], 'no references → own asset only')
+    assert.deepEqual(symbolScope({}), [], 'nothing to read is not a crash')
 })
 
-test('positioning mounts the crowding tools only when declared', () => {
-    const names = toolNames({ ...SETUP, watch: [{ kind: 'positioning', look_for: 'squeeze intact', weight: 'primary' }] })
-    assert.ok(names.includes('get_short_interest') && names.includes('get_options_context'))
+// ─── Per-wake cost ────────────────────────────────────────────────────────────
+// Free-text conditions can't be priced before they run, so the build-time estimate is replaced by
+// a measurement (docs/mentor-talos-refactor.md §5).
+
+test('tool calls accumulate across wakes, counting only the wakes that paid', () => {
+    const first = costPatch(SETUP, ['get_chart', 'get_indicators'])
+    assert.deepEqual(first['monitor_state.cost'], {
+        tool_calls: 2, assessments: 1, last: ['get_chart', 'get_indicators'],
+    })
+
+    const priced = { ...SETUP, monitor_state: { cost: first['monitor_state.cost'] } }
+    const second = costPatch(priced, ['get_chart'])
+    assert.equal(second['monitor_state.cost'].tool_calls, 3)
+    assert.equal(second['monitor_state.cost'].assessments, 2,
+        'assessments counts PAID wakes — dividing by check_count would blend in the free arithmetic ones')
 })
 
-test('a correlation or news factor adds no tools — those are fetched, not called', () => {
-    // They arrive as prompt blocks; mounting a tool for them would let the model re-fetch at will.
-    assert.deepEqual(toolNames({ ...SETUP, watch: [
-        { kind: 'correlation', look_for: 'SMH leads', symbols: ['SMH'], weight: 'confirming' },
-        { kind: 'news', look_for: 'no downgrade', weight: 'confirming' },
-    ] }), ['get_chart'])
+test('a wake that reached no tool leaves the tally untouched', () => {
+    for (const calls of [[], null, undefined]) assert.deepEqual(costPatch(SETUP, calls), {})
 })
 
-test('declaredKinds de-duplicates repeated factors', () => {
-    const kinds = declaredKinds({ watch: [{ kind: 'news' }, { kind: 'news' }, { kind: 'market' }] })
-    assert.deepEqual([...kinds].sort(), ['market', 'news'])
+// ─── The validity gate ────────────────────────────────────────────────────────
+// The second arithmetic question every wake asks. Without it the only thing Talos can say while
+// price is far away is "outside my zones, checking back in 30m" — forever, on a dead premise.
+
+const VALID = { lower: 234, upper: 244, approach: 246, timeframe: '1hr', on_break: 'revise' }
+// Carries a venue: without one the wake exits at the broker guard before any gate is reached.
+const ARMED  = { ...SETUP, broker: 'ctrader', accounts: ['a1'], mainAccountId: 'a1', quantity: 100 }
+const RANGED = { ...ARMED, validity: VALID }
+
+test('the two edges mean different things and are reported separately', () => {
+    assert.equal(validityBreach(RANGED, 233), 'adverse', 'below the floor → the premise broke')
+    assert.equal(validityBreach(RANGED, 247), 'away',    'past the pivot → it ran away')
+    assert.equal(validityBreach(RANGED, 238), null,      'inside → nothing to say')
+    assert.equal(validityBreach(RANGED, 245), null,      'between upper and approach → still in play')
+})
+
+test('the edges mirror for a short', () => {
+    const short = { ...SETUP, direction: 'short', validity: { lower: 230, upper: 244, approach: 228 } }
+    assert.equal(validityBreach(short, 245), 'adverse', 'above the ceiling → broke')
+    assert.equal(validityBreach(short, 227), 'away',    'below the pivot → ran away')
+})
+
+test('the envelope edge stands in when no away pivot was authored', () => {
+    // Otherwise a range with only two edges would never report a runaway at all.
+    const noPivot = { ...SETUP, validity: { lower: 234, upper: 244 } }
+    assert.equal(awayEdge(noPivot), 244)
+    assert.equal(adverseEdge(noPivot), 234, 'the adverse edge is the floor for a long')
+    assert.equal(validityBreach(noPivot, 245), 'away')
+})
+
+test('an unknown price never breaches', () => {
+    // A dead feed must read as "don't know", never as "the setup is broken".
+    for (const p of [NaN, null, undefined, 'abc']) assert.equal(validityBreach(RANGED, p), null, String(p))
+    assert.equal(validityBreach(SETUP, 100), null, 'no range → no gate')
+})
+
+test('a broken range reports the adverse side, the safer of the two', () => {
+    // Adverse asks the user to look; away is only an FYI. On a malformed range, ask.
+    const both = { ...SETUP, validity: { lower: 240, upper: 244, approach: 235 } }
+    assert.equal(validityBreach(both, 238), 'adverse')
+})
+
+// ── The latch ──
+test('a break latches once — an oscillating price cannot spam the user', () => {
+    const first = breachPatch(RANGED, 'adverse', 233, T)
+    assert.equal(first.set.invalidation_status, 'fired')
+    assert.equal(first.card, 'invalidated')
+
+    const latched = { ...RANGED, invalidation_status: 'fired' }
+    const again = breachPatch(latched, 'adverse', 232, T)
+    assert.deepEqual(again.set, {}, 'nothing more to write')
+    assert.equal(again.card, null, 'and nothing more to say')
+})
+
+test('a runaway is announced once and never closes the setup', () => {
+    // Price can come back, and "you missed it" is not "you were wrong".
+    const first = breachPatch(RANGED, 'away', 247, T)
+    assert.equal(first.set.invalidation_status, 'drifting')
+    assert.equal(first.card, 'ran_away')
+    assert.equal(first.set.status, undefined)
+
+    const drifted = { ...RANGED, invalidation_status: 'drifting' }
+    assert.equal(breachPatch(drifted, 'away', 248, T).card, null)
+})
+
+test('a drifted setup can still break the other way', () => {
+    const drifted = { ...RANGED, invalidation_status: 'drifting' }
+    const broke = breachPatch(drifted, 'adverse', 233, T)
+    assert.equal(broke.set.invalidation_status, 'fired')
+    assert.equal(broke.card, 'invalidated')
+})
+
+test('on_break is honoured verbatim — only "close" touches the lifecycle', () => {
+    const close = breachPatch({ ...SETUP, validity: { ...VALID, on_break: 'close' } }, 'adverse', 233, T)
+    assert.equal(close.set.status, 'closed')
+    assert.equal(close.set.closedReason, 'invalidated')
+
+    const fyi = breachPatch({ ...SETUP, validity: { ...VALID, on_break: 'notify_only' } }, 'adverse', 233, T)
+    assert.equal(fyi.set.status, undefined, 'notify_only never ends the setup')
+    assert.equal(fyi.card, 'invalidated_fyi')
+
+    assert.equal(breachPatch(RANGED, 'adverse', 233, T).set.status, undefined, 'revise keeps it alive to re-draw')
+})
+
+// ── Close, not touch (end to end) ──
+const rangedDeps = (over = {}) => stubDeps({
+    getPrice: async () => 233,          // the tick says breached
+    getClose: async () => 233,          // and so does the close
+    onInvalidation: async () => {},
+    ...over,
+})
+
+test('a wick through the line does not kill the setup', () => Promise.resolve().then(async () => {
+    // The tick is only the TRIGGER to look; the candle CLOSE is the verdict, and here it disagrees.
+    let carded = false
+    const deps = rangedDeps({ getClose: async () => 236, onInvalidation: async () => { carded = true } })
+    const res = await _checkSetup(RANGED, T, deps)
+
+    assert.equal(res.reason, 'scheduled', 'falls through to the normal reschedule')
+    assert.equal(carded, false)
+    assert.equal(deps.writes[0].invalidation_status, undefined, 'nothing latched')
+}))
+
+test('a confirmed close outside the range latches and fires the card', async () => {
+    let info = null
+    const deps = rangedDeps({ onInvalidation: async (_s, i) => { info = i } })
+    const res = await _checkSetup(RANGED, T, deps)
+
+    assert.equal(res.reason, 'invalidation')
+    assert.equal(res.side, 'adverse')
+    assert.equal(deps.writes[0].invalidation_status, 'fired')
+    assert.equal(info.card, 'invalidated')
+    assert.equal(info.price, 233, 'the card quotes the CLOSE, not the tick')
+})
+
+test('no candle means unknown, not broken', async () => {
+    // Silence beats killing a live plan on a provider hiccup.
+    let carded = false
+    const deps = rangedDeps({ getClose: async () => null, onInvalidation: async () => { carded = true } })
+    const res = await _checkSetup(RANGED, T, deps)
+    assert.equal(res.reason, 'scheduled')
+    assert.equal(carded, false)
+})
+
+test('the candle is only fetched when the tick suggests a breach', async () => {
+    // The whole reason this is affordable every wake.
+    let fetched = 0
+    const deps = rangedDeps({ getPrice: async () => 238, getClose: async () => { fetched++; return 238 } })
+    await _checkSetup(RANGED, T, deps)
+    assert.equal(fetched, 0, 'price inside the range costs no candles')
+})
+
+test('a setup sitting in its own zone is never invalidated', async () => {
+    // A zone trip is the setup doing exactly what it was built to do, whatever the range says.
+    let carded = false
+    const deps = rangedDeps({
+        getPrice: async () => 238.0,            // inside ez1
+        getClose: async () => 100,              // and wildly "breached", which must not matter
+        onInvalidation: async () => { carded = true },
+    })
+    const res = await _checkSetup(RANGED, T, deps)
+    assert.equal(carded, false)
+    assert.equal(res.fired, true, 'the zone trip proceeds normally')
+})
+
+// ─── The `edit` verdict ───────────────────────────────────────────────────────
+// It used to be persisted and SWALLOWED: on the verdict menu, written to the document, and never
+// shown to anyone.
+
+const EDIT_RAW = { verdict: 'edit', read: 'Shelf has moved up.', edit_proposal: { why: 'the 238 shelf is now 242' } }
+
+test('a stale map fires the re-map card and latches', async () => {
+    let carded = null
+    const deps = stubDeps({ assess: async () => EDIT_RAW, onEditCard: async (_s, a) => { carded = a } })
+    const res = await _checkSetup(ARMED, T, deps)
+
+    assert.equal(res.edited, true)
+    assert.equal(deps.writes[0].invalidation_status, 'fired')
+    assert.equal(carded.verdict, 'edit')
+    assert.equal(carded.edit_proposal.why, 'the 238 shelf is now 242')
+})
+
+test('an edit with no usable proposal fires nothing', async () => {
+    // A re-map card with an empty "why" tells the user their plan is stale with no way to act.
+    let carded = false
+    const deps = stubDeps({
+        assess: async () => ({ verdict: 'edit', read: 'hmm' }),
+        onEditCard: async () => { carded = true },
+    })
+    const res = await _checkSetup(ARMED, T, deps)
+    assert.equal(carded, false)
+    assert.notEqual(res.edited, true)
+})
+
+test('the re-map card cannot repeat while the map stays stale', async () => {
+    let cards = 0
+    const deps = stubDeps({ assess: async () => EDIT_RAW, onEditCard: async () => { cards++ } })
+    await _checkSetup({ ...ARMED, invalidation_status: 'fired' }, T, deps)
+    assert.equal(cards, 0, 'already latched — the user has been told')
+})
+
+// ─── Condition results + the latch ────────────────────────────────────────────
+
+const CONDS = [
+    { id: 'c1', text: 'CHoCH up',     weight: 'primary',    persistence: 'live' },
+    { id: 'c2', text: 'FDA approval', weight: 'confirming', persistence: 'latching' },
+]
+
+test('results are keyed to the DECLARED conditions, one row each', () => {
+    const out = normalizeConditionResults([{ id: 'c1', met: 'yes', note: 'reclaimed' }], CONDS)
+    assert.equal(out.length, 2)
+    assert.deepEqual(out[0], { id: 'c1', met: 'yes', note: 'reclaimed' })
+    assert.equal(out[1].met, 'unchecked', 'a condition the model ignored reads unchecked, never absent')
+})
+
+test('an answer for an id the setup never declared is dropped', () => {
+    // A hallucinated id must not latch and must not count as a check.
+    const out = normalizeConditionResults([{ id: 'c9', met: 'yes' }], CONDS)
+    assert.deepEqual(out.map(c => c.id), ['c1', 'c2'])
+    assert.ok(out.every(c => c.met === 'unchecked'))
+})
+
+test('met is three-state — a failed look never reads as "not happening"', () => {
+    // Collapsing these to a boolean makes "the provider was down" indistinguishable from "I looked
+    // and it is not there". One is a reason to wait; the other is a reason to go get the data.
+    const [a] = normalizeConditionResults([{ id: 'c1', met: 'unchecked' }], CONDS)
+    assert.equal(a.met, 'unchecked')
+    assert.equal(normalizeConditionResults([{ id: 'c1', met: 'no' }], CONDS)[0].met, 'no')
+    assert.equal(normalizeConditionResults([{ id: 'c1', met: true }], CONDS)[0].met, 'yes', 'a boolean is tolerated')
+    assert.equal(normalizeConditionResults([{ id: 'c1', met: 'probably' }], CONDS)[0].met, 'unchecked', 'off-menu → unchecked, not met')
+})
+
+const SETUP_C = { ...SETUP, conditions: CONDS }
+
+test('only a latching condition that actually resolved is remembered', () => {
+    const patch = latchPatch(SETUP_C, [
+        { id: 'c1', met: 'yes', note: 'in' },   // live — flips next candle, never latched
+        { id: 'c2', met: 'yes', note: 'approved Jul 30' },
+    ], T)
+    assert.deepEqual(Object.keys(patch), ['monitor_state.conditions.c2'])
+    assert.equal(patch['monitor_state.conditions.c2'].met, true)
+    assert.equal(patch['monitor_state.conditions.c2'].note, 'approved Jul 30')
+})
+
+test('an unchecked or unmet condition never latches', () => {
+    // Caching a failed look as a finding is the bug the three-state exists to prevent.
+    for (const met of ['unchecked', 'no']) {
+        assert.deepEqual(latchPatch(SETUP_C, [{ id: 'c2', met }], T), {}, met)
+    }
+})
+
+test('an already-latched condition is not re-stamped', () => {
+    // Re-stamping would move `at` forward every wake and lose when it actually resolved.
+    const prior = { ...SETUP_C, monitor_state: { conditions: { c2: { met: true, at: 'earlier' } } } }
+    assert.deepEqual(latchPatch(prior, [{ id: 'c2', met: 'yes' }], T), {})
 })
 
 // ─── The check, end to end (no IO) ────────────────────────────────────────────
 
+// Every wake's write is captured on `deps.writes` rather than reaching Mongo. Before persistence was
+// injectable these tests ran against a real getDb() that always failed and a _persist that always
+// swallowed — so nothing could assert what a wake actually WROTE, which is how the pre-active
+// status bug lived here undetected. `writes[i]` is the $set of the i-th persist call.
 function stubDeps(over = {}) {
+    const writes = []
     return {
         isAssetOpen: () => true,
         nextOpenMs:  () => T + 3600_000,
         getPrice:    async () => 238.0,
         assess:      async () => ({ verdict: 'enter', read: 'Trigger is live.', next_check_min: 30 }),
         buildOrderPlan: async () => [{ accountId: 'a1', quantity: 100 }],
-        onCard:       async () => {},
-        onManualCard: async () => {},
+        onCard:         async () => {},
+        onManualCard:   async () => {},
+        onEditCard:     async () => {},
+        onInvalidation: async () => {},
+        getClose:       async () => null,
+        writes,
+        persist: async (_id, $set) => { writes.push($set) },
         ...over,
     }
 }
@@ -301,6 +561,19 @@ test('a pre-active setup sleeps until it opens, with no price fetch', async () =
     assert.equal(fetched, false)
 })
 
+// THE ORPHAN BUG. Sleeping until active_from must NOT demote the status: 'waiting' is outside
+// ACTIVE_STATUSES, so the wake-up time being stamped here would sit on a document the poll query
+// can never select again — one journal line, then silence for the life of the setup.
+test('a pre-active setup keeps its status — sleeping is not disarming', async () => {
+    const deps = stubDeps()
+    await _checkSetup({ ...LIVE, active_from: '2026-07-28T00:00:00Z' }, T, deps)
+
+    assert.equal(deps.writes.length, 1)
+    const $set = deps.writes[0]
+    assert.equal($set.status, undefined, 'must not write a status at all')
+    assert.equal($set['monitor_state.next_check_at'], '2026-07-28T00:00:00.000Z', 'wakes exactly at active_from')
+})
+
 test('a setup with no trading venue costs nothing — no price fetch, no assessment', async () => {
     // Live positions never reach here at all (the poll query excludes them); this is the guard for
     // a setup whose broker vanished between the read and the check.
@@ -385,4 +658,96 @@ test('expiry with any other verdict keeps the setup alive', async () => {
     }))
     assert.notEqual(res.closed, true)
     assert.equal(res.verdict, 'edit')
+})
+
+// ─── Past-expiry terminator ────────────────────────────────────────────────────
+// _isExpiring stays true FOREVER once past valid_until, so without this a setup whose window has
+// closed pays a full chart+vision assessment every single cadence, indefinitely.
+
+test('_isPastExpiry separates "review window" from "actually over"', () => {
+    assert.equal(_isPastExpiry({ valid_until: '2026-07-26T12:05:00Z' }, T), false, 'inside the window')
+    assert.equal(_isPastExpiry({ valid_until: '2026-07-26T11:55:00Z' }, T), true,  'past it')
+    assert.equal(_isPastExpiry({ valid_until: null }, T), false, 'no expiry never expires')
+})
+
+test('_effectiveVerdict: let_expire is only on the menu for an expiry review', () => {
+    assert.equal(_effectiveVerdict('let_expire', 'zone_trip', false), 'stand_aside')
+    assert.equal(_effectiveVerdict('let_expire', 'expiry_review', false), 'let_expire')
+})
+
+test('_effectiveVerdict: past expiry and still not committing → terminate', () => {
+    for (const v of ['wait', 'stand_aside', 'edit']) {
+        assert.equal(_effectiveVerdict(v, 'expiry_review', true), 'let_expire', `${v} past expiry`)
+    }
+    assert.equal(_effectiveVerdict('enter', 'expiry_review', true), 'enter', 'a late trigger is still a trigger')
+    // Inside the window (not yet past) these stay legitimate.
+    for (const v of ['wait', 'stand_aside', 'edit']) {
+        assert.equal(_effectiveVerdict(v, 'expiry_review', false), v, `${v} inside the window`)
+    }
+})
+
+test('a past-expiry setup that keeps saying wait is closed, not re-assessed forever', async () => {
+    const deps = stubDeps({
+        getPrice: async () => 300,
+        assess:   async () => ({ verdict: 'wait', read: 'Still nothing here.' }),
+    })
+    const res = await _checkSetup({ ...LIVE, valid_until: '2026-07-26T11:00:00Z' }, T, deps)
+
+    assert.equal(res.closed, true)
+    assert.equal(deps.writes[0].status, 'closed')
+    assert.equal(deps.writes[0].closedReason, 'expired')
+})
+
+// ─── Past entry ───────────────────────────────────────────────────────────────
+// The journal used to stop dead at the entry card — the record went silent at the moment it
+// mattered most. What runs here is deliberately small: the exits rest at the BROKER, so the
+// position is protected without anyone watching it.
+
+const FILLED = { ...ARMED, status: 'long', ordersPlacedAt: T - 60_000, quantity: 100 }
+
+test('a live setup takes the position path, never the readiness gate', async () => {
+    let assessed = false, priced = false
+    const deps = stubDeps({
+        assess:   async () => { assessed = true; return {} },
+        getPrice: async () => { priced = true; return 238 },
+    })
+    await _checkSetup(FILLED, T, deps)
+    assert.equal(assessed, false, 'a live position has no use for a zone trip')
+    assert.equal(priced, false, 'and costs no quote')
+})
+
+test('the first wake after a fill writes the entry into the journal', async () => {
+    const deps = stubDeps()
+    const res = await _checkSetup(FILLED, T, deps)
+
+    assert.equal(res.promoted, true)
+    const $set = deps.writes[0]
+    assert.equal($set['position_state.entry.direction'], 'long')
+    assert.equal($set['position_state.entry.size'], 100)
+    assert.equal($set['position_state.entry.fill_at'], new Date(T - 60_000).toISOString(),
+        'stamped when the orders were placed, not when we noticed')
+    assert.equal($set['position_state.phase'], 'running')
+})
+
+test('later wakes stay quiet — an idle line every cadence is noise, not a monologue', async () => {
+    const promoted = { ...FILLED, position_state: { entry: { fill_at: '2026-07-26T11:00:00Z' } } }
+    const deps = stubDeps()
+    const res = await _checkSetup(promoted, T, deps)
+
+    assert.equal(res.reason, 'in_position_idle')
+    assert.equal(deps.writes[0]['position_state.entry.fill_at'], undefined, 'nothing re-stamped')
+})
+
+test("a setup awaiting the user's confirm says nothing the card didn't already say", async () => {
+    const deps = stubDeps()
+    const res = await _checkSetup({ ...ARMED, status: 'hit' }, T, deps)
+    assert.equal(res.reason, 'awaiting_fill')
+    assert.equal(deps.writes.length, 1, 'the schedule moves and nothing else')
+})
+
+test('a live position parks on the lazy end of the cadence', async () => {
+    // Nothing here is time-critical: the broker holds the protective orders.
+    const deps = stubDeps()
+    await _checkSetup(FILLED, T, deps)
+    assert.equal(deps.writes[0]['monitor_state.next_check_at'], new Date(T + 240 * 60_000).toISOString())
 })

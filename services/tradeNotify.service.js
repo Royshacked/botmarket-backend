@@ -78,6 +78,67 @@ export function buildSetupEntryConfirm(setup, assessment = null) {
     }
 }
 
+/**
+ * The setup's plan is no longer worth what it was — either price left the validity range, or Talos
+ * read the map as stale. FOUR distinct messages, because they are four different things to hear and
+ * merging them would produce copy that is wrong for three of the four:
+ *
+ *   ran_away        price left on the FAVOURABLE side. Nothing was wrong with the read — it was
+ *                   missed. Not a problem to solve, so no action button; a chase is the user's own
+ *                   decision to make from a clean slate.
+ *   invalidated     the premise broke and the user asked to be given the chance to re-draw it.
+ *   invalidated_fyi same break, but they chose notify_only — tell them, ask nothing.
+ *   stale_map       Talos's own read: the levels have drifted from where structure now sits. This
+ *                   one carries the proposal, so it is the only one that can offer a re-map.
+ *
+ * The transport is shared (_post → the one card pipe); the wording is Mentor's.
+ */
+export function buildSetupInvalidation(setup, info = null) {
+    const dir   = String(setup?.direction || '').toUpperCase()
+    const asset = setup?.asset ?? 'your setup'
+    const kind  = info?.card ?? 'invalidated'
+    const why   = info?.reason ?? null
+
+    const copy = {
+        ran_away: {
+            content: `Your ${dir} ${asset} setup didn't get filled — price ran past ${info?.price ?? 'the level'} without you. Nothing was wrong with the read; the entry just never came.`,
+            actions: null,
+        },
+        invalidated: {
+            content: `Your ${dir} ${asset} setup is no longer valid — price closed at ${info?.price ?? '?'}, past the ${info?.edge ?? 'edge'} of where this trade works. Want to re-draw it?`,
+            actions: cardActions('Re-draw it'),
+        },
+        invalidated_fyi: {
+            content: `Heads up — your ${dir} ${asset} setup is no longer valid. Price closed at ${info?.price ?? '?'}, past the ${info?.edge ?? 'edge'} of where this trade works.`,
+            actions: null,
+        },
+        stale_map: {
+            content: `Your ${dir} ${asset} setup needs re-drawing — ${why || 'the levels have drifted from where structure sits now'}.`,
+            actions: cardActions('Re-draw it'),
+        },
+    }[kind] ?? { content: `Your ${dir} ${asset} setup needs a look.`, actions: null }
+
+    return {
+        userId:  setup?.userId ?? null,
+        content: copy.content,
+        type:    'setup_invalidation',
+        payload: {
+            kind:      'setup',
+            setupId:   setup?.id,
+            asset:     setup?.asset,
+            direction: setup?.direction ?? null,
+            event:     kind,
+            side:      info?.side ?? null,
+            edge:      info?.edge ?? null,
+            price:     Number.isFinite(info?.price) ? info.price : null,
+            reason:    why,
+            ...(info?.edit_proposal ? { edit_proposal: info.edit_proposal } : {}),
+        },
+        botId:   'mentor',
+        ...(copy.actions ? { actions: copy.actions } : {}),
+    }
+}
+
 /** Kairos call READY to enter → open the call to confirm. Proposal comes from the fresh assessment. */
 export function buildCallReady(call, assessment = null) {
     // Only show the price bits when BOTH numbers finalized — _finalizeProposal returns null for
@@ -169,6 +230,10 @@ export async function notifySetupEntryConfirm(setup, assessment = null) {
     return _post(buildSetupEntryConfirm(setup, assessment), 'Setup entry-confirm card')
 }
 
+export async function notifySetupInvalidation(setup, info = null) {
+    return _post(buildSetupInvalidation(setup, info), `Setup-invalidation card (${info?.card ?? '?'})`)
+}
+
 export async function notifyCallReady(call, assessment = null) {
     return _post(buildCallReady(call, assessment), 'Call-ready card')
 }
@@ -185,4 +250,4 @@ export async function notifyCallReentry(call, read = null, outcome = null) {
     return _post(buildCallReentry(call, read, outcome), 'Call-reentry card')
 }
 
-export const tradeNotifyService = { notifyIdeaEntryConfirm, notifySetupEntryConfirm, notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry }
+export const tradeNotifyService = { notifyIdeaEntryConfirm, notifySetupEntryConfirm, notifySetupInvalidation, notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry }

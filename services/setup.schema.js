@@ -17,8 +17,32 @@ import { TRADE_HORIZONS } from './entity/vocabulary.js'
 export const TF_RUNGS = ['month', 'week', 'day', '4hr', '2hr', '1hr', '30min', '15min', '5min', '1min']
 
 export const TRADE_MODES  = ['classical', 'smc']
-export const WATCH_KINDS  = ['price_action', 'structure', 'correlation', 'market', 'news', 'positioning', 'fundamental']
-export const WATCH_WEIGHTS = ['primary', 'confirming']
+
+// ─── Conditions ───────────────────────────────────────────────────────────────
+//
+// A condition is TEXT. There is no taxonomy: the monitor reads the sentence and picks its own
+// tools, so an enum here would only ever narrow what can be checked (docs/mentor-talos-refactor.md
+// §2). What stays structured is the little that CODE needs:
+//
+//   id           the per-condition ledger key — the monitor answers {id, met, note}, so a verdict
+//                maps back to a specific declared condition and two wakes are comparable.
+//   weight       primary = the trigger itself · confirming = supports, doesn't veto.
+//   mode         Mentor's RECORD of the build conversation, not a re-derivation: did the user give
+//                a hard test ("below VWAP") or hand the judgment over ("how the price action
+//                looks")? Both are legitimate. It changes the monitor's VOICE and the confidence
+//                on a failed check — never the verdict.
+//   persistence  latching = an event; once true it stays true, so re-checking is waste AND a
+//                correctness risk (a re-run search can return a different answer and talk the
+//                model out of a settled fact). live = a state that can flip; re-check every wake.
+export const CONDITION_WEIGHTS     = ['primary', 'confirming']
+export const CONDITION_MODES       = ['measured', 'discretionary']
+export const CONDITION_PERSISTENCE = ['live', 'latching']
+
+/** What happens when price leaves the validity range. Authored, never assumed. */
+export const ON_BREAK = ['revise', 'close', 'notify_only']
+
+/** Cap on symbols a setup may pull the monitor onto — free text can name anything. */
+const MAX_REFERENCED_SYMBOLS = 6
 
 // Poll cadence (minutes) by horizon: {min, max}. `min` is the floor a self-chosen next_check_min
 // clamps up to; `max` the ceiling it clamps down to. Wider horizon → lazier loop.
@@ -99,45 +123,93 @@ export function totalQuantity(entryZones) {
     return sum > 0 ? sum : null
 }
 
-// ─── watch[] ──────────────────────────────────────────────────────────────────
+// ─── conditions[] ─────────────────────────────────────────────────────────────
+
+/** Upper-cased, de-duplicated, capped ticker list. Shared by `referenced_symbols`. */
+export function normalizeSymbols(arr, cap = MAX_REFERENCED_SYMBOLS) {
+    if (!Array.isArray(arr)) return []
+    return [...new Set(arr.filter(s => typeof s === 'string' && s.trim()).map(s => s.toUpperCase().trim()))].slice(0, cap)
+}
 
 /**
- * Coerce the monitor's instruction sheet. An unknown `kind` is DROPPED rather than defaulted —
- * a bogus kind would silently mount the wrong tools (or none), and a factor the monitor can't
- * act on is worse than an absent one. A factor with no `look_for` is equally useless: the
- * assessment has nothing to verify against, so it goes too.
+ * Coerce the monitor's instruction sheet. A condition with no `text` is dropped — there is nothing
+ * for the monitor to check, which is worse than an absent condition.
+ *
+ * IDS MUST BE STABLE ACROSS RE-EMITS. The monitor latches resolved conditions by id
+ * (`monitor_state.conditions`), so an id that shifts when the model drops one condition would
+ * attach a past finding to a different condition. An authored id therefore always wins; the
+ * positional fallback keys off the ORIGINAL index (not the surviving count) so a dropped entry
+ * doesn't renumber its neighbours; and collisions are suffixed rather than silently merged.
  */
-export function normalizeWatch(arr) {
+export function normalizeConditions(arr) {
     if (!Array.isArray(arr)) return []
-    return arr.reduce((out, w) => {
-        if (!w || typeof w !== 'object') return out
-        if (!WATCH_KINDS.includes(w.kind)) return out
+    const used = new Set()
 
-        const lookFor = typeof w.look_for === 'string' ? w.look_for.trim() : ''
-        if (!lookFor) return out
+    const claim = (wanted, i) => {
+        let id = wanted || `c${i + 1}`
+        if (used.has(id)) {
+            let n = 2
+            while (used.has(`${id}_${n}`)) n++
+            id = `${id}_${n}`
+        }
+        used.add(id)
+        return id
+    }
 
-        const symbols = Array.isArray(w.symbols)
-            ? [...new Set(w.symbols.filter(s => typeof s === 'string' && s.trim()).map(s => s.toUpperCase().trim()))]
-            : []
+    return arr.reduce((out, c, i) => {
+        if (!c || typeof c !== 'object') return out
+        const text = typeof c.text === 'string' ? c.text.trim() : ''
+        if (!text) return out
 
         out.push({
-            kind:      w.kind,
-            look_for:  lookFor,
-            weight:    WATCH_WEIGHTS.includes(w.weight) ? w.weight : 'confirming',
-            timeframe: normalizeTimeframe(w.timeframe) || null,
-            ...(symbols.length ? { symbols } : {}),
+            id:          claim(typeof c.id === 'string' ? c.id.trim() : '', i),
+            text,
+            weight:      CONDITION_WEIGHTS.includes(c.weight) ? c.weight : 'confirming',
+            // Unstamped → 'discretionary'. Claiming 'measured' without the conversation having
+            // established a test would overstate how hard the check is.
+            mode:        CONDITION_MODES.includes(c.mode) ? c.mode : 'discretionary',
+            // Unstamped → 'live'. Re-checking something that didn't need it costs a call;
+            // caching something that did is a WRONG ANSWER, so the safe default re-checks.
+            persistence: CONDITION_PERSISTENCE.includes(c.persistence) ? c.persistence : 'live',
         })
         return out
     }, [])
 }
 
+// ─── validity ─────────────────────────────────────────────────────────────────
+
 /**
- * The distinct tool groups a watch list activates — what the monitor will actually fetch.
- * Exposed so the cost of a setup is inspectable before it's saved (and so Talos builds its
- * tool set from the same source the UI explains it from).
+ * The price range outside which the setup is no longer worth watching — the second thing the cheap
+ * arithmetic gate asks on every wake, alongside "is price in a zone?".
+ *
+ * The two edges are NOT symmetric, and flattening them loses the point. For a long:
+ *   • below `lower`   → invalidation. Structure broke the other way; the premise is gone.
+ *   • above `approach`→ "ran away, not coming". The setup was never wrong — it was missed.
+ * Mirrored for a short. `approach` therefore sits OUTSIDE the envelope, on the away side.
+ *
+ * Absent (or with neither edge) → null, and the setup simply has no validity gate. Optional in v1:
+ * a setup without one behaves exactly as it does today.
  */
-export function watchKinds(watch) {
-    return [...new Set((watch ?? []).map(w => w.kind))]
+export function normalizeValidity(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+
+    let lower = Number(raw.lower)
+    let upper = Number(raw.upper)
+    if (!Number.isFinite(lower)) lower = null
+    if (!Number.isFinite(upper)) upper = null
+    if (lower == null && upper == null) return null
+    if (lower != null && upper != null && lower > upper) [lower, upper] = [upper, lower]
+
+    const approach = Number(raw.approach)
+    return {
+        lower,
+        upper,
+        approach:  Number.isFinite(approach) ? approach : null,
+        // Which rung's CLOSE decides. A wick through the line must not kill a setup, and an
+        // intraday wick must not kill a swing setup.
+        timeframe: normalizeTimeframe(raw.timeframe) || null,
+        on_break:  ON_BREAK.includes(raw.on_break) ? raw.on_break : 'revise',
+    }
 }
 
 // ─── ISO bounds ───────────────────────────────────────────────────────────────
@@ -185,8 +257,12 @@ export function normalizeSetup(raw) {
         active_from: isoOrNull(raw.active_from),
         valid_until: isoOrNull(raw.valid_until),
 
-        thesis: typeof raw.thesis === 'string' ? raw.thesis.trim() : '',
-        watch:  normalizeWatch(raw.watch),
+        thesis:     typeof raw.thesis === 'string' ? raw.thesis.trim() : '',
+        conditions: normalizeConditions(raw.conditions),
+        validity:   normalizeValidity(raw.validity),
+        // The symbols a condition may pull the monitor onto, beyond the setup's own asset. Free
+        // text can name anything; the fetch budget stays bounded by what Mentor extracted at build.
+        referenced_symbols: normalizeSymbols(raw.referenced_symbols),
 
         entry_zones,
         stop_zones,
@@ -221,8 +297,54 @@ export function setupReadiness(setup, hasAccount = false) {
     if (!(setup?.entry_zones?.length))               missing.push('entry zone')
     if (!(setup?.stop_zones?.length))                missing.push('stop zone')
     if (!Number.isFinite(setup?.quantity) || setup.quantity <= 0) missing.push('quantity')
+    // PRESENCE only. Whether a condition is *checkable* is Mentor's gate and lives in the prompt —
+    // code can't read a sentence and say how anyone would know. But zero conditions is the one part
+    // it can see, and it means the setup arms with nothing to verify against its thesis: Talos falls
+    // through to `judge on price structure at the zone alone` and the premise never gets tested.
+    if (!(setup?.conditions?.length))                missing.push('condition')
     if (!hasAccount)        missing.push('trading account')
-    return { ready: missing.length === 0, missing }
+
+    const problems = validityProblems(setup)
+    return { ready: missing.length === 0 && problems.length === 0, missing, problems }
+}
+
+/**
+ * Coherence between the validity range and the plan it is supposed to outlive. A range that
+ * contradicts the stop is worse than no range: it reports a setup as "still valid" at a price where
+ * its own plan is already dead (long entry 238 / stop 234.8 / validity.lower 230 → at 234 the stop
+ * is blown but the setup still reads live). Nothing checked this before, because nothing had a
+ * range to check.
+ *
+ * Returns human-readable slugs, not booleans, so the button can say WHICH thing is wrong — and it
+ * lives here rather than only in the Generate gate so the FE's readiness and the server's refusal
+ * cannot disagree.
+ *
+ * Pure. An absent validity range is not a problem (optional in v1).
+ */
+export function validityProblems(setup) {
+    const v = setup?.validity
+    if (!v) return []
+    const out  = []
+    const long = setup?.direction === 'long'
+
+    // The far stop edge = the most risk the plan admits. Beyond it the trade is dead by its own
+    // terms, so the validity floor/ceiling must not sit further out than that.
+    const stopEdges = (setup?.stop_zones ?? []).flatMap(z => [z?.lower, z?.upper]).filter(Number.isFinite)
+    if (stopEdges.length) {
+        const stopFar = long ? Math.min(...stopEdges) : Math.max(...stopEdges)
+        if (long  && v.lower != null && v.lower < stopFar) out.push('validity floor sits below the stop')
+        if (!long && v.upper != null && v.upper > stopFar) out.push('validity ceiling sits above the stop')
+    }
+
+    // The away pivot must be OUTSIDE the envelope, on the side price would run away to — inside, it
+    // can never fire, which is how the legacy invalidation monitor ended up warning and ignoring.
+    if (v.approach != null) {
+        const inside = (v.lower == null || v.approach >= v.lower) && (v.upper == null || v.approach <= v.upper)
+        if (inside) out.push('away pivot sits inside the validity range')
+        else if (long  && v.upper != null && v.approach < v.upper) out.push('away pivot is below the range on a long')
+        else if (!long && v.lower != null && v.approach > v.lower) out.push('away pivot is above the range on a short')
+    }
+    return out
 }
 
 // ─── Reward-to-risk ───────────────────────────────────────────────────────────

@@ -146,38 +146,95 @@ against the stop zone's far edge and the first target's near edge. A 237.8–238
 Below ~1.5R is thin: say so, and offer a concrete fix (a tighter stop anchored to real structure,
 a further target the chart supports, or passing).
 
-## `watch[]` — declare what the monitor should check
+## `conditions[]` — what has to be true to take this trade
 
 This is the most important thing you author, and it is **not** a description of the setup. It is
-the monitor's instruction sheet: **the monitor reads only what you declare here.** Undeclared
-dimensions are never fetched — so a factor you omit is a factor nobody checks, and a factor you
-add costs real time and money on every wake.
+the monitor's instruction sheet: **the monitor judges only what you declare here.** A condition you
+omit is a condition nobody checks; a condition you add costs a real look on every wake.
 
-Declare a factor only if it would **change the decision** at the moment price reaches the zone.
+Write them **in plain language, the way a trader would say them out loud.** There is no menu of
+types. The monitor reads your sentence, works out what would confirm or deny it, and goes and
+looks — chart, structure, indicators, a peer's tape, a news search, whatever the sentence needs.
 
-| `kind` | what the monitor pulls | declare it when |
-|---|---|---|
-| `price_action` | chart + candles, order blocks, false breaks | the trigger is a classical price pattern |
-| `structure` | the numeric SMC engine (BOS/CHoCH, FVG, liquidity) | the trigger is structural / SMC |
-| `correlation` | live quotes for the symbols you name | the trade leans on a peer or group leading |
-| `market` | SPY / QQQ / VIX | the name is market-sensitive and a risk-off tape would kill it |
-| `news` | recent headlines for the ticker | a headline could break the thesis |
-| `positioning` | short interest / options / crypto derivatives | the edge IS crowding or squeeze |
-| `fundamental` | fundamentals, filings | a long-horizon thesis resting on the business |
+> *"sweep below 238 that closes back inside, then reclaims on rising volume"*
+> *"NVDA weak intraday — below VWAP"*
+> *"the FDA approval on the cancer drug has actually landed"*
 
-Each factor: a `kind`, a concrete `look_for` cue written as **what the monitor should see**, an
-optional `timeframe` (price/structure) or `symbols` (correlation), and a `weight` —
-`primary` (the trigger itself) or `confirming`.
+Declare a condition only if it would **change the decision** at the moment price reaches the zone.
+**At least one**, and most setups need **2–4**. A purely technical trade declares two and nothing
+else — that is correct and cheap, not lazy. Don't reflexively bolt "and the market is fine" onto
+everything.
 
-Write `look_for` so a trader reading it alone knows what confirms and what kills it:
-*"sweep below 238 that closes back inside, then reclaims on rising volume — dead on a close
-below VWAP"*. Never "looks bullish".
+Give each one a stable `id` (`c1`, `c2`, …) and **carry those ids forward unchanged on every
+re-emit** — the monitor reports back per id and remembers what it has already settled, so renaming
+or renumbering silently attaches an old finding to a different condition.
 
-Most setups need **1–3 factors**. A purely technical trade declares one or two and nothing else —
-that is correct and cheap, not lazy. Do NOT reflexively add `market` and `news` to everything.
+### YOUR GATE: every condition must be checkable
 
-You do **not** need a `news` factor for scheduled events. Earnings, FOMC and CPI are stamped
-automatically and always checked. Declare `news` only for *unscheduled* headline risk.
+Before a condition goes in, you must be able to say **how anyone would know**. When you can't, ask
+the user. There are two good answers and you accept either:
+
+- **A test they name.** *"weak = below VWAP."* → `mode: "measured"`. The monitor applies that exact
+  test, nothing else.
+- **Judgment they hand over.** *"weak = how the price action looks."* → `mode: "discretionary"`.
+  The monitor uses its eyes. Two traders can disagree there and both be doing their job.
+
+What you must not save is the third thing: **vague by accident**, where neither of you ever decided
+which it was. *"If the Fed pivots"* doesn't survive the question — it becomes *"a cut at the
+September FOMC"*, or it comes out.
+
+This is the same rule you already hold for invalidation. **No honest invalidation = no setup. No
+observable test = not a condition yet — and no condition = not a setup yet.**
+
+If holding this line empties the list, you have not found the trade's premise, only its levels. Go
+back to the user and get one thing that would change the decision at the zone, in language you can
+both say out loud. Never Generate on zones alone.
+
+### `persistence` — does it stay true?
+
+- `latching` — an **event**. Once it has happened it has happened: an approval, an earnings beat, a
+  break that already occurred. The monitor checks it once and never spends on it again.
+- `live` — a **state** that can flip on the next candle: above a moving average, a peer's strength,
+  price holding a level.
+
+Ask when it isn't obvious (*"once the FDA approves, that's permanent — right?"*). If you don't
+stamp it, the monitor assumes `live` and re-checks every wake, which is safe but wasteful.
+
+### `referenced_symbols`
+
+Any ticker your conditions mention besides the setup's own — `["SMH", "NVDA"]`. This is what lets
+the monitor go and look at those names. Max 6.
+
+You do **not** need a condition for scheduled events. Earnings, FOMC and CPI are stamped
+automatically and always checked. Write one only for *unscheduled* headline risk.
+
+## `validity` — the range outside which this setup is dead
+
+A setup isn't only "not triggered yet" when price is far away — at some point it is **wrong**, and
+the user should hear about it rather than watch a monitor tick quietly forever.
+
+So author the range, and **tell the user what you've drawn and what happens when it breaks.** They
+choose:
+
+- **give you more scenarios** — another zone, the other side of the level — so the setup survives;
+- **`revise`** — they get pinged to re-draw it with you;
+- **`close`** — it just dies. Some setups shouldn't generate homework;
+- **`notify_only`** — tell them, change nothing.
+
+The two edges are **not** the same event, and this is the part worth getting right. For a long:
+
+- **below `lower`** → the premise broke. Structure went the other way.
+- **above `approach`** → it *ran away*. Nothing was wrong with the read; they missed it. That's a
+  different conversation (chase, or let it go), so `approach` sits **outside** the range on the
+  away side.
+
+Mirrored for a short. `timeframe` is which rung's **close** decides — a wick through the line must
+not kill a setup, and an intraday wick must not kill a swing setup, so name a rung that matches the
+horizon.
+
+The range must agree with the stop: a long whose `validity.lower` sits **below** its stop is
+incoherent — it would still read "valid" at a price where the plan is already dead. Generate
+refuses it.
 
 ## The setup is a live worksheet — emit it every turn
 
@@ -202,10 +259,13 @@ the setup **as built so far**, which the user watches fill in.
   "active_from": null,
   "valid_until": "2026-08-08T20:00:00Z",
   "thesis": "One or two sentences: why this name, this direction, now.",
-  "watch": [
-    { "kind": "structure", "look_for": "sweep below 238 that closes back inside, then CHoCH up", "timeframe": "15min", "weight": "primary" },
-    { "kind": "correlation", "look_for": "SMH leading, not diverging", "symbols": ["SMH"], "weight": "confirming" }
+  "conditions": [
+    { "id": "c1", "text": "sweep below 238 that closes back inside, then a CHoCH up on the 15m", "weight": "primary",    "mode": "measured",       "persistence": "live" },
+    { "id": "c2", "text": "SMH leading, not diverging",                                          "weight": "confirming", "mode": "discretionary",  "persistence": "live" },
+    { "id": "c3", "text": "the Blackwell supply headline has actually landed",                   "weight": "confirming", "mode": "measured",       "persistence": "latching" }
   ],
+  "referenced_symbols": ["SMH"],
+  "validity": { "lower": 234.0, "upper": 244.0, "approach": 246.0, "timeframe": "1hr", "on_break": "revise" },
   "entry_zones": [ { "id": "ez1", "lower": 237.8, "upper": 238.6, "quantity": 100, "note": "the shelf" } ],
   "stop_zones":  [ { "id": "sz1", "lower": 234.8, "upper": 235.9, "quantity": 100 } ],
   "tp_zones":    [ { "id": "tp1", "lower": 246.0, "upper": 247.2, "quantity": 50 },

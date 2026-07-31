@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateSetup, SETUP_STATUSES } from '../../api/setups/setups.service.js'
+import { validateSetup, SETUP_STATUSES, carryConditions } from '../../api/setups/setups.service.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
 import { resolveMode } from '../../services/venue.resolve.service.js'
 
@@ -11,7 +11,7 @@ import { resolveMode } from '../../services/venue.resolve.service.js'
 const DRAFT = {
     asset: 'NVDA', direction: 'long', type: 'swing', trade_mode: 'smc', timeframe: '1hr',
     thesis: 'Sweep and reclaim.',
-    watch: [{ kind: 'structure', look_for: 'CHoCH up', timeframe: '15min', weight: 'primary' }],
+    conditions: [{ id: 'c1', text: 'CHoCH up on the 15min after the sweep', weight: 'primary', mode: 'measured', persistence: 'latching' }],
     entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
     stop_zones:  [{ lower: 234.8, upper: 235.9, quantity: 100 }],
     tp_zones:    [{ lower: 246.0, upper: 247.2, quantity: 100 }],
@@ -35,6 +35,19 @@ test('a setup with no stop zone never reaches the broker', () => {
 test('a setup with no entry zone is rejected', () => {
     const s = normalizeSetup({ ...DRAFT, entry_zones: [] })
     assert.equal(validateSetup(s, 'ctrader', ACCTS).ok, false)
+})
+
+// PRESENCE, not checkability: a setup with nothing declared arms with nothing to verify against its
+// thesis, and Talos falls through to judging price structure at the zone alone. Whether a condition
+// is a good one stays Mentor's gate, in the prompt.
+test('a setup with no conditions has nothing for the monitor to check', () => {
+    const s = normalizeSetup({ ...DRAFT, conditions: [] })
+    assert.equal(validateSetup(s, 'ctrader', ACCTS).reason, 'missing_condition')
+})
+
+test('a condition with no text does not count as a condition', () => {
+    const s = normalizeSetup({ ...DRAFT, conditions: [{ id: 'c1', text: '   ' }] })
+    assert.equal(validateSetup(s, 'ctrader', ACCTS).reason, 'missing_condition')
 })
 
 test('direction and horizon are required — the monitor keys both off them', () => {
@@ -86,4 +99,28 @@ test('a setup speaks the ONE shared ladder — no private words', () => {
     }
     // Price sitting inside a zone is armed_zone_id on a `looking` setup — a detail, not a rung.
     assert.ok(SETUP_STATUSES.has('looking'))
+})
+
+// ─── Re-draw clears what the old plan established ─────────────────────────────
+
+test('a resolved condition carries across a re-draw only while its text is unchanged', () => {
+    // Keyed by id alone, a finding would ride onto a REWORDED condition — "FDA approval landed",
+    // already latched true, silently satisfying "FDA approval landed AND the stock held 240".
+    const resolved = { c1: { met: true, at: 'x' }, c2: { met: true, at: 'y' } }
+    const cur  = [{ id: 'c1', text: 'FDA approval landed' }, { id: 'c2', text: 'SMH leading' }]
+    const next = [{ id: 'c1', text: 'FDA approval landed' }, { id: 'c2', text: 'SMH leading AND above 240' }]
+
+    const kept = carryConditions(resolved, cur, next)
+    assert.deepEqual(Object.keys(kept), ['c1'])
+})
+
+test('a dropped condition takes its finding with it', () => {
+    const kept = carryConditions({ c1: { met: true } }, [{ id: 'c1', text: 'a' }], [{ id: 'c2', text: 'b' }])
+    assert.deepEqual(kept, {})
+})
+
+test('an edit that never touched the conditions leaves the findings alone', () => {
+    // Returning {} here would silently wipe every latch on an unrelated edit (a thesis reword).
+    assert.equal(carryConditions({ c1: { met: true } }, [{ id: 'c1', text: 'a' }], undefined), undefined)
+    assert.equal(carryConditions({}, [], []), undefined, 'nothing resolved → nothing to write')
 })

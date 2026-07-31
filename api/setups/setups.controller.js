@@ -17,10 +17,13 @@ const SETUP_REASONS = {
     invalid_zone:  [400, 'A zone is inverted or not numeric'],
     no_venue:      [400, 'Mark a trading account before generating'],
 }
+// Named reasons win over the prefix rules — `invalid_setup` / `invalid_zone` have their own copy and
+// must not be swallowed by the generic `invalid_*` passthrough below them.
 const setupReason = (reason) =>
-    (reason?.startsWith('missing_') || reason?.startsWith('cannot_arm_'))
+    SETUP_REASONS[reason]
+    ?? ((reason?.startsWith('missing_') || reason?.startsWith('cannot_arm_') || reason?.startsWith('invalid_'))
         ? [400, reason]
-        : SETUP_REASONS[reason] ?? null
+        : null)
 
 // list / get / patch / delete are the shared HTTP tier — the same moves every kind makes, over the
 // same crud. Arming IS a patch (`{status:'looking'}`); the gate it re-runs lives in the service,

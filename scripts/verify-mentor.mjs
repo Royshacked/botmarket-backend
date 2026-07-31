@@ -22,7 +22,7 @@ dotenv.config()
 // module-level code, so a static import here would construct the Anthropic client (and its
 // apiKey) before dotenv.config() had run — "Could not resolve authentication method".
 const { mentorAgentService, emptyMentorState } = await import('../services/mentor.agent.service.js')
-const { normalizeSetup, setupReadiness, computeRR, buildLadder, buildCadence } = await import('../services/setup.schema.js')
+const { normalizeSetup, setupReadiness, computeRR, buildLadder, buildCadence, validityProblems } = await import('../services/setup.schema.js')
 const { zoneGate, proximityGapMin, zoneDistance } = await import('../monitoring/talos.monitor.service.js')
 const { fetchLastPrice } = await import('../monitoring/monitorUtils.js')
 
@@ -104,22 +104,48 @@ function checkSetup(setup, price) {
         ? ok(`lens ${setup.trade_mode}`)
         : fail(`lens is "${setup.trade_mode}" — must be classical or smc`)
 
-    // watch[] — the whole cost/quality tradeoff of the kind lives here.
-    const n = setup.watch.length
-    if (n === 0)      fail('watch[] is EMPTY — the monitor has nothing to verify against the thesis')
-    else if (n > 3)   warn(`watch[] declares ${n} factors — over-declaring pays for every one on EVERY wake`)
-    else              ok(`watch[] declares ${n} factor(s) — ${setup.watch.map(w => w.kind).join(', ')}`)
+    // conditions[] — the monitor's instruction sheet, and the whole quality tradeoff of the kind.
+    const conditions = setup.conditions ?? []
+    const n = conditions.length
+    if (n === 0)      fail('conditions[] is EMPTY — the monitor has nothing to verify against the thesis')
+    else if (n > 4)   warn(`conditions[] declares ${n} — over-declaring pays for a look at every one on EVERY wake`)
+    else              ok(`conditions[] declares ${n}`)
 
-    for (const w of setup.watch) {
-        if (!w.look_for || w.look_for.length < 15) warn(`watch "${w.kind}" look_for is too vague to verify: "${w.look_for}"`)
-        if (w.kind === 'correlation' && !w.symbols?.length) fail('a correlation factor names no symbols — nothing will be fetched')
+    const ids = conditions.map(c => c.id)
+    new Set(ids).size === ids.length
+        ? ok(`ids are unique (${ids.join(', ')})`)
+        : fail(`duplicate condition ids ${ids.join(', ')} — the latch would attach a finding to the wrong condition`)
+
+    for (const c of conditions) {
+        if (!c.text || c.text.length < 15) warn(`condition ${c.id} is too vague to verify: "${c.text}"`)
+        // The checkability gate is Mentor's, and this is the only signal we have that it ran.
+        if (!['measured', 'discretionary'].includes(c.mode)) {
+            warn(`condition ${c.id} carries no mode — Mentor never settled whether it is a named test or handed-over judgment`)
+        }
+        if (c.persistence === 'latching' && c.weight === 'primary') {
+            warn(`condition ${c.id} is a latching PRIMARY — once met the trigger is permanently satisfied; check that is intended`)
+        }
     }
-    if (setup.watch.some(w => w.kind === 'news')) {
-        warn('a news factor was declared — scheduled events are already always-on, so this should be for UNSCHEDULED headline risk only')
+
+    conditions.some(c => c.weight === 'primary')
+        ? ok('a primary (trigger) condition is named')
+        : warn('nothing is marked primary — the monitor has no trigger, only confirmations')
+
+    // Referenced symbols must cover any name the conditions mention, or the monitor can't look.
+    const refs = setup.referenced_symbols ?? []
+    refs.length ? ok(`referenced_symbols ${refs.join(', ')}`) : ok('no referenced symbols (own asset only)')
+
+    // validity — the second arithmetic gate, and the only thing that speaks when price is far away.
+    head('Validity range')
+    if (!setup.validity) {
+        warn('no validity range — Talos can only ever say "price is outside my zones", never "this is dead"')
+    } else {
+        const v = setup.validity
+        ok(`range [${v.lower ?? '-'}, ${v.upper ?? '-'}] · away pivot ${v.approach ?? '-'} · on_break ${v.on_break} · ${v.timeframe ?? 'no rung'} close`)
+        const problems = validityProblems(setup)
+        problems.length ? problems.forEach(p => fail(`validity: ${p}`)) : ok('range is coherent with the stop')
+        if (!v.timeframe) warn('no timeframe on the range — which close decides is undefined, so a wick could kill the setup')
     }
-    setup.watch.some(w => w.weight === 'primary')
-        ? ok('a primary (trigger) factor is named')
-        : warn('no factor is marked primary — the monitor has no trigger, only confirmations')
 
     // Zones
     head('Zones')
@@ -186,7 +212,7 @@ function checkGate(setup, price) {
 async function checkPersist(setup) {
     head('Persist + arm + one tick (--persist)')
     const { setupService }      = await import('../api/setups/setups.service.js')
-    const { _checkSetup }       = await import('../monitoring/talos.monitor.service.js')
+    const { _checkSetup, _testDeps } = await import('../monitoring/talos.monitor.service.js')
     const { paperBrokerService } = await import('../api/broker/paperBroker.service.js')
 
     // A REAL paper account in the store. The order-plan builder resolves account ids against the
@@ -214,7 +240,11 @@ async function checkPersist(setup) {
     let carded = null
     // NOT stubbed: the real plan builder, resolving the paper account for real.
     const { buildOrderPlanForIdea } = await import('../services/orderPlan.service.js')
+    // Spread the real deps and override only what this harness fakes, so anything the monitor grows
+    // later (today: `persist`, which must stay REAL here — writing Mongo is the point of --persist)
+    // keeps working without another edit. Overriding key-by-key silently dropped new deps.
     const tickDeps = (priceFn) => ({
+        ..._testDeps,
         isAssetOpen: () => true,
         nextOpenMs:  () => Date.now() + 3600_000,
         getPrice:    priceFn,
@@ -290,7 +320,7 @@ async function main() {
                 console.log(`   • ${C.bold}${c.label}${C.off} [${s.trade_mode}] ${s.asset} ${s.direction} rr=${s.rr ?? '—'}`)
                 console.log(`     ${C.dim}${c.pitch}${C.off}`)
                 console.log(`     ${C.dim}entry ${fmtZones(s.entry_zones)} · stop ${fmtZones(s.stop_zones)} · tp ${fmtZones(s.tp_zones)}${C.off}`)
-                console.log(`     ${C.dim}watch: ${s.watch.map(w => w.kind).join(', ') || '(none)'}${C.off}`)
+                console.log(`     ${C.dim}conditions: ${(s.conditions ?? []).map(c => `${c.text} (${c.weight})`).join(' · ') || '(none)'}${C.off}`)
             }
             last.setups.candidates.length >= 2
                 ? ok('offered multiple candidates')

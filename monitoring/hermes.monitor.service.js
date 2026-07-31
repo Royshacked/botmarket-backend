@@ -4,8 +4,12 @@ import { ENTITIES } from '../services/entity/entityCollection.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../services/tradeNotify.service.js'
-import { createPollLoop, fetchLastPrice } from './monitorUtils.js'
-import { journalEntry, withJournal, zonesLabel, failNote } from './monitorJournal.js'
+import { fetchLastPrice } from './monitorUtils.js'
+import { createDueLoop, makePersist } from './dueLoop.js'
+import { journalEntry, zonesLabel, failNote } from './monitorJournal.js'
+import {
+    isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap, gradedGap,
+} from './readinessGates.js'
 import { withTimeout } from '../services/timeout.util.js'
 import { _defaultAssess, _defaultAssessPosition, _defaultAssessReentry, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses } from './hermes.assess.js'
 
@@ -42,71 +46,29 @@ const EXPIRY_THRESHOLD_MS = 15 * 60_000   // run the final "expiry review" withi
 // price fetch) hangs with no timeout, the awaited call never returns, `_running` stays true, and
 // every later tick skips forever. Bounding each check lets a hung one reject so the loop recovers.
 const CHECK_TIMEOUT_MS = 90_000
+// How long the rolling monologue runs. 50→80 (Phase 5): the journal spans readiness + entry + the
+// in-position management era, so it needs more room before old idle wakes roll off. The durable
+// factual spine (fill / actions / outcome) lives structurally in position_state and never rolls off.
+// Declared up here with the other constants because the shared writer is built at module load.
+const TIMELINE_MAX = 80
 
-const _loop = createPollLoop({ intervalMs: POLL_INTERVAL_MS, tick: _tick, eager: true, log: LOG, name: 'kairos monitor' })
+// The wake-up chore lives in dueLoop.js — find what's due, claim it against a lease, check it
+// under a timeout. What stays here is only what makes this Hermes's loop: the kind and the statuses.
+const _loop = createDueLoop({
+    collection: COLLECTION,
+    kind:       KIND_CALL,   // entities holds other kinds too; without this the tick would pick them up
+    statuses:   [...ACTIVE_STATUSES, ...POSITION_STATUSES],
+    check:      async (call, nowMs) => { const db = await getDb(); return _checkCall(db, call, nowMs, _deps) },
+    intervalMs: POLL_INTERVAL_MS,
+    checkTimeoutMs: CHECK_TIMEOUT_MS,
+    log: LOG, name: 'kairos monitor',
+})
 
 export const hermesService = { start: _loop.start, stop: _loop.stop }
 
 // Race a promise against a timeout so a hung await can't wedge the loop. Shared impl lives in
-// monitorUtils (used by Minos too); re-exported here under the historical name for tests.
+// monitorUtils (used by the loop itself too); re-exported here under the historical name for tests.
 export const _withTimeout = withTimeout
-
-// ─── Poll loop ────────────────────────────────────────────────────────────────
-async function _tick() {
-    const db  = await getDb()
-    const now = new Date().toISOString()
-    // Due = active status AND (never checked OR next_check_at has passed). ISO strings compare
-    // lexicographically for same-format UTC timestamps, so $lte on the string is correct.
-    const calls = await db.collection(COLLECTION).find({
-        kind: KIND_CALL,   // entities holds ideas too; a missing monitor_state would else match waiting ideas
-        status: { $in: [...ACTIVE_STATUSES, ...POSITION_STATUSES] },
-        $or: [
-            { 'monitor_state.next_check_at': null },
-            { 'monitor_state.next_check_at': { $lte: now } },
-        ],
-    }).toArray()
-
-    if (!calls.length) return
-    logger.info(LOG, `checking ${calls.length} due call(s)`)
-    for (const call of calls) {
-        // Claim the call by leasing its next_check_at forward BEFORE assessing. Because
-        // _withTimeout abandons (but can't cancel) a slow _checkCall, a still-running check
-        // whose next_check_at hasn't been persisted yet would otherwise be re-selected by the
-        // next tick and processed a SECOND time concurrently — double-firing readiness/manage
-        // cards. The lease (≥ the check timeout) makes the re-query miss it until the check has
-        // certainly stopped; _checkCall's own _persist overwrites the lease with the real cadence.
-        if (!(await _claimCall(db, call, Date.now()))) {
-            logger.info(LOG, `call ${call.id} already claimed/rescheduled — skipping`)
-            continue
-        }
-        try { await _withTimeout(_checkCall(db, call, Date.now(), _deps), CHECK_TIMEOUT_MS) }
-        catch (err) { logger.error(LOG, `checkCall failed for ${call.id}:`, err.message) }
-    }
-}
-
-// How far forward a claim leases next_check_at. Must be ≥ CHECK_TIMEOUT_MS so a claimed call
-// can't be re-selected until any abandoned (timed-out) check has certainly stopped running.
-const CLAIM_LEASE_MS = CHECK_TIMEOUT_MS
-
-// Atomically claim a due call for this tick by pushing its next_check_at a lease-horizon forward,
-// conditional on it STILL being due (guards against clobbering a fresher schedule). Returns true
-// iff this call won the claim. Idempotent and cheap — one conditional updateOne.
-async function _claimCall(db, call, nowMs) {
-    const nowIso     = new Date(nowMs).toISOString()
-    const leaseUntil = new Date(nowMs + CLAIM_LEASE_MS).toISOString()
-    const res = await db.collection(COLLECTION).updateOne(
-        {
-            id: call.id,
-            status: call.status,
-            $or: [
-                { 'monitor_state.next_check_at': null },
-                { 'monitor_state.next_check_at': { $lte: nowIso } },
-            ],
-        },
-        { $set: { 'monitor_state.next_check_at': leaseUntil } },
-    )
-    return res.modifiedCount === 1
-}
 
 // Orchestrate one call: cheap gate → (only if tripped/expiring) expensive assessment → persist.
 // `deps` is injectable so tests exercise the branching without real price/LLM/notify IO.
@@ -225,9 +187,12 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
     return { reason, verdict: raw.verdict, fireCard }
 }
 
-// Persist the $set patch and, when given, APPEND a journal entry (capped to the last TIMELINE_MAX).
+// The wake's write, from the shared writer (dueLoop.makePersist): the $set plus the journal line,
+// appended and capped. The threaded `db` is handed straight through — this file passes a connection
+// to every call site, and its tests inject a fake one there.
+const _write = makePersist({ collection: COLLECTION, timelineMax: TIMELINE_MAX, log: LOG })
 async function _persist(db, id, set, logEntry = null) {
-    await db.collection(COLLECTION).updateOne({ id }, withJournal(set, logEntry, TIMELINE_MAX))
+    return _write(id, set, logEntry, db)
 }
 
 // ─── In-position path (Phase 5, slice 1: lifecycle reconcile only — no brain yet) ──────────────
@@ -597,29 +562,18 @@ export function _zoneGate(call, price) {
 // monitoring entirely (no price fetch, no LLM) until then — the Kairos analog of the idea monitor's
 // isTimeBlocked "should I monitor at all" pre-check, and the lower-bound sibling of valid_until.
 // No active_from (or unparseable) → never gated. Pure.
-export function _isPreActive(call, nowMs) {
-    if (!call?.active_from) return false
-    const from = Date.parse(call.active_from)
-    if (!Number.isFinite(from)) return false
-    return nowMs < from
-}
+export const _isPreActive = isPreActive
 
 // Within EXPIRY_THRESHOLD of valid_until (or already past) → time for the final expiry review.
-export function _isExpiring(call, nowMs, thresholdMs = EXPIRY_THRESHOLD_MS) {
-    if (!call?.valid_until) return false
-    const exp = Date.parse(call.valid_until)
-    if (!Number.isFinite(exp)) return false
-    return nowMs >= exp - thresholdMs
-}
+export const _isExpiring = (call, nowMs, thresholdMs = EXPIRY_THRESHOLD_MS) => isExpiring(call, nowMs, thresholdMs)
 
 // Clamp the agent's requested gap (minutes) to the call's cadence, return an ISO next_check_at.
 export function _computeNextCheckAt(nowMs, requestedMin, cadence) {
-    const lo = Number(cadence?.min_gap_min) || 1
-    const hi = Number(cadence?.max_gap_min) || 60
-    let m = Number(requestedMin)
-    if (!Number.isFinite(m)) m = hi
-    m = Math.max(lo, Math.min(hi, m))
-    return new Date(nowMs + m * 60_000).toISOString()
+    const min = Number(cadence?.min_gap_min) || 1
+    const max = Number(cadence?.max_gap_min) || 60
+    // fallback = the LAZY end: don't burn quota re-reading a quiet name the model said nothing about.
+    // A setup falls back the other way. See clampGap.
+    return new Date(nowMs + clampGap(requestedMin, { min, max, fallback: max }) * 60_000).toISOString()
 }
 
 /**
@@ -630,9 +584,7 @@ export function _computeNextCheckAt(nowMs, requestedMin, cadence) {
  * `let_expire` closes with a reason. That is what ideas have always done, and it is why a call's
  * language used to diverge from every other kind's.
  */
-export function _nextStatus(verdict) {
-    return verdict === 'enter' ? 'hit' : 'looking'
-}
+export const _nextStatus = nextStatus
 
 /**
  * The thesis went stale before entry → latch the invalidation axis and leave the lifecycle alone.
@@ -647,11 +599,7 @@ export function _invalidationPatch(reason = null) {
 }
 
 // Actually past valid_until (not merely within the pre-expiry review window, which _isExpiring covers).
-export function _isPastExpiry(call, nowMs) {
-    if (!call?.valid_until) return false
-    const exp = Date.parse(call.valid_until)
-    return Number.isFinite(exp) && nowMs >= exp
-}
+export const _isPastExpiry = isPastExpiry
 
 // Reconcile the model's verdict against WHY we assessed + the clock, so two off-menu cases can't
 // misbehave:
@@ -661,11 +609,12 @@ export function _isPastExpiry(call, nowMs) {
 //     would re-queue to 'waiting' and be re-assessed (chart + vision LLM) every cadence forever —
 //     force it to let_expire so the call terminates. Within the pre-expiry window (not yet past),
 //     wait/stand_aside stay legitimate. Pure.
-export function _effectiveVerdict(verdict, reason, pastExpiry) {
-    if (verdict === 'let_expire' && reason !== 'expiry_review') return 'stand_aside'
-    if (reason === 'expiry_review' && pastExpiry && verdict !== 'enter' && verdict !== 'edit') return 'let_expire'
-    return verdict
-}
+// A call ALSO spares `edit` from the past-expiry cutoff: an edit latches the invalidation axis
+// (_invalidationPatch, fire-once), so a stale-map verdict cannot re-fire and re-open the loop the
+// cutoff closes. Talos spares only `enter` — see the note there.
+const SPARE_PAST_EXPIRY = ['enter', 'edit']
+export const _effectiveVerdict = (verdict, reason, pastExpiry) =>
+    effectiveVerdict(verdict, reason, pastExpiry, SPARE_PAST_EXPIRY)
 
 // The five verdicts the readiness read may return. An off-menu value (a model typo / hallucination)
 // must not silently route as a wait with no trace — _applyAssessment coerces it to 'wait' and
@@ -828,22 +777,28 @@ export function _scheduledPatch(call, nowMs, short = false, price = null) {
 const NEAR_BANDS = 2    // ≤ 2 band-widths from an edge → poll at the min cadence
 const FAR_BANDS  = 10   // ≥ 10 band-widths away → poll at the max cadence
 export function _proximityGapMin(call, price, minGap, maxGap) {
-    if (!Number.isFinite(price)) return maxGap
-    const zones = Array.isArray(call?.entry_zones) ? call.entry_zones : []
+    return gradedGap(_nearestZoneDistance(call, price), { min: minGap, max: maxGap, near: NEAR_BANDS, far: FAR_BANDS })
+}
+
+/**
+ * Distance to the nearest mapped zone, in multiples of THAT zone's own band width.
+ *
+ * A call's measurement, not a shared one: a band with `hi <= lo` is SKIPPED here, so a call whose
+ * only zone is zero-width reports no usable distance and falls to the lazy cadence. Talos measures
+ * to such a zone instead, because a zero-width setup zone is an exact level the user named and is
+ * legal by its schema. Both behaviours are test-locked; the extraction shares the interpolation
+ * between the bands, not the question of what counts as a band. Pure.
+ */
+export function _nearestZoneDistance(call, price) {
+    if (!Number.isFinite(price)) return null
     let best = Infinity
-    for (const z of zones) {
+    for (const z of (Array.isArray(call?.entry_zones) ? call.entry_zones : [])) {
         const lo = Number(z?.lower), hi = Number(z?.upper)
         if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) continue
-        const w = hi - lo
         const dist = price < lo ? (lo - price) : price > hi ? (price - hi) : 0
-        const ratio = dist / w
-        if (ratio < best) best = ratio
+        best = Math.min(best, dist / (hi - lo))
     }
-    if (!Number.isFinite(best)) return maxGap
-    if (best <= NEAR_BANDS)    return minGap
-    if (best >= FAR_BANDS)     return maxGap
-    const t = (best - NEAR_BANDS) / (FAR_BANDS - NEAR_BANDS)
-    return Math.round(minGap + (maxGap - minGap) * t)
+    return Number.isFinite(best) ? best : null
 }
 
 // ─── Out-of-zone momentum pulse (Tier 2) ───────────────────────────────────────
@@ -895,10 +850,6 @@ export function _shouldPulse(call, price, nowMs) {
 // Hermes's own: how long its log runs, what a read PULLED, and the four-axis payload of an
 // assessment. Re-exported under their historical names so the unit tests' import path is unchanged.
 //
-// 50→80 (Phase 5): the journal spans readiness + entry + the in-position management era, so the
-// rolling monologue needs more room before old idle wakes roll off. The durable factual spine
-// (fill / actions / outcome) lives structurally in position_state and never rolls off.
-const TIMELINE_MAX = 80
 
 export { zonesLabel as _zonesLabel, failNote as _failNote }
 
