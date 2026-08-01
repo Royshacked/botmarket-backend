@@ -224,11 +224,16 @@ test('a failed brief is reported to the model as a failure, not as silence', asy
     assert.match(out.message, /Could not write the market brief: down/)
 })
 
-test('the tool is registered and Axl carries it LAST', () => {
+test('the tool is registered and Axl carries it at a STABLE index', () => {
     assert.ok(TOOL_SCHEMAS.get_market_brief, 'the schema must be in the registry')
     // Appended, never inserted: the snapshot compares by index and the prompt cache keys off the
     // array prefix (see the note in axl.agent.service.js).
-    assert.equal(AXL_TOOLS.at(-1).name, 'get_market_brief')
+    //
+    // This used to assert `.at(-1)`, which encoded "append-only" as "is the last one" — so the very
+    // next appended tool failed it, reporting a violation of a rule that had actually been obeyed.
+    // Pinning the INDEX is the assertion that was meant: an INSERTION before the brief still shifts
+    // it and fails here, while a legitimate append after it does not.
+    assert.equal(AXL_TOOLS[8]?.name, 'get_market_brief')
 })
 
 // ── The daily offer window ───────────────────────────────────────────────────

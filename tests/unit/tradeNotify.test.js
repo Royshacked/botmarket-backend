@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildIdeaEntryConfirm, buildCallReady, buildCallExpiry } from '../../services/tradeNotify.service.js'
+import { buildIdeaEntryConfirm, buildCallReady, buildCallExpiry, buildOrdersReady } from '../../services/tradeNotify.service.js'
 
 // ── buildIdeaEntryConfirm ───────────────────────────────────────────────────
 test('idea entry-confirm: entry_confirm card attributed to the Idea bot with ideaId', () => {
@@ -74,4 +74,77 @@ test('call expiry (expired): terminal card offers edit/delete, null why', () => 
     assert.equal(c.payload.kind, 'expired')
     assert.equal(c.payload.why, null)
     assert.match(c.content, /thesis expired\. Edit to re-map it or delete/)
+})
+
+// ── buildOrdersReady (the market-open batch card) ────────────────────────────
+// One card for a batch that came off the bench at once, instead of N. The confirm dialog already
+// walks pending orders one at a time, so the card only has to open the queue.
+
+const order = (id, asset, builtAgoH = 1) => ({
+    id, userId: 'u1', kind: 'idea', asset,
+    pendingOrder: { builtAt: Date.now() - builtAgoH * 3_600_000 },
+})
+
+test('orders ready: one card carrying the count, the assets and the queue entry point', () => {
+    const c = buildOrdersReady({
+        userId: 'u1', kind: 'idea', botId: 'idea',
+        entities: [order('a', 'AAPL'), order('b', 'MSFT'), order('c', 'NVDA')],
+    })
+    assert.equal(c.type, 'orders_ready')
+    assert.equal(c.botId, 'idea')
+    assert.equal(c.userId, 'u1')
+    assert.equal(c.payload.count, 3)
+    assert.equal(c.payload.firstId, 'a', 'the dialog opens on the first order and walks the rest')
+    assert.deepEqual(c.payload.assets, ['AAPL', 'MSFT', 'NVDA'])
+    assert.equal(c.actions.primary.label, 'Review orders')
+    assert.match(c.content, /The market is open — 3 orders/)
+    assert.match(c.content, /one at a time/)
+})
+
+test('orders ready: a short list is named, a long one is only counted', () => {
+    const few  = buildOrdersReady({ kind: 'idea', botId: 'idea', entities: [order('a', 'AAPL'), order('b', 'MSFT')] })
+    assert.match(few.content, /\(AAPL, MSFT\)/)
+
+    const many = buildOrdersReady({
+        kind: 'idea', botId: 'idea',
+        entities: ['A', 'B', 'C', 'D', 'E'].map((s, i) => order(String(i), s)),
+    })
+    assert.doesNotMatch(many.content, /\(/, 'past four names the count is the information')
+    assert.match(many.content, /5 orders/)
+})
+
+test('orders ready: duplicate assets are named once', () => {
+    // Two legs of a forked multi-broker order are the same NAME to a reader, not two positions.
+    const c = buildOrdersReady({ kind: 'idea', botId: 'idea', entities: [order('a', 'AAPL'), order('b', 'AAPL')] })
+    assert.deepEqual(c.payload.assets, ['AAPL'])
+    assert.equal(c.payload.count, 2, 'the COUNT is still the number of orders')
+})
+
+test('orders ready: a stale batch says so; a fresh one stays quiet', () => {
+    const stale = buildOrdersReady({ kind: 'idea', botId: 'idea', entities: [order('a', 'AAPL')], staleHours: 62 })
+    assert.equal(stale.payload.staleHours, 62)
+    assert.match(stale.content, /priced 62h ago, before the close/)
+
+    const fresh = buildOrdersReady({ kind: 'idea', botId: 'idea', entities: [order('a', 'AAPL')], staleHours: 2 })
+    assert.doesNotMatch(fresh.content, /priced/, 'a same-session plan\'s age says nothing')
+
+    const unknown = buildOrdersReady({ kind: 'idea', botId: 'idea', entities: [order('a', 'AAPL')] })
+    assert.equal(unknown.payload.staleHours, null)
+    assert.doesNotMatch(unknown.content, /priced/)
+})
+
+test('orders ready: the batch belongs to the desk that authored it, never to a router', () => {
+    const c = buildOrdersReady({
+        userId: 'u1', kind: 'setup', botId: 'mentor',
+        entities: [order('s1', 'TSLA'), order('s2', 'NVDA')],
+    })
+    assert.equal(c.botId, 'mentor', 'a setup batch comes from Mentor, not a cross-kind bot')
+    assert.equal(c.payload.kind, 'setup')
+})
+
+test('orders ready: an empty batch degrades to a coherent card, not a crash', () => {
+    const c = buildOrdersReady({ kind: 'idea', botId: 'idea', entities: [] })
+    assert.equal(c.payload.count, 0)
+    assert.equal(c.payload.firstId, null)
+    assert.deepEqual(c.payload.assets, [])
 })

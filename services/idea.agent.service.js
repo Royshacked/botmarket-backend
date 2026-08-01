@@ -26,6 +26,7 @@ import { getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.prov
 import { logger } from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, makeToolHandler, buildTimeSection, formatClientTime } from './agentUtils.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
+import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
 
 // Re-exported under its historical name so the existing unit test resolves unchanged; the
 // implementation now lives in agentUtils (Mentor authors UTC bounds the same way).
@@ -72,6 +73,9 @@ export const TOOLS = toolsFor({
         description: `Crypto-perp positioning from Binance: funding rate (who pays to hold the trade — a crowding signal), open interest (committed leverage), and the global long/short account ratio (retail skew). This is the crypto analog to short-interest/options sentiment — use it when the setup is on a crypto perp. Crypto perps only (BTC, ETH, SOL…), not equities, FX or traditional futures.`,
         cache: true,
     },
+    // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
+    // array prefix. (This agent is ARCHIVED, but the snapshot test still covers its array.)
+    get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
 })
 
 // Candle config / aggregation / chart caching / the get_quote·candles·earnings·chart
@@ -105,6 +109,9 @@ const TOOL_HANDLERS = {
     ),
 
     ...COMMON_TOOL_HANDLERS,
+    // Unbound (market hours belong to the instrument, not the user) — so it lives in the
+    // static map, unlike the venue handlers that are rebuilt per request around a userId.
+    ...makeMarketHoursHandlers(),
 }
 
 // Build the per-request tool handler map. get_chart closes over onChart so it can

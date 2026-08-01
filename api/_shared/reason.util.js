@@ -27,6 +27,11 @@ const SHARED = {
     already_placed:     [409, 'Orders already placed'],
     already_closed:     [409, 'Already closed'],
     closed_is_terminal: [409, 'Closed is terminal — it cannot be reopened'],
+    // Shared because placement is kind-blind: an idea, a portfolio item and a setup all confirm
+    // through placeOrdersForIdea, so all three can hit a shut market. 409 rather than 400 — the
+    // request is perfectly well formed, it is the venue's state that refuses, and it becomes valid
+    // again at the open with no change from the caller.
+    market_closed:      [409, 'Market is closed — this order can be placed when it reopens'],
 
     // Malformed or inapplicable requests.
     invalid_status:   [400, 'Invalid status value'],

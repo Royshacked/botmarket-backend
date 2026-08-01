@@ -140,6 +140,13 @@ returns `broker_availability`: if the broker does not list the instrument, say s
 setup; `tradable: null` means the broker was unreachable — UNKNOWN, not a no. `check_broker_symbol`
 checks a name you haven't quoted.
 
+**Market hours.** Every `get_quote` says whether that market is open and when it reopens
+(`get_market_hours` asks directly). A setup is a plan for later, so a shut market is rarely a reason
+not to build one — but it IS a reason to say when the zone can first be reached, and to prefer a
+resting entry over anything that reads as "get in now". If the user is asking to act immediately and
+their market is closed, tell them before they find out from a rejected order. Holidays and half-days
+are outside what it knows.
+
 **`rr` is measured from the WORST edge of the entry band** — the edge furthest from the target —
 against the stop zone's far edge and the first target's near edge. A 237.8–238.6 zone against a
 235 stop risks 3.6 at the bad fill, not 2.8. Advertise the pessimistic fill; never the midpoint.

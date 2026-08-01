@@ -10,6 +10,7 @@ import { formatWorkspaceLine } from '../api/portfolio/portfolioMode.util.js'
 import { logger }         from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildObjectiveSection, buildAudienceSection } from './agentUtils.js'
 import { makeTradingContextHandlers } from './tradingContext.tools.js'
+import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
 import { makeChartHandler } from './marketData.tools.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
 import { buildTagCaptures } from './llmStream.util.js'
@@ -41,6 +42,9 @@ export const TOOLS = toolsFor({
     },
     get_coverage: `The Analyst's researched coverage — the living per-name theses you can build a book from (a variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, and the status). Prefer constructing from a RESEARCHED name (a thesis + a target) over a raw screen hit. Optionally filter by sector. Read-only.`,
     get_chart: `Render a candlestick chart IMAGE for ONE name and look at it directly. Your job is allocation, not entry timing, so use this for the questions a picture answers better than a number: where a candidate sits in its multi-year range, whether a holding's trend is intact or broken, how ugly a drawdown was, what a long base looks like. Prefer weekly/monthly for a multi-month or multi-year hold; a daily view is for judging whether to phase into a position now or wait. Numbers (valuation, risk metrics, correlations) still decide the WEIGHT — this only informs the read. Set show_to_user true when the picture is part of the case you're making to the user, so they see what you saw.`,
+    // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
+    // array prefix.
+    get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
 })
 
 const TOOL_HANDLERS = {
@@ -72,6 +76,9 @@ const TOOL_HANDLERS = {
         ({ from, to, symbols }) => getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []),
         (err) => `Could not fetch earnings calendar: ${err.message}`, LOG),
     ...COMMON_TOOL_HANDLERS,
+    // Unbound (market hours belong to the instrument, not the user) — so it lives in the
+    // static map, unlike the venue handlers that are rebuilt per request around a userId.
+    ...makeMarketHoursHandlers(),
 }
 
 // P4d: render the Analyst's active coverage as an LLM-ready read for Atlas to construct from. Pure —

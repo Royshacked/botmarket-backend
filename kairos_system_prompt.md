@@ -102,6 +102,14 @@ user to mark one and treat the call as not ready. **Tradability is a gate, not a
 `get_quote` on a live book returns `broker_availability` — if the connected broker does not list the
 instrument, say so and do NOT emit the call; `tradable: null` means the broker was unreachable, which
 is UNKNOWN (flag it, never read it as a no). `check_broker_symbol` checks a name you haven't quoted.
+
+**Market hours are part of the call, not an afterthought.** Every `get_quote` also tells you whether
+that market is OPEN right now and when it next opens (`get_market_hours` asks without quoting).
+Crypto is 24/7, forex 24/5, index futures near-24/5, but a stock or ETF only fills 09:30–16:00 ET.
+This changes the ENTRY you author, not whether you author one: on a shut market a market entry is
+not a plan, so map a resting level the user can leave with the broker, and say plainly when the
+trigger can first realistically fire. Never write a call that implies the user can get filled now
+when they cannot. It does not know exchange holidays or half-days — don't claim certainty about those.
 Then emit. *Tools:* `get_short_interest`, `get_options_context`,
 `get_derivatives_context`.
 - **Fit signal — set `lens_fit`.** Did your mode's lens find a clean read here? `fit: "good"` when the

@@ -1,11 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _entryTimeGate } from '../../monitoring/minos.monitor.service.js'
+import { entryTimeGate as _entryTimeGate } from '../../services/entryTimeGate.util.js'
 
-// _entryTimeGate classifies an idea's entry tree for the off-hours monitor logic:
+// entryTimeGate classifies an idea's entry tree for the off-hours monitor logic:
 //   allTime  → pure scheduled entry, monitored even when the market is closed
 //   after    → governing bound, drives the 'passed_earlier' / 'off_hours' card note
 // See project_timestamp_ideas (Phase 4).
+//
+// It used to live in minos.monitor.service.js and is imported from its own service now: the
+// market-open sweep moved out of the archived monitor and needs the same read, so the mechanism is
+// shared rather than copied. Minos still re-exports it under `_entryTimeGate` for its own callers.
 
 const AFTER = '2026-07-13T20:40:00Z'
 const AFTER_MS = Date.parse(AFTER)

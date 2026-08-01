@@ -226,7 +226,8 @@ export async function _trimItem(db, itemId, userId, change) {
  * exactly what surfaces the OrderConfirmDialog. Nothing is placed here — the user confirms, and
  * POST /api/trade-ideas/:id/orders → placeOrdersForIdea does the placing (and with it the exit
  * routing, reconciler linkage and double-place guard we'd lose by calling placeOrder directly).
- * Market closed → the plan parks as 'awaiting_market' and Minos's _marketSweep surfaces it at open.
+ * Market closed → the plan parks as 'awaiting_market' and the market-open sweep
+ * (monitoring/marketOpen.monitor.js) surfaces it at the open.
  *
  * Sizing: Atlas emits a WEIGHT, never a share count (the same contract construction has, where
  * _sizePlan does the arithmetic) — so the quantity is computed here from the book's live value.

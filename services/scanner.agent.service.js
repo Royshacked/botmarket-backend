@@ -12,6 +12,7 @@ import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildObjectiveSection, buildAudienceSection, TRADE_HORIZONS } from './agentUtils.js'
 import { makeTradingContextHandlers } from './tradingContext.tools.js'
+import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { isToolError } from './toolResult.util.js'
 import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS } from './scanner.grounding.js'
@@ -65,6 +66,9 @@ export const TOOLS = toolsFor({
         description: `Crypto-perp positioning from Binance: funding rate (who pays to hold the trade — a crowding signal), open interest (committed leverage), and the global long/short account ratio (retail skew). This is the crypto analog to short-interest/options sentiment. Crypto perps only (BTC, ETH, SOL…) — not equities, FX or traditional futures.`,
         cache: true,
     },
+    // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
+    // array prefix.
+    get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
 })
 
 const TOOL_HANDLERS = {
@@ -114,6 +118,9 @@ const TOOL_HANDLERS = {
         ({ ticker, mode, calendar_window, lookback_years }) => getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4),
         (err, { ticker }) => `Could not compute cycle analysis for ${ticker}: ${err.message}`, LOG),
     ...COMMON_TOOL_HANDLERS,
+    // Unbound (market hours belong to the instrument, not the user) — so it lives in the
+    // static map, unlike the venue handlers that are rebuilt per request around a userId.
+    ...makeMarketHoursHandlers(),
 }
 
 // Wrap the module-level handlers with a per-session grounding recorder. A

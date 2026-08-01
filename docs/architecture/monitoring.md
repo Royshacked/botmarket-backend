@@ -490,7 +490,9 @@ armed to `looking` like any idea, and fires when the clock passes `after`. Key r
 - **Off-hours determinism.** `_entryTimeGate(idea).allTime` marks a *pure* time entry;
   such an entry is **exempt from the market-closed skip**, so it fires on schedule even
   overnight, flips to `hit`, and the order defers as `awaiting_market`. When the market
-  re-opens, `_marketSweep` surfaces it and posts the entry-confirm card (note `off_hours`).
+  re-opens, the market-open sweep (`monitoring/marketOpen.monitor.js`) surfaces it and posts
+  the entry-confirm card (note `off_hours`). That sweep used to live inside Minos and was
+  archived with it, which stranded every deferred order in the app; it is its own loop now.
 - **Notification note.** The entry-confirm card carries a `note`: `passed_earlier` when the
   scheduled time was already past at arm-time (`after <= activatedAt`), `off_hours` when it
   surfaced at market open, else `null`. See the paper/live entry-confirm flow.

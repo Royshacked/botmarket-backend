@@ -440,6 +440,33 @@
       "cache_control": {
         "type": "ephemeral"
       }
+    },
+    {
+      "name": "get_market_hours",
+      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "e.g. AAPL, NQ, BTCUSD, EURUSD"
+          },
+          "asset_class": {
+            "type": "string",
+            "enum": [
+              "stock",
+              "etf",
+              "futures",
+              "forex",
+              "crypto"
+            ],
+            "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
     }
   ],
   "portfolio": [
@@ -727,6 +754,33 @@
         "required": [
           "ticker",
           "timeframe"
+        ]
+      }
+    },
+    {
+      "name": "get_market_hours",
+      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "e.g. AAPL, NQ, BTCUSD, EURUSD"
+          },
+          "asset_class": {
+            "type": "string",
+            "enum": [
+              "stock",
+              "etf",
+              "futures",
+              "forex",
+              "crypto"
+            ],
+            "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
+          }
+        },
+        "required": [
+          "ticker"
         ]
       }
     }
@@ -1279,6 +1333,33 @@
       "cache_control": {
         "type": "ephemeral"
       }
+    },
+    {
+      "name": "get_market_hours",
+      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "e.g. AAPL, NQ, BTCUSD, EURUSD"
+          },
+          "asset_class": {
+            "type": "string",
+            "enum": [
+              "stock",
+              "etf",
+              "futures",
+              "forex",
+              "crypto"
+            ],
+            "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
     }
   ],
   "analyst": [
@@ -1508,6 +1589,33 @@
           "ticker": {
             "type": "string",
             "description": "The instrument to check, as the user says it e.g. AVGO, NQ, BTCUSD"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
+      "name": "get_market_hours",
+      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "e.g. AAPL, NQ, BTCUSD, EURUSD"
+          },
+          "asset_class": {
+            "type": "string",
+            "enum": [
+              "stock",
+              "etf",
+              "futures",
+              "forex",
+              "crypto"
+            ],
+            "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
           }
         },
         "required": [
@@ -2010,6 +2118,33 @@
       }
     },
     {
+      "name": "get_market_hours",
+      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "e.g. AAPL, NQ, BTCUSD, EURUSD"
+          },
+          "asset_class": {
+            "type": "string",
+            "enum": [
+              "stock",
+              "etf",
+              "futures",
+              "forex",
+              "crypto"
+            ],
+            "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
       "name": "get_fvg",
       "description": "Fair-value gaps (3-candle imbalances) computed from OHLCV — exact bullish/bearish gap ranges, newest first, with whether each is still unfilled. Unfilled FVGs are draws + entry zones. SMC mode.",
       "input_schema": {
@@ -2310,6 +2445,33 @@
             "description": "true to rewrite the brief instead of reading the recent one. Only when the user explicitly asks for an update."
           }
         }
+      }
+    },
+    {
+      "name": "get_market_hours",
+      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "e.g. AAPL, NQ, BTCUSD, EURUSD"
+          },
+          "asset_class": {
+            "type": "string",
+            "enum": [
+              "stock",
+              "etf",
+              "futures",
+              "forex",
+              "crypto"
+            ],
+            "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
+          }
+        },
+        "required": [
+          "ticker"
+        ]
       }
     }
   ]

@@ -158,18 +158,30 @@ export async function confirmCall(id, userId, deps = _deps) {
     // Re-read the merged call — it now carries the execution shape placement needs.
     const merged = await db.collection(COLLECTION).findOne({ id })
 
+    // A refusal here is a RESULT, not an exception: placeOrdersForIdea answers {ok:false, reason}
+    // for every gate it owns (market_closed, no_orders, already_placed…) and only throws on an
+    // unexpected fault. Catching alone therefore reported a confirmed, placed order for a call
+    // where nothing had been sent — the user saw success and held no position. Both outcomes now
+    // land in the same recovery, and the reason is passed through rather than flattened, so
+    // "the market is shut" reads as itself instead of a generic placement failure.
+    let failure = null
     try {
         if (mode === 'manual') {
             await deps.notifyManualEntry(userId, { legs: [deps.entryLegFromIdea(merged)] })
         } else {
-            await deps.placeOrdersForIdea(id, merged.pendingOrder?.plan ?? [], userId)
+            const res = await deps.placeOrdersForIdea(id, merged.pendingOrder?.plan ?? [], userId)
+            if (res && res.ok === false) failure = res.reason ?? 'placement_failed'
         }
     } catch (placeErr) {
         logger.error(LOG, `handoff placement failed for ${id}:`, placeErr.message)
+        failure = 'placement_failed'
+    }
+    if (failure) {
+        logger.warn(LOG, `handoff placement refused for ${id}: ${failure}`)
         // Leave it at 'hit' (plan built, awaiting confirm) so the user can retry — resetting it
         // would discard the plan. (The old flow left an orphaned shadow; here the call IS the entity.)
         await db.collection(COLLECTION).updateOne({ id }, { $set: { orderState: null } })
-        return { ok: false, reason: 'placement_failed', ideaId: id }
+        return { ok: false, reason: failure, ideaId: id }
     }
 
     logger.info(LOG, `call ${id} confirmed → self-executing (${mode})`)

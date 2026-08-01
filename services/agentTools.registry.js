@@ -252,6 +252,21 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["kind"]
     },
+    get_market_hours: {
+        "type": "object",
+        "properties": {
+            "ticker": {
+                "type": "string",
+                "description": "e.g. AAPL, NQ, BTCUSD, EURUSD"
+            },
+            "asset_class": {
+                "type": "string",
+                "enum": ["stock", "etf", "futures", "forex", "crypto"],
+                "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
+            }
+        },
+        "required": ["ticker"]
+    },
     get_options_context: {
         "type": "object",
         "properties": {

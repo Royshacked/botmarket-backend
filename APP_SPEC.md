@@ -66,7 +66,7 @@ waiting ──► looking ──► hit ──► long / short ──► closed
   there is *no* gating entry condition (`resolveImmediate`). The agent converts the user's local
   clock time (browser `clientTz`) to absolute-UTC `after`/`before`. A pure time entry stays
   monitored even when the market is closed and defers as `awaiting_market`, surfacing the
-  entry-confirm card at the next open (`_marketSweep`, note `off_hours`). `updateIdea` refuses to
+  entry-confirm card at the next open (the market-open sweep, note `off_hours`). `updateIdea` refuses to
   revive a `closed` idea (`isClosedIdeaFrozen` → 409 `already_closed`).
 
 ---
@@ -140,8 +140,7 @@ cached across users, and by construction mentions no position, account or holdin
 posted with no tokens spent — the brief is only written when someone confirms
 (`POST /api/axl/brief`), and Axl relays that same brief in chat via `get_market_brief`.
 
-`entry_confirm` fires for paper/live idea entries (`minos.monitor.service.js`, on `awaiting_confirm` —
-ARCHIVED, so in practice only the call/setup paths below still fire it) and
+`entry_confirm` fires for paper/live idea entries (on `awaiting_confirm`) and
 Kairos-ready calls; **manual** entries keep their own FillCard. `entry_confirm`/`call_expiry` for
 calls come from Hermes (the Kairos monitor)'s card hook (`enter`→ready, `edit`→expiring, `let_expire`→expired
 — the last previously expired silently). Once a call's card fires it leaves the monitor's active

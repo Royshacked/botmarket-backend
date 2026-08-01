@@ -98,11 +98,26 @@ services/
                           tradability rather than asked to remember to check (TTL-cached per user+ticker)
   tradingContext.tools.js  get_trading_context + check_broker_symbol handlers (userId-bound, built
                           per request) + the shared tool descriptions. Wired into all 7 agents
+  marketHours.tools.js   the AGENT-facing half of market.service: ONE formatMarketStatus renderer
+                          serving BOTH surfaces — get_market_hours (the explicit ask) and
+                          withMarketStatus, which rides on every get_quote so a desk is TOLD the
+                          market is shut rather than asked to remember to check (same discipline as
+                          withBrokerAvailability). Unbound — hours belong to the instrument, not
+                          the user, so the handler is static in every agent
+  entryTimeGate.util.js  PURE entryTimeGate(entity) — is entry clock-gated, wholly or partly?
+                          Lifted out of the archived Minos when marketOpen.monitor needed the same
+                          read. Drives the market-closed exemption + the `off_hours` card note
   llmStream.util.js       createTagSuppressor({ onToken, captures })
   modelRouter.service.js  resolveModel(); REASONING_EFFORT enum
   conditionTree.service.js  resolve/collect/normalize condition trees
   orderPlan.service.js  protectionPlan.service.js  priceCandleSpec.service.js
-  price.service.js  market.service.js  timeframe.service.js  brokerSymbol.service.js
+  price.service.js  timeframe.service.js  brokerSymbol.service.js
+  market.service.js       THE market-hours engine: one class-aware gate (isAssetOpen), one status
+                          read (getMarketStatus → open/nextOpenMs/session/phase), sessionPhase +
+                          sessionStartMs. Four calendars — crypto 24/7 · forex 24/5 · CME index
+                          futures near-24/5 · US equity RTH. sessionFor is the ONE classifier
+                          (explicit asset_class first, symbol heuristic second). NO holidays or
+                          half-days, and no non-US exchange
   format.util.js  http.util.js  ttlCache.util.js  priceStats.util.js  cycleAnalysis.service.js
   logger.service.js  tokenUsage.service.js
   candleFetch.service.js    fetchMarketCandles(symbol,{timeSpan,multiplier,from,to}) + toMsCandles — shared
@@ -120,6 +135,9 @@ services/
                               klinecharts built-ins); paneId 'candle_pane' for overlays.
     studyTranslate.js         studiesToIndicators/translateStudy — _buildStudies TradingView study
                               objects → klinecharts indicator descriptors (overlay vs own-pane split).
+    NB: computeRR in services/setup.schema.js (PESSIMISTIC r:r — worst entry, furthest stop,
+        NEAREST target) is mirrored by the FE cmps/TradeIdeas/orderRisk.util.js, which is what the
+        OrderConfirmDialog shows at approval. Keep the convention in sync.
     NB: the FRONTEND popup chart mirrors this — botmarket-frontend cmps/TradeIdeas/chartOverlay.js
     (textToIndicators = FE port of _buildStudies+studyTranslate) + cmps/PriceChart/PriceChart.jsx
     (VWAP/ATR registerIndicator templates + tradeLevel overlay). Keep the ported logic in sync.
@@ -167,12 +185,21 @@ providers/
 monitoring/
   minos.monitor.service.js  ARCHIVED 2026-07-29 — NOT started (server.js). Minos — the idea monitor:
                             60s poll loop; preflightEntry (arm-time already-satisfied check);
-                            _entryTimeGate (scheduled/time-only entry: exempt from market-closed skip; _marketSweep
-                            surfaces deferred entries + notifies at market open)
+                            _entryTimeGate (scheduled/time-only entry: exempt from market-closed skip;
+                            the deferred-order sweep now lives in marketOpen.monitor.js, above)
   monitor.orchestrator.js   evaluateTree / evaluateConditions → _evalOne (opts: stateLevel, requireHeld)
   evaluators/               touch · structured · indicator · time · volume · news · chart
   execution.reconciler.js   broker-authoritative fill/close → idea status
   invalidation.monitor.js   entry-range watcher (advisory, never executes)
+  marketOpen.monitor.js     the market-open sweep — the drain for `awaiting_market`. KIND-BLIND by
+                            design: three paths park orders there (_attachImmediatePlan for the
+                            ticket AND a portfolio add, triggerEntryNow, Talos on a setup), so a
+                            sweep that understands one kind is the bug. Claims each entity
+                            (claimIf → exactly-once card), then notifies: 1 order → the desk's own
+                            entry_confirm; N → ONE `orders_ready` batch card, grouped per user PER
+                            KIND so the notification still belongs to the authoring desk. Places
+                            nothing. It rode inside Minos until 2026-08-01 and was archived with
+                            it, stranding every deferred order in the app
   hermes.monitor.service.js Hermes — the Kairos-call readiness loop (own tick, `kairos_calls`). THREE-TIER
                             out-of-zone cascade (all cheapest-first): (1) arithmetic zone gate; (1.5) proximity
                             polling (_proximityGapMin: poll faster the nearer price is to a zone) + a momentum-
@@ -257,6 +284,7 @@ docs/                       architecture design docs
 | New evaluator / leaf type | `evaluators/<type>.evaluator.js` + wire into `monitor.orchestrator._evalOne` + `condition.parser` |
 | New pure utility | add a `tests/unit/<name>.test.js` (that's the "write tests after a feature" rule in practice) |
 | New Axl tool | APPEND to `TOOLS` in `axl.agent.service.js` (never insert — the snapshot compares by index and the prompt cache keys off the array prefix) + append the built entry to the `axl` array in `tests/fixtures/agentTools.snapshot.json` in the same commit |
+| New agent tool that is a FACT about the venue/instrument | ride it on `get_quote` (`makeQuoteHandler`) as well as giving it a tool — a desk cannot then be unaware of it |
 | New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince` |
 
 ## Testing

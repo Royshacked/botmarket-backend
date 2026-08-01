@@ -14,6 +14,7 @@ import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacr
 import { getSecFilings } from '../providers/sec.provider.js'
 import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, buildObjectiveSection, buildAudienceSection, COMMON_TOOL_HANDLERS } from './agentUtils.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
+import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from './valuation.tools.js'
 import { logger } from './logger.service.js'
@@ -42,6 +43,9 @@ export const TOOLS = [
         get_options_context: `Options positioning for a US equity/ETF: put/call ratio + ATM implied vol (nearest expiry). How big a move the market is pricing around a catalyst.`,
         get_trading_context: TRADING_CONTEXT_TOOL_SPEC.get_trading_context,
         check_broker_symbol: `Check whether a name is actually TRADABLE at the user's connected live broker, and what the broker calls it. Coverage on a name the user physically cannot buy is research nobody can act on — check before initiating, and say so in the thesis if the name is unavailable. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.`,
+        // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off
+        // the array prefix.
+        get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
     }),
 ]
 
@@ -54,6 +58,9 @@ const TOOL_HANDLERS = {
     get_sector_snapshot: makeToolHandler('get_sector_snapshot', () => getSectorSnapshot(),                (e) => `Could not fetch sector snapshot: ${e.message}`, LOG),
     get_macro_snapshot:  makeToolHandler('get_macro_snapshot',  () => getMacroSnapshot(),                 (e) => `Could not fetch macro snapshot: ${e.message}`, LOG),
     ...COMMON_TOOL_HANDLERS,   // get_short_interest, get_options_context, get_derivatives_context
+    // Unbound (market hours belong to the instrument, not the user) — so it lives in the
+    // static map, unlike the venue handlers that are rebuilt per request around a userId.
+    ...makeMarketHoursHandlers(),
 }
 
 export const analystAgentService = { chatStream }

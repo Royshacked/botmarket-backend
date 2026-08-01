@@ -6,6 +6,7 @@ import { buildTagCaptures } from './llmStream.util.js'
 import { runAgentStream } from './agentIO.js'
 import { toolsFor } from './agentTools.registry.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
+import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
 import { makeObjectiveHandlers, OBJECTIVE_TOOL_SPEC } from './objective.tools.js'
 import { getOpenObjective, markRouted } from './objective.service.js'
 import { toObjectiveSummary } from '../api/objectives/objective.model.js'
@@ -48,6 +49,9 @@ export const TOOLS = toolsFor({
     // Axl relays a brief written elsewhere, which is what keeps the world-facing broadcast from
     // turning into per-user market commentary. See marketBrief.service.js.
     get_market_brief: MARKET_BRIEF_TOOL_SPEC.get_market_brief,
+    // Appended last, per the rule above. Axl fields "is the market open?" more than any desk —
+    // it is an app question, not a trade question, which is exactly Axl's half of the line.
+    get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
 })
 
 // ONE Axl. This turn both converses and routes, which used to be two agents: a `routeIntent` doorman
@@ -79,6 +83,7 @@ async function chatStream({ messages = [], audience = null, model: requestedMode
     _conceptHandlers = makeConceptHandlers,
     _experienceHandlers = makeExperienceHandlers,
     _marketBriefHandlers = makeMarketBriefHandlers,
+    _marketHoursHandlers = makeMarketHoursHandlers,
     _getOpenObjective = getOpenObjective,
     _markRouted = markRouted,
 } = {}) {
@@ -115,6 +120,8 @@ ${audienceBlock}` : ''}` },
         // Unbound for the same reason, and a stronger one: the brief is the same for every reader,
         // so a handler with no userId is the structural guarantee it stays that way.
         ..._marketBriefHandlers(),
+        // Unbound too — market hours belong to the instrument, not the user.
+        ..._marketHoursHandlers(),
         ..._experienceHandlers(userId),
         ...objectiveHandlers,
         save_objective: async (args) => {

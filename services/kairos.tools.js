@@ -2,6 +2,7 @@ import { getPriceAction, getCycleAnalysis, getCorrelations } from '../providers/
 import { toolsFor } from './agentTools.registry.js'
 import { getEarningsCalendar, getFundamentals, getStockPeers, getMacroSnapshot, getSectorSnapshot } from '../providers/fmp.provider.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
+import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { COMMON_TOOL_HANDLERS, makeToolHandler } from './agentUtils.js'
 import {
@@ -46,6 +47,9 @@ export const KAIROS_TOOLS = [
             description: `Crypto-perp positioning from Binance: funding rate, open interest, global long/short ratio. The crypto analog to short-interest/options sentiment. Crypto perps only.`,
             cache: true,
         },
+        // APPENDED, never inserted — the snapshot compares by index and the prompt cache keys off
+        // the array prefix. Same rule as Axl's TOOLS (see axl.agent.service.js).
+        get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
     }),
     ...SMC_TOOLS,   // K2 numeric SMC: get_fvg, get_structure, get_liquidity, get_key_levels
 ]
@@ -100,13 +104,18 @@ const _STATIC_HANDLERS = {
 
     ...SMC_TOOL_HANDLERS,
     ...COMMON_TOOL_HANDLERS,
+    // Unbound (market hours belong to the instrument, not the user) → static, unlike the venue
+    // handlers below which have to be rebuilt per request around a userId.
+    ...makeMarketHoursHandlers(),
 }
 
 // ── Per-mode tool subsets (KAIROS_MODES.md tool allocation) ────────────────────
 // The model only sees the tool LIST, so subsetting the list is what gates a mode's toolset;
 // the handler map can stay full (extra handlers are never reached). UNIVERSAL tools are shared
 // by all modes (DRY). NEW numeric SMC tools (K2) + get_sector_snapshot/get_rs_chart join later.
-const UNIVERSAL = ['web_search', 'get_quote', 'get_candles', 'get_chart', 'get_trading_context', 'check_broker_symbol']
+// get_market_hours is UNIVERSAL: every mode places entries, and "the market is shut" is not a
+// discretionary-vs-SMC question.
+const UNIVERSAL = ['web_search', 'get_quote', 'get_candles', 'get_chart', 'get_trading_context', 'check_broker_symbol', 'get_market_hours']
 // SMC-lens numeric tools (smc only). get_key_levels is SHARED (classical prior-day levels + SMC session liquidity).
 const SMC_ONLY = ['get_orderblocks', 'get_fvg', 'get_structure', 'get_liquidity']
 const MODE_TOOLS = {

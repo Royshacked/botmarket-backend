@@ -54,6 +54,7 @@ import { paperFillService }  from './monitoring/paperFill.service.js'
 import { paperEquityService } from './monitoring/paperEquity.service.js'
 import { paperMarkService }   from './monitoring/paperMark.service.js'
 import { marketBriefNotifier } from './monitoring/marketBrief.notify.js'
+import { marketOpenMonitor } from './monitoring/marketOpen.monitor.js'
 import { logger }           from './services/logger.service.js'
 import { closeRenderer }    from './services/chartRender/klineRender.provider.js'
 
@@ -132,6 +133,10 @@ threadService.ensureThreadIndexes()
 // its tick was also picking up `setup` entities that belong to Talos. Not started; re-add this
 // line to revive it (the kind filter it was missing is now in place).
 // minosService.start()
+// The deferred-order sweep used to ride inside Minos, so archiving Minos silently stranded every
+// order that parked at 'awaiting_market' overnight. It is its own loop now, kind-blind, and is not
+// tied to any agent's lifecycle. See monitoring/marketOpen.monitor.js.
+marketOpenMonitor.start()
 hermesService.start()
 talosService.start()
 coverageMonitorService.start()

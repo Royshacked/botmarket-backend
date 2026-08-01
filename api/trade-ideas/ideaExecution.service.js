@@ -48,6 +48,16 @@ export async function placeOrdersForIdea(id, orders, userId) {
         if (!ownsEntity(idea, userId)) return { ok: false, reason: 'forbidden' }
         if (!PLACEABLE.has(idea.status)) return { ok: false, reason: 'not_hit' }
         if (idea.ordersPlacedAt)         return { ok: false, reason: 'already_placed' }
+        // A MARKET order into a shut market cannot fill — the broker rejects it, and the user is
+        // left reading a broker error for something the app already knew. The dialog blocks this
+        // client-side, but the endpoint is the only place that actually holds: a stale tab, a retry
+        // that crosses the close, or any direct caller reaches here without passing that check.
+        // The market-open sweep is what brings these back (monitoring/marketOpen.monitor.js).
+        //
+        // Entry-type-aware on purpose: a RESTING limit/stop entry is a working order the broker is
+        // meant to hold until price comes to it, so it is not gated here — placeRestingEntryForIdea
+        // owns that path, and its own venue rules apply.
+        if (!isAssetOpen(idea.asset, idea.asset_class)) return { ok: false, reason: 'market_closed' }
 
         const plan = (idea.pendingOrder?.plan?.length) ? idea.pendingOrder.plan : orders
         if (!Array.isArray(plan) || plan.length === 0) return { ok: false, reason: 'no_orders' }
@@ -121,7 +131,8 @@ export async function placeOrdersForIdea(id, orders, userId) {
  * Mirrors the monitor's on-trigger transition (monitor.service _checkEntry): flips
  * a 'looking' idea to 'hit', builds the per-account order plan and sets orderState,
  * so the normal order-confirm dialog surfaces. It does NOT place at the broker —
- * the user still confirms (which routes through placeOrdersForIdea).
+ * the user still confirms (which routes through placeOrdersForIdea). A closed market parks the
+ * plan at 'awaiting_market'; the market-open sweep brings it back.
  */
 export async function triggerEntryNow(id, userId) {
     try {

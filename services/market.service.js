@@ -7,8 +7,9 @@
  * has always used.
  *
  * The session is chosen from the idea's explicit `asset_class` (set by the chat
- * assistant) when available, falling back to a symbol heuristic for ideas that
- * predate the class field. Four session classes:
+ * assistant) when available, falling back to a symbol heuristic (`_sessionForSymbol`:
+ * crypto → index future → fiat pair → equity) for ideas that predate the class field
+ * and for callers that only ever see a ticker. Four session classes:
  *   • crypto  — 24/7 (no gate).
  *   • forex   — 24/5: Sun 17:00 ET → Fri 17:00 ET, continuous (no daily break).
  *   • futures — CME equity-index hours: near-24/5. Sun 18:00 ET → Fri 17:00 ET,
@@ -77,6 +78,31 @@ export function isFutures(symbol) {
     if (symbol == null) return false
     return INDEX_FUTURES.has(normSymbol(symbol))   // 'US-100' → 'US100'
         || INDEX_FUTURES.has(baseSymbol(symbol))   // 'US100.cash' → 'US100'
+}
+
+// ISO-4217 codes for the currencies our data feeds actually quote pairs in. A six-character
+// symbol made of two of these is a forex pair (EURUSD, GBPJPY, USDCHF…).
+const FIAT_CODES = new Set([
+    'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'NZD', 'CAD', 'CHF',   // majors
+    'SEK', 'NOK', 'DKK', 'PLN', 'CZK', 'HUF', 'TRY', 'ZAR',   // European + EM crosses
+    'MXN', 'SGD', 'HKD', 'CNH', 'CNY', 'INR', 'ILS', 'RUB',
+])
+
+/**
+ * True for a fiat currency pair (24/5 hours, not equity RTH).
+ *
+ * Order matters at every call site: BTCUSD is SIX characters of two known codes only if you
+ * forget BTC isn't fiat — so `isCrypto` must be asked first. It is, in `_sessionForSymbol`,
+ * and BTC/ETH/… are deliberately absent from FIAT_CODES as a second line of defence.
+ *
+ * This exists because the classless fallback used to answer "equity" for everything that was
+ * neither crypto nor an index future, which told every caller that EURUSD is shut at 3am.
+ */
+export function isForex(symbol) {
+    if (symbol == null) return false
+    const s = normSymbol(symbol)   // 'EUR/USD' / 'EURUSD=X' → 'EURUSD'
+    if (s.length !== 6) return false
+    return FIAT_CODES.has(s.slice(0, 3)) && FIAT_CODES.has(s.slice(3))
 }
 
 /**
@@ -201,11 +227,28 @@ function _sessionForClass(assetClass) {
     }
 }
 
-/** Heuristic session from the symbol alone (back-compat for ideas with no class). */
+/**
+ * Heuristic session from the symbol alone (back-compat for ideas with no class, and the only
+ * thing available to a caller that knows a ticker but not its class — e.g. the `get_quote`
+ * market-status rider). Crypto is tested FIRST so BTCUSD never reads as a fiat pair.
+ */
 function _sessionForSymbol(symbol) {
     if (isCrypto(symbol))  return 'crypto'
     if (isFutures(symbol)) return 'futures'
+    if (isForex(symbol))   return 'forex'
     return 'equity'
+}
+
+/**
+ * THE session classifier — explicit class first, symbol heuristic second. Everything that needs
+ * to know which calendar an asset trades on goes through here, so a caller can never disagree
+ * with the gate about what kind of thing it is looking at.
+ * @param {string} symbol
+ * @param {string} [assetClass]
+ * @returns {'crypto'|'forex'|'futures'|'equity'}
+ */
+export function sessionFor(symbol, assetClass) {
+    return _sessionForClass(assetClass) ?? _sessionForSymbol(symbol)
 }
 
 /**
@@ -217,7 +260,7 @@ function _sessionForSymbol(symbol) {
  * @param {Date}   [date]  instant to evaluate (defaults to now; injectable for tests)
  */
 export function isAssetOpen(symbol, assetClass, date = new Date()) {
-    switch (_sessionForClass(assetClass) ?? _sessionForSymbol(symbol)) {
+    switch (sessionFor(symbol, assetClass)) {
         case 'crypto':  return true
         case 'forex':   return isForexOpen(date)
         case 'futures': return isFuturesOpen(date)
@@ -226,26 +269,38 @@ export function isAssetOpen(symbol, assetClass, date = new Date()) {
 }
 
 /**
- * Market status for an asset (class-aware, symbol fallback).
+ * Market status for an asset (class-aware, symbol fallback). THE one read — the HTTP endpoint,
+ * the FE hook, the monitors' sleep-until and the agent-facing formatter all consume this, so
+ * there is exactly one answer to "is this open" in the app.
+ *
+ * `session` and `phase` are carried alongside so a caller that wants to SAY something about the
+ * status (the agent formatter) doesn't have to re-derive the classification and risk drifting
+ * from the gate. Existing consumers read `open`/`nextOpenMs` and ignore the rest.
+ *
  * @param {string} symbol
  * @param {string} [assetClass]
- * @returns {{ open: boolean, isCrypto: boolean, nextOpenMs: number|null }}
+ * @param {Date}   [date]  instant to evaluate (defaults to now; injectable for tests)
+ * @returns {{ open: boolean, isCrypto: boolean, nextOpenMs: number|null, session: string, phase: string }}
  */
-export function getMarketStatus(symbol, assetClass) {
-    switch (_sessionForClass(assetClass) ?? _sessionForSymbol(symbol)) {
+export function getMarketStatus(symbol, assetClass, date = new Date()) {
+    const session = sessionFor(symbol, assetClass)
+    const phase   = sessionPhase(symbol, assetClass, date)
+    const base    = { isCrypto: session === 'crypto', session, phase }
+
+    switch (session) {
         case 'crypto':
-            return { open: true, isCrypto: true, nextOpenMs: null }
+            return { open: true, nextOpenMs: null, ...base }
         case 'forex': {
-            const open = isForexOpen()
-            return { open, isCrypto: false, nextOpenMs: open ? null : nextForexOpenMs() }
+            const open = isForexOpen(date)
+            return { open, nextOpenMs: open ? null : nextForexOpenMs(date), ...base }
         }
         case 'futures': {
-            const open = isFuturesOpen()
-            return { open, isCrypto: false, nextOpenMs: open ? null : nextFuturesOpenMs() }
+            const open = isFuturesOpen(date)
+            return { open, nextOpenMs: open ? null : nextFuturesOpenMs(date), ...base }
         }
         default: {
-            const open = isMarketOpen()
-            return { open, isCrypto: false, nextOpenMs: open ? null : nextMarketOpenMs() }
+            const open = isMarketOpen(date)
+            return { open, nextOpenMs: open ? null : nextMarketOpenMs(date), ...base }
         }
     }
 }

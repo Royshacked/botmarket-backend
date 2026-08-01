@@ -8,6 +8,7 @@ import { sessionStartMs } from './market.service.js'
 import { toolError } from './toolResult.util.js'
 import { makeToolHandler } from './agentUtils.js'
 import { withBrokerAvailability } from './tradingContext.tools.js'
+import { withMarketStatus } from './marketHours.tools.js'
 import { logger } from './logger.service.js'
 
 // Shared market-data toolset for the chart-reading agents (Idea, Kairos, and any
@@ -87,16 +88,29 @@ export { cachedChartImage }
 // the model-visible failure string stays identical to what the agents returned before.
 
 /**
- * `userId` (optional) turns on the venue check: every quote comes back carrying whether the
- * instrument is actually listed at the user's live broker. Wired here rather than left to a prompt
- * because availability is a FACT about the venue, not a judgment about the trade — a desk must not
- * be able to work up a live setup on an instrument the broker doesn't list. Omit it (monitors,
- * non-user contexts) and the quote is returned untouched. See withBrokerAvailability.
+ * Every quote carries the two facts a desk must not be able to be unaware of.
+ *
+ * MARKET HOURS ride on every quote unconditionally — they are a property of the instrument, need
+ * no user and no network, and are what stops a desk working up a market entry on AAPL at 03:00.
+ *
+ * BROKER AVAILABILITY needs a user: `userId` (optional) turns it on, so every quote also says
+ * whether the instrument is actually listed at the connected live broker. Omit it (monitors,
+ * non-user contexts) and only the hours are attached.
+ *
+ * Both are wired here rather than left to a prompt because both are FACTS about the venue, not
+ * judgments about the trade — the desk still decides what to do about them. See
+ * withMarketStatus / withBrokerAvailability, and feedback_data_vs_judgment_separation.
+ *
+ * Order is deliberate: availability first, then hours, so the closed-market sentence — the one
+ * that changes what the desk can do *right now* — lands last and closest to the model's attention.
  */
 export function makeQuoteHandler(log, userId = null) {
     return makeToolHandler(
         'get_quote',
-        async ({ ticker }) => withBrokerAvailability(await getQuote(ticker), userId, ticker),
+        async ({ ticker }) => withMarketStatus(
+            await withBrokerAvailability(await getQuote(ticker), userId, ticker),
+            ticker,
+        ),
         (err, { ticker }) => `Could not fetch quote for ${ticker}: ${err.message}`,
         log,
     )

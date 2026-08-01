@@ -139,6 +139,50 @@ export function buildSetupInvalidation(setup, info = null) {
     }
 }
 
+/**
+ * SEVERAL orders came off the bench at once — the market opened on a batch that had parked
+ * overnight (a portfolio activation is the usual case: nine holdings, nine deferred plans).
+ *
+ * ONE card, not N. Nine separate confirm cards at 09:30 is not nine notifications, it is a wall
+ * the user scrolls past — and the confirm dialog already walks a queue one order at a time, so the
+ * card only has to get them INTO that queue.
+ *
+ * Grouped per KIND, never across kinds: the batch still belongs to the desk that authored it, and
+ * one cross-kind "all your orders" card would be exactly the notification router that was
+ * deliberately abandoned (see project_axl_agent). So `botId` and the route target are passed in by
+ * the caller that owns the kind; the SENTENCE is shared because the event genuinely is one event —
+ * the market opened — and there is no per-desk judgment in saying so.
+ *
+ * `staleHours` is the age of the OLDEST plan in the batch. Surfaced rather than acted on: these
+ * plans were priced before the close, and the user decides whether that still stands (the confirm
+ * dialog shows the same age). Omitted when nothing in the batch is old enough to be worth saying.
+ */
+export function buildOrdersReady({ userId, entities = [], kind, botId, staleHours = null }) {
+    const n      = entities.length
+    const assets = [...new Set(entities.map(e => e?.asset).filter(Boolean))]
+    // Name them when the list is short enough to read; past that the count is the information.
+    const names  = assets.length && assets.length <= 4 ? ` (${assets.join(', ')})` : ''
+    const stale  = Number.isFinite(staleHours) && staleHours >= 12
+        ? ` These were priced ${Math.round(staleHours)}h ago, before the close — check the levels still make sense.`
+        : ''
+    return {
+        userId: userId ?? null,
+        content: `The market is open — ${n} order${n === 1 ? '' : 's'}${names} ${n === 1 ? 'is' : 'are'} ready to place.${stale} Confirm them one at a time.`,
+        type:    'orders_ready',
+        payload: {
+            kind,
+            count: n,
+            assets,
+            // The queue's entry point. The confirm dialog surfaces the first eligible order by
+            // itself; this just opens it on the right workspace.
+            firstId: entities[0]?.id ?? null,
+            staleHours: Number.isFinite(staleHours) ? Math.round(staleHours) : null,
+        },
+        botId,
+        actions: cardActions('Review orders'),
+    }
+}
+
 /** Kairos call READY to enter → open the call to confirm. Proposal comes from the fresh assessment. */
 export function buildCallReady(call, assessment = null) {
     // Only show the price bits when BOTH numbers finalized — _finalizeProposal returns null for
@@ -230,6 +274,10 @@ export async function notifySetupEntryConfirm(setup, assessment = null) {
     return _post(buildSetupEntryConfirm(setup, assessment), 'Setup entry-confirm card')
 }
 
+export async function notifyOrdersReady(batch) {
+    return _post(buildOrdersReady(batch), `Orders-ready card (${batch?.entities?.length ?? 0})`)
+}
+
 export async function notifySetupInvalidation(setup, info = null) {
     return _post(buildSetupInvalidation(setup, info), `Setup-invalidation card (${info?.card ?? '?'})`)
 }
@@ -250,4 +298,4 @@ export async function notifyCallReentry(call, read = null, outcome = null) {
     return _post(buildCallReentry(call, read, outcome), 'Call-reentry card')
 }
 
-export const tradeNotifyService = { notifyIdeaEntryConfirm, notifySetupEntryConfirm, notifySetupInvalidation, notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry }
+export const tradeNotifyService = { notifyIdeaEntryConfirm, notifySetupEntryConfirm, notifySetupInvalidation, notifyOrdersReady, notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry }

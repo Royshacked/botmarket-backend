@@ -35,8 +35,8 @@ import { logger }                               from '../services/logger.service
 import { isAssetOpen }                          from '../services/market.service.js'
 import { buildOrderPlanForIdea }                from '../services/orderPlan.service.js'
 import { getCheckGap, isIntradayTimeframe }     from '../services/timeframe.service.js'
-import { collectSymbols, resolveConditionTree, extractLeaves } from '../services/conditionTree.service.js'
-import { toMs } from './evaluators/time.evaluator.js'
+import { collectSymbols, resolveConditionTree } from '../services/conditionTree.service.js'
+import { entryTimeGate as _entryTimeGate } from '../services/entryTimeGate.util.js'
 import { checkInvalidation }                    from './invalidation.monitor.js'
 import { checkPosition }                        from './positionMonitor.js'
 import { notifyManualEntry, entryLegFromIdea }  from '../services/manualNotify.service.js'
@@ -97,8 +97,6 @@ async function _tick() {
     const liveIds = new Set((ideas ?? []).map(i => i.id))
     for (const id of _lastChecked.keys()) if (!liveIds.has(id)) _lastChecked.delete(id)
 
-    await _marketSweep(db)
-
     if (!ideas || ideas.length === 0) return
     logger.info(LOG, `Checking ${ideas.length} idea(s) (looking + long + short)`)
 
@@ -108,52 +106,20 @@ async function _tick() {
     }
 }
 
-// ─── Deferred-order market sweep ──────────────────────────────────────────────
-
-async function _marketSweep(db) {
-    let deferred
-    try {
-        deferred = await entityRepo.listByOrderState('awaiting_market')
-    } catch (err) {
-        logger.error(LOG, 'Market sweep read error:', err.message)
-        return
-    }
-    if (!deferred || deferred.length === 0) return
-
-    const surface = deferred.filter(idea => isAssetOpen(idea.asset, idea.asset_class))
-    if (surface.length === 0) return
-
-    logger.info(LOG, `Surfacing ${surface.length} deferred order(s)`)
-    for (const idea of surface) {
-        await _patch(db, idea.id, { orderState: 'awaiting_confirm' })
-        // Close the notification hole: an entry that triggered while the market was closed
-        // parked silently as awaiting_market — now that it's open, surface the confirm card.
-        // A scheduled/time entry is marked 'off_hours' so the copy reflects why it's late.
-        const note = _entryTimeGate(idea).timeGated ? 'off_hours' : null
-        try { await notifyIdeaEntryConfirm(idea, note) }
-        catch (err) { logger.warn(LOG, `[${idea.id}] deferred-surface notify failed:`, err.message) }
-    }
-}
-
-// Inspect an idea's entry tree for time gating.
-//   timeGated — at least one `time` leaf gates entry
-//   allTime   — EVERY entry leaf is a `time` leaf (a pure scheduled entry: needs no market
-//               data, so it's monitored regardless of market hours)
-//   after     — the governing (latest) `after` bound in ms, or null
-// Used for the market-closed-skip exemption and the entry-confirm note. See
-// project_timestamp_ideas (Phase 4). Exported for unit testing.
-export function _entryTimeGate(idea) {
-    const tree   = resolveConditionTree(idea?.entry_condition_tree, idea?.entry_conditions, idea?.entry_logic ?? 'AND')
-    const leaves = extractLeaves(tree)
-    const timeLeaves = leaves.filter(l => l?.type === 'time')
-    if (timeLeaves.length === 0) return { timeGated: false, allTime: false, after: null }
-    const afters = timeLeaves.map(l => toMs(l?.after)).filter(v => v != null)
-    return {
-        timeGated: true,
-        allTime:   timeLeaves.length === leaves.length,
-        after:     afters.length ? Math.max(...afters) : null,
-    }
-}
+// ─── Deferred-order market sweep — MOVED ──────────────────────────────────────
+//
+// `_marketSweep` used to live here, and that was the bug. It is the drain for `awaiting_market`,
+// which THREE kinds write (idea + portfolio_item via _attachImmediatePlan, and setup via Talos) —
+// but it ran inside the one monitor that owns a single kind, so when Minos was archived every
+// deferred order in the app stopped waking up. Nothing flipped them back; they parked forever.
+//
+// It now lives in monitoring/marketOpen.monitor.js, started on its own, and is kind-blind by
+// design. Do NOT reinstate a copy here if Minos is ever revived — two sweeps over one orderState
+// would double-post the confirm card.
+//
+// The entry time-gate it used moved to services/entryTimeGate.util.js for the same reason (two
+// callers, one mechanism). Re-exported under its historical name so importers/tests resolve.
+export { _entryTimeGate }
 
 // ─── Per-idea check ───────────────────────────────────────────────────────────
 
@@ -199,7 +165,7 @@ async function _checkIdea(db, idea) {
         : entryTf
     // A pure scheduled (time-only) entry needs no live market data — the wall-clock gate
     // fires and the order defers via awaiting_market until the market re-opens (surfaced by
-    // _marketSweep). So it stays monitored when the market is closed, regardless of timeframe;
+    // the market-open sweep). So it stays monitored when the market is closed, regardless of timeframe;
     // this makes off-hours behavior deterministic rather than dependent on a stray entry TF.
     if ((isIntradayTimeframe(fastestTf) || cumVol) && !isAssetOpen(asset, idea.asset_class)
         && !(!isPosition && _entryTimeGate(idea).allTime)) {
@@ -329,7 +295,7 @@ async function _checkEntry(db, idea, candles) {
             // Mark the card when the scheduled time was already in the past when the user armed
             // the idea (after <= activation) — the entry fires on the first check, so it reads
             // as "already passed" rather than a fresh trigger. Off-hours triggers never reach
-            // here (they defer to awaiting_market and _marketSweep marks them 'off_hours').
+            // here (they defer to awaiting_market and the market-open sweep marks them 'off_hours').
             const tg     = _entryTimeGate(idea)
             const armAt  = idea.activatedAt ?? idea.savedAt ?? 0
             const note   = tg.timeGated && tg.after != null && tg.after <= armAt ? 'passed_earlier' : null

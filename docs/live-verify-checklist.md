@@ -124,9 +124,14 @@ The headline case first — this is the bug the change exists to fix.
   verify the order goes in, `brokerOrders` is written, and the reconciler links the fill. This is
   the ordinary `placeOrdersForIdea` path, but it has never run for a `portfolio_item` from a review.
 - [ ] **Market closed → parks, then surfaces at open** `[MKT]` — accept a review with an add while
-  the market is shut. Expect `orderState: 'awaiting_market'` and NO dialog; then at open, Minos's
-  `_marketSweep` should flip it to `awaiting_confirm` and post the `entry_confirm` card. Worth
-  catching: the sweep is kind-blind, so a portfolio item should ride it, but that is untested live.
+  the market is shut. Expect `orderState: 'awaiting_market'` and NO dialog; then at open, the
+  market-open sweep (`monitoring/marketOpen.monitor.js`) should flip it to `awaiting_confirm` and
+  post the card. Worth catching: this NEVER worked in the deployed build — the sweep rode inside
+  the archived Minos, so deferred orders parked forever. It is its own loop now and kind-blind, so
+  a portfolio item should ride it; unit-tested, not yet seen live.
+- [ ] **Batch at the open** `[MKT]` — park 2+ orders off-hours (a portfolio activation is the easy
+  case). Expect ONE `orders_ready` card at the open, not one per order, and the confirm dialog to
+  walk them one at a time. Two kinds (idea + setup) should still produce two cards, one per desk.
 - [ ] **Manual book** `[ANY]` — same flow on a **manual** portfolio: no order plan, an ENTRY Fill
   card instead; submitting price + qty opens the holding. Check the leg is NOT flagged `add` (that
   flag routes to `/manual-add`, which is for scale-ins — a new holding must go to `/manual-entry`).
