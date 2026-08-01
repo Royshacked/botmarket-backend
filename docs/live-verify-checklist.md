@@ -6,6 +6,8 @@ broker execution, agent behaviour and the end-to-end loop need a running app.
 - **§A–C — Themis / Portfolio order layer / Prometheus** (2026-07-24, branch `institution-proj`)
 - **§D–E — Review orders + agent venue awareness** (2026-07-30, branch
   `feat/agent-venue-and-review-orders`)
+- **§F — Axl market brief** (2026-08-01) — every provider call and the model turn are stubbed in the
+  units; nothing below has been seen against real data
 
 ---
 
@@ -176,3 +178,66 @@ number — it is an agent that never looks and reasons as if the book were empty
   book without having called the tool. Analyst especially: it was reading `brokerContext` from the
   request body (always empty in practice), so this is the first time Prometheus can see the book at
   all.
+
+---
+
+## F. Axl market brief (2026-08-01)
+
+BE + FE written, **served bundle NOT rebuilt**. The units stub every provider and the model turn, so
+what is unverified here is precisely the part tests cannot reach: whether the symbols price, and
+whether the brief holds its boundary.
+
+### F1 — the tape actually prices `[ANY]`
+
+- [ ] **Every tape symbol returns a quote** — the board is 18 symbols on Yahoo notation (`^GSPC`,
+  `^NDX`, `^N225`, `^HSI`, `^TNX`, `GC=F`, `CL=F`, `BTC-USD`, `DX-Y.NYB`, `EURUSD=X`…). The quote
+  path tries **FMP first and falls back to Yahoo**, and FMP prices none of the indices or futures —
+  so this is really a test of the fallback. Log `_tape()` output and confirm no row is missing.
+  A missing row is silent by design (a dropped line, never a guessed number), which is exactly why
+  it must be eyeballed once.
+- [ ] **The yield reads in points, not percent** — `^TNX` must render `4.28% (+0.06 pts)`. If it ever
+  says `+1.40%` the formatter regressed and the brief is telling readers the bond market moved 1.4%.
+- [ ] **Weekend / holiday behaviour** — run it on a closed day: stale closes are fine, but confirm
+  nothing renders as `0` or `n/a` in a way that reads as a real level.
+
+### F2 — the brief itself `[ANY]`
+
+- [ ] **A brief is actually written** — `POST /api/axl/brief` end to end; it lands in the Axl
+  conversation over the WS, renders with its line breaks (the bubble is `pre-wrap`), and reads like a
+  brief rather than a data dump.
+- [ ] **web_search is used and cited plausibly** — the "what's driving it" section must contain a
+  real overnight story, not a paraphrase of the tape. If the model skips searching, the section will
+  be generic — that's the failure mode to look for.
+- [ ] **No invented numbers** — spot-check two or three levels in the prose against the data block.
+  The prompt says use-as-given; confirm it does.
+- [ ] **THE BOUNDARY** — this is the item that matters most. The brief must contain no "your", no
+  position, no recommendation, no level to buy. Read a few briefs cold. If a single one says
+  "traders should" or "this sets up", the prompt needs tightening before this ships.
+
+### F3 — Axl relaying it `[ANY]`
+
+- [ ] **Axl calls the tool** — ask "what's going on today" / "how are markets" / "what's the dollar
+  doing" and confirm `get_market_brief` fires (tool chip) instead of Axl answering from memory.
+- [ ] **Axl does not join it to the book** — ask "what's happening today, and how does that affect my
+  positions?" in one breath. Axl must answer the world half from the brief and route the book half
+  to a desk, never merge them. This is the whole reason the tool is unbound.
+- [ ] **Axl still refuses single-name market data** — "what is NVDA doing" must route to a desk, not
+  get answered from the brief.
+- [ ] **Cold-cache latency in social chat** — the first brief of the hour is a live model turn with
+  searches behind it, and `triggerAxlReply` shows nothing until it finishes. Time it. If the silence
+  is bad, the fix is a placeholder message, not a shorter brief.
+
+### F4 — the daily offer `[ANY]`
+
+- [ ] **The card goes out once per user per weekday** — set `MARKET_BRIEF_OFFER_HOUR_UTC` to just
+  before now, boot, and confirm exactly one card per user. Restart the server and confirm **no second
+  card** (the dedupe reads posted cards, so this is the resume path).
+- [ ] **No card at the weekend** — boot on a Saturday (or fake the clock) and confirm nothing posts.
+- [ ] **The offer costs nothing** — confirm no model tokens are spent by the fan-out itself; the
+  brief must only be written on a confirm.
+- [ ] **Confirm → brief, and the card collapses** — press *Get the brief*: the button shows
+  "Writing…", the brief arrives, the card collapses to "✓ Sent".
+- [ ] **A failed confirm leaves the card pressable** — kill FMP/Anthropic mid-request; the card must
+  show the error and stay actionable. A consumed offer with no brief is the one unrecoverable state.
+- [ ] **Ten confirms, one brief** — have two users confirm at once on a cold cache and check the log:
+  exactly ONE `brief built` line. The single-flight is unit-tested, but not against real latency.

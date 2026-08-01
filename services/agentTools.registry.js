@@ -566,6 +566,15 @@ export const TOOL_SCHEMAS = {
         }
     },
     web_search: { server: "web_search_20250305" },
+    get_market_brief: {
+        "type": "object",
+        "properties": {
+            "refresh": {
+                "type": "boolean",
+                "description": "true to rewrite the brief instead of reading the recent one. Only when the user explicitly asks for an update."
+            }
+        }
+    },
 }
 
 /** Every tool the registry knows. */

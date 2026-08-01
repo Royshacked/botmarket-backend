@@ -42,6 +42,9 @@ export async function ensureIndexes() {
         await db.collection(MSGS).createIndexes([
             { key: { conversationId: 1, createdAt: -1 } },
             { key: { conversationId: 1, readAt: 1 } },
+            // listCardRecipientsSince — a notifier's "who already got today's?" runs on a timer over
+            // a collection that only grows, so it must not be a scan.
+            { key: { type: 1, createdAt: -1 } },
         ])
     } catch (err) {
         logger.warn(LOG, 'ensureIndexes failed', err.message)
@@ -337,6 +340,32 @@ export async function resolveMessage(conversationId, messageId, userId, { status
         } }
     )
     return { ok: true }
+}
+
+/**
+ * Which users already received a card of this type since `since` — the dedupe read for any
+ * fan-out notifier ("has this user had today's?"). Lives here rather than in the notifier because
+ * the conversation→user join needs the collection layout, and that knowledge belongs to one module.
+ *
+ * @returns {Promise<Set<string>>} userIds (the non-bot participant of each matching conversation)
+ */
+export async function listCardRecipientsSince(type, since) {
+    const db = await getDb()
+    const msgs = await db.collection(MSGS)
+        .find({ type: String(type), createdAt: { $gte: Number(since) } }, { projection: { conversationId: 1 } })
+        .toArray()
+    if (!msgs.length) return new Set()
+
+    const convIds = [...new Set(msgs.map(m => m.conversationId))]
+    const convs = await db.collection(CONVS)
+        .find({ id: { $in: convIds } }, { projection: { participants: 1 } })
+        .toArray()
+
+    const out = new Set()
+    for (const c of convs) {
+        for (const p of (c.participants ?? [])) if (!isBot(p)) out.add(String(p))
+    }
+    return out
 }
 
 /** Back-compat alias — a plain dismiss (status='dismissed'). Prefer resolveMessage. */

@@ -2298,6 +2298,19 @@
           "source"
         ]
       }
+    },
+    {
+      "name": "get_market_brief",
+      "description": "Today's MARKET BRIEF — a short broadcast of what the world's markets are doing: the tape (US, Europe, Asia), what drove it overnight, rates, the dollar and commodities, major currency pairs, the macro picture, and the week's Fed releases and major earnings. Call it for \"what's going on today\", \"how are markets\", \"what's happening in the world\", \"anything I should know\", and for any question about global markets, geopolitics, macro data or currencies. It is written for everyone and knows NOTHING about this user — it never mentions their positions, and you must not connect it to them either. Relay it; do not rewrite it into advice. Costs a live write when stale, so call it once per conversation unless the user asks for a refresh.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "refresh": {
+            "type": "boolean",
+            "description": "true to rewrite the brief instead of reading the recent one. Only when the user explicitly asks for an update."
+          }
+        }
+      }
     }
   ]
 }

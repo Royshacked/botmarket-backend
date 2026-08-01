@@ -52,8 +52,13 @@ api/
                               index futures only) + applyOffset + real/cash ticker maps
     paperBroker.service.js / paperExecution.service.js
   paper/                  paper mode toggle/settings/reset/trades/equity  /api/paper/*
+  axl/                    Axl chat SSE /api/axl/stream (converse + chart + `<route>` to a desk) and
+                          POST /api/axl/brief — DELIVERY, not a turn: posts today's market brief
+                          into the user's own Axl conversation (the confirm behind the offer card)
   chat/                   social DM + bot notifications (chatWs.js = WebSocket); sendBotMessage funnel,
-                          BOT_IDS = axl·idea·portfolio·scanner·kairos (one notify bot per agent)
+                          BOT_IDS = axl·idea·portfolio·scanner·kairos (one notify bot per agent).
+                          listCardRecipientsSince(type, since) = the shared dedupe read for any
+                          fan-out notifier ("who already got today's?"), conversation→user join
   market/ calendar/ user/ authentication/ transcribe/
   _shared/                cross-controller helpers:
       sse.util.js             startSseStream() — SSE headers + heartbeat + abort wiring
@@ -118,6 +123,16 @@ services/
     NB: the FRONTEND popup chart mirrors this — botmarket-frontend cmps/TradeIdeas/chartOverlay.js
     (textToIndicators = FE port of _buildStudies+studyTranslate) + cmps/PriceChart/PriceChart.jsx
     (VWAP/ATR registerIndicator templates + tradeLevel overlay). Keep the ported logic in sync.
+  marketBrief.service.js    THE market brief — one broadcast of what the world is doing, shared by
+                            EVERY user (no userId anywhere; that is load-bearing, not an optimization).
+                            Data assembled in code — tape board (indices/rates/commodities/FX via the
+                            Yahoo-fallback quote path, so ^GSPC / EURUSD=X / GC=F all price), macro
+                            snapshot, and a 7d calendar filtered to Fed rows + MAJOR_EARNINGS only —
+                            then ONE model turn with web_search for the narrative. Cached 45min
+                            (MARKET_BRIEF_TTL_MS) + single-flight: the morning fan-out costs one run,
+                            not one per user. Two consumers: Axl's tool and POST /api/axl/brief
+  marketBrief.tools.js      get_market_brief — UNBOUND (no userId, so the brief cannot be made
+                            personal). Axl RELAYS the brief; it does not write market commentary
   eventRisk.service.js      buildEventRisk({asset,assetClass}) — scheduled catalysts FROZEN onto a Kairos
                             call at build: earnings (Finnhub, equities) + Fed/macro (FRED), low-impact
                             dropped, 10d horizon. Never throws. Hermes reads it to hold off pre-event entry
@@ -178,6 +193,11 @@ monitoring/
                             2nd pass (downgrades enter→wait, fail-open)
   positionMonitor.js  portfolio.monitor.js   (portfolio.monitor: due-review NOTIFY-only; runs the non-LLM
                             pre-check computeReviewSignals → enriches the bubble + payload with triggers[])
+  marketBrief.notify.js     the daily market-brief OFFER: one card per user per weekday (12:00 UTC,
+                            MARKET_BRIEF_OFFER_HOUR_UTC; MARKET_BRIEF_OFFER=off disables). Posts the
+                            OFFER, never the brief — the confirm builds it, so the fan-out costs no
+                            tokens. Dedupe reads the posted cards themselves (listCardRecipientsSince),
+                            so a mid-fan-out restart resumes instead of double-posting
   paperFill.service.js  paperEquity.service.js
   exitOrders.util.js        buildExitOrder (applies +basisOffset → broker price space) / exitOrderRecord / closeSide / orderSymbol
   monitorUtils.js           candleMs, parseYesNo, round, remainingForAccount, timeframe resolvers;
@@ -236,6 +256,8 @@ docs/                       architecture design docs
 | New aliased index future (broker basis) | add to `brokerSymbol.service.ALIASES` + `brokerPrice.service` REAL_TICKER/CASH_INDEX maps; offset auto-measured at fork, candle-shifted in monitor |
 | New evaluator / leaf type | `evaluators/<type>.evaluator.js` + wire into `monitor.orchestrator._evalOne` + `condition.parser` |
 | New pure utility | add a `tests/unit/<name>.test.js` (that's the "write tests after a feature" rule in practice) |
+| New Axl tool | APPEND to `TOOLS` in `axl.agent.service.js` (never insert — the snapshot compares by index and the prompt cache keys off the array prefix) + append the built entry to the `axl` array in `tests/fixtures/agentTools.snapshot.json` in the same commit |
+| New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince` |
 
 ## Testing
 

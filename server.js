@@ -53,6 +53,7 @@ import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
 import { paperEquityService } from './monitoring/paperEquity.service.js'
 import { paperMarkService }   from './monitoring/paperMark.service.js'
+import { marketBriefNotifier } from './monitoring/marketBrief.notify.js'
 import { logger }           from './services/logger.service.js'
 import { closeRenderer }    from './services/chartRender/klineRender.provider.js'
 
@@ -139,6 +140,7 @@ executionReconciler.start()
 paperFillService.start()
 paperEquityService.start()
 paperMarkService.start()
+marketBriefNotifier.start()
 
 // SPA fallback: only in production when static assets live in public/
 if (process.env.NODE_ENV === 'production') {

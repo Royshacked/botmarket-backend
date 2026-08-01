@@ -132,6 +132,13 @@ Dismiss/handled state persists per-message.
 | `manual_entry` / `manual_exit` | Broker-less fill needed | Inline FillCard (price/qty) — the one embedded-action card |
 | `entry_confirm` | Entry triggered, confirm needed (`kind: idea`\|`call`) | idea → workspace + `OrderConfirmDialog`; call → `/call/:id` pop-out |
 | `call_expiry` | Kairos thesis expiring/expired (`kind: edit`\|`expired`) | Edit → `/call/:id` pop-out · Delete · Dismiss |
+| `market_brief_offer` | Daily broadcast offer, one per user per weekday (`marketBrief.notify.js`) | Get the brief → posts `market_brief` in place · Dismiss |
+| `market_brief` | The brief itself — plain, actionless, inert | none (it's a message, not a card) |
+
+The market brief is the one card that is **not about the user**: the same text goes to everyone, is
+cached across users, and by construction mentions no position, account or holding. Its offer is
+posted with no tokens spent — the brief is only written when someone confirms
+(`POST /api/axl/brief`), and Axl relays that same brief in chat via `get_market_brief`.
 
 `entry_confirm` fires for paper/live idea entries (`minos.monitor.service.js`, on `awaiting_confirm` —
 ARCHIVED, so in practice only the call/setup paths below still fire it) and

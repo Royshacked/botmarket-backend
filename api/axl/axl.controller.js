@@ -3,6 +3,9 @@ import { resolveModel }    from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages } from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
+import { getMarketBrief } from '../../services/marketBrief.service.js'
+import { postCard } from '../../services/notifyCard.js'
+import { logger } from '../../services/logger.service.js'
 
 // The desks a reply may hand the user to. Validated here rather than trusted from the model: an
 // unknown key would leave the client trying to navigate to a tab that doesn't exist, so it becomes
@@ -69,4 +72,36 @@ export async function streamAxl(req, res) {
             }
         },
     })
+}
+
+/**
+ * Deliver today's market brief into the user's Axl conversation — the CONFIRM half of the daily
+ * offer card. The offer is posted by the notifier; nothing is written until the user asks for it
+ * here, which is the point: a broadcast nobody wanted is spam.
+ *
+ * The brief itself comes from the shared service, so what lands here is the same text Axl relays in
+ * chat. Resolving the offer card is deliberately NOT done here: the client resolves it on a
+ * successful response, the way every other card in the social chat is resolved, so its local copy
+ * collapses immediately instead of staying pending until a reload. A failure therefore leaves the
+ * card actionable, which is the behaviour we want — the user can just press it again.
+ */
+export async function deliverBrief(req, res) {
+    const userId = req.user._id
+
+    try {
+        const { text, asOf, cached } = await getMarketBrief()
+
+        const posted = await postCard(
+            { userId, content: text, type: 'market_brief', payload: { asOf } },
+            { tag: 'Market brief', log: LOG },
+        )
+        // postCard never throws — it returns null when delivery failed. Reporting success then would
+        // be a lie the user discovers by looking at an empty chat.
+        if (!posted) return res.status(502).json({ error: 'Could not deliver the brief to your chat.' })
+
+        return res.json({ ok: true, messageId: posted.id, asOf, cached })
+    } catch (err) {
+        logger.error(LOG, 'deliverBrief failed', err)
+        return res.status(502).json({ error: 'Could not write the market brief right now.' })
+    }
 }

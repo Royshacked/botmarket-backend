@@ -12,6 +12,7 @@ import { toObjectiveSummary } from '../api/objectives/objective.model.js'
 import { makeUserDataHandlers, USER_DATA_TOOL_SPEC } from './userData.tools.js'
 import { makeConceptHandlers, CONCEPT_TOOL_SPEC } from './concepts.tools.js'
 import { makeExperienceHandlers, EXPERIENCE_TOOL_SPEC } from './experience.tools.js'
+import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from './marketBrief.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -43,6 +44,10 @@ export const TOOLS = toolsFor({
     get_upcoming_events: USER_DATA_TOOL_SPEC.get_upcoming_events,
     explain_concept: CONCEPT_TOOL_SPEC.explain_concept,
     set_experience_level: EXPERIENCE_TOOL_SPEC.set_experience_level,
+    // Appended last, per the rule above. ONE tool, not the five market reads it is built from:
+    // Axl relays a brief written elsewhere, which is what keeps the world-facing broadcast from
+    // turning into per-user market commentary. See marketBrief.service.js.
+    get_market_brief: MARKET_BRIEF_TOOL_SPEC.get_market_brief,
 })
 
 // ONE Axl. This turn both converses and routes, which used to be two agents: a `routeIntent` doorman
@@ -73,6 +78,7 @@ async function chatStream({ messages = [], audience = null, model: requestedMode
     _userDataHandlers = makeUserDataHandlers,
     _conceptHandlers = makeConceptHandlers,
     _experienceHandlers = makeExperienceHandlers,
+    _marketBriefHandlers = makeMarketBriefHandlers,
     _getOpenObjective = getOpenObjective,
     _markRouted = markRouted,
 } = {}) {
@@ -106,6 +112,9 @@ ${audienceBlock}` : ''}` },
         ..._userDataHandlers(userId),
         // Unbound: an explanation is the same for everyone, which is why it can be authored once.
         ..._conceptHandlers(),
+        // Unbound for the same reason, and a stronger one: the brief is the same for every reader,
+        // so a handler with no userId is the structural guarantee it stays that way.
+        ..._marketBriefHandlers(),
         ..._experienceHandlers(userId),
         ...objectiveHandlers,
         save_objective: async (args) => {

@@ -45,6 +45,9 @@ PORT (3030)   NODE_ENV   PAPER_FILL_INTERVAL_MS (30s)   PAPER_EQUITY_SNAPSHOT_MS
 OWN_CHART_RENDER (on)   OWN_CHART_RENDER_TIMEOUT_MS (8s)   OWN_CHART_RENDER_PAGE_TIMEOUT_MS (10s)
 #   own-chart vision render (KLineCharts headless via Playwright). Set OWN_CHART_RENDER=false to
 #   force chart-img. Prod host must run `npx playwright install chromium` or renders fall back.
+MARKET_BRIEF_OFFER (on)   MARKET_BRIEF_OFFER_HOUR_UTC (12)   MARKET_BRIEF_TTL_MS (45m)
+#   the daily market-brief offer card + how long one written brief is served to everyone.
+#   MARKET_BRIEF_OFFER=off stops the card; Axl's get_market_brief tool keeps working.
 ```
 
 ### Run
@@ -56,7 +59,7 @@ npm run server:prod  # NODE_ENV=production (serves built frontend from public/)
 ```
 `server.js` fails fast if `MONGODB_URI` or `JWT_SECRET` are missing. On boot it starts the
 background services: monitor, execution reconciler, paper fill engine, paper
-equity snapshotter.
+equity snapshotter, market-brief offer.
 
 ---
 
@@ -67,7 +70,8 @@ server.js              Express app, route mounts, background-service boot
 api/                   HTTP surface — one folder per feature (routes + controller + service)
   _shared/             the cross-kind HTTP tier: reason.util (ONE reason→status map),
                        entityController.util (list/get/patch/delete for any kind), sse.util, parse
-  axl/                 Axl — the concierge/critic meta-layer that routes to the specialists
+  axl/                 Axl — the concierge/critic meta-layer that routes to the specialists;
+                       also delivers the daily market brief (POST /api/axl/brief)
   kairos/              Kairos chat + the `call` kind (monitored by Hermes)
   mentor/ setups/      Mentor chat + the `setup` kind (monitored by Talos)
   analyst/             buy-side analyst chat + the `coverage` research artifact
@@ -88,6 +92,7 @@ providers/             external clients (LLMs, market data, brokers, Mongo)
 monitoring/            one monitor per kind + the shared execution layer
                        hermes (call) · talos (setup) · themis (portfolio) · coverage (analyst)
                        minos (idea) is ARCHIVED and not started
+                       marketBrief.notify — not a monitor: the weekday market-brief offer card
   evaluators/          touch, structured, indicator, time, volume, news, chart
 docs/architecture/     design docs
 ```
