@@ -5,7 +5,7 @@ import { enrichWithProfiles } from '../../services/companyProfile.util.js'
 // Calendar business logic (fetch + shape + enrich). The controller stays thin — it just
 // calls these and shapes the HTTP response.
 
-export const calendarService = { getEarnings, getFed, getIpo, calendarWeek, enrichCalendarProfiles }
+export const calendarService = { getEarnings, getFed, getIpo, calendarWeek, enrichCalendarProfiles, dedupeByDaySymbol }
 
 // Which window the calendar shows = the current trading week. On a weekday that's today →
 // this week's Friday; on the weekend it rolls forward to the coming Mon–Fri. Offsets indexed
@@ -27,11 +27,31 @@ export async function enrichCalendarProfiles(items, fetchProfile = fetchCompanyP
     return enrichWithProfiles(items, { fetchProfile, concurrency })
 }
 
+// Finnhub can report the same ticker twice on one date (re-filed / duplicated rows), which
+// renders as a repeated line and breaks the day+symbol identity both calendar surfaces key on.
+// Collapse to one row per symbol+date, first-wins, filling any field the first row left blank
+// so a sparse duplicate never costs us an estimate. Rows without a symbol pass through
+// untouched — they can't collide on identity.
+export function dedupeByDaySymbol(items) {
+    const seen = new Map()
+    const out = []
+    for (const item of items) {
+        if (!item.symbol) { out.push(item); continue }
+        const key = `${item.date}|${item.symbol}`
+        const kept = seen.get(key)
+        if (!kept) { seen.set(key, item); out.push(item); continue }
+        for (const [k, v] of Object.entries(item)) {
+            if (kept[k] == null && v != null) kept[k] = v
+        }
+    }
+    return out
+}
+
 async function getEarnings() {
     const { from, to } = calendarWeek()
     const data = await fetchEarningsCalendarByDate(from, to)
     const rows = Array.isArray(data?.earningsCalendar) ? data.earningsCalendar : []
-    const items = rows
+    const items = dedupeByDaySymbol(rows
         .map(r => ({
             symbol:           r.symbol,
             date:             r.date,
@@ -40,7 +60,7 @@ async function getEarnings() {
             epsActual:        r.epsActual          ?? null,
             revenueEstimated: r.revenueEstimate    ?? null,
         }))
-        .sort((a, b) => (a.date || '').localeCompare(b.date || ''))  // chronological → groups by day cleanly
+        .sort((a, b) => (a.date || '').localeCompare(b.date || '')))  // chronological → groups by day cleanly
     await enrichCalendarProfiles(items)
     return { from, to, items }
 }
@@ -53,7 +73,7 @@ async function getFed() {
 async function getIpo() {
     const { from, to } = calendarWeek()
     const rows = await fetchIpoCalendar(from, to)
-    const items = rows
+    const items = dedupeByDaySymbol(rows
         .map(r => ({
             date:     r.date,
             symbol:   r.symbol || null,
@@ -64,7 +84,7 @@ async function getIpo() {
             value:    r.totalSharesValue ?? null,
             status:   r.status || null,
         }))
-        .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+        .sort((a, b) => (a.date || '').localeCompare(b.date || '')))
     // Attach logos + fill blank names (many IPO rows carry a name already, so don't clobber
     // it — only fill when Finnhub's calendar left it empty).
     await enrichWithProfiles(items, { overwriteName: false })
