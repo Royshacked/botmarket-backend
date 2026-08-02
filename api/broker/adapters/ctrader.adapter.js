@@ -591,12 +591,19 @@ function _normaliseAccount(raw) {
     }
 }
 
-function _normaliseTradingAccount(raw) {
+export function _normaliseTradingAccount(raw) {
     return {
         id:       String(raw.id ?? raw.accountId ?? ''),
         login:    raw.traderLogin ?? raw.login ?? raw.accountNumber ?? null,
         currency: raw.depositCurrency ?? raw.currency ?? null,
         balance:  money(raw.balance),
+        // What is actually DEPLOYABLE. Balance counts capital already committed to open positions, so
+        // an agent sizing a new book against it spends the same money twice. This list is the only
+        // account shape the agents ever see — the richer read that carried freeMargin is a different
+        // call they never make. null when the payload doesn't carry it, which the renderers treat as
+        // "not reported" and fall back to balance rather than inventing a figure.
+        freeMargin: money(raw.freeMargin),
+        equity:     money(raw.equity),
         broker:   raw.brokerName ?? raw.broker ?? null,
         isLive:   !!(raw.isLive ?? !raw.isDemo),
     }

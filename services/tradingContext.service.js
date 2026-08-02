@@ -6,7 +6,7 @@
 // Returns:
 //   { modes: { paper: bool, manual: bool, live_brokers: [name] },
 //     workspace: 'paper'|'live',   ← the one the user is SITTING IN (see activeWorkspace)
-//     accounts: [ { id, broker, mode, name, balance, currency, capabilities, selected, positions } ],
+//     accounts: [ { id, broker, mode, name, balance, freeMargin, currency, capabilities, selected, positions } ],
 //     unavailable: [broker] }   ← brokers whose position read failed; their book is UNKNOWN, not flat
 //
 // Every agent reaches this through the tools in tradingContext.tools.js — it is the ONE answer to
@@ -95,6 +95,11 @@ export async function getTradingContext(userId) {
                 id: String(a.id), broker, mode: 'live',
                 name: a.name ?? a.login ?? String(a.id),
                 balance: a.balance ?? null, currency: a.currency ?? null, capabilities: caps,
+                // What is actually deployable. Balance includes capital already in the positions
+                // listed alongside it, so an agent sizing against balance spends it twice. null when
+                // the broker doesn't report it — the renderer then falls back to balance rather than
+                // inventing a number.
+                freeMargin: a.freeMargin ?? null,
                 // Which account an order would actually go to today, when the user holds several.
                 selected: selectedAccountId != null && String(selectedAccountId) === String(a.id),
                 positions: posFor(a.id),
@@ -114,6 +119,7 @@ export async function getTradingContext(userId) {
                     id, broker: mode, mode,
                     name: a.name ?? id,
                     balance: a.cashBalance ?? a.balance ?? null, currency: a.currency ?? null, capabilities: caps,
+                    freeMargin: a.freeMargin ?? null,   // see the live branch above
                     // Virtual accounts are picked per artifact, not globally — there is no
                     // "selected" one to report.
                     selected: false,

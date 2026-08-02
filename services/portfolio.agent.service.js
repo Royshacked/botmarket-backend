@@ -332,15 +332,33 @@ function _buildPortfolioContext(portfolioId, ideas) {
     return `${header}\n${ideaLines}`
 }
 
-function _buildAccountsSection(accounts, mainAccountId = null) {
+export function _buildAccountsSection(accounts, mainAccountId = null) {
     const lines = buildAccountLines(accounts, mainAccountId)
     const mainNote = accounts.length > 1
         ? ' The account tagged ← MAIN is the reference account — use it as the base for scaling the other accounts. (If none is tagged, use the largest balance or context to pick the reference.)'
         : ''
-    return `PORTFOLIO ACCOUNTS (the user plans to execute ideas from this portfolio on):\n${lines.join('\n')}\n\nWhen suggesting position sizes, use these account balances to recommend concrete allocations.${mainNote}`
+    return `PORTFOLIO ACCOUNTS (the user plans to execute ideas from this portfolio on):\n${lines.join('\n')}\n\nSize against "available to deploy", NOT balance: balance counts capital already sitting in open positions, so building a book on it allocates the same money twice and hands the user a plan they cannot fill. Where an account reports no available figure, balance is the only number there is — use it, and say that the sizing assumes the account is uninvested.${mainNote}`
 }
 
-function _buildMandateSection(mandate) {
+// A mandate CARRIED OVER from a goal the user gave Axl — possibly in an earlier session — is not the
+// same thing as one they established with Atlas, and must not be rendered as though it were. Stated
+// as fact, Atlas builds a book on a target nobody confirmed this session (see the ASK rule in Phase 1).
+function _buildCarriedMandateSection(mandate, setAt) {
+    const when = Number.isFinite(setAt) ? new Date(setAt).toISOString().slice(0, 10) : null
+    const lines = [`CARRIED-OVER GOAL — the user told Axl this${when ? ` on ${when}` : ' previously'}, NOT to you, and possibly in an earlier session:`]
+    return { lines, close: `This is a PROPOSAL, not an established mandate. Open by putting it back to them in one line — "${when ? `on ${when} you set` : 'you set'} this goal; still the plan?" — and let them change it. Once they confirm, treat it as established and stop asking. Do NOT build, screen, or name anything until they have.` }
+}
+
+export function _buildMandateSection(mandate) {
+    const carried = mandate._fromObjective
+    if (carried) {
+        const { lines, close } = _buildCarriedMandateSection(mandate, carried.setAt)
+        if (mandate.objective)     lines.push(`Objective: ${mandate.objective}`)
+        if (mandate.horizon)       lines.push(`Time horizon: ${mandate.horizon}`)
+        if (mandate.riskTolerance) lines.push(`Risk tolerance: ${mandate.riskTolerance}`)
+        lines.push(close)
+        return lines.join('\n')
+    }
     const lines = ['INVESTMENT MANDATE (already established — do not re-ask for any field listed here):']
     if (mandate.objective)     lines.push(`Objective: ${mandate.objective}`)
     if (mandate.horizon)       lines.push(`Time horizon: ${mandate.horizon}`)

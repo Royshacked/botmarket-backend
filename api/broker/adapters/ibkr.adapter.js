@@ -137,15 +137,20 @@ export class IBKRAdapter extends BrokerAdapter {
 
         const byAccount = new Map()
         for (const [account, tag, value, currency] of rows) {
-            if (!byAccount.has(account)) byAccount.set(account, { currency: null, balance: null })
+            if (!byAccount.has(account)) byAccount.set(account, { currency: null, balance: null, freeMargin: null })
             const entry = byAccount.get(account)
             if (tag === 'NetLiquidation') { entry.balance = num(value); entry.currency = currency }
+            // Deployable cash, so a new book isn't sized against capital already in positions.
+            // Same pair the single-account read uses; ExcessLiquidity is the fallback IBKR reports
+            // when AvailableFunds is absent.
+            if (tag === 'AvailableFunds' || (tag === 'ExcessLiquidity' && entry.freeMargin == null)) entry.freeMargin = num(value)
         }
-        return [...byAccount.entries()].map(([id, { currency, balance }]) => ({
+        return [...byAccount.entries()].map(([id, { currency, balance, freeMargin }]) => ({
             id,
             login:    id,
             currency,
             balance,
+            freeMargin,
             broker:   'Interactive Brokers',
             isLive,
         }))

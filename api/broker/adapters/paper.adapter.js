@@ -79,6 +79,11 @@ export class PaperAdapter extends BrokerAdapter {
             name:     acct.name,
             currency: acct.currency,
             balance:  round2(acct.cashBalance),
+            // A virtual account's cash is ALREADY net of open positions — a fill decrements
+            // cashBalance — so cash IS the deployable figure here. Stated explicitly rather
+            // than left null, so the agents size against a real number instead of falling
+            // back to balance with a "assumes uninvested" caveat that isn't true here.
+            freeMargin: round2(acct.cashBalance),
             broker:   'Paper',
             isLive:   false,
         }))

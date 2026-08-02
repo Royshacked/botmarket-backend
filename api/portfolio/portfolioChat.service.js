@@ -73,6 +73,13 @@ export function mandateFromObjective(objective) {
             ? { horizon: `${horizon.days} day${horizon.days === 1 ? '' : 's'}${horizon.until ? ` — by ${horizon.until}` : ''}` }
             : {}),
         ...(riskText ? { riskTolerance: riskText } : {}),
+        // Provenance rides WITH the mandate rather than beside it. A goal survives the session it was
+        // set in — expiry is lazy, so one set last week is still `open` today — and without this tag
+        // it reaches the prompt wearing the same "already established" header as something the user
+        // said to Atlas a minute ago. Atlas then builds on a target nobody confirmed. This is the ASK
+        // half of the Phase-1 rule: it is about THEM, so a carried-over answer gets checked, not assumed.
+        // Never persisted: the controller writes back `statedMandate`, never this one.
+        _fromObjective: { setAt: objective.createdAt ?? null },
     }
 }
 

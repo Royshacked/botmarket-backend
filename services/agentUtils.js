@@ -154,6 +154,11 @@ export function buildAccountLines(accounts, mainAccountId = null) {
         const parts = [`${(a.broker || '').toUpperCase()} ${type} — login: ${a.login || '—'}, currency: ${a.currency || '—'}`]
         if (a.balance != null) parts.push(`balance: ${formatMoney(a.balance)}`)
         if (a.equity  != null) parts.push(`equity: ${formatMoney(a.equity)}`)
+        // DEPLOYABLE cash, and the number to size against — balance counts capital already sitting in
+        // open positions, so an agent sizing a new book against it allocates money that isn't there.
+        // Every adapter reports it (it is on the broker interface); it was simply never rendered, so
+        // no agent could see it. Absent → the broker didn't report it, and balance is the fallback.
+        if (a.freeMargin != null) parts.push(`available to deploy: ${formatMoney(a.freeMargin)}`)
         const line = `  - ${parts.join(', ')}`
         return (mainId != null && a.id != null && String(a.id) === mainId) ? `${line}  ← MAIN` : line
     })

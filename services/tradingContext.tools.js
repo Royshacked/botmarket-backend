@@ -66,6 +66,10 @@ function _accountBlock(a, workspace = null) {
         + here
         + `${a.selected ? ' · SELECTED (where a live order goes today)' : ''}`
         + ` · balance ${_fixed(a.balance) ?? 'unknown'}${a.currency ? ` ${a.currency}` : ''}`
+        // The tool's own description promises buying power; until this line it did not carry any.
+        // Balance includes whatever is already in the positions listed right below it, so sizing
+        // against balance double-counts the account's own holdings.
+        + (_fixed(a.freeMargin) != null ? ` · available to deploy ${_fixed(a.freeMargin)}` : '')
 
     const positions = Array.isArray(a.positions) ? a.positions : []
     if (!positions.length) return [head, '  no open positions in this account'].join('\n')
