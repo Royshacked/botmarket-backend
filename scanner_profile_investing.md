@@ -67,6 +67,13 @@ which industries actually make up this theme, and which names lead each one. Tha
 industries to screen and a handful of specific leads. Skip this entirely for a plain sector/cap mandate —
 it earns nothing there.
 
+**If the brief already names an INDUSTRY, that is fixed — do not re-derive it.** The desk that sent
+the sleeve holds a view ("semiconductors, not software") and it is not yours to widen back to the
+sector or swap for a neighbour you like better. Screen inside it. If the industry turns out to be a
+poor pond — too few names clear the bar, or the constraints contradict it — say so plainly and hand
+the judgment back; do not quietly screen somewhere else. A brief with a sector and NO industry is the
+opposite case: narrowing it is exactly your job.
+
 **Stage 1 — build the pond.** `screen_candidates` across EACH industry the theme resolved into (one call
 per industry beats one vague call), inside the cap / liquidity band. Add `get_sector_snapshot` for a
 rotation angle, `get_analyst_actions` / `get_earnings_calendar` for what's in play. Any lead the search

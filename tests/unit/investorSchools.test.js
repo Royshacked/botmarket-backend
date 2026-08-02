@@ -167,3 +167,18 @@ test('an edit that forgets the lens inherits it from the list being edited', () 
     const edited = { thesis: 's', direction: 'long', style: 'long term', candidates: [{ ticker: 'KEEP', keep: true }] }
     assert.equal(_normalizeScan(edited, prior, null, 'investing').lens, 'income')
 })
+
+// ── the industry hop ──────────────────────────────────────────────────────────
+// A sector is a coarse pond — semis, software and IT services are different businesses. Argus
+// narrowing it is screening mechanics and its job; Atlas naming one is a JUDGMENT, and judgment has
+// to cross as a field. Buried in free-text constraints it is a hint Argus may or may not honour.
+test('an industry view crosses the hop as its own field', () => {
+    const req = raw => _parseScreenRequest(`<screen_request>${JSON.stringify(raw)}</screen_request>`)
+    assert.equal(req({ sector: 'Technology', industry: 'Semiconductors' }).industry, 'Semiconductors')
+})
+
+test('no industry named → null, and Argus narrows the sector itself', () => {
+    const req = raw => _parseScreenRequest(`<screen_request>${JSON.stringify(raw)}</screen_request>`)
+    assert.equal(req({ sector: 'Technology' }).industry, null)
+    assert.equal(req({ sector: 'Technology', industry: '   ' }).industry, null)
+})

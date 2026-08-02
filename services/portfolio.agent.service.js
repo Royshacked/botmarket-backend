@@ -242,7 +242,11 @@ export function _parseScreenRequest(raw) {
     // any use for (a screener has nothing to do with how risk is spread). Validated against the same
     // vocabulary both ends read, so a hallucinated school reaches the screen as "no lens" (the neutral
     // ranking) rather than as a word nothing downstream understands.
-    return { sector, style, cap_band: s('cap_band'), lens: normalizeSelection(s('lens')), constraints: s('constraints'), note: s('note') }
+    // `industry` is the finer pond INSIDE the sector, and it crosses only when Atlas actually holds a
+    // view ("semis, not software"). Absent, Argus narrows the sector itself — that is screening
+    // mechanics and its job. Present, it is a judgment and therefore has to travel as a field: buried
+    // in free-text constraints it is a hint Argus may or may not treat as binding.
+    return { sector, industry: s('industry'), style, cap_band: s('cap_band'), lens: normalizeSelection(s('lens')), constraints: s('constraints'), note: s('note') }
 }
 
 /**
