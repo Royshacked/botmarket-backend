@@ -110,3 +110,35 @@ test('a payload without it yields null, never a fabricated figure', () => {
     assert.equal(a.freeMargin, null)
     assert.equal(a.balance, 50_000)
 })
+
+// ── virtual accounts: cash does NOT drop when a position opens ────────────────
+// The correction that mattered. adjustBalance moves cash by the COMMISSION on open and by the
+// realized amount on CLOSE — so cashBalance is starting-balance + realized P&L and still counts
+// every dollar sitting in an open holding. A paper account with equities showed its full balance
+// as spendable, which is what the user hit. Deployable = cash MINUS committed cost basis.
+import { deployable } from '../../api/broker/paperExecution.service.js'
+
+test('deployable subtracts what open positions already committed', () => {
+    // $50k started, $30k of it now in equities → $20k left to allocate, not $50k.
+    assert.equal(deployable({ cashBalance: 50_000, marginUsed: 30_000 }), 20_000)
+})
+
+test('fully invested reads as zero, not as the whole balance', () => {
+    assert.equal(deployable({ cashBalance: 50_000, marginUsed: 50_000 }), 0)
+})
+
+test('equity is NOT the answer — it counts the holdings as spendable', () => {
+    // The old no-leverage fallback returned equity (cash + unrealized). With $30k invested and a
+    // $2k gain that reported $52k deployable on an account with $20k of actual room.
+    const eq = { cashBalance: 50_000, marginUsed: 30_000, unrealized: 2_000, equity: 52_000, buyingPower: null }
+    assert.equal(deployable(eq), 20_000)
+    assert.notEqual(deployable(eq), eq.equity)
+})
+
+test('with leverage on, buying power replaces cash as the base', () => {
+    assert.equal(deployable({ cashBalance: 50_000, marginUsed: 30_000, buyingPower: 100_000 }), 70_000)
+})
+
+test('never negative — an over-committed account reports nothing to deploy', () => {
+    assert.equal(deployable({ cashBalance: 10_000, marginUsed: 25_000 }), 0)
+})

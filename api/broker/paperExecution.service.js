@@ -270,6 +270,35 @@ export async function reducePosition({ userId, positionId, qty, price, reason = 
  * @param {string} accountId
  * @returns {Promise<{currency,cashBalance,realizedPnl,unrealized,equity,openPositions,marginUsed,buyingPower,overLeveraged}>}
  */
+/**
+ * Capital already COMMITTED to open positions, per account — cost basis at entry, the same
+ * `|avgPrice × qty|` computeEquity calls `marginUsed`.
+ *
+ * Exists because a virtual account's cash does NOT move when a position opens: `adjustBalance` is
+ * called with the commission on open and the realized amount on CLOSE, so `cashBalance` is
+ * starting-balance + realized P&L and still counts every dollar sitting in an open holding. An agent
+ * sizing a new book against it allocates money that is already invested — which is exactly what a
+ * user with open equities saw.
+ *
+ * One query for every account, and deliberately NO quote fetch: cost basis needs entry price only.
+ * That is what makes this affordable on an accounts LIST, which is called far more often than the
+ * single-account read.
+ */
+export async function committedByAccount(userId) {
+    const positions = await paperBrokerService.listPositions(userId, { status: 'open' })
+    const by = new Map()
+    for (const p of positions) {
+        const key = String(p.accountId)
+        by.set(key, (by.get(key) ?? 0) + Math.abs(p.avgPrice * p.qty))
+    }
+    return by
+}
+
+/** Deployable cash: leveraged buying power where leverage is on, otherwise cash not yet committed. */
+export function deployable({ cashBalance = 0, marginUsed = 0, buyingPower = null } = {}) {
+    return round2(Math.max(0, (buyingPower != null ? buyingPower : cashBalance) - marginUsed))
+}
+
 export async function computeEquity(userId, accountId) {
     const acct = await paperBrokerService.getAccount(userId, accountId)
     if (!acct) return {

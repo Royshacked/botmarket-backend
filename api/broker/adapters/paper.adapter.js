@@ -23,6 +23,8 @@ import { paperBrokerService } from '../paperBroker.service.js'
 import { openPosition,
          reducePosition,
          computeEquity,
+         committedByAccount,
+         deployable,
          latestMarkPrice,
          dirSign, round2 }    from '../paperExecution.service.js'
 import { logger }             from '../../../services/logger.service.js'
@@ -54,7 +56,10 @@ export class PaperAdapter extends BrokerAdapter {
 
         // Exposure model: marginUsed = Σ notional. A buying-power cap (settings.maxLeverage)
         // is ADVISORY — freeMargin/marginLevel reflect it for display, but a fill is never
-        // blocked (see computeEquity). maxLeverage 0 = off → buyingPower null, freeMargin == equity.
+        // blocked (see computeEquity).
+        // With leverage OFF this used to report freeMargin = equity, which counts the value of what
+        // the account already holds as though it were spendable. Deployable cash is cash not yet
+        // committed (see `deployable`) — equity is what the account is WORTH, not what it can buy.
         const maxLeverage = Number(acct.settings?.maxLeverage) || 0
         return {
             id:          acct.accountId,
@@ -64,7 +69,7 @@ export class PaperAdapter extends BrokerAdapter {
             balance:     eq.cashBalance,
             equity:      eq.equity,
             margin:      eq.marginUsed,
-            freeMargin:  eq.buyingPower != null ? Math.max(0, round2(eq.buyingPower - eq.marginUsed)) : eq.equity,
+            freeMargin:  deployable(eq),
             marginLevel: eq.marginUsed > 0 ? round2((eq.equity / eq.marginUsed) * 100) : null,
             leverage:    maxLeverage || null,
         }
@@ -73,17 +78,23 @@ export class PaperAdapter extends BrokerAdapter {
     async getTradingAccounts(userId) {
         let accts = await paperBrokerService.listAccounts(userId, { mode: 'paper' })
         if (!accts.length) accts = [await paperBrokerService.getOrCreateDefaultAccount(userId, 'paper')]
+        // Cash minus what is already committed to open positions. A virtual account's cash does NOT
+        // drop when a position opens (see committedByAccount), so balance alone tells an agent it has
+        // capital that is in fact invested. One query for all accounts, no quotes.
+        const committed = await committedByAccount(userId)
         return accts.map(acct => ({
             id:       acct.accountId,
             login:    acct.accountId,
             name:     acct.name,
             currency: acct.currency,
             balance:  round2(acct.cashBalance),
-            // A virtual account's cash is ALREADY net of open positions — a fill decrements
-            // cashBalance — so cash IS the deployable figure here. Stated explicitly rather
-            // than left null, so the agents size against a real number instead of falling
-            // back to balance with a "assumes uninvested" caveat that isn't true here.
-            freeMargin: round2(acct.cashBalance),
+            freeMargin: deployable({
+                cashBalance: acct.cashBalance,
+                marginUsed:  committed.get(String(acct.accountId)) ?? 0,
+                buyingPower: Number(acct.settings?.maxLeverage) > 0
+                    ? round2(acct.cashBalance * Number(acct.settings.maxLeverage))
+                    : null,
+            }),
             broker:   'Paper',
             isLive:   false,
         }))

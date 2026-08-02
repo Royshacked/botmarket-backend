@@ -15,7 +15,7 @@
 
 import { PaperAdapter }       from './paper.adapter.js'
 import { paperBrokerService } from '../paperBroker.service.js'
-import { computeEquity, round2 } from '../paperExecution.service.js'
+import { computeEquity, committedByAccount, deployable, round2 } from '../paperExecution.service.js'
 
 const MANUAL = 'manual'
 
@@ -51,7 +51,9 @@ export class ManualAdapter extends PaperAdapter {
             : (await paperBrokerService.listAccounts(userId, { mode: MANUAL }))[0]
         if (!acct) throw Object.assign(new Error(`manual account ${accountId ?? ''} not found`), { status: 404 })
         const eq = await computeEquity(userId, acct.accountId)
-        // No cost model / leverage cap → no margin bookkeeping (free margin == equity).
+        // No cost model / leverage cap → no margin bookkeeping. Free margin is cash NOT yet
+        // committed to open positions, not equity: equity is what the account is worth, including
+        // the holdings themselves, so reporting it as deployable double-counts them.
         return {
             id:          acct.accountId,
             login:       acct.accountId,
@@ -60,7 +62,7 @@ export class ManualAdapter extends PaperAdapter {
             balance:     eq.cashBalance,
             equity:      eq.equity,
             margin:      eq.marginUsed,
-            freeMargin:  eq.equity,
+            freeMargin:  deployable(eq),
             marginLevel: null,
             leverage:    null,
         }
@@ -68,17 +70,19 @@ export class ManualAdapter extends PaperAdapter {
 
     async getTradingAccounts(userId) {
         const accts = await paperBrokerService.listAccounts(userId, { mode: MANUAL })
+        const committed = await committedByAccount(userId)
         return accts.map(acct => ({
             id:       acct.accountId,
             login:    acct.accountId,
             name:     acct.name,
             currency: acct.currency,
             balance:  round2(acct.cashBalance),
-            // A virtual account's cash is ALREADY net of open positions — a fill decrements
-            // cashBalance — so cash IS the deployable figure here. Stated explicitly rather
-            // than left null, so the agents size against a real number instead of falling
-            // back to balance with a "assumes uninvested" caveat that isn't true here.
-            freeMargin: round2(acct.cashBalance),
+            // Cash minus what open positions already committed — a virtual account's cash does not
+            // drop when a position opens (see committedByAccount). One query, no quotes.
+            freeMargin: deployable({
+                cashBalance: acct.cashBalance,
+                marginUsed:  committed.get(String(acct.accountId)) ?? 0,
+            }),
             broker:   'Manual',
             isLive:   false,
         }))
