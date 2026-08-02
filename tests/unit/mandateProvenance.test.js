@@ -163,3 +163,35 @@ test('coverage that exists is offered as the thing to build from', () => {
     assert.match(out, /AVGO/)
     assert.ok(!/END THE TURN/.test(out), 'the hand-off instruction belongs only to the empty case')
 })
+
+// ── the benchmark the prompt proposes must be one the code can price ──────────
+// The same mandate was producing a different benchmark every run: benchmark is not in the
+// minimum-to-proceed, so it never reached <portfolio_mandate>, so it was re-decided from scratch on
+// every turn — and nothing constrained the choice. The prompt now names defaults per objective; if
+// any of them can't resolve to a tradeable proxy, the review has nothing to compute against and the
+// over/underweights of Phase 3 measure against a number that doesn't exist.
+import { benchmarkTicker } from '../../services/portfolioReview.util.js'
+import { readFileSync } from 'fs'
+import { fileURLToPath as _fu } from 'url'
+import { dirname as _dn, join } from 'path'
+const ROOT_MD = join(_dn(_fu(import.meta.url)), '../../')
+
+test('every benchmark the prompt names resolves to a proxy the app can price', () => {
+    for (const [name, expected] of [
+        ['S&P 500', 'SPY'], ['60/40', 'AOR'], ['Russell 2000', 'IWM'],
+        ['Nasdaq 100', 'QQQ'], ['MSCI World', 'ACWI'],
+    ]) {
+        assert.equal(benchmarkTicker(name), expected, `${name} must resolve`)
+    }
+    // "absolute return" is deliberately un-priceable — it means measure against zero, not an index.
+    assert.equal(benchmarkTicker('absolute return'), null)
+})
+
+test('the prompt does not offer a benchmark the code cannot resolve', () => {
+    const prompt = readFileSync(join(ROOT_MD, 'portfolio_system_prompt.md'), 'utf8')
+    const line = prompt.split('\n').find(l => l.includes('Default by objective'))
+    assert.ok(line !== undefined || prompt.includes('growth → S&P 500'), 'the default table is still there')
+    for (const name of ['S&P 500', '60/40', 'Russell 2000', 'Nasdaq 100', 'MSCI World']) {
+        if (prompt.includes(name)) assert.ok(benchmarkTicker(name), `prompt offers ${name} but it resolves to null`)
+    }
+})
