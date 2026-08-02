@@ -1,6 +1,19 @@
-# Investor Schools (design — nothing built)
+# Investor Schools (BUILT 2026-08-02 — two axes)
 
-2026-08-01. Discussion only. No code, no decision locked.
+2026-08-01 design. **Built 2026-08-02**, two axes, not live-verified.
+
+The open question below ("two axes, or four flat schools?") is **settled: two**, and not on taste —
+they land on two different mechanical seams. Selection is the only half that crosses to Argus (the
+`<screen_request>.lens`), where it re-weights the investing composite; allocation never leaves Atlas,
+where it is the Phase-5 weighting rule. Flattening them would have forced All Weather to fake a
+stock-picking view AND left the sizing rule with nowhere to live.
+
+Where it lives: `services/investorSchools.js` (the vocabulary, the rules text, the incoherent pairs,
+the injected block, and the per-lens ranking weights — one source, read by Atlas and Argus alike).
+Tests: `tests/unit/investorSchools.test.js`.
+
+The other open question — is the school visible to the user as a badge, or met only through Atlas's
+words? — is still open. Today: internal, though the lens is saved on the list.
 
 Teach Atlas the **way** great investors think — not what they hold. (Tracking real holdings needs
 13F: FMP's is Premium-locked, `fmp.provider.js:18`; EDGAR is reachable via `sec.provider.js` but a
@@ -33,7 +46,27 @@ Buffett = conviction-weighted + quality-value. All Weather = risk-balanced + pas
 Cost: incoherent combos exist (risk-balanced + concentrated quality-value fights itself) — Atlas must
 say so, not silently build something confused.
 
-**OPEN:** two axes, or four flat schools and live with All Weather as the odd one out?
+**SETTLED — two axes** (see the header). Each axis carries a `rule` (what governs) and a `review`
+question (what the book is re-read against); the review question is the part that pays, per *What it
+buys* below.
+
+**The mechanical half, which is what stops a school being a costume.** A lens that changes only the
+prose is indistinguishable from a working feature in any transcript. So the selection school
+re-weights Argus's four investing axes — which axis LEADS is the school:
+
+| Lens | quality | valuation | growth | balance_sheet |
+|---|---|---|---|---|
+| *(none — pre-schools blend)* | .30 | .30 | .25 | .15 |
+| quality-value | .35 | .35 | .10 | .20 |
+| growth-durability | .30 | .15 | .40 | .15 |
+| income | .25 | .25 | .15 | **.35** |
+
+`income` leads on balance_sheet because there is no yield axis — payout *coverage* is the honest
+proxy, and a high yield is the market pricing a cut. `passive` has no row: it never screens.
+
+Absent/unknown lens → the neutral blend, byte-identical to the pre-schools set, so a book built
+before this feature ranks exactly as it did. That is deliberate: **normalize returns `null`, never a
+default** — a mandate must not acquire a stance by accident.
 
 ## THE TRAP — regime moves the weights, not the worldview
 
@@ -80,8 +113,24 @@ Not edge — encoding the method doesn't produce the returns, and the prompts mu
 has the moat eroded / has the runway shortened / is the payout covered / has risk drifted from balance.
 Sharpens **Themis and the review** more than construction.
 
+## Two traps found while building
+
+Both are the frozen-thesis break arriving by a quieter door than a regime signal:
+
+- **The review must not retro-fit a school.** The injected block offers its menu only when a mandate
+  is being established (`buildSchoolSection(mandate, { menu: !isReviewMode })`). Offered mid-review,
+  Atlas would adopt a stance the book was never built under and then judge the holdings by it.
+- **An edit turn that forgets to restate the lens** would re-rank every kept name under the neutral
+  blend — the order changing under the user for a school they never dropped. `_normalizeScan` falls
+  back to the lens of the list being edited.
+
+Also worth knowing: the saved-scan document whitelists its fields, so `lens` had to be added to BOTH
+the create and the patch paths or the school would have been dropped at save while every in-memory
+test passed.
+
 ## Open questions
 
-- Two axes or four flat schools?
 - Is the school visible to the user (a badge on the book), or an internal lens met only through
-  Atlas's words?
+  Atlas's words? Today: internal — but the lens IS persisted on the list, so a badge is a render away.
+- Allocation currently reaches Atlas as prose (the Phase-5 rule it applies itself). If the weights
+  ever move server-side, that rule needs a real implementation per school, not a prompt paragraph.

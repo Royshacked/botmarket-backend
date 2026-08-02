@@ -14,6 +14,7 @@ import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.t
 import { makeChartHandler } from './marketData.tools.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
 import { buildTagCaptures } from './llmStream.util.js'
+import { buildSchoolSection, normalizeAllocation, normalizeSelection } from './investorSchools.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[portfolioAgent]'
@@ -126,6 +127,12 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     const objectiveSection = buildObjectiveSection(objective)
     if (objectiveSection) dynamicSections.push(objectiveSection)
     if (mandate)    dynamicSections.push(_buildMandateSection(mandate))
+    // Right after the mandate, because it IS a mandate field — and because it governs how everything
+    // below is read: the selection school sets the bar for Phase 4, the allocation school sets the
+    // weighting rule for Phase 5, and both set the question this book is reviewed against. Rendered
+    // even with no mandate yet: with nothing chosen it is the menu Atlas picks from in Phase 1.
+    const schoolSection = buildSchoolSection(mandate, { menu: !isReviewMode })
+    if (schoolSection) dynamicSections.push(schoolSection)
     if (thesis)     dynamicSections.push(_buildThesisSection(thesis))
     if (lifecycle)  dynamicSections.push(_buildLifecycleSection(lifecycle))
     if (portfolioState) dynamicSections.push(_buildPortfolioStateSection(portfolioState, isReviewMode, reviewDelta))
@@ -226,7 +233,11 @@ export function _parseScreenRequest(raw) {
     const s = k => (typeof obj?.[k] === 'string' && obj[k].trim() ? obj[k].trim() : null)
     const sector = s('sector'), style = s('style')
     if (!sector && !style) return null   // a screen needs at least a sector or a style to constrain
-    return { sector, style, cap_band: s('cap_band'), constraints: s('constraints'), note: s('note') }
+    // `lens` is the mandate's SELECTION school riding the hop — the only half of the school Argus has
+    // any use for (a screener has nothing to do with how risk is spread). Validated against the same
+    // vocabulary both ends read, so a hallucinated school reaches the screen as "no lens" (the neutral
+    // ranking) rather than as a word nothing downstream understands.
+    return { sector, style, cap_band: s('cap_band'), lens: normalizeSelection(s('lens')), constraints: s('constraints'), note: s('note') }
 }
 
 /**
@@ -336,6 +347,13 @@ function _buildMandateSection(mandate) {
     if (mandate.riskTolerance) lines.push(`Risk tolerance: ${mandate.riskTolerance}`)
     if (mandate.constraints)   lines.push(`Constraints: ${mandate.constraints}`)
     if (mandate.benchmark)     lines.push(`Benchmark: ${mandate.benchmark}`)
+    // The two school axes are mandate fields like any other — named here so they are covered by the
+    // do-not-re-ask rule (a school that re-derives itself every turn from a slightly different
+    // sentence is the failure mode). What they MEAN is the INVESTMENT SCHOOL block below.
+    const selection  = normalizeSelection(mandate.selection)
+    const allocation = normalizeAllocation(mandate.allocation)
+    if (selection)  lines.push(`Selection school: ${selection}`)
+    if (allocation) lines.push(`Allocation school: ${allocation}`)
     lines.push('Do not re-ask for mandate details — use these directly.')
     return lines.join('\n')
 }

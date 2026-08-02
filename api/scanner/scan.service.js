@@ -42,6 +42,10 @@ async function saveScan(scan, userId) {
             style:      scan.style       ?? null,
             // Which Argus profile produced this list (P4a). investing → the names route to the Analyst.
             profile:    scan.profile === 'investing' ? 'investing' : 'trading',
+            // The SELECTION school it was screened under (investing lists only; normalized upstream).
+            // Saved because it is what the ranking MEANS — the same names under a different school are
+            // a different list, and one re-read months later has to say which bar it was held to.
+            lens:       scan.lens        ?? null,
             candidates: Array.isArray(scan.candidates) ? scan.candidates : [],
             // The scanner conversation that produced this list — lets the user
             // click the thesis to return to that chat.
@@ -86,6 +90,7 @@ async function updateScan(id, patch, userId) {
         if (patch.direction !== undefined)   set.direction  = patch.direction
         if (patch.style     !== undefined)   set.style      = patch.style
         if (patch.profile   !== undefined)   set.profile    = patch.profile === 'investing' ? 'investing' : 'trading'
+        if (patch.lens      !== undefined)   set.lens       = patch.lens
         if (Array.isArray(patch.candidates)) {
             set.candidates = patch.candidates
             await enrichWithProfiles(set.candidates, { key: 'ticker', overwriteName: false })

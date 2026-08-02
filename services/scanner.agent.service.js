@@ -16,6 +16,7 @@ import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.t
 import { buildTagCaptures } from './llmStream.util.js'
 import { isToolError } from './toolResult.util.js'
 import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS } from './scanner.grounding.js'
+import { normalizeSelection, selectionWeights } from './investorSchools.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[scannerAgent]'
@@ -276,6 +277,16 @@ function _normalizeScan(scan, editList = null, ledger = null, profile = 'trading
     // so resolve it up front and thread it into every candidate's score.
     const style = SCAN_STYLES.includes(scan.style) ? scan.style : null
     const prof  = profile === 'investing' ? 'investing' : 'trading'
+    // The SELECTION school this list was screened under — Atlas's half of the mandate, inherited
+    // across the sleeve hand-off and restated by Argus. It re-weights the investing composite (which
+    // axis leads IS the school), so an unstated or unknown lens falls back to the neutral blend and
+    // ranks exactly as lists did before schools existed. Trading lists have no lens.
+    // Falls back to the list being EDITED: an edit turn that forgets to restate the school would
+    // otherwise re-rank every kept name under the neutral blend — the order silently changing while
+    // the user watches, for a school they never dropped.
+    const lens  = prof === 'investing'
+        ? (normalizeSelection(scan.lens) ?? normalizeSelection(editList?.lens))
+        : null
     const candidates = Array.isArray(scan.candidates) ? scan.candidates : []
     const counts = { sourced: 0, validated: 0, kept: 0, dropped: 0 }
     const clean = []
@@ -289,7 +300,7 @@ function _normalizeScan(scan, editList = null, ledger = null, profile = 'trading
         const isBareReference = !c.analysis && !c.signals && !c.thesis
         if ((c.keep === true || isBareReference) && priorByTicker.has(key)) {
             const prior = priorByTicker.get(key)
-            const cand = _cleanCandidate(prior, style, prof)
+            const cand = _cleanCandidate(prior, style, prof, lens)
             cand.grounding = prior.grounding ?? 'kept'
             clean.push(cand)
             counts.kept++
@@ -304,7 +315,7 @@ function _normalizeScan(scan, editList = null, ledger = null, profile = 'trading
             if (tier === 'ungrounded') { counts.dropped++; continue }   // A1: drop pure fabrications
             counts[tier]++
         }
-        const cand = _cleanCandidate(c, style, prof)
+        const cand = _cleanCandidate(c, style, prof, lens)
         if (ledger) cand.grounding = tier
         clean.push(cand)
     }
@@ -332,6 +343,10 @@ function _normalizeScan(scan, editList = null, ledger = null, profile = 'trading
         // P4a: which Argus lens produced this list + where a candidate is built. investing → the Analyst
         // (research), trading → the trade-idea builder (Kairos).
         profile:     prof,
+        // The selection school it was screened under (investing only). Persisted with the list because
+        // it is what the ranking MEANS — the same names under a different school are a different list,
+        // and a saved list re-read months later has to say which bar it was held to.
+        lens,
         destination: prof === 'investing' ? 'analyst' : 'kairos',
         candidates: clean,
     }
@@ -363,8 +378,8 @@ function _feasibleMode(mode, score) {
     return (Number.isFinite(liq) && liq < MODE_LIQUIDITY_FLOOR) ? 'discretionary' : mode
 }
 
-function _cleanCandidate(c, style = null, profile = 'trading') {
-    const score = _cleanScore(c.score, style, profile)
+function _cleanCandidate(c, style = null, profile = 'trading', lens = null) {
+    const score = _cleanScore(c.score, style, profile, lens)
     return {
         ticker:    c.ticker.toUpperCase().trim(),
         name:      typeof c.name === 'string' ? c.name : null,
@@ -394,16 +409,16 @@ const TRADING_WEIGHTS = {
     swing:       { catalyst: 0.30, technical: 0.30, relativeStrength: 0.25, liquidity: 0.15 },
     'long term': { catalyst: 0.35, technical: 0.20, relativeStrength: 0.25, liquidity: 0.20 },
 }
-// INVESTING profile axes (P4a) — a fundamental/quality lens for portfolio candidates. ONE weight set:
-// investing is long-horizon, so style doesn't re-weight it. quality + valuation lead; then growth;
-// balance-sheet a light gate. Sums to 1.
+// INVESTING profile axes (P4a) — a fundamental/quality lens for portfolio candidates. The horizon
+// doesn't re-weight these (investing is long-horizon by definition); the SELECTION SCHOOL does, and
+// that is the whole point of it: which axis leads IS the school (investorSchools.js). No lens → the
+// neutral blend, identical to the pre-schools single set.
 const INVESTING_COMPONENTS = ['quality', 'valuation', 'growth', 'balance_sheet']
-const INVESTING_WEIGHTS    = { quality: 0.30, valuation: 0.30, growth: 0.25, balance_sheet: 0.15 }
 
-// Resolve the scored axes + their weights for a (profile, style). Trading is style-weighted; investing
-// is a single set (null/unknown trading style → swing).
-function _scoreSpec(profile, style) {
-    if (profile === 'investing') return { components: INVESTING_COMPONENTS, weights: INVESTING_WEIGHTS }
+// Resolve the scored axes + their weights for a (profile, style, lens). Trading is style-weighted;
+// investing is lens-weighted (null/unknown trading style → swing, null/unknown lens → neutral).
+function _scoreSpec(profile, style, lens = null) {
+    if (profile === 'investing') return { components: INVESTING_COMPONENTS, weights: selectionWeights(lens) }
     return { components: TRADING_COMPONENTS, weights: TRADING_WEIGHTS[style] || TRADING_WEIGHTS.swing }
 }
 
@@ -424,9 +439,9 @@ function _composeTotal(out, components, weights) {
 // quality/valuation/growth/balance_sheet). Each axis clamped to 0–100; a non-numeric axis → null so a
 // partial card still renders. `total` is RECOMPUTED from the present axes (Argus #2) — the model's total
 // is discarded. A bare total with no axes is never trusted.
-function _cleanScore(raw, style = null, profile = 'trading') {
+function _cleanScore(raw, style = null, profile = 'trading', lens = null) {
     if (!raw || typeof raw !== 'object') return null
-    const { components, weights } = _scoreSpec(profile, style)
+    const { components, weights } = _scoreSpec(profile, style, lens)
     const out = {}
     let any = false
     for (const k of components) {

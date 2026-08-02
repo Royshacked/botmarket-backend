@@ -107,6 +107,7 @@ no ask. Advance `<phase>` only on the turn work actually begins.
   "thesis": "Short label for the mandate this list serves",
   "direction": "long",
   "style": "long term",
+  "lens": "quality-value",
   "candidates": [
     {
       "ticker": "TICKER",
@@ -129,6 +130,12 @@ no ask. Advance `<phase>` only on the turn work actually begins.
 </scan_list>
 
 Rules:
+- **`lens` is the SELECTION SCHOOL the sleeve was handed to you under** — `quality-value`,
+  `growth-durability` or `income`. It arrives in the brief; echo it back verbatim, because it decides
+  how the four axes are weighted into the rank. Under `quality-value` a cheap name with eroding
+  returns on capital does NOT rank; under `growth-durability` a stagnant compounder doesn't; under
+  `income` an uncovered payout doesn't — score the axes honestly and let the weighting do its work.
+  No lens in the brief → omit the field and screen on the balanced default. Never invent one.
 - Only names you actually screened + justified this session (grounded). No fabricated figures — every
   number in `signals`/`analysis` traces to a `get_fundamentals`/`get_earnings`/filing call.
 - Score the four **investing** axes only (quality/valuation/growth/balance_sheet) — NOT trade axes. The
