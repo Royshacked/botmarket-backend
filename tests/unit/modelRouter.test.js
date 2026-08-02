@@ -5,6 +5,7 @@ import {
     _normalizeClassification,
     ROUTING_MODES,
     REASONING_EFFORT,
+    _phaseAboutToRun,
 } from '../../services/modelRouter.service.js'
 import { isAllowedModel } from '../../services/llmModels.js'
 import { _thinkingConfig } from '../../providers/anthropic.provider.js'
@@ -130,4 +131,36 @@ test('pricing: cache reads/writes are billed at 0.1x / 1.25x input', () => {
 test('pricing: an unpriced model falls back instead of billing zero', () => {
     const cost = calcCost('some-future-model', { input_tokens: 1_000_000 })
     assert.equal(cost, 3)
+})
+
+// ── the phase a bare go-ahead actually unlocks ────────────────────────────────
+// The client reports the phase that just FINISHED. On "go" the agent begins the NEXT one, so routing
+// on the reported number picks the model for work already done — and picks it one phase too light on
+// exactly the turns a user waves through. The classifier suffers most: its inputs are the agent, that
+// stale phase, and the word "go", which describes no task at all.
+test('a bare go-ahead routes for the phase about to run, not the one just finished', () => {
+    for (const word of ['go', 'yes', 'ok', 'proceed', 'continue', 'next', 'do it', 'Go ahead.']) {
+        assert.equal(_phaseAboutToRun(3, word, 'portfolio'), 4, `"${word}" should advance`)
+    }
+})
+
+test('a message with actual content routes for the phase as reported', () => {
+    // Only an empty go-ahead is ambiguous — real instructions describe their own work.
+    for (const msg of ['go long NVDA instead', 'yes but drop the utilities sleeve', 'what is ROIC?']) {
+        assert.equal(_phaseAboutToRun(3, msg, 'portfolio'), 3, `"${msg}" should not advance`)
+    }
+})
+
+test('it never runs off the end of the ladder', () => {
+    assert.equal(_phaseAboutToRun(6, 'go', 'portfolio'), 6)   // portfolio tops out at 6
+    assert.equal(_phaseAboutToRun(4, 'go', 'scanner'), 4)     // scanner at 4
+})
+
+test('a missing or non-numeric phase is passed through untouched', () => {
+    assert.equal(_phaseAboutToRun(null, 'go', 'portfolio'), null)
+    assert.equal(_phaseAboutToRun(undefined, 'go', 'portfolio'), undefined)
+})
+
+test('an agent with no phase ladder still advances (mentor is judged per turn)', () => {
+    assert.equal(_phaseAboutToRun(2, 'go', 'mentor'), 3)
 })

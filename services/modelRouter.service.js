@@ -92,23 +92,51 @@ export async function resolveModel(opts) {
     return _floorEffort(await _resolveRoute(opts ?? {}))
 }
 
+// A bare go-ahead is the emptiest message a user sends and it unlocks the heaviest work.
+//
+// The phase the client reports is the one that just FINISHED — every agent prompt says the number
+// advances on the turn the next stage's work begins. So "go" after a phase-3 architecture routes for
+// phase 3, while phase 4 selection and phase 5 sizing are what actually run. The router was picking
+// the model for work already done, and picking it one phase too light on exactly the turns a user
+// waves through. The classifier had it worse: its three inputs are the agent, that stale phase, and
+// the word "go" — which says nothing about the task at all, though its own rules would send sizing to
+// opus with high reasoning if it ever learned that sizing was next.
+//
+// Pure; exported for tests.
+const _CONTINUATION = /^(go|go ahead|yes|yep|yeah|ok|okay|sure|proceed|continue|next|do it|please do|carry on)\b[\s.!]*$/i
+export function _phaseAboutToRun(phase, lastMessage, agent) {
+    // `phase == null` before Number(): Number(null) is 0, which is finite, so a null phase would
+    // otherwise advance to phase 1 and route a mid-conversation turn as a fresh extraction.
+    if (phase == null) return phase
+    const n = Number(phase)
+    if (!Number.isFinite(n)) return phase
+    if (!_CONTINUATION.test(String(lastMessage ?? '').trim())) return phase
+    // Don't run off the end of the ladder — the last phase repeats rather than falling to the
+    // default. Agents with no ladder (axl, mentor) have an EMPTY table, not a missing one, and
+    // Math.max() of nothing is -Infinity — so check for keys, not for the table.
+    const keys = Object.keys(PHASE_TABLES[agent] ?? {}).map(Number)
+    return keys.length ? Math.min(n + 1, Math.max(...keys)) : n + 1
+}
+
 async function _resolveRoute({ routingMode, agent, phase, model, reasoningEffort, lastMessage }) {
     if (routingMode === ROUTING_MODES.MANUAL) {
         return { model: model ?? SONNET, reasoningEffort: reasoningEffort ?? REASONING_EFFORT.OFF }
     }
 
+    const next = _phaseAboutToRun(phase, lastMessage, agent)
+
     if (routingMode === ROUTING_MODES.AUTO) {
         const table = PHASE_TABLES[agent] ?? {}
-        return table[phase] ?? DEFAULT_ROUTE
+        return table[next] ?? DEFAULT_ROUTE
     }
 
     if (routingMode === ROUTING_MODES.CLASSIFIER) {
         try {
-            return await _classify(agent, phase, lastMessage)
+            return await _classify(agent, next, lastMessage)
         } catch {
             // classifier failed — fall back to phase-based
             const table = PHASE_TABLES[agent] ?? {}
-            return table[phase] ?? DEFAULT_ROUTE
+            return table[next] ?? DEFAULT_ROUTE
         }
     }
 
@@ -120,7 +148,10 @@ async function _classify(agent, phase, lastMessage) {
         model:      HAIKU,
         max_tokens: 32,
         system:     _CLASSIFIER_SYSTEM,
-        messages:   [{ role: 'user', content: `Agent: ${agent}\nPhase: ${phase ?? 'unknown'}\nMessage: ${String(lastMessage ?? '').slice(0, 400)}` }],
+        // "Phase about to run", not the current one: the number is already advanced for a bare
+        // go-ahead (see _phaseAboutToRun), and the label is what tells the classifier to judge the
+        // work COMING rather than the turn that just ended.
+        messages:   [{ role: 'user', content: `Agent: ${agent}\nPhase about to run: ${phase ?? 'unknown'}\nMessage: ${String(lastMessage ?? '').slice(0, 400)}` }],
     })
 
     const text = response.content[0]?.text ?? ''
