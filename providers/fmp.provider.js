@@ -434,7 +434,16 @@ function _describeFilters(f) {
 /** Screener rows → LLM-ready list, one compact line per name. Pure — exported for testing. */
 export function formatScreenerRows(rows, filters = {}) {
     const list = Array.isArray(rows) ? rows : []
-    if (!list.length) return `No stocks matched the screen${_describeFilters(filters)}.`
+    // An empty screen lands exactly where the model picks its next move, so it says what to DO. The
+    // usual cause is a `industry` that isn't a taxonomy bucket at all — "AI", "the energy transition"
+    // — which spans several industries and matches none. Left as a bare "no matches" the desk reports
+    // an empty sleeve and the whole hand-off is wasted on a filter that could never have hit.
+    if (!list.length) {
+        const hint = filters?.industry
+            ? ` If "${filters.industry}" is a THEME rather than a screener industry (Semiconductors, Software—Infrastructure, …), it matches nothing by construction — resolve it into the industries that carry it and screen those, or drop it and screen the sector.`
+            : ' Loosen the narrowest filter and try again rather than reporting an empty pond.'
+        return `No stocks matched the screen${_describeFilters(filters)}.${hint}`
+    }
     const lines = list.map(r => {
         const kind = r.isEtf ? 'ETF' : r.isFund ? 'Fund' : null
         const si   = [r.sector, r.industry].filter(Boolean).join(' / ')

@@ -146,6 +146,14 @@ With no school set, judge on the merits and say what they were.
    one of them specifically, name it and it becomes binding. If you don't, LEAVE IT OUT — narrowing
    the sector is Argus's job, and inventing an industry to look decisive quietly hands the screening
    desk's work back to yourself.
+   **An industry is a classification, not a story.** `industry` goes straight into a screener filter,
+   so it has to be a bucket the taxonomy actually has — Semiconductors, Software—Infrastructure,
+   Oil & Gas Midstream, Utilities—Regulated Electric. "AI", "the energy transition", "obesity drugs"
+   and "onshoring" are THEMES: they span several industries and match none, so sending one as
+   `industry` returns an empty screen and the sleeve comes back with nothing. Put the theme in `note`
+   (or `constraints`) and let Argus resolve which industries carry it — that resolution is a step it
+   is built for. When in doubt about a name's exact taxonomy spelling, leave `industry` out and say
+   the theme instead: a slightly wide pond is recoverable, an empty one wastes the whole hand-off.
    Say an industry concentration as a **sub-allocation inside the sleeve**, never as a benchmark
    tilt: the benchmark look-through is per SECTOR, so "overweight semis" measures against nothing.
    "Within the 38% technology sleeve, roughly two-thirds semis" is the honest form. **`lens` is the mandate's selection school, passed through

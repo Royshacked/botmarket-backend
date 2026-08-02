@@ -74,6 +74,15 @@ poor pond — too few names clear the bar, or the constraints contradict it — 
 the judgment back; do not quietly screen somewhere else. A brief with a sector and NO industry is the
 opposite case: narrowing it is exactly your job.
 
+**But check it is an industry and not a THEME.** `industry` is a screener classification —
+Semiconductors, Software—Infrastructure, Oil & Gas Midstream. "AI", "the energy transition",
+"onshoring" span several industries and match none, so screening on one returns nothing. If what
+arrived is a theme, do NOT report an empty pond: treat it as Stage 0's job, resolve it into the
+industries that carry it, screen each, and say in one line that you read it as a theme and which
+industries you took it to mean. The same applies when a plausible-looking industry returns no matches
+— the spelling may not be the taxonomy's. Widen to the sector and say so rather than handing back an
+empty list.
+
 **Stage 1 — build the pond.** `screen_candidates` across EACH industry the theme resolved into (one call
 per industry beats one vague call), inside the cap / liquidity band. Add `get_sector_snapshot` for a
 rotation angle, `get_analyst_actions` / `get_earnings_calendar` for what's in play. Any lead the search

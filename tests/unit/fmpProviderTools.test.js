@@ -79,8 +79,17 @@ test('screener: row → compact line with derived dividend yield', () => {
 })
 
 test('screener: empty → no-match line naming the filters', () => {
-    assert.equal(formatScreenerRows([], { sector: 'Energy' }), 'No stocks matched the screen (Energy).')
-    assert.equal(formatScreenerRows(null, {}), 'No stocks matched the screen.')
+    // An empty screen carries an instruction, not just a status — it lands where the model chooses
+    // its next move, and a bare "no matches" gets reported to the user as an empty sleeve.
+    assert.match(formatScreenerRows([], { sector: 'Energy' }), /^No stocks matched the screen \(Energy\)\./)
+    assert.match(formatScreenerRows([], { sector: 'Energy' }), /Loosen the narrowest filter/)
+    assert.match(formatScreenerRows(null, {}), /^No stocks matched the screen\./)
+
+    // The usual cause: a THEME sent as an industry. It matches nothing by construction, so the
+    // message has to name that rather than let the desk conclude the pond is empty.
+    const themed = formatScreenerRows([], { sector: 'Technology', industry: 'AI' })
+    assert.match(themed, /"AI" is a THEME/)
+    assert.match(themed, /resolve it into the industries that carry it/)
 })
 
 test('screener: ETF flagged, plural count', () => {
