@@ -286,8 +286,44 @@ export function _finalizeToolBlocks(contentBlocks) {
 function _normalizeMessages(promptOrMessages) {
     if (typeof promptOrMessages === 'string') return [{ role: 'user', content: promptOrMessages }]
     if (Array.isArray(promptOrMessages))
-        return promptOrMessages.map((m) => ({ role: m.role, content: m.content }))
+        return _stampHistoryCache(promptOrMessages.map((m) => ({ role: m.role, content: m.content })))
     return []
+}
+
+/**
+ * Mark the end of the conversation history as a prompt-cache breakpoint. Pure; exported for tests.
+ *
+ * Every agent already caches its SYSTEM prompt, and none of them cached the conversation — so turn
+ * 9 re-read turns 1–8 at full price, and the longer the desk session ran the more it cost. Caching
+ * is a prefix match over `tools → system → messages`, so a breakpoint on the last history turn lets
+ * every following turn read the whole conversation at ~0.1×.
+ *
+ * It lives HERE, at the provider boundary, because `cache_control` is Anthropic's — the agents are
+ * multi-provider and must not learn about it. One stamp, every agent, no per-agent wiring.
+ *
+ * Deliberately once, on the way in: the tool loop appends to this array afterwards, and those blocks
+ * land after the breakpoint where they belong. A second breakpoint per tool round would spend the
+ * budget below for a within-turn prefix that is rarely read again.
+ *
+ * BUDGET: the API allows FOUR breakpoints per request and the agents already spend up to three (one
+ * on the tool list, one or two on the system prompt — Atlas and Kairos use two). This is the fourth.
+ * A new system-prompt breakpoint anywhere would push a request over the limit and it would be
+ * rejected, so add one only by taking one away.
+ *
+ * Skipped below two messages: a first turn has no prior conversation to reuse, and a breakpoint
+ * there would occupy a slot to cache something nothing will ever read.
+ */
+export function _stampHistoryCache(messages) {
+    if (messages.length < 2) return messages
+    const last = messages[messages.length - 1]
+    const stamped = typeof last.content === 'string'
+        ? [{ type: 'text', text: last.content, cache_control: { type: 'ephemeral' } }]
+        : Array.isArray(last.content) && last.content.length
+            ? last.content.map((b, i) =>
+                (i === last.content.length - 1 ? { ...b, cache_control: { type: 'ephemeral' } } : b))
+            : null
+    if (!stamped) return messages
+    return [...messages.slice(0, -1), { ...last, content: stamped }]
 }
 
 function _extractText(content) {

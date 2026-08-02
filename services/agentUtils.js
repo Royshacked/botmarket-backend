@@ -57,6 +57,33 @@ export const COMMON_TOOL_HANDLERS = {
     ),
 }
 
+// How far the history is allowed to grow past `maxCount` before it is trimmed back to it. The
+// history is trimmed on a HIGH-WATER MARK, not on every turn — see trimHistory.
+const HISTORY_CEILING_FACTOR = 3
+
+/**
+ * Trim a coalesced history to `keep` turns, but only once it has grown past keep × 3.
+ *
+ * A sliding window (`slice(-keep)` every turn) drops the oldest turn on EVERY turn, and that is
+ * expensive twice over. The model loses the start of the conversation permanently — the constraint
+ * the user set ten turns ago is simply gone, so the desk re-asks and re-suggests things already
+ * settled. And prompt caching is a PREFIX match: shifting the first message by one turn changes the
+ * first byte, so the cached history is thrown away and re-read at full price, every turn, forever.
+ *
+ * Trimming on a high-water mark fixes both. Between trims the prefix is byte-stable, so the cache
+ * reads; the history runs 1–3× longer before anything is dropped; and the cost is one cache miss per
+ * trim instead of one per turn.
+ *
+ * Guarantees the result still opens on a `user` turn: the API rejects a history that starts with an
+ * assistant message, and slicing a strictly-alternating list to an even count lands on an assistant
+ * whenever the total is odd — which it is on exactly the turns the user is speaking.
+ */
+export function trimHistory(merged, keep) {
+    if (!(keep > 0) || merged.length <= keep * HISTORY_CEILING_FACTOR) return merged
+    const cut = merged.slice(-keep)
+    return cut[0]?.role === 'assistant' ? cut.slice(1) : cut
+}
+
 export function normalizeMessages(messages, maxCount) {
     if (!Array.isArray(messages)) return []
     const cleaned = messages
@@ -71,7 +98,7 @@ export function normalizeMessages(messages, maxCount) {
         if (last && last.role === m.role) last.content += `\n\n${m.content}`
         else merged.push({ ...m })
     }
-    return merged.slice(-maxCount)
+    return trimHistory(merged, maxCount)
 }
 
 // ─── Prompt hot-reload loader ─────────────────────────────────────────────────
