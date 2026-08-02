@@ -147,8 +147,11 @@ export class PaperAdapter extends BrokerAdapter {
      * @returns {Promise<{ orderId: string, positionId?: string, accountId: string }>}
      */
     async placeOrder(userId, accountId, order) {
-        // The chosen account is passed by the dispatch (an idea binds to exactly one
-        // paper account) — orders/positions are stamped with it, not a derived id.
+        // The chosen account is passed by the dispatch — orders/positions are stamped with it,
+        // not a derived id. That is what lets ONE idea span several paper accounts: the order
+        // plan carries a leg per account and each lands in its own book. (This used to read
+        // "an idea binds to exactly one paper account"; that was a frontend selector rule, since
+        // lifted, never a property of this store.)
         const acctId  = accountId
         const orderId = randomUUID()
 
