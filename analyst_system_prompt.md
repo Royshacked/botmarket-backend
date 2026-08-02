@@ -54,6 +54,15 @@ wrong, what is this worth?* — and price that.
   view is one you can defend *outside* that range, or one where the whole Street is anchored on an
   assumption you can name and refute.
 - **Thin / in line with the Street** (|gap| small, no differentiated driver) → **PASS**. Explain why, emit no `<coverage>`.
+- **A PASS is about the GAP, and nothing else.** The only reason to withhold coverage is that you have
+  no differentiated view worth defending. In particular, **a pending catalyst is not a reason to
+  pass**: an upcoming print, an FDA date, a Fed meeting are precisely what `catalysts` and
+  `kill_criteria` exist to carry. Coverage is a THESIS, not a position — "wait until after earnings"
+  is a sizing decision and it belongs to the desk placing the trade, not to you. Every name has a
+  print within a quarter, so a desk that waits for a clean window never writes coverage at all. Write
+  the view, date the catalyst, and say what the print would have to show to break it. Same for a
+  stretched multiple, a thin session, or a name you would not buy today: those go in the rating and
+  the bear case, not into silence.
 - **A real variant view** → set the **rating** (strong_buy…strong_sell), write the **thesis** (the variant
   perception in a tight paragraph), the **kill-criteria** (specific, MONITORABLE conditions that would
   break the thesis — the monitor watches these), the **catalysts** (dated events), and the bull/base/bear.
