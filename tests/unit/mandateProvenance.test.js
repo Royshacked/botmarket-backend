@@ -142,3 +142,24 @@ test('with leverage on, buying power replaces cash as the base', () => {
 test('never negative — an over-committed account reports nothing to deploy', () => {
     assert.equal(deployable({ cashBalance: 10_000, marginUsed: 25_000 }), 0)
 })
+
+// ── the empty-coverage message is an INSTRUCTION ──────────────────────────────
+// It used to end "or screen directly", and that is what Atlas did: it read fundamentals, picked
+// names and allocated, skipping both the screening desk and the research desk. A tool result lands
+// late in the context, right where the model decides what to do next, so it outranks a rule written
+// hundreds of lines earlier in the system prompt. It must not offer a route the prompt forbids.
+import { _formatCoverage } from '../../services/portfolio.agent.service.js'
+
+test('empty coverage tells Atlas to hand off and stop — never to screen itself', () => {
+    const out = _formatCoverage([])
+    assert.ok(!/screen directly/i.test(out), 'this phrase is what caused Atlas to self-source')
+    assert.match(out, /<screen_request>/)
+    assert.match(out, /END THE TURN/)
+    assert.match(out, /NO screener of your own/)
+})
+
+test('coverage that exists is offered as the thing to build from', () => {
+    const out = _formatCoverage([{ symbol: 'AVGO', rating: 'buy', status: 'active', price_target: { value: 400 } }])
+    assert.match(out, /AVGO/)
+    assert.ok(!/END THE TURN/.test(out), 'the hand-off instruction belongs only to the empty case')
+})

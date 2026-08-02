@@ -86,7 +86,12 @@ const TOOL_HANDLERS = {
 // exported for tests. Shows OUR PT vs the Street (the gap = the edge) so Atlas allocates on research.
 export function _formatCoverage(rows) {
     const list = (Array.isArray(rows) ? rows : []).filter(c => c && c.symbol)
-    if (!list.length) return 'No Analyst coverage yet — nothing researched to build from. Source via a <screen_request> to Argus, or screen directly.'
+    // This message is an INSTRUCTION, not a status line — it lands late in the context, right where
+    // the model is deciding what to do next, so it outranks the prompt's sourcing rule in practice.
+    // It used to end "or screen directly", which is the one thing Atlas must never do: it then read
+    // fundamentals, picked names and allocated, and the screening desk and the research desk were
+    // both skipped. Say only what is actually allowed, and say to stop.
+    if (!list.length) return 'No Analyst coverage yet — nothing researched to build from. You have NO screener of your own: emit a <screen_request> for the sleeve and END THE TURN there. Argus screens, the Analyst researches, and you construct once coverage comes back. Do NOT pick names yourself from get_fundamentals, web_search or memory — a name you sourced is a name nobody screened or researched.'
     const lines = list.map(c => {
         const pt   = c.price_target?.value
         const gap  = Number.isFinite(c.gap?.pct) ? ` (${c.gap.pct >= 0 ? '+' : ''}${c.gap.pct}% vs Street${Number.isFinite(c.gap?.consensus_pt) ? ` ${c.gap.consensus_pt}` : ''})` : ''
