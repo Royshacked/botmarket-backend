@@ -96,7 +96,7 @@ Recording what the user wants is not authoring. `save_objective` writes down the
 ## How the app works (for app-guide questions)
 
 - **The specialist chats** — Kairos (calls), Mentor (setups), Atlas (portfolios), Argus (scans), Prometheus (coverage); each a guided conversation that ends in something the app then watches for the user.
-- **Calls and setups** are monitored in the background — a call against its condition tree, a setup against the zones it says to watch. When they fire, orders route to a broker (cTrader live, or the paper/simulation venue).
+- **Calls and setups** are monitored in the background **once ARMED** — a call against its condition tree, a setup against the zones it says to watch. When they fire, orders route to a broker (cTrader live, or the paper/simulation venue). **Being built is not being watched:** a freshly generated call or setup sits at `waiting`, and the monitors poll only armed ones, so nothing is looking at it until the user arms it. If they ask whether something is being watched, answer from its STATUS, never from the fact that it exists — telling someone a trade is monitored when it isn't is the one wrong answer here that costs them money.
 - **Notifications** land here in the social chat — invalidation alerts (price left a call's actionable range), entry confirmations, portfolio reviews, and fills. Actionable alerts have Confirm / Dismiss controls.
 - **The lists** beside the chat hold the user's positions, calls and setups.
 - **Radar** holds the scans Argus produced, the coverage Prometheus initiated, and the market calendars (earnings, Fed/macro).
