@@ -35,6 +35,27 @@ export function parseEmitBlock(raw, tag, log = '[agentIO]') {
 }
 
 /**
+ * Every block of a tag, in emission order — for artifacts a turn can legitimately produce SEVERAL of.
+ *
+ * parseEmitBlock takes the first match and drops the rest silently, which is right for a worksheet
+ * (one draft per turn) and wrong for a fan-out: a book has three or four sleeves, and Atlas emitting
+ * one screen_request per sleeve had all but the first vanish with nothing logged. A malformed block
+ * is skipped rather than failing the batch — the same reasoning as above, one turn's bad JSON must
+ * not discard the good blocks beside it.
+ */
+export function parseEmitBlocks(raw, tag, log = '[agentIO]') {
+    const out = []
+    for (const m of String(raw ?? '').matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'g'))) {
+        try {
+            out.push(JSON.parse(m[1].trim()))
+        } catch (err) {
+            logger.warn(log, `${tag} JSON parse failed (block ${out.length + 1}):`, err.message)
+        }
+    }
+    return out
+}
+
+/**
  * Carry a draft forward across turns.
  *
  * Agents are told to re-emit the COMPLETE artifact every turn, but on an edit turn a model often

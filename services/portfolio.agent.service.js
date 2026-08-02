@@ -1,5 +1,5 @@
 import { fileURLToPath }  from 'url'
-import { parseEmitBlock, makePhaseCapture, runAgentStream } from './agentIO.js'
+import { parseEmitBlock, parseEmitBlocks, makePhaseCapture, runAgentStream } from './agentIO.js'
 import { toolsFor } from './agentTools.registry.js'
 import { dirname, join }  from 'path'
 import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw } from '../providers/yahoofinance.provider.js'
@@ -197,7 +197,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
         try { capturedThesis = JSON.parse(thesisMatch[1].trim()) } catch { /* malformed */ }
     }
     // P4c: Atlas hands a sleeve's mandate to Argus's INVESTING desk to source + research candidates.
-    const screenRequest = _parseScreenRequest(raw)
+    const screenRequests = _parseScreenRequests(raw)
     // G1: Atlas hands a HELD name back to Prometheus for an async re-research when its coverage is stale.
     const coverageRefresh = _parseCoverageRefresh(raw)
 
@@ -209,8 +209,8 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequest: !!screenRequest, coverageRefresh: !!coverageRefresh, phase: phase.get() })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequest ? { screenRequest } : {}), ...(coverageRefresh ? { coverageRefresh } : {}) }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, phase: phase.get() })
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}) }
 }
 
 // ─── Coverage-refresh extraction (pure) ─────────────────────────────────────────
@@ -233,8 +233,21 @@ export function _parseCoverageRefresh(raw) {
 // then researches. This pulls the <screen_request> mandate block. Needs a sector OR a style to constrain
 // (else null). Mirrors Kairos's _parseScanRequest. Exported for tests.
 export function _parseScreenRequest(raw) {
-    const obj = parseEmitBlock(raw, 'screen_request', LOG)
-    if (!obj) return null
+    return _parseScreenRequests(raw)[0] ?? null
+}
+
+/**
+ * EVERY sleeve Atlas routed this turn, in order. A book has three or four, and screening them one
+ * per round trip put the user through the whole Atlas → Argus → Prometheus → Atlas walk once per
+ * sector. They go out together now and come back once.
+ *
+ * Pure; exported for tests.
+ */
+export function _parseScreenRequests(raw) {
+    return parseEmitBlocks(raw, 'screen_request', LOG).map(_cleanScreenRequest).filter(Boolean)
+}
+
+function _cleanScreenRequest(obj) {
     const s = k => (typeof obj?.[k] === 'string' && obj[k].trim() ? obj[k].trim() : null)
     const sector = s('sector'), style = s('style')
     if (!sector && !style) return null   // a screen needs at least a sector or a style to constrain

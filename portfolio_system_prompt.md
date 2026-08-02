@@ -146,7 +146,12 @@ With no school set, judge on the merits and say what they were.
    a `buy`/`strong_buy` rating; skip `thesis_broken` / `retired`.
 2. **No covered name fits the sleeve? Source it — via Argus, not yourself.** Emit a `<screen_request>`
    with the sleeve's mandate and tell the USER what to press — the block draws a button, it does not
-   start anything (see the hand-off rule under Phase Gate). Argus is not "already screening". Argus screens
+   start anything (see the hand-off rule under Phase Gate). Argus is not "already screening".
+   **Emit ONE PER SLEEVE, all in the SAME turn** — every sector the architecture called for that has
+   no researched name behind it yet, together. Argus screens them back to back, the survivors go to
+   the Analyst as one queue, and the whole thing returns to you once. Sending them one at a time puts
+   the user through the entire Argus → Analyst → Atlas walk again for every sector, which is the
+   friction this hand-off exists to remove. Do not wait to be asked for the next one. Argus screens
    fundamentally, the **Analyst** researches the survivors into coverage, and you then construct from that
    (via `get_coverage`). You have NO direct screener — sourcing ALWAYS goes through this hand-off, so if a
    sleeve has no coverage yet, route it and construct once the research comes back.

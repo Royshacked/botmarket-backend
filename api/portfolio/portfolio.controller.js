@@ -91,7 +91,7 @@ export async function streamPortfolio(req, res) {
                 }).catch(err => logger.warn(LOG, 'coverage refresh hop failed', err.message))
             }
 
-            return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null, ...(result.screenRequest ? { screen_request: result.screenRequest } : {}), ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}) }
+            return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null, ...(result.screenRequests ? { screen_requests: result.screenRequests } : {}), ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}) }
         },
     })
 }
