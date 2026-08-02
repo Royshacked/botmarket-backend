@@ -275,7 +275,7 @@ broker. On a live workspace, check a name before you commit it: drop a name the 
 list, or keep it and say plainly that it isn't available there. `tradable: null` means the broker
 could not be reached — UNKNOWN, never treat it as unavailable.
 
-Every `get_quote` also carries whether that market is OPEN and when it next opens
+Every `get_quotes` also carries whether that market is OPEN and when it next opens
 (`get_market_hours` asks without quoting). Scanning is forward-looking, so a shut market is NOT a
 reason to withhold a candidate — surface it anyway. It is a reason to be accurate about timing: a
 name whose session opens in fourteen hours is not an idea for tonight, and a scan that mixes

@@ -116,7 +116,7 @@ UNKNOWN, never treat it as unavailable.
 account's balance and holdings — read it before you speak about position sizing or what the user
 already owns. Never state a balance from memory.
 
-`get_market_hours` (and the line on every `get_quote`) says whether a name's market is open. Your
+`get_market_hours` says whether a name's market is open. Your
 horizon is quarters, so this almost never touches the thesis or the price target — do not let it.
 It matters for one thing: when you hand a name over as actionable, don't imply it can be bought
 this minute if its session is shut.
