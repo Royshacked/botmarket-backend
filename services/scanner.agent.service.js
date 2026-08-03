@@ -26,6 +26,13 @@ const _profilePrompt = {
     trading:   makePromptLoader(join(__dirname, '../scanner_system_prompt.md'), LOG),
     investing: makePromptLoader(join(__dirname, '../scanner_profile_investing.md'), LOG),
 }
+// The Kairos hand-off is a MODE of the trading profile, not a profile of its own: it shares the whole
+// screening spine and differs only in what it converges on (one name, not a list) and what it emits
+// (<kairos_pick>, not <scan_list>). So it lives in its own module, injected as its own cached block
+// on a hand-off turn — the same shape as kairos_mode_*.md. It used to sit INSIDE the trading prompt,
+// where a list-building turn read fifty lines of "find ONE ticker, do not emit a scan_list" that did
+// not apply to it, and a hand-off turn read the list machinery and phase gate it had to override.
+const _handoffMode = makePromptLoader(join(__dirname, '../scanner_mode_handoff.md'), LOG)
 const MAX_MESSAGES = 10
 
 export const TOOLS = toolsFor({
@@ -167,7 +174,10 @@ function SCANNER_TOOLS_FOR_PROFILE(profile) {
 // Injected into the volatile context when Argus is invoked as a Kairos discovery hand-off: it flips
 // Argus from "build a watchlist" to "find ONE ticker + emit <kairos_pick>" (see the prompt's
 // KAIROS HAND-OFF MODE section). The bias/horizon ride in the seeded opening message.
-const HANDOFF_CONTEXT = 'KAIROS HAND-OFF MODE: the user was sent here by Kairos to find ONE ticker for a single call. Follow the KAIROS HAND-OFF MODE section — converge to a single best pick, do NOT ask whether they are ready for Kairos, and end with a <kairos_pick> block (not a <scan_list>).'
+// The mode MARKER only — what the mode means is the module (scanner_mode_handoff.md), injected as
+// its own cached block. Mirrors Kairos's "ACTIVE MODE: x" line: the volatile block declares which
+// lens is live, the cached module carries it.
+const HANDOFF_CONTEXT = 'ACTIVE MODE: KAIROS HAND-OFF — the user was sent here by Kairos to find ONE ticker for a single call. The KAIROS HAND-OFF MODE module is in force: it replaces the list-building shape of the spine.'
 
 async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, profile = 'trading', objective = null, audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
@@ -191,11 +201,18 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     if (objectiveSection) dynamic.push(objectiveSection)
     const editSection = _buildEditSection(editList)
     if (editSection) dynamic.push(editSection)
-    if (handoff && prof === 'trading') dynamic.push(HANDOFF_CONTEXT)   // hand-off is a trading-only path
+    const inHandoff = handoff && prof === 'trading'   // hand-off is a trading-only path
+    if (inHandoff) dynamic.push(HANDOFF_CONTEXT)
 
     const promptLoader = _profilePrompt[prof] ?? _profilePrompt.trading
+    // Spine (cached) + the mode module on a hand-off turn (its own cached block, so the list-mode
+    // prefix stays byte-identical and keeps its own cache entry) + the volatile tail.
+    // BREAKPOINT BUDGET: four per request. Tools take one, the history takes one
+    // (_stampHistoryCache in the Anthropic provider), and this leaves the system prompt at one
+    // normally, two in hand-off — the ceiling Atlas and Kairos already run at. Do not add a third.
     const systemPrompt = [
         { type: 'text', text: promptLoader(), cache_control: { type: 'ephemeral' } },
+        ...(inHandoff ? [{ type: 'text', text: _handoffMode(), cache_control: { type: 'ephemeral' } }] : []),
         { type: 'text', text: dynamic.join('\n\n') },
     ]
 
