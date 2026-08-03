@@ -26,6 +26,7 @@ import { openPosition,
          committedByAccount,
          deployable,
          latestMarkPrice,
+         exitMarkPrice,
          dirSign, round2 }    from '../paperExecution.service.js'
 import { logger }             from '../../../services/logger.service.js'
 
@@ -172,15 +173,17 @@ export class PaperAdapter extends BrokerAdapter {
         const orderId = randomUUID()
 
         if (order.type === 'market') {
-            // Fill at the real-time mark (Yahoo last-traded, candle-close fallback) — a
-            // market order should hit the live price, and the candle-only feed blanks out
-            // on a transient empty fetch (e.g. an equity with no fresh 1-min bar), which
-            // would spuriously reject an order for a symbol Yahoo can price fine.
-            const price = await latestMarkPrice(order.symbol)
-            if (price == null) throw new Error(`paper: no price for ${order.symbol}`)
-
-            // Closing market order (monitor close / reduce) → apply against the position.
+            // Closing market order (a monitor's stop/TP, a reduce) → apply against the position.
+            // Priced like every other exit (see closePosition): an exit that has already been
+            // DECIDED must not fail for want of a live quote — a stop that doesn't execute
+            // because the 1-min feed 429'd is the worst failure this venue has.
             if (order.positionId != null) {
+                const pos = await paperBrokerService.getPosition(userId, order.positionId)
+                const { price, source } = await exitMarkPrice(order.symbol, pos?.currentPrice)
+                if (price == null) throw new Error(`paper: no price for ${order.symbol}`)
+                if (source !== 'live') {
+                    logger.warn(LOG, `exit order on ${order.positionId} (${order.symbol}): no live quote — filling at the ${source === 'day' ? 'day close' : 'last stamped mark'} ${price}`)
+                }
                 await paperBrokerService.insertOrder(this._orderDoc({
                     userId, accountId: acctId, orderId, order, status: 'filled', fillPrice: price,
                 }))
@@ -188,7 +191,16 @@ export class PaperAdapter extends BrokerAdapter {
                 return { orderId, accountId: acctId }
             }
 
-            // Opening market order → new position.
+            // Opening market order → new position. This one KEEPS the strict live-price rule:
+            // an entry filled at a stale day close would misstate the trade's basis for its whole
+            // life, and refusing to open is recoverable in a way a wrong entry price isn't.
+            // Fill at the real-time mark (Yahoo last-traded, candle-close fallback) — a
+            // market order should hit the live price, and the candle-only feed blanks out
+            // on a transient empty fetch (e.g. an equity with no fresh 1-min bar), which
+            // would spuriously reject an order for a symbol Yahoo can price fine.
+            const price = await latestMarkPrice(order.symbol)
+            if (price == null) throw new Error(`paper: no price for ${order.symbol}`)
+
             const positionId = await openPosition({
                 userId, accountId: acctId, symbol: order.symbol,
                 direction: order.direction, qty: order.quantity, price, orderId,
@@ -234,14 +246,26 @@ export class PaperAdapter extends BrokerAdapter {
     }
 
     /**
-     * Close (or partially close) a position at the live price — the reduce/close events
-     * are emitted by reducePosition so the reconciler reacts as for a real broker.
+     * Close (or partially close) a position — the reduce/close events are emitted by
+     * reducePosition so the reconciler reacts as for a real broker.
+     *
+     * Priced through exitMarkPrice, NOT latestMarkPrice: every caller here (the user's ✕, a
+     * monitor's exit condition, a rebalance trim) has already decided to be out, so the price is
+     * a bookkeeping detail, not the trigger. This used to throw when the 1-min feed was down —
+     * a routine FMP 429 — and the user got a 500 on a market close with no way out of the
+     * position. It now degrades to the day close, then to the last stamped mark, and only throws
+     * when the symbol has no resolvable price at all.
      */
     async closePosition(userId, accountId, positionId, opts = {}) {
         const pos = await paperBrokerService.getPosition(userId, positionId)
         if (!pos || pos.status !== 'open') throw new Error(`paper: position ${positionId} not open`)
-        const price = await latestMarkPrice(pos.symbol)
+        const { price, source } = await exitMarkPrice(pos.symbol, pos.currentPrice)
         if (price == null) throw new Error(`paper: no price for ${pos.symbol}`)
+        // A fill booked off a degraded price is still a fill, but it should never be silent —
+        // the realized P&L it banks is only as good as the price it used.
+        if (source !== 'live') {
+            logger.warn(LOG, `closePosition ${positionId} (${pos.symbol}): no live quote — booking at the ${source === 'day' ? 'day close' : 'last stamped mark'} ${price}`)
+        }
         await reducePosition({ userId, positionId, qty: opts.quantity ?? pos.qty, price, reason: opts.reason ?? 'manual' })
     }
 

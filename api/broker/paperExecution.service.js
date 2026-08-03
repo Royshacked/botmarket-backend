@@ -144,6 +144,46 @@ export async function latestMarkPrice(symbol) {
     }
 }
 
+const usable = p => p != null && Number.isFinite(p) && p > 0
+
+/**
+ * Price to BOOK AN EXIT at — a close/trim that has already been decided (the user pressed ✕, a
+ * monitor's exit condition fired, a rebalance is trimming a leg).
+ *
+ * This is deliberately NOT latestMarkPrice. That one refuses to fall back to a day candle because
+ * it also answers "did the price TOUCH this level" — a coarse, stale close there would fire a TP
+ * against a level the live price never reached. An exit isn't a trigger: the decision is made, and
+ * all that's left is a number to book it at. Applying the touch rule here meant an outage in the
+ * 1-min feed (FMP 429s, a provider gap) turned into a position the user could not close AT ALL —
+ * a 500 on a market order, with a perfectly good day close sitting one call away.
+ *
+ * So it degrades instead of refusing, worst case to the mark the UI has been showing all along:
+ *   live → the same real-time quote everything else marks against
+ *   day  → today's close-so-far (during a session this tracks the last print)
+ *   mark → the last price stamped on the position by the mark loop
+ * `source` comes back so the caller can say which one it used — a fill booked off a stale price
+ * should not look identical to one booked off the live quote.
+ *
+ * @param {string} symbol
+ * @param {number|null} [stamped]  position.currentPrice — the last mark stamped on the doc
+ * @param {{live?: Function, last?: Function}} [deps]  injectable for tests
+ * @returns {Promise<{ price: number|null, source: 'live'|'day'|'mark'|null }>}
+ */
+export async function exitMarkPrice(symbol, stamped = null, deps = {}) {
+    const { live = latestMarkPrice, last = latestPrice } = deps
+
+    const mark = await live(symbol)
+    if (usable(mark)) return { price: mark, source: 'live' }
+
+    // Day-candle close (latestQuote's own fallback), which is exactly what latestMarkPrice
+    // withholds — and the only price available when the intraday feed is down.
+    const dayClose = await last(symbol)
+    if (usable(dayClose)) return { price: dayClose, source: 'day' }
+
+    if (usable(stamped)) return { price: stamped, source: 'mark' }
+    return { price: null, source: null }
+}
+
 /**
  * Open a new virtual position and emit position.opened. `orderId` must be the id of
  * the order that opened it (the market order, or the resting-entry working order) —
@@ -345,4 +385,4 @@ async function _cancelClosingOrders(userId, positionId, exceptOrderId = null) {
     }
 }
 
-export const paperExecutionService = { openPosition, reducePosition, computeEquity, latestPrice, latestMarkPrice, quoteMapForSymbols, applySpread, dirSign, round2 }
+export const paperExecutionService = { openPosition, reducePosition, computeEquity, latestPrice, latestMarkPrice, exitMarkPrice, quoteMapForSymbols, applySpread, dirSign, round2 }
