@@ -24,6 +24,34 @@ export function _sanitizeRouteSymbol(raw) {
     return SYMBOL_RE.test(symbol) ? symbol : null
 }
 
+// The kinds `<edit>` may reopen. Same gate as the desks above and for the same reason — a kind the
+// client has no opener for would leave it mid-hand-off with nothing to show.
+//
+// A BOOK is the one whose edit is not free: reopening a plan in Atlas takes every holding back to
+// `waiting` until the user re-activates it. That is the existing pencil's behaviour, not something
+// this hand-off invents — the same click, reached by sentence — but it is why the prompt has Axl
+// say so before it hands over, rather than letting a live book quietly go unmonitored.
+export const EDIT_KINDS = new Set(['call', 'setup', 'coverage', 'scan', 'portfolio'])
+
+// The handle Axl quotes back from get_watched_items: an item id (a UUID), or — when it has none to
+// hand — a bare ticker the client can match on instead. Deliberately permissive about WHICH of the
+// two: this is used to look something up in a list the client already holds, so a wrong or invented
+// ref finds nothing and opens nothing. It can never reach another user's data. The gate is only
+// here to keep junk (a sentence, a quoted phrase) from travelling as if it were a handle.
+const EDIT_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+export function _sanitizeEditRef(raw) {
+    if (typeof raw !== 'string') return null
+    const ref = raw.trim()
+    return EDIT_REF_RE.test(ref) ? ref : null
+}
+
+/** The whole edit hand-off, or null — kind, desk and ref all have to survive for it to mean anything. */
+export function _validateEdit(edit) {
+    if (!edit || !EDIT_KINDS.has(edit.kind) || !VALID_PIPELINES.has(edit.desk)) return null
+    const ref = _sanitizeEditRef(edit.ref)
+    return ref ? { kind: edit.kind, ref, desk: edit.desk } : null
+}
+
 // SSE chat with Axl — the one Axl surface. It answers, remembers the thread, docks charts, and
 // routes to a desk when the user wants one (`route` + optional `routeSymbol` in the `done` payload,
 // the desk and the name it should open on). There is deliberately no
@@ -62,6 +90,9 @@ export async function streamAxl(req, res) {
                 route,
                 // A symbol only rides along WITH a desk — with no route it has nowhere to land.
                 routeSymbol: route ? _sanitizeRouteSymbol(result.routeSymbol) : null,
+                // Reopen an item the user already has, in the desk that owns it, instead of opening
+                // that desk on a blank page. Independent of `route` — it carries its own desk.
+                edit: _validateEdit(result.edit),
                 // Unlike routeSymbol this stands alone: an objective captured on a turn that does
                 // NOT route is the normal case (intake first, hand-off once they're ready), and the
                 // client shows it back to the user so they can see what was understood — and correct

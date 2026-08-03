@@ -44,6 +44,28 @@ test('detail is separated from status, and vanishes cleanly when there is none',
     assert.doesNotMatch(bare, /· *$/m, 'no separator left hanging at the end of a line')
 })
 
+// Without the id the model can only name a symbol, and "edit that coverage" has to become a route
+// to Prometheus — which opens a BLANK research chat on a name already covered. The id in the bracket
+// is what lets Axl say `<edit>coverage <id></edit>` and reopen the thesis that exists.
+test('every row leads with its id — the handle the edit hand-off is built on', () => {
+    const out = formatWatchedItems({
+        items: [
+            row({ kind: 'call', id: 'c1' }),
+            row({ kind: 'coverage', id: 'cov_9', symbol: 'ZTS', status: 'active', detail: { rating: 'buy', ourPT: 210 } }),
+            row({ kind: 'scan', id: 'sc3', symbol: null, title: 'laggards', status: null, detail: { candidates: 4 } }),
+        ],
+        counts: { call: 1, coverage: 1, scan: 1 },
+    })
+    assert.match(out, /\[call:c1\] NVDA/)
+    assert.match(out, /\[coverage:cov_9\] ZTS/)
+    assert.match(out, /\[scan:sc3\] laggards/)
+})
+
+test('a row with no id still renders — a missing handle costs the edit, not the answer', () => {
+    const out = formatWatchedItems({ items: [row({ id: null })], counts: { call: 1 } })
+    assert.match(out, /\[call\] NVDA/)
+})
+
 test('the summary line counts what was found', () => {
     const out = formatWatchedItems({ items: [row()], counts: { call: 1, setup: 2 }, unavailable: [] })
     assert.match(out, /1 call, 2 setups/)
@@ -54,7 +76,7 @@ test('a book renders as a book — holdings and names, not a ticker', () => {
         items: [row({ kind: 'portfolio', symbol: null, title: 'Growth', status: null, detail: { holdings: 2, byStatus: { long: 2 }, symbols: ['NVDA', 'MSFT'] } })],
         counts: { portfolio: 1 },
     })
-    assert.match(out, /\[book\] Growth/)
+    assert.match(out, /\[book:c1\] Growth/)
     assert.match(out, /2 holdings/)
     assert.match(out, /NVDA, MSFT/)
 })

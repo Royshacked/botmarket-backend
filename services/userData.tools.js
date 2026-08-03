@@ -50,12 +50,23 @@ function _zone(z) {
     return `${z.low ?? z.high}`
 }
 
+/**
+ * Every row leads with `[kind:id]`, and the id is load-bearing rather than decoration: it is the
+ * handle Axl quotes back in an `<edit>` tag to reopen THAT item in the desk that owns it. Without
+ * it the model can only name a symbol, and two calls on the same name are indistinguishable — which
+ * is how "edit that coverage" became a request to research the name from scratch.
+ *
+ * toWatchRow.js already keeps `id` on every row for exactly this ("a targeted read, not a re-list");
+ * this only carries it the last step, into what the model actually reads.
+ */
+const _tag = (row, label = row.kind) => `[${label}${row.id ? `:${row.id}` : ''}]`
+
 function _watchLine(row) {
     const d = row.detail ?? {}
     switch (row.kind) {
         case 'call':
         case 'setup':
-            return `- [${row.kind}] ${row.symbol ?? '?'} ${row.direction ?? ''} · ${row.status ?? '?'}${_tail([
+            return `- ${_tag(row)} ${row.symbol ?? '?'} ${row.direction ?? ''} · ${row.status ?? '?'}${_tail([
                 d.nearestEntry ? `entry ${_zone(d.nearestEntry)}` : null,
                 d.stop ? `stop ${_zone(d.stop)}` : null,
                 _n(d.rr, 'R'), d.conviction ? `conviction ${d.conviction}` : null,
@@ -63,17 +74,17 @@ function _watchLine(row) {
             ])}${row.title ? ` — ${row.title}` : ''}`
         case 'portfolio': {
             const byStatus = Object.entries(d.byStatus ?? {}).map(([s, n]) => `${n} ${s}`).join(', ')
-            return `- [book] ${row.title} · ${d.holdings ?? 0} holding${d.holdings === 1 ? '' : 's'}${byStatus ? ` (${byStatus})` : ''}${d.symbols?.length ? ` · ${d.symbols.join(', ')}` : ''}`
+            return `- ${_tag(row, 'book')} ${row.title} · ${d.holdings ?? 0} holding${d.holdings === 1 ? '' : 's'}${byStatus ? ` (${byStatus})` : ''}${d.symbols?.length ? ` · ${d.symbols.join(', ')}` : ''}`
         }
         case 'scan':
-            return `- [scan] ${row.title}${d.period ? ` (${d.period})` : ''} · ${d.candidates ?? 0} candidate${d.candidates === 1 ? '' : 's'}${d.stale ? ' · STALE (its period has passed)' : ''}`
+            return `- ${_tag(row)} ${row.title}${d.period ? ` (${d.period})` : ''} · ${d.candidates ?? 0} candidate${d.candidates === 1 ? '' : 's'}${d.stale ? ' · STALE (its period has passed)' : ''}`
         case 'coverage':
-            return `- [coverage] ${row.symbol ?? '?'} [${d.rating ?? 'unrated'}] · ${row.status ?? '?'}${_tail([
+            return `- ${_tag(row)} ${row.symbol ?? '?'} [${d.rating ?? 'unrated'}] · ${row.status ?? '?'}${_tail([
                 d.ourPT != null ? `our PT ${d.ourPT}` : null,
                 d.gapPct != null ? `${d.gapPct >= 0 ? '+' : ''}${d.gapPct}% vs Street${d.streetPT != null ? ` ${d.streetPT}` : ''}` : null,
             ])}${row.title ? ` — ${row.title}` : ''}`
         default:
-            return `- [${row.kind}] ${row.symbol ?? row.title ?? row.id}`
+            return `- ${_tag(row)} ${row.symbol ?? row.title ?? row.id}`
     }
 }
 

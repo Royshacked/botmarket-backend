@@ -5,8 +5,8 @@ import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
-import { _splitRoute, axlAgentService } from '../../services/axl.agent.service.js'
-import { _sanitizeRouteSymbol, VALID_PIPELINES } from '../../api/axl/axl.controller.js'
+import { _splitRoute, _splitEdit, EDIT_KIND_DESKS, axlAgentService } from '../../services/axl.agent.service.js'
+import { _sanitizeRouteSymbol, _sanitizeEditRef, _validateEdit, VALID_PIPELINES, EDIT_KINDS } from '../../api/axl/axl.controller.js'
 
 // Axl's desk hand-off: `<route>research NVDA</route>` — the desk AND the name it should open on.
 // The symbol is what turns "routing you to Prometheus" into Prometheus already researching NVDA,
@@ -55,6 +55,66 @@ test('sanitize: junk the model may have attached → null (the desk opens empty)
     assert.equal(_sanitizeRouteSymbol(42), null)
 })
 
+// ── the edit tag: reopening an item that already exists ───────────────────────
+//
+// The bug this exists for: Axl listed the user's coverage, the user said "edit that one", and the
+// only tag Axl had was `<route>research NVDA</route>` — which opens Prometheus on a BLANK page and
+// starts a second thesis on a name already covered. A route names a desk; an edit names a document.
+
+test('split edit: kind + handle, and the desk that owns the kind', () => {
+    assert.deepEqual(_splitEdit('coverage 3f9c1a2b'), { kind: 'coverage', ref: '3f9c1a2b', desk: 'research' })
+    assert.deepEqual(_splitEdit('call c1'),  { kind: 'call',  ref: 'c1', desk: 'trade' })
+    assert.deepEqual(_splitEdit('setup s1'), { kind: 'setup', ref: 's1', desk: 'assist' })
+    assert.deepEqual(_splitEdit('scan sc1'), { kind: 'scan',  ref: 'sc1', desk: 'scan' })
+    assert.deepEqual(_splitEdit('portfolio p1'), { kind: 'portfolio', ref: 'p1', desk: 'portfolio' })
+})
+
+test('split edit: tolerant separators + a capitalized kind, and a UUID survives its dashes', () => {
+    assert.deepEqual(_splitEdit('Coverage:3f9c'), { kind: 'coverage', ref: '3f9c', desk: 'research' })
+    assert.deepEqual(_splitEdit(' call , 1b4d-9f2c-aa01 '), { kind: 'call', ref: '1b4d-9f2c-aa01', desk: 'trade' })
+})
+
+test('split edit: half a tag opens nothing — better a plain reply than the wrong desk', () => {
+    assert.equal(_splitEdit('coverage'), null, 'a kind with no handle names no item')
+    assert.equal(_splitEdit('3f9c'), null, 'a handle with no kind names no list to find it in')
+    assert.equal(_splitEdit('idea i1'), null, 'the Idea agent is retired — there is no chat to reopen')
+    assert.equal(_splitEdit('position p1'), null, 'a broker position is not something the app authored')
+    assert.equal(_splitEdit(''), null)
+    assert.equal(_splitEdit(null), null)
+})
+
+test('every kind the split can produce maps to a desk the controller accepts', () => {
+    for (const [kind, desk] of Object.entries(EDIT_KIND_DESKS)) {
+        assert.ok(EDIT_KINDS.has(kind), `the service can emit kind '${kind}' but the controller drops it`)
+        assert.ok(VALID_PIPELINES.has(desk), `kind '${kind}' maps to desk '${desk}', which is not a desk`)
+    }
+})
+
+test('sanitize ref: ids and bare tickers both pass — Axl may have only one of them', () => {
+    assert.equal(_sanitizeEditRef('3f9c1a2b-4d5e-6f70-8a9b-0c1d2e3f4a5b'), '3f9c1a2b-4d5e-6f70-8a9b-0c1d2e3f4a5b')
+    assert.equal(_sanitizeEditRef(' NVDA '), 'NVDA')
+    assert.equal(_sanitizeEditRef('cov_1.2'), 'cov_1.2')
+})
+
+test('sanitize ref: anything that is not a handle → null', () => {
+    assert.equal(_sanitizeEditRef('the NVDA one'), null)   // a phrase, not a handle
+    assert.equal(_sanitizeEditRef('"c1"'), null)           // quoted
+    assert.equal(_sanitizeEditRef('-c1'), null)            // must start alphanumeric
+    assert.equal(_sanitizeEditRef('x'.repeat(65)), null)
+    assert.equal(_sanitizeEditRef(''), null)
+    assert.equal(_sanitizeEditRef(null), null)
+    assert.equal(_sanitizeEditRef(42), null)
+})
+
+test('validate edit: the whole hand-off survives, or none of it does', () => {
+    assert.deepEqual(_validateEdit({ kind: 'coverage', ref: 'c1', desk: 'research' }), { kind: 'coverage', ref: 'c1', desk: 'research' })
+    assert.equal(_validateEdit(null), null)
+    assert.deepEqual(_validateEdit({ kind: 'portfolio', ref: 'p1', desk: 'portfolio' }), { kind: 'portfolio', ref: 'p1', desk: 'portfolio' })
+    assert.equal(_validateEdit({ kind: 'idea', ref: 'i1', desk: 'trade' }), null, 'kind not openable')
+    assert.equal(_validateEdit({ kind: 'call', ref: 'c1', desk: 'nowhere' }), null, 'desk not routable')
+    assert.equal(_validateEdit({ kind: 'call', ref: 'a whole sentence', desk: 'trade' }), null, 'ref not a handle')
+})
+
 // ── the prompt and the gate agree ─────────────────────────────────────────────
 
 // The failure this catches is silent and total: the prompt teaches Axl a tag the controller drops,
@@ -71,15 +131,47 @@ test('every route tag the prompt teaches is one the controller accepts', () => {
     }
 })
 
+// The same silent-and-total failure, one tag over: the prompt teaches an edit kind nothing can open,
+// so Axl says "opening that call" and the user watches a desk start from scratch instead.
+test('every edit kind the prompt teaches is one the app can actually open', () => {
+    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../axl_system_prompt.md')
+    const prompt = readFileSync(promptPath, 'utf8')
+    const taught = [...prompt.matchAll(/<edit>([a-z]+)[^<]*<\/edit>/g)].map(m => m[1])
+
+    assert.ok(taught.length >= 5, 'the prompt still teaches the edit tags')
+    for (const kind of new Set(taught)) {
+        assert.ok(EDIT_KINDS.has(kind), `the prompt teaches <edit>${kind}</edit> but the controller drops it`)
+        assert.ok(EDIT_KIND_DESKS[kind], `the prompt teaches <edit>${kind}</edit> but no desk owns it`)
+    }
+})
+
+// The one kind with two modes. A book still being built is a plan to re-work; a book in positions is
+// a REVIEW, because re-planning it would stand a live position down to rewrite a plan the market has
+// already acted on. That choice is the client's, made from the book's own state (isPortfolioReview)
+// — so what the prompt must not do is teach Axl to make it, or to promise the wrong one.
+// If this fails because the wording moved, check the two modes are still DESCRIBED, then update it.
+test('the prompt teaches the book edit as one tag with two outcomes, decided by the book', () => {
+    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../axl_system_prompt.md')
+    const prompt = readFileSync(promptPath, 'utf8')
+
+    assert.match(prompt, /<edit>portfolio/, 'the book edit tag is taught')
+    // Whitespace-tolerant throughout: the prompt is hard-wrapped, so these sentences carry newlines.
+    assert.match(prompt, /the\s+BOOK\s+decides\s+which/, 'the mode is the book\'s call, not the model\'s')
+    assert.match(prompt, /in\s+a\s+position\s+→\s+Atlas\s+opens\s+a\s+REVIEW/,
+        'a book in positions must be described as opening a review, never a re-plan')
+})
+
 // ── the whole turn (service, over the _run seam) ──────────────────────────────
 
 // Stand in for runAgentStream: the tag never reaches the token stream, so the capture is how the
 // service sees it — hand the reply back through the same callback the real stream uses.
 function runWith(reply) {
     return async ({ tagCaptures }) => {
-        const routeTag = reply.match(/<route>([\s\S]*?)<\/route>/)
-        const capture = (tagCaptures ?? []).find(c => c.open === '<route>')
-        if (routeTag) capture?.onCapture?.(routeTag[1])
+        for (const name of ['route', 'edit']) {
+            const tag = reply.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))
+            const capture = (tagCaptures ?? []).find(c => c.open === `<${name}>`)
+            if (tag) capture?.onCapture?.(tag[1])
+        }
         return reply
     }
 }
@@ -92,6 +184,40 @@ test('turn: the tag becomes route + routeSymbol and never shows up in the reply'
     assert.equal(result.route, 'research')
     assert.equal(result.routeSymbol, 'NVDA')
     assert.equal(result.reply, 'Taking you to Prometheus.')
+})
+
+test('turn: an edit tag becomes the item hand-off, and never shows up in the reply', async () => {
+    const result = await axlAgentService.chatStream({
+        messages: [{ role: 'user', content: 'edit that NVDA coverage' }],
+        _run: runWith('Reopening it in Prometheus. <edit>coverage cov_9</edit>'),
+    })
+    assert.deepEqual(result.edit, { kind: 'coverage', ref: 'cov_9', desk: 'research' })
+    assert.equal(result.route, null, 'an edit is not a route — it carries its own desk')
+    assert.equal(result.reply, 'Reopening it in Prometheus.')
+})
+
+test('turn: an edit does NOT stamp an open objective — reopening is not a desk taking the goal', async () => {
+    const result = await axlAgentService.chatStream({
+        userId: 'u1',
+        messages: [{ role: 'user', content: 'change the entry on my TSLA call' }],
+        _run: runWith('Opening it in Kairos. <edit>call c1</edit>'),
+        _objectiveHandlers: () => ({ save_objective: async () => ({}) }),
+        _tradingContextHandlers: () => ({}),
+        _getOpenObjective: async () => { throw new Error('an edit must not pay for the objective read') },
+        _markRouted: async () => { throw new Error('an edit must not stamp the goal') },
+    })
+    assert.equal(result.edit?.kind, 'call')
+})
+
+test('turn: a book edit reaches Atlas as an item, not as a fresh mandate', async () => {
+    // The failure it replaces: `<route>portfolio</route>` opens Atlas at Phase 1 and asks for the
+    // mandate again — for a book that already has one, and whose plan is what they wanted to change.
+    const result = await axlAgentService.chatStream({
+        messages: [{ role: 'user', content: 're-work my Core book' }],
+        _run: runWith('That takes it off monitoring until you re-activate — opening it in Atlas. <edit>portfolio p1</edit>'),
+    })
+    assert.deepEqual(result.edit, { kind: 'portfolio', ref: 'p1', desk: 'portfolio' })
+    assert.equal(result.route, null)
 })
 
 test('turn: a clarifying question (no tag) keeps the user with Axl', async () => {

@@ -73,6 +73,31 @@ export function _splitRoute(raw) {
     return { desk: desk ? desk.toLowerCase() : null, symbol: symbol || null }
 }
 
+// The kinds a user can be taken back INTO, and the desk that owns each.
+//
+// Editing is not routing, which is why it is a second tag rather than a third word in the first one.
+// `<route>research NVDA</route>` opens Prometheus for NEW work — a fresh thesis even on a name
+// already covered, which is exactly what went wrong when the only tag we had was this one.
+// `<edit>coverage <id></edit>` reopens the thesis that exists, in the chat that wrote it.
+//
+// kind → desk lives here beside the parse because it IS part of the grammar: the client is told
+// which desk so the pipeline crumb reads the same as any other arrival. Note the trade desk ENTERS
+// at Argus but a call EDITS in Kairos — the client resolves that, since the item picks the tab.
+export const EDIT_KIND_DESKS = { call: 'trade', setup: 'assist', coverage: 'research', scan: 'scan', portfolio: 'portfolio' }
+
+// `<edit>coverage 3f9c…</edit>` → { kind, ref, desk }, or null when there is nothing openable.
+// BOTH halves or nothing: a kind with no handle names no item, a handle with no kind names no list
+// to find it in. Returning null in either case lets the turn fall through to a plain reply, which
+// is strictly better than sending the user to a desk that starts the wrong work.
+export function _splitEdit(raw) {
+    if (typeof raw !== 'string') return null
+    const [kind = '', ref = ''] = raw.trim().split(/[\s:,]+/)
+    const k = kind.toLowerCase()
+    const desk = EDIT_KIND_DESKS[k]
+    if (!desk || !ref) return null
+    return { kind: k, ref, desk }
+}
+
 async function chatStream({ messages = [], audience = null, model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     // The objective collaborators are seams too: intake is the one part of Axl that touches the
@@ -104,8 +129,11 @@ ${audienceBlock}` : ''}` },
     // toolless agent can put a chart in its chat at all. <route> is Axl's own: suppressed from the
     // token stream here, and stripped from `raw` below because this return value is a second
     // consumer that would otherwise hand the client "…to the trading desk. <route>trade</route>".
+    // <edit> is <route>'s sibling and is handled identically here — suppressed from the stream,
+    // stripped from `raw` below, parsed after the turn.
     let chartRow = null
     let routeCapture = null
+    let editCapture = null
 
     // The objective handler is wrapped rather than passed straight through, so the turn knows an
     // intake happened without a second read: the id it returns rides out on the `done` payload and
@@ -136,15 +164,21 @@ ${audienceBlock}` : ''}` },
         messages: normalized, systemPrompt,
         tools: TOOLS, toolHandlers,
         reasoningEffort, signal, onToken,
-        tagCaptures: buildTagCaptures({ route: (text) => { routeCapture = text.trim() } }),
+        tagCaptures: buildTagCaptures({
+            route: (text) => { routeCapture = text.trim() },
+            edit:  (text) => { editCapture = text.trim() },
+        }),
         onToolStart, onReasoning,
         onChart: (row) => { chartRow = row; onChart?.(row) },
     })
 
-    const reply = stripEmitTags(raw ?? '', ['route']).trim()
+    const reply = stripEmitTags(raw ?? '', ['route', 'edit']).trim()
     const { desk, symbol } = _splitRoute(routeCapture)
+    const edit = _splitEdit(editCapture)
 
-    // Stamp which desk took the goal. Only on a routing turn, and only then do we pay for a read —
+    // Stamp which desk took the goal. Only on a ROUTING turn — reopening an item the user already
+    // has is not a desk taking on their stated goal, so an edit deliberately stamps nothing. And only
+    // on a routing turn do we pay for a read —
     // the objective is usually captured a turn or two before the hand-off, so the id from THIS turn
     // is often null while an open objective still exists.
     let objective = savedObjective
@@ -153,13 +187,16 @@ ${audienceBlock}` : ''}` },
         if (objective?.id) await _markRouted(objective.id, desk)
     }
 
-    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, objectiveId: objective?.id ?? null, replyLength: reply.length })
+    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, edit: edit ? `${edit.kind}:${edit.ref}` : null, objectiveId: objective?.id ?? null, replyLength: reply.length })
     // `chart` on the return is the REQUEST, never the image: the row already went out on its own
     // event and doubling it here would double the bytes on the wire.
     return {
         reply,
         route: desk,
         routeSymbol: symbol,
+        // { kind, ref, desk } — reopen this exact item. Stands apart from `route` rather than
+        // folding into it: a route hands over a desk and a blank page, an edit hands over a document.
+        edit,
         objective,
         chart: chartRow ? { ticker: chartRow.symbol, timeframe: chartRow.timeframe } : null,
     }
