@@ -25,9 +25,47 @@ test('missing fields degrade gracefully (no PT / no gap / no thesis / unrated)',
     assert.doesNotMatch(out, /our PT/)
 })
 
+// ── grouped by sleeve ─────────────────────────────────────────────────────────
+// Atlas builds sector sleeves, and read as a flat list it had to guess which sleeve each researched
+// name belonged to — from the ticker. The Analyst records the sector; group on it.
+test('names are grouped under the sector the Analyst researched them for', () => {
+    const out = _formatCoverage([
+        { symbol: 'NVDA', rating: 'buy',  sector: 'Technology' },
+        { symbol: 'XOM',  rating: 'buy',  sector: 'Energy' },
+        { symbol: 'MSFT', rating: 'hold', sector: 'Technology' },
+    ])
+    const tech = out.indexOf('Technology:')
+    const nrgy = out.indexOf('Energy:')
+    assert.ok(tech > -1 && nrgy > -1, 'both sector headings present')
+    assert.ok(tech < out.indexOf('NVDA') && out.indexOf('NVDA') < nrgy, 'NVDA sits under Technology')
+    assert.ok(nrgy < out.indexOf('XOM'), 'XOM sits under Energy')
+    // MSFT joins the existing Technology block rather than opening a second one
+    assert.equal(out.match(/^Technology:$/gm).length, 1)
+    assert.ok(out.indexOf('MSFT') < nrgy)
+})
+
+test('a sector-less name gets its own bucket, always last', () => {
+    const out = _formatCoverage([
+        { symbol: 'ABC' },                              // no sector
+        { symbol: 'XOM', sector: 'Energy' },
+    ])
+    assert.match(out, /Unclassified \(no sector recorded/)
+    assert.ok(out.indexOf('Energy:') < out.indexOf('Unclassified'), 'the unclassified bucket comes last')
+})
+
+test('a sleeve with nothing researched is not fillable from another sector', () => {
+    // The heading rule is what stops Atlas placing a tech name into the energy sleeve because the
+    // list happened to be flat. It has to be stated, not implied by the layout.
+    const out = _formatCoverage([{ symbol: 'NVDA', sector: 'Technology' }])
+    assert.match(out, /no heading here has nothing researched behind it yet/)
+})
+
 test('a long thesis is truncated', () => {
     const long = 'x'.repeat(300)
     const out = _formatCoverage([{ symbol: 'ABC', rating: 'buy', thesis: long }])
     assert.ok(out.includes('…'))
-    assert.ok(out.length < 300 + 100)
+    // Measure the NAME's line, not the whole read — the header is fixed prose and grows with the
+    // instructions; only the per-name thesis is what truncation is protecting the context from.
+    const row = out.split('\n').find(l => l.startsWith('- ABC'))
+    assert.ok(row.length < 200, `thesis row not truncated: ${row.length} chars`)
 })

@@ -82,8 +82,13 @@ const TOOL_HANDLERS = {
     ...makeMarketHoursHandlers(),
 }
 
+// Coverage the Analyst never classified. Its own bucket, always last: a name with no sector is not a
+// sleeve, and quietly filing it under one would be the guess this grouping exists to prevent.
+const UNSECTORED = 'Unclassified'
+
 // P4d: render the Analyst's active coverage as an LLM-ready read for Atlas to construct from. Pure —
-// exported for tests. Shows OUR PT vs the Street (the gap = the edge) so Atlas allocates on research.
+// exported for tests. Shows OUR PT vs the Street (the gap = the edge) so Atlas allocates on research,
+// grouped by sector so it can see which SLEEVE each name was researched for.
 export function _formatCoverage(rows) {
     const list = (Array.isArray(rows) ? rows : []).filter(c => c && c.symbol)
     // This message is an INSTRUCTION, not a status line — it lands late in the context, right where
@@ -92,13 +97,39 @@ export function _formatCoverage(rows) {
     // fundamentals, picked names and allocated, and the screening desk and the research desk were
     // both skipped. Say only what is actually allowed, and say to stop.
     if (!list.length) return 'No Analyst coverage yet — nothing researched to build from. You have NO screener of your own: emit a <screen_request> for the sleeve and END THE TURN there. Argus screens, the Analyst researches, and you construct once coverage comes back. Do NOT pick names yourself from get_fundamentals, web_search or memory — a name you sourced is a name nobody screened or researched.'
-    const lines = list.map(c => {
+    const line = (c) => {
         const pt   = c.price_target?.value
         const gap  = Number.isFinite(c.gap?.pct) ? ` (${c.gap.pct >= 0 ? '+' : ''}${c.gap.pct}% vs Street${Number.isFinite(c.gap?.consensus_pt) ? ` ${c.gap.consensus_pt}` : ''})` : ''
         const th   = typeof c.thesis === 'string' && c.thesis ? ` — ${c.thesis.length > 160 ? c.thesis.slice(0, 157) + '…' : c.thesis}` : ''
         return `- ${c.symbol} [${c.rating ?? 'unrated'}]${pt != null ? ` our PT ${pt}${gap}` : ''} · ${c.status ?? 'active'}${th}`
-    })
-    return ['Analyst coverage (researched theses — build from these, our target vs the Street):', ...lines].join('\n')
+    }
+
+    // GROUPED BY SECTOR, not a flat list. Atlas builds a book of SLEEVES, and a sleeve is a sector
+    // bucket from Phase 3 — so "which names do I have for technology" is the question it actually
+    // asks here. Read flat, it had to re-derive that mapping from the tickers it happened to
+    // recognize, which is exactly the guessing the research pipeline exists to remove. The sector is
+    // the Analyst's own (coverage.sector), so the grouping is the researcher's classification, not
+    // Atlas's memory of one.
+    const bySector = new Map()
+    for (const c of list) {
+        const sector = typeof c.sector === 'string' && c.sector.trim() ? c.sector.trim() : UNSECTORED
+        if (!bySector.has(sector)) bySector.set(sector, [])
+        bySector.get(sector).push(c)
+    }
+    // First-seen order, but the unclassified bucket always last — it is a data gap, not a sleeve.
+    const sectors = [...bySector.keys()].filter(s => s !== UNSECTORED)
+    if (bySector.has(UNSECTORED)) sectors.push(UNSECTORED)
+
+    const blocks = sectors.map(sector => [
+        sector === UNSECTORED ? `${UNSECTORED} (no sector recorded — check the name fits before placing it):` : `${sector}:`,
+        ...bySector.get(sector).map(line),
+    ].join('\n'))
+
+    return [
+        'Analyst coverage (researched theses — build from these, our target vs the Street).',
+        'Grouped by the sector the Analyst researched each name UNDER — that is the sleeve it was sourced for. A sleeve from your architecture with no heading here has nothing researched behind it yet: route it, do not fill it from another sector\'s names.',
+        ...blocks.flatMap(b => ['', b]),
+    ].join('\n')
 }
 
 // Per-session handler — coverage is per-user, so it binds userId (like Kairos's userId-bound tools).
