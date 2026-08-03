@@ -79,6 +79,47 @@ test('a stale map leads with WHY, since that is the whole content of the offer',
     assert.ok(card.payload.edit_proposal, 'the proposal rides along so the re-draw has somewhere to start')
 })
 
+// ─── Rival premises ───────────────────────────────────────────────────────────
+// A setup can hold two ways in at different levels with different sizes. Copy that says "your NVDA
+// setup" is ambiguous when one of them fired, and outright false when one of them died.
+
+const RIVALS = {
+    ...SETUP, armed_scenario_id: 's2',
+    scenarios: [{ id: 's1', name: 'false break' }, { id: 's2', name: 'break and go' }],
+}
+
+test('the confirm names WHICH way in fired', () => {
+    const card = buildSetupEntryConfirm(RIVALS, { verdict: 'enter', read: 'It broke.', scenario_id: 's2' })
+    assert.match(card.content, /the break and go way in/)
+    assert.equal(card.payload.scenario, 'break and go')
+    assert.equal(card.payload.scenarioId, 's2')
+})
+
+test('a single-premise setup is never made to sound like it had a choice', () => {
+    const one  = { ...SETUP, armed_scenario_id: 's1', scenarios: [{ id: 's1', name: 'false break' }] }
+    const card = buildSetupEntryConfirm(one, { verdict: 'enter' })
+    assert.doesNotMatch(card.content, /way in/)
+    assert.equal(card.payload.scenario, 'false break', 'the payload still says which, for the dialog')
+})
+
+test('a breach names the premise and says what is still armed', () => {
+    const card = buildSetupInvalidation(RIVALS, {
+        card: 'invalidated', side: 'adverse', price: 233, edge: 'lower', scenario: 'false break', remaining: 1,
+    })
+    assert.match(card.content, /"false break" way into your LONG NVDA/)
+    assert.match(card.content, /other scenario is still armed/)
+    assert.doesNotMatch(card.content, /Want to re-draw it\?/, 'nothing to re-draw while a rival is live')
+    assert.equal(card.payload.remaining, 1)
+})
+
+test('with nothing left standing the copy is about the setup again', () => {
+    const card = buildSetupInvalidation(RIVALS, {
+        card: 'invalidated', side: 'adverse', price: 233, edge: 'lower', scenario: 'break and go', remaining: 0,
+    })
+    assert.doesNotMatch(card.content, /still armed/)
+    assert.match(card.content, /Want to re-draw it\?/)
+})
+
 test('every invalidation card is owner-scoped and routes to Mentor', () => {
     for (const kind of ['ran_away', 'invalidated', 'invalidated_fyi', 'stale_map']) {
         const card = buildSetupInvalidation(SETUP, { card: kind })

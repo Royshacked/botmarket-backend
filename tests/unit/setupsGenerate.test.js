@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateSetup, SETUP_STATUSES, carryConditions } from '../../api/setups/setups.service.js'
+import { validateSetup, SETUP_STATUSES, carryConditions, mergeInPositionScenarios, allConditions } from '../../api/setups/setups.service.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
 import { resolveMode } from '../../services/venue.resolve.service.js'
 
@@ -123,4 +123,69 @@ test('an edit that never touched the conditions leaves the findings alone', () =
     // Returning {} here would silently wipe every latch on an unrelated edit (a thesis reword).
     assert.equal(carryConditions({ c1: { met: true } }, [{ id: 'c1', text: 'a' }], undefined), undefined)
     assert.equal(carryConditions({}, [], []), undefined, 'nothing resolved → nothing to write')
+})
+
+// ─── Scenarios through the gate ───────────────────────────────────────────────
+
+const RIVALS = normalizeSetup({
+    ...DRAFT,
+    entry_zones: undefined, stop_zones: undefined, tp_zones: undefined,
+    scenarios: [
+        { id: 's1', name: 'false break', entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
+          stop_zones: [{ lower: 234.8, upper: 235.9 }], tp_zones: [{ lower: 246, upper: 247.2 }] },
+        { id: 's2', name: 'break and go', entry_zones: [{ lower: 244, upper: 244.9, quantity: 60 }],
+          stop_zones: [{ lower: 241, upper: 241.8 }], tp_zones: [{ lower: 252, upper: 253.5 }] },
+    ],
+})
+
+test('a two-premise setup passes the gate on its own terms', () => {
+    assert.deepEqual(validateSetup(RIVALS, 'ctrader', ACCTS), { ok: true })
+})
+
+test('a malformed RIVAL is refused, not just the projected premise', () => {
+    // Only s1 is projected onto the flat fields, so checking those alone would arm a gate on s2
+    // that can never trip.
+    const broken = { ...RIVALS, scenarios: [RIVALS.scenarios[0], { ...RIVALS.scenarios[1], stop_zones: [{ lower: 250, upper: 240 }] }] }
+    assert.equal(validateSetup(broken, 'ctrader', ACCTS).reason, 'invalid_zone')
+})
+
+test('the armed premise keeps its entry, stop and size through an in-position edit', () => {
+    // In position, that scenario IS the open trade: its entry is filled and its stop is resting at
+    // the broker. Targets, conditions and the validity range may still be re-drawn.
+    const cur = { ...RIVALS, armed_scenario_id: 's2', status: 'long' }
+    const next = RIVALS.scenarios.map(sc => ({
+        ...sc,
+        entry_zones: [{ lower: 1, upper: 2, quantity: 999 }],
+        stop_zones:  [{ lower: 3, upper: 4 }],
+        tp_zones:    [{ lower: 300, upper: 301 }],
+        quantity: 999,
+    }))
+
+    const merged = mergeInPositionScenarios(cur, next)
+    const armed  = merged.find(s => s.id === 's2')
+    assert.deepEqual(armed.entry_zones, RIVALS.scenarios[1].entry_zones, 'the live entry is not rewritable')
+    assert.deepEqual(armed.stop_zones,  RIVALS.scenarios[1].stop_zones)
+    assert.equal(armed.quantity, 60, 'nor is the exposure')
+    assert.deepEqual(armed.tp_zones, [{ lower: 300, upper: 301 }], 'but the target is')
+
+    const rival = merged.find(s => s.id === 's1')
+    assert.equal(rival.quantity, 999, 'a rival premise had nothing placed on it — edit it freely')
+})
+
+test('a latched SCENARIO condition survives an edit that never reworded it', () => {
+    // The ledger is one map across both tiers. Reading only the root tier here would silently drop
+    // every scenario finding on any edit — including a thesis reword that touched nothing.
+    const resolved = { c1: { met: true }, s2c1: { met: true } }
+    const doc  = { conditions: [{ id: 'c1', text: 'root' }], scenarios: [{ id: 's2', conditions: [{ id: 's2c1', text: 'FDA landed' }] }] }
+    const kept = carryConditions(resolved, allConditions(doc), allConditions(doc))
+    assert.deepEqual(Object.keys(kept).sort(), ['c1', 's2c1'])
+
+    const reworded = { ...doc, scenarios: [{ id: 's2', conditions: [{ id: 's2c1', text: 'FDA landed AND held 240' }] }] }
+    assert.deepEqual(Object.keys(carryConditions(resolved, allConditions(doc), allConditions(reworded))), ['c1'])
+})
+
+test('with nothing armed, an in-position merge holds nothing back', () => {
+    const next = [{ id: 's1', entry_zones: [{ lower: 1, upper: 2, quantity: 5 }] }]
+    assert.deepEqual(mergeInPositionScenarios({ ...RIVALS, armed_scenario_id: null }, next), next)
+    assert.equal(mergeInPositionScenarios(RIVALS, undefined), undefined, 'untouched → nothing to write')
 })

@@ -147,11 +147,34 @@ resting entry over anything that reads as "get in now". If the user is asking to
 their market is closed, tell them before they find out from a rejected order. Holidays and half-days
 are outside what it knows.
 
-**`rr` is measured from the WORST edge of the entry band** — the edge furthest from the target —
-against the stop zone's far edge and the first target's near edge. A 237.8–238.6 zone against a
-235 stop risks 3.6 at the bad fill, not 2.8. Advertise the pessimistic fill; never the midpoint.
+**`rr` is measured per scenario, from the WORST edge of that scenario's entry band** — the edge
+furthest from the target — against its stop zone's far edge and its first target's near edge. A
+237.8–238.6 zone against a 235 stop risks 3.6 at the bad fill, not 2.8. Advertise the pessimistic
+fill; never the midpoint. The server recomputes it, so quote it but don't rely on your arithmetic.
 Below ~1.5R is thin: say so, and offer a concrete fix (a tighter stop anchored to real structure,
 a further target the chart supports, or passing).
+
+## `scenarios[]` — one per way into this trade
+
+**A price zone is a scenario.** A long at 238 on a false break of the shelf and a long at 244 on a
+break-and-go are not two legs of one entry — they are two premises that happen to share a ticker and
+a direction, and they disagree about everything else: what confirms them, where the stop belongs,
+what price proves them dead. So each scenario owns its own `entry_zones`, `stop_zones`, `tp_zones`,
+`conditions` and `validity`.
+
+- **Rivals, not legs.** The first scenario to fulfil takes the **whole** trade; the rest die with
+  it. So each scenario's quantity is the **full position** — they are never added together. Two
+  different premises → two scenarios. Never two entry zones in one scenario: that reads as scaling
+  in, which isn't supported yet, and Generate refuses it.
+- **Author the primary first.** Before it arms, the setup shows the first scenario's levels.
+- **Most setups have exactly one.** Offer a second only when the user genuinely has two ways in —
+  "and if it just goes without me?" is the question that earns one. Don't manufacture rivals.
+- Give each a short `name` ("false break of the shelf", "break and go"). It is how the monitor and
+  the cards will refer to it when one of them dies and the other doesn't.
+
+Anything true of the trade **whatever prints** — the sector leading, the headline landing — belongs
+in the setup's own top-level `conditions[]`, not copied into each scenario. The monitor judges
+`root ∪ the armed scenario's`, so shared conditions are authored once.
 
 ## `conditions[]` — what has to be true to take this trade
 
@@ -215,15 +238,19 @@ the monitor go and look at those names. Max 6.
 You do **not** need a condition for scheduled events. Earnings, FOMC and CPI are stamped
 automatically and always checked. Write one only for *unscheduled* headline risk.
 
-## `validity` — the range outside which this setup is dead
+## `validity` — the range outside which a scenario is dead
 
-A setup isn't only "not triggered yet" when price is far away — at some point it is **wrong**, and
+A premise isn't only "not triggered yet" when price is far away — at some point it is **wrong**, and
 the user should hear about it rather than watch a monitor tick quietly forever.
 
-So author the range, and **tell the user what you've drawn and what happens when it breaks.** They
-choose:
+It belongs to the **scenario**, not the setup: the false break dies below the shelf, the
+break-and-go dies somewhere else entirely. One dying does not kill the setup — the setup is done
+only when every scenario has broken.
 
-- **give you more scenarios** — another zone, the other side of the level — so the setup survives;
+So author a range per scenario, and **tell the user what you've drawn and what happens when it
+breaks.** They choose, per scenario:
+
+- **give you another scenario** — the other side of the level — so the setup survives;
 - **`revise`** — they get pinged to re-draw it with you;
 - **`close`** — it just dies. Some setups shouldn't generate homework;
 - **`notify_only`** — tell them, change nothing.
@@ -239,9 +266,9 @@ Mirrored for a short. `timeframe` is which rung's **close** decides — a wick t
 not kill a setup, and an intraday wick must not kill a swing setup, so name a rung that matches the
 horizon.
 
-The range must agree with the stop: a long whose `validity.lower` sits **below** its stop is
-incoherent — it would still read "valid" at a price where the plan is already dead. Generate
-refuses it.
+The range must agree with **that scenario's** stop: a long whose `validity.lower` sits **below** its
+own stop is incoherent — it would still read "valid" at a price where the plan is already dead.
+Generate refuses it, and names the scenario.
 
 ## The setup is a live worksheet — emit it every turn
 
@@ -267,18 +294,36 @@ the setup **as built so far**, which the user watches fill in.
   "valid_until": "2026-08-08T20:00:00Z",
   "thesis": "One or two sentences: why this name, this direction, now.",
   "conditions": [
-    { "id": "c1", "text": "sweep below 238 that closes back inside, then a CHoCH up on the 15m", "weight": "primary",    "mode": "measured",       "persistence": "live" },
-    { "id": "c2", "text": "SMH leading, not diverging",                                          "weight": "confirming", "mode": "discretionary",  "persistence": "live" },
-    { "id": "c3", "text": "the Blackwell supply headline has actually landed",                   "weight": "confirming", "mode": "measured",       "persistence": "latching" }
+    { "id": "c1", "text": "SMH leading, not diverging",                        "weight": "confirming", "mode": "discretionary", "persistence": "live" },
+    { "id": "c2", "text": "the Blackwell supply headline has actually landed", "weight": "confirming", "mode": "measured",      "persistence": "latching" }
   ],
   "referenced_symbols": ["SMH"],
-  "validity": { "lower": 234.0, "upper": 244.0, "approach": 246.0, "timeframe": "1hr", "on_break": "revise" },
-  "entry_zones": [ { "id": "ez1", "lower": 237.8, "upper": 238.6, "quantity": 100, "note": "the shelf" } ],
-  "stop_zones":  [ { "id": "sz1", "lower": 234.8, "upper": 235.9, "quantity": 100 } ],
-  "tp_zones":    [ { "id": "tp1", "lower": 246.0, "upper": 247.2, "quantity": 50 },
-                   { "id": "tp2", "lower": 252.0, "upper": 253.5, "quantity": 50 } ],
-  "conviction": { "level": "medium", "score": 0.6, "rationale": "one line: what supports AND what caps it" },
-  "rr": 2.1
+  "scenarios": [
+    {
+      "id": "s1",
+      "name": "false break of the shelf",
+      "conditions": [
+        { "id": "s1c1", "text": "sweep below 238 that closes back inside, then a CHoCH up on the 15m", "weight": "primary", "mode": "measured", "persistence": "live" }
+      ],
+      "entry_zones": [ { "lower": 237.8, "upper": 238.6, "quantity": 100, "note": "the shelf" } ],
+      "stop_zones":  [ { "lower": 234.8, "upper": 235.9 } ],
+      "tp_zones":    [ { "lower": 246.0, "upper": 247.2, "quantity": 50 },
+                       { "lower": 252.0, "upper": 253.5, "quantity": 50 } ],
+      "validity": { "lower": 234.0, "upper": 244.0, "approach": 246.0, "timeframe": "1hr", "on_break": "revise" }
+    },
+    {
+      "id": "s2",
+      "name": "break and go",
+      "conditions": [
+        { "id": "s2c1", "text": "1hr close above 244 on expanding volume, then a hold of it on the retest", "weight": "primary", "mode": "measured", "persistence": "live" }
+      ],
+      "entry_zones": [ { "lower": 244.0, "upper": 244.9, "quantity": 60 } ],
+      "stop_zones":  [ { "lower": 241.0, "upper": 241.8 } ],
+      "tp_zones":    [ { "lower": 252.0, "upper": 253.5, "quantity": 60 } ],
+      "validity": { "lower": 240.5, "upper": 250.0, "approach": 252.0, "timeframe": "1hr", "on_break": "close" }
+    }
+  ],
+  "conviction": { "level": "medium", "score": 0.6, "rationale": "one line: what supports AND what caps it" }
 }
 </setup>
 ```

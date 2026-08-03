@@ -13,6 +13,10 @@ trades ledger and not by the journal. Both want the same in-position brain.
 Supersedes the `watch[]` taxonomy in `docs/setup-entity.md` §3/§8. Everything else in that
 contract stands.
 
+Phase 6 (§10) is **designed, not built** — a price zone becomes a *scenario* that owns its own
+conditions, stops, targets and validity range. It supersedes the flat `entry_zones`/`stop_zones`/
+`tp_zones` **as the authored shape**; those three stay as the execution projection.
+
 ---
 
 ## 1. What changes, in one paragraph
@@ -395,3 +399,209 @@ D1 and D2 are Phase 4 and don't block Phases 0–3.
   verbatim, in order, including `cache_control`. Adding the monitor as a registry consumer will
   break it — regenerate deliberately, and re-read the equivalence-harness method in the memory note
   before doing so.
+
+---
+
+## 10. Phase 6 — a price zone is a scenario
+
+Status: **BUILT** (2026-08-03) — backend 1794 tests green, frontend 319 vitest + 164 node green,
+both lint clean, neither committed. Not live-verified.
+
+### 10.1 Why
+
+Ask the question the current shape can't answer: a long at 100 on a **false break** and a long at
+104 on a **break and go** are not two legs of one entry. They are two premises that happen to share
+a ticker and a direction — different triggers, different stops, different death lines. One
+root-level `conditions[]` checked at whichever zone price reaches will grade the breakout against
+the false break's trigger, and mean it.
+
+The code has been leaning this way already: `armed_zone_id` exists precisely because *which zone*
+is meaningful state. Scenarios give it something to own.
+
+### 10.2 Shape
+
+```js
+scenarios: [
+  { id: 's1', name: 'false break',
+    entry_zones: [ { lower: 99, upper: 100.5, quantity: 100 } ],   // v1: exactly one
+    conditions:  [ { id:'s1c1', text:'sweep of the 100 low then reclaim on the 15m',
+                     weight:'primary', mode:'measured', persistence:'live' } ],
+    stop_zones:  [ { lower: 96,  upper: 96.8 } ],
+    tp_zones:    [ { lower: 106, upper: 107 } ],
+    validity:    { lower: 95.5, approach: 104, timeframe: '1hr', on_break: 'revise' },
+    quantity: 100, rr: 2.1 },                                      // both server-derived
+
+  { id: 's2', name: 'break and go', entry_zones: [ { lower: 104, upper: 104.6, quantity: 60 } ], … },
+]
+
+conditions: [ … ]   // ROOT — true of the setup regardless of which scenario prints
+```
+
+**Why `entry_zones[]` and not a single `entry`.** A scenario mirrors the flat triple exactly, so the
+projection (§10.3) is a copy of three keys rather than a shape change, the legacy wrap is trivial,
+and scale-in later means *more entries inside one scenario* with no schema churn. The distinction
+that matters is the one the arrays encode: **within** a scenario, entries are legs (they sum);
+**across** scenarios they are rivals (they never do). Readiness refuses more than one entry zone per
+scenario in v1, since execution still fires once for the scenario's whole size.
+
+**Conditions stay two-tier.** Root = setup-wide truths (the FDA approval, the regime read).
+Scenario = that premise's own trigger. A wake checks `root ∪ armed scenario's`. When both scenarios
+genuinely share everything, Mentor authors it once at the root and the scenarios carry none — so
+"the same conditions twice" costs nothing and is never copied.
+
+**The ledger stays ONE map**, `monitor_state.conditions`, keyed by condition id. Ids are unique
+across the doc, so a `latching` event resolves once no matter which scenario armed. The per-scenario
+view is a group-by, not a second store. A per-scenario ledger would let a settled fact disagree with
+itself — the exact failure §2.4 exists to prevent.
+
+**Validity is per scenario** (§3 unchanged in meaning, moved). Each premise has its own death line:
+the false break dies below 95.5, the breakout dies somewhere else entirely. The setup as a whole
+closes only when **every** scenario has broken; while one survives it stays `looking`. `on_break` is
+still authored per scenario, so one premise can be `revise` and the other `close`.
+
+As built, that is three pieces:
+
+- **`monitor_state.scenarios.<id>`** — the per-premise invalidation latch (`fired` / `drifting`,
+  edge, reason, timestamp). It lives in monitor state, not on the scenario, because `scenarios` is
+  the AUTHORED plan and a monitor must not rewrite what the user wrote. `fired` drops a premise out
+  of the gate (`liveScenarios`); `drifting` leaves it armed — price can come back.
+- **`rollUpBreaches`** — the document's own axis, decided by what is LEFT standing. Nothing is
+  written while a rival is alive; when the last one falls, **that** scenario's `on_break` decides
+  whether the setup closes. `drifting` rolls up the same way and never closes anything.
+- **The projection follows the survivors.** If the premise the document was projecting dies while
+  another stands, the flat fields are re-stamped onto the first survivor — otherwise the confirm
+  dialog, the watch row and the FE would keep advertising a dead plan's levels.
+
+The invalidation card names the premise and says what survived ("the *false break* way into your
+LONG NVDA is no longer valid… your other scenario is still armed"), because the old copy — *"your
+setup is no longer valid"* — is simply false when a rival is still live.
+
+### 10.3 The rule that keeps this from becoming spaghetti
+
+> **`scenarios[]` is the authored + monitored model. The flat triple is the execution projection,
+> written from the winning scenario at arm time.**
+
+`entry_zones` / `stop_zones` / `tp_zones` are **not** setup-private — they are the vocabulary the
+`call` kind uses too, and the kind-blind consumers read them flat: `routeSetupZones`
+(`protectionPlan.service.js:145`), `tradeCapture`, `monitorJournal`, the order plan
+(`orderPlan.service.js:78` reads the doc's `quantity`). So when a scenario fires, stamp its entry /
+stop / tp zones and its quantity onto those fields and **execution, capture, the reconciler and the
+trades ledger stay untouched.**
+
+That projection also settles the double-count that is live today: `totalQuantity` **sums** the entry
+zones (scale-in semantics) while Talos fires **once for the doc's full quantity** (alternative
+semantics), so two rival zones of 100 place 200.
+
+**Decided (user, 2026-08-03): one entry per scenario, at the WHOLE position size.** Scenarios are
+rivals, not legs — the first to fulfil takes the full trade and the others die. So:
+
+- `totalQuantity` is **deleted**, not deferred. Nothing sums zones any more; summing was the bug.
+- `scenario.entry.quantity` **is** the position. Two scenarios may size differently (the false break
+  gets 100, the worse breakout entry gets 60) — they're independent numbers, never added.
+- The doc's `quantity` is the **armed** scenario's; pre-arm it reads the nearest live scenario's,
+  the same rule the row uses (§10.6), so the confirm dialog and the panel can't show a size the
+  order wouldn't place.
+- Scale-in — several entries inside *one* scenario — stays out of scope. When it lands it is `entry`
+  becoming an array **within a scenario**, and it does not disturb this rule: the scenario still
+  owns one position, its legs still sum to that position, and rival scenarios still never add.
+
+Three seams, and no fourth:
+
+1. **One shape at the top.** Nothing outside `setup.schema.js` asks "does this doc have scenarios?"
+2. **One projection at the bottom.** The stamp at arm, described above.
+3. **One legacy adapter.** `normalizeSetup` wraps a pre-scenario doc (root zones, no `scenarios`)
+   into a single implicit scenario `s1` carrying the root conditions and the root validity. Every
+   other module reads scenarios only. Delete the wrapper once no such docs remain — and if there are
+   none in Mongo when this is built, skip it entirely rather than writing compatibility for nobody.
+
+### 10.4 Rewrite, don't patch (three pure functions)
+
+These already score one plan against a mixed bag and get worse, not better, if extended:
+
+- `computeRR` — per scenario, worst entry edge vs that scenario's nearest TP. The doc-level `rr`
+  becomes the armed scenario's (pre-arm: the nearest scenario's).
+- `validityProblems` — per scenario: floor vs *that* scenario's stop far edge, `approach` outside
+  *that* envelope.
+- `setupReadiness` — presence moves down a level: every scenario needs an entry zone, a stop zone,
+  its own whole-position quantity, and at least one condition **counting the root tier** (a scenario
+  with no trigger of its own is legitimate when the root carries it; a setup with no condition
+  anywhere is not). Report the failing scenario by name, not a bare reason — with two scenarios
+  "missing stop zone" is ambiguous.
+
+### 10.5 What changes, by file
+
+| file | change |
+|---|---|
+| `services/setup.schema.js` | `normalizeScenario`/`normalizeScenarios`; `validity` + `conditions` move inside; the three rewrites in §10.4; the one legacy wrapper |
+| `monitoring/talos.monitor.service.js` | `zoneGate` iterates scenarios → `{scenario, zone}`; `armed_scenario_id` beside `armed_zone_id`; the validity gate runs per scenario and the setup closes only when all have broken; on fire, the projection stamp + the losing scenarios marked dead |
+| `monitoring/talos.assess.js` | `_conditionsBlock` = root ∪ armed scenario, and the prompt **names** the scenario, so the read is "the false break, not the breakout" |
+| `api/setups/setups.service.js` | generate/patch over the nested shape |
+| `services/entity/toWatchRow.js` | §10.6 |
+| `services/tradeNotify.service.js` | the invalidation card names the premise + what survived |
+| `mentor_system_prompt.md` | authors scenarios; the checkability gate is unchanged, applied per scenario; must ask which premise a level belongs to instead of accumulating zones |
+| FE (separate repo) | **NOT DONE — §10.8.** `ZoneEditor` groups by scenario; `SetupSummary` renders scenario blocks |
+| — | **no change:** `protectionPlan`, `orderPlan`, `execution.reconciler`, `tradeCapture`, `monitorJournal` |
+
+Three defects found in the bug hunt on this phase's own code, all fixed and test-locked:
+
+1. On an **expiry review** there is no armed scenario, so the recorder judged the root tier alone
+   while the assessment had shown the model the projected scenario — every answer keyed to that
+   scenario's conditions was dropped as hallucinated. `_applyVerdict` now falls back to
+   `pickScenario`, matching what `assessSetup` asks.
+2. A **dead premise stayed projected**, so the flat levels kept advertising a plan nobody watches.
+3. `carryConditions` read the **root tier only**, so an in-position light edit (a thesis reword)
+   silently wiped every latched *scenario* condition. It now carries both tiers (`allConditions`).
+
+### 10.6 The row shows every scenario
+
+`setupToWatchRow.detail` gains:
+
+```js
+scenarios: [ { id, name, entry:{low,high}, stop:{low,high}, tp:{low,high}, rr, armed:false } ]
+```
+
+`nearestEntry` / `stop` / `firstTp` / `rr` stay, pointing at the **armed** scenario, else the
+nearest live one. They are not redundant back-compat: `userData.tools._zone` reads those keys, and
+an agent asking "where is my NVDA setup" wants one answer, not a menu. The array is what makes
+"I have two ways into this" visible at all.
+
+### 10.7 Tests
+
+- **Schema:** scenarios normalise, ids stable, a scenario with no conditions is valid when the root
+  has them; readiness names the failing scenario; per-scenario `computeRR` and validity coherence
+  (both directions); a legacy root-zone doc becomes exactly one scenario with the root's validity.
+- **Talos:** the gate picks the scenario price is actually in; the assessment prompt carries the
+  armed scenario's conditions and NOT the rival's; one scenario breaking validity does not close a
+  setup whose other scenario is alive; all broken → closed.
+- **Projection:** on fire, the flat triple and `quantity` equal the armed scenario's — and
+  `routeSetupZones` produces that scenario's stop/tp legs unchanged (the regression that guards
+  "execution never learned about scenarios").
+- **Quantity is never summed:** two scenarios of 100 and 60 place 100 or 60, never 160 — the bug
+  that is live today, asserted in both directions (armed s1, armed s2).
+- **Ledger:** a `latching` condition declared at the root resolves once and is not re-checked when a
+  different scenario arms.
+
+### 10.8 The FE (botmarket-frontend, DONE 2026-08-03 — 319 vitest + 164 node green, lint clean)
+
+The trap this section used to describe: once a draft carries `scenarios`, `normalizeSetup` reads
+**scenarios** and ignores the flat zones (they are output, not input) — so an edit written to the
+flat zones looked accepted in the panel and was **silently discarded on Generate**. Closed by making
+the editor scenario-shaped rather than by special-casing the seam.
+
+| file | change |
+|---|---|
+| `ZoneEditor.jsx` | takes a **scenario**, hands back a scenario. New zone ids are scoped to it (`s2t2`) so they stay unique document-wide. The entry group refuses a SECOND zone — that is a second scenario, not a second leg — and the affordance is simply not offered |
+| `ConditionList.jsx` *(new)* | the instruction sheet as prose + the three tags that change how it is judged. ONE component, two tiers (setup-wide and per premise) |
+| `ScenarioBlock.jsx` *(new)* | one way in: name, entry, its own r:r and size, armed/dead badges, its zones, its conditions, its validity line |
+| `SetupSummary.jsx` | renders the setup-wide conditions once, then a block per scenario, plus "+ another way in". Writes into `scenarios[i]`, never into the projection |
+| `SetupPage.jsx` | the pop-out renders every premise (armed / dead) with its own levels and conditions; the flat zones are deliberately not drawn beside them |
+| `SetupCard.jsx` · `CandidatePicker.jsx` | show the projected levels **plus** "+N more ways in", so one set of numbers never reads as the whole plan |
+| `ChatWindow.jsx` (`EntryConfirmBubble`) | names the premise that fired, from the card's new `scenario` payload |
+
+**Also fixed here, stale since Phase 1:** `SetupSummary` and `SetupPage` were still rendering
+`watch[]` — the taxonomy Phase 1 deleted — so the panel had been showing nothing at all where the
+conditions should be. Both now render `conditions`.
+
+Not converted, deliberately: `chartOverlay.js` draws the **projection's** zones (the armed premise,
+else the primary). Drawing every rival's entry/stop/target on one chart is a legibility question,
+not a correctness one, and it wants a look at the real thing before choosing.

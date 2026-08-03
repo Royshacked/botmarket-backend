@@ -11,6 +11,7 @@ import {
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, READINESS_VERDICTS } from './talos.assess.js'
+import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario } from '../services/setup.schema.js'
 import { notifySetupEntryConfirm, notifySetupInvalidation } from '../services/tradeNotify.service.js'
 
 // Talos — the guardian of the `setup` kind (docs/setup-entity.md §5).
@@ -120,7 +121,10 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     }
 
     const price = await deps.getPrice(setup)
-    const zone  = Number.isFinite(price) ? zoneGate(setup.entry_zones, price) : null
+    // Which PREMISE price reached, not merely which zone: the scenario decides what gets judged,
+    // what size is taken and which stop rests behind it.
+    const hit   = scenarioGate(setup, price)
+    const zone  = hit?.zone ?? null
 
     // Nothing tripped and not expiring → the cheap path. No LLM, just a proximity-aware
     // reschedule that tightens as price approaches the nearest zone.
@@ -137,7 +141,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     }
 
     const reason = expiring ? 'expiry_review' : 'zone_trip'
-    const raw    = await deps.assess(setup, zone, { reason, price })
+    const raw    = await deps.assess(setup, hit, { reason, price })
 
     if (!raw || raw._failReason) {
         const patch = _reschedule(setup, nowMs, price)
@@ -151,7 +155,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     const verdict = _effectiveVerdict(onMenu, reason, _isPastExpiry(setup, nowMs))
     if (verdict !== onMenu) logger.info(LOG, `[${setup.id}] verdict "${onMenu}" → "${verdict}" (${reason}${_isPastExpiry(setup, nowMs) ? ', past expiry' : ''})`)
 
-    return _applyVerdict(setup, zone, { ...raw, verdict }, nowMs, reason, price, deps)
+    return _applyVerdict(setup, hit, { ...raw, verdict }, nowMs, reason, price, deps)
 }
 
 /**
@@ -214,7 +218,11 @@ async function _checkPosition(setup, nowMs, deps) {
 }
 
 function _num(n) { return Number.isFinite(Number(n)) ? Number(n) : null }
-function _zoneById(setup, id) { return (setup?.entry_zones ?? []).find(z => z.id === id) ?? null }
+// Across every scenario, not just the projected one — a position's armed zone belongs to whichever
+// premise won, and by now the projection agrees, but the lookup must not depend on that ordering.
+function _zoneById(setup, id) {
+    return (setup?.scenarios ?? []).flatMap(sc => sc.entry_zones ?? []).find(z => z.id === id) ?? null
+}
 
 /**
  * The validity gate for one wake. Returns a result when the setup's fate changed, else null so the
@@ -229,36 +237,77 @@ function _zoneById(setup, id) { return (setup?.entry_zones ?? []).find(z => z.id
  * plan on a provider hiccup.
  */
 async function _checkValidity(setup, price, nowMs, deps) {
-    if (!setup?.validity) return null
+    const watched = liveScenarios(setup).filter(sc => sc.validity)
+    if (!watched.length) return null
 
-    const suspected = validityBreach(setup, price)
-    if (!suspected) return null
+    const closes = new Map()   // timeframe → close. Rival premises usually share a rung; pay once.
+    const set    = {}
+    const events = []
+    const next   = {}
+    let last     = null
 
-    const tf    = setup.validity.timeframe || setup.ladder?.[0] || setup.timeframe
-    const close = await deps.getClose(setup, tf)
-    if (!Number.isFinite(close)) {
-        logger.info(LOG, `[${setup.id}] tick ${price} looks past the ${suspected} edge but no ${tf} close available — leaving it alone`)
-        return null
+    for (const sc of watched) {
+        const view      = scenarioView(setup, sc)
+        const suspected = validityBreach(view, price)
+        if (!suspected) continue
+
+        const tf = sc.validity.timeframe || setup.ladder?.[0] || setup.timeframe
+        if (!closes.has(tf)) closes.set(tf, await deps.getClose(setup, tf))
+        const close = closes.get(tf)
+        if (!Number.isFinite(close)) {
+            logger.info(LOG, `[${setup.id}] tick ${price} looks past ${scenarioLabel(sc)}'s ${suspected} edge but no ${tf} close available — leaving it alone`)
+            continue
+        }
+
+        // The close is the verdict, and it may disagree with the tick: that IS the wick guard working.
+        const side = validityBreach(view, close)
+        if (!side) continue
+
+        const res = breachPatch(setup, sc, side, close, nowMs)
+        if (!res.card) continue   // already latched — stay quiet, don't re-announce every wake
+
+        Object.assign(set, res.set)
+        next[sc.id] = res.status
+        last = { scenario: sc, edge: res.edge, reason: res.reason }
+        events.push({ scenario: sc, card: res.card, side, price: close, edge: res.edge, reason: res.reason })
     }
 
-    // The close is the verdict, and it may disagree with the tick: that IS the wick guard working.
-    const side = validityBreach(setup, close)
-    if (!side) return null
+    if (!events.length) return null
 
-    const { set, card } = breachPatch(setup, side, close, nowMs)
-    if (!card) return null   // already latched — stay quiet, don't re-announce every wake
+    // The document's own axis, decided by what is LEFT standing rather than by what just fell.
+    const rolled = rollUpBreaches(setup, next, last, nowMs)
+    Object.assign(set, rolled)
 
+    const survivors = liveScenarios(setup).filter(sc => next[sc.id] !== INVALIDATION.FIRED)
+    const remaining = survivors.length
+
+    // If the premise the document was PROJECTING just died while another still stands, the flat
+    // fields would keep advertising a dead plan — the levels the confirm dialog, the watch row and
+    // the FE all read. Re-project onto the first survivor.
+    const projected = setup.armed_scenario_id ?? pickScenario(setup)?.id ?? null
+    if (remaining && next[projected] === INVALIDATION.FIRED) {
+        Object.assign(set, projectScenario(setup, survivors[0].id))
+        logger.info(LOG, `[${setup.id}] projection moves to ${scenarioLabel(survivors[0])} — the one it was showing is gone`)
+    }
     const patch = { ..._reschedule(setup, nowMs, price), ...set }
     await deps.persist(setup.id, patch, _entry('invalidation', {
-        setup, nowMs, price: close, nextAt: patch['monitor_state.next_check_at'],
-        read: set.invalidation_reason,
+        setup, nowMs, price: events[0].price, nextAt: patch['monitor_state.next_check_at'],
+        read: events.map(e => e.reason).join(' · '),
     }))
 
-    try { await deps.onInvalidation(setup, { card, side, price: close, edge: set.invalidation_edge, reason: set.invalidation_reason }) }
-    catch (err) { logger.warn(LOG, `invalidation card failed for ${setup.id}:`, err.message) }
+    for (const ev of events) {
+        try { await deps.onInvalidation(setup, { ...ev, scenario: scenarioLabel(ev.scenario), remaining }) }
+        catch (err) { logger.warn(LOG, `invalidation card failed for ${setup.id}:`, err.message) }
+    }
 
-    logger.info(LOG, `[${setup.id}] validity ${side} breach at ${close} → ${set.invalidation_status}${set.status === 'closed' ? ' (closed)' : ''}`)
-    return { reason: 'invalidation', side, status: set.invalidation_status, closed: set.status === 'closed' }
+    logger.info(LOG, `[${setup.id}] ${events.map(e => `${scenarioLabel(e.scenario)} ${e.side}`).join(', ')} at ${events[0].price} — ${remaining} scenario(s) still live${rolled.status === 'closed' ? ' (closed)' : ''}`)
+    return {
+        reason: 'invalidation',
+        side:   events[0].side,
+        status: rolled.invalidation_status ?? next[events[0].scenario.id],
+        closed: rolled.status === 'closed',
+        remaining,
+    }
 }
 
 /**
@@ -275,12 +324,23 @@ async function _checkValidity(setup, price, nowMs, deps) {
  *
  * Card spam isn't a risk: firing moves the setup to 'hit', which leaves the polled statuses.
  */
-async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
-    const conditions = normalizeConditionResults(raw.conditions, setup.conditions)
+async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
+    const zone     = hit?.zone ?? null
+    // No zone means an EXPIRY REVIEW, and the assessment still had to show the model a plan — it
+    // falls back to the projected premise (pickScenario). The recorder must agree with what was
+    // asked, or every answer keyed to that scenario's conditions is dropped as hallucinated.
+    const scenario = hit?.scenario ?? pickScenario(setup)
+    // The mandate for this wake: the setup-wide tier plus the armed premise's own trigger. A rival
+    // scenario's conditions are NOT judged here — grading the breakout's trigger while price sits in
+    // the false break's zone is how a setup ends up reading as unfulfilled forever.
+    const declared = declaredConditions(setup, scenario)
+
+    const conditions = normalizeConditionResults(raw.conditions, declared)
     const assessment = {
         at:             new Date(nowMs).toISOString(),
         reason,
         zone_id:        zone?.id ?? null,
+        scenario_id:    scenario?.id ?? null,
         verdict:        raw.verdict,
         read:           raw.read ?? null,
         warning:        raw.verdict === 'enter' ? null : (raw.warning ?? raw.read ?? null),
@@ -295,7 +355,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
         'monitor_state.memo':            raw.memo_update ?? setup.monitor_state?.memo ?? null,
         'monitor_state.last_assessment': assessment,
         'monitor_state.next_check_at':   _nextCheckAt(setup, nowMs, raw.next_check_min),
-        ...latchPatch(setup, conditions, nowMs),
+        ...latchPatch(setup, conditions, nowMs, declared),
         ...costPatch(setup, raw._calls),
     }
 
@@ -319,7 +379,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
     if (raw.verdict === 'edit' && !isInvalidated(setup.invalidation_status) && _hasEditProposal(raw)) {
         const patch = {
             ...base,
-            ...(zone ? { armed_zone_id: zone.id } : {}),
+            ...(zone ? { armed_zone_id: zone.id, armed_scenario_id: scenario?.id ?? null } : {}),
             invalidation_status: INVALIDATION.FIRED,
             invalidation_edge:   'time',
             invalidation_reason: raw.edit_proposal?.why ?? raw.read ?? null,
@@ -335,7 +395,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
     // and let Talos's self-chosen cadence decide when to look again. No card: asking the user to
     // confirm an entry Talos just declined is the one thing this gate exists to prevent.
     if (zone && raw.verdict !== 'enter') {
-        await deps.persist(setup.id, { ...base, status: _nextStatus(raw.verdict, reason), armed_zone_id: zone.id },
+        await deps.persist(setup.id, { ...base, status: _nextStatus(raw.verdict, reason), armed_zone_id: zone.id, armed_scenario_id: scenario?.id ?? null },
             _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
         return { reason, verdict: raw.verdict, watching: true }
     }
@@ -344,19 +404,33 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
     // setup with no pendingOrder would open the confirm dialog onto nothing and dead-end there
     // (the bug that shipped in the first draft).
     if (zone) {
-        const patch = { ...base, status: _nextStatus(raw.verdict, reason), armed_zone_id: zone.id, entryTriggeredAt: nowMs }
+        // THE PROJECTION (docs/mentor-talos-refactor.md §10.3). The winning premise's legs and its
+        // whole size are stamped onto the flat fields every kind-blind consumer reads — the order
+        // plan, protectionPlan's exit legs, the reconciler, the trades ledger — so execution never
+        // learns that scenarios exist. The rivals are simply no longer projected: nothing sums.
+        const projection = projectScenario(setup, scenario?.id ?? null)
+        const executable = { ...setup, ...projection }
+        const patch = {
+            ...base, ...projection,
+            status: _nextStatus(raw.verdict, reason),
+            armed_zone_id: zone.id,
+            armed_scenario_id: scenario?.id ?? null,
+            entryTriggeredAt: nowMs,
+        }
 
         // Manual (broker-less real money): no order plan — the user places it themselves and
         // reports the fill. Its own card, not the confirm dialog.
         if (setup.broker === 'manual') {
             patch.orderState = 'awaiting_manual_fill'
             await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
-            try { await deps.onManualCard(setup) }
+            // The PROJECTED setup, not the document as it was read: the leg the user is told to place
+            // must be the armed premise's, at the armed premise's size.
+            try { await deps.onManualCard(executable) }
             catch (err) { logger.warn(LOG, `manual entry card failed for ${setup.id}:`, err.message) }
             return { reason, verdict: raw.verdict, fired: true, manual: true }
         }
 
-        const plan = await deps.buildOrderPlan(setup).catch(err => {
+        const plan = await deps.buildOrderPlan(executable).catch(err => {
             logger.error(LOG, `order plan failed for ${setup.id}:`, err.message)
             return []
         })
@@ -374,7 +448,7 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
         // Only an order actually awaiting confirmation gets the confirm card. 'awaiting_market'
         // defers silently until the market sweep surfaces it, matching Minos.
         if (patch.orderState !== 'awaiting_market') {
-            try { await deps.onCard(setup, assessment) }
+            try { await deps.onCard(executable, assessment) }
             catch (err) { logger.warn(LOG, `entry card failed for ${setup.id}:`, err.message) }
         }
 
@@ -395,6 +469,43 @@ async function _applyVerdict(setup, zone, raw, nowMs, reason, price, deps) {
 export function zoneGate(zones, price) {
     if (!Number.isFinite(price)) return null
     return (zones ?? []).find(z => price >= z.lower && price <= z.upper) ?? null
+}
+
+/** What a scenario's own invalidation axis says, or null while it is untouched. */
+export function scenarioState(setup, id) {
+    return setup?.monitor_state?.scenarios?.[id] ?? null
+}
+
+/**
+ * The scenarios still worth watching. A scenario whose premise BROKE is out — price returning to a
+ * dead level is not an entry, it is the market walking back over a corpse. `drifting` (it ran away)
+ * stays live: price can come back, and "you missed it" was never "you were wrong".
+ */
+export function liveScenarios(setup) {
+    return (setup?.scenarios ?? []).filter(sc => scenarioState(setup, sc.id)?.invalidation_status !== INVALIDATION.FIRED)
+}
+
+/**
+ * The gate across a setup's rival premises: the first LIVE scenario whose entry zone contains price.
+ * Returns `{ scenario, zone }`, because everything downstream needs both — the zone to report, and
+ * the scenario to know which conditions to judge, which stop to place and which size to take.
+ *
+ * Scenarios are ordered as authored, so a primary declared first wins a tie against a rival whose
+ * zone overlaps it. Overlapping rivals are a build-time smell, not a runtime decision to agonise
+ * over: whichever premise the user wrote first is the one they meant.
+ */
+export function scenarioGate(setup, price) {
+    if (!Number.isFinite(price)) return null
+    for (const scenario of liveScenarios(setup)) {
+        const zone = zoneGate(scenario.entry_zones, price)
+        if (zone) return { scenario, zone }
+    }
+    return null
+}
+
+/** Every entry zone still armed, across live scenarios — what proximity cadence measures against. */
+export function liveEntryZones(setup) {
+    return liveScenarios(setup).flatMap(sc => sc.entry_zones ?? [])
 }
 
 /** Distance from price to the nearest zone edge, as a multiple of that zone's width. */
@@ -440,7 +551,12 @@ export function _hasEditProposal(raw) {
     return Boolean(hasWhy || hasChanges)
 }
 
-/** The edge whose breach means the premise broke. Pure. */
+/**
+ * The edge whose breach means the premise broke. Pure.
+ *
+ * Takes a PLAN, not necessarily the document: a scenario view (scenarioView) carries the same two
+ * fields, which is how one implementation serves every rival premise on a setup.
+ */
 export function adverseEdge(setup) {
     const v = setup?.validity
     if (!v) return null
@@ -479,49 +595,99 @@ export function validityBreach(setup, price) {
     return null
 }
 
-/**
- * The $set for a confirmed breach, plus whether a card should fire.
- *
- * FIRE-ONCE, both sides. Price oscillating around an edge would otherwise notify on every wake —
- * the single most likely way for this feature to become something the user mutes. `fired` is
- * terminal for the latch (only a re-map clears it, exactly as the call path does); `drifting` is
- * announced once and then stays quiet, and can still escalate to `fired` if price later breaks the
- * other way.
- *
- * `on_break` is the user's authored choice and is honoured verbatim — 'close' is the one branch
- * that touches the lifecycle, and only on the ADVERSE side. Pure.
- */
-export function breachPatch(setup, side, price, nowMs) {
-    const prior = setup?.invalidation_status ?? null
-    const edge  = setup?.direction === 'long'
+/** Which edge of the range a breach came through, in the document's words. Pure. */
+function _breachEdge(direction, side) {
+    return direction === 'long'
         ? (side === 'adverse' ? 'lower' : 'upper')
         : (side === 'adverse' ? 'upper' : 'lower')
+}
+
+/**
+ * The $set for a confirmed breach of ONE scenario, plus whether a card should fire.
+ *
+ * FIRE-ONCE, both sides, PER SCENARIO. Price oscillating around an edge would otherwise notify on
+ * every wake — the single most likely way for this feature to become something the user mutes.
+ * `fired` is terminal for that premise (only a re-map clears it, exactly as the call path does);
+ * `drifting` is announced once and then stays quiet, and can still escalate to `fired` if price
+ * later breaks the other way.
+ *
+ * The latch lives in `monitor_state.scenarios.<id>` rather than on the scenario itself, because the
+ * `scenarios` array is the AUTHORED plan and a monitor must not rewrite what the user wrote. Pure.
+ */
+export function breachPatch(setup, sc, side, price, nowMs) {
+    const prior = scenarioState(setup, sc?.id)?.invalidation_status ?? null
+    const edge  = _breachEdge(setup?.direction, side)
+    const label = scenarioLabel(sc)
+    const many  = (setup?.scenarios?.length ?? 0) > 1
+    const at    = new Date(nowMs).toISOString()
+    const key   = `monitor_state.scenarios.${sc?.id}`
 
     if (side === 'away') {
         // Already announced (or already dead) → nothing to say.
-        if (prior != null) return { set: {}, card: null }
+        if (prior != null) return { set: {}, card: null, status: null }
+        const reason = `price ran to ${price} — past the ${edge} edge of where ${many ? label : 'this setup'} works`
         return {
-            set: {
-                invalidation_status: INVALIDATION.DRIFTING,
-                invalidation_edge:   edge,
-                invalidation_reason: `price ran to ${price} — past the ${edge} edge of where this setup works`,
-            },
-            card: 'ran_away',
+            set:    { [key]: { invalidation_status: INVALIDATION.DRIFTING, invalidation_edge: edge, invalidation_reason: reason, at } },
+            card:   'ran_away',
+            status: INVALIDATION.DRIFTING,
+            edge, reason,
         }
     }
 
-    if (prior === INVALIDATION.FIRED) return { set: {}, card: null }
+    if (prior === INVALIDATION.FIRED) return { set: {}, card: null, status: null }
 
-    const set = {
-        invalidation_status: INVALIDATION.FIRED,
-        invalidation_edge:   edge,
-        invalidation_reason: `closed at ${price}, past the ${edge} edge — the premise is broken`,
+    const reason = `closed at ${price}, past the ${edge} edge — ${many ? label : 'the premise'} is broken`
+    return {
+        set:    { [key]: { invalidation_status: INVALIDATION.FIRED, invalidation_edge: edge, invalidation_reason: reason, at } },
+        // `notify_only` is the authored "let it die quietly" — still its own card, never silence.
+        card:   sc?.validity?.on_break === 'notify_only' ? 'invalidated_fyi' : 'invalidated',
+        status: INVALIDATION.FIRED,
+        edge, reason,
     }
-    // The ONE branch that ends the setup, and only because the user asked for it at build time.
-    if (setup?.validity?.on_break === 'close') {
-        Object.assign(set, { status: 'closed', closedReason: 'invalidated', closedAt: nowMs })
+}
+
+/**
+ * The document's own invalidation axis, rolled up from its scenarios.
+ *
+ * A setup is not dead because ONE premise died — that is the entire point of authoring rivals. It is
+ * dead when nothing is left standing, and only then does `on_break` get to end it. The scenario that
+ * fired last owns that decision: it is the one the user was still waiting on.
+ *
+ * `drifting` rolls up the same way (everything alive has run away from us) and never closes
+ * anything. Pure — `next` is this wake's id→status map, layered over what the document already held.
+ */
+export function rollUpBreaches(setup, next, last, nowMs) {
+    const all = setup?.scenarios ?? []
+    if (!all.length) return {}
+
+    const statusOf = (id) => next[id] ?? scenarioState(setup, id)?.invalidation_status ?? null
+    const dead     = all.filter(sc => statusOf(sc.id) === INVALIDATION.FIRED).length
+    const drifting = all.filter(sc => statusOf(sc.id) === INVALIDATION.DRIFTING).length
+
+    if (dead === all.length) {
+        const many = all.length > 1
+        const set  = {
+            invalidation_status: INVALIDATION.FIRED,
+            invalidation_edge:   last?.edge ?? null,
+            invalidation_reason: many ? `every scenario has broken — ${last?.reason ?? 'the plan is gone'}` : (last?.reason ?? null),
+        }
+        // The ONE branch that ends the setup, and only because the user asked for it at build time —
+        // on the LAST premise standing, never on the first one to go.
+        if (last?.scenario?.validity?.on_break === 'close') {
+            Object.assign(set, { status: 'closed', closedReason: 'invalidated', closedAt: nowMs })
+        }
+        return set
     }
-    return { set, card: setup?.validity?.on_break === 'notify_only' ? 'invalidated_fyi' : 'invalidated' }
+
+    // Everything still alive has run away. Announce once; the document's latch is what keeps it once.
+    if (dead + drifting === all.length && setup?.invalidation_status == null) {
+        return {
+            invalidation_status: INVALIDATION.DRIFTING,
+            invalidation_edge:   last?.edge ?? null,
+            invalidation_reason: last?.reason ?? null,
+        }
+    }
+    return {}
 }
 
 // ─── Condition results ─────────────────────────────────────────────────────────
@@ -569,8 +735,10 @@ export function normalizeConditionResults(rawResults, declared) {
  * never latches at ALL — caching a failed look as a finding is the bug this three-state exists to
  * prevent. Returns dotted $set keys so it merges into the wake's single write. Pure.
  */
-export function latchPatch(setup, results, nowMs) {
-    const byId  = new Map((setup?.conditions ?? []).map(c => [c.id, c]))
+export function latchPatch(setup, results, nowMs, declared = null) {
+    // `declared` is root ∪ the armed scenario's — the same list the wake judged. It defaults to the
+    // root tier alone so a caller with no scenario in hand still behaves.
+    const byId  = new Map((declared ?? setup?.conditions ?? []).map(c => [c.id, c]))
     const prior = setup?.monitor_state?.conditions ?? {}
     const patch = {}
 
@@ -659,7 +827,9 @@ const NEAR_WIDTHS = 1
 const FAR_WIDTHS  = 8
 export function proximityGapMin(setup, price) {
     const { min = 5, max = 30 } = setup?.cadence ?? {}
-    return gradedGap(zoneDistance(setup?.entry_zones, price), { min, max, near: NEAR_WIDTHS, far: FAR_WIDTHS })
+    // Measured against EVERY live premise's entry, not the projected one: price walking toward the
+    // breakout must tighten the loop even while the projection still shows the false break.
+    return gradedGap(zoneDistance(liveEntryZones(setup), price), { min, max, near: NEAR_WIDTHS, far: FAR_WIDTHS })
 }
 
 /** Clamp the model's self-chosen next check into the setup's cadence band. */

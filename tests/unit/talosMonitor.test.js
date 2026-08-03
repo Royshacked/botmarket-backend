@@ -4,24 +4,40 @@ import {
     zoneGate, zoneDistance, proximityGapMin, _isPreActive, _isExpiring, _nextCheckAt, _checkSetup,
     _nextStatus, _isPastExpiry, _effectiveVerdict, normalizeConditionResults, latchPatch, costPatch,
     validityBreach, breachPatch, awayEdge, adverseEdge,
+    scenarioGate, liveScenarios, liveEntryZones, rollUpBreaches, scenarioState,
 } from '../../monitoring/talos.monitor.service.js'
+import { normalizeSetup } from '../../services/setup.schema.js'
 import { buildToolsFor, symbolScope } from '../../monitoring/talos.assess.js'
 import { statusesFor, AWAITING_CONFIRM } from '../../services/entity/vocabulary.js'
 
 // Talos's gates. Everything here runs on EVERY wake for free — the expensive assessment only fires
 // when these say so — so a wrong gate is either a missed entry or a wasted LLM call on every poll.
 
-const SETUP = {
-    id: 'setup_NVDA_1', kind: 'setup', asset: 'NVDA', asset_class: 'stock',
+// The PLAN, stated flat. A price zone is a scenario now (docs/mentor-talos-refactor.md §10), so
+// fixtures are built through normalizeSetup rather than hand-written: that gives every one of them
+// the same `scenarios` + execution projection a persisted document has, and a fixture can never
+// drift from what the service would actually store.
+const PLAN = {
+    asset: 'NVDA', asset_class: 'stock',
     direction: 'long', type: 'swing', trade_mode: 'classical', timeframe: '1hr',
-    ladder: ['4hr', '2hr', '1hr', '30min', '15min'],
-    cadence: { min: 30, max: 240 },
-    status: 'looking',   // armed — the setup ladder's spelling, shared with calls
     entry_zones: [{ id: 'ez1', lower: 237.8, upper: 238.6, quantity: 100 }],
-    stop_zones:  [{ id: 'sz1', lower: 234.8, upper: 235.9, quantity: 100 }],
+    stop_zones:  [{ id: 'sz1', lower: 234.8, upper: 235.9 }],
     conditions: [{ id: 'c1', text: 'CHoCH up on the 15m', weight: 'primary', mode: 'measured', persistence: 'live' }],
-    monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [] },
 }
+
+/** A persisted setup: identity + monitor state around a normalised plan. */
+function mk(plan = {}, doc = {}) {
+    return {
+        id: 'setup_NVDA_1', kind: 'setup',
+        status: 'looking',   // armed — the setup ladder's spelling, shared with calls
+        armed_zone_id: null, armed_scenario_id: null,
+        monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {}, scenarios: {} },
+        ...normalizeSetup({ ...PLAN, ...plan }),
+        ...doc,
+    }
+}
+
+const SETUP = mk()
 
 // ─── Zone gate ────────────────────────────────────────────────────────────────
 
@@ -73,7 +89,7 @@ test('cadence is monotonic — approaching price never polls lazier', () => {
 test('an unknown price falls back to the lazy ceiling, not the floor', () => {
     // Polling flat-out on a broken price feed would burn quota for nothing.
     assert.equal(proximityGapMin(SETUP, NaN), 240)
-    assert.equal(proximityGapMin({ ...SETUP, entry_zones: [] }, 238), 240)
+    assert.equal(proximityGapMin({ ...SETUP, scenarios: [] }, 238), 240, 'nothing armed → nothing to approach')
 })
 
 // ─── Time gates ───────────────────────────────────────────────────────────────
@@ -167,8 +183,9 @@ test('a wake that reached no tool leaves the tally untouched', () => {
 
 const VALID = { lower: 234, upper: 244, approach: 246, timeframe: '1hr', on_break: 'revise' }
 // Carries a venue: without one the wake exits at the broker guard before any gate is reached.
-const ARMED  = { ...SETUP, broker: 'ctrader', accounts: ['a1'], mainAccountId: 'a1', quantity: 100 }
-const RANGED = { ...ARMED, validity: VALID }
+const VENUE  = { broker: 'ctrader', accounts: ['a1'], mainAccountId: 'a1' }
+const ARMED  = mk({}, VENUE)
+const RANGED = mk({ validity: VALID }, VENUE)
 
 test('the two edges mean different things and are reported separately', () => {
     assert.equal(validityBreach(RANGED, 233), 'adverse', 'below the floor → the premise broke')
@@ -204,45 +221,121 @@ test('a broken range reports the adverse side, the safer of the two', () => {
 })
 
 // ── The latch ──
+// It lives PER SCENARIO (monitor_state.scenarios.<id>): one premise dying is not the setup dying.
+const KEY = 'monitor_state.scenarios.s1'
+const latched = (setup, status, id = 's1') => ({
+    ...setup,
+    monitor_state: { ...setup.monitor_state, scenarios: { [id]: { invalidation_status: status } } },
+})
+
 test('a break latches once — an oscillating price cannot spam the user', () => {
-    const first = breachPatch(RANGED, 'adverse', 233, T)
-    assert.equal(first.set.invalidation_status, 'fired')
+    const first = breachPatch(RANGED, RANGED.scenarios[0], 'adverse', 233, T)
+    assert.equal(first.set[KEY].invalidation_status, 'fired')
     assert.equal(first.card, 'invalidated')
 
-    const latched = { ...RANGED, invalidation_status: 'fired' }
-    const again = breachPatch(latched, 'adverse', 232, T)
+    const again = breachPatch(latched(RANGED, 'fired'), RANGED.scenarios[0], 'adverse', 232, T)
     assert.deepEqual(again.set, {}, 'nothing more to write')
     assert.equal(again.card, null, 'and nothing more to say')
 })
 
-test('a runaway is announced once and never closes the setup', () => {
+test('a runaway is announced once and never kills the premise', () => {
     // Price can come back, and "you missed it" is not "you were wrong".
-    const first = breachPatch(RANGED, 'away', 247, T)
-    assert.equal(first.set.invalidation_status, 'drifting')
+    const first = breachPatch(RANGED, RANGED.scenarios[0], 'away', 247, T)
+    assert.equal(first.set[KEY].invalidation_status, 'drifting')
     assert.equal(first.card, 'ran_away')
-    assert.equal(first.set.status, undefined)
 
-    const drifted = { ...RANGED, invalidation_status: 'drifting' }
-    assert.equal(breachPatch(drifted, 'away', 248, T).card, null)
+    assert.equal(breachPatch(latched(RANGED, 'drifting'), RANGED.scenarios[0], 'away', 248, T).card, null)
 })
 
-test('a drifted setup can still break the other way', () => {
-    const drifted = { ...RANGED, invalidation_status: 'drifting' }
-    const broke = breachPatch(drifted, 'adverse', 233, T)
-    assert.equal(broke.set.invalidation_status, 'fired')
+test('a drifted scenario can still break the other way', () => {
+    const broke = breachPatch(latched(RANGED, 'drifting'), RANGED.scenarios[0], 'adverse', 233, T)
+    assert.equal(broke.set[KEY].invalidation_status, 'fired')
     assert.equal(broke.card, 'invalidated')
 })
 
-test('on_break is honoured verbatim — only "close" touches the lifecycle', () => {
-    const close = breachPatch({ ...SETUP, validity: { ...VALID, on_break: 'close' } }, 'adverse', 233, T)
-    assert.equal(close.set.status, 'closed')
-    assert.equal(close.set.closedReason, 'invalidated')
+test('a dead premise is not re-armed by price wandering back into its zone', () => {
+    assert.deepEqual(liveScenarios(latched(RANGED, 'fired')), [], 'fired is out')
+    assert.equal(liveScenarios(latched(RANGED, 'drifting')).length, 1, 'drifting stays armed')
+    assert.equal(scenarioGate(latched(RANGED, 'fired'), 238.0), null)
+    assert.equal(scenarioGate(RANGED, 238.0).scenario.id, 's1')
+})
 
-    const fyi = breachPatch({ ...SETUP, validity: { ...VALID, on_break: 'notify_only' } }, 'adverse', 233, T)
-    assert.equal(fyi.set.status, undefined, 'notify_only never ends the setup')
-    assert.equal(fyi.card, 'invalidated_fyi')
+test('on_break is honoured verbatim — and only once nothing is left standing', () => {
+    const closeSc = mk({ validity: { ...VALID, on_break: 'close' } }, VENUE)
+    const res = breachPatch(closeSc, closeSc.scenarios[0], 'adverse', 233, T)
+    assert.equal(res.set[KEY].status, undefined, 'the scenario latch never carries a lifecycle')
+    const rolled = rollUpBreaches(closeSc, { s1: 'fired' }, { scenario: closeSc.scenarios[0], edge: 'lower', reason: 'x' }, T)
+    assert.equal(rolled.status, 'closed')
+    assert.equal(rolled.closedReason, 'invalidated')
 
-    assert.equal(breachPatch(RANGED, 'adverse', 233, T).set.status, undefined, 'revise keeps it alive to re-draw')
+    const fyi = mk({ validity: { ...VALID, on_break: 'notify_only' } }, VENUE)
+    assert.equal(breachPatch(fyi, fyi.scenarios[0], 'adverse', 233, T).card, 'invalidated_fyi')
+    assert.equal(rollUpBreaches(fyi, { s1: 'fired' }, { scenario: fyi.scenarios[0] }, T).status, undefined,
+        'notify_only never ends the setup')
+
+    assert.equal(rollUpBreaches(RANGED, { s1: 'fired' }, { scenario: RANGED.scenarios[0] }, T).status, undefined,
+        'revise keeps it alive to re-draw')
+})
+
+// ── The roll-up: a setup dies when nothing is left, not when the first premise falls ──
+
+const RIVALS = mk({
+    validity: undefined,
+    scenarios: [
+        { id: 's1', name: 'false break', entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
+          stop_zones: [{ lower: 234.8, upper: 235.9 }], validity: { ...VALID, on_break: 'close' } },
+        // A deliberately WIDER premise: the breakout can still come while price works the base, so
+        // its floor sits under the shelf. This is what lets one premise die while the other stands.
+        { id: 's2', name: 'break and go', entry_zones: [{ lower: 244, upper: 244.9, quantity: 60 }],
+          stop_zones: [{ lower: 241, upper: 241.8 }], validity: { lower: 230, upper: 250, approach: 252, on_break: 'close' } },
+    ],
+}, VENUE)
+
+test('one premise breaking leaves the setup alive and untouched', () => {
+    const rolled = rollUpBreaches(RIVALS, { s1: 'fired' }, { scenario: RIVALS.scenarios[0], edge: 'lower', reason: 'broke' }, T)
+    assert.deepEqual(rolled, {}, 'the document says nothing while a rival is still armed')
+    assert.equal(liveScenarios({ ...RIVALS, monitor_state: { scenarios: { s1: { invalidation_status: 'fired' } } } })[0].id, 's2')
+})
+
+test('the LAST premise to break is the one whose on_break decides', () => {
+    const half = { ...RIVALS, monitor_state: { ...RIVALS.monitor_state, scenarios: { s1: { invalidation_status: 'fired' } } } }
+    const rolled = rollUpBreaches(half, { s2: 'fired' }, { scenario: RIVALS.scenarios[1], edge: 'lower', reason: 'gone' }, T)
+    assert.equal(rolled.invalidation_status, 'fired')
+    assert.match(rolled.invalidation_reason, /every scenario has broken/)
+    assert.equal(rolled.status, 'closed')
+})
+
+test('proximity measures against EVERY live premise, not the projected one', () => {
+    assert.equal(liveEntryZones(RIVALS).length, 2)
+    // 244.4 sits in s2's zone — the projection still shows s1, and the loop must tighten anyway.
+    assert.equal(proximityGapMin(RIVALS, 244.4), 30)
+})
+
+test('when the premise being SHOWN dies, the projection moves to a survivor', async () => {
+    // The flat fields are what the confirm dialog, the watch row and the FE read. Leaving them on a
+    // dead premise would keep advertising levels nobody is watching any more.
+    const deps = stubDeps({ getPrice: async () => 233, getClose: async () => 233, onInvalidation: async () => {} })
+    const res = await _checkSetup(RIVALS, T, deps)
+
+    assert.equal(res.reason, 'invalidation')
+    assert.equal(res.remaining, 1, 's2 is untouched at 233')
+    assert.deepEqual(deps.writes[0].entry_zones, RIVALS.scenarios[1].entry_zones)
+    assert.equal(deps.writes[0].status, undefined, 'one premise falling never closes the setup')
+})
+
+test('the card names the premise and says what is still standing', async () => {
+    let info = null
+    const deps = stubDeps({ getPrice: async () => 233, getClose: async () => 233, onInvalidation: async (_s, i) => { info = i } })
+    await _checkSetup(RIVALS, T, deps)
+    assert.equal(info.scenario, 'false break')
+    assert.equal(info.remaining, 1)
+})
+
+test('the gate answers WHICH premise price reached', () => {
+    assert.equal(scenarioGate(RIVALS, 238.0).scenario.id, 's1')
+    assert.equal(scenarioGate(RIVALS, 244.4).scenario.id, 's2')
+    assert.equal(scenarioGate(RIVALS, 241.0), null)
+    assert.equal(scenarioState(RIVALS, 's1'), null, 'untouched premises have no state yet')
 })
 
 // ── Close, not touch (end to end) ──
@@ -526,6 +619,72 @@ test('an enter verdict carries no warning', async () => {
     let card = null
     await _checkSetup(LIVE, T, stubDeps({ onCard: async (_s, a) => { card = a } }))
     assert.equal(card.warning, null)
+})
+
+// ── The execution projection (docs/mentor-talos-refactor.md §10.3) ──
+// The winning premise is stamped onto the flat fields every kind-blind consumer reads, so execution
+// never learns that scenarios exist — and the rivals are simply no longer projected.
+
+const RIVAL_LIVE = mk({
+    valid_until: null,
+    scenarios: [
+        { id: 's1', name: 'false break', entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
+          stop_zones: [{ lower: 234.8, upper: 235.9 }], tp_zones: [{ lower: 246, upper: 247.2 }],
+          conditions: [{ id: 's1c1', text: 'sweep and reclaim of 238', weight: 'primary' }] },
+        { id: 's2', name: 'break and go', entry_zones: [{ lower: 244, upper: 244.9, quantity: 60 }],
+          stop_zones: [{ lower: 241, upper: 241.8 }], tp_zones: [{ lower: 252, upper: 253.5 }],
+          conditions: [{ id: 's2c1', text: '1hr close above 244 on volume', weight: 'primary' }] },
+    ],
+}, VENUE)
+
+test('the premise that fires is the one stamped onto the execution fields', async () => {
+    const deps = stubDeps({ getPrice: async () => 244.4 })   // s2's zone, not the projected s1
+    const res = await _checkSetup(RIVAL_LIVE, T, deps)
+
+    assert.equal(res.fired, true)
+    const $set = deps.writes[0]
+    assert.equal($set.armed_scenario_id, 's2')
+    assert.deepEqual($set.entry_zones, RIVAL_LIVE.scenarios[1].entry_zones)
+    assert.deepEqual($set.stop_zones,  RIVAL_LIVE.scenarios[1].stop_zones)
+    assert.deepEqual($set.tp_zones,    RIVAL_LIVE.scenarios[1].tp_zones)
+})
+
+test('QUANTITY IS NEVER SUMMED — the winner takes the whole trade, and only its own size', async () => {
+    // Two rivals of 100 and 60. The document that placed the order must never say 160.
+    for (const [price, want] of [[238.0, 100], [244.4, 60]]) {
+        let planned = null
+        const deps = stubDeps({ getPrice: async () => price, buildOrderPlan: async (s) => { planned = s; return [{ accountId: 'a1', quantity: s.quantity }] } })
+        await _checkSetup(RIVAL_LIVE, T, deps)
+        assert.equal(planned.quantity, want, `at ${price}`)
+        assert.equal(deps.writes[0].quantity, want, `persisted at ${price}`)
+    }
+})
+
+test('the order plan is built from the PROJECTED setup, not the document as it was read', async () => {
+    let planned = null
+    const deps = stubDeps({ getPrice: async () => 244.4, buildOrderPlan: async (s) => { planned = s; return [{ accountId: 'a1', quantity: 60 }] } })
+    await _checkSetup(RIVAL_LIVE, T, deps)
+    // protectionPlan.routeSetupZones reads these off the doc to build the resting exits.
+    assert.deepEqual(planned.stop_zones, RIVAL_LIVE.scenarios[1].stop_zones)
+    assert.deepEqual(planned.tp_zones,   RIVAL_LIVE.scenarios[1].tp_zones)
+})
+
+test('the wake judges the armed premise — the rival is not on the table', async () => {
+    let hit = null
+    const deps = stubDeps({ getPrice: async () => 244.4, assess: async (_s, h) => { hit = h; return { verdict: 'wait', read: 'not yet' } } })
+    await _checkSetup(RIVAL_LIVE, T, deps)
+    assert.equal(hit.scenario.id, 's2')
+    assert.equal(hit.zone.id, RIVAL_LIVE.scenarios[1].entry_zones[0].id)
+})
+
+test('a per-condition answer is recorded against the armed premise, not the rival', async () => {
+    const deps = stubDeps({
+        getPrice: async () => 244.4,
+        assess:   async () => ({ verdict: 'wait', read: 'not yet', conditions: [{ id: 's2c1', met: 'no', note: 'no close yet' }] }),
+    })
+    await _checkSetup(RIVAL_LIVE, T, deps)
+    const rows = deps.writes[0]['monitor_state.last_assessment'].conditions
+    assert.deepEqual(rows.map(r => r.id), ['c1', 's2c1'], 'root ∪ armed — s1c1 is a different trade')
 })
 
 test('an off-menu verdict is coerced to wait rather than acted on', async () => {

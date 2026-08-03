@@ -4,7 +4,7 @@ import { logger }            from '../../services/logger.service.js'
 import { buildEventRisk }    from '../../services/eventRisk.service.js'
 import { makeEntityCrud }    from '../../services/entity/entityCrud.service.js'
 import { resolveVenue, resolveMode } from '../../services/venue.resolve.service.js'
-import { normalizeSetup, setupReadiness } from '../../services/setup.schema.js'
+import { normalizeSetup, setupReadiness, projectScenario } from '../../services/setup.schema.js'
 import { resolveMainAccountId } from '../../services/agentUtils.js'
 
 // Persistence for the `setup` kind — Mentor's artifact (docs/setup-entity.md).
@@ -45,10 +45,13 @@ const POSITION_STATUSES = new Set(PAST_ENTRY)
 
 // Plan fields rewritten by an in-place edit. Identity, monitor_state history and execution
 // linkage are never in the $set.
+// `scenarios` is the authored plan; `entry_zones`/`stop_zones`/`tp_zones`/`validity`/`quantity`/`rr`
+// are its EXECUTION PROJECTION, re-derived by normalizeSetup and re-stamped by Talos when a premise
+// arms. Both are written here so a re-draw leaves no stale projection behind.
 const PLAN_FIELDS = [
     'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe', 'ladder', 'cadence',
-    'thesis', 'conditions', 'validity', 'referenced_symbols',
-    'entry_zones', 'stop_zones', 'tp_zones', 'quantity',
+    'thesis', 'conditions', 'referenced_symbols', 'scenarios',
+    'entry_zones', 'stop_zones', 'tp_zones', 'validity', 'quantity',
     'active_from', 'valid_until', 'event_risk', 'rr', 'conviction',
     'mode', 'broker', 'accounts', 'mainAccountId', 'brokerSymbol', 'basisOffset',
 ]
@@ -56,7 +59,11 @@ const PLAN_FIELDS = [
 // In-position edits touch CONTEXT only — never the zones, size or venue a live position depends on.
 // `validity` is context: it governs whether the PLAN is still worth watching, not what the live
 // position does, so re-drawing it can't disturb an open trade.
-const LIGHT_FIELDS = ['thesis', 'conditions', 'validity', 'referenced_symbols', 'tp_zones', 'valid_until', 'rr', 'conviction', 'cadence']
+//
+// `scenarios` is here because targets and conditions now live inside it — but the ARMED scenario's
+// entry, stop and size are preserved from the current document (mergeInPositionScenarios), so the
+// promise above still holds literally.
+const LIGHT_FIELDS = ['thesis', 'conditions', 'validity', 'referenced_symbols', 'scenarios', 'tp_zones', 'valid_until', 'rr', 'conviction', 'cadence']
 
 export const setupService = {
     generateSetup,
@@ -87,8 +94,10 @@ export function validateSetup(setup, broker, accounts) {
     if (broker !== 'paper' && !(accounts?.length)) return { ok: false, reason: 'no_venue' }
 
     // A zone with no width is allowed (an exact level), but lower > upper means the normaliser
-    // was bypassed — refuse rather than arm a gate that can never trip.
-    for (const z of [...setup.entry_zones, ...setup.stop_zones, ...(setup.tp_zones ?? [])]) {
+    // was bypassed — refuse rather than arm a gate that can never trip. Every scenario's legs, not
+    // just the projected one: a malformed rival would arm silently and trip on nonsense.
+    const zones = (setup.scenarios ?? []).flatMap(sc => [...(sc.entry_zones ?? []), ...(sc.stop_zones ?? []), ...(sc.tp_zones ?? [])])
+    for (const z of zones) {
         if (!Number.isFinite(z.lower) || !Number.isFinite(z.upper) || z.lower > z.upper) {
             return { ok: false, reason: 'invalid_zone' }
         }
@@ -163,8 +172,11 @@ async function _insert(bound, userId) {
         status:  'waiting',
         savedAt: now,
         ...bound,
-        monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {} },
-        armed_zone_id:   null,
+        // `scenarios` here is the monitor's per-premise invalidation ledger, NOT the authored plan
+        // (that rides in `bound`). Declared at birth for the same reason the axis below is.
+        monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {}, scenarios: {} },
+        armed_zone_id:     null,
+        armed_scenario_id: null,
         pulse_anchor_px: null,
         // The invalidation axis, declared at birth so every consumer can read it without an
         // existence check — a setup is not invalidated, it simply hasn't been yet.
@@ -185,6 +197,15 @@ async function _insert(bound, userId) {
  * Returns `undefined` when there is nothing to change (no prior findings, or the conditions weren't
  * touched), so an untouched edit doesn't write a redundant key. Pure.
  */
+/**
+ * Every condition on a document — the setup-wide tier plus each scenario's own. The resolved-ledger
+ * is ONE map keyed by id, so carrying findings across an edit has to see both tiers: reading only
+ * the root would silently drop the latch on a scenario condition that never changed.
+ */
+export function allConditions(doc) {
+    return [...(doc?.conditions ?? []), ...(doc?.scenarios ?? []).flatMap(sc => sc?.conditions ?? [])]
+}
+
 export function carryConditions(resolved, curConditions, nextConditions) {
     if (!resolved || !Object.keys(resolved).length) return undefined
     if (!Array.isArray(nextConditions)) return undefined   // conditions untouched → findings stand
@@ -197,6 +218,26 @@ export function carryConditions(resolved, curConditions, nextConditions) {
     return kept
 }
 
+/**
+ * An in-position re-draw, with the live trade's own legs held back.
+ *
+ * The armed scenario IS the open position — its entry is filled, its stop is resting at the broker
+ * and its size is the exposure. So an edit may rewrite that scenario's targets, conditions and
+ * validity range, and it may rewrite a RIVAL scenario freely (nothing was placed on it), but the
+ * armed one's entry, stop and quantity come back from the current document verbatim.
+ *
+ * Returns `undefined` when there is nothing to write, so an untouched edit adds no key. Pure.
+ */
+export function mergeInPositionScenarios(cur, next) {
+    if (!Array.isArray(next)) return undefined
+    const armedId = cur?.armed_scenario_id ?? null
+    const armed   = (cur?.scenarios ?? []).find(s => s.id === armedId)
+    if (!armed) return next
+    return next.map(s => (s.id === armedId
+        ? { ...s, entry_zones: armed.entry_zones, stop_zones: armed.stop_zones, quantity: armed.quantity }
+        : s))
+}
+
 async function _update(id, bound, userId) {
     const found = await crud.getOwned(id, userId)
     if (!found.ok) return found
@@ -207,6 +248,12 @@ async function _update(id, bound, userId) {
     for (const k of (inPosition ? LIGHT_FIELDS : PLAN_FIELDS)) {
         if (bound[k] !== undefined) $set[k] = bound[k]
     }
+    if (inPosition && $set.scenarios !== undefined) {
+        $set.scenarios = mergeInPositionScenarios(cur, $set.scenarios)
+        // The projection follows the ARMED premise while a position is open — not the first authored
+        // one, which is what a bare re-normalise would have written.
+        Object.assign($set, projectScenario({ scenarios: $set.scenarios }, cur.armed_scenario_id ?? null))
+    }
     if (bound.chat_state !== undefined) $set.chat_state = bound.chat_state
 
     // Pre-position: a rewritten plan DISARMS — the user must Arm again, because the plan Talos
@@ -215,8 +262,13 @@ async function _update(id, bound, userId) {
     if (!inPosition) {
         $set.status = 'waiting'
         $set.armed_zone_id = null
+        $set.armed_scenario_id = null
         $set.pulse_anchor_px = null
         $set['monitor_state.next_check_at'] = null
+        // Per-premise invalidation latches die with the plan that earned them: a re-drawn scenario
+        // keeps its id, so without this a fresh premise would inherit the dead one's verdict and
+        // never be watched again.
+        $set['monitor_state.scenarios'] = {}
     }
 
     // Re-drawing is what CLEARS the invalidation latch — the same rule the call path applies
@@ -231,7 +283,12 @@ async function _update(id, bound, userId) {
     // A resolved condition survives only while its id AND its text are unchanged. Keyed by id
     // alone, a finding would ride onto a REWORDED condition — "FDA approval landed", already
     // latched true, silently satisfying "FDA approval landed AND the stock held 240".
-    const kept = carryConditions(cur.monitor_state?.conditions, cur.conditions, bound.conditions)
+    // BOTH tiers: an edit that rewrites `scenarios` touches conditions even when the root tier was
+    // untouched, and vice versa. `touched` is what says "the plan's conditions were re-emitted" —
+    // if neither field came in, every finding stands.
+    const touched = bound.conditions !== undefined || bound.scenarios !== undefined
+    const kept = carryConditions(cur.monitor_state?.conditions, allConditions(cur),
+        touched ? allConditions({ conditions: bound.conditions ?? cur.conditions, scenarios: $set.scenarios ?? cur.scenarios }) : undefined)
     if (kept !== undefined) $set['monitor_state.conditions'] = kept
 
     const res = await crud.patchOwned(id, userId, $set)
@@ -279,6 +336,7 @@ async function patchSetup(id, patch, userId) {
             $set.activatedAt = Date.now()
             $set['monitor_state.next_check_at'] = null   // check on the very next tick
             $set.armed_zone_id = null
+            $set.armed_scenario_id = null
         }
         $set.status = patch.status
     }

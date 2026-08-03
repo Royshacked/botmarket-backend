@@ -69,6 +69,39 @@ test('a setup carries its own stop and target, which a call leaves to its tree',
     assert.equal(row.detail.timeframe, '4h')
 })
 
+// A setup can hold rival premises — a false break at one level and a break-and-go at another. One
+// set of levels would hide the second one entirely, and the user would never learn they have two
+// ways in (or that one of them has already died).
+test('a row shows every scenario, and says which one is armed', () => {
+    const row = setupToWatchRow({
+        id: 's1', asset: 'NVDA', direction: 'long', status: 'looking', savedAt: 2000,
+        armed_scenario_id: 's2',
+        entry_zones: [{ lower: 244, upper: 244.9 }], stop_zones: [{ lower: 241, upper: 241.8 }], rr: 2.4,
+        scenarios: [
+            { id: 's1', name: 'false break', entry_zones: [{ lower: 237.8, upper: 238.6 }],
+              stop_zones: [{ lower: 234.8, upper: 235.9 }], tp_zones: [{ lower: 246, upper: 247.2 }], quantity: 100, rr: 1.95 },
+            { id: 's2', name: 'break and go', entry_zones: [{ lower: 244, upper: 244.9 }],
+              stop_zones: [{ lower: 241, upper: 241.8 }], tp_zones: [{ lower: 252, upper: 253.5 }], quantity: 60, rr: 2.4 },
+        ],
+        monitor_state: { scenarios: { s1: { invalidation_status: 'fired' } } },
+    })
+    assert.equal(row.detail.scenarios.length, 2)
+    assert.deepEqual(row.detail.scenarios.map(s => s.name), ['false break', 'break and go'])
+    assert.deepEqual(row.detail.scenarios.map(s => s.armed), [false, true])
+    assert.equal(row.detail.scenarios[0].invalidation, 'fired', 'a dead premise must not read as live')
+    assert.deepEqual(row.detail.scenarios[1].entry, { low: 244, high: 244.9 })
+    assert.deepEqual(row.detail.scenarios.map(s => s.quantity), [100, 60], 'never added together')
+    // The flat levels stay the ARMED premise's — one answer for "where is my NVDA setup".
+    assert.deepEqual(row.detail.nearestEntry, { low: 244, high: 244.9 })
+    assert.equal(row.detail.rr, 2.4)
+})
+
+test('a scenario-less document still projects a row', () => {
+    const row = setupToWatchRow({ id: 's1', asset: 'SPY', direction: 'long', entry_zones: [{ lower: 500, upper: 502 }] })
+    assert.deepEqual(row.detail.scenarios, [])
+    assert.deepEqual(row.detail.nearestEntry, { low: 500, high: 502 })
+})
+
 test('a book reports null status — it has none of its own — and counts what is in it', () => {
     const row = portfolioToWatchRow({
         portfolioId: 'p1', name: 'Growth', holdings: 3, savedAt: 3000,

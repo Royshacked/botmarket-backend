@@ -60,9 +60,17 @@ export function buildIdeaEntryConfirm(idea, note = null) {
  */
 export function buildSetupEntryConfirm(setup, assessment = null) {
     const dir = String(setup?.direction || '').toUpperCase()
+    // WHICH premise fired. A setup can hold rivals, and "your NVDA setup is confirmed" is ambiguous
+    // when the user drew two ways in at different levels with different sizes — the order they are
+    // about to confirm belongs to one of them.
+    const armedId  = assessment?.scenario_id ?? setup?.armed_scenario_id ?? null
+    const scenario = (setup?.scenarios ?? []).find(s => s.id === armedId) ?? null
+    const many     = (setup?.scenarios?.length ?? 0) > 1
+    const named    = many && scenario ? ` — the ${scenario.name?.trim() || armedId} way in` : ''
+
     return {
         userId:  setup?.userId ?? null,
-        content: `Your ${dir} ${setup?.asset} setup is confirmed — price reached the zone and the setup filled in. Confirm to place your order.`,
+        content: `Your ${dir} ${setup?.asset} setup is confirmed${named} — price reached the zone and the setup filled in. Confirm to place your order.`,
         type:    'entry_confirm',
         payload: {
             kind:      'setup',
@@ -70,6 +78,8 @@ export function buildSetupEntryConfirm(setup, assessment = null) {
             asset:     setup?.asset,
             direction: setup?.direction ?? null,
             zoneId:    assessment?.zone_id ?? setup?.armed_zone_id ?? null,
+            scenarioId: armedId,
+            scenario:   scenario ? (scenario.name?.trim() || armedId) : null,
             verdict:   assessment?.verdict ?? null,
             read:      assessment?.read ?? null,
         },
@@ -99,17 +109,25 @@ export function buildSetupInvalidation(setup, info = null) {
     const kind  = info?.card ?? 'invalidated'
     const why   = info?.reason ?? null
 
+    // A setup can hold rival premises, and one of them dying is not the setup dying. Naming the
+    // scenario — and saying what is still standing — is the difference between "your trade is dead"
+    // and the truth, which is that one way in closed and another is still armed.
+    const what      = info?.scenario ? `the "${info.scenario}" way into your ${dir} ${asset}` : `Your ${dir} ${asset} setup`
+    const subject   = info?.scenario ? what.charAt(0).toUpperCase() + what.slice(1) : what
+    const remaining = Number(info?.remaining) || 0
+    const survives  = remaining > 0 ? ` Your other ${remaining === 1 ? 'scenario is' : `${remaining} scenarios are`} still armed.` : ''
+
     const copy = {
         ran_away: {
-            content: `Your ${dir} ${asset} setup didn't get filled — price ran past ${info?.price ?? 'the level'} without you. Nothing was wrong with the read; the entry just never came.`,
+            content: `${subject} didn't get filled — price ran past ${info?.price ?? 'the level'} without you. Nothing was wrong with the read; the entry just never came.`,
             actions: null,
         },
         invalidated: {
-            content: `Your ${dir} ${asset} setup is no longer valid — price closed at ${info?.price ?? '?'}, past the ${info?.edge ?? 'edge'} of where this trade works. Want to re-draw it?`,
+            content: `${subject} is no longer valid — price closed at ${info?.price ?? '?'}, past the ${info?.edge ?? 'edge'} of where this trade works.${survives || ' Want to re-draw it?'}`,
             actions: cardActions('Re-draw it'),
         },
         invalidated_fyi: {
-            content: `Heads up — your ${dir} ${asset} setup is no longer valid. Price closed at ${info?.price ?? '?'}, past the ${info?.edge ?? 'edge'} of where this trade works.`,
+            content: `Heads up — ${what} is no longer valid. Price closed at ${info?.price ?? '?'}, past the ${info?.edge ?? 'edge'} of where this trade works.${survives}`,
             actions: null,
         },
         stale_map: {
@@ -130,6 +148,8 @@ export function buildSetupInvalidation(setup, info = null) {
             event:     kind,
             side:      info?.side ?? null,
             edge:      info?.edge ?? null,
+            scenario:  info?.scenario ?? null,
+            remaining: Number.isFinite(info?.remaining) ? info.remaining : null,
             price:     Number.isFinite(info?.price) ? info.price : null,
             reason:    why,
             ...(info?.edit_proposal ? { edit_proposal: info.edit_proposal } : {}),

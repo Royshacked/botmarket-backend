@@ -117,8 +117,17 @@ export function normalizeZones(arr, prefix) {
     return arr.map((z, i) => normalizeZone(z, i, prefix)).filter(Boolean)
 }
 
-/** Total authored size = the sum of entry-zone quantities (scale-in legs sum to the position). */
-export function totalQuantity(entryZones) {
+/**
+ * A SCENARIO's size — the sum of its own entry zones, which in v1 is exactly one zone, so this is
+ * simply "the position this premise takes".
+ *
+ * NEVER SUMMED ACROSS SCENARIOS. Scenarios are rivals, not legs: the first to fulfil takes the whole
+ * trade and the others die. The predecessor of this function summed every entry zone on the document
+ * while the monitor fired ONCE for that total — so two rival zones of 100 placed 200. Scaling in
+ * (several entries inside ONE scenario) is what this sum is reserved for; readiness blocks it until
+ * per-leg execution exists.
+ */
+export function scenarioQuantity(entryZones) {
     const sum = (entryZones ?? []).reduce((acc, z) => acc + (Number(z?.quantity) || 0), 0)
     return sum > 0 ? sum : null
 }
@@ -141,18 +150,23 @@ export function normalizeSymbols(arr, cap = MAX_REFERENCED_SYMBOLS) {
  * positional fallback keys off the ORIGINAL index (not the surviving count) so a dropped entry
  * doesn't renumber its neighbours; and collisions are suffixed rather than silently merged.
  */
-export function normalizeConditions(arr) {
+export function normalizeConditions(arr, { used, prefix = 'c' } = {}) {
     if (!Array.isArray(arr)) return []
-    const used = new Set()
+    // Ids are unique across the WHOLE document, not just this list: the resolved-condition ledger
+    // (`monitor_state.conditions`) is ONE map for the setup, so a scenario's condition sharing an id
+    // with a root condition would let one latch answer for the other. Callers thread a single `used`
+    // set through the root tier and every scenario; `prefix` keeps the positional fallback readable
+    // (`c1` at the root, `s2c1` inside the second scenario).
+    const used_ = used ?? new Set()
 
     const claim = (wanted, i) => {
-        let id = wanted || `c${i + 1}`
-        if (used.has(id)) {
+        let id = wanted || `${prefix}${i + 1}`
+        if (used_.has(id)) {
             let n = 2
-            while (used.has(`${id}_${n}`)) n++
+            while (used_.has(`${id}_${n}`)) n++
             id = `${id}_${n}`
         }
-        used.add(id)
+        used_.add(id)
         return id
     }
 
@@ -212,6 +226,146 @@ export function normalizeValidity(raw) {
     }
 }
 
+// ─── scenarios[] ──────────────────────────────────────────────────────────────
+//
+// A PRICE ZONE IS A SCENARIO (docs/mentor-talos-refactor.md §10). A long at 100 on a false break and
+// a long at 104 on a break-and-go are not two legs of one entry — they are two premises that happen
+// to share a ticker and a direction, and they disagree about everything else: what confirms them,
+// where the stop belongs, and what price would prove them dead. So each scenario owns its own
+// entry / stop / targets, its own conditions and its own validity range.
+//
+// RIVALS, NOT LEGS. The first scenario to fulfil takes the WHOLE trade; the rest die with it.
+// Quantities are never added across scenarios (see scenarioQuantity).
+//
+// The setup keeps a root `conditions[]` for what is true whatever prints — the FDA approval, the
+// regime read. A wake judges `root ∪ the armed scenario's`, so shared conditions are authored once
+// and never copied.
+
+/** How a scenario is named in a message to the user. Its own name if it has one, else its id. */
+export function scenarioLabel(sc) {
+    const n = typeof sc?.name === 'string' ? sc.name.trim() : ''
+    return n || sc?.id || 'scenario'
+}
+
+/**
+ * One scenario. `direction` comes from the setup because a premise cannot be long while its parent
+ * is short — direction is the one thing rivals must agree on (it is what makes them rivals rather
+ * than two setups).
+ *
+ * Zone ids are prefixed with the scenario's id, so they stay unique document-wide and
+ * `armed_zone_id` still resolves to exactly one zone. An authored id always wins, which is what
+ * lets a legacy document keep its `ez1`/`sz1` ids through the wrap.
+ */
+export function normalizeScenario(raw, i, { direction = null, used, ids } = {}) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+
+    const taken = ids ?? new Set()
+    let id = (typeof raw.id === 'string' && raw.id.trim()) ? raw.id.trim() : `s${i + 1}`
+    if (taken.has(id)) { let n = 2; while (taken.has(`${id}_${n}`)) n++; id = `${id}_${n}` }
+    taken.add(id)
+
+    const entry_zones = normalizeZones(raw.entry_zones, `${id}e`)
+    const stop_zones  = normalizeZones(raw.stop_zones,  `${id}s`)
+    const tp_zones    = normalizeZones(raw.tp_zones,    `${id}t`)
+
+    const sc = {
+        id,
+        name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : null,
+        entry_zones,
+        stop_zones,
+        tp_zones,
+        conditions: normalizeConditions(raw.conditions, { used, prefix: `${id}c` }),
+        validity:   normalizeValidity(raw.validity),
+        quantity:   scenarioQuantity(entry_zones),
+        rr:         null,
+    }
+    // Derived per scenario, from ITS OWN legs. A setup-wide r:r would price the false break's entry
+    // against the breakout's target and mean neither.
+    const authored = Number(raw.rr)
+    sc.rr = computeRR({ direction, ...sc }) ?? (Number.isFinite(authored) ? authored : null)
+    return sc
+}
+
+export function normalizeScenarios(arr, { direction = null, used } = {}) {
+    if (!Array.isArray(arr)) return []
+    const ids = new Set()
+    return arr.map((s, i) => normalizeScenario(s, i, { direction, used, ids })).filter(Boolean)
+}
+
+/**
+ * THE ONE PLACE THAT KNOWS THE PRE-SCENARIO SHAPE. A document authored before scenarios carries its
+ * zones and its validity range at the root; it becomes a single implicit scenario so every other
+ * module can read scenarios and nothing else.
+ *
+ * Its entry zones are kept together in that one scenario — verbatim today's behaviour, including the
+ * summed quantity — rather than split into rivals, because splitting would silently re-price a live
+ * plan. Readiness will refuse to ARM such a setup until it is re-drawn as one scenario per premise,
+ * which is the honest outcome: that shape is the double-count bug.
+ *
+ * Delete this when no pre-scenario documents remain.
+ */
+function _scenarioSource(raw) {
+    if (Array.isArray(raw?.scenarios) && raw.scenarios.length) return raw.scenarios
+    const legacy = raw?.entry_zones ?? raw?.stop_zones ?? raw?.tp_zones ?? raw?.validity
+    if (!legacy) return []
+    return [{
+        id: 's1',
+        name: null,
+        entry_zones: raw.entry_zones,
+        stop_zones:  raw.stop_zones,
+        tp_zones:    raw.tp_zones,
+        validity:    raw.validity,
+        conditions:  [],
+        rr:          raw.rr,
+    }]
+}
+
+/** The scenario a document is currently acting on: the armed one, else the first authored. */
+export function pickScenario(setup, id = null) {
+    const list = setup?.scenarios ?? []
+    if (!list.length) return null
+    return (id ? list.find(s => s.id === id) : null) ?? list[0]
+}
+
+/**
+ * THE EXECUTION PROJECTION — a scenario's legs, flattened onto the fields the rest of the app has
+ * always read (docs/mentor-talos-refactor.md §10.3).
+ *
+ * `entry_zones` / `stop_zones` / `tp_zones` / `quantity` are NOT setup-private: they are the shape
+ * the `call` kind uses too, and every kind-blind consumer reads them flat — protectionPlan's
+ * routeSetupZones, the order plan, tradeCapture, the watch row. So scenarios stay the authored and
+ * monitored model, and the winning scenario is stamped down here when it arms. Execution never
+ * learns that scenarios exist.
+ *
+ * Pre-arm the projection is the FIRST scenario — the primary, which Mentor authors first. The row
+ * shows every scenario (toWatchRow) so a second premise is never hidden behind this one. Pure.
+ */
+export function projectScenario(setup, id = null) {
+    const sc = pickScenario(setup, id)
+    return {
+        entry_zones: sc?.entry_zones ?? [],
+        stop_zones:  sc?.stop_zones  ?? [],
+        tp_zones:    sc?.tp_zones    ?? [],
+        validity:    sc?.validity    ?? null,
+        quantity:    sc?.quantity    ?? null,
+        rr:          sc?.rr          ?? null,
+    }
+}
+
+/**
+ * A scenario as the pure per-plan helpers want it — they ask for `direction` + legs + `validity`,
+ * which is exactly a scenario plus the one field it inherits. Lets computeRR, validityProblems and
+ * validityBreach run per scenario with no second implementation.
+ */
+export function scenarioView(setup, sc) {
+    return { direction: setup?.direction ?? null, ...(sc ?? {}) }
+}
+
+/** The conditions a wake judges: the setup-wide tier plus the armed scenario's own. Pure. */
+export function declaredConditions(setup, sc = null) {
+    return [...(setup?.conditions ?? []), ...(sc?.conditions ?? [])]
+}
+
 // ─── ISO bounds ───────────────────────────────────────────────────────────────
 
 // Accept an ISO string (or ms) and return a normalised Z-ISO string. Invalid → null, so a
@@ -237,12 +391,13 @@ export function normalizeSetup(raw) {
 
     const type      = TRADE_HORIZONS.includes(raw.type) ? raw.type : null
     const timeframe = VALID_TIMEFRAMES.has(normalizeTimeframe(raw.timeframe)) ? normalizeTimeframe(raw.timeframe) : null
+    const direction = raw.direction === 'short' ? 'short' : raw.direction === 'long' ? 'long' : null
 
-    const entry_zones = normalizeZones(raw.entry_zones, 'ez')
-    const stop_zones  = normalizeZones(raw.stop_zones,  'sz')
-    const tp_zones    = normalizeZones(raw.tp_zones,    'tp')
-
-    const rr = Number(raw.rr)
+    // ONE id space for the whole document — the root tier first, then each scenario, so the single
+    // resolved-condition ledger can never have two conditions answering to the same key.
+    const used      = new Set()
+    const conditions = normalizeConditions(raw.conditions, { used })
+    const scenarios  = normalizeScenarios(_scenarioSource(raw), { direction, used })
 
     return {
         asset:       typeof raw.asset === 'string' ? raw.asset.toUpperCase().trim() : '',
@@ -250,7 +405,7 @@ export function normalizeSetup(raw) {
         // this, and each had grown its own synonym map. An unknown value becomes null, which
         // every consumer already reads as "fall back to the symbol heuristic".
         asset_class: normalizeAssetClass(raw.asset_class),
-        direction:   raw.direction === 'short' ? 'short' : raw.direction === 'long' ? 'long' : null,
+        direction,
         type,
         trade_mode:  TRADE_MODES.includes(raw.trade_mode) ? raw.trade_mode : 'classical',
         timeframe,
@@ -258,21 +413,23 @@ export function normalizeSetup(raw) {
         valid_until: isoOrNull(raw.valid_until),
 
         thesis:     typeof raw.thesis === 'string' ? raw.thesis.trim() : '',
-        conditions: normalizeConditions(raw.conditions),
-        validity:   normalizeValidity(raw.validity),
+        // The setup-wide tier. Each scenario carries its own trigger; these are what holds whichever
+        // one prints.
+        conditions,
         // The symbols a condition may pull the monitor onto, beyond the setup's own asset. Free
         // text can name anything; the fetch budget stays bounded by what Mentor extracted at build.
         referenced_symbols: normalizeSymbols(raw.referenced_symbols),
 
-        entry_zones,
-        stop_zones,
-        tp_zones,
+        // The authored plan: one entry per premise, each owning its legs and its death line.
+        scenarios,
 
         conviction: cleanConviction(raw.conviction) || null,
-        rr:         Number.isFinite(rr) ? rr : null,
 
-        // Server-derived — recomputed every time, never taken from the model.
-        quantity: totalQuantity(entry_zones),
+        // Server-derived — recomputed every time, never taken from the model. `entry_zones`,
+        // `stop_zones`, `tp_zones`, `validity`, `quantity` and `rr` are the EXECUTION PROJECTION of
+        // one scenario (projectScenario): pre-arm the first, and re-stamped by Talos to the armed
+        // one when a zone trips. Authoring them directly does nothing — scenarios are the source.
+        ...projectScenario({ scenarios }, raw.armed_scenario_id ?? null),
         ladder:   buildLadder(timeframe),
         cadence:  buildCadence(type),
     }
@@ -294,15 +451,36 @@ export function setupReadiness(setup, hasAccount = false) {
     if (!setup?.asset)      missing.push('asset')
     if (!setup?.direction)  missing.push('direction')
     if (!setup?.type)       missing.push('horizon')
-    if (!(setup?.entry_zones?.length))               missing.push('entry zone')
-    if (!(setup?.stop_zones?.length))                missing.push('stop zone')
-    if (!Number.isFinite(setup?.quantity) || setup.quantity <= 0) missing.push('quantity')
-    // PRESENCE only. Whether a condition is *checkable* is Mentor's gate and lives in the prompt —
-    // code can't read a sentence and say how anyone would know. But zero conditions is the one part
-    // it can see, and it means the setup arms with nothing to verify against its thesis: Talos falls
-    // through to `judge on price structure at the zone alone` and the premise never gets tested.
-    if (!(setup?.conditions?.length))                missing.push('condition')
-    if (!hasAccount)        missing.push('trading account')
+
+    const list  = setup?.scenarios ?? []
+    const multi = list.length > 1
+    const root  = setup?.conditions ?? []
+
+    if (!list.length) missing.push('scenario')
+
+    for (const sc of list) {
+        // With two premises in play, "missing stop zone" is ambiguous — say WHICH one.
+        const at = (what) => (multi ? `${what} on ${scenarioLabel(sc)}` : what)
+
+        if (!(sc.entry_zones?.length)) missing.push(at('entry zone'))
+        // Two entries in ONE scenario is scaling in, and execution fires once for the scenario's
+        // whole size — so the position would be both legs while only one zone printed. Two PREMISES
+        // are two scenarios; two legs of one premise wait for per-leg execution.
+        else if (sc.entry_zones.length > 1) missing.push(at('a single entry zone (two premises are two scenarios; scaling in is not supported yet)'))
+
+        if (!(sc.stop_zones?.length)) missing.push(at('stop zone'))
+        if (!Number.isFinite(sc.quantity) || sc.quantity <= 0) missing.push(at('quantity'))
+
+        // PRESENCE only, counting the root tier. Whether a condition is *checkable* is Mentor's gate
+        // and lives in the prompt — code can't read a sentence and say how anyone would know. But a
+        // scenario with nothing to check arms blind: Talos falls through to `judge on price structure
+        // at the zone alone` and the premise never gets tested. A scenario needs no trigger of its
+        // own when the root carries one.
+        if (!root.length && !(sc.conditions?.length)) missing.push(at('condition'))
+    }
+    if (!list.length && !root.length) missing.push('condition')
+
+    if (!hasAccount) missing.push('trading account')
 
     const problems = validityProblems(setup)
     return { ready: missing.length === 0 && problems.length === 0, missing, problems }
@@ -322,6 +500,19 @@ export function setupReadiness(setup, hasAccount = false) {
  * Pure. An absent validity range is not a problem (optional in v1).
  */
 export function validityProblems(setup) {
+    const list  = setup?.scenarios ?? []
+    const multi = list.length > 1
+    return list.flatMap(sc => rangeProblems(scenarioView(setup, sc))
+        .map(p => (multi ? `${scenarioLabel(sc)}: ${p}` : p)))
+}
+
+/**
+ * The coherence check for ONE plan — a scenario, or anything else carrying `direction` + `validity`
+ * + `stop_zones`. Per scenario because the range and the stop it must outlive both belong to the
+ * same premise: checking the false break's floor against the breakout's stop compares two different
+ * trades. Pure.
+ */
+export function rangeProblems(setup) {
     const v = setup?.validity
     if (!v) return []
     const out  = []
@@ -351,6 +542,10 @@ export function validityProblems(setup) {
 
 /**
  * Reward-to-risk from the PESSIMISTIC fill, per docs/setup-entity.md §6.
+ *
+ * SCOPED TO ONE PLAN — a scenario (via scenarioView), or the projected document, both of which carry
+ * `direction` + the three zone arrays. Pricing a setup's r:r across scenarios would run one
+ * premise's entry to another's target and describe a trade nobody planned.
  *
  * For a long: the worst entry is the zone's UPPER edge (you paid up), risk runs to the LOWEST
  * stop edge (the failsafe rests at the far side), reward to the NEAREST target edge. Mirrored

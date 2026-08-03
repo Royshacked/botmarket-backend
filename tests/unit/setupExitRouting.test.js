@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { routeExits, routeSetupZones, zoneExitLevel } from '../../services/protectionPlan.service.js'
-import { computeRR } from '../../services/setup.schema.js'
+import { computeRR, projectScenario } from '../../services/setup.schema.js'
 
 // A confirmed setup used to place a NAKED entry.
 //
@@ -18,6 +18,27 @@ const SETUP = {
     stop_zones:  [{ id: 'sz1', lower: 234.8, upper: 235.9 }],
     tp_zones:    [{ id: 'tp1', lower: 246.0, upper: 247.2 }, { id: 'tp2', lower: 252.0, upper: 253.5 }],
 }
+
+// The Phase-6 half of the same guarantee: exits are routed off the flat zones, and those are the
+// EXECUTION PROJECTION of whichever scenario armed. If Talos ever stopped stamping it, a rival
+// premise's stop would rest behind the position that actually opened — silently, exactly like the
+// naked-entry bug above.
+test('the exits belong to the premise that armed, not to the first one authored', () => {
+    const RIVALS = {
+        kind: 'setup', direction: 'long',
+        scenarios: [
+            { id: 's1', entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
+              stop_zones: [{ lower: 234.8, upper: 235.9 }], tp_zones: [{ lower: 246, upper: 247.2 }], quantity: 100 },
+            { id: 's2', entry_zones: [{ lower: 244, upper: 244.9, quantity: 60 }],
+              stop_zones: [{ lower: 241, upper: 241.8 }], tp_zones: [{ lower: 252, upper: 253.5 }], quantity: 60 },
+        ],
+    }
+    const armed = { ...RIVALS, ...projectScenario(RIVALS, 's2') }
+    const { stop, tp } = routeSetupZones(armed)
+    assert.equal(stop.nativeOrders[0].level, 241.0, "s2's stop, not s1's 234.8")
+    assert.equal(tp.nativeOrders[0].level, 252.0)
+    assert.equal(stop.nativeOrders[0].quantity, 60, 'and s2\'s size — never 160')
+})
 
 test('a setup routes through zones, not through condition trees', async () => {
     // The dispatch lives inside routeExits so the execution path stays kind-blind: it asks one

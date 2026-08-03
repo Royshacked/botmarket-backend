@@ -81,9 +81,38 @@ export function callToWatchRow(doc) {
     }
 }
 
-/** A Mentor setup → a row. Setups carry their own stop/tp zones, which a call leaves to its tree. */
+/**
+ * One scenario, as a row reads it. A setup can hold rival premises — a false break at one level and
+ * a break-and-go at another — and a single set of levels would hide the second one entirely, which
+ * is the whole reason this array exists.
+ */
+function _scenarioRow(sc, doc) {
+    return {
+        id: sc?.id ?? null,
+        name: sc?.name ?? null,
+        entry: _firstZone(sc?.entry_zones),
+        stop: _firstZone(sc?.stop_zones),
+        tp: _firstZone(sc?.tp_zones),
+        quantity: sc?.quantity ?? null,
+        rr: sc?.rr ?? null,
+        armed: sc?.id != null && sc.id === (doc?.armed_scenario_id ?? null),
+        // The premise's own invalidation axis: 'fired' means this way in is dead while the others
+        // may still be live, so a row that showed only the document's status would read as fine.
+        invalidation: doc?.monitor_state?.scenarios?.[sc?.id]?.invalidation_status ?? null,
+    }
+}
+
+/**
+ * A Mentor setup → a row. Setups carry their own stop/tp zones, which a call leaves to its tree.
+ *
+ * The flat `nearestEntry`/`stop`/`firstTp`/`rr` are the ARMED scenario's (else the first authored) —
+ * they read the document's execution projection, which is exactly that. They are not redundant with
+ * `scenarios`: userData.tools._zone reads these keys, and an agent asked "where is my NVDA setup"
+ * wants one answer rather than a menu.
+ */
 export function setupToWatchRow(doc) {
     if (!doc?.id) return null
+    const scenarios = Array.isArray(doc.scenarios) ? doc.scenarios : []
     return {
         kind: 'setup',
         id: doc.id,
@@ -101,6 +130,7 @@ export function setupToWatchRow(doc) {
             conviction: doc.conviction ?? null,
             validUntil: doc.valid_until ?? null,
             timeframe: doc.timeframe ?? null,
+            scenarios: scenarios.map(sc => _scenarioRow(sc, doc)),
         },
     }
 }

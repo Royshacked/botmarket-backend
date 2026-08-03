@@ -9,6 +9,7 @@ import { assessRouting, candlesText as _candlesText,
     ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING } from './assess.shared.js'
 import { _thinkingConfig, _allText, _formatEventRisk } from './hermes.assess.js'
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
+import { declaredConditions, pickScenario, scenarioLabel } from '../services/setup.schema.js'
 
 // Talos's assessment — the condition-driven counterpart to Hermes's four-axis read.
 //
@@ -95,7 +96,9 @@ export async function gatherFor(setup, tf, deps = {}) {
 
 const _SYSTEM = `You are Talos, the guardian watching a trade SETUP the user built with Mentor. Price has reached one of the setup's zones (or the setup is near expiry) and you were woken to judge the moment.
 
-You are given the setup — its THESIS, its zones, and its CONDITIONS — plus a chart, recent candles and the current price. Anything else you want, you go and get with your tools.
+You are given the setup — its THESIS, the SCENARIO price actually reached, and that scenario's CONDITIONS — plus a chart, recent candles and the current price. Anything else you want, you go and get with your tools.
+
+A setup can hold more than one way in: a false break at one level and a break-and-go at another are rival premises, not two halves of one trade. Judge ONLY the scenario on the table, with its own zones, its own stop and its own conditions. If it isn't there, say so — the other scenarios stay armed on their own terms, and nothing you say here kills them.
 
 THE CONDITIONS ARE YOUR MANDATE. They are written in plain language, the way a trader would say them. Read each one, work out what would actually confirm or deny it, and go check — call the tools you need, and pull another timeframe if the first look leaves you unsure. A condition marked "primary" is the trigger itself: if it is not happening, this is not the moment. A "confirming" condition that fails weakens the read but does not by itself veto it.
 
@@ -130,8 +133,10 @@ Include "edit_proposal":{"why":"...","changes":{}} only when the verdict is "edi
  * a search for a fact established three wakes ago both wastes the call and risks the model talking
  * itself out of it when results shift.
  */
-function _conditionsBlock(setup) {
-    const conditions = setup?.conditions ?? []
+function _conditionsBlock(setup, scenario = null) {
+    // Root ∪ the armed scenario's. The rival premise's trigger is deliberately absent: it describes
+    // a different trade, and grading it here would read as a setup that never fulfils.
+    const conditions = declaredConditions(setup, scenario)
     if (!conditions.length) {
         return 'CONDITIONS: (none declared — judge on price structure at the zone alone)'
     }
@@ -144,6 +149,18 @@ function _conditionsBlock(setup) {
         return `- [${c.id}] (${c.weight}, ${c.mode}) ${c.text}`
     })
     return `CONDITIONS — judge exactly these, nothing else:\n${lines.join('\n')}`
+}
+
+/**
+ * The rival premises, named only. Enough that the model knows a rejection here is not a rejection of
+ * the whole setup ("wait" leaves the other one armed), and never enough to invite it to judge them —
+ * their zones and triggers are deliberately withheld.
+ */
+function _otherScenariosBlock(setup, scenario) {
+    const others = (setup?.scenarios ?? []).filter(s => s.id !== scenario?.id)
+    if (!others.length) return ''
+    return `OTHER SCENARIOS ON THIS SETUP (not yours to judge — they stay armed either way): ${
+        others.map(s => scenarioLabel(s)).join(', ')}`
 }
 
 function _dataBlocks(setup, g, tf) {
@@ -163,8 +180,10 @@ function _dataBlocks(setup, g, tf) {
  * the caller's timeline entry can be honest about WHY (bad reply vs failed IO) and reschedule on
  * the normal cadence rather than wedging the loop.
  */
-export async function assessSetup(setup, zone, ctx = {}) {
+export async function assessSetup(setup, hit, ctx = {}) {
     try {
+        const zone     = hit?.zone ?? null
+        const scenario = hit?.scenario ?? pickScenario(setup)
         const ladder = setup?.ladder?.length ? setup.ladder : ['15min']
         const tf     = ladder[ladder.length - 1]   // primary view = the ladder's finest rung
         const g      = await gatherFor(setup, tf)
@@ -173,10 +192,16 @@ export async function assessSetup(setup, zone, ctx = {}) {
             `SETUP: ${JSON.stringify({
                 asset: setup.asset, direction: setup.direction, type: setup.type,
                 trade_mode: setup.trade_mode, timeframe: setup.timeframe, thesis: setup.thesis,
-                entry_zones: setup.entry_zones, stop_zones: setup.stop_zones, tp_zones: setup.tp_zones,
-                conviction: setup.conviction, rr: setup.rr, valid_until: setup.valid_until,
+                conviction: setup.conviction, valid_until: setup.valid_until,
             })}`,
-            _conditionsBlock(setup),
+            // ONE premise is on the table. A setup can hold rivals — a false break and a break-and-go
+            // are different trades — and the one price actually reached is the one being judged.
+            `SCENARIO ON THE TABLE${scenario?.name ? ` — "${scenario.name}"` : ''}: ${JSON.stringify({
+                entry_zones: scenario?.entry_zones ?? [], stop_zones: scenario?.stop_zones ?? [],
+                tp_zones: scenario?.tp_zones ?? [], quantity: scenario?.quantity ?? null, rr: scenario?.rr ?? null,
+            })}`,
+            _otherScenariosBlock(setup, scenario),
+            _conditionsBlock(setup, scenario),
             `ARMED ZONE: ${zone ? JSON.stringify(zone) : '(none — expiry review)'}`,
             `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
             `SESSION NOW: ${sessionPhase(setup.asset, setup.asset_class)}`,

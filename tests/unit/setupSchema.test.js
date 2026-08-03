@@ -1,9 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    buildLadder, buildCadence, normalizeZone, normalizeZones, totalQuantity,
-    normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems,
+    buildLadder, buildCadence, normalizeZone, normalizeZones, scenarioQuantity,
+    normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
+    normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
 } from '../../services/setup.schema.js'
 
 // The `setup` entity contract (docs/setup-entity.md §3). Mentor authors loosely, Talos monitors
@@ -94,10 +95,10 @@ test('a non-positive or absent quantity becomes null, never 0', () => {
     }
 })
 
-test('total quantity sums the scale-in legs, and is null when nothing is sized', () => {
-    assert.equal(totalQuantity([{ quantity: 100 }, { quantity: 50 }]), 150)
-    assert.equal(totalQuantity([{ quantity: null }]), null)
-    assert.equal(totalQuantity([]), null)
+test('a scenario is sized by its own entry legs, and is null when nothing is sized', () => {
+    assert.equal(scenarioQuantity([{ quantity: 100 }, { quantity: 50 }]), 150)
+    assert.equal(scenarioQuantity([{ quantity: null }]), null)
+    assert.equal(scenarioQuantity([]), null)
 })
 
 // ─── conditions[] ─────────────────────────────────────────────────────────────
@@ -183,18 +184,18 @@ const COHERENT = {
 }
 
 test('a coherent validity range raises no problem', () => {
-    assert.deepEqual(validityProblems(COHERENT), [])
-    assert.deepEqual(validityProblems({ direction: 'long' }), [], 'no range is not a problem')
+    assert.deepEqual(rangeProblems(COHERENT), [])
+    assert.deepEqual(rangeProblems({ direction: 'long' }), [], 'no range is not a problem')
 })
 
 test('a validity floor below the stop is refused on a long', () => {
-    const p = validityProblems({ ...COHERENT, validity: { ...COHERENT.validity, lower: 230 } })
+    const p = rangeProblems({ ...COHERENT, validity: { ...COHERENT.validity, lower: 230 } })
     assert.equal(p.length, 1)
     assert.match(p[0], /floor sits below the stop/)
 })
 
 test('a validity ceiling above the stop is refused on a short', () => {
-    const p = validityProblems({
+    const p = rangeProblems({
         direction: 'short',
         stop_zones: [{ lower: 244, upper: 245 }],
         validity:   { lower: 230, upper: 250, approach: 228 },
@@ -204,18 +205,41 @@ test('a validity ceiling above the stop is refused on a short', () => {
 })
 
 test('an away pivot inside the range can never fire, so it is refused', () => {
-    const p = validityProblems({ ...COHERENT, validity: { ...COHERENT.validity, approach: 240 } })
+    const p = rangeProblems({ ...COHERENT, validity: { ...COHERENT.validity, approach: 240 } })
     assert.match(p[0], /inside the validity range/)
 })
 
+// Each range is checked against ITS OWN scenario's stop — checking the false break's floor against
+// the breakout's stop would compare two different trades.
+test('coherence is per scenario, and the failing one is named', () => {
+    const s = normalizeSetup({
+        asset: 'NVDA', direction: 'long', type: 'swing', timeframe: '1hr',
+        conditions: [{ id: 'c1', text: 'SMH leading' }],
+        scenarios: [
+            { id: 's1', name: 'false break',
+              entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
+              stop_zones:  [{ lower: 234.8, upper: 235.9 }],
+              validity:    { lower: 235.5, upper: 244 } },
+            { id: 's2', name: 'break and go',
+              entry_zones: [{ lower: 244, upper: 244.9, quantity: 60 }],
+              stop_zones:  [{ lower: 241, upper: 241.8 }],
+              validity:    { lower: 238, upper: 250 } },   // below ITS stop, fine against s1's
+        ],
+    })
+    const p = validityProblems(s)
+    assert.equal(p.length, 1, 's1 is coherent; only s2 is not')
+    assert.match(p[0], /^break and go: /, 'the message names which premise is wrong')
+    assert.match(p[0], /floor sits below the stop/)
+})
+
 test('readiness reports coherence problems separately from missing fields', () => {
-    const r = setupReadiness({
-        asset: 'NVDA', direction: 'long', type: 'swing', quantity: 100,
+    const r = setupReadiness(normalizeSetup({
+        asset: 'NVDA', direction: 'long', type: 'swing',
         conditions:  [{ id: 'c1', text: 'CHoCH up on the 15m' }],
-        entry_zones: [{ lower: 237.8, upper: 238.6 }],
+        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
         stop_zones:  [{ lower: 234.8, upper: 235.9 }],
         validity:    { lower: 230, upper: 244 },
-    }, true)
+    }), true)
     assert.equal(r.ready, false)
     assert.deepEqual(r.missing, [], 'nothing is missing — the range is wrong, not absent')
     assert.equal(r.problems.length, 1)
@@ -344,4 +368,143 @@ test('rr picks the NEAREST target and the WIDEST stop, whatever order they were 
 test('rr is null when a leg is missing or the entry sits inside its own stop', () => {
     assert.equal(computeRR(normalizeSetup({ ...DRAFT, tp_zones: [] })), null)
     assert.equal(computeRR(normalizeSetup({ ...DRAFT, stop_zones: [{ lower: 239, upper: 240 }] })), null)
+})
+
+// ─── scenarios ────────────────────────────────────────────────────────────────
+// A price zone is a scenario: a premise that owns its entry, its stop, its targets, its conditions
+// and its death line. Rivals, not legs — the first to fulfil takes the whole trade.
+
+const RIVALS = {
+    asset: 'NVDA', direction: 'long', type: 'swing', timeframe: '1hr',
+    thesis: 'Two ways into the same idea.',
+    conditions: [{ id: 'c1', text: 'SMH leading, not diverging', weight: 'confirming' }],
+    scenarios: [
+        { id: 's1', name: 'false break',
+          conditions:  [{ text: 'sweep of 238 that closes back inside', weight: 'primary', mode: 'measured' }],
+          entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
+          stop_zones:  [{ lower: 234.8, upper: 235.9 }],
+          tp_zones:    [{ lower: 246.0, upper: 247.2 }] },
+        { id: 's2', name: 'break and go',
+          conditions:  [{ text: '1hr close above 244 on volume', weight: 'primary', mode: 'measured' }],
+          entry_zones: [{ lower: 244.0, upper: 244.9, quantity: 60 }],
+          stop_zones:  [{ lower: 241.0, upper: 241.8 }],
+          tp_zones:    [{ lower: 252.0, upper: 253.5 }] },
+    ],
+}
+
+test('each scenario keeps its own legs, size and r:r', () => {
+    const s = normalizeSetup(RIVALS)
+    assert.equal(s.scenarios.length, 2)
+    assert.equal(s.scenarios[0].quantity, 100)
+    assert.equal(s.scenarios[1].quantity, 60)
+    // Priced from its OWN legs: s1 worst fill 238.6 / stop 234.8 / tp 246 ⇒ 1.95.
+    assert.equal(s.scenarios[0].rr, 1.95)
+    assert.notEqual(s.scenarios[1].rr, s.scenarios[0].rr)
+})
+
+test('QUANTITY IS NEVER SUMMED ACROSS SCENARIOS — the whole trade, whichever prints', () => {
+    const s = normalizeSetup(RIVALS)
+    assert.equal(s.quantity, 100, 'the projected scenario, not 160')
+    assert.equal(projectScenario(s, 's2').quantity, 60)
+})
+
+test('the document projects ONE scenario for execution — the armed one, else the first', () => {
+    const s = normalizeSetup(RIVALS)
+    assert.deepEqual(s.entry_zones, s.scenarios[0].entry_zones, 'pre-arm: the primary')
+    assert.deepEqual(s.stop_zones,  s.scenarios[0].stop_zones)
+    assert.equal(s.rr, s.scenarios[0].rr)
+
+    const armed = normalizeSetup({ ...RIVALS, armed_scenario_id: 's2' })
+    assert.deepEqual(armed.entry_zones, armed.scenarios[1].entry_zones)
+    assert.deepEqual(armed.tp_zones,    armed.scenarios[1].tp_zones)
+})
+
+test('condition ids are unique across the WHOLE document — one ledger, one key each', () => {
+    const s = normalizeSetup({
+        ...RIVALS,
+        conditions: [{ id: 'c1', text: 'root one' }],
+        scenarios: RIVALS.scenarios.map(sc => ({ ...sc, conditions: [{ id: 'c1', text: 'scenario one' }] })),
+    })
+    const ids = [s.conditions[0].id, ...s.scenarios.flatMap(sc => sc.conditions.map(c => c.id))]
+    assert.equal(new Set(ids).size, ids.length, 'a collision would let one latch answer for another')
+})
+
+test('an unnamed scenario condition is keyed by its scenario, so it reads back', () => {
+    const s = normalizeSetup(RIVALS)
+    assert.equal(s.scenarios[1].conditions[0].id, 's2c1')
+})
+
+test('a wake judges root ∪ the armed scenario, never the rival', () => {
+    const s = normalizeSetup(RIVALS)
+    const declared = declaredConditions(s, s.scenarios[0])
+    assert.deepEqual(declared.map(c => c.text), ['SMH leading, not diverging', 'sweep of 238 that closes back inside'])
+    assert.deepEqual(declaredConditions(s, null).map(c => c.id), ['c1'], 'no scenario → the root tier alone')
+})
+
+test('a scenario view is what the per-plan helpers take — direction rides down from the setup', () => {
+    const s = normalizeSetup(RIVALS)
+    assert.equal(scenarioView(s, s.scenarios[1]).direction, 'long')
+    assert.equal(scenarioLabel(s.scenarios[1]), 'break and go')
+    assert.equal(scenarioLabel({ id: 's3' }), 's3', 'no name → the id, never blank')
+})
+
+test('pickScenario falls back to the first when the id is unknown or absent', () => {
+    const s = normalizeSetup(RIVALS)
+    assert.equal(pickScenario(s, 'nope').id, 's1')
+    assert.equal(pickScenario(s).id, 's1')
+    assert.equal(pickScenario({ scenarios: [] }), null)
+})
+
+test('scenario ids collide safely rather than merging two premises', () => {
+    const list = normalizeScenarios([{ id: 's1' }, { id: 's1' }], { direction: 'long' })
+    assert.deepEqual(list.map(s => s.id), ['s1', 's1_2'])
+})
+
+// ─── readiness, per scenario ──────────────────────────────────────────────────
+
+test('readiness names WHICH premise is unfinished', () => {
+    const s = normalizeSetup({ ...RIVALS, scenarios: [RIVALS.scenarios[0], { ...RIVALS.scenarios[1], stop_zones: [] }] })
+    const { ready, missing } = setupReadiness(s, true)
+    assert.equal(ready, false)
+    assert.deepEqual(missing, ['stop zone on break and go'])
+})
+
+test('a scenario with no trigger of its own is fine while the root carries one', () => {
+    const s = normalizeSetup({ ...RIVALS, scenarios: RIVALS.scenarios.map(sc => ({ ...sc, conditions: [] })) })
+    assert.equal(setupReadiness(s, true).ready, true)
+})
+
+test('a scenario with nothing to check anywhere arms blind, and is refused', () => {
+    const s = normalizeSetup({ ...RIVALS, conditions: [], scenarios: RIVALS.scenarios.map(sc => ({ ...sc, conditions: [] })) })
+    assert.ok(setupReadiness(s, true).missing.includes('condition on false break'))
+})
+
+test('two entries in ONE scenario is scaling in — refused until per-leg execution exists', () => {
+    const s = normalizeSetup({ ...RIVALS, scenarios: [{
+        ...RIVALS.scenarios[0],
+        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }, { lower: 235, upper: 236, quantity: 50 }],
+    }, RIVALS.scenarios[1]] })
+    assert.match(setupReadiness(s, true).missing[0], /single entry zone/)
+})
+
+test('a setup with no scenario at all is not a plan', () => {
+    assert.ok(setupReadiness(normalizeSetup({ asset: 'NVDA', direction: 'long', type: 'swing' }), true).missing.includes('scenario'))
+})
+
+// ─── the legacy wrap ──────────────────────────────────────────────────────────
+
+test('a pre-scenario document becomes exactly one scenario, keeping its zone ids', () => {
+    const s = normalizeSetup({ ...DRAFT, validity: { lower: 234, upper: 244, on_break: 'close' } })
+    assert.equal(s.scenarios.length, 1)
+    assert.equal(s.scenarios[0].id, 's1')
+    assert.deepEqual(s.scenarios[0].entry_zones, s.entry_zones, 'the projection matches the wrap')
+    assert.equal(s.scenarios[0].validity.on_break, 'close', 'the root range moves down with it')
+    assert.equal(s.validity.on_break, 'close', 'and is projected back up for the FE')
+})
+
+test('re-normalising an already-scenario document is idempotent', () => {
+    const once  = normalizeSetup(RIVALS)
+    const twice = normalizeSetup(once)
+    assert.deepEqual(twice.scenarios, once.scenarios)
+    assert.deepEqual(twice.entry_zones, once.entry_zones)
 })
