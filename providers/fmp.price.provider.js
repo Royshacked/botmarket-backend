@@ -76,11 +76,15 @@ export async function getFmpQuoteYf(symbol) {
  * can't price it (uncovered symbol → empty array). Cached ~3s. Throws only on a transient
  * network/provider error so the caller can fall back rather than cache a miss.
  */
-export async function getFmpQuoteFull(symbol) {
+export async function getFmpQuoteFull(symbol, { fresh = false } = {}) {
     const key = String(symbol || '').toUpperCase().trim()
     if (!key) return null
 
-    const cached = _quoteCache.get(key)
+    // `fresh` skips the READ, never the write. The 3s window is there to collapse the mark and
+    // fill loops onto one fetch, which is right for polling and wrong for the one call that
+    // actually prices a fill: an order placed a beat after a failed poll would otherwise be
+    // answered by that failure instead of by the market.
+    const cached = fresh ? null : _quoteCache.get(key)
     if (cached) return cached.v   // wrapper distinguishes "cached null" from "not cached"
 
     if (!API_KEY) throw new Error('FMP_API_KEY is not set')
@@ -93,8 +97,8 @@ export async function getFmpQuoteFull(symbol) {
 }
 
 /** Real-time last price for a symbol, or null. Convenience over getFmpQuoteFull. */
-export async function getFmpQuote(symbol) {
-    return (await getFmpQuoteFull(symbol))?.price ?? null
+export async function getFmpQuote(symbol, opts) {
+    return (await getFmpQuoteFull(symbol, opts))?.price ?? null
 }
 
 // ─── Candles ──────────────────────────────────────────────────────────────────
@@ -103,6 +107,13 @@ export async function getFmpQuote(symbol) {
 // UTC epoch SECONDS (both Massive and Yahoo emit `q.date.getTime()/1000`), so every FMP row
 // must be converted the same way — a wrong offset shifts every intraday bar and would make
 // the monitor misfire. See reference_fmp_pricing / the Stage-2 plan.
+
+// "This key has no intraday" — a plan fact, not a symbol fact, so it is one latch rather than
+// one per ticker. TTL'd rather than permanent so upgrading the plan heals without a restart;
+// the entry expiring IS the re-probe, and it costs a single request.
+const NO_INTRADAY_TTL_MS = 30 * 60_000
+const NO_INTRADAY_KEY    = 'intraday'
+const _noIntraday        = createTtlCache({ ttlMs: NO_INTRADAY_TTL_MS, max: 1 })
 
 /** ET America/New_York offset (ms) from UTC at an instant — negative west of UTC. */
 function _etOffsetMs(instant) {
@@ -254,6 +265,15 @@ export async function getFmpCandles(ticker, options = {}) {
     if (!sym) return null
     if (!API_KEY) throw new Error('FMP_API_KEY is not set')
 
+    // Intraday is a PLAN feature, and on a key without it every bar spec below the daily
+    // one answers 402 forever. Asking anyway is not a harmless miss: each attempt spends a
+    // request against the same rate limit `/quote` needs, so a mark loop over a dozen symbols
+    // burns its way to a 429 on the one endpoint that DOES work — the outage is self-inflicted
+    // and lands on real-time pricing, which is the thing the paper venue actually fills off.
+    // So the refusal is remembered and we go straight to the fallback provider. Null (not an
+    // empty array) is what the router reads as "FMP shouldn't serve this".
+    if (spec.kind === 'intraday' && _noIntraday.get(NO_INTRADAY_KEY)) return null
+
     const dateStr = (ms) => new Date(ms).toISOString().slice(0, 10)
     const parts = [`symbol=${encodeURIComponent(sym)}`]
     if (from != null) parts.push(`from=${dateStr(from)}`)
@@ -261,7 +281,24 @@ export async function getFmpCandles(ticker, options = {}) {
     const qs   = `${parts.join('&')}&apikey=${API_KEY}`
     const path = spec.kind === 'intraday' ? `/historical-chart/${spec.interval}?${qs}` : `/historical-price-eod/full?${qs}`
 
-    const rows   = await getJson(`${BASE}${path}`, { label: `FMP candles ${sym}/${timeSpan}x${multiplier}` })
+    let rows
+    try {
+        rows = await getJson(`${BASE}${path}`, { label: `FMP candles ${sym}/${timeSpan}x${multiplier}` })
+    } catch (err) {
+        // 402 is the plan speaking, not the network: it is the same answer for every symbol
+        // and every retry until the subscription changes. Latch it (with a TTL, so an upgrade
+        // heals on its own) and let the caller fall back. Anything else — 429, 5xx, a timeout
+        // — is transient and must keep rethrowing, or a rate limit would look like a
+        // permanent loss of intraday data.
+        if (spec.kind === 'intraday' && err?.status === 402) {
+            if (!_noIntraday.get(NO_INTRADAY_KEY)) {
+                logger.warn(LOG, `intraday candles are not on this FMP plan (402) — routing minute/hour bars to the fallback provider for ${NO_INTRADAY_TTL_MS / 60_000}m`)
+            }
+            _noIntraday.set(NO_INTRADAY_KEY, true)
+            return null
+        }
+        throw err
+    }
     const mapped = (Array.isArray(rows) ? rows : [])
         .map(_normalizeFmpCandle)
         .filter(Boolean)

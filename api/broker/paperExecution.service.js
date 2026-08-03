@@ -120,23 +120,39 @@ const _noFmp        = createTtlCache({ ttlMs: NO_FMP_TTL_MS, max: 500 })   // sy
  * never reached (see project_timestamp_ideas Issue 1). No live-enough price → null, and
  * both callers degrade safely (the mark loop keeps the last mark; the fill loop doesn't
  * trigger that tick).
+ *
+ * Note how thin the ladder actually is: on an FMP plan WITHOUT intraday candles the second
+ * rung is empty for equities, so `/quote` is the only real-time price this venue has. That
+ * is why the suppression cache below must never be set on a transient error.
+ *
+ * @param {string} symbol
+ * @param {{ quote?: Function, candles?: Function, isOpen?: Function }} [deps]  injectable for tests
  */
-export async function latestMarkPrice(symbol) {
+export async function latestMarkPrice(symbol, deps = {}) {
+    const { quote = getFmpQuote, candles: fetchCandles = getCandles, isOpen = isAssetOpen } = deps
     // get() returns undefined when absent OR expired (it evicts on read), so a falsy
     // hit is exactly "no live suppression — try FMP".
     if (!_noFmp.get(symbol)) {
         try {
-            const price = await getFmpQuote(symbol)
+            const price = await quote(symbol)
             if (price != null && Number.isFinite(price) && price > 0) return price
-        } catch { /* provider error — fall back to an intraday candle */ }
-        _noFmp.set(symbol, true)
+            // FMP ANSWERED and had no price — that is a coverage fact about the symbol
+            // (a future, an index CFD, a broker alias), so it is worth remembering.
+            _noFmp.set(symbol, true)
+        } catch {
+            // A THROWN error is the provider having a bad moment — a 429, a timeout, a blip.
+            // It says nothing about whether FMP covers this symbol, and recording it here
+            // used to suppress the only working price source for a full 10 minutes: a
+            // one-second rate limit became a ten-minute outage in which every entry on the
+            // symbol was refused and every open position stopped marking. Ask again next tick.
+        }
     }
     // Intraday (1-min) candle close ONLY — never a day candle (see above). Skip entirely when
     // the session is closed: no fresh intraday bars exist, so the fetch only returns empty and
     // logs noise, and the caller degrades safely on null (the fill loop simply doesn't trigger).
-    if (!isAssetOpen(symbol)) return null
+    if (!isOpen(symbol)) return null
     try {
-        const candles = await getCandles(symbol, '1min', 1)
+        const candles = await fetchCandles(symbol, '1min', 1)
         const c = candles?.at(-1)?.c
         return c != null && Number.isFinite(c) ? c : null
     } catch {
@@ -181,6 +197,47 @@ export async function exitMarkPrice(symbol, stamped = null, deps = {}) {
     if (usable(dayClose)) return { price: dayClose, source: 'day' }
 
     if (usable(stamped)) return { price: stamped, source: 'mark' }
+    return { price: null, source: null }
+}
+
+// A beat, not a backoff. Long enough that a rate-limited window has moved on, short enough to
+// be invisible inside an order round-trip the user is already waiting on.
+const ENTRY_RETRY_DELAY_MS = 300
+
+/**
+ * Price to FILL AN ENTRY at — the counterpart of exitMarkPrice, and deliberately NOT its twin.
+ *
+ * An exit degrades: the decision is already made, and refusing to book it strands a position
+ * nobody can get out of. An entry is the opposite trade-off. Its price becomes the position's
+ * cost basis for life — every P&L number, every R multiple, every line of the ledger is measured
+ * from it — and a simulated venue whose entries are booked off stale prints is not simulating
+ * anything. Refusing to open is recoverable in a way a wrong basis is not. So this NEVER falls
+ * back to a coarser price.
+ *
+ * What it does instead is ask twice. The single real-time source can blink — an FMP 429, a
+ * timeout — and the first ask may also be answered by a 3s-cached miss from a poll that blinked
+ * a moment earlier. One fresh retry, past that cache, is the difference between "the market has
+ * no price" and "we happened to ask at a bad instant"; only the first is worth refusing over.
+ *
+ * @param {string} symbol
+ * @param {{ mark?: Function, fresh?: Function, wait?: Function, delayMs?: number }} [deps]  injectable for tests
+ * @returns {Promise<{ price: number|null, source: 'live'|'retry'|null }>}
+ */
+export async function entryMarkPrice(symbol, deps = {}) {
+    const {
+        mark    = latestMarkPrice,
+        fresh   = (s) => latestMarkPrice(s, { quote: (sym) => getFmpQuote(sym, { fresh: true }) }),
+        wait    = (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+        delayMs = ENTRY_RETRY_DELAY_MS,
+    } = deps
+
+    const live = await mark(symbol)
+    if (usable(live)) return { price: live, source: 'live' }
+
+    await wait(delayMs)
+    const again = await fresh(symbol)
+    if (usable(again)) return { price: again, source: 'retry' }
+
     return { price: null, source: null }
 }
 
@@ -385,4 +442,4 @@ async function _cancelClosingOrders(userId, positionId, exceptOrderId = null) {
     }
 }
 
-export const paperExecutionService = { openPosition, reducePosition, computeEquity, latestPrice, latestMarkPrice, exitMarkPrice, quoteMapForSymbols, applySpread, dirSign, round2 }
+export const paperExecutionService = { openPosition, reducePosition, computeEquity, latestPrice, latestMarkPrice, exitMarkPrice, entryMarkPrice, quoteMapForSymbols, applySpread, dirSign, round2 }

@@ -12,6 +12,7 @@ import { entityRepo }          from '../../services/entity/entityRepo.service.js
 import { ownsEntity }          from '../../services/entity/entityCrud.service.js'
 import { AWAITING_CONFIRM, isRestingEntry } from '../../services/entity/vocabulary.js'
 import { coverageService }     from '../analyst/coverage.service.js'
+import { NO_PRICE }            from '../broker/adapters/broker.interface.js'
 
 const LOG = '[ideaExecution]'
 
@@ -85,12 +86,21 @@ export async function placeOrdersForIdea(id, orders, userId) {
                 })
             } catch (err) {
                 logger.error(LOG, 'Order failed', { id, broker: order.broker, accountId: order.accountId, error: err.message })
-                results.push({ accountId: order.accountId, ok: false, error: err.message })
+                results.push({ accountId: order.accountId, ok: false, error: err.message, code: err.code ?? null })
             }
         }
 
         const anyPlaced = results.some(r => r.ok)
-        if (!anyPlaced) return { ok: false, reason: 'all_failed', results }
+        if (!anyPlaced) {
+            // "Every broker rejected you" and "we couldn't read a price" are different events and
+            // deserve different answers — the first is the venue's verdict on the trade, the second
+            // is our own data layer being briefly unavailable and is worth retrying in a moment.
+            // Only when EVERY leg failed for want of a price is that the honest report.
+            if (results.every(r => r.code === NO_PRICE)) {
+                return { ok: false, reason: 'no_price', symbol: idea.asset, results }
+            }
+            return { ok: false, reason: 'all_failed', results }
+        }
 
         const now    = Date.now()
         const status = idea.direction === 'short' ? 'short' : 'long'

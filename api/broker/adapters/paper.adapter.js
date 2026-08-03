@@ -18,7 +18,7 @@
  */
 
 import { randomUUID }         from 'crypto'
-import { BrokerAdapter }      from './broker.interface.js'
+import { BrokerAdapter, NO_PRICE } from './broker.interface.js'
 import { paperBrokerService } from '../paperBroker.service.js'
 import { openPosition,
          reducePosition,
@@ -27,10 +27,24 @@ import { openPosition,
          deployable,
          latestMarkPrice,
          exitMarkPrice,
+         entryMarkPrice,
          dirSign, round2 }    from '../paperExecution.service.js'
 import { logger }             from '../../../services/logger.service.js'
 
 const LOG = '[paper.adapter]'
+
+/**
+ * The refusal that means "our own price feed had nothing", as opposed to a venue declining the
+ * trade. On a real broker those are the same event; here they are not — this venue has no book,
+ * so a "rejection" is only ever us being unable to read a price. Tagging it lets the order layer
+ * answer with that fact instead of reporting a data outage as a broker rejection.
+ */
+function noPriceError(symbol) {
+    const err = new Error(`paper: no live price for ${symbol}`)
+    err.code   = NO_PRICE
+    err.symbol = symbol
+    return err
+}
 
 export class PaperAdapter extends BrokerAdapter {
 
@@ -193,13 +207,13 @@ export class PaperAdapter extends BrokerAdapter {
 
             // Opening market order → new position. This one KEEPS the strict live-price rule:
             // an entry filled at a stale day close would misstate the trade's basis for its whole
-            // life, and refusing to open is recoverable in a way a wrong entry price isn't.
-            // Fill at the real-time mark (Yahoo last-traded, candle-close fallback) — a
-            // market order should hit the live price, and the candle-only feed blanks out
-            // on a transient empty fetch (e.g. an equity with no fresh 1-min bar), which
-            // would spuriously reject an order for a symbol Yahoo can price fine.
-            const price = await latestMarkPrice(order.symbol)
-            if (price == null) throw new Error(`paper: no price for ${order.symbol}`)
+            // life, and refusing to open is recoverable in a way a wrong entry price isn't. So
+            // entryMarkPrice never degrades — it just asks a second time, past the poll cache,
+            // before believing that the price is genuinely unavailable rather than that we asked
+            // at a bad instant.
+            const { price, source } = await entryMarkPrice(order.symbol)
+            if (price == null) throw noPriceError(order.symbol)
+            if (source === 'retry') logger.info(LOG, `entry on ${order.symbol}: first quote blinked, filled at ${price} on the retry`)
 
             const positionId = await openPosition({
                 userId, accountId: acctId, symbol: order.symbol,

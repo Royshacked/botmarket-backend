@@ -129,6 +129,17 @@ import { logger }                  from '../../../services/logger.service.js'
  * @property {number}            at  unix ms
  */
 
+/**
+ * `err.code` on a placeOrder rejection that came from OUR price feed, not from the venue.
+ *
+ * Part of the contract because it is the one refusal a venue can't express: a broker with a book
+ * fills at its own price and never needs ours, so only a simulated venue can fail this way. It
+ * lives here rather than in paper.adapter so the order layer can recognise it without importing
+ * an adapter — and so a future venue that prices off our feed (manual mode) says it the same way.
+ * Any other rejection is the venue's own and stays an opaque broker error.
+ */
+export const NO_PRICE = 'NO_PRICE'
+
 export class BrokerAdapter {
     /**
      * Broker type id used for DB lookups (e.g. 'ctrader'). Subclasses MUST set this
