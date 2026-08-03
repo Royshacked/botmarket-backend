@@ -47,6 +47,70 @@ export const coverageService = { initiateCoverage, getCoverage, getCoverageById,
 // Exported for tests + downstream phases (P2 valuation, P3 agent, P5 monitor).
 export { normalizeCoverage, newRevision }
 
+// ─── the rating/target coherence gate ─────────────────────────────────────────
+// A rating is a claim about the PRICE; the gap is a claim about the STREET. Nothing in the research
+// pipeline compared the two until the daily monitor did — so a thesis whose rating and target pointed
+// in opposite directions passed every gate on the way in and surfaced a day later as a bogus verdict.
+// (ZTS, 2026-08-02: rated `sell` with a target of 85.15 while the stock traded at 77.29, i.e. our own
+// number was 10% of UPSIDE. The monitor read it as the bearish target being reached and stamped
+// `target_hit` 26 minutes after initiation.)
+//
+// This is the one comparison that closes it, and it belongs here rather than at a call site: every
+// authoring path — the UI's initiate, a user edit, and the headless re-model — funnels through this
+// service, and a second copy would be a second chance to diverge.
+const BULLISH_RATINGS = new Set(['strong_buy', 'buy'])
+const BEARISH_RATINGS = new Set(['sell', 'strong_sell'])
+
+/**
+ * Does the rating agree with the target, given where the stock actually trades? PURE.
+ * → `{ ok: true }` | `{ ok: false, reason, detail }`.
+ *
+ * ABSTAINS (ok) whenever the question doesn't arise: a `hold` or absent rating (no direction claimed),
+ * a thesis with no price target, or no price. That last one is deliberate — market data being
+ * unreachable must never block research from being written. The gate is a contradiction detector, not
+ * a data requirement.
+ */
+export function ratingCoherence({ rating, price_target, price } = {}) {
+    const pt = _num(price_target?.value ?? price_target)
+    const px = _num(price)
+    const bullish = BULLISH_RATINGS.has(rating), bearish = BEARISH_RATINGS.has(rating)
+    if ((!bullish && !bearish) || pt === null || px === null || px <= 0) return { ok: true }
+
+    const impliedPct = Math.round((pt - px) / px * 1000) / 10
+    if (bullish && pt <= px) {
+        return { ok: false, reason: 'rating_contradicts_target', detail:
+            `A ${rating} rating needs upside, but the target ${pt} is at or below the price ${px} (${impliedPct}%). `
+            + `Either the target is too low or the rating should be hold/sell — a gap vs the Street is not a rating.` }
+    }
+    if (bearish && pt >= px) {
+        return { ok: false, reason: 'rating_contradicts_target', detail:
+            `A ${rating} rating needs downside, but the target ${pt} is at or above the price ${px} (+${impliedPct}%). `
+            + `Being below the Street's consensus is a view on the consensus, not on the stock — rate the stock.` }
+    }
+    return { ok: true }
+}
+
+// The price read for the gate. Injected so tests exercise the branching, and imported LAZILY so that
+// merely importing this service (the schema normalizer is used in pure unit tests, and half the app
+// imports coverageService) never drags in the monitor's whole provider stack.
+const _io = {
+    getPrice: async (symbol) => {
+        try {
+            const { fetchLastPrice } = await import('../../monitoring/monitorUtils.js')
+            return await fetchLastPrice(symbol)
+        } catch { return null }   // no price → the gate abstains (see ratingCoherence)
+    },
+}
+export function _setCoverageIO(io) { Object.assign(_io, io) }
+
+/** Resolve spot and run the gate over a normalized doc. Skips the fetch when no direction is claimed. */
+async function _checkCoherence(doc, io = _io) {
+    const rating = doc?.rating
+    if (!BULLISH_RATINGS.has(rating) && !BEARISH_RATINGS.has(rating)) return { ok: true }
+    if (_num(doc?.price_target?.value) === null) return { ok: true }
+    return ratingCoherence({ rating, price_target: doc.price_target, price: await io.getPrice(doc.symbol) })
+}
+
 // ─── pure helpers ──────────────────────────────────────────────────────────────
 const _str = v => (typeof v === 'string' && v.trim() ? v.trim() : null)
 const _arr = v => (Array.isArray(v) ? v : [])
@@ -195,6 +259,14 @@ async function initiateCoverage(raw, userId) {
         if (existing) return { ok: false, reason: 'already_covered', id: existing.id }
 
         const doc = normalizeCoverage(raw, userId)
+        // A thesis that contradicts itself is not research worth keeping — refuse it here, where the
+        // analyst (or the user) can still fix it, rather than storing one that the monitor will
+        // resolve into a nonsense verdict tomorrow.
+        const coherent = await _checkCoherence(doc)
+        if (!coherent.ok) {
+            logger.warn(LOG, 'coverage REJECTED — rating contradicts target', { symbol, rating: doc.rating, pt: doc.price_target?.value, detail: coherent.detail })
+            return coherent
+        }
         doc.revisions = [newRevision({ kind: 'initiate', note: _str(raw?.init_note) ?? `Initiated coverage on ${symbol}` })]
         const saved = await crud.insert(doc)
         logger.info(LOG, 'coverage initiated', { id: doc.id, symbol, sector: doc.sector })
@@ -232,6 +304,17 @@ async function updateCoverage(id, patch, userId) {
         { ...cur, ...p, id: cur.id, symbol: cur.symbol, created_at: cur.created_at, revisions: cur.revisions },
         cur.userId ?? userId,
     )
+    // Only when the patch AUTHORS a view. The monitor patches gap/status/revision_* on every material
+    // verdict and must not be gated: it would re-litigate a rating it never touched, and pay for a
+    // price fetch on every tick to do it. A re-model or a user edit does carry these fields.
+    if ('rating' in p || 'price_target' in p) {
+        const coherent = await _checkCoherence(merged)
+        if (!coherent.ok) {
+            logger.warn(LOG, 'coverage update REJECTED — rating contradicts target', { id, symbol: merged.symbol, rating: merged.rating, pt: merged.price_target?.value, detail: coherent.detail })
+            return coherent
+        }
+    }
+
     const revision = newRevision({ kind: _str(p.revision_kind) ?? 'update', note: _str(p.revision_note), changed: _diffPlan(cur, merged) })
     const revisions = [revision, ..._arr(cur.revisions)]
 

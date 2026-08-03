@@ -28,6 +28,9 @@ const _deps = {
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
+/** Why a persist failed, for the caller's log — the service's own reason when it gave one. */
+const _reason = r => (typeof r === 'string' && r.trim() ? r.trim() : 'persist_failed')
+
 /** The user's live thesis for this name, or null. Never throws — a refresh must survive a bad read. */
 async function _existingCoverage(userId, symbol) {
     try {
@@ -92,16 +95,27 @@ export async function refreshCoverage({ userId, ticker, question = null, portfol
 
         // Persist: initiate a fresh thesis, or update the existing one (appends a revision). initiate
         // returns already_covered + the id when a thesis already exists for (user, symbol).
-        let coverageId = null
+        let coverageId = null, persisted = false, failReason = 'persist_failed'
         const init = await deps.initiate(draft, userId)
         if (init?.ok) {
             coverageId = init.doc?.id ?? null
+            persisted  = true
         } else if (init?.reason === 'already_covered') {
             const upd = await deps.update(init.id, draft, userId)
             coverageId = init.id
-            if (!upd?.ok) logger.warn(LOG, 'coverage update returned not-ok', { id: init.id })
+            persisted  = Boolean(upd?.ok)
+            if (!upd?.ok) { failReason = _reason(upd?.reason); logger.warn(LOG, 'coverage update returned not-ok', { id: init.id, reason: upd?.reason, detail: upd?.detail }) }
         } else {
-            logger.warn(LOG, 'coverage persist failed', { ticker: sym, reason: init?.reason })
+            failReason = _reason(init?.reason)
+            logger.warn(LOG, 'coverage persist failed', { ticker: sym, reason: init?.reason, detail: init?.detail })
+        }
+
+        // Nothing was written — say so. Telling the user "fresh research is ready" and sending them to
+        // a thesis that never changed is worse than reporting the failure: the review resumes on the
+        // OLD artifact either way, and only one of those messages is true.
+        if (!persisted) {
+            await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId, ok: false })
+            return { ok: false, reason: failReason }
         }
 
         await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId, summary: draft.thesis ?? null, ok: true })

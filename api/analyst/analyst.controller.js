@@ -61,6 +61,9 @@ export async function streamAnalyst(req, res) {
 const COVERAGE_REASONS = {
     symbol_required: [400, 'A symbol is required to initiate coverage'],
     already_covered: [409, 'Already covered — update the thesis instead of initiating it again'],
+    // The thesis contradicts itself — a buy-side rating with a target below spot, or the reverse.
+    // 422, not 400: the body is well-formed, the research isn't. `detail` says which way it breaks.
+    rating_contradicts_target: [422, 'The rating and the price target point in opposite directions'],
 }
 
 const crud = makeEntityController({
@@ -102,7 +105,7 @@ export async function initiateCoverage(req, res) {
         if (!result.ok) {
             return sendReason(res, result.reason, {
                 overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to initiate coverage',
-                extra: result.id ? { id: result.id } : null,
+                extra: { ...(result.id ? { id: result.id } : {}), ...(result.detail ? { detail: result.detail } : {}) },
             })
         }
         res.send(result.doc)
@@ -119,7 +122,10 @@ export async function updateCoverage(req, res) {
             return res.status(400).send({ error: 'patch must be an object' })
         }
         const result = await coverageService.updateCoverage(req.params.id, patch, req.user._id)
-        if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to update coverage' })
+        if (!result.ok) return sendReason(res, result.reason, {
+            overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to update coverage',
+            extra: result.detail ? { detail: result.detail } : null,
+        })
         res.send(result.doc)
     } catch (err) {
         logger.error(LOG, 'updateCoverage failed', err)

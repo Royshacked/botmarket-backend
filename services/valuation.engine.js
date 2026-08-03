@@ -145,6 +145,10 @@ export function computeValuation(input = {}) {
         gap: consensusPt !== null && consensusPt !== 0
             ? { value: _round2(ptBase - consensusPt), pct: _round2((ptBase - consensusPt) / consensusPt * 100) }
             : null,
+        // The MARKET leg. Echoed back (not just the derived %) because the reader has to be able to
+        // see which side of spot the target landed on: a rating is a claim about the price, and a
+        // target the market has already passed cannot support one in that direction.
+        current_price: (price !== null && price > 0) ? price : null,
         upside_pct: (price !== null && price > 0) ? _round2((ptBase - price) / price * 100) : null,
         // Context for the reader: where our multiple sits vs the stock's own history + its peers.
         historical_median_multiple: hist.length ? _round2(median(hist)) : null,

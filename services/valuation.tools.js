@@ -6,6 +6,7 @@
 
 import { getAnalystEstimates, getPriceTargetConsensus, getGradesConsensus, getGradesHistorical, getHistoricalMultiples } from '../providers/fmp.provider.js'
 import { computeValuation, VALUATION_METHODS } from './valuation.engine.js'
+import { fetchLastPrice } from '../monitoring/monitorUtils.js'
 import { makeToolHandler } from './agentUtils.js'
 
 const LOG = '[valuationTools]'
@@ -72,9 +73,23 @@ export function valuationReadText(sym, method, result, meta = {}) {
     const gapLine = result.gap
         ? `${_sign(result.gap.value)}${result.gap.value} (${_sign(result.gap.pct)}${result.gap.pct}%) vs Street`
         : 'n/a (no consensus PT)'
+    // Deliberately says "vs the Street", never "bullish"/"bearish" unqualified. Being under the
+    // consensus is a variant view about the CONSENSUS — it is not a view on the stock, and reading it
+    // as one is what produced a `sell` rating on a name trading 10% BELOW its own price target.
     const edge = result.gap
-        ? (result.gap.pct > 3 ? 'ABOVE the Street — a bullish variant view' : result.gap.pct < -3 ? 'BELOW the Street — a bearish variant view' : 'in line with the Street — thin edge, may not be worth covering')
+        ? (result.gap.pct > 3 ? 'ABOVE the Street — a variant view vs consensus (relative; not yet a rating)' : result.gap.pct < -3 ? 'BELOW the Street — a variant view vs consensus (relative; not yet a rating)' : 'in line with the Street — thin edge, may not be worth covering')
         : 'no consensus to compare'
+    // THE RATING LEG. The gap above is measured against the Street; a rating is measured against the
+    // PRICE, and only this line carries it. Stated as what the target can and cannot support, because
+    // the failure mode is silent: nothing downstream re-checks the direction of a rating.
+    const marketLine = (result.current_price !== null && result.upside_pct !== null)
+        ? `- vs the MARKET: price ${result.current_price} → our target implies ${_sign(result.upside_pct)}${result.upside_pct}%. `
+          + (result.upside_pct > 0
+              ? 'The target is ABOVE spot — this can only support a BUY-side rating (or hold). It cannot support a sell.'
+              : result.upside_pct < 0
+                  ? 'The target is BELOW spot — this can only support a SELL-side rating (or hold). It cannot support a buy.'
+                  : 'The target IS spot — no implied return; this supports a hold.')
+        : '- vs the MARKET: no price available — the implied return is unknown, so do not pitch a rating off this run.'
     // Spell out what the band IS. A sensitivity band read as a downside case is the failure this
     // whole field exists to prevent, so the agent is told plainly and nudged to model a real one.
     const legs = result.legs
@@ -89,8 +104,9 @@ export function valuationReadText(sym, method, result, meta = {}) {
         `- OUR price target: ${result.our_pt} (bear ${pt.bear} / base ${pt.base} / bull ${pt.bull})`,
         bandLine,
         `- Street consensus PT: ${result.consensus_pt ?? 'n/a'}`,
-        `- THE GAP: ${gapLine}${result.upside_pct != null ? ` · upside ${_sign(result.upside_pct)}${result.upside_pct}% vs price` : ''}`,
+        `- THE GAP: ${gapLine}`,
         `- Edge: ${edge}`,
+        marketLine,
     ].join('\n')
 }
 
@@ -109,8 +125,13 @@ async function _computeValuation({ ticker, method = 'pe', multiple, forward_metr
     if (!sym) return 'Provide a ticker.'
     const m = VALUATION_METHODS.includes(method) ? method : 'pe'
 
-    const [est, ptc, hist] = await Promise.all([
+    // Spot is FETCHED, not asked for. It used to be an optional agent-supplied param, so an agent that
+    // simply didn't pass it got a valuation measured only against the Street — no implied return, no
+    // way to see that its target sat on the wrong side of the market. That is not an optional field:
+    // the rating depends on it. The agent's own number still wins when it passes one.
+    const [est, ptc, hist, spot] = await Promise.all([
         getAnalystEstimates(sym), getPriceTargetConsensus(sym), getHistoricalMultiples(sym, m),
+        Number.isFinite(Number(current_price)) ? Number(current_price) : fetchLastPrice(sym).catch(() => null),
     ])
     const consensusFwd = est?.next ? est.next[_FWD_FIELD[m]] : null
     const usingConsensus = !Number.isFinite(Number(forward_metric))
@@ -122,7 +143,7 @@ async function _computeValuation({ ticker, method = 'pe', multiple, forward_metr
         multiple,
         historical_multiples: hist,
         consensus_pt: ptc?.consensus ?? null,
-        current_price,
+        current_price: spot,
         shares_out,
         net_debt,
         scenarios,
@@ -146,7 +167,7 @@ export const VALUATION_TOOLS = [
                 method:         { type: 'string', enum: VALUATION_METHODS, description: 'pe (default) | ev_sales | ev_ebitda' },
                 multiple:       { type: 'number', description: 'Your justified multiple (e.g. 28 for 28x). Omit to derive from the stock’s own historical range.' },
                 forward_metric: { type: 'number', description: 'Your own forward metric (EPS / revenue / EBITDA per method). Omit to use the consensus estimate.' },
-                current_price:  { type: 'number', description: 'Optional — current price, to also report upside %.' },
+                current_price:  { type: 'number', description: 'Optional OVERRIDE — spot is fetched for you and the reply always reports the implied return vs the market. Pass this only to value off a different price.' },
                 shares_out:     { type: 'number', description: 'Shares outstanding — required for ev_* (the EV→equity bridge).' },
                 net_debt:       { type: 'number', description: 'Net debt — for ev_* (defaults 0).' },
                 scenarios:      {

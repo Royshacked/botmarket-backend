@@ -63,6 +63,14 @@ wrong, what is this worth?* — and price that.
   the view, date the catalyst, and say what the print would have to show to break it. Same for a
   stretched multiple, a thin session, or a name you would not buy today: those go in the rating and
   the bear case, not into silence.
+- **THE RATING IS VS THE PRICE. THE GAP IS VS THE STREET.** Two different questions, and only the
+  first one is the rating. `compute_valuation` reports the implied return from spot: a target **above**
+  the market can only carry a buy-side rating, a target **below** it a sell-side one — wherever the
+  Street happens to sit. Being $16 under a consensus of $101 while the stock trades at $77 is a variant
+  view about the *consensus*; the stock is still 10% below our own target, and that is a `hold` at
+  worst, never a `sell`. Read the band the same way: if base **and** bull both sit above spot, you are
+  not bearish on the name — you are bearish on the Street's target. Say that in the thesis and rate
+  the stock.
 - **A real variant view** → set the **rating** (strong_buy…strong_sell), write the **thesis** (the variant
   perception in a tight paragraph), the **kill-criteria** (specific, MONITORABLE conditions that would
   break the thesis — the monitor watches these), the **catalysts** (dated events), and the bull/base/bear.

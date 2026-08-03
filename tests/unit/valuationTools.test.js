@@ -57,6 +57,33 @@ test('valuationReadText: a near-consensus PT reads as a THIN edge', () => {
     assert.match(valuationReadText('NVDA', 'pe', r), /thin edge/)
 })
 
+// ── the MARKET leg ───────────────────────────────────────────────────────────
+// The gap is measured against the Street; a RATING is measured against the price, and only this line
+// carries it. Without it a target can land on the wrong side of spot and still read as a clean
+// variant view — which is how ZTS came to be rated `sell` at a target 10% above the market.
+test('valuationReadText: names which rating a target can support, in both directions', () => {
+    const up = computeValuation({ method: 'pe', multiple: 32, forward_metric: 6.5, consensus_pt: 180, current_price: 160 })  // 208
+    assert.match(valuationReadText('NVDA', 'pe', up), /vs the MARKET: price 160 → our target implies \+30%/)
+    assert.match(valuationReadText('NVDA', 'pe', up), /ABOVE spot.*cannot support a sell/)
+
+    const down = computeValuation({ method: 'pe', multiple: 13, forward_metric: 6.55, consensus_pt: 101.5, current_price: 95 })  // 85.15
+    assert.match(valuationReadText('ZTS', 'pe', down), /BELOW spot.*cannot support a buy/)
+})
+
+test('valuationReadText: below the Street but ABOVE spot — the gap is bearish, the rating cannot be', () => {
+    const r = computeValuation({ method: 'pe', multiple: 13, forward_metric: 6.55, consensus_pt: 101.5, current_price: 77.29 })
+    const t = valuationReadText('ZTS', 'pe', r)
+    assert.match(t, /BELOW the Street/)                       // still a variant view vs consensus…
+    assert.doesNotMatch(t, /bearish variant view/)            // …but never labelled a view on the STOCK
+    assert.match(t, /implies \+10\.17%/)
+    assert.match(t, /cannot support a sell/)
+})
+
+test('valuationReadText: no price → says the implied return is unknown rather than staying silent', () => {
+    const r = computeValuation({ method: 'pe', multiple: 32, forward_metric: 6.5, consensus_pt: 180 })
+    assert.match(valuationReadText('NVDA', 'pe', r), /no price available.*do not pitch a rating/)
+})
+
 test('valuationReadText: a failed valuation explains why', () => {
     const bad = computeValuation({ method: 'pe', forward_metric: 6.5 })  // no multiple, no history
     const t = valuationReadText('X', 'pe', bad)

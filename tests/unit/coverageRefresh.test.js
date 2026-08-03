@@ -41,12 +41,12 @@ test('buildCoverageRefreshed: no user or ticker → null', () => {
 })
 
 // ─── refreshCoverage orchestration (injected deps) ──────────────────────────────
-function harness({ draft, initResult, existing = null }) {
+function harness({ draft, initResult, existing = null, updResult = { ok: true } }) {
     const calls = { research: [], initiate: [], update: [], notify: [], existing: [] }
     const deps = {
         research: async (args) => { calls.research.push(args); return draft ? { coverage: draft } : {} },
         initiate: async (d, userId) => { calls.initiate.push({ d, userId }); return initResult },
-        update:   async (id, patch, userId) => { calls.update.push({ id, patch, userId }); return { ok: true } },
+        update:   async (id, patch, userId) => { calls.update.push({ id, patch, userId }); return updResult },
         notify:   async (a) => { calls.notify.push(a) },
         existing: async (userId, sym) => { calls.existing.push({ userId, sym }); return existing },
     }
@@ -86,6 +86,28 @@ test('wrong-symbol draft is rejected (guards against a drifted research run)', a
     assert.equal(r.ok, false)
     assert.equal(h.calls.initiate.length, 0)
     assert.equal(h.calls.notify[0].ok, false)
+})
+
+// A re-model the coverage service REFUSES (e.g. the rating contradicts the target) leaves the old
+// thesis in place — so the ping has to say so. Reporting "fresh research is ready" would send the user
+// back to a review that reads the unchanged artifact, with nothing to explain why.
+test('a rejected initiate → failure ping carrying the service reason, not a false all-clear', async () => {
+    const h = harness({ draft: { symbol: 'ZTS', thesis: 'sell at a target above spot' }, initResult: { ok: false, reason: 'rating_contradicts_target', detail: 'A sell rating needs downside…' } })
+    const r = await refreshCoverage({ userId: 'u1', ticker: 'ZTS' }, h.deps)
+    assert.deepEqual(r, { ok: false, reason: 'rating_contradicts_target' })
+    assert.equal(h.calls.notify[0].ok, false)
+})
+
+test('a rejected update on an already-covered name → failure ping too', async () => {
+    const h = harness({
+        draft: { symbol: 'ZTS', thesis: 'v2' },
+        initResult: { ok: false, reason: 'already_covered', id: 'covOLD' },
+        updResult:  { ok: false, reason: 'rating_contradicts_target' },
+    })
+    const r = await refreshCoverage({ userId: 'u1', ticker: 'ZTS' }, h.deps)
+    assert.deepEqual(r, { ok: false, reason: 'rating_contradicts_target' })
+    assert.equal(h.calls.notify[0].ok, false)
+    assert.equal(h.calls.notify[0].coverageId, 'covOLD')   // still routes to the thesis that stayed
 })
 
 test('bad args (no ticker) → no research, no notify', async () => {
