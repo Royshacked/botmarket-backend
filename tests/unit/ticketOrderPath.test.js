@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { touchLeaf, routeExits } from '../../services/protectionPlan.service.js'
-import { applyPriceLevels } from '../../api/trade-ideas/tradeIdeas.service.js'
+import { applyPriceLevels, ideaService } from '../../api/trade-ideas/tradeIdeas.service.js'
+import { updateTradeIdea } from '../../api/trade-ideas/tradeIdeas.controller.js'
 import { isRestingEntry, RESTING_ENTRY_TYPES } from '../../services/entity/vocabulary.js'
 import { buildIdeaFromCall } from '../../services/kairos.handoff.service.js'
 import { restingEntryPrice } from '../../api/trade-ideas/ideaExecution.service.js'
@@ -82,6 +83,61 @@ test('an absent leg is left alone — a stop edit must not wipe the target', () 
     const out = applyPriceLevels({ stop_price: 185 })
     assert.equal(out.tp_conditions, undefined)
     assert.equal(out.entry_conditions, undefined)
+})
+
+// ── The route has to LET the price through ────────────────────────────────────
+// applyPriceLevels is only reachable if the update whitelist keeps the numeric fields. It didn't,
+// so a ticket that sent nothing but `tp_price` arrived as an empty patch and was refused with
+// "Nothing to update" — a 400 on a request that was perfectly well formed. Every assertion above
+// about the price → leaf expansion passed the whole time; the number never got that far.
+
+/** Drive the controller with a stubbed service, and hand back what the route decided. */
+async function callUpdate(body) {
+    const sent = {}
+    const res = {
+        status(code) { sent.code = code; return this },
+        send(payload) { sent.body = payload; sent.code ??= 200; return this },
+    }
+    const real = ideaService.updateIdea
+    ideaService.updateIdea = async (id, patch) => { sent.patch = patch; return { ok: true, idea: { id } } }
+    try {
+        await updateTradeIdea({ params: { id: 'i1' }, body, user: { _id: 'u1' } }, res)
+    } finally {
+        ideaService.updateIdea = real
+    }
+    return sent
+}
+
+test('a target stated as a bare price reaches the service instead of being refused', async () => {
+    const sent = await callUpdate({ tp_price: 210 })
+    assert.equal(sent.code, 200, 'this used to be a 400 "Nothing to update"')
+    assert.equal(sent.patch.tp_price, 210)
+})
+
+test('the stop leg travels the same road, and one leg alone is enough', async () => {
+    const sent = await callUpdate({ stop_price: 185.5 })
+    assert.equal(sent.code, 200)
+    assert.equal(sent.patch.stop_price, 185.5)
+    assert.equal(sent.patch.tp_price, undefined, 'the untouched leg is not invented by the route')
+})
+
+test('clearing a leg is an edit too — null must not read as nothing to update', async () => {
+    // `null` is how the ticket REMOVES a stop; if the guard rejected it, a stop could be set
+    // but never taken off.
+    const sent = await callUpdate({ stop_price: null })
+    assert.equal(sent.code, 200)
+    assert.equal(sent.patch.stop_price, null)
+})
+
+test('the whitelist still holds — an unknown field is not smuggled in with a price', async () => {
+    const sent = await callUpdate({ tp_price: 210, userId: 'someone-else', status: 'closed' })
+    assert.equal(sent.patch.userId, undefined, 'ownership is not client-editable')
+    assert.equal(sent.patch.status, 'closed', 'a field that IS editable still passes')
+})
+
+test('a body with nothing editable in it is still a 400', async () => {
+    const sent = await callUpdate({ nonsense: 1 })
+    assert.equal(sent.code, 400)
 })
 
 // ── Resting entry types ───────────────────────────────────────────────────────

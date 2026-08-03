@@ -167,10 +167,16 @@ export async function placeTradeIdeaOrders(req, res) {
                 no_orders:  [400, 'No orders provided'],
                 not_hit:    [400, 'Idea is not awaiting confirmation'],
                 all_failed: [502, 'All broker orders failed'],
+                // Not a rejection: the simulated venue prices off our own feed, and the feed was
+                // briefly unavailable. 503 (+ the symbol) so the client can say "try again in a
+                // moment" rather than implying a venue turned the trade down.
+                no_price:   [503, 'No live price right now — try again in a moment'],
             }
             return sendReason(res, result.reason, {
                 overrides: PLACE, fallback: 500, fallbackMessage: 'Failed to place orders',
-                extra: result.reason === 'all_failed' ? { results: result.results } : null,
+                extra: ['all_failed', 'no_price'].includes(result.reason)
+                    ? { results: result.results, ...(result.symbol && { symbol: result.symbol }) }
+                    : null,
             })
         }
 
@@ -221,6 +227,11 @@ export async function updateTradeIdea(req, res) {
             'entry_conditions', 'entry_logic', 'entry_condition_tree',
             'stop_conditions',  'stop_logic',  'stop_condition_tree',
             'tp_conditions',    'tp_logic',    'tp_condition_tree',
+            // The bare-price form of the same three legs. The ticket states a level as a NUMBER
+            // and nothing else — the service expands it into the `touch` leaf (applyPriceLevels)
+            // — so if these aren't editable the patch arrives empty and the whole request is
+            // refused as "Nothing to update", which is what a ticket stop/target used to hit.
+            'entry_price', 'stop_price', 'tp_price',
             'notes', 'invalidation', 'accounts', 'mainAccountId',
             'immediate', 'resetWindow', 'resetPreEntry',
         ]
