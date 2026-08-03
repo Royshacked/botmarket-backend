@@ -70,8 +70,10 @@ server.js              Express app, route mounts, background-service boot
 api/                   HTTP surface — one folder per feature (routes + controller + service)
   _shared/             the cross-kind HTTP tier: reason.util (ONE reason→status map),
                        entityController.util (list/get/patch/delete for any kind), sse.util, parse
-  axl/                 Axl — the concierge/critic meta-layer that routes to the specialists;
-                       also delivers the daily market brief (POST /api/axl/brief)
+  axl/                 Axl — the concierge/critic meta-layer that hands the user to the specialists:
+                       `<route>` opens a desk for new work, `<edit>` reopens an item they already
+                       have in the editor that owns it. Also delivers the daily market brief
+                       (POST /api/axl/brief)
   kairos/              Kairos chat + the `call` kind (monitored by Hermes)
   mentor/ setups/      Mentor chat + the `setup` kind (monitored by Talos)
   analyst/             buy-side analyst chat + the `coverage` research artifact

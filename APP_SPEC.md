@@ -146,6 +146,36 @@ calls come from Hermes (the Kairos monitor)'s card hook (`enter`→ready, `edit`
 — the last previously expired silently). Once a call's card fires it leaves the monitor's active
 statuses, so no re-fire.
 
+### Axl reception hand-off: `<route>` vs `<edit>`
+
+Axl (`POST /api/axl/stream`) is where the user lands, so it is also the way in to the desks. It hands
+them over with one of two tags, and they are different acts: a route names a **desk**, an edit names a
+**document**.
+
+- `<route>desk SYMBOL</route>` — NEW work. The desk opens at its `entryTab`, on that name.
+- `<edit>kind ID</edit>` — reopen something they ALREADY have, in the editor that owns it, with the
+  conversation that built it restored. Same destination as the list-surface pencil, by design: an
+  edit reached from a sentence and an edit reached from a click are one edit.
+
+| kind | desk | reopens in |
+|---|---|---|
+| `call` | trade | Kairos — chat + draft restored (note the trade desk *enters* at Argus; the item picks the tab) |
+| `setup` | assist | Mentor — chat + worksheet restored |
+| `coverage` | research | Prometheus, in revise mode |
+| `scan` | scan | Argus, list primed for refining |
+| `portfolio` | portfolio | Atlas — **edit or review, decided by the book** (§3) |
+
+`kind → desk` resolves server-side (`EDIT_KIND_DESKS`), so the client is told which pipeline it is
+arriving at and the crumb reads like any other arrival. The controller drops an unknown kind or a
+malformed handle and the turn falls back to a plain reply — the same discipline as the desk gate.
+
+The handle is the item's **id**, surfaced by `get_watched_items`, whose every row leads with
+`[kind:id]`. A bare ticker (or a one-word book name) also resolves, but **only when it matches
+exactly one item** — on two live NVDA calls a ticker is a coin flip, and losing it means editing a
+different trade than the user meant, so ambiguity opens nothing. Resolution runs against the lists
+the client already holds, which is also the authorization: a ref that isn't in the user's own list is
+inert. An edit stamps no objective — reopening what they have is not a desk taking on a stated goal.
+
 ---
 
 ## 3. Portfolios
@@ -172,8 +202,20 @@ Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/b
   **notifies only** — but the notification carries a cheap non-LLM **pre-check** (`computeReviewSignals` →
   `triggers[]`: conviction fell / regime shift / drift / benchmark lag / imminent earnings); the full memo is
   generated only when the user opens the review (user-initiated via the bubble, the portfolio-row review
-  action, or the *Activate all* gate). Nothing auto-executes — changes stay Accept-gated. Endpoints:
+  action, the *Activate all* gate, or simply reopening a book that holds a position — see the next
+  bullet). Nothing auto-executes — changes stay Accept-gated. Endpoints:
   `GET /pending-reviews`, `POST /:portfolioId/rebalance`, `POST /:portfolioId/complete-review`.
+- **Edit or review is the BOOK's call, never the caller's.** Every path that reopens a book — the
+  three pencils (cards / table / Floor) and Axl's `<edit>portfolio` hand-off — goes through one
+  client-side gate (`handleEditPortfolio` → `isPortfolioReview`, FE `tradeIdea.utils.js`):
+  nothing in a position → the plan reopens as a construction **edit**, which sends every holding back
+  to `waiting` until re-activated; any leg `long`/`short` → it opens as a **review** instead, because
+  re-planning would take an open position off monitoring in order to rewrite a plan the market has
+  already acted on. A caller may still FORCE a review (a due-review pencil, the review card, the
+  *Activate all* gate); none can force a plain edit on a book holding a position. `hit` sits below the
+  line — a parked order is not a position — so an activated-but-unfilled book still re-plans, and its
+  pending orders stand down with it. The four paths disagreed before this gate existed: the lists
+  forced a review only when one was DUE, the Floor pencil never did.
 - Portfolio holdings are governed by the scheduled review, **not** the intrabar invalidation watcher.
 
 ---

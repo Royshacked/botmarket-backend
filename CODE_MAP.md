@@ -52,8 +52,10 @@ api/
                               index futures only) + applyOffset + real/cash ticker maps
     paperBroker.service.js / paperExecution.service.js
   paper/                  paper mode toggle/settings/reset/trades/equity  /api/paper/*
-  axl/                    Axl chat SSE /api/axl/stream (converse + chart + `<route>` to a desk) and
-                          POST /api/axl/brief — DELIVERY, not a turn: posts today's market brief
+  axl/                    Axl chat SSE /api/axl/stream (converse + chart + two hand-off tags:
+                          `<route>desk SYMBOL` opens a desk for NEW work, `<edit>kind ID` reopens an
+                          item the user already has, in the editor that owns it — see APP_SPEC §2)
+                          and POST /api/axl/brief — DELIVERY, not a turn: posts today's market brief
                           into the user's own Axl conversation (the confirm behind the offer card)
   chat/                   social DM + bot notifications (chatWs.js = WebSocket); sendBotMessage funnel,
                           BOT_IDS = axl·idea·portfolio·scanner·kairos (one notify bot per agent).
@@ -107,7 +109,9 @@ services/
   entryTimeGate.util.js  PURE entryTimeGate(entity) — is entry clock-gated, wholly or partly?
                           Lifted out of the archived Minos when marketOpen.monitor needed the same
                           read. Drives the market-closed exemption + the `off_hours` card note
-  llmStream.util.js       createTagSuppressor({ onToken, captures })
+  llmStream.util.js       createTagSuppressor({ onToken, captures }) + ALL_EMIT_TAGS — the ONE list
+                          of tags suppressed from every agent's token stream. A new emit tag goes
+                          here first, or it leaks raw into the chat AND is never captured
   modelRouter.service.js  resolveModel(); REASONING_EFFORT enum
   conditionTree.service.js  resolve/collect/normalize condition trees
   orderPlan.service.js  protectionPlan.service.js  priceCandleSpec.service.js
@@ -151,6 +155,16 @@ services/
                             not one per user. Two consumers: Axl's tool and POST /api/axl/brief
   marketBrief.tools.js      get_market_brief — UNBOUND (no userId, so the brief cannot be made
                             personal). Axl RELAYS the brief; it does not write market commentary
+  watchlist.service.js      listWatchedItems — "what am I watching?" across ALL kinds in ONE read
+                            (calls · setups · books · coverage · scans). COMPOSES the owning services
+                            rather than querying Mongo, and settles them independently: one desk's
+                            read failing is REPORTED in `unavailable`, never reported as zero.
+                            Returns structured rows only — see entity/toWatchRow.js for the projectors
+  userData.tools.js         the ADAPTER over it (+ performance / upcomingEvents): rows → the compact
+                            text a model reads. Every watch line leads with `[kind:id]`, and that id
+                            is load-bearing: it is the handle Axl quotes back in `<edit>` to reopen
+                            that exact item. Formatting is judgment, the read is a pipe, and the pipe
+                            is shared — a future card or route renders the same fields
   eventRisk.service.js      buildEventRisk({asset,assetClass}) — scheduled catalysts FROZEN onto a Kairos
                             call at build: earnings (Finnhub, equities) + Fed/macro (FRED), low-impact
                             dropped, 10d horizon. Never throws. Hermes reads it to hold off pre-event entry
@@ -286,6 +300,8 @@ docs/                       architecture design docs
 | New Axl tool | APPEND to `TOOLS` in `axl.agent.service.js` (never insert — the snapshot compares by index and the prompt cache keys off the array prefix) + append the built entry to the `axl` array in `tests/fixtures/agentTools.snapshot.json` in the same commit |
 | New agent tool that is a FACT about the venue/instrument | ride it on `get_quote` (`makeQuoteHandler`) as well as giving it a tool — a desk cannot then be unaware of it |
 | New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince` |
+| New emit tag (any agent) | add the name to `ALL_EMIT_TAGS` (llmStream.util.js) BEFORE anything else — unlisted tags leak into the chat and are never captured — then `buildTagCaptures({ tag })` in the agent + `stripEmitTags` on the return value |
+| New Axl `<edit>` kind | one row in `EDIT_KIND_DESKS` (axl.agent.service.js) + `EDIT_KINDS` (axl.controller.js) + a `case` in the FE `openForEdit` (MainPage.jsx) pointing at that kind's EXISTING pencil handler + the tag in the prompt. The prompt-vs-gate test fails if the prompt teaches a kind the gate drops |
 
 ## Testing
 
