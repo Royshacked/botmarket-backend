@@ -108,12 +108,13 @@ export async function getFmpQuote(symbol, opts) {
 // must be converted the same way — a wrong offset shifts every intraday bar and would make
 // the monitor misfire. See reference_fmp_pricing / the Stage-2 plan.
 
-// "This key has no intraday" — a plan fact, not a symbol fact, so it is one latch rather than
-// one per ticker. TTL'd rather than permanent so upgrading the plan heals without a restart;
-// the entry expiring IS the re-probe, and it costs a single request.
+// "This key cannot serve THIS resolution" — a plan fact, not a symbol fact, so it is one latch per
+// interval rather than one per ticker. Keyed by interval because plans slice intraday by resolution
+// (a key may serve 5min/15min/1hour and refuse 1min), and a single shared flag let the cheapest
+// refusal disable the resolutions that do work. TTL'd rather than permanent so upgrading the plan
+// heals without a restart; the entry expiring IS the re-probe, and it costs a single request.
 const NO_INTRADAY_TTL_MS = 30 * 60_000
-const NO_INTRADAY_KEY    = 'intraday'
-const _noIntraday        = createTtlCache({ ttlMs: NO_INTRADAY_TTL_MS, max: 1 })
+const _noIntraday        = createTtlCache({ ttlMs: NO_INTRADAY_TTL_MS, max: 8 })   // 1/5/15/30min, 1/4hour
 
 /** ET America/New_York offset (ms) from UTC at an instant — negative west of UTC. */
 function _etOffsetMs(instant) {
@@ -265,14 +266,21 @@ export async function getFmpCandles(ticker, options = {}) {
     if (!sym) return null
     if (!API_KEY) throw new Error('FMP_API_KEY is not set')
 
-    // Intraday is a PLAN feature, and on a key without it every bar spec below the daily
-    // one answers 402 forever. Asking anyway is not a harmless miss: each attempt spends a
-    // request against the same rate limit `/quote` needs, so a mark loop over a dozen symbols
-    // burns its way to a 429 on the one endpoint that DOES work — the outage is self-inflicted
-    // and lands on real-time pricing, which is the thing the paper venue actually fills off.
-    // So the refusal is remembered and we go straight to the fallback provider. Null (not an
-    // empty array) is what the router reads as "FMP shouldn't serve this".
-    if (spec.kind === 'intraday' && _noIntraday.get(NO_INTRADAY_KEY)) return null
+    // Intraday is a PLAN feature, and a refused resolution answers 402 for every symbol until the
+    // subscription changes. Asking anyway is not a harmless miss: each attempt spends a request
+    // against the same rate limit `/quote` needs, so a mark loop over a dozen symbols burns its way
+    // to a 429 on the one endpoint that DOES work — the outage is self-inflicted and lands on
+    // real-time pricing, which is the thing the paper venue actually fills off. So the refusal is
+    // remembered and we go straight to the fallback provider. Null (not an empty array) is what the
+    // router reads as "FMP shouldn't serve this".
+    //
+    // Per RESOLUTION, not per plan. Availability is not all-or-nothing: this key serves 5min, 15min
+    // and 1hour and refuses only 1min. Latched plan-wide, the single 1-min request the paper venue
+    // makes on an open session pushed EVERY intraday timeframe onto the fallback provider for half
+    // an hour — so 5-minute bars FMP would have served came back empty instead, and every intraday
+    // read in the app quietly degraded. Still shared across symbols: a 402 on AAPL/1min is a fact
+    // about the key, not about AAPL.
+    if (spec.kind === 'intraday' && _noIntraday.get(spec.interval)) return null
 
     const dateStr = (ms) => new Date(ms).toISOString().slice(0, 10)
     const parts = [`symbol=${encodeURIComponent(sym)}`]
@@ -291,10 +299,10 @@ export async function getFmpCandles(ticker, options = {}) {
         // — is transient and must keep rethrowing, or a rate limit would look like a
         // permanent loss of intraday data.
         if (spec.kind === 'intraday' && err?.status === 402) {
-            if (!_noIntraday.get(NO_INTRADAY_KEY)) {
-                logger.warn(LOG, `intraday candles are not on this FMP plan (402) — routing minute/hour bars to the fallback provider for ${NO_INTRADAY_TTL_MS / 60_000}m`)
+            if (!_noIntraday.get(spec.interval)) {
+                logger.warn(LOG, `${spec.interval} candles are not on this FMP plan (402) — routing ${spec.interval} bars to the fallback provider for ${NO_INTRADAY_TTL_MS / 60_000}m (other resolutions unaffected)`)
             }
-            _noIntraday.set(NO_INTRADAY_KEY, true)
+            _noIntraday.set(spec.interval, true)
             return null
         }
         throw err
