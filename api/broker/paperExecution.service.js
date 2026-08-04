@@ -18,6 +18,7 @@ import { executionBus }       from '../../services/executionBus.js'
 import { isAssetOpen }        from '../../services/market.service.js'
 import { createTtlCache }     from '../../services/ttlCache.util.js'
 import { logger }             from '../../services/logger.service.js'
+import { publish }            from '../../services/priceFeed.service.js'
 
 const LOG = '[paperExecution]'
 
@@ -96,11 +97,22 @@ export async function latestPrice(symbol) {
     return (await latestQuote(symbol))?.c ?? null
 }
 
-/** Map of symbol → latest mark price for the distinct symbols given (one fetch per symbol).
- *  Shared by the fill engine, the mark loop, and equity mark-to-market. */
+/**
+ * Map of symbol → latest mark price for the distinct symbols given (one fetch per symbol).
+ * Shared by the fill engine and the mark loop.
+ *
+ * Everything it resolves is PUBLISHED to the price feed. That is what makes the feed's reciprocity
+ * work: whoever paid for a price hands it to everyone else, so a symbol someone is already watching
+ * costs the next reader nothing. Publishing here rather than in each caller means a new caller
+ * cannot forget to.
+ */
 export async function quoteMapForSymbols(symbols) {
     const distinct = [...new Set(symbols)]
-    const entries  = await Promise.all(distinct.map(async s => [s, await latestMarkPrice(s)]))
+    const entries  = await Promise.all(distinct.map(async s => {
+        const price = await latestMarkPrice(s)
+        publish(s, price)
+        return [s, price]
+    }))
     return new Map(entries)
 }
 
@@ -139,12 +151,21 @@ export async function latestMarkPrice(symbol, deps = {}) {
             // FMP ANSWERED and had no price — that is a coverage fact about the symbol
             // (a future, an index CFD, a broker alias), so it is worth remembering.
             _noFmp.set(symbol, true)
-        } catch {
+        } catch (err) {
             // A THROWN error is the provider having a bad moment — a 429, a timeout, a blip.
             // It says nothing about whether FMP covers this symbol, and recording it here
             // used to suppress the only working price source for a full 10 minutes: a
             // one-second rate limit became a ten-minute outage in which every entry on the
             // symbol was refused and every open position stopped marking. Ask again next tick.
+            //
+            // A 429 is different in one way that matters HERE: the rung below is the same
+            // provider on the same quota, so it cannot possibly answer — and asking anyway
+            // spends a second request per symbol per tick on a limit that is already blown.
+            // That is a loop which deepens the outage it is reacting to: the mark loop doubles
+            // its own request rate exactly when it must not. Give up for this tick; the caller
+            // degrades safely (the mark holds, the fill simply doesn't trigger) and the limit
+            // gets the quiet it needs to recover.
+            if (err?.status === 429) return null
         }
     }
     // Intraday (1-min) candle close ONLY — never a day candle (see above). Skip entirely when
@@ -265,6 +286,13 @@ export async function openPosition({ userId, accountId, symbol, direction, qty, 
         userId, accountId, positionId,
         symbol, direction, qty,
         avgPrice:        fillPrice,   // effective entry — entry spread baked in
+        // Seed the mark with the fill. The mark loop is the only writer of `currentPrice`, so a
+        // position opened between its ticks had none at all — and everything that reads the stored
+        // mark rather than fetching (see computeEquity) would have skipped this position for up to
+        // a full interval. At the moment of the fill the mark IS the fill price, so there is no
+        // approximation here, only the gap removed.
+        currentPrice:    fillPrice,
+        markedAt:        Date.now(),
         entryCommission: commissionPerTrade,
         openedAt:        Date.now(),
         status:          'open',
@@ -396,6 +424,37 @@ export function deployable({ cashBalance = 0, marginUsed = 0, buyingPower = null
     return round2(Math.max(0, (buyingPower != null ? buyingPower : cashBalance) - marginUsed))
 }
 
+/**
+ * Roll open positions up into exposure + unrealized P&L. Pure; exported for tests.
+ *
+ * READS the stored mark; it does not fetch. The mark loop is the single writer of `currentPrice`
+ * and refreshes every open symbol on its own cadence, so equity is at most one mark interval stale
+ * — the right trade for a P&L readout, and the wrong one for pricing an order, which is why
+ * entryMarkPrice / exitMarkPrice still go live and are untouched by this.
+ *
+ * This used to fetch a live quote per symbol and fall back to this same stored mark when the quote
+ * missed. That bought a few seconds of freshness on a display number at the cost of one request per
+ * open symbol per CALL — and `getAccount` is polled by the client, so the bill was positions × poll
+ * rate. Measured on a real book: ~40-55 of a ~130 req/min budget, spent re-fetching what the mark
+ * loop had already written down.
+ *
+ * @param {Array<{avgPrice:number, qty:number, direction:string, currentPrice?:number}>} positions
+ * @returns {{unrealized:number, marginUsed:number}}
+ */
+export function rollUpPositions(positions = []) {
+    let unrealized = 0
+    let marginUsed = 0
+    for (const p of positions) {
+        marginUsed += Math.abs(p.avgPrice * p.qty)   // exposure at entry price (live qty)
+        const px = p.currentPrice
+        // Never marked: contributes nothing rather than guessing. openPosition seeds the mark with
+        // the fill price, so in practice this is only a legacy row written before it did.
+        if (px == null || !Number.isFinite(px)) continue
+        unrealized += (px - p.avgPrice) * p.qty * dirSign(p.direction)
+    }
+    return { unrealized, marginUsed }
+}
+
 export async function computeEquity(userId, accountId) {
     const acct = await paperBrokerService.getAccount(userId, accountId)
     if (!acct) return {
@@ -404,18 +463,7 @@ export async function computeEquity(userId, accountId) {
     }
     const positions = await paperBrokerService.listPositions(userId, { status: 'open', accountId })
 
-    let unrealized = 0
-    let marginUsed = 0
-    if (positions.length) {
-        const priceBy = await quoteMapForSymbols(positions.map(p => p.symbol))
-        for (const p of positions) {
-            marginUsed += Math.abs(p.avgPrice * p.qty)   // exposure at entry price (live qty)
-            // Fall back to the last stored mark so equity doesn't jump when a quote misses.
-            const px = priceBy.get(p.symbol) ?? p.currentPrice
-            if (px == null) continue
-            unrealized += (px - p.avgPrice) * p.qty * dirSign(p.direction)
-        }
-    }
+    const { unrealized, marginUsed } = rollUpPositions(positions)
     const equity      = round2(acct.cashBalance + unrealized)
     const maxLeverage = Number(acct.settings?.maxLeverage) || 0
     const buyingPower = maxLeverage > 0 ? round2(equity * maxLeverage) : null

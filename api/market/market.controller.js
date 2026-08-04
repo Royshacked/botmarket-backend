@@ -4,8 +4,14 @@ import { getFmpQuoteFull } from '../../providers/fmp.price.provider.js'
 import { createTtlCache } from '../../services/ttlCache.util.js'
 import { parseChartInterval, defaultLookbackDays } from '../../services/candleInterval.util.js'
 import { logger } from '../../services/logger.service.js'
+import { readMark, publish } from '../../services/priceFeed.service.js'
 
 const LOG = '[market:controller]'
+
+// How stale a published mark may be before the chart buys its own. The chart polls the quote every
+// 5s to repaint the live bar, so this is deliberately just under that: fresh enough that the tick
+// still moves, loose enough that a held symbol (marked by the paper loop) is served for free.
+const QUOTE_MAX_AGE_MS = Number(process.env.QUOTE_FEED_MAX_AGE_MS) || 4_000
 const DAY_MS = 86_400_000
 
 export async function getStatus(req, res) {
@@ -53,9 +59,20 @@ function _parseWhenMs(v) {
 export async function getQuote(req, res) {
     const symbol = String(req.query.symbol ?? '').toUpperCase().trim()
     if (!symbol) return res.status(400).send({ error: 'symbol is required' })
+
+    // Read before fetching. A symbol the user holds is already priced by the mark loop, and the
+    // chart ticking on it should not buy a second copy of the same number. TOLERANCE IS THE
+    // CHART'S: it repaints the live bar, so a few seconds is fine and a stale minute is not — the
+    // caller states the bound, the feed never assumes one (services/priceFeed.service.js).
+    const cheap = readMark(symbol, { maxAgeMs: QUOTE_MAX_AGE_MS })
+    if (cheap != null) return res.send({ symbol, price: cheap, fromFeed: true })
+
     try {
         const q = await getFmpQuoteFull(symbol)
         if (!q) return res.send({ symbol, price: null })
+        // Pay once, share it. A chart open on a symbol nobody holds now subsidises the mark loop
+        // instead of duplicating it — the reciprocity that makes the feed worth having.
+        publish(symbol, q.price)
         res.send({ symbol, price: q.price, dayHigh: q.dayHigh, dayLow: q.dayLow, tsSec: q.tsSec })
     } catch (err) {
         logger.warn(LOG, `getQuote soft-fail for ${symbol}: ${err.message}`)

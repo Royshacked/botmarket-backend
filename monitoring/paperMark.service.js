@@ -23,6 +23,7 @@ import { quoteMapForSymbols,
          round2 }       from '../api/broker/paperExecution.service.js'
 import { logger }       from '../services/logger.service.js'
 import { createPollLoop } from './monitorUtils.js'
+import { partitionByFreshness, retainOnly } from '../services/priceFeed.service.js'
 
 const LOG              = '[paperMark.service]'
 const POSITIONS        = 'paperPositions'
@@ -37,12 +38,24 @@ async function _tick() {
     const positions = await db.collection(POSITIONS).find({ status: 'open' }, { projection: { _id: 0 } }).toArray()
     if (!positions.length) return
 
-    // One price per distinct symbol — many positions can share a symbol. Marking
-    // prefers a real-time last quote (equities) and falls back to the candle close,
-    // which also seeds the shared quote cache for the client poll + fill engine.
-    const priceBy = await quoteMapForSymbols(positions.map(p => p.symbol))
+    // One price per distinct symbol — many positions can share a symbol. Marking prefers a
+    // real-time last quote (equities) and falls back to the candle close.
+    //
+    // Read before fetching. Someone else may have priced this symbol since our last tick — a chart
+    // open on it polls every 5s, and every fetch in the app publishes what it paid for — and a mark
+    // younger than half our interval is exactly as good as the one we would have gone and bought.
+    // The tolerance is HALF the interval, not the whole of it, so this can never be satisfied by
+    // its OWN publication from the previous tick and stop refreshing.
+    const symbols = [...new Set(positions.map(p => p.symbol))]
+    const { fresh, stale } = partitionByFreshness(symbols, POLL_INTERVAL_MS / 2)
+    const fetched = stale.length ? await quoteMapForSymbols(stale) : new Map()   // publishes as it resolves
+    const priceBy = new Map([...fresh, ...fetched])
 
-    const now  = Date.now()
+    const now = Date.now()
+    // Symbols we no longer hold stop being published — the feed should be the size of what is live,
+    // not of everything ever marked.
+    retainOnly(symbols)
+
     const ops  = []
     for (const p of positions) {
         const price = priceBy.get(p.symbol)
@@ -57,5 +70,6 @@ async function _tick() {
     }
 
     if (ops.length) await db.collection(POSITIONS).bulkWrite(ops, { ordered: false })
-    logger.info(LOG, `Marked ${ops.length}/${positions.length} open paper position(s) across ${priceBy.size} symbol(s)`)
+    logger.info(LOG, `Marked ${ops.length}/${positions.length} open paper position(s) across ${priceBy.size} symbol(s)` +
+        ` — ${fetched.size} fetched, ${fresh.size} read from the feed`)
 }

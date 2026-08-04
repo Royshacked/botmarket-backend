@@ -67,3 +67,40 @@ test('still never falls back to a day candle — the touch-fill rule is unchange
     }))
     assert.equal(price, null)
 })
+
+// A 429 says the QUOTA is gone, and the rung below is the same provider on the same quota. Asking
+// it anyway cannot succeed and spends a second request per symbol per tick — so the mark loop
+// doubled its own request rate exactly while the limit was blown, holding the outage open and
+// filling the log with "No candles returned for SPY/1min" that were really a rate limit wearing a
+// candle's clothes. Observed in the wild 2026-08-04.
+test('a 429 on the quote does NOT then spend a second request on the candle rung', async () => {
+    let candleCalls = 0
+    const quote = async () => { const e = new Error('FMP /quote 429'); e.status = 429; throw e }
+    const price = await latestMarkPrice('TST_429_NOFALL', deps(quote, {
+        candles: async () => { candleCalls++; return [{ c: 77.29 }] },
+    }))
+    assert.equal(price, null, 'no price this tick — the caller holds its last mark')
+    assert.equal(candleCalls, 0, 'the exhausted provider must not be asked a second time')
+})
+
+// Every OTHER failure still falls through: a timeout or a 5xx says nothing about the quota, and
+// the intraday rung is a genuinely different endpoint that may well answer.
+test('a timeout still falls through to the candle rung', async () => {
+    let candleCalls = 0
+    const quote = async () => { throw new Error('FMP /quote timeout') }   // no .status
+    const price = await latestMarkPrice('TST_TIMEOUT', deps(quote, {
+        candles: async () => { candleCalls++; return [{ c: 77.29 }] },
+    }))
+    assert.equal(price, 77.29)
+    assert.equal(candleCalls, 1)
+})
+
+test('a 5xx still falls through — only the quota verdict short-circuits', async () => {
+    let candleCalls = 0
+    const quote = async () => { const e = new Error('FMP /quote 503'); e.status = 503; throw e }
+    const price = await latestMarkPrice('TST_503', deps(quote, {
+        candles: async () => { candleCalls++; return [{ c: 12.5 }] },
+    }))
+    assert.equal(price, 12.5)
+    assert.equal(candleCalls, 1)
+})
