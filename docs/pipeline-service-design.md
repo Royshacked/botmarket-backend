@@ -342,12 +342,27 @@ correct for an abandoned run. The better end state is retroactive: the run colle
 in my book" reaches back through the screen that found it. The run shape should carry a `threadIds`
 field from the start — unused for now — so this needs no re-plumbing later.
 
-**Entering a pipeline mid-way.** The later single-vs-portfolio list feature (a user scan tagged
-`intent: 'single' | 'portfolio'`; item click → Kairos either way, whole-list click offered only for
-`portfolio` → Prometheus → Atlas) enters the portfolio pipeline **at step 2 with an artifact in
-hand**, skipping Atlas's mandate. So the conveyor API is `startAt(pipeline, step, artifact)`, not
-`start(pipeline)` — build it that way now even though the feature is later. Open question for then:
-does Atlas set a mandate *after* the names exist, or does that list arrive mandate-less?
+**Entering a pipeline mid-way. — BUILT (not live-verified).** `planEntry({steps, agent, artifact})`
++ `enterPipelineAt(pipelineKey, agent, artifact)`. Promoted from "later, if worth it" the moment
+phase 3 found that two live hops need it: routing a `candidate_list` out of Argus is undecidable
+from the artifact, and entering says what routing could not.
+
+The step is named by **agent, never index** — an index is the one thing a reorder silently breaks
+(move Research ahead of Screen and every caller quoting `2` enters the wrong desk, with nothing to
+catch it). Named, the entry point moves with the step, which is the property the whole design
+exists to have. There is a test for exactly that.
+
+- a sleeve (`handleResearchList`) enters **portfolio @ analyst** — Mandate and Screen are skipped
+  because the names already exist
+- one name (`handleResearchCandidate`) enters **research @ analyst** — a single ticker is a
+  coverage question, not the start of a book
+
+Answering the open question: Atlas is **not** cut out. The user can walk back from Research to
+Screen to Mandate, and Prometheus hands the coverage forward to Atlas at the end either way
+(`handleSleeveResearched`). A test pins the backward path, since it is what makes skipping safe.
+
+Refuses when the named desk does not accept the kind, so a wrong pairing is a caller's `false`
+rather than a panel handed something it cannot read.
 
 ## 9. Open
 
