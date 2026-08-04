@@ -262,10 +262,48 @@ Each phase deletes the per-hop state it replaces from `MainPage`; nothing is lef
    Known gap, unreachable today: if auto is refused mid-run the panel has no offer to fall back to
    until the user flips to manual. No step on the trade desk is gated, so it cannot fire yet; the
    real fix is §4's "no artifact → drop to manual", which lands with the fan-out work.
-2. **Assist + Research + Scan desks.** Single-step, nothing to migrate — they get contracts so a
-   step can later be inserted without touching them. Proves the "add a step, edit no agent" claim.
-3. **Argus → Prometheus** (`handleResearchList` / `handleResearchCandidate`). First `each`, over
-   names. Deletes `analystScanResult`, `RESEARCH_TOP_N` handling.
+2. **Assist + Research + Scan desks. — DONE (not live-verified).** `mentor.contract.js` (accepts a
+   candidate, `deliver: 'seed'`, words its own opening turn — and says where a name came from
+   rather than calling it "my own trade", which would have Mentor pressure-test a plan nobody has
+   made) and `analyst.contract.js` (accepts a candidate list, emits a coverage set,
+   `deliver: 'artifact'`). No behaviour changed: neither desk routes anything yet.
+
+   The claim is now a test — inserting a scan step in front of the assist desk makes it route, with
+   no agent edited, and the backward leg comes free. Also added: every kind emitted is accepted by
+   someone and vice versa, with Atlas's two loose ends named explicitly so phase 4 empties the list.
+
+   **It found a real bug.** A third acceptor of `candidate_list` broke the outside-a-pipeline
+   fallback: routing by capability alone was only ever unambiguous while Kairos was the sole taker.
+   Editing a call and then asking Kairos for another name would have silently done nothing. Fixed by
+   BORROWING the emitting desk's own chain when no pipeline is active — a desk's pipeline knows
+   which of three acceptors comes next, and nothing else does. The borrowed chain routes but does
+   not stamp a step, since the user never entered it.
+
+   Worth knowing before phase 3 argues about it: Prometheus already paces its own queue internally
+   (one name per turn, the rest named in the prompt so it can pace itself, the unqueued pool carried
+   so "do KLAC as well" works). The `each` fan-out partly exists there already, woven into the
+   prompt text rather than just the iteration.
+3. **Argus → Prometheus. — DONE (not live-verified), and it changed the plan.** `analystScanResult`
+   is gone; Prometheus takes a `candidate_list` artifact from all three producers, so it has ONE
+   inbox however the names reached it. Names are the `items`, the frame is the `context`
+   (`queued` / `pool` / `bySector` / `sector`), and Argus's read now rides on the item it belongs
+   to rather than on the envelope — a list carries one per candidate.
+
+   **The hop is delivered, not routed, and that is a finding.** A `candidate_list` leaving Argus
+   means Kairos on the trade desk and Prometheus on the portfolio desk; the artifact cannot say
+   which, because the difference is not in the names but in what they are FOR. Routing it would
+   misroute an investing candidate clicked while the trade desk happens to be open, and "the desk I
+   am standing on" is the wrong answer when the user came from a saved list.
+
+   That is exactly the `startAt(pipeline, step, artifact)` gap already recorded in §8 — sending a
+   list to research is ENTERING the portfolio pipeline at its Research step, not advancing along
+   whatever chain is open. Until that exists the intent lives in the button the user pressed. So
+   what phase 3 bought is the shape, not the routing, and the routing needs `startAt` rather than
+   more cleverness in `planHop`.
+
+   `each` was not needed: Prometheus already paces its own queue, and its pacing is woven into the
+   prompt text (which name, what follows it, what is on the list but unqueued), not just the
+   iteration. Moving that to the conveyor would have split one behaviour across two files to no end.
 4. **Atlas → Argus → Prometheus → Atlas.** The sleeve run: fan-out, join, empty, partial, and the
    two refs. Last because it exercises everything, and because it is the one with a scar per branch.
 
