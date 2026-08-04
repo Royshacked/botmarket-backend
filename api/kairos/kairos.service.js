@@ -76,15 +76,18 @@ const LIGHT_FIELDS = [
 
 /**
  * Pure: build the $set for an in-place call edit. IN-POSITION → LIGHT_FIELDS only + NO re-arm (never
- * flip a live call back to 'waiting' — that would orphan the reconciler's position match). PRE-position
- * → full PLAN_FIELDS re-map + re-arm (status→waiting, next check + armed zone cleared).
+ * flip a live call out of its position status — that would orphan the reconciler's position match).
+ * PRE-position → full PLAN_FIELDS re-map + re-arm (status→looking, next check + armed zone cleared).
  */
 export function _buildEditSet(cur, full, chatState) {
     const inPosition = POSITION_STATUSES.has(cur?.status)
     const $set = { chat_state: chatState ?? cur?.chat_state ?? null }
     for (const k of (inPosition ? LIGHT_FIELDS : PLAN_FIELDS)) $set[k] = full[k]
     if (!inPosition) {
-        $set.status = 'waiting'
+        // Re-ARM means armed: back to the state the monitor actually reads, with the check timer and
+        // armed zone cleared so the re-mapped plan is assessed fresh on the next tick. Writing
+        // 'waiting' here — the pre-convergence spelling — silently retired the call instead.
+        $set.status = 'looking'
         $set['monitor_state.next_check_at'] = null
         $set['monitor_state.armed_zone_id'] = null
     }
@@ -318,7 +321,16 @@ export function normalizeCall(raw, userId = null) {
         },
 
         // ── monitor_state (written each wake, Phase 2) ──
-        status: 'waiting',
+        // LOOKING, not waiting: a generated call is watched from the moment it exists. Kairos has no
+        // arm step and never had one — the user builds the call and expects Hermes on it, which is
+        // what `looking` means in the shared vocabulary ("a monitor is watching for entry", while
+        // `waiting` means created and idle).
+        //
+        // This was 'waiting' back when Hermes watched ['waiting','watching']. The status
+        // convergence (6764d1b, 2026-07-28) moved the monitor to ['looking'] and left the writer
+        // here alone, so every call built since was saved into a state nothing reads. They did not
+        // fail loudly; they simply sat there, forever, looking exactly like a call being watched.
+        status: 'looking',
         monitor_state: {
             next_check_at:   null,
             armed_zone_id:   null,

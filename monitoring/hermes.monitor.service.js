@@ -32,7 +32,11 @@ const POLL_INTERVAL_MS = 60_000
 // Only this is re-checked by the readiness loop. `expiry_review` is triggered TIME-based off it
 // (via _isExpiring). A call whose thesis has gone stale STAYS 'looking' — the staleness lives on
 // the invalidation axis, which latches, so the edit card cannot spam.
-const ACTIVE_STATUSES  = ['looking']
+// Exported so the WRITER can be pinned to it. This list and normalizeCall's saved status are one
+// decision spelled in two files, and when they drifted apart (the convergence moved this to
+// 'looking' and left the writer on 'waiting') nothing failed — calls were simply saved into a state
+// no loop reads, and sat there looking exactly like calls being watched. A test asserts they agree.
+export const ACTIVE_STATUSES = ['looking']
 // Post-confirm statuses routed to the position path (NOT the zone-gate readiness path). P3b: the
 // call carries its own execution, so its status CONVERGES to the execution vocab after confirm —
 // 'hit' = order placed / awaiting fill; 'long'/'short' = live (reconciler-set on fill) and managed.

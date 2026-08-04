@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { MODES, DEFAULT_MODE, normalizeMode, isMode } from '../../services/kairos.modes.js'
 import { KAIROS_TOOLS_FOR_MODE } from '../../services/kairos.tools.js'
 import { normalizeCall, _buildEditSet } from '../../api/kairos/kairos.service.js'
+import { ACTIVE_STATUSES as HERMES_WATCHES } from '../../monitoring/hermes.monitor.service.js'
 import { _sanitizeSeed } from '../../api/kairos/kairos.controller.js'
 
 // K1: Kairos mode scaffolding (KAIROS_MODES.md) — mode field + per-mode tool subsets.
@@ -77,11 +78,13 @@ const rawCall = (over = {}) => ({
 })
 
 // ── K4: light in-position edit vs pre-position re-arm ────────────────────────
-test('_buildEditSet: pre-position (watching) → full re-map + re-arm', () => {
+test('_buildEditSet: pre-position → full re-map + re-arm INTO the monitored state', () => {
     const full = { asset: 'X', entry_zones: [{ id: 'z' }], sizing: { max_size: 1 }, thesis: 't' }
-    const { $set, inPosition } = _buildEditSet({ status: 'watching', chat_state: null }, full, null)
+    const { $set, inPosition } = _buildEditSet({ status: 'looking', chat_state: null }, full, null)
     assert.equal(inPosition, false)
-    assert.equal($set.status, 'waiting')                       // re-armed
+    // Re-ARM has to mean armed. Asserted against Hermes's own list, not a literal: writing the
+    // pre-convergence spelling here retired the call instead of re-arming it, and looked identical.
+    assert.ok(HERMES_WATCHES.includes($set.status), `re-armed to '${$set.status}', which no loop reads`)
     assert.equal($set['monitor_state.next_check_at'], null)
     assert.equal($set['monitor_state.armed_zone_id'], null)
     assert.ok('entry_zones' in $set)                           // full plan re-mapped

@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateCall, normalizeCall, computeKairosPerformance, _normalizeSensitivity } from '../../api/kairos/kairos.service.js'
+import { validateCall, normalizeCall, computeKairosPerformance, _buildEditSet, _normalizeSensitivity } from '../../api/kairos/kairos.service.js'
+import { ACTIVE_STATUSES as HERMES_WATCHES } from '../../monitoring/hermes.monitor.service.js'
 
 // A minimal well-formed call the build agent (Phase 1) would emit, with venue bound (Generate).
 function call(extra = {}) {
@@ -225,9 +226,15 @@ test('normalize: index carries its resolved broker_symbol + basis_offset', () =>
     assert.equal(doc.basis_offset, -12.5)
 })
 
-test('normalize: fresh call starts waiting with empty monitor_state', () => {
+// A generated call is WATCHED from the moment it exists — Kairos has no arm step and never had one.
+// Asserted against Hermes's own list rather than the literal, because the literal is exactly what
+// drifted: the status convergence moved the monitor to ['looking'] and left this writer on
+// 'waiting', so every call built for the following week was saved into a state nothing reads. It
+// did not fail loudly — the calls just sat there, looking precisely like calls being watched.
+test('normalize: a fresh call is saved in the state the monitor actually reads', () => {
     const doc = normalizeCall(call(), 'u_abc')
-    assert.equal(doc.status, 'waiting')
+    assert.ok(HERMES_WATCHES.includes(doc.status),
+        `saved as '${doc.status}', but Hermes only picks up ${HERMES_WATCHES.join('/')}`)
     assert.equal(doc.strategy, 'kairos')
     assert.equal(doc.userId, 'u_abc')
     // Envelope field, ONE name across kinds. A call reverting to `user_id` silently breaks every
