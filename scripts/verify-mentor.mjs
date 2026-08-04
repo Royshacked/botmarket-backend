@@ -22,8 +22,9 @@ dotenv.config()
 // module-level code, so a static import here would construct the Anthropic client (and its
 // apiKey) before dotenv.config() had run — "Could not resolve authentication method".
 const { mentorAgentService, emptyMentorState } = await import('../services/mentor.agent.service.js')
-const { normalizeSetup, setupReadiness, computeRR, buildLadder, buildCadence, validityProblems } = await import('../services/setup.schema.js')
-const { zoneGate, proximityGapMin, zoneDistance } = await import('../monitoring/talos.monitor.service.js')
+const { normalizeSetup, setupReadiness, computeRR, buildLadder, buildCadence, validityProblems,
+    scenarioLabel, scenarioView, declaredConditions } = await import('../services/setup.schema.js')
+const { scenarioGate, liveEntryZones, proximityGapMin, zoneDistance } = await import('../monitoring/talos.monitor.service.js')
 const { fetchLastPrice } = await import('../monitoring/monitorUtils.js')
 
 const args   = process.argv.slice(2)
@@ -54,6 +55,11 @@ const TURNS = [
     `I want to go long ${TICKER} as a swing trade over the next couple of weeks. What do you make of it?`,
     `I don't have a setup in mind — build me a couple of options and I'll pick one.`,
     `Let's go with the first one. Size it for a $500 risk.`,
+    // A fourth turn, because turn 3 legitimately does not always end in a worksheet: told to size a
+    // thin plan, Mentor is supposed to push back rather than ship it, which leaves the conversation
+    // on a question. This answers it AND exercises the rival-premise path — two scenarios, each with
+    // its own stop, targets and death line, which is where the projection has to pick a winner.
+    `Build both as rival scenarios, each with its own stop and targets, and finish the setup.`,
 ]
 
 async function runTurn(prompt, chatState, history, n) {
@@ -104,19 +110,22 @@ function checkSetup(setup, price) {
         ? ok(`lens ${setup.trade_mode}`)
         : fail(`lens is "${setup.trade_mode}" — must be classical or smc`)
 
-    // conditions[] — the monitor's instruction sheet, and the whole quality tradeoff of the kind.
-    const conditions = setup.conditions ?? []
-    const n = conditions.length
-    if (n === 0)      fail('conditions[] is EMPTY — the monitor has nothing to verify against the thesis')
-    else if (n > 4)   warn(`conditions[] declares ${n} — over-declaring pays for a look at every one on EVERY wake`)
-    else              ok(`conditions[] declares ${n}`)
+    // conditions — the monitor's instruction sheet, and the whole quality tradeoff of the kind.
+    // TWO TIERS: the setup-wide list plus each premise's own. A wake judges root ∪ the armed
+    // scenario's, so both are checked here and ids must be unique across the WHOLE document.
+    const scenarios = setup.scenarios ?? []
+    const everyCond = [...(setup.conditions ?? []), ...scenarios.flatMap(sc => sc.conditions ?? [])]
+    const n = everyCond.length
+    if (n === 0)      fail('no conditions anywhere — the monitor has nothing to verify against the thesis')
+    else if (n > 6)   warn(`${n} conditions declared — over-declaring pays for a look at every one on EVERY wake`)
+    else              ok(`${n} condition(s): ${setup.conditions?.length ?? 0} setup-wide + ${n - (setup.conditions?.length ?? 0)} across ${scenarios.length} scenario(s)`)
 
-    const ids = conditions.map(c => c.id)
+    const ids = everyCond.map(c => c.id)
     new Set(ids).size === ids.length
-        ? ok(`ids are unique (${ids.join(', ')})`)
-        : fail(`duplicate condition ids ${ids.join(', ')} — the latch would attach a finding to the wrong condition`)
+        ? ok(`ids are unique document-wide (${ids.join(', ')})`)
+        : fail(`duplicate condition ids ${ids.join(', ')} — ONE ledger keys off these, so a finding would answer for the wrong condition`)
 
-    for (const c of conditions) {
+    for (const c of everyCond) {
         if (!c.text || c.text.length < 15) warn(`condition ${c.id} is too vague to verify: "${c.text}"`)
         // The checkability gate is Mentor's, and this is the only signal we have that it ran.
         if (!['measured', 'discretionary'].includes(c.mode)) {
@@ -127,42 +136,77 @@ function checkSetup(setup, price) {
         }
     }
 
-    conditions.some(c => c.weight === 'primary')
-        ? ok('a primary (trigger) condition is named')
-        : warn('nothing is marked primary — the monitor has no trigger, only confirmations')
-
     // Referenced symbols must cover any name the conditions mention, or the monitor can't look.
     const refs = setup.referenced_symbols ?? []
     refs.length ? ok(`referenced_symbols ${refs.join(', ')}`) : ok('no referenced symbols (own asset only)')
 
-    // validity — the second arithmetic gate, and the only thing that speaks when price is far away.
-    head('Validity range')
-    if (!setup.validity) {
-        warn('no validity range — Talos can only ever say "price is outside my zones", never "this is dead"')
-    } else {
-        const v = setup.validity
-        ok(`range [${v.lower ?? '-'}, ${v.upper ?? '-'}] · away pivot ${v.approach ?? '-'} · on_break ${v.on_break} · ${v.timeframe ?? 'no rung'} close`)
-        const problems = validityProblems(setup)
-        problems.length ? problems.forEach(p => fail(`validity: ${p}`)) : ok('range is coherent with the stop')
-        if (!v.timeframe) warn('no timeframe on the range — which close decides is undefined, so a wick could kill the setup')
+    // ── Scenarios: one block per way in, each owning its legs, conditions and death line ──
+    head(`Scenarios — ${scenarios.length} way(s) in`)
+    if (!scenarios.length) fail('no scenarios — a setup with no premise is not a plan')
+
+    let sumQty = 0
+    for (const [i, sc] of scenarios.entries()) {
+        const label = scenarioLabel(sc)
+        console.log(`\n   ${C.bold}${i + 1}. ${label}${C.off}${sc.name ? '' : `${C.dim} (unnamed — cards will say "${sc.id}")${C.off}`}`)
+        if (!sc.name) warn(`scenario ${sc.id} has no name — the monitor's cards name the premise that fired`)
+
+        // Legs. ONE entry per premise: it takes the whole position, and two entries would be
+        // scaling in, which execution can't do yet.
+        for (const [key, gLabel] of [['entry_zones', 'entry'], ['stop_zones', 'stop'], ['tp_zones', 'tp']]) {
+            const zones = sc[key] ?? []
+            if (!zones.length) { (key === 'tp_zones' ? warn : fail)(`${label}: no ${gLabel} zone`); continue }
+            if (key === 'entry_zones' && zones.length > 1) fail(`${label}: ${zones.length} entry zones — that is scaling in; two premises are two scenarios`)
+            for (const z of zones) {
+                const width = z.upper - z.lower
+                const pct   = price ? (width / price) * 100 : null
+                const size  = pct == null ? '' : ` (${pct.toFixed(2)}% of price)`
+                console.log(`      ${gLabel} ${z.id}: ${z.lower} – ${z.upper}${size} qty=${z.quantity ?? '—'}`)
+                if (width === 0) warn(`${label}: ${gLabel} ${z.id} is a zero-width band — an exact level, not a zone`)
+                if (pct != null && pct > 6)    warn(`${label}: ${gLabel} ${z.id} spans ${pct.toFixed(1)}% of price — implausibly wide`)
+                if (pct != null && pct > 0 && pct < 0.02) warn(`${label}: ${gLabel} ${z.id} spans ${pct.toFixed(3)}% — too tight to ever fill`)
+                if (key === 'entry_zones' && !z.quantity) fail(`${label}: entry ${z.id} has no quantity — this premise can't be sized`)
+            }
+        }
+        sumQty += Number(sc.quantity) || 0
+
+        // A premise with nothing to check arms blind — unless the setup-wide tier carries it.
+        const declared = declaredConditions(setup, sc)
+        declared.some(c => c.weight === 'primary')
+            ? ok(`${label}: a primary trigger is named`)
+            : warn(`${label}: nothing marked primary — the monitor has confirmations but no trigger`)
+        console.log(`      ${C.dim}judges: ${declared.map(c => `${c.id} ${c.text}`).join(' · ') || '(nothing)'}${C.off}`)
+
+        // Its own death line, checked against its OWN stop.
+        if (!sc.validity) {
+            warn(`${label}: no validity range — Talos can only ever say "price is outside my zones", never "this is dead"`)
+        } else {
+            const v = sc.validity
+            ok(`${label}: valid [${v.lower ?? '-'}, ${v.upper ?? '-'}] · away ${v.approach ?? '-'} · on_break ${v.on_break} · ${v.timeframe ?? 'no rung'} close`)
+            if (!v.timeframe) warn(`${label}: no timeframe on the range — which close decides is undefined, so a wick could kill it`)
+        }
+
+        const scRR = computeRR(scenarioView(setup, sc))
+        if (scRR == null)     warn(`${label}: rr could not be computed (a leg is missing, or entry sits inside the stop)`)
+        else if (scRR < 1.5)  warn(`${label}: rr ${scRR} is thin — the prompt says to push back below ~1.5R`)
+        else                  ok(`${label}: rr ${scRR} (worst entry edge), size ${sc.quantity ?? '—'}`)
     }
 
-    // Zones
-    head('Zones')
-    const groups = [['entry', setup.entry_zones], ['stop', setup.stop_zones], ['tp', setup.tp_zones]]
-    for (const [label, zones] of groups) {
-        if (!zones.length) { (label === 'tp' ? warn : fail)(`no ${label} zone`); continue }
-        for (const z of zones) {
-            const width = z.upper - z.lower
-            const pct   = price ? (width / price) * 100 : null
-            const size  = pct == null ? '' : ` (${pct.toFixed(2)}% of price)`
-            console.log(`   ${label} ${z.id}: ${z.lower} – ${z.upper}${size} qty=${z.quantity ?? '—'}`)
-            if (width === 0) warn(`${label} ${z.id} is a zero-width band — an exact level, not a zone`)
-            if (pct != null && pct > 6)    warn(`${label} ${z.id} spans ${pct.toFixed(1)}% of price — implausibly wide`)
-            if (pct != null && pct > 0 && pct < 0.02) warn(`${label} ${z.id} spans ${pct.toFixed(3)}% — too tight to ever fill`)
-            if (label === 'entry' && !z.quantity) fail(`entry ${z.id} has no quantity — the setup can't be sized`)
-        }
+    // Coherence is per premise, and the message names which one.
+    const problems = validityProblems(setup)
+    problems.length ? problems.forEach(p => fail(`validity: ${p}`)) : ok('every range is coherent with its own stop')
+
+    // THE bug this shape exists to kill: rivals are not legs, so their sizes are never added.
+    if (scenarios.length > 1) {
+        setup.quantity !== sumQty
+            ? ok(`document size ${setup.quantity} is ONE premise's, not the ${sumQty} sum — rivals never add`)
+            : fail(`document size ${setup.quantity} equals the SUM of every scenario — the double-count is back`)
     }
+
+    head('Execution projection')
+    const projected = scenarios[0]
+    JSON.stringify(setup.entry_zones) === JSON.stringify(projected?.entry_zones ?? [])
+        ? ok(`flat zones project ${scenarioLabel(projected)} — what execution will actually place pre-arm`)
+        : fail('the flat zones match no scenario — execution would place something nobody authored')
 
     // Derived fields must be the server's, not the model's.
     head('Derived fields')
@@ -172,11 +216,6 @@ function checkSetup(setup, price) {
     JSON.stringify(setup.cadence) === JSON.stringify(buildCadence(setup.type))
         ? ok(`cadence ${setup.cadence.min}–${setup.cadence.max} min`)
         : fail('cadence does not match the derivation')
-
-    const rr = computeRR(setup)
-    if (rr == null) warn('rr could not be computed (a leg is missing, or entry sits inside the stop)')
-    else if (rr < 1.5) warn(`rr ${rr} is thin — the prompt says to push back below ~1.5R`)
-    else ok(`rr ${rr} (from the worst entry edge)`)
 
     setup.conviction?.level ? ok(`conviction ${setup.conviction.level} — "${setup.conviction.rationale ?? ''}"`) : warn('no conviction set')
 
@@ -192,15 +231,16 @@ function checkGate(setup, price) {
     if (!Number.isFinite(price)) { fail('no live price — the gate can never trip'); return }
 
     console.log(`   live ${setup.asset} = ${price}`)
-    const hit  = zoneGate(setup.entry_zones, price)
-    const dist = zoneDistance(setup.entry_zones, price)
+    // Across every LIVE premise — the gate answers which one price reached, not merely that it did.
+    const hit  = scenarioGate(setup, price)
+    const dist = zoneDistance(liveEntryZones(setup), price)
     const gap  = proximityGapMin(setup, price)
 
-    console.log(`   distance to nearest zone: ${dist?.toFixed(2)} zone-widths`)
+    console.log(`   distance to the nearest premise: ${dist?.toFixed(2)} zone-widths`)
     console.log(`   next check in: ${gap} min  (cadence ${setup.cadence.min}–${setup.cadence.max})`)
 
-    if (hit) ok(`price is INSIDE ${hit.id} — this would trigger an assessment + confirm card right now`)
-    else     ok(`price is outside every zone — the cheap gate holds, no LLM spend this wake`)
+    if (hit) ok(`price is INSIDE ${scenarioLabel(hit.scenario)} (${hit.zone.id}) — this would trigger an assessment + confirm card right now`)
+    else     ok('price is outside every premise\'s zone — the cheap gate holds, no LLM spend this wake')
 
     // The zone must be reachable: an entry the market has to travel to is fine, one it has
     // already blown past by a mile is a setup that will never fire.
@@ -215,22 +255,41 @@ async function checkPersist(setup) {
     const { _checkSetup, _testDeps } = await import('../monitoring/talos.monitor.service.js')
     const { paperBrokerService } = await import('../api/broker/paperBroker.service.js')
 
+    // Cleanup runs in a `finally`: every early return here (generate refused, arm refused) and any
+    // throw used to leak a real paper account — and a real setup — into the developer's Mongo.
+    const trash = { setupId: null, acctId: null }
+    try {
+        await persistRun(setup, { setupService, _checkSetup, _testDeps, paperBrokerService, trash })
+    } finally {
+        if (trash.setupId) await setupService.deleteSetup(trash.setupId, VERIFY_USER).catch(() => {})
+        if (trash.acctId)  await paperBrokerService.deleteAccount(VERIFY_USER, trash.acctId).catch(() => {})
+        if (trash.setupId || trash.acctId) ok('cleaned up (setup + paper account)')
+    }
+}
+
+async function persistRun(setup, { setupService, _checkSetup, _testDeps, paperBrokerService, trash }) {
+
     // A REAL paper account in the store. The order-plan builder resolves account ids against the
     // paper store, so an invented id silently yields an empty plan ("no placeable accounts") and
     // the money path goes untested — which is exactly what happened on the first --persist run.
     const acct = await paperBrokerService.createAccount(VERIFY_USER, { mode: 'paper', name: 'verify', startingBalance: 100000 })
     const acctId = acct.accountId
+    trash.acctId = acctId
     ok(`paper account ${acctId} created`)
     const accounts = [{ id: acctId, broker: 'paper', name: 'verify', balance: 100000, currency: 'USD' }]
 
     const gen = await setupService.generateSetup(setup, { userId: VERIFY_USER, accounts, mainAccountId: acctId })
     if (!gen.ok) { fail(`generate rejected: ${gen.reason}`); return }
-    ok(`generated ${gen.setup.id} — status ${gen.setup.status}, mode ${gen.setup.mode}, broker ${gen.setup.broker}`)
-    gen.setup.event_risk?.length
-        ? ok(`event_risk stamped: ${gen.setup.event_risk.map(e => `${e.date} ${e.label}`).join(' · ')}`)
+    // `{ ok, doc }` — the ONE shape every service in api/ answers in since the entity-CRUD refactor.
+    // This script still read `.setup` and crashed on the first run that got far enough to find out.
+    const saved = gen.doc
+    trash.setupId = saved.id
+    ok(`generated ${saved.id} — status ${saved.status}, mode ${saved.mode}, broker ${saved.broker}`)
+    saved.event_risk?.length
+        ? ok(`event_risk stamped: ${saved.event_risk.map(e => `${e.date} ${e.label}`).join(' · ')}`)
         : ok('event_risk stamped: none in the next ~10 days')
 
-    const armed = await setupService.patchSetup(gen.setup.id, { status: 'looking' }, VERIFY_USER)
+    const armed = await setupService.patchSetup(saved.id, { status: 'looking' }, VERIFY_USER)
     armed.ok ? ok('armed → looking') : fail(`arm refused: ${armed.reason}`)
     if (!armed.ok) return
 
@@ -238,6 +297,9 @@ async function checkPersist(setup) {
     // handoff here, not spending an LLM call or posting into the user's chat. The order plan is
     // the real one.
     let carded = null
+    // The assessment's VERDICT is the second gate, so the harness drives it explicitly rather than
+    // hard-coding one answer. A zone trip is not an entry: only `enter` asks the user to confirm.
+    let verdict = 'wait'
     // NOT stubbed: the real plan builder, resolving the paper account for real.
     const { buildOrderPlanForIdea } = await import('../services/orderPlan.service.js')
     // Spread the real deps and override only what this harness fakes, so anything the monitor grows
@@ -248,43 +310,69 @@ async function checkPersist(setup) {
         isAssetOpen: () => true,
         nextOpenMs:  () => Date.now() + 3600_000,
         getPrice:    priceFn,
-        assess:      async () => ({ verdict: 'wait', read: '(stubbed) not convinced', warning: 'Stubbed warning — the card must fire anyway.', next_check_min: 30 }),
+        assess:      async () => ({ verdict, read: `(stubbed) ${verdict}`, warning: verdict === 'enter' ? null : 'Stubbed objection.', next_check_min: 30 }),
         onCard:       async (_s, a) => { carded = a },
         onManualCard: async () => {},
         buildOrderPlan: buildOrderPlanForIdea,
     })
 
     // Tick 1 — the real live price. Almost certainly outside the zone; proves the cheap path.
-    const real = await _checkSetup(armed.setup, Date.now(), tickDeps(() => fetchLastPrice(setup.asset)))
+    const real = await _checkSetup(armed.doc, Date.now(), tickDeps(() => fetchLastPrice(setup.asset)))
     ok(`tick @ live price → ${real.reason}${real.fired ? ` (FIRED, orderState=${real.orderState})` : ''}`)
 
-    // Tick 2 — force price into the first entry zone so the EXECUTION handoff actually runs.
-    // Without this the money-adjacent path (order plan + orderState + card) stays untested.
-    const z = setup.entry_zones[0]
+    // Tick 2 — force price into the LAST premise's entry zone so the EXECUTION handoff runs AND the
+    // projection is proved: with rivals, the zone that fires is deliberately not the one the
+    // document was projecting, so the order plan must come back with that premise's size and stop.
+    const target = saved.scenarios?.[saved.scenarios.length - 1]
+    const z = target?.entry_zones?.[0] ?? setup.entry_zones[0]
     const inZone = (z.lower + z.upper) / 2
-    head(`Forced trigger @ ${inZone} (inside ${z.id})`)
-    const fired = await _checkSetup(armed.setup, Date.now(), tickDeps(async () => inZone))
+
+    // THE SECOND GATE. A zone trip only says price is WHERE the setup lives; whether the setup is
+    // FULFILLED is what the conditions are for. So a `wait` in the zone must keep watching and post
+    // NOTHING — asking the user to confirm an entry Talos just declined is the one thing this gate
+    // exists to prevent.
+    head(`In zone @ ${inZone} on a "wait" verdict (inside ${scenarioLabel(target)} / ${z.id})`)
+    const held = await _checkSetup(armed.doc, Date.now(), tickDeps(async () => inZone))
+    held.watching ? ok('stayed looking — the zone alone is not an entry') : fail(`a "wait" in the zone returned ${JSON.stringify(held)}`)
+    carded ? fail('a declined setup posted a confirm card') : ok('no card on a declined setup')
+
+    // Now the setup actually fulfils, and the EXECUTION handoff runs for real.
+    verdict = 'enter'
+    head(`Forced trigger @ ${inZone} on an "enter" verdict`)
+    const fired = await _checkSetup(armed.doc, Date.now(), tickDeps(async () => inZone))
 
     fired.fired ? ok(`triggered on ${z.id}`) : fail(`price inside ${z.id} did not trigger`)
     fired.orderState === 'awaiting_confirm'
         ? ok(`orderState ${fired.orderState}`)
         : fail(`orderState is ${fired.orderState} — a 'hit' with no plan dead-ends at the dialog`)
-    carded ? ok(`card fired on a "${carded.verdict}" verdict — warning: "${carded.warning}"`) : fail('no confirm card')
-    if (carded && !carded.warning) fail('a non-enter verdict produced no warning')
+    carded ? ok(`confirm card fired on "${carded.verdict}"`) : fail('no confirm card')
+    if (carded?.warning) fail(`an "enter" carried a warning ("${carded.warning}") — a hedged confirm is what the gate prevents`)
 
     // Read it back: this is what the confirm dialog would actually receive.
-    const after = await setupService.getSetup(gen.setup.id, VERIFY_USER)
-    console.log(`   status=${after.status} orderState=${after.orderState} armed_zone=${after.armed_zone_id}`)
+    const read = await setupService.getSetup(saved.id, VERIFY_USER)
+    const after = read.doc ?? read
+    console.log(`   status=${after.status} orderState=${after.orderState} armed_zone=${after.armed_zone_id} armed_scenario=${after.armed_scenario_id}`)
+    // The projection must have MOVED to the premise that fired, or execution places the wrong plan.
+    if (target) {
+        after.armed_scenario_id === target.id ? ok(`armed_scenario_id is ${target.id}`) : fail(`armed_scenario_id is ${after.armed_scenario_id}, expected ${target.id}`)
+        JSON.stringify(after.stop_zones) === JSON.stringify(target.stop_zones)
+            ? ok('the stop that will rest at the broker belongs to the premise that fired')
+            : fail(`stop_zones are ${JSON.stringify(after.stop_zones)} — the losing premise's stop would rest behind this position`)
+        after.quantity === target.quantity
+            ? ok(`size ${after.quantity} is that premise's own — never a sum`)
+            : fail(`size ${after.quantity} is not ${scenarioLabel(target)}'s ${target.quantity}`)
+    }
     console.log(`   pendingOrder.plan: ${JSON.stringify(after.pendingOrder?.plan ?? null)}`)
     after.pendingOrder?.plan?.length
         ? ok('a placeable order plan is persisted')
         : fail('no pendingOrder.plan persisted — nothing for the confirm dialog to place')
-    console.log(`   timeline: ${(after.monitor_state?.timeline ?? []).map(t => t.kind).join(' → ')}`)
+    // `reason`, not `kind` — journalEntry's field. Reading the wrong one printed an empty timeline
+    // on every run and made a working journal look broken.
+    const timeline = after.monitor_state?.timeline ?? []
+    console.log(`   timeline: ${timeline.map(t => t.reason).join(' → ') || '(empty)'}`)
+    timeline.length ? ok(`journal wrote ${timeline.length} line(s): "${timeline.at(-1)?.note ?? ''}"`) : fail('nothing journalled')
     console.log(`   memo: ${after.monitor_state?.memo ?? '(none)'}`)
 
-    await setupService.deleteSetup(gen.setup.id, VERIFY_USER)
-    await paperBrokerService.deleteAccount(VERIFY_USER, acctId).catch(() => {})
-    ok('cleaned up (setup + paper account)')
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────

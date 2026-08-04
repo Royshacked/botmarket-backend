@@ -75,6 +75,21 @@ export function buildCadence(type) {
     return { ...(CADENCE_BY_TYPE[type] ?? DEFAULT_CADENCE) }
 }
 
+/**
+ * A number, where ABSENT means absent.
+ *
+ * `Number(null)` is **0**, and that is a live trap here rather than a curiosity: this module
+ * re-normalises documents it has already normalised — every streamed turn, every edit, every
+ * Generate — and its own output writes an absent edge as `null`, not `undefined`. So the naive
+ * `Number(raw.approach)` read a missing away-pivot as 0 on the SECOND pass. For a long that means
+ * "price has run away above 0", which is permanently true: the coherence check then refuses the
+ * setup for an edge the author never wrote, and the runaway gate would fire on every wake. The same
+ * one-character trap turned an absent `validity.lower` into a floor of 0, i.e. "below the stop".
+ *
+ * Found by a live verification run that refused to Generate a plan with nothing wrong with it.
+ */
+const num = (v) => (v == null || v === '' ? NaN : Number(v))
+
 // ─── Zones ────────────────────────────────────────────────────────────────────
 
 /**
@@ -89,12 +104,12 @@ export function buildCadence(type) {
 export function normalizeZone(z, i, prefix) {
     if (!z || typeof z !== 'object') return null
 
-    let lo = Number(z.lower)
-    let hi = Number(z.upper)
+    let lo = num(z.lower)
+    let hi = num(z.upper)
 
     // Point emitted instead of a band → zero-width zone at that price.
     if (!Number.isFinite(lo) && !Number.isFinite(hi)) {
-        const p = Number(z.price)
+        const p = num(z.price)
         if (!Number.isFinite(p)) return null
         lo = hi = p
     } else if (!Number.isFinite(lo)) lo = hi
@@ -102,7 +117,7 @@ export function normalizeZone(z, i, prefix) {
 
     if (lo > hi) [lo, hi] = [hi, lo]
 
-    const qty = Number(z.quantity)
+    const qty = num(z.quantity)
     return {
         id:       typeof z.id === 'string' && z.id.trim() ? z.id.trim() : `${prefix}${i + 1}`,
         lower:    lo,
@@ -207,14 +222,14 @@ export function normalizeConditions(arr, { used, prefix = 'c' } = {}) {
 export function normalizeValidity(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
 
-    let lower = Number(raw.lower)
-    let upper = Number(raw.upper)
+    let lower = num(raw.lower)
+    let upper = num(raw.upper)
     if (!Number.isFinite(lower)) lower = null
     if (!Number.isFinite(upper)) upper = null
     if (lower == null && upper == null) return null
     if (lower != null && upper != null && lower > upper) [lower, upper] = [upper, lower]
 
-    const approach = Number(raw.approach)
+    const approach = num(raw.approach)
     return {
         lower,
         upper,
@@ -281,7 +296,7 @@ export function normalizeScenario(raw, i, { direction = null, used, ids } = {}) 
     }
     // Derived per scenario, from ITS OWN legs. A setup-wide r:r would price the false break's entry
     // against the breakout's target and mean neither.
-    const authored = Number(raw.rr)
+    const authored = num(raw.rr)
     sc.rr = computeRR({ direction, ...sc }) ?? (Number.isFinite(authored) ? authored : null)
     return sc
 }

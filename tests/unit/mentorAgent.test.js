@@ -2,7 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     mergeCoverage, _mergeSetupDraft, _parseMentorResponse, _parseCandidates, emptyMentorState,
+    _buildProblemsSection,
 } from '../../services/mentor.agent.service.js'
+import { normalizeSetup } from '../../services/setup.schema.js'
 
 // Mentor's pure seams: the cumulative coverage tag, draft carry-forward, and emit-block
 // extraction. All model-output handling — so every test here is really "what happens when the
@@ -142,4 +144,40 @@ test('an offer with no usable candidates is null, not an empty picker', () => {
     assert.equal(_parseCandidates(`<setups>${JSON.stringify({ candidates: [] })}</setups>`), null)
     assert.equal(_parseCandidates(`<setups>${JSON.stringify({ candidates: 'two' })}</setups>`), null)
     assert.equal(_parseCandidates('no block here'), null)
+})
+
+// ─── The gate speaks to the AGENT, not only to the user ───────────────────────
+// Live runs: with two scenarios the model got the validity ordering right on one and wrong on the
+// other about every other build. The panel showed the refusal; the model never saw it, so the next
+// turn re-emitted the same contradiction. It is fed back into the prompt now.
+
+const INCOHERENT = normalizeSetup({
+    asset: 'NVDA', direction: 'long', type: 'swing', timeframe: '1hr',
+    conditions: [{ id: 'c1', text: 'CHoCH up on the 15m' }],
+    scenarios: [
+        { id: 's1', name: 'pullback', entry_zones: [{ lower: 199, upper: 201, quantity: 60 }],
+          stop_zones: [{ lower: 194, upper: 195 }], validity: { lower: 196, upper: 210 } },
+        { id: 's2', name: 'breakout', entry_zones: [{ lower: 208, upper: 209, quantity: 100 }],
+          stop_zones: [{ lower: 204, upper: 205 }], validity: { lower: 200, upper: 220 } },  // below ITS stop
+    ],
+})
+
+test('a contradiction in the emitted plan is handed back to the agent, naming the scenario', () => {
+    const block = _buildProblemsSection(INCOHERENT)
+    assert.match(block, /DOES NOT ADD UP/)
+    assert.match(block, /breakout: validity floor sits below the stop/)
+    assert.doesNotMatch(block, /pullback:/, 'the coherent premise is not nagged about')
+    assert.match(block, /Generate refuses/, 'it must say what the consequence is, or the model can ignore it')
+})
+
+test('a coherent plan adds nothing — no standing nag in the prompt', () => {
+    const fine = normalizeSetup({ ...INCOHERENT, scenarios: [INCOHERENT.scenarios[0]] })
+    assert.equal(_buildProblemsSection(fine), '')
+    assert.equal(_buildProblemsSection(null), '')
+})
+
+test('MISSING fields are never fed back — an unfinished setup is the normal state of a chat', () => {
+    // Reciting the gaps every turn pushes the agent to fill them by guessing instead of asking.
+    const bare = normalizeSetup({ asset: 'NVDA', direction: 'long' })
+    assert.equal(_buildProblemsSection(bare), '')
 })

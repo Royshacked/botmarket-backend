@@ -508,3 +508,35 @@ test('re-normalising an already-scenario document is idempotent', () => {
     assert.deepEqual(twice.scenarios, once.scenarios)
     assert.deepEqual(twice.entry_zones, once.entry_zones)
 })
+
+// `Number(null)` is 0, and this module re-normalises its OWN output — every streamed turn, every
+// edit, every Generate — where an absent edge is written as `null`, not `undefined`. So an absent
+// away pivot became a pivot at 0 on the second pass, which for a long reads as "price ran away
+// above 0": permanently true, refused by the coherence check, and a runaway alert on every wake.
+// A live verification run refused to Generate a plan with nothing wrong with it.
+test('AN ABSENT EDGE STAYS ABSENT through a second normalise — Number(null) is 0', () => {
+    // 235 sits at/above DRAFT's stop far edge (234.8), so the only thing that can be reported here
+    // is the phantom pivot.
+    const once  = normalizeSetup({ ...DRAFT, validity: { lower: 235, upper: 244 } })
+    assert.equal(once.validity.approach, null)
+
+    const twice = normalizeSetup(once)
+    assert.equal(twice.validity.approach, null, 'a pivot the author never wrote must not appear at 0')
+    assert.deepEqual(validityProblems(twice), [], 'and must not be reported as incoherent')
+})
+
+test('an absent validity floor does not become a floor of 0', () => {
+    // Same trap, other edge: 0 is below every stop, so this refused Generate with "floor sits below
+    // the stop" on a range whose floor was simply never authored.
+    const once  = normalizeSetup({ ...DRAFT, validity: { upper: 244, approach: 246 } })
+    const twice = normalizeSetup(once)
+    assert.equal(twice.validity.lower, null)
+    assert.deepEqual(validityProblems(twice), [])
+})
+
+test('an unsized zone does not become a zone at 0 on the second pass', () => {
+    const once  = normalizeZone({ lower: null, upper: 238.6, quantity: null }, 0, 'ez')
+    const twice = normalizeZone(once, 0, 'ez')
+    assert.deepEqual([twice.lower, twice.upper], [238.6, 238.6], 'a one-edged band stays that level')
+    assert.equal(twice.quantity, null)
+})

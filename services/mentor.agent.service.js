@@ -4,7 +4,7 @@ import { dirname, join } from 'path'
 import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, buildTimeSection, buildObjectiveSection, buildAudienceSection } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS, buildKairosToolHandlers } from './kairos.tools.js'
-import { normalizeSetup, setupReadiness, computeRR } from './setup.schema.js'
+import { normalizeSetup, setupReadiness, computeRR, validityProblems } from './setup.schema.js'
 import { logger } from './logger.service.js'
 
 // Mentor — the trade ASSISTANT (Pipeline F). A conversation → a draft `setup` entity.
@@ -176,10 +176,31 @@ export function _parseCandidates(text) {
 
 // ─── Prompt / messages ────────────────────────────────────────────────────────
 
+/**
+ * What the readiness gate says about the draft the agent itself emitted — fed BACK to it next turn.
+ *
+ * Without this the agent is the only party that can't see the verdict on its own work: the panel
+ * shows a dark Generate button and the reason, the user has to read it out, and the agent re-emits
+ * the same mistake because nothing told it. Live runs made that concrete — with two scenarios, the
+ * validity ordering was right on one and wrong on the other about every other build, and each time
+ * the refusal was invisible to the model that could have fixed it in one line.
+ *
+ * `missing` is deliberately NOT included: an unfinished setup is the normal state of a
+ * conversation, and reciting the gaps every turn would push the agent to fill them by guessing
+ * rather than by asking. A `problem` is different — the setup is complete and CONTRADICTS itself,
+ * which is never something to wait out.
+ */
+export function _buildProblemsSection(draft) {
+    const problems = draft ? validityProblems(draft) : []
+    if (!problems.length) return ''
+    return `\nTHE PLAN YOU EMITTED DOES NOT ADD UP — fix this in your next <setup>, and say so plainly rather than silently re-emitting:\n${
+        problems.map(p => `- ${p}`).join('\n')}\nGenerate refuses a setup in this state, so the user cannot save it until you correct it.`
+}
+
 function _buildSystemPrompt(chatState, accounts, mainAccountId, clientTime, objective = null, audience = null) {
     const asset = chatState?.active_asset || 'none'
     const draft = chatState?.draft
-        ? `\nSetup so far (carry every settled field forward; change only what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
+        ? `\nSetup so far (carry every settled field forward; change only what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}${_buildProblemsSection(chatState.draft)}`
         : ''
 
     const covered = Array.isArray(chatState?.coverage) && chatState.coverage.length
