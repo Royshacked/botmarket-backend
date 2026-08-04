@@ -304,8 +304,36 @@ Each phase deletes the per-hop state it replaces from `MainPage`; nothing is lef
    `each` was not needed: Prometheus already paces its own queue, and its pacing is woven into the
    prompt text (which name, what follows it, what is on the list but unqueued), not just the
    iteration. Moving that to the conveyor would have split one behaviour across two files to no end.
-4. **Atlas → Argus → Prometheus → Atlas.** The sleeve run: fan-out, join, empty, partial, and the
-   two refs. Last because it exercises everything, and because it is the one with a scar per branch.
+4. **Atlas → Argus → Prometheus → Atlas. — DONE (not live-verified), scoped deliberately.**
+   `portfolio.contract.js` declares Atlas, which **closes the vocabulary**: every kind that crosses
+   now has a declared emitter and a declared acceptor, and the two named exceptions the hop tests
+   carried are gone.
+
+   **`awaits` landed here, because Atlas is the first agent standing at two steps.** A step that
+   declares `awaits` receives only that kind; a step that declares none, whose agent appears more
+   than once, receives *nothing* — silence is the safe reading, since picking the first would
+   deliver a finished book to the desk meant to frame it. Ambiguity is a missing declaration, not a
+   coin to flip. So `Allocate` awaits `coverage_set` and `Mandate` declares nothing: it is where the
+   user ENTERS, not somewhere work arrives.
+
+   **The last sender-written brief is gone.** Atlas's opening turn was composed in `MainPage`;
+   it now lives in Atlas's own contract. Both the successful run and the all-empty one go back as
+   the same `coverage_set` — from Atlas's side "nothing, and here is which sleeves" answers the same
+   question as "here is what came back" — so there is one inbox, one brief, one voice, instead of a
+   second hand-written message on the unhappy path where wording drifts. §5's rule is now six tests
+   against the real contract.
+
+   Also fixed on the way: `_applyHop` hardcoded seed delivery to the scanner, which would have
+   silently mis-delivered the moment a second seed desk existed. Two tables now — an inbox per
+   artifact desk, a seed per seed desk.
+
+   **NOT done, deliberately: the generic `each`.** The run loop (`sleeveRunRef`, `_advanceSleeveRun`,
+   `handleSkipSleeve`, the mid-run branch in `handleGenerateList`) stays in `MainPage`. It has ONE
+   caller, three fixed bugs recorded in its comments, and the parts worth sharing — the artifact
+   vocabulary, the empties, the briefs — have now been extracted from around it. What is left is
+   portfolio JUDGMENT (dedupe across sleeves, `RESEARCH_TOP_N`, which sleeve a name is for), and per
+   the data-vs-judgment rule that does not belong in a generic conveyor. Generalising a loop with no
+   second caller would buy risk, not reuse. Revisit if a second fan-out ever appears.
 
 Tests per phase (`pipelineNav.test.jsx` is the precedent): advance, fan-out/join, empty-carries-
 forward, gate-blocks-auto, no-artifact-drops-to-manual, abort-pins.
