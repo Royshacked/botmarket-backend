@@ -404,8 +404,19 @@ D1 and D2 are Phase 4 and don't block Phases 0–3.
 
 ## 10. Phase 6 — a price zone is a scenario
 
-Status: **BUILT** (2026-08-03) — backend 1794 tests green, frontend 319 vitest + 164 node green,
-both lint clean, neither committed. Not live-verified.
+Status: **BUILT + LIVE-VERIFIED** (2026-08-03) — backend 1800 green, frontend 322 vitest + 164 node
+green, both committed. `scripts/verify-mentor.mjs --persist` finished with **no findings**: two rival
+scenarios, generate → arm → live tick → in-zone `wait` holds and posts nothing → in-zone `enter`
+fires the RIVAL premise, stamps its stop and its own size, and persists a placeable paper order plan.
+
+**What is left, and it is not part of this phase** (tracked as TODO #18 / #19):
+
+- **Scaling in** — several entries inside ONE scenario. The shape is reserved (`entry_zones[]` per
+  scenario, already summed by `scenarioQuantity`); readiness refuses more than one until execution
+  can fire per leg, because `_applyVerdict` places the scenario's whole size in one shot.
+- **In-position management + the close journal line.** `_checkPosition` writes the fill line and
+  parks; nothing re-reads the thesis, scales, or moves a stop. And the reconciler flips a closed
+  setup to `closed` before Talos's next wake, so the journal goes quiet exactly when the trade ends.
 
 ### 10.1 Why
 
