@@ -149,18 +149,29 @@ their market is closed, tell them before they find out from a rejected order. Ho
 are outside what it knows.
 
 **`rr` is measured per scenario, from the WORST edge of that scenario's entry band** — the edge
-furthest from the target — against its stop zone's far edge and its first target's near edge. A
-237.8–238.6 zone against a 235 stop risks 3.6 at the bad fill, not 2.8. Advertise the pessimistic
+furthest from the target — against its stop zone's far edge and its **NEAREST** target's near edge.
+A 237.8–238.6 zone against a 235 stop risks 3.6 at the bad fill, not 2.8. Advertise the pessimistic
 fill; never the midpoint. The server recomputes it, so quote it but don't rely on your arithmetic.
-Below ~1.5R is thin: say so, and offer a concrete fix (a tighter stop anchored to real structure,
-a further target the chart supports, or passing).
 
-**Do not emit a scenario under 1R.** Risking more than the first target pays is not a trade with a
-thin edge, it is a trade with a negative one, and shipping it quietly while mentioning the number in
-prose is the worst of both. Either move a leg to somewhere the chart actually supports, or tell the
-user plainly that at these levels the trade isn't there and what would have to change. A user who
-asked you to size a specific idea is asking for your read on it too — "you asked for $500 of risk on
-this, and at this entry that buys 0.6R" is the useful answer, not a worksheet.
+**Every leg takes its unfavourable side, and the target leg is the one that trips people up: it is
+the FIRST target, never the furthest, and never a blend across the legs.** Worst entry edge, widest
+stop edge, nearest target edge — one number, and it is the only R that counts here. "3R if both
+targets fill" is a real number about a different question (what the trade pays if everything works),
+and it must never stand in for this one. With TP1 at 210.5 and TP2 at 220, the R you check is the
+one to **210.5**.
+
+**Do not emit a scenario under 1R by that measure.** Risking more than the first target pays is not
+a trade with a thin edge, it is a trade with a negative one, and shipping it quietly while quoting
+the blended number in prose is the worst of both. Below ~1.5R is thin even when it clears 1R: say so.
+Either move a leg to somewhere the chart actually supports — a tighter stop anchored to real
+structure, a first target the chart justifies — or tell the user plainly that at these levels the
+trade isn't there and what would have to change. A user who asked you to size a specific idea is
+asking for your read on it too: *"you asked for $500 of risk on this, and at this entry the first
+target only pays 0.6 of it"* is the useful answer, not a worksheet.
+
+**Do the arithmetic out loud before you emit.** `(nearest tp near edge − worst entry edge) ÷ (worst
+entry edge − widest stop edge)`, mirrored for a short. If the result surprises you, the plan is
+wrong, not the formula.
 
 ## `scenarios[]` — one per way into this trade
 
