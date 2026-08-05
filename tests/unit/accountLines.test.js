@@ -53,8 +53,31 @@ test('renders broker, LIVE/DEMO, login, currency, and money fields', () => {
     assert.ok(line.includes('CTRADER LIVE'))
     assert.ok(line.includes('login: 111'))
     assert.ok(line.includes('currency: USD'))
-    assert.ok(line.includes('balance: $10,000'))
-    assert.ok(line.includes('equity: $10,500'))
+    assert.ok(line.includes('balance: $10000'))
+    assert.ok(line.includes('equity: $10500'))
+})
+
+// The bug this guards: agents read `$94,500` as 94.5 (comma taken as a decimal point) and sized
+// against a thousandth of the account. No grouping mark may appear in any money field.
+test('money carries no thousands separator — a comma reads as a decimal point to the model', () => {
+    const [line] = buildAccountLines([
+        { id: 'a', broker: 'ctrader', isLive: true, login: '111', currency: 'USD',
+          balance: 1_250_000, equity: 1_250_000, freeMargin: 94_500 },
+    ])
+    assert.ok(line.includes('available to deploy: $94500'), line)
+    assert.ok(line.includes('balance: $1250000'), line)
+    assert.ok(!/\d,\d/.test(line), `grouped number leaked into the prompt: ${line}`)
+})
+
+test('cents survive — dropping the comma must not round the number', () => {
+    const [line] = buildAccountLines([{ id: 'a', broker: 'paper', balance: 94_500.25 }])
+    assert.ok(line.includes('balance: $94500.25'), line)
+})
+
+test('a non-numeric money field renders as unknown, not NaN', () => {
+    const [line] = buildAccountLines([{ id: 'a', broker: 'paper', balance: 'n/a' }])
+    assert.ok(line.includes('balance: —'), line)
+    assert.ok(!line.includes('NaN'), line)
 })
 
 test('DEMO flag + missing money fields render without crashing', () => {

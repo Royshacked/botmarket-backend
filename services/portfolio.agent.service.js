@@ -493,9 +493,11 @@ export function _formatReviewDelta(d) {
 }
 
 export function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = null) {
+    // Ungrouped, for the reason agentUtils.formatMoney spells out: a comma in a number an agent
+    // reads is a decimal point half the time, and `$94,500` came back as 94.5.
     const fmtMoney = (n) => {
         if (n == null) return '—'
-        const abs = Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
+        const abs = Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0, useGrouping: false })
         return `${n >= 0 ? '+' : '-'}$${abs}`
     }
     const fmtPct = (n, decimals = 1) => {
@@ -518,7 +520,7 @@ export function _buildPortfolioStateSection(state, isReviewMode = false, reviewD
     const header = [
         title,
         formatWorkspaceLine(state.workspace),
-        `Total notional: $${Math.round(state.totalNotional).toLocaleString('en-US')} | Total P&L: ${fmtMoney(state.totalPnl)} (${fmtPct(state.totalPnlPct)})`,
+        `Total notional: $${Math.round(state.totalNotional)} | Total P&L: ${fmtMoney(state.totalPnl)} (${fmtPct(state.totalPnlPct)})`,
     ].filter(Boolean).join('\n')
 
     const live    = state.ideas.filter(s => s.actualWeight != null)

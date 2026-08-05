@@ -164,8 +164,17 @@ export function makePromptLoader(absPath, log = LOG) {
 // ─── Money / account formatting ───────────────────────────────────────────────
 // Shared USD formatter and idea-accounts line builder. Each agent keeps only its
 // own header sentence; the per-account lines are byte-identical across agents.
+// NO thousands separator, deliberately. `$94,500` is only unambiguous to a reader who takes the
+// comma as grouping; read the other way round it is `94.500` — and the agents were coming back
+// with 94.5, sizing a book against a thousandth of the cash. These strings are read by a model,
+// not a person, so they follow the same plain-digit shape get_trading_context already emits
+// (tradingContext.tools.js `_fixed`): one number, one meaning. Fractions still render — a cash
+// balance of 94500.25 is not 94500 — they just never carry a grouping mark.
 export function formatMoney(v) {
-    return v != null ? `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'
+    if (v == null) return '—'
+    const n = Number(v)
+    if (!Number.isFinite(n)) return '—'
+    return `$${n.toLocaleString('en-US', { maximumFractionDigits: 2, useGrouping: false })}`
 }
 
 // Which marked account a call / portfolio binds to as MAIN — the venue + monitoring anchor.
