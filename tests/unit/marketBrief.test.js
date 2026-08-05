@@ -257,3 +257,71 @@ test('the offer waits for its hour, then stays open for the rest of the day', ()
 test('the dedupe window is the UTC day containing the tick', () => {
     assert.equal(_dayStart(Date.parse('2026-08-03T20:00:00Z')), Date.parse('2026-08-03T00:00:00Z'))
 })
+
+// ── Delivery: the brief is streamed into Axl's thread, not posted to the social chat ──────────
+// It used to arrive as a second social-chat message — a page of market prose in a surface built for
+// one-liners, with nobody to ask about it. These pin the shape the Axl panel consumes: a named wait
+// first (writing a stale brief is a live model turn), then the text, then the turn's payload.
+
+import { EventEmitter } from 'node:events'
+import { streamBrief } from '../../api/axl/axl.controller.js'
+
+function makeReqRes() {
+    const res = new EventEmitter()
+    res.writes = []
+    res.ended  = false
+    res.setHeader    = () => {}
+    res.flushHeaders = () => {}
+    res.write = (chunk) => { res.writes.push(chunk); return true }
+    res.end   = () => { res.ended = true }
+    return { req: new EventEmitter(), res }
+}
+
+function sseEvents(res) {
+    return res.writes
+        .join('')
+        .split('\n\n')
+        .map(block => {
+            const ev = block.match(/event: (\w+)/)?.[1]
+            const dt = block.match(/data: (.+)/)?.[1]
+            return ev ? { event: ev, data: dt ? JSON.parse(dt) : null } : null
+        })
+        .filter(Boolean)
+}
+
+test('the brief streams as a turn: the wait is named, then the text, then the payload', async () => {
+    const { req, res } = makeReqRes()
+    const brief = { text: 'Asia closed mixed. Europe is bid.', asOf: '2026-08-05', cached: true }
+
+    await streamBrief(req, res, { fetchBrief: async () => brief })
+
+    const evs = sseEvents(res)
+    // The chip comes FIRST — before the await, or a minute of brief-writing is a silent minute.
+    assert.equal(evs[0].event, 'status')
+    assert.deepEqual(evs[0].data, { tool: 'market_brief' })
+    // One token carrying the whole brief: there is nothing to stream progressively (the text is
+    // complete before it exists), and the client's typewriter is what paces it.
+    assert.deepEqual(evs[1], { event: 'token', data: { text: brief.text } })
+    assert.deepEqual(evs.at(-1), { event: 'done', data: { reply: brief.text, asOf: '2026-08-05', cached: true } })
+    assert.equal(res.ended, true)
+})
+
+test('a brief that cannot be written fails the turn — no empty bubble reported as delivered', async () => {
+    const { req, res } = makeReqRes()
+
+    await streamBrief(req, res, { fetchBrief: async () => { throw new Error('no brief') } })
+
+    const evs = sseEvents(res)
+    assert.equal(evs.find(e => e.event === 'done'), undefined, 'a failure must not report done')
+    assert.equal(evs.at(-1).event, 'error')
+})
+
+test('a client that walked away is not written to', async () => {
+    const { req, res } = makeReqRes()
+    // Abort DURING the write — the realistic case, since writing a stale brief takes a while.
+    await streamBrief(req, res, { fetchBrief: async () => { res.emit('close'); return { text: 'x', asOf: 'd' } } })
+
+    const evs = sseEvents(res)
+    assert.equal(evs.some(e => e.event === 'token'), false, 'no brief text to a closed connection')
+    assert.equal(evs.some(e => e.event === 'done'),  false)
+})

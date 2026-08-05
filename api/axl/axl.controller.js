@@ -4,8 +4,6 @@ import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages } from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
 import { getMarketBrief } from '../../services/marketBrief.service.js'
-import { postCard } from '../../services/notifyCard.js'
-import { logger } from '../../services/logger.service.js'
 
 // The desks a reply may hand the user to. Validated here rather than trusted from the model: an
 // unknown key would leave the client trying to navigate to a tab that doesn't exist, so it becomes
@@ -104,33 +102,43 @@ export async function streamAxl(req, res) {
 }
 
 /**
- * Deliver today's market brief into the user's Axl conversation — the CONFIRM half of the daily
- * offer card. The offer is posted by the notifier; nothing is written until the user asks for it
- * here, which is the point: a broadcast nobody wanted is spam.
+ * Today's market brief, streamed into the Axl chat panel — the CONFIRM half of the daily offer
+ * card. The offer is posted by the notifier; nothing is written until the user asks for it here,
+ * which is the point: a broadcast nobody wanted is spam.
  *
- * The brief itself comes from the shared service, so what lands here is the same text Axl relays in
- * chat. Resolving the offer card is deliberately NOT done here: the client resolves it on a
- * successful response, the way every other card in the social chat is resolved, so its local copy
- * collapses immediately instead of staying pending until a reload. A failure therefore leaves the
- * card actionable, which is the behaviour we want — the user can just press it again.
+ * ── WHY A STREAM AND NOT A POSTED CARD ───────────────────────────────────────
+ * The brief used to be posted back into the social chat as a second message, which put a wall of
+ * market prose in a surface built for one-line notifications — and left the user reading it with
+ * nobody to ask about it. It belongs in Axl's chat: the brief lands as Axl's turn, so "what does
+ * that mean for my book?" is the next thing the user types, not a new journey.
+ *
+ * It is a DELIVERY dressed as a turn, so it does NOT go through /stream: nothing is said to Axl,
+ * no model turn runs here, and the reply is fixed text. The client still consumes it with the same
+ * SSE handlers as a real turn, which is what makes the waiting chip and the typewriter work for
+ * free.
+ *
+ * The whole brief goes out as ONE token event. There is nothing to stream progressively — the text
+ * is already complete by the time it exists (getMarketBrief builds it in one model turn behind the
+ * shared cache, or returns the copy every other reader that hour got). The pacing the user sees is
+ * the client's typewriter, which is where pacing has always lived.
+ *
+ * Resolving the offer card is deliberately NOT done here: the client resolves its own copy, the way
+ * every other card in the social chat is resolved, so it collapses immediately rather than staying
+ * pending until a reload.
  */
-export async function deliverBrief(req, res) {
-    const userId = req.user._id
+export async function streamBrief(req, res, { fetchBrief = getMarketBrief } = {}) {
+    await streamAgentResponse(req, res, {
+        log: LOG,
+        handler: async ({ sendEvent, signal }) => {
+            // Writing a stale brief is a live model turn with web searches behind it — the chip is
+            // the only thing standing between the user and a silent minute.
+            sendEvent('status', { tool: 'market_brief' })
 
-    try {
-        const { text, asOf, cached } = await getMarketBrief()
+            const { text, asOf, cached } = await fetchBrief()
+            if (signal.aborted) return {}
 
-        const posted = await postCard(
-            { userId, content: text, type: 'market_brief', payload: { asOf } },
-            { tag: 'Market brief', log: LOG },
-        )
-        // postCard never throws — it returns null when delivery failed. Reporting success then would
-        // be a lie the user discovers by looking at an empty chat.
-        if (!posted) return res.status(502).json({ error: 'Could not deliver the brief to your chat.' })
-
-        return res.json({ ok: true, messageId: posted.id, asOf, cached })
-    } catch (err) {
-        logger.error(LOG, 'deliverBrief failed', err)
-        return res.status(502).json({ error: 'Could not write the market brief right now.' })
-    }
+            sendEvent('token', { text })
+            return { reply: text, asOf, cached }
+        },
+    })
 }
