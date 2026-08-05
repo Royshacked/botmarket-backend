@@ -146,8 +146,11 @@ test('an uncovered name carries no update-mode context — there is nothing to r
     assert.equal(h.calls.research[0].chatState, undefined)
 })
 
-test('the refresh prompt pins prose to the existing language, enums to English', () => {
+// The refresh prompt says NOTHING about language on purpose — see _buildRefreshPrompt. Mirroring the
+// existing doc is what let a headless re-model rewrite an English thesis in Portuguese; the one rule
+// now rides on every agent's base prompt (LANGUAGE_RULE) and a headless run has no user to have asked
+// for anything else. A second instruction here would only compete with it.
+test('the refresh prompt carries no language instruction of its own', () => {
     const p = _buildRefreshPrompt('NVDA', null)
-    assert.match(p, /SAME LANGUAGE as the existing coverage/)
-    assert.match(p, /rating, status, band_basis, horizon.*canonical English/)
+    assert.doesNotMatch(p, /language/i)
 })

@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'url'
 import { parseEmitBlock, mergeDraft, runAgentStream } from './agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, buildTimeSection, buildObjectiveSection, buildAudienceSection } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, buildTimeSection, buildObjectiveSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS, buildKairosToolHandlers } from './kairos.tools.js'
 import { normalizeSetup, setupReadiness, computeRR, validityProblems } from './setup.schema.js'
@@ -46,8 +46,8 @@ async function chatStream({
     const tools        = KAIROS_TOOLS
     const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
-    const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, clientTime, objective, audience)
-    const builtMessages = _buildMessages({ messages, userPrompt })
+    const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, objective, audience)
+    const builtMessages = attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState, clientTime))
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
     // but a turn that forgets a dimension must not un-read it. Union with the prior state.
@@ -197,16 +197,15 @@ export function _buildProblemsSection(draft) {
         problems.map(p => `- ${p}`).join('\n')}\nGenerate refuses a setup in this state, so the user cannot save it until you correct it.`
 }
 
-function _buildSystemPrompt(chatState, accounts, mainAccountId, clientTime, objective = null, audience = null) {
+/**
+ * SESSION-STABLE only. Talos carries THREE per-turn things and all three moved to
+ * _buildTurnContext: the setup draft (and the problems derived from it), the coverage tally (it
+ * grows on the turns the model reads something new), and the clock. Any one of them left here
+ * would have been enough to keep the history breakpoint from hitting — the cache prefix does not
+ * care how small the volatile block is, only that it sits ahead of the conversation.
+ */
+function _buildSystemPrompt(chatState, accounts, mainAccountId, objective = null, audience = null) {
     const asset = chatState?.active_asset || 'none'
-    const draft = chatState?.draft
-        ? `\nSetup so far (carry every settled field forward; change only what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}${_buildProblemsSection(chatState.draft)}`
-        : ''
-
-    const covered = Array.isArray(chatState?.coverage) && chatState.coverage.length
-        ? chatState.coverage.join(', ')
-        : 'nothing yet'
-
     const today = new Date().toISOString().slice(0, 10)
     const audienceBlock = buildAudienceSection(audience)
     const objectiveBlock = buildObjectiveSection(objective)
@@ -216,15 +215,34 @@ ${audienceBlock ? `
 ${audienceBlock}
 
 ` : ''}${objectiveBlock ? `\n${objectiveBlock}\n` : ''}
-${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.
 CONVERSATION CONTEXT:
-Active asset: ${asset}${draft}${_buildAccountsSection(accounts, mainAccountId)}`
+Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}`
 
     return [
-        { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: _baseSystemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamicContext },
     ]
+}
+
+/**
+ * Everything that is true only for THIS turn. Rides on the last user message. PURE.
+ *
+ * The COVERAGE tally travels with its own re-state instruction, and the draft with its
+ * carry-forward rule and the problems block: an instruction separated from the data it governs is
+ * how a prompt quietly stops meaning what it says.
+ */
+export function _buildTurnContext(chatState, clientTime = null) {
+    const draft = chatState?.draft
+        ? `\nSetup so far (carry every settled field forward; change only what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}${_buildProblemsSection(chatState.draft)}`
+        : ''
+
+    const covered = Array.isArray(chatState?.coverage) && chatState.coverage.length
+        ? chatState.coverage.join(', ')
+        : 'nothing yet'
+
+    return `---
+${buildTimeSection(clientTime, 'active_from / valid_until')}
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}`
 }
 
 function _buildAccountsSection(accounts, mainAccountId = null) {

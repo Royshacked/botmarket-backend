@@ -10,7 +10,7 @@ import { isMode } from './kairos.modes.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildObjectiveSection, buildAudienceSection, TRADE_HORIZONS } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildObjectiveSection, buildAudienceSection, LANGUAGE_RULE, TRADE_HORIZONS } from './agentUtils.js'
 import { makeTradingContextHandlers } from './tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
 import { buildTagCaptures } from './llmStream.util.js'
@@ -211,7 +211,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     // (_stampHistoryCache in the Anthropic provider), and this leaves the system prompt at one
     // normally, two in hand-off — the ceiling Atlas and Kairos already run at. Do not add a third.
     const systemPrompt = [
-        { type: 'text', text: promptLoader(), cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: promptLoader() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
         ...(inHandoff ? [{ type: 'text', text: _handoffMode(), cache_control: { type: 'ephemeral' } }] : []),
         { type: 'text', text: dynamic.join('\n\n') },
     ]

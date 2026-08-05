@@ -114,10 +114,12 @@ Rules for the block:
 - `kill_criteria` must be **specific and checkable** (a number + a condition), never vague ("if it goes
   down"). These are what makes the thesis *falsifiable* and *monitorable*. They are the ONLY place
   invalidation lives — the valuation band is not a stop level, and no price alone breaks a thesis.
-- Free prose (`thesis`, `kill_criteria`, `catalysts`, `basis`, `rationale`) is written in the language
-  of the conversation — it is the analyst's own research, read by the analyst. The VOCABULARY fields
-  (`rating`, `status`, `band_basis`, `horizon`) stay canonical English regardless; they are enums the
-  normalizer validates, not prose.
+- Free prose (`thesis`, `kill_criteria`, `catalysts`, `basis`, `rationale`) follows the LANGUAGE rule
+  at the end of this prompt — English unless the user has explicitly asked otherwise. A coverage doc
+  outlives the turn that wrote it and is re-read by a monitor and a re-model that have no conversation
+  to inherit from, so its language must not depend on one. The VOCABULARY fields (`rating`, `status`,
+  `band_basis`, `horizon`) stay canonical English regardless; they are enums the normalizer validates,
+  not prose.
 - `estimates.ours` vs `estimates.consensus` should show the axis of your edge (the metric you differ on).
 - Fill only fields you actually have; omit or null the rest. Never fabricate a figure to complete the shape.
 

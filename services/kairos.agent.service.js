@@ -2,7 +2,7 @@ import { fileURLToPath } from 'url'
 import { makePhaseCapture, runAgentStream } from './agentIO.js'
 import { parseEmitBlock, mergeDraft } from './agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, resolveMainAccountId, buildObjectiveSection, buildAudienceSection, TRADE_HORIZONS } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, resolveMainAccountId, buildObjectiveSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, TRADE_HORIZONS } from './agentUtils.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { KAIROS_TOOLS_FOR_MODE, buildKairosToolHandlers } from './kairos.tools.js'
 import { normalizeMode } from './kairos.modes.js'
@@ -51,7 +51,7 @@ async function chatStream({
     const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, mode, seed, mainAccountId, objective, audience)
-    const builtMessages = _buildMessages({ messages, userPrompt })
+    const builtMessages = attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState))
 
     // The model emits <phase>N</phase> (1–7) at the start of each turn; capture it for the UI
     // progress + next-turn model routing. <call> is suppressed from the token stream and parsed
@@ -176,11 +176,18 @@ export async function _finalizeCall(call, { userId = null, accounts = [], mainAc
 }
 
 // ─── Prompt / messages ────────────────────────────────────────────────────────
+/**
+ * Everything here is SESSION-STABLE: the date, the committed mode, the mandate, the audience, the
+ * active asset, the Argus seed, the account list. It is written once and read from cache on every
+ * turn after.
+ *
+ * The DRAFT is not, and it used to live here — see _buildTurnContext below. A block that changes
+ * every turn sitting in `system` is ahead of the whole conversation in the cache prefix, so the
+ * history breakpoint behind it could never hit and the entire chat was re-read at full price, every
+ * turn. See agentUtils.attachTurnContext.
+ */
 function _buildSystemPrompt(chatState, accounts, mode = normalizeMode(), seed = null, mainAccountId = null, objective = null, audience = null) {
     const asset = chatState?.active_asset || 'none'
-    const draft = chatState?.draft
-        ? `\nDraft call so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
-        : ''
     // K3: a structured Argus candidate seed (scan hand-off or scan-list click) — the ticker + Argus's
     // read arrive as fields, not free text. Start at Phase 1 with this ticker; fold `analysis` into
     // Phase 2 as the provisional thesis (verify it, don't take it on faith).
@@ -211,14 +218,25 @@ ${audienceBlock ? `
 ${audienceBlock}
 
 ` : ''}${objectiveBlock ? `\n${objectiveBlock}\n\n` : ''}CONVERSATION CONTEXT:
-Active asset: ${asset}${seedBlock}${draft}${_buildAccountsSection(accounts, mainAccountId)}`
+Active asset: ${asset}${seedBlock}${_buildAccountsSection(accounts, mainAccountId)}`
 
     const modeModule = (_modePrompt[mode] ?? _modePrompt.discretionary)()
     return [
-        { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: _baseSystemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: modeModule, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamicContext },
     ]
+}
+
+/**
+ * The one genuinely per-TURN thing Kairos carries: the call being built. Rides on the last user
+ * message so it is frozen history by the next turn instead of re-written ahead of it. PURE;
+ * returns '' when no draft exists, so nothing is appended on a fresh conversation.
+ */
+export function _buildTurnContext(chatState) {
+    return chatState?.draft
+        ? `---\nDraft call so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
+        : ''
 }
 
 function _buildAccountsSection(accounts, mainAccountId = null) {

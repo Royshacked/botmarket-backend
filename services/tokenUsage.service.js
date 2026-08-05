@@ -29,25 +29,55 @@ export function calcCost(model, usage) {
     )
 }
 
-export async function recordUsage(userId, model, usage) {
+/**
+ * A Mongo-safe field segment. Field PATHS are dot-delimited, so any dot in a key would silently
+ * nest a subdocument instead of naming one counter — which is why `byModel` has always replaced
+ * them. Same rule, one helper, now that a second dimension needs it.
+ */
+const _fieldKey = v => String(v ?? 'unknown').replace(/[.$]/g, '_')
+
+/**
+ * @param {string} [agent]  which desk spent this — the missing dimension. The month totals say
+ *   caching pays (reads/writes ≈ 3.7 in Aug 2026) but not WHERE the uncached quarter is being
+ *   spent, and that is the whole question: a desk whose volatile system tail sits ahead of the
+ *   history breakpoint re-reads its own conversation at full price every turn, and it is
+ *   indistinguishable from ordinary first-turn cost until it is counted per desk.
+ *   `turns` rides along so a desk's cost can be read per call, not just in total — a big prompt
+ *   used rarely and a small one used constantly look identical in a token count alone.
+ */
+export async function recordUsage(userId, model, usage, agent) {
     if (!userId || !usage) return
     const db      = await getDb()
     const key     = monthKey()
     const cost    = calcCost(model, usage)
-    const mKey    = model.replace(/\./g, '_')  // dots are not allowed in MongoDB field paths
+    const mKey    = _fieldKey(model)
+    const aKey    = _fieldKey(agent)
+
+    const input      = usage.input_tokens                ?? 0
+    const output     = usage.output_tokens               ?? 0
+    const cacheRead  = usage.cache_read_input_tokens     ?? 0
+    const cacheWrite = usage.cache_creation_input_tokens ?? 0
 
     await db.collection('token_usage').updateOne(
         { userId, month: key },
         {
             $inc: {
-                inputTokens:       usage.input_tokens                  ?? 0,
-                outputTokens:      usage.output_tokens                 ?? 0,
-                cacheReadTokens:   usage.cache_read_input_tokens       ?? 0,
-                cacheWriteTokens:  usage.cache_creation_input_tokens   ?? 0,
+                inputTokens:       input,
+                outputTokens:      output,
+                cacheReadTokens:   cacheRead,
+                cacheWriteTokens:  cacheWrite,
                 totalCost:         cost,
-                [`byModel.${mKey}.inputTokens`]:  usage.input_tokens  ?? 0,
-                [`byModel.${mKey}.outputTokens`]: usage.output_tokens ?? 0,
+                [`byModel.${mKey}.inputTokens`]:  input,
+                [`byModel.${mKey}.outputTokens`]: output,
                 [`byModel.${mKey}.cost`]:         cost,
+                // Cache columns are carried per AGENT and not per model, deliberately: the model is
+                // a price, the agent is the thing you can actually change.
+                [`byAgent.${aKey}.inputTokens`]:      input,
+                [`byAgent.${aKey}.outputTokens`]:     output,
+                [`byAgent.${aKey}.cacheReadTokens`]:  cacheRead,
+                [`byAgent.${aKey}.cacheWriteTokens`]: cacheWrite,
+                [`byAgent.${aKey}.cost`]:             cost,
+                [`byAgent.${aKey}.turns`]:            1,
             },
             $setOnInsert: { userId, month: key },
         },
@@ -70,5 +100,6 @@ export async function getMonthlyUsage(userId, month = monthKey()) {
         cacheReadTokens:   doc?.cacheReadTokens  ?? 0,
         cacheWriteTokens:  doc?.cacheWriteTokens ?? 0,
         byModel:           doc?.byModel          ?? {},
+        byAgent:           doc?.byAgent          ?? {},
     }
 }

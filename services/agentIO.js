@@ -277,6 +277,20 @@ export function makeChartChatPipe(onChart, { log = '[agentIO]' } = {}) {
  * Deliberately does NOT parse otherwise: what comes back out of the stream is the agent's own
  * contract.
  */
+/**
+ * An agent's log tag → the key its spend is booked under. `'[analystAgent]'` → `'analystAgent'`.
+ * PURE, exported for tests.
+ *
+ * The tag is a display string, so this must not trust its shape: brackets are optional, and
+ * anything that isn't a plain identifier character is dropped rather than passed to Mongo as part
+ * of a field path. An unusable tag books to `unknown` — spend is never dropped just because a
+ * caller's tag was odd, since a silently unattributed desk is the one thing this is meant to end.
+ */
+export function agentKeyFromLog(log) {
+    const key = String(log ?? '').replace(/[[\]]/g, '').trim().replace(/[^\w-]/g, '_')
+    return key || 'unknown'
+}
+
 // Every agent's `chatStream` takes `_run = runAgentStream` and calls `_run(...)` here. That one
 // seam is what lets the SHARED contract test (tests/unit/agentStreamContract.test.js) drive every
 // agent's real chatStream with no provider and no model id — the assertions live once, not per
@@ -291,7 +305,11 @@ export async function runAgentStream({
     // Injectable so the argument-bag contract can be tested without a provider or a real model id.
     _resolve = resolveAgentStream,
 }) {
-    const { model, streamFn, provider, onUsage } = _resolve(requestedModel, userId)
+    // WHICH desk is spending. Derived from `log` rather than added as a new argument: every agent
+    // already passes its own tag here and nothing else in the bag identifies the caller, so taking
+    // it from the tag is what makes this zero edits at the eight call sites — a new agent is
+    // attributed the moment it exists, with nothing to remember to wire.
+    const { model, streamFn, provider, onUsage } = _resolve(requestedModel, userId, agentKeyFromLog(log))
 
     const chart = onChart ? makeChartChatPipe(onChart, { log }) : null
 

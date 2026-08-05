@@ -45,15 +45,18 @@ async function _existingCoverage(userId, symbol) {
 // The headless research prompt. A refresh is a re-model of an EXISTING thesis, optionally focused by
 // Atlas's question. Pure — exported for tests.
 //
-// The language line matters because this path has no conversation to inherit from. A thesis written
-// in Spanish by an analyst working in Spanish would otherwise come back in English purely because
-// the SCHEDULER spoke English — a doc silently changing language on its own, with no one asking.
+// NO LANGUAGE LINE HERE, deliberately. This used to say "write in the SAME LANGUAGE as the existing
+// coverage", to stop a Spanish thesis coming back in English merely because the SCHEDULER spoke
+// English. It backfired: mirroring whatever it was shown is exactly how a doc changes language with
+// nobody asking (ZTS came back in Portuguese over an English thesis, 2026-08-05). The rule now lives
+// once in agentUtils.LANGUAGE_RULE, on every agent's base prompt — English unless the USER asked for
+// something else — and a headless run has no user to have asked. Re-adding an instruction here would
+// only give the model a second, conflicting one.
 export function _buildRefreshPrompt(ticker, question) {
     const q = typeof question === 'string' && question.trim() ? question.trim() : null
     return `Re-research ${ticker} and emit an updated <coverage> block for it.`
         + (q ? ` Focus especially on: ${q}` : '')
         + ` This is a refresh of an existing thesis for a portfolio review — produce your current variant-perception view, our price target vs the Street, catalysts, and monitorable kill-criteria.`
-        + ` Write the block's prose in the SAME LANGUAGE as the existing coverage shown to you; keep the vocabulary fields (rating, status, band_basis, horizon) in canonical English.`
 }
 
 /**

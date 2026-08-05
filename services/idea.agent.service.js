@@ -24,7 +24,7 @@ import { getSecFilings } from '../providers/sec.provider.js'
 import { getEarningsCalendar, getFundamentals } from '../providers/fmp.provider.js'
 import { getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
 import { logger } from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, makeToolHandler, buildTimeSection, formatClientTime } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, makePromptLoader, buildAccountLines, makeToolHandler, buildTimeSection, formatClientTime, attachTurnContext, LANGUAGE_RULE } from './agentUtils.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
 
@@ -137,8 +137,8 @@ export const ideaAgentService = {
 }
 
 async function chat({ messages, userPrompt, analysisState = emptyAnalysisState(), clientTime = null }) {
-    const systemPrompt = _buildSystemPrompt(analysisState, [], clientTime)
-    const builtMessages = _buildMessages({ messages, userPrompt, analysisState })
+    const systemPrompt = _buildSystemPrompt(analysisState, [])
+    const builtMessages = attachTurnContext(_buildMessages({ messages, userPrompt, analysisState }), _buildTurnContext(analysisState, clientTime))
 
     logger.info(LOG, 'chat start', {
         userPrompt,
@@ -172,8 +172,8 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
     const tools        = TOOLS
     const toolHandlers = _buildToolHandlers(onChart, userId)
 
-    const systemPrompt   = _buildSystemPrompt(analysisState, ideaAccounts, clientTime, mainAccountId)
-    const builtMessages  = _buildMessages({ messages, userPrompt, analysisState })
+    const systemPrompt   = _buildSystemPrompt(analysisState, ideaAccounts, mainAccountId)
+    const builtMessages  = attachTurnContext(_buildMessages({ messages, userPrompt, analysisState }), _buildTurnContext(analysisState, clientTime))
 
     // (the 'chatStream start' line lives in runAgentStream now — it's the one that knows the
     // resolved model + provider; `meta` below carries this agent's extra fields)
@@ -204,33 +204,52 @@ async function chatStream({ messages, userPrompt, analysisState = emptyAnalysisS
     return { reply, analysisState: updatedState, phase: phase.get(), ...(tradeIdea ? { tradeIdea } : {}) }
 }
 
-function _buildSystemPrompt(analysisState, ideaAccounts = [], clientTime = null, mainAccountId = null) {
-    const asset   = analysisState?.structured_state?.active_asset || 'none'
+/**
+ * THREE tiers, by how often each changes — which is the same thing as where each one can cache.
+ *
+ *   1. the instructions      byte-identical every request, for every user  → cached prefix
+ *   2. session-stable context date + active asset + accounts               → system tail
+ *   3. per-TURN state        the rolling summary, the clock, the draft     → the conversation
+ *
+ * Tier 3 used to sit in the system tail with tier 2, and that is what kept the history breakpoint
+ * from ever hitting: a block that changes every turn invalidates the whole conversation behind it.
+ * It is the same text the model saw before, moved to the end of the messages — see
+ * agentUtils.attachTurnContext for why the end of the conversation is the cacheable place for it.
+ */
+function _buildSystemPrompt(analysisState, ideaAccounts = [], mainAccountId = null) {
+    const asset = analysisState?.structured_state?.active_asset || 'none'
+
+    // The DATE is tier 2, not tier 3: it is stable for a whole trading session, and re-deriving it
+    // per turn would cost the cache for nothing. It does invalidate once a day, at midnight UTC.
+    const today = new Date().toISOString().slice(0, 10)
+    const stableContext = `---
+CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.
+Active asset: ${asset}${_buildIdeaAccountsSection(ideaAccounts, mainAccountId)}`
+
+    return [
+        { type: 'text', text: _baseSystemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: stableContext },
+    ]
+}
+
+/**
+ * Tier 3 — what is true only for THIS turn. Rides on the last user message. PURE.
+ * Returns '' when there is nothing turn-specific to say, so nothing is appended.
+ */
+function _buildTurnContext(analysisState, clientTime = null) {
     const summary = analysisState?.recent_chat_summary || 'No prior context.'
     const pt      = analysisState?.structured_state?.pending_trade
 
-    // Include the current pending_trade so the LLM updates from it rather than
-    // re-deriving the entire state from scratch each turn.
+    // The current pending_trade, so the model updates FROM it rather than re-deriving the whole
+    // state each turn. Genuinely per-turn: it changes as the trade is built.
     const stateSection = pt
         ? `\nCurrent pending trade (carry all set fields forward — only update what changed):\n${JSON.stringify(pt, null, 2)}`
         : ''
 
-    // Split into a stable base (the instructions — byte-identical every request)
-    // and a volatile context tail. cache_control on the base lets Anthropic cache
-    // the tools+instructions prefix across turns (and across users), so only the
-    // short tail is reprocessed each request. Returned as system content blocks.
-    const today = new Date().toISOString().slice(0, 10)
-    const dynamicContext = `---
-CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.
+    return `---
 ${buildTimeSection(clientTime, 'a time condition')}
 CONVERSATION CONTEXT:
-${summary}
-Active asset: ${asset}${stateSection}${_buildIdeaAccountsSection(ideaAccounts, mainAccountId)}`
-
-    return [
-        { type: 'text', text: _baseSystemPrompt(), cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: dynamicContext },
-    ]
+${summary}${stateSection}`
 }
 
 

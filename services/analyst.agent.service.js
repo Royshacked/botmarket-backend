@@ -12,7 +12,7 @@ import { dirname, join } from 'path'
 
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
-import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, buildObjectiveSection, buildAudienceSection, COMMON_TOOL_HANDLERS } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, buildObjectiveSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, COMMON_TOOL_HANDLERS } from './agentUtils.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
 import { buildTagCaptures } from './llmStream.util.js'
@@ -72,7 +72,7 @@ async function chatStream({
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
     const systemPrompt  = _buildSystemPrompt(chatState, seed, objective, audience)
-    const builtMessages = _buildMessages({ messages, userPrompt })
+    const builtMessages = attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState))
 
 
     const phase = makePhaseCapture(6, onPhase)
@@ -109,12 +109,17 @@ function _cleanDraft(c) {
     return { ...c, symbol: c.symbol.toUpperCase().trim() }
 }
 
+/**
+ * SESSION-STABLE only. The draft moved to _buildTurnContext — it changes every turn, and in
+ * `system` that sat ahead of the whole conversation in the cache prefix, so the history breakpoint
+ * behind it could never hit. See agentUtils.attachTurnContext.
+ *
+ * `existing_coverage` deliberately STAYS: it is the stored thesis, fetched once for the session and
+ * byte-identical thereafter — it is the draft that moves, not everything shaped like JSON.
+ */
 function _buildSystemPrompt(chatState, seed = null, objective = null, audience = null) {
     const today  = new Date().toISOString().slice(0, 10)
     const active = chatState?.active_symbol || 'none'
-    const draft  = chatState?.draft
-        ? `\nDraft coverage so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
-        : ''
     const existingBlock = chatState?.existing_coverage
         ? `\nEXISTING COVERAGE — update mode: this name is already in the book. Revise the thesis rather than starting from scratch. Reference what's changed since the prior view.\n${JSON.stringify(chatState.existing_coverage, null, 2)}`
         : ''
@@ -132,11 +137,21 @@ CURRENT DATE: ${today}. Resolve relative dates (this quarter, next earnings) aga
 ${audienceBlock ? `
 ${audienceBlock}
 
-` : ''}${objectiveBlock ? `\n${objectiveBlock}\n\n` : ''}Active name: ${active}${seedBlock}${draft}${existingBlock}`
+` : ''}${objectiveBlock ? `\n${objectiveBlock}\n\n` : ''}Active name: ${active}${seedBlock}${existingBlock}`
     return [
-        { type: 'text', text: _systemPrompt(), cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: _systemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamic },
     ]
+}
+
+/**
+ * The one per-TURN thing Prometheus carries: the coverage being drafted. Rides on the last user
+ * message so it is frozen history by the next turn. PURE; '' when there is no draft yet.
+ */
+export function _buildTurnContext(chatState) {
+    return chatState?.draft
+        ? `---\nDraft coverage so far (carry set fields forward, only change what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}`
+        : ''
 }
 
 function _buildMessages({ messages, userPrompt }) {

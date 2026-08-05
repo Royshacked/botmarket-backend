@@ -14,9 +14,9 @@ const LOG = '[agentUtils]'
 // the standard per-request usage recorder (a no-op when there's no userId). Every
 // streaming agent repeats these two lines verbatim; centralizing them means a new
 // agent (e.g. Axl) can't silently diverge on model routing or usage accounting.
-export function resolveAgentStream(requestedModel, userId) {
+export function resolveAgentStream(requestedModel, userId, agent) {
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
-    const onUsage = userId ? (usage) => recordUsage(userId, model, usage).catch(() => {}) : undefined
+    const onUsage = userId ? (usage) => recordUsage(userId, model, usage, agent).catch(() => {}) : undefined
     return { model, streamFn, provider, onUsage }
 }
 
@@ -99,6 +99,44 @@ export function normalizeMessages(messages, maxCount) {
         else merged.push({ ...m })
     }
     return trimHistory(merged, maxCount)
+}
+
+// ─── Per-turn context placement ───────────────────────────────────────────────
+/**
+ * Attach this turn's VOLATILE context to the end of the conversation instead of to the system
+ * prompt. Returns a NEW array (the input is never mutated); a falsy `text`, or no message to
+ * attach to, returns the input untouched.
+ *
+ * WHY IT MOVES AT ALL. Caching is a prefix match over `tools → system → messages`, so a block that
+ * changes every turn invalidates everything AFTER it. Sitting in `system`, a volatile tail is ahead
+ * of the entire conversation: the tools and the base prompt still cache (their breakpoints come
+ * first), but the history breakpoint the provider stamps on the last message can never hit, and the
+ * whole conversation is re-read at full price on every turn — for the life of the session. That is
+ * the shape of the uncached ~24% of prompt tokens measured across Aug 2026.
+ *
+ * WHY THE END OF THE CONVERSATION IS THE RIGHT PLACE, and not just a later one. Text written into a
+ * MESSAGE is frozen the moment it is written: on the next turn it is ordinary history, byte for
+ * byte, so it caches. Text written into `system` is regenerated every turn and cannot. Moving it
+ * converts a permanent cache miss into a one-turn one.
+ *
+ * The caller is responsible for sending only genuinely per-turn material through here — a draft
+ * being built, a rolling summary, the clock. Session-stable context (the mode, the mandate, the
+ * account list) belongs in `system`, where it is written once and read from cache thereafter.
+ */
+export function attachTurnContext(messages, text) {
+    const body = typeof text === 'string' ? text.trim() : ''
+    if (!body || !Array.isArray(messages) || !messages.length) return messages ?? []
+
+    const last = messages[messages.length - 1]
+    // Only ever onto a USER turn. Appending to an assistant message would put words in the model's
+    // own mouth — it would read its previous reply as having stated this context itself.
+    if (!last || last.role !== 'user') return messages
+
+    const content = typeof last.content === 'string'
+        ? `${last.content}\n\n${body}`
+        : [...(Array.isArray(last.content) ? last.content : []), { type: 'text', text: body }]
+
+    return [...messages.slice(0, -1), { ...last, content }]
 }
 
 // ─── Prompt hot-reload loader ─────────────────────────────────────────────────
@@ -302,6 +340,30 @@ export function buildAudienceSection(level) {
     }
     return null
 }
+
+// ─── Language ─────────────────────────────────────────────────────────────────
+// English by DEFAULT, switched only by an explicit request. One rule, appended to
+// every agent's base system prompt — a voice rule in the same family as
+// buildAudienceSection above, and single-sourced for the same reason: eight copies
+// of a sentence about tone is eight chances for one of them to drift.
+//
+// WHY A FIXED DEFAULT rather than "the language of the conversation". These agents
+// also write when nobody is in the room — a headless re-model, a scheduled monitor
+// card, a notification. Those runs have NO conversation to read a language off, so a
+// rule phrased that way has nothing to bind to and the model picks. (ZTS,
+// 2026-08-05: a headless coverage refresh rewrote an English thesis in Portuguese.
+// Nothing was wrong with the research; the doc just changed language with nobody
+// asking.) A default cannot be absent, so it cannot be guessed.
+//
+// This is appended to the BASE prompt only, never to a mode/profile fragment — those
+// are concatenated onto the base and would repeat it.
+export const LANGUAGE_RULE = `
+
+LANGUAGE: Write in English. That covers your replies AND any prose you emit into something that gets saved — a thesis, a rationale, kill-criteria, card copy, a note.
+
+Switch only when the user EXPLICITLY asks you to use another language. The request counts no matter which language it is written in — "answer me in Hebrew" and "תענה לי בעברית" are both requests. But a user simply WRITING to you in another language is not one: keep answering in English until they actually ask. Once they have asked, stay in that language for the rest of the conversation.
+
+Vocabulary fields are canonical English ALWAYS, in every language — rating, status, side, horizon, band_basis and the like are validated enum values, not prose.`
 
 // ─── Emit-tag cleanup ─────────────────────────────────────────────────────────
 // Strip the given emit blocks (<name>…</name>) from a raw model reply. Each name
