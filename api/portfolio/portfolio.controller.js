@@ -10,7 +10,6 @@ import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { threadService }          from '../../services/thread.service.js'
 import { resolvePortfolioReviewCard } from '../chat/chat.service.js'
-import { getOpenObjective } from '../../services/objective.service.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
 
 const LOG = '[portfolio:controller]'
@@ -34,9 +33,8 @@ export async function streamPortfolio(req, res) {
             const bodyMandate  = (req.body?.mandate && typeof req.body.mandate === 'object') ? req.body.mandate : null
 
             // Pre-stream context load + mandate carry-forward (business logic → service).
-            const { portfolioState, lifecycle, mandate, statedMandate, storedThesis, reviewDelta, objective } = await portfolioChatService.loadStreamContext({
+            const { portfolioState, lifecycle, mandate, statedMandate, storedThesis, reviewDelta } = await portfolioChatService.loadStreamContext({
                 userId: req.user._id, portfolioId, threadId, isReviewMode, bodyMandate,
-                objective: await getOpenObjective(req.user._id),
             })
 
             const lastMessage = messages.at(-1)?.content ?? ''
@@ -53,7 +51,6 @@ export async function streamPortfolio(req, res) {
                 reviewDelta,
                 lifecycle,
                 mandate,
-                objective,
                 audience: await getExperienceLevel(req.user._id),
                 thesis: storedThesis,
                 model:           routing.model,
@@ -72,8 +69,7 @@ export async function streamPortfolio(req, res) {
             // still listening, matching the previous "after finish, if not aborted" gate.
             if (signal.aborted) return undefined
             portfolioChatService.persistStreamOutcome({
-                // statedMandate, not mandate: a mandate DERIVED from the intake objective is context
-                // for the prompt, never something to write back as though the user established it here.
+                // statedMandate, not mandate: only what the user established WITH ATLAS is written back.
                 userId: req.user._id, portfolioId, threadId, isReviewMode, messages,
                 mandate: statedMandate, storedThesis, result,
             })

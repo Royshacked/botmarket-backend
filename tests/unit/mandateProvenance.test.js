@@ -8,46 +8,29 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { mandateFromObjective } from '../../api/portfolio/portfolioChat.service.js'
 import { _buildAccountsSection, _buildMandateSection } from '../../services/portfolio.agent.service.js'
 import { buildAccountLines } from '../../services/agentUtils.js'
 import { formatTradingContext } from '../../services/tradingContext.tools.js'
 
-const OBJECTIVE = {
-    createdAt: Date.parse('2026-07-26T09:00:00Z'),
-    target: { pct: 5 },
-    horizon: { days: 90, until: '2026-10-24' },
-    risk: { maxDrawdownPct: 5 },
-}
+// ── the mandate is established WITH ATLAS, or it is not a mandate ─────────────
+// Bug 1 above was fixed twice. First by TAGGING a mandate derived from the intake objective and
+// rendering it as a proposal to confirm ("you set this goal on 2026-07-26 — still the plan?"). Then,
+// on 2026-08-05, by removing the derivation entirely: reception no longer collects a goal as fields,
+// so there is no such thing as a carried-over mandate. What crosses the hop is the user's own
+// sentence, which Atlas reads as a message and answers in its own Phase 1.
 
-// ── the carried-over goal ─────────────────────────────────────────────────────
-
-test('a mandate derived from an objective is TAGGED with when it was set', () => {
-    const m = mandateFromObjective(OBJECTIVE)
-    assert.equal(m._fromObjective.setAt, OBJECTIVE.createdAt)
-    assert.match(m.objective, /5%/)
-})
-
-test('it is rendered as a PROPOSAL to confirm, never as established', () => {
-    const out = _buildMandateSection(mandateFromObjective(OBJECTIVE))
-    assert.match(out, /CARRIED-OVER GOAL/)
-    assert.match(out, /2026-07-26/)                       // the user can be told WHEN they said it
-    assert.match(out, /still the plan\?/)
-    assert.match(out, /PROPOSAL, not an established mandate/)
-    assert.ok(!out.includes('already established'), 'must not claim the user settled this')
-    assert.ok(!out.includes('Do not re-ask for mandate details'), 'that is the established-mandate line')
-})
-
-test('a mandate the user actually stated keeps the established wording', () => {
+test('a mandate reads as established — the only kind there is now', () => {
     const out = _buildMandateSection({ objective: 'growth', horizon: 'swing', riskTolerance: '20% drawdown' })
     assert.match(out, /already established/)
     assert.match(out, /Do not re-ask for mandate details/)
-    assert.ok(!out.includes('CARRIED-OVER'))
 })
 
-test('no objective, or one with nothing stated → nothing carried', () => {
-    assert.equal(mandateFromObjective(null), null)
-    assert.equal(mandateFromObjective({ target: {}, horizon: {}, risk: {} }), null)
+test('nothing renders a goal as a settled mandate behind the user\'s back', () => {
+    // The `_fromObjective` provenance tag and its CARRIED-OVER rendering are both gone. A stray one
+    // on some old stored mandate must not resurrect that path — it is simply an unknown field.
+    const out = _buildMandateSection({ objective: 'growth', _fromObjective: { setAt: Date.parse('2026-07-26') } })
+    assert.ok(!out.includes('CARRIED-OVER'))
+    assert.ok(!out.includes('2026-07-26'), 'no date from a field nothing writes any more')
 })
 
 // ── deployable cash ───────────────────────────────────────────────────────────

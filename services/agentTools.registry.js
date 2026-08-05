@@ -484,45 +484,6 @@ export const TOOL_SCHEMAS = {
             }
         }
     },
-    save_objective: {
-        "type": "object",
-        "properties": {
-            "target_pct": {
-                "type": "number",
-                "description": "The return the user is after, as a percent of the account e.g. 5 for \"5%\". Give this OR target_amount — whichever the user actually said."
-            },
-            "target_amount": {
-                "type": "number",
-                "description": "The return the user is after as a cash figure e.g. 2000 for \"I want to make $2,000\"."
-            },
-            "target_currency": {
-                "type": "string",
-                "description": "Currency of target_amount e.g. USD. Omit when the user gave a percent."
-            },
-            "horizon_days": {
-                "type": "integer",
-                "description": "How many days they have in mind: 7 for \"next week\", 30 for \"a month\". The deadline date is computed for you — do not try to supply it."
-            },
-            "risk_max_drawdown_pct": {
-                "type": "number",
-                "description": "The most the user said they are willing to LOSE, as a percent of the account. Only ever what they stated. Never derive it from the target and never fill it with a sensible default — leave it out if they have not said, and the desk will ask before sizing."
-            },
-            "risk_amount": {
-                "type": "number",
-                "description": "The most they are willing to lose as a cash figure. Same rule: only if stated."
-            },
-            "scope": {
-                "type": "string",
-                "enum": ["single", "basket"],
-                "description": "Whether this goal is meant to come from ONE position (single) or several (basket). This is the question that decides which desk they need."
-            },
-            "symbol": {
-                "type": "string",
-                "description": "The one name this goal is about, if there is one e.g. NVDA. Bare ticker only. Omit for a market-wide or whole-portfolio goal."
-            }
-        },
-        "required": ["horizon_days"]
-    },
     screen_candidates: {
         "type": "object",
         "properties": {

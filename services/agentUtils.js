@@ -264,55 +264,6 @@ export function buildTimeSection(clientTime, what = 'a time condition') {
 }
 
 /**
- * The user's stated goal, as a system-prompt block — what Axl took down at intake, rendered for
- * whichever desk they landed at. See api/objectives/objective.model.js for the record itself.
- *
- * Two things this block is careful about:
- *
- *   - It says the goal is ESTABLISHED, so the desk stops re-asking. That is the whole point of
- *     persisting it: the user states the job once. Same discipline as the mandate block Atlas has
- *     always had (portfolio.agent.service.js _buildMandateSection).
- *
- *   - When risk is MISSING it says so out loud rather than staying quiet. A silent gap reads as
- *     "no constraint" and the desk sizes against nothing; naming it puts the question exactly where
- *     sizing happens. Never render a risk figure derived from the target — see the model's rule 1.
- *
- * Context, not instruction: the goal is what the user is working toward, not an order to act now.
- *
- * @returns {string|null} null when there is no objective, so callers can push conditionally
- */
-export function buildObjectiveSection(objective) {
-    if (!objective) return null
-
-    const { target = {}, horizon = {}, risk = {}, scope, symbol } = objective
-    const lines = ["THE USER'S STATED GOAL (already established — do not re-ask for any field listed here):"]
-
-    const targetText = [
-        target.pct != null ? `${target.pct}%` : null,
-        target.amount != null ? `${target.amount}${target.currency ? ` ${target.currency}` : ''}` : null,
-    ].filter(Boolean).join(' / ')
-    if (targetText) lines.push(`Target return: ${targetText}`)
-
-    if (horizon.days != null) {
-        lines.push(`Horizon: ${horizon.days} day${horizon.days === 1 ? '' : 's'}${horizon.until ? ` — by ${horizon.until}` : ''}`)
-    }
-
-    const riskText = [
-        risk.maxDrawdownPct != null ? `${risk.maxDrawdownPct}% of the account` : null,
-        risk.amount != null ? `${risk.amount}` : null,
-    ].filter(Boolean).join(' / ')
-    lines.push(riskText
-        ? `Most they are willing to lose: ${riskText}`
-        : 'Risk tolerance: NOT STATED — ask for it before you size anything, and never infer it from the target.')
-
-    if (scope) lines.push(`Shape: ${scope === 'single' ? 'one position' : 'spread across several positions'}`)
-    if (symbol) lines.push(`Name they came for: ${symbol}`)
-
-    lines.push('This is the job they came here with, not an instruction to act now. Use it; do not re-ask for it.')
-    return lines.join('\n')
-}
-
-/**
  * WHO you are talking to, as a system-prompt block — see api/experience/experience.model.js.
  *
  * This is a VOICE parameter and the block says so in the strongest terms available, because it is

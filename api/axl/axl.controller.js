@@ -93,12 +93,10 @@ export async function streamAxl(req, res) {
                 // Reopen an item the user already has, in the desk that owns it, instead of opening
                 // that desk on a blank page. Independent of `route` — it carries its own desk.
                 edit: _validateEdit(result.edit),
-                // Unlike routeSymbol this stands alone: an objective captured on a turn that does
-                // NOT route is the normal case (intake first, hand-off once they're ready), and the
-                // client shows it back to the user so they can see what was understood — and correct
-                // it if we got it wrong. Built by us from the stored record, not from model output,
-                // so there is nothing here to re-validate.
-                objective: result.objective ?? null,
+                // The desk's opening turn, in the user's own words — the whole hand-off. Gated on a
+                // real route for the same reason the symbol is: with nowhere to land it is a message
+                // sent to no one. The service has already collapsed and capped it.
+                opening: route ? (result.opening ?? null) : null,
                 chart: result.chart ?? null,
             }
         },

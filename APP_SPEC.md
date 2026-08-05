@@ -153,6 +153,13 @@ them over with one of two tags, and they are different acts: a route names a **d
 **document**.
 
 - `<route>desk SYMBOL</route>` — NEW work. The desk opens at its `entryTab`, on that name.
+- `<open>…</open>` — the desk's FIRST TURN, in the user's own words, sent on arrival as their own
+  message. Rides with a route (never with an edit, which resumes a conversation that already exists).
+  This is the whole hand-off: Axl works out only what decides WHERE — one position or several, do
+  they have a name — and everything else the user said travels as a sentence. Risk, horizon,
+  constraints and benchmark are the receiving desk's own first phase, and asking at reception means
+  answering twice. Replaced the `objectives` record (2026-08-05), which carried the job as structured
+  fields, outlived the job it described, and reached every desk as "already established".
 - `<edit>kind ID</edit>` — reopen something they ALREADY have, in the editor that owns it, with the
   conversation that built it restored. Same destination as the list-surface pencil, by design: an
   edit reached from a sentence and an edit reached from a click are one edit.
@@ -174,7 +181,7 @@ The handle is the item's **id**, surfaced by `get_watched_items`, whose every ro
 exactly one item** — on two live NVDA calls a ticker is a coin flip, and losing it means editing a
 different trade than the user meant, so ambiguity opens nothing. Resolution runs against the lists
 the client already holds, which is also the authorization: a ref that isn't in the user's own list is
-inert. An edit stamps no objective — reopening what they have is not a desk taking on a stated goal.
+inert. And an edit carries no `<open>` — the document arrives with its own conversation attached.
 
 ---
 

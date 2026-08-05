@@ -7,9 +7,6 @@ import { runAgentStream } from './agentIO.js'
 import { toolsFor } from './agentTools.registry.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
-import { makeObjectiveHandlers, OBJECTIVE_TOOL_SPEC } from './objective.tools.js'
-import { getOpenObjective, markRouted } from './objective.service.js'
-import { toObjectiveSummary } from '../api/objectives/objective.model.js'
 import { makeUserDataHandlers, USER_DATA_TOOL_SPEC } from './userData.tools.js'
 import { makeConceptHandlers, CONCEPT_TOOL_SPEC } from './concepts.tools.js'
 import { makeExperienceHandlers, EXPERIENCE_TOOL_SPEC } from './experience.tools.js'
@@ -30,16 +27,17 @@ const MAX_MESSAGES = 12
 // account/trade data + tools and are added one by one — the VENUE reads are the
 // first, since "which account am I on / what am I holding / can I trade this
 // here" is a question ABOUT the app, which is Axl's own job, not a desk's.
-// save_objective is the one WRITE Axl has, and it does not breach the boundary above: it records
-// what the user said they want, which is intake, not authoring. No level, size, order or artifact
-// comes out of it — those stay with the desks.
+// Axl now has NO writes at all. `save_objective` was one — it recorded the user's stated goal so a
+// desk wouldn't re-ask — and it is gone with the objective record itself (2026-08-05): a goal
+// written down became a goal that outlived its job, and reception was interrogating users for
+// numbers (risk, horizon) that are the DESK's Phase 1. What crosses the hop now is a sentence, not
+// a record — see `<open>` below.
 // The reporting reads are APPENDED, never inserted: the snapshot compares by index and prompt
 // caching keys off the array prefix, so a mid-array addition both fails three tests instead of one
 // and invalidates Axl's cached tool block on every request until it re-warms.
 export const TOOLS = toolsFor({
     get_trading_context: TRADING_CONTEXT_TOOL_SPEC.get_trading_context,
     check_broker_symbol: TRADING_CONTEXT_TOOL_SPEC.check_broker_symbol,
-    save_objective: OBJECTIVE_TOOL_SPEC.save_objective,
     get_watched_items: USER_DATA_TOOL_SPEC.get_watched_items,
     get_performance: USER_DATA_TOOL_SPEC.get_performance,
     get_upcoming_events: USER_DATA_TOOL_SPEC.get_upcoming_events,
@@ -98,19 +96,40 @@ export function _splitEdit(raw) {
     return { kind: k, ref, desk }
 }
 
+// What the desk OPENS ON — the user's own statement of the job, in their words, as the first turn of
+// the desk's conversation.
+//
+// This is the whole hand-off now. It replaced an `objectives` record (2026-08-05) that tried to carry
+// the job as DATA — target, horizon, risk, scope — and got two things wrong at once. It outlived the
+// job it described, so a portfolio goal set in August was still telling the trade desk to assume a
+// 3-month horizon and 5% risk; and collecting it turned reception into an interrogation, asking for
+// numbers that belong to the desk's own first phase. Axl asks only what decides WHERE. Everything
+// else the user said travels as a sentence and the desk takes it from there.
+//
+// A sentence rather than fields is the point: it cannot be mistaken for an established parameter, it
+// needs no schema, and the desk reads it exactly as it would read the user typing it — because that
+// is what it is.
+//
+// It rides beside `<route>` rather than inside it: prose has spaces and newlines, and _splitRoute
+// splits on those. No route → no opening, since there is no desk to open.
+const MAX_OPENING = 600
+export function _cleanOpening(raw) {
+    if (typeof raw !== 'string') return null
+    // Collapse the hard wrapping a model does inside a tag — this becomes a chat message, not a
+    // document. Cap it because it is a first turn, not a brief: something longer is a summary Axl
+    // was not asked for, and the desk is better served by the sentence than by an essay.
+    const text = raw.replace(/\s+/g, ' ').trim().slice(0, MAX_OPENING)
+    return text || null
+}
+
 async function chatStream({ messages = [], audience = null, model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
-    // The objective collaborators are seams too: intake is the one part of Axl that touches the
-    // database, and a unit test of the turn should not need one.
-    _objectiveHandlers = makeObjectiveHandlers,
     _tradingContextHandlers = makeTradingContextHandlers,
     _userDataHandlers = makeUserDataHandlers,
     _conceptHandlers = makeConceptHandlers,
     _experienceHandlers = makeExperienceHandlers,
     _marketBriefHandlers = makeMarketBriefHandlers,
     _marketHoursHandlers = makeMarketHoursHandlers,
-    _getOpenObjective = getOpenObjective,
-    _markRouted = markRouted,
 } = {}) {
     const normalized = normalizeMessages(messages, MAX_MESSAGES)
 
@@ -134,12 +153,8 @@ ${audienceBlock}` : ''}` },
     let chartRow = null
     let routeCapture = null
     let editCapture = null
+    let openCapture = null
 
-    // The objective handler is wrapped rather than passed straight through, so the turn knows an
-    // intake happened without a second read: the id it returns rides out on the `done` payload and
-    // is what the client confirms back to the user.
-    let savedObjective = null
-    const objectiveHandlers = _objectiveHandlers(userId)
     const toolHandlers = {
         ..._tradingContextHandlers(userId),
         ..._userDataHandlers(userId),
@@ -151,12 +166,6 @@ ${audienceBlock}` : ''}` },
         // Unbound too — market hours belong to the instrument, not the user.
         ..._marketHoursHandlers(),
         ..._experienceHandlers(userId),
-        ...objectiveHandlers,
-        save_objective: async (args) => {
-            const result = await objectiveHandlers.save_objective(args)
-            if (result?.saved && result.objective) savedObjective = result.objective
-            return result
-        },
     }
 
     const raw = await _run({
@@ -167,27 +176,22 @@ ${audienceBlock}` : ''}` },
         tagCaptures: buildTagCaptures({
             route: (text) => { routeCapture = text.trim() },
             edit:  (text) => { editCapture = text.trim() },
+            open:  (text) => { openCapture = text },
         }),
         onToolStart, onReasoning,
         onChart: (row) => { chartRow = row; onChart?.(row) },
     })
 
-    const reply = stripEmitTags(raw ?? '', ['route', 'edit']).trim()
+    const reply = stripEmitTags(raw ?? '', ['route', 'edit', 'open']).trim()
     const { desk, symbol } = _splitRoute(routeCapture)
     const edit = _splitEdit(editCapture)
 
-    // Stamp which desk took the goal. Only on a ROUTING turn — reopening an item the user already
-    // has is not a desk taking on their stated goal, so an edit deliberately stamps nothing. And only
-    // on a routing turn do we pay for a read —
-    // the objective is usually captured a turn or two before the hand-off, so the id from THIS turn
-    // is often null while an open objective still exists.
-    let objective = savedObjective
-    if (desk && userId) {
-        objective ??= toObjectiveSummary(await _getOpenObjective(userId))
-        if (objective?.id) await _markRouted(objective.id, desk)
-    }
+    // No desk, no opening. An `<open>` on a turn that routes nowhere has no conversation to start,
+    // and an EDIT reopens a document that already holds its own history — the desk resumes it rather
+    // than beginning again, so an opening turn there would talk over what is already on the page.
+    const opening = (desk && !edit) ? _cleanOpening(openCapture) : null
 
-    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, edit: edit ? `${edit.kind}:${edit.ref}` : null, objectiveId: objective?.id ?? null, replyLength: reply.length })
+    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, edit: edit ? `${edit.kind}:${edit.ref}` : null, opening: opening ? opening.length : null, replyLength: reply.length })
     // `chart` on the return is the REQUEST, never the image: the row already went out on its own
     // event and doubling it here would double the bytes on the wire.
     return {
@@ -197,7 +201,9 @@ ${audienceBlock}` : ''}` },
         // { kind, ref, desk } — reopen this exact item. Stands apart from `route` rather than
         // folding into it: a route hands over a desk and a blank page, an edit hands over a document.
         edit,
-        objective,
+        // The desk's first turn, in the user's words. The client sends it as their message on
+        // arrival, so the desk starts on the job instead of asking what they came for.
+        opening,
         chart: chartRow ? { ticker: chartRow.symbol, timeframe: chartRow.timeframe } : null,
     }
 }

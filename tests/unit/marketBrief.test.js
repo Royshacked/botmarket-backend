@@ -233,7 +233,11 @@ test('the tool is registered and Axl carries it at a STABLE index', () => {
     // next appended tool failed it, reporting a violation of a rule that had actually been obeyed.
     // Pinning the INDEX is the assertion that was meant: an INSERTION before the brief still shifts
     // it and fails here, while a legitimate append after it does not.
-    assert.equal(AXL_TOOLS[8]?.name, 'get_market_brief')
+    //
+    // 8 → 7 on 2026-08-05: `save_objective` was REMOVED from index 2 with the objective record, which
+    // shifts everything after it. That is a one-time cache re-warm, and the rule this test guards is
+    // still intact — nothing was inserted ahead of the brief.
+    assert.equal(AXL_TOOLS[7]?.name, 'get_market_brief')
 })
 
 // ── The daily offer window ───────────────────────────────────────────────────

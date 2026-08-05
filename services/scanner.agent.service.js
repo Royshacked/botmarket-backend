@@ -10,7 +10,7 @@ import { isMode } from './kairos.modes.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
 import { cleanConviction } from './conviction.util.js'
 import { logger }        from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildObjectiveSection, buildAudienceSection, LANGUAGE_RULE, TRADE_HORIZONS } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection, LANGUAGE_RULE, TRADE_HORIZONS } from './agentUtils.js'
 import { makeTradingContextHandlers } from './tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
 import { buildTagCaptures } from './llmStream.util.js'
@@ -179,7 +179,7 @@ function SCANNER_TOOLS_FOR_PROFILE(profile) {
 // lens is live, the cached module carries it.
 const HANDOFF_CONTEXT = 'ACTIVE MODE: KAIROS HAND-OFF — the user was sent here by Kairos to find ONE ticker for a single call. The KAIROS HAND-OFF MODE module is in force: it replaces the list-building shape of the spine.'
 
-async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, profile = 'trading', objective = null, audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, profile = 'trading', audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
     const prof = profile === 'investing' ? 'investing' : 'trading'
@@ -197,8 +197,6 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     const dynamic = [`CURRENT DATE: ${today}. Resolve all relative timeframes (today, next week, this month) against this date.`]
     const audienceSection = buildAudienceSection(audience)
     if (audienceSection) dynamic.push(audienceSection)
-    const objectiveSection = buildObjectiveSection(objective)
-    if (objectiveSection) dynamic.push(objectiveSection)
     const editSection = _buildEditSection(editList)
     if (editSection) dynamic.push(editSection)
     const inHandoff = handoff && prof === 'trading'   // hand-off is a trading-only path

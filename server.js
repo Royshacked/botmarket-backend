@@ -23,7 +23,6 @@ import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
 import { ensureKairosIndexes } from './api/kairos/kairos.service.js'
 import { ensureTradeIndexes } from './services/tradeCapture.service.js'
-import { ensureObjectiveIndexes } from './api/objectives/objective.model.js'
 import { ensureExperienceIndexes } from './api/experience/experience.model.js'
 import { threadService } from './services/thread.service.js'
 // import { ideaRoutes } from './api/idea/idea.routes.js'   // ARCHIVED — see the mount below
@@ -125,7 +124,6 @@ ensureUserIndexes()
 ensureIdeaIndexes()
 ensureKairosIndexes()
 ensureTradeIndexes()
-ensureObjectiveIndexes()
 ensureExperienceIndexes()
 threadService.ensureThreadIndexes()
 

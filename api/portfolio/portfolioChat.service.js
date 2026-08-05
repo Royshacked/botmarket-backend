@@ -41,56 +41,12 @@ export const portfolioChatService = {
 }
 
 /**
- * Turn the goal the user gave Axl at intake into mandate fields, so Atlas opens already knowing
- * the job instead of asking for it a second time.
- *
- * The two shapes line up almost exactly — a mandate is a portfolio's contract, an objective is the
- * sentence the user said out loud — so this is a translation, not a merge. It sits LAST in the
- * precedence chain below: anything the user has since stated to Atlas directly outranks what they
- * told Axl on the way in.
- *
- * Risk is only rendered when it was actually stated. An absent risk stays absent here too — the
- * objective block (buildObjectiveSection) tells Atlas to ask for it rather than assume.
- */
-export function mandateFromObjective(objective) {
-    if (!objective) return null
-    const { target = {}, horizon = {}, risk = {} } = objective
-
-    const targetText = [
-        target.pct != null ? `${target.pct}%` : null,
-        target.amount != null ? `${target.amount}${target.currency ? ` ${target.currency}` : ''}` : null,
-    ].filter(Boolean).join(' / ')
-    if (!targetText && horizon.days == null) return null
-
-    const riskText = [
-        risk.maxDrawdownPct != null ? `max drawdown ${risk.maxDrawdownPct}%` : null,
-        risk.amount != null ? `at most ${risk.amount} at risk` : null,
-    ].filter(Boolean).join(', ')
-
-    return {
-        ...(targetText ? { objective: `Return target ${targetText} (stated by the user at intake)` } : {}),
-        ...(horizon.days != null
-            ? { horizon: `${horizon.days} day${horizon.days === 1 ? '' : 's'}${horizon.until ? ` — by ${horizon.until}` : ''}` }
-            : {}),
-        ...(riskText ? { riskTolerance: riskText } : {}),
-        // Provenance rides WITH the mandate rather than beside it. A goal survives the session it was
-        // set in — expiry is lazy, so one set last week is still `open` today — and without this tag
-        // it reaches the prompt wearing the same "already established" header as something the user
-        // said to Atlas a minute ago. Atlas then builds on a target nobody confirmed. This is the ASK
-        // half of the Phase-1 rule: it is about THEM, so a carried-over answer gets checked, not assumed.
-        // Never persisted: the controller writes back `statedMandate`, never this one.
-        _fromObjective: { setAt: objective.createdAt ?? null },
-    }
-}
-
-/**
  * Assemble the per-turn context the portfolio agent needs and resolve the effective mandate,
  * which is carried forward across turns: a fresh body mandate wins, then the draft-thread
- * mandate (so first-time construction survives a reload), then the stored one (edit/review),
- * and finally the goal captured at intake.
- * Every fetch is best-effort. Returns { portfolioState, lifecycle, mandate, statedMandate, storedThesis, objective }.
+ * mandate (so first-time construction survives a reload), then the stored one (edit/review).
+ * Every fetch is best-effort. Returns { portfolioState, lifecycle, mandate, statedMandate, storedThesis }.
  */
-async function loadStreamContext({ userId, portfolioId, threadId, isReviewMode, bodyMandate, objective = null }) {
+async function loadStreamContext({ userId, portfolioId, threadId, isReviewMode, bodyMandate }) {
     const [portfolioState, lifecycle, storedMandate, storedThesis] = await Promise.all([
         // Position/P&L + workspace state is loaded whenever an EXISTING portfolio is open — a
         // scheduled review OR a normal update/edit — so Atlas can always see the live book it's
@@ -107,14 +63,15 @@ async function loadStreamContext({ userId, portfolioId, threadId, isReviewMode, 
         ? await threadService.getThread({ threadId, userId }).catch(() => null)
         : null
 
-    // Two mandates, deliberately. `statedMandate` is what the user actually established WITH ATLAS;
-    // `mandate` adds the intake fallback and is what the prompt reads. They are kept apart because
-    // the derived one must not count as an established mandate: `isSubstantive` gates a construction
-    // draft thread on `mandateReady`, so folding the objective in here would persist a draft the
-    // moment someone with an open goal opened Atlas, which is exactly the junk that floor exists to
-    // keep out. Only the stated one is ever written back — see persistStreamOutcome.
+    // ONE mandate now. `statedMandate` is what the user established WITH ATLAS, and it is also what
+    // the prompt reads — the pair existed because a mandate could also be DERIVED from the intake
+    // objective, and a derived one had to be kept out of `statedMandate`: `isSubstantive` gates a
+    // construction draft thread on `mandateReady`, so folding it in would persist a draft the moment
+    // someone with an open goal opened Atlas. The objective is gone (2026-08-05) and what arrives now
+    // is the user's own opening message, which Atlas reads as a message and answers in Phase 1.
+    // `mandate` is kept as a separate name because every caller and the prompt block use it.
     const statedMandate = bodyMandate ?? draftThread?.mandate ?? storedMandate
-    const mandate = statedMandate ?? mandateFromObjective(objective)
+    const mandate = statedMandate
 
     // In review mode, resolve the review-window delta (benchmark-relative return + regime shift)
     // against the stored fingerprint. Best-effort — a first review (no fingerprint) yields null.
@@ -122,7 +79,7 @@ async function loadStreamContext({ userId, portfolioId, threadId, isReviewMode, 
         ? await buildReviewDelta(lifecycle.lastFingerprint, portfolioState).catch(() => null)
         : null
 
-    return { portfolioState, lifecycle, mandate, statedMandate, storedThesis, reviewDelta, objective }
+    return { portfolioState, lifecycle, mandate, statedMandate, storedThesis, reviewDelta }
 }
 
 /**

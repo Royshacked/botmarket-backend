@@ -12,7 +12,7 @@ import { dirname, join } from 'path'
 
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
-import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, buildObjectiveSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, COMMON_TOOL_HANDLERS } from './agentUtils.js'
+import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, COMMON_TOOL_HANDLERS } from './agentUtils.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
 import { buildTagCaptures } from './llmStream.util.js'
@@ -66,12 +66,12 @@ const TOOL_HANDLERS = {
 export const analystAgentService = { chatStream }
 
 async function chatStream({
-    messages, userPrompt, chatState = {}, seed = null, objective = null, audience = null,
+    messages, userPrompt, chatState = {}, seed = null, audience = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onToolStart, onReasoning, onPhase, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
-    const systemPrompt  = _buildSystemPrompt(chatState, seed, objective, audience)
+    const systemPrompt  = _buildSystemPrompt(chatState, seed, audience)
     const builtMessages = attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState))
 
 
@@ -117,7 +117,7 @@ function _cleanDraft(c) {
  * `existing_coverage` deliberately STAYS: it is the stored thesis, fetched once for the session and
  * byte-identical thereafter — it is the draft that moves, not everything shaped like JSON.
  */
-function _buildSystemPrompt(chatState, seed = null, objective = null, audience = null) {
+function _buildSystemPrompt(chatState, seed = null, audience = null) {
     const today  = new Date().toISOString().slice(0, 10)
     const active = chatState?.active_symbol || 'none'
     const existingBlock = chatState?.existing_coverage
@@ -131,13 +131,12 @@ function _buildSystemPrompt(chatState, seed = null, objective = null, audience =
             + `\n  → Start here, verify Argus's read against the tools, then form your own variant view.`
         : ''
     const audienceBlock = buildAudienceSection(audience)
-    const objectiveBlock = buildObjectiveSection(objective)
     const dynamic = `---
 CURRENT DATE: ${today}. Resolve relative dates (this quarter, next earnings) against it.
 ${audienceBlock ? `
 ${audienceBlock}
 
-` : ''}${objectiveBlock ? `\n${objectiveBlock}\n\n` : ''}Active name: ${active}${seedBlock}${existingBlock}`
+` : ''}Active name: ${active}${seedBlock}${existingBlock}`
     return [
         { type: 'text', text: _systemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamic },

@@ -8,7 +8,7 @@ import { getSecFilings } from '../providers/sec.provider.js'
 import { cleanConviction } from './conviction.util.js'
 import { formatWorkspaceLine } from '../api/portfolio/portfolioMode.util.js'
 import { logger }         from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildObjectiveSection, buildAudienceSection, LANGUAGE_RULE } from './agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, LANGUAGE_RULE } from './agentUtils.js'
 import { makeTradingContextHandlers } from './tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
 import { makeChartHandler } from './marketData.tools.js'
@@ -141,7 +141,7 @@ function makeCoverageHandler(userId) {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, objective = null, audience = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, audience = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
     const normalized   = _buildMessages(messages)
@@ -154,14 +154,9 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     const dynamicSections = [`CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.`]
     if (ideaAccounts.length > 0) dynamicSections.push(_buildAccountsSection(ideaAccounts, mainAccountId))
     if (portfolioId && portfolioIdeas.length > 0) dynamicSections.push(_buildPortfolioContext(portfolioId, portfolioIdeas))
-    // Ahead of the mandate deliberately: the objective is what the user actually said on the way in,
-    // and the mandate below may have been DERIVED from it (see portfolioChat.service loadStreamContext).
-    // Reading the source first makes a mandate that drifted from it visible rather than invisible.
     // Who we're talking to comes FIRST: it frames how everything below is said.
     const audienceSection = buildAudienceSection(audience)
     if (audienceSection) dynamicSections.push(audienceSection)
-    const objectiveSection = buildObjectiveSection(objective)
-    if (objectiveSection) dynamicSections.push(objectiveSection)
     if (mandate)    dynamicSections.push(_buildMandateSection(mandate))
     // Right after the mandate, because it IS a mandate field — and because it governs how everything
     // below is read: the selection school sets the bar for Phase 4, the allocation school sets the
@@ -393,25 +388,11 @@ export function _buildAccountsSection(accounts, mainAccountId = null) {
     return `PORTFOLIO ACCOUNTS (the user plans to execute ideas from this portfolio on):\n${lines.join('\n')}\n\nSize against "available to deploy", NOT balance: balance counts capital already sitting in open positions, so building a book on it allocates the same money twice and hands the user a plan they cannot fill. Where an account reports no available figure, balance is the only number there is — use it, and say that the sizing assumes the account is uninvested.${mainNote}`
 }
 
-// A mandate CARRIED OVER from a goal the user gave Axl — possibly in an earlier session — is not the
-// same thing as one they established with Atlas, and must not be rendered as though it were. Stated
-// as fact, Atlas builds a book on a target nobody confirmed this session (see the ASK rule in Phase 1).
-function _buildCarriedMandateSection(mandate, setAt) {
-    const when = Number.isFinite(setAt) ? new Date(setAt).toISOString().slice(0, 10) : null
-    const lines = [`CARRIED-OVER GOAL — the user told Axl this${when ? ` on ${when}` : ' previously'}, NOT to you, and possibly in an earlier session:`]
-    return { lines, close: `This is a PROPOSAL, not an established mandate. Open by putting it back to them in one line — "${when ? `on ${when} you set` : 'you set'} this goal; still the plan?" — and let them change it. Once they confirm, treat it as established and stop asking. Do NOT build, screen, or name anything until they have.` }
-}
-
+// Every mandate this renders was established WITH ATLAS. There used to be a second rendering for one
+// CARRIED OVER from the goal the user gave Axl — a proposal to confirm rather than a settled fact —
+// and it is gone with the objective record (2026-08-05). Nothing arrives from reception as fields any
+// more; what arrives is the user's own opening message, which Atlas answers in Phase 1 like any other.
 export function _buildMandateSection(mandate) {
-    const carried = mandate._fromObjective
-    if (carried) {
-        const { lines, close } = _buildCarriedMandateSection(mandate, carried.setAt)
-        if (mandate.objective)     lines.push(`Objective: ${mandate.objective}`)
-        if (mandate.horizon)       lines.push(`Time horizon: ${mandate.horizon}`)
-        if (mandate.riskTolerance) lines.push(`Risk tolerance: ${mandate.riskTolerance}`)
-        lines.push(close)
-        return lines.join('\n')
-    }
     const lines = ['INVESTMENT MANDATE (already established — do not re-ask for any field listed here):']
     if (mandate.objective)     lines.push(`Objective: ${mandate.objective}`)
     if (mandate.horizon)       lines.push(`Time horizon: ${mandate.horizon}`)

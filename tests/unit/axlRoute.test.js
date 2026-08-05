@@ -5,7 +5,7 @@ import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
-import { _splitRoute, _splitEdit, EDIT_KIND_DESKS, axlAgentService } from '../../services/axl.agent.service.js'
+import { _splitRoute, _splitEdit, _cleanOpening, EDIT_KIND_DESKS, axlAgentService } from '../../services/axl.agent.service.js'
 import { _sanitizeRouteSymbol, _sanitizeEditRef, _validateEdit, VALID_PIPELINES, EDIT_KINDS } from '../../api/axl/axl.controller.js'
 
 // Axl's desk hand-off: `<route>research NVDA</route>` — the desk AND the name it should open on.
@@ -145,6 +145,23 @@ test('every edit kind the prompt teaches is one the app can actually open', () =
     }
 })
 
+// Reception's whole job is WHERE, and the sentence that travels with them. The rules this replaces
+// had Axl collecting a risk number and a timeframe at the door — the desk's own Phase 1 — and
+// writing them down as an objective that then outlived the job.
+test('the prompt teaches the opening hand-off, and keeps reception out of the brief', () => {
+    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../axl_system_prompt.md')
+    const prompt = readFileSync(promptPath, 'utf8')
+
+    assert.match(prompt, /<open>/, 'the opening tag is taught')
+    assert.match(prompt, /AS\s+THE\s+USER'S\s+OWN\s+MESSAGE/, 'and what it becomes on arrival')
+    assert.match(prompt, /You\s+are\s+reception,\s+not\s+the\s+meeting/, 'the boundary is stated')
+    assert.match(prompt, /Their\s+statement\s+of\s+the\s+job,\s+not\s+your\s+summary/,
+        "the user's words, not a brief Axl authored")
+    assert.doesNotMatch(prompt, /save_objective/, 'the intake write is gone')
+    assert.doesNotMatch(prompt, /Always ask for the risk number/,
+        'asking for risk at reception is what the desk does in its own first phase')
+})
+
 // The one kind with two modes. A book still being built is a plan to re-work; a book in positions is
 // a REVIEW, because re-planning it would stand a live position down to rewrite a plan the market has
 // already acted on. That choice is the client's, made from the book's own state (isPortfolioReview)
@@ -167,7 +184,7 @@ test('the prompt teaches the book edit as one tag with two outcomes, decided by 
 // service sees it — hand the reply back through the same callback the real stream uses.
 function runWith(reply) {
     return async ({ tagCaptures }) => {
-        for (const name of ['route', 'edit']) {
+        for (const name of ['route', 'edit', 'open']) {
             const tag = reply.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))
             const capture = (tagCaptures ?? []).find(c => c.open === `<${name}>`)
             if (tag) capture?.onCapture?.(tag[1])
@@ -196,19 +213,6 @@ test('turn: an edit tag becomes the item hand-off, and never shows up in the rep
     assert.equal(result.reply, 'Reopening it in Prometheus.')
 })
 
-test('turn: an edit does NOT stamp an open objective — reopening is not a desk taking the goal', async () => {
-    const result = await axlAgentService.chatStream({
-        userId: 'u1',
-        messages: [{ role: 'user', content: 'change the entry on my TSLA call' }],
-        _run: runWith('Opening it in Kairos. <edit>call c1</edit>'),
-        _objectiveHandlers: () => ({ save_objective: async () => ({}) }),
-        _tradingContextHandlers: () => ({}),
-        _getOpenObjective: async () => { throw new Error('an edit must not pay for the objective read') },
-        _markRouted: async () => { throw new Error('an edit must not stamp the goal') },
-    })
-    assert.equal(result.edit?.kind, 'call')
-})
-
 test('turn: a book edit reaches Atlas as an item, not as a fresh mandate', async () => {
     // The failure it replaces: `<route>portfolio</route>` opens Atlas at Phase 1 and asks for the
     // mandate again — for a book that already has one, and whose plan is what they wanted to change.
@@ -230,84 +234,70 @@ test('turn: a clarifying question (no tag) keeps the user with Axl', async () =>
     assert.equal(result.reply, 'A tradeable setup on it, or a research thesis?')
 })
 
-// ── intake: the goal the user states on the way in ────────────────────────────
+// ── the opening turn the desk receives ───────────────────────────────────────
 //
-// The objective is what survives the hop to a desk, so the turn has to surface its id (the client
-// shows the captured goal back to the user) and stamp which desk took it. The collaborators are
-// injected here — intake is the one part of Axl that touches a database, and this seam is what
-// keeps a unit test of the turn from needing one.
+// This IS the hand-off. It replaced an `objectives` record (2026-08-05) that carried the job as
+// structured data, outlived it, and turned reception into an interrogation for numbers the desk asks
+// for itself. What crosses now is one sentence in the user's own words.
 
-/** Like runWith, but the model calls save_objective before it answers. */
-function runWithIntake(reply, args = { target_pct: 5, horizon_days: 7 }) {
-    return async ({ tagCaptures, toolHandlers }) => {
-        await toolHandlers.save_objective(args)
-        const routeTag = reply.match(/<route>([\s\S]*?)<\/route>/)
-        const capture = (tagCaptures ?? []).find(c => c.open === '<route>')
-        if (routeTag) capture?.onCapture?.(routeTag[1])
-        return reply
-    }
-}
-
-const summary = (id) => ({ id, target: { pct: 5 }, horizon: { days: 7, until: '2026-08-06' }, risk: {}, scope: null, symbol: null })
-const stubHandlers = (id = 'obj_1') => () => ({
-    save_objective: async () => ({ saved: true, id, deadline: '2026-08-06', objective: summary(id) }),
-})
-
-test('turn: an objective captured this turn rides out on the result', async () => {
+test('turn: the opening rides out beside the route, and never shows up in the reply', async () => {
     const result = await axlAgentService.chatStream({
-        userId: 'u1',
-        messages: [{ role: 'user', content: 'I want to make 5% in the next week' }],
-        _run: runWithIntake('Noted — 5% by August 6th. One position or several?'),
-        _objectiveHandlers: stubHandlers('obj_1'),
-        _tradingContextHandlers: () => ({}),
+        messages: [{ role: 'user', content: 'several positions' }],
+        _run: runWith('Taking you to Atlas. <route>portfolio</route><open>I want 5% profit.</open>'),
     })
-    assert.equal(result.objective?.id, 'obj_1')
-    assert.equal(result.objective?.horizon.until, '2026-08-06', 'the chip needs the goal, not just its id')
-    assert.equal(result.route, null, 'capturing a goal is not the same as handing it to a desk')
+    assert.equal(result.route, 'portfolio')
+    assert.equal(result.opening, 'I want 5% profit.')
+    assert.equal(result.reply, 'Taking you to Atlas.', 'the user sees the sentence, never the tags')
 })
 
-test('turn: routing a turn LATER still finds the open objective and stamps the desk', async () => {
-    // The goal is usually captured a turn or two before the hand-off, so the id from this turn is
-    // null while an open objective still exists. Without the lookup the stamp would just be missed.
-    const marked = []
+test('turn: a hard-wrapped opening arrives as one line — it becomes a chat message', async () => {
     const result = await axlAgentService.chatStream({
-        userId: 'u1',
-        messages: [{ role: 'user', content: 'one position' }],
-        _run: runWith('Taking you to the trading desk. <route>trade NVDA</route>'),
-        _objectiveHandlers: stubHandlers(),
-        _tradingContextHandlers: () => ({}),
-        _getOpenObjective: async () => summary('obj_earlier'),
-        _markRouted: async (id, desk) => { marked.push([id, desk]) },
+        messages: [{ role: 'user', content: 'go' }],
+        _run: runWith('Off you go. <route>trade</route><open>I think NVDA\n  breaks out   this week.</open>'),
     })
-    assert.equal(result.objective?.id, 'obj_earlier')
-    assert.deepEqual(marked, [['obj_earlier', 'trade']])
+    assert.equal(result.opening, 'I think NVDA breaks out this week.')
 })
 
-test('turn: a reply that does not route never pays for the objective lookup', async () => {
-    // Every Axl turn would otherwise carry a database read for a stamp only a hand-off needs.
-    let looked = 0
+test('turn: an opening with no route has nowhere to land', async () => {
+    // A clarifying turn that emits one anyway would be a message sent to no desk.
     const result = await axlAgentService.chatStream({
-        userId: 'u1',
-        messages: [{ role: 'user', content: 'what is a stop loss?' }],
-        _run: runWith('A stop is the price where you accept the idea was wrong.'),
-        _objectiveHandlers: stubHandlers(),
-        _tradingContextHandlers: () => ({}),
-        _getOpenObjective: async () => { looked++; return summary('obj_1') },
+        messages: [{ role: 'user', content: 'i want 5% profit' }],
+        _run: runWith('One position or several? <open>I want 5% profit.</open>'),
     })
-    assert.equal(looked, 0)
-    assert.equal(result.objective, null)
+    assert.equal(result.route, null)
+    assert.equal(result.opening, null)
 })
 
-test('turn: routing with no objective at all is fine — the desk simply asks', async () => {
+test('turn: an EDIT never carries an opening — it resumes a conversation that exists', async () => {
+    // Reopening a call restores the chat that built it. An opening turn there talks over the page.
     const result = await axlAgentService.chatStream({
-        userId: 'u1',
+        messages: [{ role: 'user', content: 'change the entry on my TSLA call' }],
+        _run: runWith('Opening it in Kairos. <edit>call c1</edit><open>I want to move the entry.</open>'),
+    })
+    assert.equal(result.edit?.kind, 'call')
+    assert.equal(result.opening, null)
+})
+
+test('turn: routing with no opening at all is fine — the desk simply asks', async () => {
+    const result = await axlAgentService.chatStream({
         messages: [{ role: 'user', content: 'find me a trade on tsla' }],
         _run: runWith('Off to Kairos. <route>trade TSLA</route>'),
-        _objectiveHandlers: stubHandlers(),
-        _tradingContextHandlers: () => ({}),
-        _getOpenObjective: async () => null,
-        _markRouted: async () => { throw new Error('must not stamp a goal that does not exist') },
     })
-    assert.equal(result.objective, null)
     assert.equal(result.route, 'trade')
+    assert.equal(result.opening, null)
+})
+
+test('an opening is capped — it is a first message, not a handover document', async () => {
+    const long = 'x'.repeat(900)
+    const result = await axlAgentService.chatStream({
+        messages: [{ role: 'user', content: 'go' }],
+        _run: runWith(`Off you go. <route>portfolio</route><open>${long}</open>`),
+    })
+    assert.equal(result.opening.length, 600)
+})
+
+test('_cleanOpening: nothing but whitespace is nothing', () => {
+    assert.equal(_cleanOpening('   \n  '), null)
+    assert.equal(_cleanOpening(null), null)
+    assert.equal(_cleanOpening(undefined), null)
 })
