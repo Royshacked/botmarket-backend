@@ -5,8 +5,35 @@ import { logger }                     from '../../services/logger.service.js'
 
 const LOG = '[chatWs]'
 
-// userId (string) → WebSocket
+// userId (string) → Set<WebSocket>
+//
+// A SET, not one socket. Keyed one-per-user, a second connection for the same person silently
+// replaced the first: the displaced socket stayed OPEN on the client, so the browser never saw a
+// close, never reconnected, and simply stopped receiving events — its unread badge sat still while
+// messages arrived, and only a REST read (opening the chat) showed the true count. Two tabs, or a
+// reload racing its own predecessor's close, is all it took.
 const socketMap = new Map()
+
+/** Register a live socket for a user. Exported for tests — the registry is the whole bug. */
+export function _register(userId, ws) {
+    const set = socketMap.get(userId) ?? new Set()
+    set.add(ws)
+    socketMap.set(userId, set)
+    return set.size
+}
+
+/** Drop one socket; forget the user entirely once their last connection goes. */
+export function _unregister(userId, ws) {
+    const set = socketMap.get(userId)
+    if (!set) return 0
+    set.delete(ws)
+    if (set.size === 0) socketMap.delete(userId)
+    return set.size
+}
+
+export function _socketCount(userId) {
+    return socketMap.get(String(userId))?.size ?? 0
+}
 
 let wss = null
 
@@ -42,8 +69,8 @@ export function attach(httpServer) {
     })
 
     wss.on('connection', (ws, _req, userId) => {
-        logger.info(LOG, 'connected', { userId })
-        socketMap.set(userId, ws)
+        const open = _register(userId, ws)
+        logger.info(LOG, 'connected', { userId, sockets: open })
 
         ws.send(JSON.stringify({ event: 'connected' }))
 
@@ -55,8 +82,8 @@ export function attach(httpServer) {
         })
 
         ws.on('close', () => {
-            if (socketMap.get(userId) === ws) socketMap.delete(userId)
-            logger.info(LOG, 'disconnected', { userId })
+            const left = _unregister(userId, ws)
+            logger.info(LOG, 'disconnected', { userId, sockets: left })
         })
 
         ws.on('error', (err) => {
@@ -68,12 +95,15 @@ export function attach(httpServer) {
 }
 
 /**
- * Push an event to a connected user. No-op if the user is offline.
+ * Push an event to EVERY live connection a user has — each tab is a reader of the same inbox, and
+ * one of them missing a message is one of them showing a stale badge. No-op if the user is offline.
  */
 export function emit(userId, event, data) {
-    const ws = socketMap.get(String(userId))
-    if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ event, data }))
+    const set = socketMap.get(String(userId))
+    if (!set?.size) return
+    const frame = JSON.stringify({ event, data })
+    for (const ws of set) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(frame)
     }
 }
 
