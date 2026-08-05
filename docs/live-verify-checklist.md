@@ -6,8 +6,8 @@ broker execution, agent behaviour and the end-to-end loop need a running app.
 - **§A–C — Themis / Portfolio order layer / Prometheus** (2026-07-24, branch `institution-proj`)
 - **§D–E — Review orders + agent venue awareness** (2026-07-30, branch
   `feat/agent-venue-and-review-orders`)
-- **§F — Axl market brief** (2026-08-01) — every provider call and the model turn are stubbed in the
-  units; nothing below has been seen against real data
+- **§F — Axl market brief** (2026-08-01) — F2/F4 partly cleared 2026-08-05 when delivery moved into
+  Axl's chat (see below); the tape (F1) and the boundary reads (F2/F3) are still unseen
 
 ---
 
@@ -188,9 +188,14 @@ number — it is an agent that never looks and reasons as if the book were empty
 
 ## F. Axl market brief (2026-08-01)
 
-BE + FE written, **served bundle NOT rebuilt**. The units stub every provider and the model turn, so
-what is unverified here is precisely the part tests cannot reach: whether the symbols price, and
-whether the brief holds its boundary.
+BE + FE written; bundle rebuilt and shipped 2026-08-05. The units stub every provider and the model
+turn, so what is unverified here is precisely the part tests cannot reach: whether the symbols price,
+and whether the brief holds its boundary.
+
+**Delivery changed 2026-08-05.** The confirm no longer posts the brief into the social chat — it
+routes to Axl and streams it into his thread (`POST /api/axl/brief/stream`). The items below are
+rewritten to match; anything phrased around a posted `market_brief` message is gone, not merely
+re-worded.
 
 ### F1 — the tape actually prices `[ANY]`
 
@@ -207,9 +212,10 @@ whether the brief holds its boundary.
 
 ### F2 — the brief itself `[ANY]`
 
-- [ ] **A brief is actually written** — `POST /api/axl/brief` end to end; it lands in the Axl
-  conversation over the WS, renders with its line breaks (the bubble is `pre-wrap`), and reads like a
-  brief rather than a data dump.
+- [x] **A brief is actually written** — verified 2026-08-05: `getMarketBrief()` against the live
+  providers wrote a 3332-char brief in 37s on a cold cache, and the card → Axl → chip → streamed text
+  path was exercised end to end in the app. What is still unread is the CONTENT (the three items
+  below): it was checked as a delivery, not as a piece of writing.
 - [ ] **web_search is used and cited plausibly** — the "what's driving it" section must contain a
   real overnight story, not a paraphrase of the tape. If the model skips searching, the section will
   be generic — that's the failure mode to look for.
@@ -228,9 +234,10 @@ whether the brief holds its boundary.
   to a desk, never merge them. This is the whole reason the tool is unbound.
 - [ ] **Axl still refuses single-name market data** — "what is NVDA doing" must route to a desk, not
   get answered from the brief.
-- [ ] **Cold-cache latency in social chat** — the first brief of the hour is a live model turn with
-  searches behind it, and `triggerAxlReply` shows nothing until it finishes. Time it. If the silence
-  is bad, the fix is a placeholder message, not a shorter brief.
+- [ ] **Cold-cache latency when Axl relays it in chat** — the first brief of the hour is a live model
+  turn with searches behind it (measured: ~37s). Asking Axl in his own chat shows the tool chip while
+  it runs; the social-chat path (`triggerAxlReply`) still shows nothing until it finishes. Time that
+  one. If the silence is bad, the fix is a placeholder message, not a shorter brief.
 
 ### F4 — the daily offer `[ANY]`
 
@@ -240,9 +247,12 @@ whether the brief holds its boundary.
 - [ ] **No card at the weekend** — boot on a Saturday (or fake the clock) and confirm nothing posts.
 - [ ] **The offer costs nothing** — confirm no model tokens are spent by the fan-out itself; the
   brief must only be written on a confirm.
-- [ ] **Confirm → brief, and the card collapses** — press *Get the brief*: the button shows
-  "Writing…", the brief arrives, the card collapses to "✓ Sent".
-- [ ] **A failed confirm leaves the card pressable** — kill FMP/Anthropic mid-request; the card must
-  show the error and stay actionable. A consumed offer with no brief is the one unrecoverable state.
+- [x] **Confirm → Axl writes it** — verified 2026-08-05: press *Get the brief* and the card resolves
+  to "✓ Got it", the social chat closes, the app routes to Axl, the ask appears as the user's own
+  bubble under a pulsing "Writing today's brief…" chip, and the brief types in.
+- [ ] **A failed confirm** — kill FMP/Anthropic mid-request. The card is consumed on the CLICK now
+  (it routes; it no longer waits on a delivery), so the failure has to land legibly in Axl's thread
+  and be recoverable by simply asking him — that is the trade this design makes, and it needs one
+  real look.
 - [ ] **Ten confirms, one brief** — have two users confirm at once on a cold cache and check the log:
   exactly ONE `brief built` line. The single-flight is unit-tested, but not against real latency.

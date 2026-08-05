@@ -132,13 +132,21 @@ Dismiss/handled state persists per-message.
 | `manual_entry` / `manual_exit` | Broker-less fill needed | Inline FillCard (price/qty) — the one embedded-action card |
 | `entry_confirm` | Entry triggered, confirm needed (`kind: idea`\|`call`) | idea → workspace + `OrderConfirmDialog`; call → `/call/:id` pop-out |
 | `call_expiry` | Kairos thesis expiring/expired (`kind: edit`\|`expired`) | Edit → `/call/:id` pop-out · Delete · Dismiss |
-| `market_brief_offer` | Daily broadcast offer, one per user per weekday (`marketBrief.notify.js`) | Get the brief → posts `market_brief` in place · Dismiss |
-| `market_brief` | The brief itself — plain, actionless, inert | none (it's a message, not a card) |
+| `market_brief_offer` | Daily broadcast offer, one per user per weekday (`marketBrief.notify.js`) | Get the brief → routes to **Axl**, who writes it in his thread · Dismiss |
 
 The market brief is the one card that is **not about the user**: the same text goes to everyone, is
 cached across users, and by construction mentions no position, account or holding. Its offer is
-posted with no tokens spent — the brief is only written when someone confirms
-(`POST /api/axl/brief`), and Axl relays that same brief in chat via `get_market_brief`.
+posted with no tokens spent — the brief is only written when someone confirms, and Axl relays that
+same brief in chat via `get_market_brief`.
+
+Confirming does not answer in the social chat: it resolves the card as read, routes to Axl, and
+streams the brief into his thread (`POST /api/axl/brief/stream`). A page of market prose does not
+belong in a surface built for one-liners, and read in Axl's thread the obvious follow-up — "what
+does that mean for my book?" — is the next thing the user types rather than a new journey. (The
+answer to that follow-up still may not join the brief to their book; see the unbound tool above.)
+The endpoint is a delivery dressed as a turn: no model runs on it, the brief goes out as one token
+event, and the pacing the reader sees is the client's typewriter. The thread is per-mount, so the
+brief is transient — it is re-askable, never re-read.
 
 `entry_confirm` fires for paper/live idea entries (on `awaiting_confirm`) and
 Kairos-ready calls; **manual** entries keep their own FillCard. `entry_confirm`/`call_expiry` for
@@ -223,6 +231,15 @@ Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/b
   line — a parked order is not a position — so an activated-but-unfilled book still re-plans, and its
   pending orders stand down with it. The four paths disagreed before this gate existed: the lists
   forced a review only when one was DUE, the Floor pencil never did.
+- **Activation is offered wherever a book is listed.** A built book sits at `waiting` doing nothing,
+  so every list that shows one can send it live: the cards, the ideas table, and (since 2026-08-05)
+  the Floor's portfolio row, which shows `waiting` on the row and reveals an Activate control on
+  hover. All three open the same pre-activation gate (`ActivatePortfolioDialog` — *Review first* /
+  *Activate now*) and share one meaning of activation (`activatePortfolio`, FE `tradeIdea.utils.js`):
+  on a broker each `waiting` leg moves to its own activation status; in **manual** nothing flips and
+  the N-leg entry card is posted instead, because with no broker to tell, moving a status would claim
+  a position nobody opened. Offered only while EVERY leg is still waiting — a half-working book is
+  managed leg by leg.
 - Portfolio holdings are governed by the scheduled review, **not** the intrabar invalidation watcher.
 
 ---

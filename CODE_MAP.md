@@ -55,9 +55,15 @@ api/
   axl/                    Axl chat SSE /api/axl/stream (converse + chart + two hand-off tags:
                           `<route>desk SYMBOL` opens a desk for NEW work, `<edit>kind ID` reopens an
                           item the user already has, in the editor that owns it — see APP_SPEC §2)
-                          and POST /api/axl/brief — DELIVERY, not a turn: posts today's market brief
-                          into the user's own Axl conversation (the confirm behind the offer card)
-  chat/                   social DM + bot notifications (chatWs.js = WebSocket); sendBotMessage funnel,
+                          and POST /api/axl/brief/stream — DELIVERY, not a turn: streams today's
+                          market brief into the Axl chat panel (the confirm behind the offer card).
+                          No model runs on it and the whole brief goes out as ONE token event, but it
+                          speaks the same SSE shape as a turn, so the client's chip/typewriter/Stop
+                          work with the handlers it already has
+  chat/                   social DM + bot notifications (chatWs.js = WebSocket, userId → SET of
+                          sockets: every tab is a reader of the same inbox, and one socket per user
+                          meant a second tab displaced the first WITHOUT closing it — that browser
+                          never reconnected and its unread badge silently froze); sendBotMessage funnel,
                           BOT_IDS = axl·idea·portfolio·scanner·kairos (one notify bot per agent).
                           listCardRecipientsSince(type, since) = the shared dedupe read for any
                           fan-out notifier ("who already got today's?"), conversation→user join
@@ -91,7 +97,10 @@ services/
   valuation.tools.js        get_consensus + compute_valuation agent tools over valuation.engine + FMP consensus
                             feeds; pure LLM-ready formatters (edge classified above/below/thin vs Street). (P2)
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
-                          formatMoney/buildAccountLines, stripEmitTags, runtime glue
+                          formatMoney/buildAccountLines, stripEmitTags, runtime glue.
+                          formatMoney is UNGROUPED on purpose: `$94,500` read the other way round is
+                          `94.500`, and the desks came back with 94.5 — money an agent READS carries
+                          no thousands separator (toFixed never groups; toLocaleString does)
   tradingContext.service.js  ONE venue read for every desk: getTradingContext (mode paper/live/manual,
                           connected brokers, each account's balance + capabilities + selected + open
                           positions) and checkBrokerSymbol (is this tradable HERE, and what does the
@@ -152,7 +161,7 @@ services/
                             snapshot, and a 7d calendar filtered to Fed rows + MAJOR_EARNINGS only —
                             then ONE model turn with web_search for the narrative. Cached 45min
                             (MARKET_BRIEF_TTL_MS) + single-flight: the morning fan-out costs one run,
-                            not one per user. Two consumers: Axl's tool and POST /api/axl/brief
+                            not one per user. Two consumers: Axl's tool and POST /api/axl/brief/stream
   marketBrief.tools.js      get_market_brief — UNBOUND (no userId, so the brief cannot be made
                             personal). Axl RELAYS the brief; it does not write market commentary
   watchlist.service.js      listWatchedItems — "what am I watching?" across ALL kinds in ONE read
@@ -238,7 +247,9 @@ monitoring/
                             MARKET_BRIEF_OFFER_HOUR_UTC; MARKET_BRIEF_OFFER=off disables). Posts the
                             OFFER, never the brief — the confirm builds it, so the fan-out costs no
                             tokens. Dedupe reads the posted cards themselves (listCardRecipientsSince),
-                            so a mid-fan-out restart resumes instead of double-posting
+                            so a mid-fan-out restart resumes instead of double-posting. The confirm
+                            takes the user to AXL and streams it there; the brief never lands in the
+                            social chat (a page of prose in a one-line surface, with nobody to ask)
   paperFill.service.js  paperEquity.service.js
   exitOrders.util.js        buildExitOrder (applies +basisOffset → broker price space) / exitOrderRecord / closeSide / orderSymbol
   monitorUtils.js           candleMs, parseYesNo, round, remainingForAccount, timeframe resolvers;

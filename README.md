@@ -73,7 +73,8 @@ api/                   HTTP surface — one folder per feature (routes + control
   axl/                 Axl — the concierge/critic meta-layer that hands the user to the specialists:
                        `<route>` opens a desk for new work, `<edit>` reopens an item they already
                        have in the editor that owns it. Also delivers the daily market brief
-                       (POST /api/axl/brief)
+                       (POST /api/axl/brief/stream — streamed into the Axl chat panel, never
+                       posted into the social chat)
   kairos/              Kairos chat + the `call` kind (monitored by Hermes)
   mentor/ setups/      Mentor chat + the `setup` kind (monitored by Talos)
   analyst/             buy-side analyst chat + the `coverage` research artifact
