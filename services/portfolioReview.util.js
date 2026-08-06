@@ -1,6 +1,8 @@
 // Pure helpers for the portfolio review lifecycle — no I/O, no DB.
 //
 import { toNum } from './format.util.js'
+// Pure too (forecast clock + arithmetic), so this module stays no-I/O as its header claims.
+import { diffStances } from '../monitoring/tilt.assess.js'
 //
 // A review is a delta operation anchored to the thesis, but the book's "then" state
 // (the regime, book value, and benchmark price it was last reviewed / constructed in)
@@ -64,7 +66,7 @@ const _n = toNum
  *
  * @returns {Array<{kind:string, severity:'high'|'medium', label:string}>}
  */
-export function computeReviewTriggers({ state = null, fingerprint = null, delta = null, coverage = [], now = Date.now(), driftThreshold = 0.10, benchmarkLagThreshold = 3, adverseMoveThreshold = 8 } = {}) {
+export function computeReviewTriggers({ state = null, fingerprint = null, delta = null, coverage = [], tilt = null, now = Date.now(), driftThreshold = 0.10, benchmarkLagThreshold = 3, adverseMoveThreshold = 8 } = {}) {
     const triggers = []
     const ideas = Array.isArray(state?.ideas) ? state.ideas : []
 
@@ -109,10 +111,32 @@ export function computeReviewTriggers({ state = null, fingerprint = null, delta 
     }
 
     // Regime shift since the book was last reviewed.
+    //
+    // DAILY SECTOR ROTATION IS DELIBERATELY NOT HERE (removed 2026-08-06). It fired almost every
+    // day and told the reader nothing. `leaders` was the top 3 sectors by ONE DAY's percent change,
+    // compared against the 3 leaders stored whenever the last review happened — three drawn from
+    // eleven, twice, weeks apart. Under a random model ≥2 differ about 85% of the time, and the cut
+    // between "leading" and not was routinely a few hundredths of a percent. It had no baseline
+    // that could ratchet, which is the same reason it was declined as a coverage re-model trigger
+    // on 2026-07-30 and should never have survived here.
+    //
+    // What replaces it is the HOUSE SECTOR VIEW changing — deliberate, rare, and already ratcheted
+    // (Pythia publishes on a monthly floor under a cooldown). See the sector_view trigger below.
     if (delta?.regime?.inversionFlip) {
         triggers.push({ kind: 'regime', severity: 'high', label: 'yield-curve inversion flipped since last review' })
-    } else if ((delta?.regime?.rotatedIn?.length ?? 0) >= 2) {
-        triggers.push({ kind: 'regime', severity: 'medium', label: `sector leadership rotated — ${delta.regime.rotatedIn.slice(0, 2).join(', ')} now leading` })
+    }
+
+    // The house sector view moved since this book was last looked at.
+    //
+    // NOT gated on what the book holds. A sector we own nothing in turning overweight is exactly
+    // when a swap is worth considering, so filtering to current holdings would hide the most
+    // actionable case — the opposite of the ownership gate the notification cards use, and
+    // deliberately so: a card interrupts, a review trigger is read when the user is already looking.
+    const viewMoved = diffStances({ tilts: fingerprint?.tilt?.stances }, { tilts: tilt?.tilts })
+    if (viewMoved.length) {
+        const named = viewMoved.slice(0, 2).map(c => `${c.sector} ${c.from ?? 'no view'}→${c.to ?? 'no view'}`).join(', ')
+        const more  = viewMoved.length > 2 ? ` (+${viewMoved.length - 2} more)` : ''
+        triggers.push({ kind: 'sector_view', severity: 'medium', label: `house sector view changed — ${named}${more}` })
     }
 
     // Worst drift beyond the band.
@@ -186,17 +210,14 @@ export function computeReviewDelta({ fingerprint = null, state = null, benchmark
     let regime = null
     const rThen = fingerprint.regime
     if (rThen && macroNow) {
-        const leadersThen = Array.isArray(rThen.leaders) ? rThen.leaders : []
-        const leadersNow  = Array.isArray(macroNow.leaders) ? macroNow.leaders : []
+        // No leaders/rotation legs. Diffing two single-day sector rankings produced a "rotation"
+        // on almost every comparison; the honest version of that signal is the house view moving.
         const spreadThen = rThen.spread2s10s, spreadNow = macroNow.spread2s10s
         regime = {
             spread2s10s: { then: spreadThen ?? null, now: spreadNow ?? null },
             fedFunds:    { then: rThen.fedFunds ?? null, now: macroNow.fedFunds ?? null },
             inflation:   { then: rThen.inflation ?? null, now: macroNow.inflation ?? null },
             inversionFlip: (Number.isFinite(spreadThen) && Number.isFinite(spreadNow)) ? (spreadThen < 0) !== (spreadNow < 0) : false,
-            leadersThen, leadersNow,
-            rotatedIn:  leadersNow.filter(x => !leadersThen.includes(x)),
-            rotatedOut: leadersThen.filter(x => !leadersNow.includes(x)),
         }
     }
 
@@ -215,7 +236,7 @@ export function computeReviewDelta({ fingerprint = null, state = null, benchmark
  * @param {{ticker:string, price:(number|null)}|null} args.benchmark
  * @param {number} [args.now]          epoch ms (injectable for tests)
  */
-export function buildFingerprint({ reason, state = null, macroRaw = null, benchmark = null, now = Date.now() }) {
+export function buildFingerprint({ reason, state = null, macroRaw = null, benchmark = null, tilt = null, now = Date.now() }) {
     const holdings = (Array.isArray(state?.ideas) ? state.ideas : []).map(s => ({
         asset:           s.asset ?? null,
         allocationRatio: s.allocationRatio ?? null,
@@ -237,8 +258,16 @@ export function buildFingerprint({ reason, state = null, macroRaw = null, benchm
                 spread2s10s: macroRaw.spread2s10s ?? null,
                 fedFunds:    macroRaw.fedFunds ?? null,
                 inflation:   macroRaw.inflation ?? null,
-                leaders:     Array.isArray(macroRaw.leaders) ? macroRaw.leaders : [],
                 asOf:        macroRaw.asOf ?? null,
+            }
+            : null,
+        // The house sector view AS IT STOOD at this review — the baseline the next one diffs
+        // against. Only the three fields a stance is judged by; the rest of the doc is Pythia's.
+        tilt: tilt?.id
+            ? {
+                id: tilt.id,
+                stances: (Array.isArray(tilt.tilts) ? tilt.tilts : [])
+                    .map(r => ({ sector: r.sector, stance: r.stance ?? null, active_bp: r.active_bp ?? null })),
             }
             : null,
         holdings,

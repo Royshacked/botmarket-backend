@@ -69,3 +69,33 @@ test('a long thesis is truncated', () => {
     const row = out.split('\n').find(l => l.startsWith('- ABC'))
     assert.ok(row.length < 200, `thesis row not truncated: ${row.length} chars`)
 })
+
+// ── the gap Atlas could not see ─────────────────────────────────────────────
+test('names the sectors coverage has NOTHING in — an absence is not on the page', () => {
+    // The reported behaviour: Atlas built entirely from existing coverage and never screened. Using
+    // coverage first is correct; NOT screening is correct only if every targeted sleeve had a name
+    // behind it. The empty case already ended in a hard instruction, but the PARTIAL case had none —
+    // so a book covered in two sectors read as "you have what you need".
+    const out = _formatCoverage([{ symbol: 'NVDA', sector: 'Technology', rating: 'buy', status: 'active' }])
+    assert.match(out, /NO COVERAGE AT ALL IN:/)
+    assert.match(out, /Healthcare/)
+    assert.match(out, /Utilities/)
+    assert.match(out, /emit a <screen_request> for that sleeve/)
+    // A covered sector must not be reported as a gap.
+    assert.doesNotMatch(out.split('NO COVERAGE AT ALL IN:')[1], /Technology/)
+    // The failure worth naming outright: bending the architecture to fit what happens to be researched.
+    assert.match(out, /shrink the sleeve to fit what happens to be covered/)
+})
+
+test('every sector covered → no gap line at all', async () => {
+    const { SECTORS } = await import('../../services/entity/vocabulary.js')
+    const out = _formatCoverage(SECTORS.map((s, i) => ({ symbol: `T${i}`, sector: s, rating: 'buy', status: 'active' })))
+    assert.doesNotMatch(out, /NO COVERAGE AT ALL IN/)
+})
+
+test('with NOTHING covered the hard stop still wins — it must not soften into a gap list', () => {
+    const out = _formatCoverage([])
+    assert.match(out, /No Analyst coverage yet/)
+    assert.match(out, /END THE TURN/)
+    assert.doesNotMatch(out, /NO COVERAGE AT ALL IN/)
+})

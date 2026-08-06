@@ -11,8 +11,10 @@ import { logger }         from './logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, LANGUAGE_RULE } from './agentUtils.js'
 import { makeTradingContextHandlers } from './tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
+import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from './sectorView.tools.js'
 import { makeChartHandler } from './marketData.tools.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
+import { SECTORS } from './entity/vocabulary.js'
 import { buildTagCaptures } from './llmStream.util.js'
 import { buildSchoolSection, normalizeAllocation, normalizeSelection } from './investorSchools.js'
 
@@ -46,9 +48,15 @@ export const TOOLS = toolsFor({
     // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
     // array prefix.
     get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
+    // Appended too. The house sector view — the SAME unbound read Axl reports from, because a
+    // broadcast has one text and two readers, not two texts. Advisory: it informs which sectors
+    // Atlas sources, and the mandate still wins (see the prompt).
+    get_sector_view: SECTOR_VIEW_TOOL_SPEC.get_sector_view,
 })
 
 const TOOL_HANDLERS = {
+    // Unbound — a house view is a broadcast, so the handler takes no userId to leak.
+    ...makeSectorViewHandlers(),
     get_quote: makeToolHandler('get_quote',
         ({ ticker }) => getQuote(ticker),
         (err, { ticker }) => `Could not fetch quote for ${ticker}: ${err.message}`, LOG),
@@ -120,6 +128,18 @@ export function _formatCoverage(rows) {
     const sectors = [...bySector.keys()].filter(s => s !== UNSECTORED)
     if (bySector.has(UNSECTORED)) sectors.push(UNSECTORED)
 
+    // WHAT IS NOT HERE, said out loud.
+    //
+    // The empty case above ends in a hard instruction; the PARTIAL case had none, so a book with
+    // eight technology names and one financial read as "you have what you need". An absence is not
+    // on the page, and a model works from what is on the page — noticing a missing heading means
+    // remembering an architecture written several turns earlier. Naming the uncovered sectors turns
+    // that into something it reads rather than something it recalls.
+    //
+    // Same fix and same reason as the strategy desk's own coverage read (_coverageBySector).
+    const covered   = new Set(bySector.keys())
+    const uncovered = SECTORS.filter(sec => !covered.has(sec))
+
     const blocks = sectors.map(sector => [
         sector === UNSECTORED ? `${UNSECTORED} (no sector recorded — check the name fits before placing it):` : `${sector}:`,
         ...bySector.get(sector).map(line),
@@ -129,6 +149,12 @@ export function _formatCoverage(rows) {
         'Analyst coverage (researched theses — build from these, our target vs the Street).',
         'Grouped by the sector the Analyst researched each name UNDER — that is the sleeve it was sourced for. A sleeve from your architecture with no heading here has nothing researched behind it yet: route it, do not fill it from another sector\'s names.',
         ...blocks.flatMap(b => ['', b]),
+        ...(uncovered.length ? ['', `NO COVERAGE AT ALL IN: ${uncovered.join(', ')}.`
+            + ' If your architecture targets any of these, it has nothing researched behind it —'
+            + ' emit a <screen_request> for that sleeve (one per sleeve, all in this turn). Do NOT'
+            + ' shrink the sleeve to fit what happens to be covered, and do not fill it from a'
+            + ' neighbouring sector: what is already researched is a fact about our past work, not a'
+            + ' view about this mandate.'] : []),
     ].join('\n')
 }
 
@@ -483,9 +509,7 @@ export function _formatReviewDelta(d) {
         ].filter(Boolean)
         let line = `Regime shift since last review: ${parts.length ? parts.join(', ') : 'n/a'}`
         if (r.inversionFlip) line += ' ⚠ yield-curve inversion FLIPPED'
-        if (r.rotatedIn.length || r.rotatedOut.length) {
-            line += ` | sector leaders ${r.rotatedIn.length ? `+[${r.rotatedIn.join(', ')}]` : ''}${r.rotatedOut.length ? ` −[${r.rotatedOut.join(', ')}]` : ''}`.trimEnd()
-        }
+
         lines.push(line)
     }
 

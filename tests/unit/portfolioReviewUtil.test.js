@@ -38,8 +38,9 @@ test('fingerprint: full state → all fields captured', () => {
             { asset: 'XLV',  allocationRatio: 0.2, actualWeight: 0.18, conviction: { level: 'medium', score: 0.5 } },
         ],
     }
-    const macroRaw = { asOf: '2026-07-16', spread2s10s: 0.41, fedFunds: 4.09, inflation: 2.29, leaders: ['Tech', 'Health', 'Energy'] }
-    const fp = buildFingerprint({ reason: 'review', state, macroRaw, benchmark: { ticker: 'SPY', price: 600 }, now: 1_700_000_000_000 })
+    const macroRaw = { asOf: '2026-07-16', spread2s10s: 0.41, fedFunds: 4.09, inflation: 2.29 }
+    const tilt = { id: 'tilt1', tilts: [{ sector: 'Energy', stance: 'under', active_bp: -150, rationale: 'ignored here' }] }
+    const fp = buildFingerprint({ reason: 'review', state, macroRaw, tilt, benchmark: { ticker: 'SPY', price: 600 }, now: 1_700_000_000_000 })
 
     assert.equal(fp.reason, 'review')
     assert.equal(fp.capturedAt, 1_700_000_000_000)
@@ -49,7 +50,10 @@ test('fingerprint: full state → all fields captured', () => {
     assert.deepEqual(fp.benchmark, { ticker: 'SPY', price: 600 })
     assert.equal(fp.regime.spread2s10s, 0.41)
     assert.equal(fp.regime.fedFunds, 4.09)
-    assert.deepEqual(fp.regime.leaders, ['Tech', 'Health', 'Energy'])
+    // The house view as it stood — the baseline the NEXT review diffs against. Only the three
+    // fields a stance is judged by; the day's sector ranking is deliberately not captured at all.
+    assert.deepEqual(fp.tilt, { id: 'tilt1', stances: [{ sector: 'Energy', stance: 'under', active_bp: -150 }] })
+    assert.equal(fp.regime.leaders, undefined, 'a daily sector ranking is not a baseline')
     assert.equal(fp.holdings.length, 2)
     assert.deepEqual(fp.holdings[0], { asset: 'NVDA', allocationRatio: 0.3, actualWeight: 0.32, convictionScore: 0.8, convictionLevel: 'high' })
 })
@@ -71,14 +75,14 @@ test('fingerprint: benchmark with no price kept as {ticker, price:null}', () => 
 })
 
 // ─── computeReviewDelta ─────────────────────────────────────────────────────
-test('delta: benchmark-relative + regime rotation', () => {
+test('delta: benchmark-relative + regime shift (no rotation legs)', () => {
     const fingerprint = {
         capturedAt: 1_700_000_000_000, reason: 'review', totalPnlPct: 3.0,
         benchmark: { ticker: 'SPY', price: 600 },
-        regime: { spread2s10s: -0.2, fedFunds: 4.5, inflation: 3.0, leaders: ['Technology', 'Energy', 'Financials'] },
+        regime: { spread2s10s: -0.2, fedFunds: 4.5, inflation: 3.0 },
     }
     const state    = { totalPnlPct: 5.0 }
-    const macroNow = { spread2s10s: 0.3, fedFunds: 4.09, inflation: 2.29, leaders: ['Healthcare', 'Technology', 'Utilities'] }
+    const macroNow = { spread2s10s: 0.3, fedFunds: 4.09, inflation: 2.29 }
     const now      = fingerprint.capturedAt + 30 * 86400000
     const d = computeReviewDelta({ fingerprint, state, benchmarkNowPrice: 630, macroNow, now })
 
@@ -87,8 +91,11 @@ test('delta: benchmark-relative + regime rotation', () => {
     assert.equal(d.benchmark.bookDeltaPnlPct, 2)    // 5.0 - 3.0
     assert.equal(d.benchmark.relativePct, -3)       // 2 - 5 → BEHIND
     assert.equal(d.regime.inversionFlip, true)      // -0.2 → +0.3
-    assert.deepEqual(d.regime.rotatedIn, ['Healthcare', 'Utilities'])
-    assert.deepEqual(d.regime.rotatedOut, ['Energy', 'Financials'])
+    // Diffing two single-day sector rankings produced a "rotation" on nearly every comparison, so
+    // the legs are gone entirely rather than left computed-but-unused.
+    assert.equal(d.regime.rotatedIn, undefined)
+    assert.equal(d.regime.rotatedOut, undefined)
+    assert.equal(d.regime.leadersNow, undefined)
 })
 
 test('delta: null fingerprint or neither leg → null', () => {
@@ -138,12 +145,48 @@ test('triggers: quiet cycle → empty', () => {
     assert.deepEqual(computeReviewTriggers({ state, delta: null }), [])
 })
 
-test('triggers: sector rotation (≥2 rotated in) fires a medium regime trigger', () => {
+test('triggers: daily sector rotation NEVER fires — it was pure noise', () => {
+    // It compared the top 3 sectors by ONE day's move against the 3 stored at the last review,
+    // weeks earlier. Three from eleven, twice: ≥2 differ ~85% of the time under a random model, so
+    // it notified almost daily and said nothing. Removed 2026-08-06.
     const t = computeReviewTriggers({ state: null, delta: { regime: { inversionFlip: false, rotatedIn: ['Healthcare', 'Utilities'] } } })
+    assert.equal(t.length, 0)
+})
+
+test('triggers: the HOUSE SECTOR VIEW changing is what earns a look', () => {
+    const fingerprint = { tilt: { id: 't1', stances: [{ sector: 'Energy', stance: 'under', active_bp: -150 }] } }
+    const tilt = { id: 't2', tilts: [{ sector: 'Energy', stance: 'over', active_bp: 150 }] }
+    const t = computeReviewTriggers({ state: null, fingerprint, tilt })
     assert.equal(t.length, 1)
-    assert.equal(t[0].kind, 'regime')
-    assert.equal(t[0].severity, 'medium')
-    assert.match(t[0].label, /Healthcare, Utilities now leading/)
+    assert.equal(t[0].kind, 'sector_view')
+    assert.match(t[0].label, /Energy under→over/)
+})
+
+test('triggers: a republished but UNCHANGED view is not news', () => {
+    // The ratchet the rotation trigger never had: publishing again with the same stances is silent.
+    const stances = [{ sector: 'Energy', stance: 'under', active_bp: -150 }]
+    const t = computeReviewTriggers({
+        state: null,
+        fingerprint: { tilt: { id: 't1', stances } },
+        tilt: { id: 't2', tilts: stances },
+    })
+    assert.equal(t.length, 0)
+})
+
+test('triggers: the view trigger is NOT gated on what the book holds', () => {
+    // A sector we own nothing in turning overweight is exactly when a swap is worth considering, so
+    // filtering to holdings would hide the most actionable case.
+    const t = computeReviewTriggers({
+        state: { ideas: [{ asset: 'NVDA' }] },
+        fingerprint: { tilt: { id: 't1', stances: [] } },
+        tilt: { id: 't2', tilts: [{ sector: 'Utilities', stance: 'over', active_bp: 200 }] },
+    })
+    assert.ok(t.some(x => x.kind === 'sector_view' && /Utilities/.test(x.label)))
+})
+
+test('triggers: no view at all on either side is silent', () => {
+    assert.equal(computeReviewTriggers({ state: null }).length, 0)
+    assert.equal(computeReviewTriggers({ state: null, tilt: { id: 't', tilts: [] } }).length, 0)
 })
 
 // ─── _formatReviewDelta (display) ───────────────────────────────────────────
@@ -156,7 +199,7 @@ test('format: benchmark BEHIND + regime flip render as expected', () => {
     assert.match(text, /Performance vs SPY \(since last review, 30d\): SPY \+5\.0% \| book \+2\.0% \(Δ unrealized P&L\) → book BEHIND by 3\.0pt/)
     assert.match(text, /Regime shift since last review: 2s10s -0\.2→0\.3, Fed funds 4\.5%→4\.09%, inflation 3%→2\.29%/)
     assert.match(text, /inversion FLIPPED/)
-    assert.match(text, /sector leaders \+\[Healthcare\] −\[Energy\]/)
+    assert.doesNotMatch(text, /sector leaders/, 'the daily ranking is no longer shown as a delta')
     assert.equal(_formatReviewDelta(null), null)
 })
 
