@@ -141,14 +141,14 @@ export async function _checkCoverage(db, cov, nowMs, deps = _deps) {
     // The classifier compares point-to-point (our PT vs the Street's mean); the stored gap keeps the
     // whole distribution. A bare number is still accepted, so an injected test dep can stay simple.
     const consensusPt = (street && typeof street === 'object') ? street.consensus ?? null : street ?? null
-    const verdict = classifyGapState(cov, { price, consensus_pt: consensusPt })
+    const verdict = classifyGapState(cov, { price, consensus_pt: consensusPt, nowMs })
     const gap     = recomputeGap(cov.price_target?.value, street) ?? cov.gap ?? null
     const nextAt  = nextCheckAt(cov, verdict.state, nowMs)
 
     // The expensive-tier decision rides the SAME daily fetch — no extra call to ask "is a re-model
     // earned?". `edge_category` is persisted on every tick precisely so the next one can spot a
     // CHANGE; recording it is what makes that trigger possible at all.
-    const remodel = remodelDecision(cov, { street, nowMs })
+    const remodel = remodelDecision(cov, { street, nowMs, gapState: verdict.state })
 
     const bookkeeping = {
         $set: {
@@ -156,6 +156,10 @@ export async function _checkCoverage(db, cov, nowMs, deps = _deps) {
             'monitor.last_checked':    new Date(nowMs).toISOString(),
             'monitor.edge_category':   remodel.edge_category,
             'monitor.next_remodel_at': remodel.next_remodel_at,
+            // The early-hit ratchet (see `alreadyRecorded`). Written on the material path only —
+            // stamping it on the quiet path would be a no-op, since the quiet path for this state is
+            // reached only when the stamp already exists.
+            ...(verdict.state === 'target_hit_early' ? { 'monitor.early_hit_at': new Date(nowMs).toISOString() } : {}),
         },
         $inc: { 'monitor.checks': 1 },
     }
@@ -165,7 +169,23 @@ export async function _checkCoverage(db, cov, nowMs, deps = _deps) {
     // the same revision and the same card every single day. Consensus states self-limit — each write
     // moves `gap.consensus_pt`, so `diverging` can only fire again on a FURTHER move — but a price
     // comparison has no such ratchet, so it needs this one.
-    const alreadyRecorded = verdict.state === 'target_hit' && cov.status === 'target_hit'
+    //
+    // An EARLY hit needs its own ratchet rather than sharing the status check: it deliberately leaves
+    // the status `active` (coverage.assess.statusForState), so there is no status for the verdict to
+    // be read back out of, and its own stamp is what stops it repeating.
+    //
+    // The stamp is scoped to the TARGET it silenced, not to the name. An early hit triggers a
+    // re-model, the re-model writes a fresh (higher) target with a fresh `set_at` — and a stamp left
+    // standing from the previous target would then swallow the next early hit in silence, which is the
+    // one verdict that must never go unheard twice in a row. A stamp older than the current target has
+    // outlived its subject and no longer ratchets anything.
+    const earlyStampMs = Date.parse(cov.monitor?.early_hit_at ?? '')
+    const targetSetMs  = Date.parse(cov.price_target?.set_at ?? '')
+    const earlyAlreadyStamped = Number.isFinite(earlyStampMs)
+        && (!Number.isFinite(targetSetMs) || earlyStampMs >= targetSetMs)
+
+    const alreadyRecorded = (verdict.state === 'target_hit'       && cov.status === 'target_hit')
+                         || (verdict.state === 'target_hit_early' && earlyAlreadyStamped)
 
     if (verdict.state === 'stable' || alreadyRecorded) {
         // Quiet day — refresh the recorded gap + bookkeeping directly (no revision, no notify).

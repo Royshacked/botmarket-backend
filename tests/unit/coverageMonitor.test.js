@@ -197,3 +197,63 @@ test('the ownership key is user-scoped — one user\'s holdings cannot prioritis
     await _runRemodels(h.db, candidates, h.deps)
     assert.equal(h.ran.length, 2)   // both fit under the cap; the point is no crash + no cross-user credit
 })
+
+// ── the early-hit ratchet ────────────────────────────────────────────────────
+// An early hit deliberately leaves the status `active`, so the status check that stops `target_hit`
+// re-firing daily can't stop this one — `monitor.early_hit_at` is what does.
+const DAY = 24 * 60 * 60 * 1000
+const T0  = Date.parse('2026-01-01T00:00:00.000Z')
+const earlyCov = (over = {}) => cov({
+    price_target: { value: 200, horizon: '12m', set_at: '2026-01-01T00:00:00.000Z', target_date: '2027-01-01T00:00:00.000Z' },
+    ...over,
+})
+
+test('target_hit_early: notifies + appends a revision but does NOT retire the thesis', async () => {
+    const h = harness({ price: 205, consensusPt: 190 })
+    const v = await _checkCoverage(h.db, earlyCov(), T0 + 21 * DAY, h.deps)
+    assert.equal(v.state, 'target_hit_early')
+    assert.equal(h.updates.length, 1)
+    assert.equal(h.updates[0].patch.revision_kind, 'target_hit_early')
+    assert.equal(h.updates[0].patch.status, undefined)   // stays active — the call is re-opened, not booked
+    assert.equal(h.notifies.length, 1)
+    assert.ok(h.db._updates.at(-1).u.$set['monitor.early_hit_at'])   // the ratchet is stamped
+})
+
+test('an early hit fires ONCE — a price parked above our PT cannot re-ring it daily', async () => {
+    const h = harness({ price: 205, consensusPt: 190 })
+    const already = earlyCov({ monitor: { early_hit_at: '2026-01-22T00:00:00.000Z' } })
+    const v = await _checkCoverage(h.db, already, T0 + 25 * DAY, h.deps)
+    assert.equal(v.state, 'target_hit_early')
+    assert.equal(v.applied, false)
+    assert.equal(h.updates.length, 0)    // no second revision
+    assert.equal(h.notifies.length, 0)   // no second card
+})
+
+test('an early hit earns a re-model — the model was too conservative', async () => {
+    const h = harness({ price: 205, consensusPt: 190 })
+    const v = await _checkCoverage(h.db, earlyCov({ created_at: '2026-01-01T00:00:00.000Z' }), T0 + 21 * DAY, h.deps)
+    assert.equal(v.remodel.due, true)
+    assert.match(v.remodel.reason, /early/)
+})
+
+test('...but it still sits under the re-model cooldown, like every other trigger', async () => {
+    const h = harness({ price: 205, consensusPt: 190 })
+    const recent = earlyCov({ monitor: { last_remodel_at: new Date(T0 + 20 * DAY).toISOString() } })
+    const v = await _checkCoverage(h.db, recent, T0 + 21 * DAY, h.deps)
+    assert.equal(v.state, 'target_hit_early')
+    assert.equal(v.remodel.due, false)
+})
+
+test('the early-hit stamp is scoped to the TARGET, not the name — a re-modelled PT can fire again', async () => {
+    const h = harness({ price: 305, consensusPt: 290 })
+    // The re-model raised the target to 300 and restarted its clock; the old stamp predates it and so
+    // must not silence the new call reaching 305 in its first weeks.
+    const remodelled = cov({
+        price_target: { value: 300, horizon: '12m', set_at: '2026-02-01T00:00:00.000Z', target_date: '2027-02-01T00:00:00.000Z' },
+        monitor: { early_hit_at: '2026-01-22T00:00:00.000Z' },   // stamped against the OLD 200 target
+    })
+    const v = await _checkCoverage(h.db, remodelled, Date.parse('2026-02-20T00:00:00.000Z'), h.deps)
+    assert.equal(v.state, 'target_hit_early')
+    assert.equal(h.notifies.length, 1)   // heard, not swallowed
+    assert.equal(h.db._updates.at(-1).u.$set['monitor.early_hit_at'], '2026-02-20T00:00:00.000Z')
+})

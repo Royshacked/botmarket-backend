@@ -19,6 +19,21 @@ test('target_hit → analyst card; edge_gone adds the harvest nudge', () => {
     assert.match(gone.content, /edge is gone.*harvest/i)
 })
 
+test('target_hit_early reads as a MISS — never as a target reached worth harvesting', () => {
+    const c = buildCoverageEvent(cov(), {
+        state: 'target_hit_early',
+        reason: 'price 205 reached PT 200 just 6% into a 12m call — the target was too low',
+        edge_gone: false,
+    })
+    assert.equal(c.payload.state, 'target_hit_early')
+    assert.match(c.content, /too fast/)
+    assert.match(c.content, /the target was too low/)
+    assert.match(c.content, /Re-modelling rather than closing/)
+    // The failure this copy guards: a card that announced "reached our price target" and stopped there
+    // would invite exactly the harvest the verdict argues against.
+    assert.doesNotMatch(c.content, /harvest/i)
+})
+
 test('thesis_broken / validating / diverging each phrase the reason', () => {
     assert.match(buildCoverageEvent(cov(), { state: 'thesis_broken', reason: 'price ≤ bear' }).content, /thesis BROKEN: price ≤ bear/)
     assert.match(buildCoverageEvent(cov(), { state: 'validating', reason: 'Street catching up' }).content, /playing out: Street catching up/)

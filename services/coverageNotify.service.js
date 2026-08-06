@@ -25,6 +25,11 @@ export function buildCoverageEvent(coverage, verdict) {
     if (state === 'target_hit') {
         content = `${sym} reached our price target${pt != null ? ` (${pt})` : ''}`
             + (verdict.edge_gone ? ' — the Street has caught up, so the edge is gone. Consider harvesting.' : '.')
+    } else if (state === 'target_hit_early') {
+        // Reads as a MISS, not a win — the copy has to say so, or a card announcing "target reached"
+        // invites exactly the harvest the verdict is arguing against.
+        content = `${sym} reached our price target${pt != null ? ` (${pt})` : ''} far too fast: ${verdict.reason}.`
+            + ' Re-modelling rather than closing the call.'
     } else if (state === 'thesis_broken') {
         content = `${sym} thesis BROKEN: ${verdict.reason}.`
     } else if (state === 'validating') {

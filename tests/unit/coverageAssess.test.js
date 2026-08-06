@@ -57,6 +57,60 @@ test('bearish: price falls to our PT → target_hit', () => {
     assert.equal(classifyGapState(bear(), { price: 148, consensus_pt: 180 }).state, 'target_hit')
 })
 
+// ── target_hit_early: WHEN the target was reached is the whole point of storing a horizon ──────
+// A 12m target reached in week three and one reached in month eleven used to be recorded identically.
+// They are opposite outcomes: the early one says our number was too LOW.
+const DAY = 24 * 60 * 60 * 1000
+// A 12m call set at t0, with the clock handed in as `nowMs` (the monitor's).
+const dated = (over = {}) => bull({
+    price_target: { value: 200, horizon: '12m', set_at: '2026-01-01T00:00:00.000Z', target_date: '2027-01-01T00:00:00.000Z' },
+    ...over,
+})
+const at = days => Date.parse('2026-01-01T00:00:00.000Z') + days * DAY
+
+test('a target reached in the first quarter of its window → target_hit_early, never edge_gone', () => {
+    const v = classifyGapState(dated(), { price: 205, consensus_pt: 210, nowMs: at(21) })
+    assert.equal(v.state, 'target_hit_early')
+    assert.match(v.reason, /too low/)
+    assert.match(v.reason, /12m/)
+    // The Street sitting above our PT would read as edge_gone on a normal hit. On an early one it must
+    // not: agreeing with a number we now think was wrong is no reason to harvest.
+    assert.equal(v.edge_gone, false)
+})
+
+test('past the quarter mark it is an ordinary target_hit, edge_gone intact', () => {
+    const v = classifyGapState(dated(), { price: 205, consensus_pt: 210, nowMs: at(200) })
+    assert.equal(v.state, 'target_hit')
+    assert.equal(v.edge_gone, true)
+})
+
+test('the early boundary scales with the horizon, not a fixed period', () => {
+    // 30 days is a third of a 3m call (ordinary) but 4% of a 24m one (early).
+    const short = dated({ price_target: { value: 200, horizon: '3m', set_at: '2026-01-01T00:00:00.000Z', target_date: '2026-04-01T00:00:00.000Z' } })
+    const long  = dated({ price_target: { value: 200, horizon: '24m', set_at: '2026-01-01T00:00:00.000Z', target_date: '2028-01-01T00:00:00.000Z' } })
+    assert.equal(classifyGapState(short, { price: 205, nowMs: at(30) }).state, 'target_hit')
+    assert.equal(classifyGapState(long,  { price: 205, nowMs: at(30) }).state, 'target_hit_early')
+})
+
+test('bearish theses split the same way', () => {
+    const b = bear({ price_target: { value: 150, horizon: '12m', set_at: '2026-01-01T00:00:00.000Z', target_date: '2027-01-01T00:00:00.000Z' } })
+    assert.equal(classifyGapState(b, { price: 148, nowMs: at(10) }).state,  'target_hit_early')
+    assert.equal(classifyGapState(b, { price: 148, nowMs: at(300) }).state, 'target_hit')
+})
+
+test('a hit after the deadline is still a plain target_hit — late is not early', () => {
+    assert.equal(classifyGapState(dated(), { price: 205, nowMs: at(500) }).state, 'target_hit')
+})
+
+// Timing SHARPENS a hit; it is never a precondition for noticing one. Coverage written before the
+// deadline existed, or checked without a clock, must classify exactly as it did before.
+test('no clock or no stored deadline → degrades to plain target_hit', () => {
+    assert.equal(classifyGapState(dated(), { price: 205 }).state, 'target_hit')                        // no nowMs
+    assert.equal(classifyGapState(bull(),  { price: 205, nowMs: at(1) }).state, 'target_hit')          // legacy PT, no dates
+    const malformed = dated({ price_target: { value: 200, horizon: '12m', set_at: 'nonsense', target_date: '2027-01-01T00:00:00.000Z' } })
+    assert.equal(classifyGapState(malformed, { price: 205, nowMs: at(1) }).state, 'target_hit')
+})
+
 // ── the valuation band is NOT an invalidation level ──────────────────────────
 // risk_reward is a ±15% sensitivity around our multiple with EPS held constant — for a bullish name it
 // routinely sits ABOVE spot, so reading `bear` as a stop broke every thesis on its first check. Research
@@ -114,6 +168,9 @@ test('statusForState: only target_hit moves the status; signals leave it unchang
     assert.equal(statusForState('validating'), null)
     assert.equal(statusForState('diverging'), null)
     assert.equal(statusForState('stable'), null)
+    // An early hit deliberately leaves the thesis ACTIVE. Retiring it as `target_hit` would book a
+    // mis-calibrated model as a win and stop the research that should follow it.
+    assert.equal(statusForState('target_hit_early'), null)
 })
 
 test('statusForState never returns thesis_broken — no deterministic kill exists', () => {
@@ -123,7 +180,7 @@ test('statusForState never returns thesis_broken — no deterministic kill exist
 })
 
 test('nextCheckAt: ALWAYS a next check — a thesis lives until the user retires it', () => {
-    for (const state of ['target_hit', 'validating', 'diverging', 'stable']) {
+    for (const state of ['target_hit', 'target_hit_early', 'validating', 'diverging', 'stable']) {
         assert.equal(nextCheckAt(bull(), state, 0), '1970-01-02T00:00:00.000Z', state)  // base 0 + 24h
     }
 })

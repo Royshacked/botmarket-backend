@@ -18,6 +18,10 @@
 // price fell is cheaper, not wrong. And not raw consensus-PT drift either — that is the daily card's
 // job (validating/diverging), and for a contrarian thesis the Street moving away is the view working.
 //
+//   • the one apparent exception is an EARLY target hit, which is not really price talking: reaching
+//     our own number in a fraction of its horizon contradicts the `multiple × forward metric` model
+//     as squarely as a catalyst does, and it fires once (the monitor stamps `monitor.early_hit_at`).
+//
 // Nor SECTOR ROTATION (asked + declined 2026-07-30). Three reasons, and they stack:
 //   • It is the cause, not the effect. Rotation moves neither our PT nor the Street's, so it cannot
 //     move the gap. When it genuinely matters the analysts cut numbers, consensus moves, and
@@ -109,7 +113,7 @@ function _lastModelledMs(coverage) {
  * @returns {{ due:boolean, reason:string|null, edge_category:string|null, next_remodel_at:string|null }}
  *   `edge_category` is always returned (persist it; the change detection reads it back next tick).
  */
-export function remodelDecision(coverage, { street = null, nowMs = 0 } = {}) {
+export function remodelDecision(coverage, { street = null, nowMs = 0, gapState = null } = {}) {
     const edge = classifyEdge(coverage, street)
     const lastMs = _lastModelledMs(coverage)
     const dates  = parseCatalystDates(coverage?.catalysts)
@@ -126,6 +130,15 @@ export function remodelDecision(coverage, { street = null, nowMs = 0 } = {}) {
     // The cooldown outranks every trigger. A name in the news can trip several in the same week, and
     // three research runs on one ticker in three days buys nothing the first one didn't.
     if (lastMs !== null && nowMs - lastMs < COOLDOWN_DAYS * DAY_MS) return quiet
+
+    // 0. The target was reached almost immediately (coverage.assess.classifyGapState). The exception
+    //    to "price is never a trigger" below, and it isn't really one: the claim isn't that the tape
+    //    moved, it's that our own number was reached in a fraction of the time we said it would take,
+    //    which contradicts the model directly. Sits UNDER the cooldown like every other trigger, and
+    //    the monitor's `early_hit_at` stamp keeps it firing once.
+    if (gapState === 'target_hit_early') {
+        return { ...quiet, due: true, reason: 'target reached early — the model was too conservative' }
+    }
 
     // 1. A dated catalyst has landed since we last modelled.
     const passed = dates.filter(d => {

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { normalizeCoverage, newRevision, RATINGS, STATUSES, coverageService } from '../../api/analyst/coverage.service.js'
+import { normalizeCoverage, newRevision, RATINGS, STATUSES, HORIZONS, DEFAULT_HORIZON, coverageService } from '../../api/analyst/coverage.service.js'
 
 // Analyst P1 — coverage schema normalizer (pure). The CRUD methods are DB-bound (not unit-tested,
 // mirroring normalizeCall vs saveKairosCall).
@@ -46,11 +46,57 @@ test('normalize: status validated (unknown → default active)', () => {
 
 // ── numeric sub-objects ─────────────────────────────────────────────────────
 test('normalize: price_target requires a numeric value (else null)', () => {
-    assert.deepEqual(
-        normalizeCoverage({ symbol: 'X', price_target: { value: '182.5', horizon: '12m', basis: '18x FY26 EPS' } }).price_target,
-        { value: 182.5, horizon: '12m', basis: '18x FY26 EPS' })
+    const pt = normalizeCoverage({ symbol: 'X', price_target: { value: '182.5', horizon: '12m', basis: '18x FY26 EPS', set_at: '2026-01-15T00:00:00.000Z' } }).price_target
+    assert.deepEqual(pt, {
+        value: 182.5, horizon: '12m', basis: '18x FY26 EPS',
+        set_at: '2026-01-15T00:00:00.000Z', target_date: '2027-01-15T00:00:00.000Z',
+    })
     assert.equal(normalizeCoverage({ symbol: 'X', price_target: { horizon: '12m' } }).price_target, null)   // no value
     assert.equal(normalizeCoverage({ symbol: 'X', price_target: 'nope' }).price_target, null)
+})
+
+// ── the price-target HORIZON (what makes the call scoreable) ────────────────
+test('normalize: horizon validated against HORIZONS; anything else → the 12m house default', () => {
+    const h = raw => normalizeCoverage({ symbol: 'X', price_target: { value: 100, ...raw } }).price_target.horizon
+    for (const v of HORIZONS) assert.equal(h({ horizon: v }), v)
+    // The shapes that used to persist verbatim and left the target unscoreable.
+    assert.equal(h({ horizon: '12 months' }), DEFAULT_HORIZON)
+    assert.equal(h({ horizon: 'end of 2027' }), DEFAULT_HORIZON)
+    assert.equal(h({ horizon: '' }), DEFAULT_HORIZON)
+    assert.equal(h({}), DEFAULT_HORIZON)          // omitted entirely
+    assert.equal(DEFAULT_HORIZON, '12m')
+})
+
+test('normalize: target_date is DERIVED from set_at + horizon, never trusted from input', () => {
+    const at = '2026-03-10T12:00:00.000Z'
+    const td = horizon => normalizeCoverage({ symbol: 'X', price_target: { value: 100, horizon, set_at: at } }).price_target.target_date
+    assert.equal(td('3m'),  '2026-06-10T12:00:00.000Z')
+    assert.equal(td('6m'),  '2026-09-10T12:00:00.000Z')
+    assert.equal(td('12m'), '2027-03-10T12:00:00.000Z')
+    assert.equal(td('24m'), '2028-03-10T12:00:00.000Z')
+    // A hand-supplied target_date is overwritten — the deadline can't disagree with the horizon.
+    assert.equal(
+        normalizeCoverage({ symbol: 'X', price_target: { value: 100, horizon: '6m', set_at: at, target_date: '2099-01-01T00:00:00.000Z' } }).price_target.target_date,
+        '2026-09-10T12:00:00.000Z')
+})
+
+test('normalize: month-end target dates clamp instead of overflowing into the next month', () => {
+    // Jan 31 + 1 month is Mar 3 under naive date math. 24m off a leap day is the other trap.
+    const td = (set_at, horizon) => normalizeCoverage({ symbol: 'X', price_target: { value: 100, horizon, set_at } }).price_target.target_date
+    assert.equal(td('2026-08-31T00:00:00.000Z', '6m'),  '2027-02-28T00:00:00.000Z')
+    assert.equal(td('2028-02-29T00:00:00.000Z', '12m'), '2029-02-28T00:00:00.000Z')
+    assert.equal(td('2026-05-31T00:00:00.000Z', '3m'),  '2026-08-31T00:00:00.000Z')   // 31-day month → unchanged
+})
+
+test('normalize: set_at defaults to now, so a fresh target restarts the clock', () => {
+    const before = Date.now()
+    const pt = normalizeCoverage({ symbol: 'X', price_target: { value: 100 } }).price_target
+    assert.ok(Date.parse(pt.set_at) >= before && Date.parse(pt.set_at) <= Date.now())
+    // ...and an existing set_at survives re-normalization, which is what keeps a daily monitor patch
+    // (spreading the stored price_target through) from pushing the deadline out one day at a time.
+    const kept = normalizeCoverage({ symbol: 'X', price_target: pt }).price_target
+    assert.equal(kept.set_at, pt.set_at)
+    assert.equal(kept.target_date, pt.target_date)
 })
 
 test('normalize: gap keeps the whole Street distribution; all-absent → null', () => {

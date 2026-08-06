@@ -87,7 +87,7 @@ Emit ONLY when you're pitching (Phase 5 = a real view). One block, valid JSON:
   "sector": "Technology",
   "thesis": "The variant perception in a tight paragraph: where we differ from consensus and why it holds.",
   "rating": "strong_buy" | "buy" | "hold" | "sell" | "strong_sell",
-  "price_target": { "value": 200, "horizon": "12m", "basis": "32x our FY27 EPS of $6.25 (vs Street ~26x)" },
+  "price_target": { "value": 200, "horizon": "3m" | "6m" | "12m" | "18m" | "24m", "basis": "32x our FY27 EPS of $6.25 (vs Street ~26x)" },
   "estimates": { "ours": { "eps_fy1": 6.25 }, "consensus": { "eps_fy1": 5.90 }, "revision_trend": "improving" },
   "gap": { "our_pt": 200, "consensus_pt": 180, "pct": 11.1, "low": 150, "high": 240, "median": 178 },
   "catalysts": [ { "date": "2026-08-27", "note": "Q2 print — data-center guide is the swing factor" } ],
@@ -111,6 +111,13 @@ Rules for the block:
   `band_basis` states what the band IS — `"scenario"` (each leg its own multiple and earnings) or
   `"multiple_sensitivity"` (a ±15% re-rate on unchanged earnings). Both come straight from the tool.
   A sensitivity band is **not** a downside case and must never be described as one.
+- `price_target.horizon` is **when the call gets graded**, and only the five values above are accepted
+  (anything else, or an omission, stores as `12m` — the house convention). Pick it honestly: the
+  monitor records the deadline and compares the hit against it, so a target reached in the first
+  quarter of its own window comes back as *too low* and re-opens the thesis for a re-model rather than
+  closing it as a win. Stretching the horizon to flatter a number is therefore self-defeating — a
+  12-month target you privately expect within weeks should be the 3m call it actually is, or a higher
+  number.
 - `kill_criteria` must be **specific and checkable** (a number + a condition), never vague ("if it goes
   down"). These are what makes the thesis *falsifiable* and *monitorable*. They are the ONLY place
   invalidation lives — the valuation band is not a stop level, and no price alone breaks a thesis.
@@ -120,6 +127,13 @@ Rules for the block:
   to inherit from, so its language must not depend on one. The VOCABULARY fields (`rating`, `status`,
   `band_basis`, `horizon`) stay canonical English regardless; they are enums the normalizer validates,
   not prose.
+- `sector` is a JOIN KEY, not prose — it is how your book gets aggregated per sector and compared
+  against top-down sector data, so it must be exactly one of: **Basic Materials · Communication
+  Services · Consumer Cyclical · Consumer Defensive · Energy · Financial Services · Healthcare ·
+  Industrials · Real Estate · Technology · Utilities**. These are our data provider's names, so
+  prefer them over the GICS spellings you may reach for first (`Financials`, `Health Care`,
+  `Consumer Staples`, `Consumer Discretionary`, `Materials` are all the wrong side of that split).
+  Put the industry in the thesis where it belongs, not in this field.
 - `estimates.ours` vs `estimates.consensus` should show the axis of your edge (the metric you differ on).
 - Fill only fields you actually have; omit or null the rest. Never fabricate a figure to complete the shape.
 

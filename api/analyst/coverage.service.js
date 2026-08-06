@@ -13,6 +13,9 @@ import { getDb }           from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
 import { makeEntityCrud }  from '../../services/entity/entityCrud.service.js'
+import { HORIZONS, DEFAULT_HORIZON, openWindow } from '../../services/forecastClock.js'
+import { normalizeSector }  from '../../services/entity/vocabulary.js'
+import { newRevision, diffFields } from '../../services/revisionTrail.js'
 
 const LOG        = '[coverage]'
 const COLLECTION = 'coverage'
@@ -32,6 +35,18 @@ const crud = makeEntityCrud({
 
 // Rating vocabulary — mirrors FMP grades-consensus so our rating and the Street's are comparable.
 export const RATINGS  = ['strong_buy', 'buy', 'hold', 'sell', 'strong_sell']
+// Price-target HORIZONS — the vocabulary and the arithmetic live in the shared forecast clock, since
+// the strategy desk's per-sector stances are graded over the identical kind of window. Re-exported
+// here because a price target's horizon is part of the coverage contract that callers read.
+//
+// A target with no deadline can never be wrong, which is why every research house publishes one. Ours
+// was documented in the Analyst prompt as an enum "the normalizer validates" while the code kept it
+// as free text — so `"12m"`, `"12 months"`, `"end of 2027"` and nothing at all all persisted alike,
+// and NOTHING read the field. That made the target unscoreable: the monitor stamps `target_hit` on a
+// bare price comparison, so a 12-month target reached in three weeks and one reached in month eleven
+// were recorded identically — opposite outcomes in real research, where the early one means the target
+// was too LOW and calls for a re-model, not a victory lap.
+export { HORIZONS, DEFAULT_HORIZON }
 // Lifecycle. active = live thesis; target_hit / thesis_broken = terminal-but-kept for the record;
 // retired = churned out of the book; watchlist = proposed (e.g. an Argus hit) but not yet initiated.
 export const STATUSES = ['active', 'thesis_broken', 'target_hit', 'retired', 'watchlist']
@@ -42,7 +57,7 @@ const DEFAULT_STATUS = 'active'
 const PLAN_FIELDS = ['sector', 'thesis', 'rating', 'price_target', 'estimates', 'gap',
     'catalysts', 'kill_criteria', 'risk_reward', 'conviction', 'status', 'evidence']
 
-export const coverageService = { initiateCoverage, getCoverage, getCoverageById, updateCoverage, retireCoverage, deleteCoverage, captureResearchBasis }
+export const coverageService = { initiateCoverage, getCoverage, getCoverageById, listActiveBySector, updateCoverage, retireCoverage, deleteCoverage, captureResearchBasis }
 
 // Exported for tests + downstream phases (P2 valuation, P3 agent, P5 monitor).
 export { normalizeCoverage, newRevision }
@@ -119,11 +134,21 @@ function _num(v) {
     const n = Number(v)
     return Number.isFinite(n) ? n : null
 }
-function _priceTarget(pt) {
+/**
+ * OUR price target: the number, the deadline it must arrive by, and the basis that produced it.
+ *
+ * The window comes from the shared forecast clock, which owns the reaffirm-vs-restart rule: a patch
+ * that doesn't carry `price_target` spreads the stored one through with its `set_at` intact (the
+ * deadline holds through a daily monitor tick), while a re-model supplies a fresh target with no
+ * `set_at` and re-stamps from now — a new target is a new call, same as a real analyst raising a PT.
+ * `target_date` is this schema's name for the window's end; it is always derived, never trusted.
+ */
+function _priceTarget(pt, now) {
     if (!pt || typeof pt !== 'object') return null
     const value = _num(pt.value)
     if (value === null) return null   // a PT with no number is meaningless
-    return { value, horizon: _str(pt.horizon), basis: _str(pt.basis) }
+    const { horizon, set_at, ends_at } = openWindow(pt, now)
+    return { value, horizon, basis: _str(pt.basis), set_at, target_date: ends_at }
 }
 /**
  * THE GAP — our PT against the Street's, kept as a DISTRIBUTION rather than a single number.
@@ -196,10 +221,13 @@ function normalizeCoverage(raw, userId = null) {
         // Owner — camelCase like every other owner-scoped list (the payload below stays snake_case).
         userId,
         symbol,
-        sector:        _str(r.sector),
+        // Canonicalised at the boundary (the shared vocabulary), not left as the LLM typed it — this
+        // is the join key the strategy desk aggregates our book on, and a GICS spelling would match
+        // nothing while looking perfectly reasonable in the UI.
+        sector:        normalizeSector(r.sector),
         thesis:        _str(r.thesis),                 // the VARIANT PERCEPTION vs consensus
         rating:        RATINGS.includes(r.rating) ? r.rating : null,
-        price_target:  _priceTarget(r.price_target),   // OUR target (P2)
+        price_target:  _priceTarget(r.price_target, now),   // OUR target + its deadline (P2)
         estimates:     (r.estimates && typeof r.estimates === 'object' && !Array.isArray(r.estimates)) ? r.estimates : {}, // {ours, consensus, revision_trend} (P2)
         gap:           _gap(r.gap),                    // our PT vs Street — the edge (P2)
         catalysts:     _arr(r.catalysts),
@@ -218,26 +246,12 @@ function normalizeCoverage(raw, userId = null) {
     }
 }
 
-/** Build one revision-log entry (the living trail). Pure. `changed` = {field:{from,to}}. */
-function newRevision({ kind = null, note = null, changed = null, at = null } = {}) {
-    return {
-        at:      _str(at) ?? new Date().toISOString(),
-        kind:    _str(kind),        // 'initiate' | 'remodel' | 'rating_change' | 'thesis_broken' | 'target_hit' | 'retire' | 'update'
-        note:    _str(note),
-        changed: (changed && typeof changed === 'object') ? changed : null,
-    }
-}
-
-// Shallow diff of the plan fields worth logging on an update (for the revision trail).
-function _diffPlan(prev, next) {
-    const changed = {}
-    for (const k of ['rating', 'status', 'price_target', 'thesis']) {
-        if (JSON.stringify(prev?.[k] ?? null) !== JSON.stringify(next?.[k] ?? null)) {
-            changed[k] = { from: prev?.[k] ?? null, to: next?.[k] ?? null }
-        }
-    }
-    return Object.keys(changed).length ? changed : null
-}
+// Which plan fields are worth a trail entry when they move. The FIELDS are coverage's judgment; the
+// diffing and the entry shape are the shared trail's mechanism.
+// Revision kinds coverage writes: 'initiate' | 'remodel' | 'rating_change' | 'thesis_broken' |
+// 'target_hit' | 'target_hit_early' | 'retire' | 'update'.
+const LOGGED_FIELDS = ['rating', 'status', 'price_target', 'thesis']
+const _diffPlan = (prev, next) => diffFields(prev, next, LOGGED_FIELDS)
 
 async function _ensureIndexes(db) {
     await db.collection(COLLECTION).createIndex({ id: 1 }, { unique: true })
@@ -282,9 +296,40 @@ async function initiateCoverage(raw, userId) {
 async function getCoverage(userId, { sector = null, status = null, onError } = {}) {
     // Validate/coerce the filters — never let a raw query param (e.g. status[$ne]) inject a Mongo operator.
     const filter = {}
-    if (typeof sector === 'string' && sector.trim()) filter.sector = sector.trim()
+    // Canonicalise the QUERY too, not just the stored value — otherwise a caller filtering on the
+    // GICS spelling ("Financials") searches for a string this collection never contains.
+    const sec = normalizeSector(sector)
+    if (sec) filter.sector = sec
     if (typeof status === 'string' && STATUSES.includes(status)) filter.status = status
     return crud.list(userId, { filter, onError })
+}
+
+/**
+ * Every ACTIVE thesis in these sectors, across ALL users → `[{ userId, symbol, sector }]`.
+ *
+ * OWNER-BLIND by design, like entityRepo.listByStatus, and for the same reason: it serves a
+ * cross-user sweep — the strategy desk asking "who researches Energy?" so a house-view change
+ * reaches the people it is news to. The CALLER must group by owner; handing one user's names to
+ * another is exactly the bug the owner-scoped CRUD exists to prevent, so this returns nothing but
+ * the join columns.
+ *
+ * Only `active` theses: a retired one is a book the user closed, and telling them their sector view
+ * moved would be telling them about research they stopped doing. Sectors are canonicalised on the
+ * way in, so a caller may ask in GICS and still match.
+ */
+async function listActiveBySector(sectors) {
+    const want = [...new Set((Array.isArray(sectors) ? sectors : []).map(normalizeSector).filter(Boolean))]
+    if (!want.length) return []
+    try {
+        const db = await getDb()
+        return await db.collection(COLLECTION)
+            .find({ status: 'active', sector: { $in: want } })
+            .project({ _id: 0, userId: 1, symbol: 1, sector: 1 })
+            .toArray()
+    } catch (err) {
+        logger.error(LOG, 'sector sweep failed', err)
+        return []
+    }
 }
 
 // The shared crud's shape, `{ ok, doc }` — the same one every other kind's service answers in.
