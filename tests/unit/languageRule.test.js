@@ -35,6 +35,7 @@ const DESKS = [
     'mentor.agent.service.js',
     'portfolio.agent.service.js',
     'scanner.agent.service.js',
+    'strategy.agent.service.js',
 ]
 
 const src = f => readFileSync(join(SERVICES, f), 'utf-8')

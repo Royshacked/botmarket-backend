@@ -551,6 +551,21 @@ export const TOOL_SCHEMAS = {
             }
         }
     },
+    // ── strategy desk (Pythia) + Axl's read of its output ────────────────────
+    // All argument-free: each answers ONE question about the world or about our own book, and
+    // giving them parameters would only invite the model to narrow a read that is cheap whole.
+    get_priced_in: {
+        "type": "object",
+        "properties": {}
+    },
+    get_coverage_by_sector: {
+        "type": "object",
+        "properties": {}
+    },
+    get_sector_view: {
+        "type": "object",
+        "properties": {}
+    },
 }
 
 /** Every tool the registry knows. */

@@ -9,6 +9,7 @@ import { TOOLS as PORTFOLIO_TOOLS } from '../../services/portfolio.agent.service
 import { TOOLS as SCANNER_TOOLS }   from '../../services/scanner.agent.service.js'
 import { TOOLS as ANALYST_TOOLS }   from '../../services/analyst.agent.service.js'
 import { TOOLS as AXL_TOOLS }       from '../../services/axl.agent.service.js'
+import { TOOLS as STRATEGY_TOOLS } from '../../services/strategy.agent.service.js'
 import { KAIROS_TOOLS }             from '../../services/kairos.tools.js'
 import { SMC_TOOLS }                from '../../services/smc.tools.js'
 import { VALUATION_TOOLS }          from '../../services/valuation.tools.js'
@@ -41,6 +42,7 @@ const SNAPSHOT  = JSON.parse(fs.readFileSync(join(__dirname, '../fixtures/agentT
 // reading as an orphan schema below.
 const LIVE = {
     idea:      IDEA_TOOLS,
+    strategy:  STRATEGY_TOOLS,
     portfolio: PORTFOLIO_TOOLS,
     scanner:   SCANNER_TOOLS,
     analyst:   ANALYST_TOOLS,

@@ -783,6 +783,14 @@
           "ticker"
         ]
       }
+    },
+    {
+      "name": "get_sector_view",
+      "description": "The house SECTOR VIEW published by Pythia (the strategy desk): the named market regime, what would break that read, and each sector's stance as an active weight against the benchmark — plus how each stance is doing so far. Call it for \"what's our sector view\", \"which sectors do we like\", \"what's the house view\", \"are we overweight tech\", \"what's the current forecast\". READ-ONLY: it reports a view that already exists. It is a broadcast written for everyone and knows NOTHING about this user's book — never connect it to their positions. If the user wants a NEW or CHANGED view, that is Pythia's desk, not this tool.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
     }
   ],
   "scanner": [
@@ -2424,6 +2432,52 @@
         "required": [
           "ticker"
         ]
+      }
+    },
+    {
+      "name": "get_sector_view",
+      "description": "The house SECTOR VIEW published by Pythia (the strategy desk): the named market regime, what would break that read, and each sector's stance as an active weight against the benchmark — plus how each stance is doing so far. Call it for \"what's our sector view\", \"which sectors do we like\", \"what's the house view\", \"are we overweight tech\", \"what's the current forecast\". READ-ONLY: it reports a view that already exists. It is a broadcast written for everyone and knows NOTHING about this user's book — never connect it to their positions. If the user wants a NEW or CHANGED view, that is Pythia's desk, not this tool.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "strategy": [
+    {
+      "type": "web_search_20250305",
+      "name": "web_search"
+    },
+    {
+      "name": "get_macro_snapshot",
+      "description": "Hard macro read: the Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today's sector rotation. The Phase-1 backdrop. No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_sector_snapshot",
+      "description": "Today's sector rotation, every sector ranked leaders→laggards. Where money has actually been going — the tape against which your stance is a claim. No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_priced_in",
+      "description": "What the MARKET has already discounted: 5y and 10y breakeven inflation, the 5y5y forward, and the 10y TIPS real yield (FRED, daily). This is the benchmark your view has to beat — a regime call that merely restates what is priced is not a view. Breakevens carry an inflation risk premium, so they are not a pure forecast, and the market-implied POLICY PATH is not available to us. No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_coverage_by_sector",
+      "description": "OUR OWN analysts' book, aggregated by sector: how many active theses per sector, and which sectors we cover at all. The bottom-up cross-check for Phase 4 — where the book agrees with your top-down read that is your strongest basis, and where it disagrees you must say so rather than reconciling it away. No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
       }
     }
   ]

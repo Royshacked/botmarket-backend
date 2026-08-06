@@ -191,3 +191,101 @@ export const isEquityClass = (raw) => {
     const c = normalizeAssetClass(raw)
     return c === 'stock' || c === 'etf'
 }
+
+// ─── Sectors ──────────────────────────────────────────────────────────────────
+//
+// The JOIN KEY between research written per name and data read per sector — the Analyst stamps
+// `coverage.sector`, and the strategy desk aggregates coverage by sector to cross-check its
+// top-down view against our own book. A join needs both sides spelling the sector the same way,
+// and left alone they would not: `coverage.sector` was free text from an LLM, matched by exact
+// string, against sector rows named by FMP.
+//
+// CANONICAL = WHAT FMP ACTUALLY RETURNS, probed live 2026-08-06 off /sector-performance-snapshot —
+// deliberately not the textbook GICS list, because five of the eleven differ and FMP is the side we
+// cannot change. An LLM writing from training knowledge reaches for the GICS spelling every time
+// ("Financials", "Health Care", "Consumer Staples"), so those are exactly what the synonym map has
+// to absorb. Getting this wrong fails SILENTLY — an empty aggregate reads as "no view", not as an
+// error — which is why it is pinned here rather than left to each caller.
+export const SECTORS = [
+    'Basic Materials', 'Communication Services', 'Consumer Cyclical', 'Consumer Defensive',
+    'Energy', 'Financial Services', 'Healthcare', 'Industrials', 'Real Estate', 'Technology',
+    'Utilities',
+]
+
+// Keyed lowercase; GICS spellings first, then the everyday shorthands.
+const SECTOR_SYNONYMS = {
+    'basic materials': 'Basic Materials', 'materials': 'Basic Materials',
+    'communication services': 'Communication Services', 'communications': 'Communication Services',
+    'communication': 'Communication Services', 'telecom': 'Communication Services',
+    'telecommunications': 'Communication Services', 'media': 'Communication Services',
+    'consumer cyclical': 'Consumer Cyclical', 'consumer discretionary': 'Consumer Cyclical',
+    'discretionary': 'Consumer Cyclical', 'consumer cyclicals': 'Consumer Cyclical',
+    'consumer defensive': 'Consumer Defensive', 'consumer staples': 'Consumer Defensive',
+    'staples': 'Consumer Defensive', 'consumer defensives': 'Consumer Defensive',
+    'energy': 'Energy', 'oil & gas': 'Energy', 'oil and gas': 'Energy',
+    'financial services': 'Financial Services', 'financials': 'Financial Services',
+    'financial': 'Financial Services', 'finance': 'Financial Services', 'banks': 'Financial Services',
+    'healthcare': 'Healthcare', 'health care': 'Healthcare', 'health-care': 'Healthcare',
+    'health': 'Healthcare', 'medical': 'Healthcare',
+    'industrials': 'Industrials', 'industrial': 'Industrials',
+    'real estate': 'Real Estate', 'reits': 'Real Estate', 'realestate': 'Real Estate',
+    'technology': 'Technology', 'information technology': 'Technology', 'tech': 'Technology',
+    'it': 'Technology', 'infotech': 'Technology',
+    'utilities': 'Utilities', 'utility': 'Utilities',
+}
+
+// Sector/industry separators the Analyst actually reaches for. Checked only AFTER the whole string
+// fails to match, so a legitimately hyphenated spelling ("health-care") is never split.
+const SECTOR_QUALIFIER = /\s*[/|,;:—–\-(]\s*/
+
+/**
+ * Canonicalise a sector to FMP's spelling. Unknown or absent → null, the same contract
+ * normalizeAssetClass answers on.
+ *
+ * TWO PASSES, because the live book showed the model volunteers the industry alongside the sector
+ * far more often than it writes the sector alone — "Technology / Semiconductors",
+ * "Healthcare — Biotechnology", "Energy / Oil & Gas Equipment & Services". Whole-string matching
+ * alone nulled 7 of 17 existing docs, so the second pass takes the LEADING segment, which is where
+ * the sector always sits. The extra precision is not lost, it is simply not the join key.
+ *
+ * NULL IS THE HONEST ANSWER for what survives both passes, and deliberately preferred over passing
+ * the raw value through: an unrecognised string joins to nothing, so storing it would preserve the
+ * appearance of a sector while keeping the silent-empty-aggregate bug this block exists to close. A
+ * bare INDUSTRY ("Semiconductors") nulls for that reason — a real value, but not a sector.
+ */
+export function normalizeSector(raw) {
+    if (!raw || typeof raw !== 'string') return null
+    const s = raw.trim().toLowerCase()
+    if (SECTOR_SYNONYMS[s]) return SECTOR_SYNONYMS[s]
+    const head = s.split(SECTOR_QUALIFIER)[0]?.trim()
+    return (head && head !== s) ? (SECTOR_SYNONYMS[head] ?? null) : null
+}
+
+/**
+ * How a sector is PRICED — the SPDR Select Sector ETF that stands in for it, and SPY for the
+ * benchmark. A sector is an abstraction; attribution needs something with a quote, and this is the
+ * standard proxy set every desk uses for exactly that.
+ *
+ * It lives beside the names rather than in the monitor because more than one caller needs it (the
+ * grading loop prices a stance; the strategy desk quotes the group it is discussing), and a second
+ * copy would be a second chance for a sector to map to the wrong ticker.
+ */
+export const SECTOR_ETF = {
+    'Basic Materials':        'XLB',
+    'Communication Services': 'XLC',
+    'Consumer Cyclical':      'XLY',
+    'Consumer Defensive':     'XLP',
+    'Energy':                 'XLE',
+    'Financial Services':     'XLF',
+    'Healthcare':             'XLV',
+    'Industrials':            'XLI',
+    'Real Estate':            'XLRE',
+    'Technology':             'XLK',
+    'Utilities':              'XLU',
+}
+
+/** The benchmark a tilt is measured against, by its name on the doc. */
+export const BENCHMARK_PROXY = { SPX: 'SPY' }
+
+/** The tradable proxy for a sector (accepts any spelling normalizeSector accepts), or null. */
+export const sectorProxy = (raw) => SECTOR_ETF[normalizeSector(raw)] ?? null

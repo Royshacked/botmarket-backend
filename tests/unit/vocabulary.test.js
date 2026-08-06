@@ -5,6 +5,7 @@ import {
     STATUSES_BY_KIND, statusesFor, isValidStatus, isLivePosition, isPastEntry, isTerminal,
     TRADE_HORIZONS, CALL_HORIZONS, isHorizon,
     ASSET_CLASSES, normalizeAssetClass, isEquityClass,
+    SECTORS, normalizeSector,
 } from '../../services/entity/vocabulary.js'
 import { ACTIVE_STATUSES } from '../../services/entity/entityRepo.service.js'
 import { SETUP_STATUSES } from '../../api/setups/setups.service.js'
@@ -190,4 +191,67 @@ test('asset_class is canonicalised at the setup boundary, not absorbed downstrea
     assert.equal(normalizeSetup({ asset: 'NVDA', asset_class: 'equity' }).asset_class, 'stock')
     assert.equal(normalizeSetup({ asset: 'BTC', asset_class: ' CRYPTO ' }).asset_class, 'crypto')
     assert.equal(normalizeSetup({ asset: 'X', asset_class: 'bond' }).asset_class, null)
+})
+
+// ── sectors: the join key between per-name research and per-sector data ──────
+test('SECTORS is FMP\'s taxonomy, not GICS — the side we cannot change', () => {
+    assert.equal(SECTORS.length, 11)
+    // The five that differ from GICS. If any of these ever reads like the textbook name, the join
+    // against FMP's sector rows has silently broken.
+    for (const s of ['Healthcare', 'Basic Materials', 'Financial Services', 'Consumer Defensive', 'Consumer Cyclical']) {
+        assert.ok(SECTORS.includes(s), `${s} missing`)
+    }
+    for (const gics of ['Health Care', 'Materials', 'Financials', 'Consumer Staples', 'Consumer Discretionary']) {
+        assert.ok(!SECTORS.includes(gics), `${gics} is the GICS spelling, not FMP's`)
+    }
+    // Every canonical value must normalize to itself, or storing what we read back breaks.
+    for (const s of SECTORS) assert.equal(normalizeSector(s), s)
+})
+
+test('normalizeSector: GICS spellings — what an LLM writes from training knowledge', () => {
+    assert.equal(normalizeSector('Health Care'), 'Healthcare')
+    assert.equal(normalizeSector('Financials'), 'Financial Services')
+    assert.equal(normalizeSector('Consumer Staples'), 'Consumer Defensive')
+    assert.equal(normalizeSector('Consumer Discretionary'), 'Consumer Cyclical')
+    assert.equal(normalizeSector('Materials'), 'Basic Materials')
+    assert.equal(normalizeSector('Information Technology'), 'Technology')
+    assert.equal(normalizeSector('  TECH  '), 'Technology')     // trimmed + case-folded
+})
+
+test('normalizeSector: compound "Sector / Industry" keeps the sector', () => {
+    // Not hypothetical — these are the exact strings in the live coverage book. Whole-string
+    // matching alone nulled 7 of 17 docs.
+    assert.equal(normalizeSector('Technology / Semiconductors'), 'Technology')
+    assert.equal(normalizeSector('Healthcare — Biotechnology'), 'Healthcare')
+    assert.equal(normalizeSector('Technology — Software Infrastructure'), 'Technology')
+    assert.equal(normalizeSector('Healthcare / Medical Instruments & Supplies'), 'Healthcare')
+    assert.equal(normalizeSector('Energy / Oil & Gas Equipment & Services'), 'Energy')
+    assert.equal(normalizeSector('Healthcare — Animal Health'), 'Healthcare')
+    // Other separators the model might reach for.
+    assert.equal(normalizeSector('Technology (Semiconductors)'), 'Technology')
+    assert.equal(normalizeSector('Financials, Regional Banks'), 'Financial Services')
+})
+
+test('normalizeSector: unknown → null, so an empty aggregate is never mistaken for a view', () => {
+    assert.equal(normalizeSector('Semiconductors'), null)     // an INDUSTRY is not a sector
+    assert.equal(normalizeSector('Biotechnology'), null)
+    assert.equal(normalizeSector('Crypto'), null)
+    assert.equal(normalizeSector(''), null)
+    assert.equal(normalizeSector(null), null)
+    assert.equal(normalizeSector(42), null)
+})
+
+test('normalizeSector: a whole-string match is never split', () => {
+    // 'health-care' contains a separator but matches whole, so the second pass must not run.
+    assert.equal(normalizeSector('health-care'), 'Healthcare')
+    assert.equal(normalizeSector('Oil & Gas'), 'Energy')
+})
+
+test('coverage stamps the canonical sector, and filtering accepts the GICS spelling', async () => {
+    const { normalizeCoverage } = await import('../../api/analyst/coverage.service.js')
+    // The Analyst's own prompt example writes "Technology"; its live docs write compounds. Both land
+    // on one stored word, which is the only reason a per-sector aggregate over the book can work.
+    assert.equal(normalizeCoverage({ symbol: 'NVDA', sector: 'Technology / Semiconductors' }).sector, 'Technology')
+    assert.equal(normalizeCoverage({ symbol: 'JPM',  sector: 'Financials' }).sector, 'Financial Services')
+    assert.equal(normalizeCoverage({ symbol: 'X',    sector: 'Nonsense' }).sector, null)
 })

@@ -39,6 +39,7 @@ import { transcribeRoutes }  from './api/transcribe/transcribe.routes.js'
 import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
 import { scannerRoutes }     from './api/scanner/scanner.routes.js'
 import { analystRoutes }     from './api/analyst/analyst.routes.js'
+import { strategyRoutes }    from './api/strategy/strategy.routes.js'
 import { axlRoutes }         from './api/axl/axl.routes.js'
 import { threadsRoutes }     from './api/threads/threads.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
@@ -47,6 +48,7 @@ import { calendarRoutes }    from './api/calendar/calendar.routes.js'
 import { hermesService }    from './monitoring/hermes.monitor.service.js'
 import { talosService }     from './monitoring/talos.monitor.service.js'
 import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
+import { tiltMonitorService }     from './monitoring/tilt.monitor.service.js'
 import { themisService }      from './monitoring/themis.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
@@ -112,6 +114,7 @@ app.use('/api/trades',      tradesRoutes)
 app.use('/api/portfolio',   portfolioRoutes)
 app.use('/api/scanner',     scannerRoutes)
 app.use('/api/analyst',     analystRoutes)
+app.use('/api/strategy',    strategyRoutes)
 app.use('/api/axl',         axlRoutes)
 app.use('/api/threads',     threadsRoutes)
 app.use('/api/market',      marketRoutes)
@@ -138,6 +141,7 @@ marketOpenMonitor.start()
 hermesService.start()
 talosService.start()
 coverageMonitorService.start()
+tiltMonitorService.start()
 themisService.start()
 executionReconciler.start()
 paperFillService.start()
