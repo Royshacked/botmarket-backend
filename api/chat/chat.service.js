@@ -18,7 +18,7 @@ export const BOT_USER_ID = 'axl'   // the default + the one conversational bot
 // isn't here, so a missing entry doesn't error, it misattributes. `mentor` was missing while
 // buildSetupEntryConfirm posted under it, which is why Talos's setup cards arrived from Axl.
 // The frontend registry (agentMeta.jsx BOT_IDS) must stay in step with this one.
-export const BOT_IDS = ['axl', 'idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'analyst']
+export const BOT_IDS = ['axl', 'idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'analyst', 'strategy']
 export const isBot = (id) => BOT_IDS.includes(String(id))
 const BOT_WELCOME = "Hi, I'm Axl — your trading assistant. I'll notify you here about portfolio reviews, position alerts, and anything that needs your attention, and you can ask me how the app works. Just message me."
 

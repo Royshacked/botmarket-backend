@@ -11,6 +11,7 @@ import { makeUserDataHandlers, USER_DATA_TOOL_SPEC } from './userData.tools.js'
 import { makeConceptHandlers, CONCEPT_TOOL_SPEC } from './concepts.tools.js'
 import { makeExperienceHandlers, EXPERIENCE_TOOL_SPEC } from './experience.tools.js'
 import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from './marketBrief.tools.js'
+import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from './sectorView.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -50,6 +51,9 @@ export const TOOLS = toolsFor({
     // Appended last, per the rule above. Axl fields "is the market open?" more than any desk —
     // it is an app question, not a trade question, which is exactly Axl's half of the line.
     get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
+    // Appended last, per the rule above. The SHOW half of the strategy desk: Axl reports the
+    // published view, Pythia is the one who writes or changes it.
+    get_sector_view: SECTOR_VIEW_TOOL_SPEC.get_sector_view,
 })
 
 // ONE Axl. This turn both converses and routes, which used to be two agents: a `routeIntent` doorman
@@ -130,6 +134,7 @@ async function chatStream({ messages = [], audience = null, model: requestedMode
     _experienceHandlers = makeExperienceHandlers,
     _marketBriefHandlers = makeMarketBriefHandlers,
     _marketHoursHandlers = makeMarketHoursHandlers,
+    _sectorViewHandlers = makeSectorViewHandlers,
 } = {}) {
     const normalized = normalizeMessages(messages, MAX_MESSAGES)
 
@@ -165,6 +170,9 @@ ${audienceBlock}` : ''}` },
         ..._marketBriefHandlers(),
         // Unbound too — market hours belong to the instrument, not the user.
         ..._marketHoursHandlers(),
+        // Unbound for the brief's reason exactly: the house sector view is a BROADCAST, so a handler
+        // that cannot see a user cannot leak one into it.
+        ..._sectorViewHandlers(),
         ..._experienceHandlers(userId),
     }
 
