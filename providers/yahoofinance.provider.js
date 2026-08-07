@@ -20,6 +20,7 @@ import {
 // leaf module, so importing it here is cycle-free — unlike candles.provider, which imports
 // massive → this module. See reference_fmp_pricing.
 import { getFmpQuoteYf, getFmpCandles } from './fmp.price.provider.js'
+import { config } from '../services/config.js'
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] })
 
@@ -85,7 +86,7 @@ export async function getNumericQuote(ticker) {
 // would multiply yf.quote calls across the WHOLE app (agent tools + sizing) and invite
 // 429s. So this rides a SEPARATE short-TTL cache: the extra load stays scoped to the
 // small set of active paper symbols, deduped to ~one fetch per symbol per TTL.
-const FAST_QUOTE_TTL_MS = Number(process.env.PAPER_FAST_QUOTE_TTL_MS) || 3_000
+const FAST_QUOTE_TTL_MS = config.paperFastQuoteTtlMs
 const _fastQuoteCache   = createTtlCache({ ttlMs: FAST_QUOTE_TTL_MS, max: QUOTE_CACHE_MAX }) // SYMBOL -> data
 
 /**

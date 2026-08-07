@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken'
 import { getDb } from '../../providers/mongodb.provider.js'
 import { COLLECTION, stripUser, buildUserDoc } from '../user/user.model.js'
 import { logger } from '../../services/logger.service.js'
+import { config } from '../../services/config.js'
 
 const LOG = '[authService]'
 
@@ -47,7 +48,7 @@ async function signin(username, password) {
     // Admin cross-user visibility disabled for now (see auth.middleware) — keep
     // fresh tokens clean too. Restore `user.isAdmin ?? false` to re-enable.
     const payload = { _id: user.id, username: user.username, fullname: user.fullname, isAdmin: false }
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' })
+    const token = jwt.sign(payload, config.jwtSecret, { expiresIn: '7d' })
 
     logger.info(LOG, 'user signed in', { username })
     // Return the same shape as /api/auth/me (the decoded token) so the client has

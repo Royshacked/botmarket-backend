@@ -22,6 +22,7 @@ import { num }                     from './normalize.js'
 import { getIBKRGateway }          from '../../../providers/ibkr.gateway.provider.js'
 import { brokerConnectionService } from '../brokerConnection.service.js'
 import { logger }                  from '../../../services/logger.service.js'
+import { config } from '../../../services/config.js'
 
 const LOG = '[ibkr.adapter]'
 
@@ -71,9 +72,9 @@ export class IBKRAdapter extends BrokerAdapter {
      */
     async connectGateway(userId, coords = {}) {
         const resolved = {
-            host:     coords.host     ?? process.env.IBKR_GW_HOST     ?? '127.0.0.1',
-            port:     Number(coords.port     ?? process.env.IBKR_GW_PORT     ?? 4002),
-            clientId: Number(coords.clientId ?? process.env.IBKR_GW_CLIENTID ?? 1),
+            host:     coords.host     ?? config.ibkrGwHost,
+            port:     Number(coords.port     ?? config.ibkrGwPort),
+            clientId: Number(coords.clientId ?? config.ibkrGwClientId),
         }
         await brokerConnectionService.saveGatewayConnection(userId, 'ibkr', resolved)
         logger.info(LOG, `Gateway connection saved for user ${userId}: ${resolved.host}:${resolved.port}`)
@@ -97,9 +98,9 @@ export class IBKRAdapter extends BrokerAdapter {
     async _coords(userId) {
         const conn = await brokerConnectionService.getConnection(userId, 'ibkr')
         return {
-            host:     conn?.host     ?? process.env.IBKR_GW_HOST     ?? '127.0.0.1',
-            port:     Number(conn?.port     ?? process.env.IBKR_GW_PORT     ?? 4002),
-            clientId: Number(conn?.clientId ?? process.env.IBKR_GW_CLIENTID ?? 1),
+            host:     conn?.host     ?? config.ibkrGwHost,
+            port:     Number(conn?.port     ?? config.ibkrGwPort),
+            clientId: Number(conn?.clientId ?? config.ibkrGwClientId),
         }
     }
 
@@ -110,7 +111,7 @@ export class IBKRAdapter extends BrokerAdapter {
 
     async isConnected(userId) {
         const conn = await brokerConnectionService.getConnection(userId, 'ibkr')
-        if (!conn?.gateway && !process.env.IBKR_GW_HOST) return false
+        if (!conn?.gateway && !config.ibkrGwConfigured) return false
         try {
             const gw = await this._gateway(userId)
             await gw.ready

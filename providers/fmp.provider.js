@@ -25,10 +25,11 @@ import { logger } from '../services/logger.service.js'
 import { compactMoney } from '../services/format.util.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
 import { getJson } from '../services/http.util.js'
+import { config } from '../services/config.js'
 
 const LOG     = '[fmp]'
 const BASE    = 'https://financialmodelingprep.com/stable'
-const API_KEY = process.env.FMP_API_KEY
+const API_KEY = config.fmpApiKey
 
 // ─── Two-layer cache (in-process Map over Mongo) ────────────────────────────
 // Fundamentals barely move (quarterly), so a long TTL is fine. The Mongo layer

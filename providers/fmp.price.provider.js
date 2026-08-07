@@ -12,14 +12,15 @@
 import { logger }         from '../services/logger.service.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
 import { getJson }        from '../services/http.util.js'
+import { config } from '../services/config.js'
 
 const LOG     = '[fmp.price]'
 const BASE    = 'https://financialmodelingprep.com/stable'
-const API_KEY = process.env.FMP_API_KEY
+const API_KEY = config.fmpApiKey
 
 // Short TTL — quotes must stay fresh for touch-fill detection, but this collapses the
 // overlapping mark/fill/equity callers to ~one real fetch per symbol per window.
-const QUOTE_TTL_MS = Number(process.env.FMP_QUOTE_TTL_MS) || 3_000
+const QUOTE_TTL_MS = config.fmpQuoteTtlMs
 const _quoteCache  = createTtlCache({ ttlMs: QUOTE_TTL_MS, max: 500 }) // SYMBOL -> { v: quote|null }
 
 /**

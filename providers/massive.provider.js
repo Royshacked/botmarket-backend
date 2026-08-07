@@ -2,9 +2,10 @@ import dotenv from 'dotenv'
 import { restClient } from '@massive.com/client-js'
 import { getTickerAggregates as getYahooAggregates } from './yahoofinance.provider.js'
 import { logger } from '../services/logger.service.js'
+import { config } from '../services/config.js'
 
 dotenv.config()
-const MASSIVE_API_KEY = process.env.MASSIVE_API_KEY
+const MASSIVE_API_KEY = config.massiveApiKey
 const rest = restClient(MASSIVE_API_KEY, 'https://api.massive.com')
 
 

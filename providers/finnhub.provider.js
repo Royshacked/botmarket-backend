@@ -3,10 +3,11 @@ import axios from 'axios'
 import { logger } from '../services/logger.service.js'
 import { getDb } from './mongodb.provider.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
+import { config } from '../services/config.js'
 
 dotenv.config()
 
-const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY
+const FINNHUB_API_KEY = config.finnhubApiKey
 
 function toFinnhubDate(value) {
     if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value

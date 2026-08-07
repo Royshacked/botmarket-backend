@@ -1,8 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createTagSuppressor } from '../services/llmStream.util.js'
 import { isToolError, toolErrorText } from '../services/toolResult.util.js'
+import { config } from '../services/config.js'
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const client = new Anthropic({ apiKey: config.anthropicApiKey })
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_MAX_TOKENS = 8192
 // When thinking is on, reasoning tokens count toward max_tokens, so give the

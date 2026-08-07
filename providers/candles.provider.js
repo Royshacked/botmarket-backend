@@ -12,9 +12,10 @@
 import { getFmpCandles }                              from './fmp.price.provider.js'
 import { getTickerAggregates as getMassiveAggregates } from './massive.provider.js'
 import { logger }                                     from '../services/logger.service.js'
+import { config } from '../services/config.js'
 
 const LOG     = '[candles.provider]'
-const USE_FMP = ['true', '1', 'yes'].includes(String(process.env.USE_FMP_CANDLES ?? '').toLowerCase())
+const USE_FMP = config.useFmpCandles
 
 if (USE_FMP) logger.info(LOG, 'USE_FMP_CANDLES on — FMP-first candle sourcing (Massive/Yahoo fallback)')
 

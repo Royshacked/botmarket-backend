@@ -23,6 +23,7 @@
 import { EventEmitter }          from 'node:events'
 import { IBApi, EventName, ErrorCode, WhatToShow, MarketDataType } from '@stoqey/ib'
 import { logger }                from '../services/logger.service.js'
+import { config } from '../services/config.js'
 
 const LOG = '[ibkr.gateway]'
 
@@ -46,9 +47,9 @@ const _clients = new Map()   // 'host:port:clientId' → IBKRGateway
  * @returns {IBKRGateway}
  */
 export function getIBKRGateway(coords = {}) {
-    const host     = coords.host     ?? process.env.IBKR_GW_HOST     ?? '127.0.0.1'
-    const port     = Number(coords.port     ?? process.env.IBKR_GW_PORT     ?? 4002)
-    const clientId = Number(coords.clientId ?? process.env.IBKR_GW_CLIENTID ?? 1)
+    const host     = coords.host     ?? config.ibkrGwHost
+    const port     = Number(coords.port     ?? config.ibkrGwPort)
+    const clientId = Number(coords.clientId ?? config.ibkrGwClientId)
     const key      = `${host}:${port}:${clientId}`
     if (!_clients.has(key)) _clients.set(key, new IBKRGateway({ host, port, clientId }))
     return _clients.get(key)

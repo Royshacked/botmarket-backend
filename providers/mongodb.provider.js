@@ -1,8 +1,9 @@
 import { MongoClient, ServerApiVersion } from 'mongodb'
 import { logger } from '../services/logger.service.js'
+import { config } from '../services/config.js'
 
 const LOG = '[mongodb]'
-const URI = process.env.MONGODB_URI
+const URI = config.mongoUri
 
 let _client = null
 let _db = null

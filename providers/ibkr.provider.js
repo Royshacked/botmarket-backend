@@ -19,6 +19,7 @@
 
 import https from 'https'
 import { logger } from '../services/logger.service.js'
+import { config } from '../services/config.js'
 
 const LOG = '[ibkr.provider]'
 
@@ -40,8 +41,8 @@ const _conidCache = new Map()
  * @returns {string}
  */
 export function getAuthUrl(state) {
-    const clientId    = process.env.IBKR_CLIENT_ID
-    const redirectUri = encodeURIComponent(process.env.IBKR_REDIRECT_URI ?? '')
+    const clientId    = config.ibkrClientId
+    const redirectUri = encodeURIComponent(config.ibkrRedirectUri)
     const stateParam  = state ? `&state=${encodeURIComponent(state)}` : ''
     return (
         `https://${AUTH_HOST}${AUTH_PATH}` +
@@ -63,9 +64,9 @@ export async function exchangeCode(code) {
     const body = new URLSearchParams({
         grant_type:    'authorization_code',
         code,
-        redirect_uri:  process.env.IBKR_REDIRECT_URI   ?? '',
-        client_id:     process.env.IBKR_CLIENT_ID      ?? '',
-        client_secret: process.env.IBKR_CLIENT_SECRET  ?? '',
+        redirect_uri:  config.ibkrRedirectUri,
+        client_id:     config.ibkrClientId,
+        client_secret: config.ibkrClientSecret,
     }).toString()
 
     const data = await _postForm(TOKEN_HOST, TOKEN_PATH, body)
@@ -85,8 +86,8 @@ export async function refreshTokens({ refreshToken }) {
     const body = new URLSearchParams({
         grant_type:    'refresh_token',
         refresh_token: refreshToken,
-        client_id:     process.env.IBKR_CLIENT_ID     ?? '',
-        client_secret: process.env.IBKR_CLIENT_SECRET ?? '',
+        client_id:     config.ibkrClientId,
+        client_secret: config.ibkrClientSecret,
     }).toString()
 
     const data = await _postForm(TOKEN_HOST, TOKEN_PATH, body)

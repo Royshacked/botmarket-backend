@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { config } from './config.js'
 
 const HAIKU  = 'claude-haiku-4-5-20251001'
 const SONNET = 'claude-sonnet-4-6'
@@ -58,7 +59,7 @@ const PHASE_TABLES = {
     mentor: {},
 }
 
-const _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const _client = new Anthropic({ apiKey: config.anthropicApiKey })
 
 const _CLASSIFIER_SYSTEM = `You are a routing classifier for a trading AI assistant. Output ONLY valid JSON — no prose, no markdown.
 

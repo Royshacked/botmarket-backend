@@ -15,6 +15,7 @@
 
 import https from 'https'
 import { logger } from '../services/logger.service.js'
+import { config } from '../services/config.js'
 
 const LOG = '[ctrader.provider]'
 
@@ -24,9 +25,7 @@ const TOKEN_PATH  = '/apps/token'
 const AUTH_BASE   = 'https://id.ctrader.com/my/settings/openapi/grantingaccess/'
 
 function _redirectUri() {
-    return process.env.NODE_ENV === 'production'
-        ? (process.env.CTRADER_REDIRECT_URL_PROD ?? '')
-        : (process.env.CTRADER_REDIRECT_URI ?? '')
+    return config.ctraderRedirectUri
 }
 
 // ─── OAuth URLs ───────────────────────────────────────────────────────────────
@@ -37,7 +36,7 @@ function _redirectUri() {
  * @returns {string}
  */
 export function getAuthUrl(state) {
-    const clientId    = process.env.CTRADER_CLIENTID ?? ''
+    const clientId    = config.ctraderClientId
     const redirectUri = encodeURIComponent(_redirectUri())
     const stateParam  = state ? `&state=${encodeURIComponent(state)}` : ''
     return (
@@ -60,8 +59,8 @@ export async function exchangeCode(code) {
         grant_type:    'authorization_code',
         code,
         redirect_uri:  _redirectUri(),
-        client_id:     process.env.CTRADER_CLIENTID ?? '',
-        client_secret: process.env.CTRADER_SECRET ?? '',
+        client_id:     config.ctraderClientId,
+        client_secret: config.ctraderSecret,
     })
 
     const data = await _getToken(params)
@@ -81,8 +80,8 @@ export async function refreshTokens({ refreshToken }) {
     const params = new URLSearchParams({
         grant_type:    'refresh_token',
         refresh_token: refreshToken,
-        client_id:     process.env.CTRADER_CLIENTID ?? '',
-        client_secret: process.env.CTRADER_SECRET ?? '',
+        client_id:     config.ctraderClientId,
+        client_secret: config.ctraderSecret,
     })
 
     const data = await _getToken(params)

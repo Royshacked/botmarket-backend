@@ -19,6 +19,7 @@ import { logger } from '../logger.service.js'
 import { parseChartInterval, defaultLookbackDays } from '../candleInterval.util.js'
 import { fetchMarketCandles } from '../candleFetch.service.js'
 import { studiesToIndicators } from './studyTranslate.js'
+import { config } from '../config.js'
 
 const LOG       = '[klineRender.provider]'
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -31,7 +32,7 @@ const DAY_MS    = 86_400_000
 const BG        = '#020810'   // matches the app chart pane (PriceChart --bg-wash)
 // Hard ceiling on a single in-page render. The caller (chartImgCache) also races an outer timeout,
 // but this one CLOSES the page so a hung render can't wedge the serialised render chain behind it.
-const RENDER_MS = Number(process.env.OWN_CHART_RENDER_PAGE_TIMEOUT_MS) || 10_000
+const RENDER_MS = config.ownChartRenderPageTimeoutMs
 
 // Concrete dark theme for the headless canvas. The React PriceChart resolves these from CSS
 // custom properties at runtime; headless Chromium has no app stylesheet, so we hard-code the
@@ -84,7 +85,7 @@ function precisionOf(candles) {
 // expensive part). Renders run through a bounded concurrency pool (a counting semaphore) so a
 // monitor burst can render several charts at once WITHOUT spawning unbounded Chromium pages — the
 // cap bounds memory while still overlapping renders (unlike a single serialised chain).
-const POOL_SIZE = Math.max(1, Number(process.env.OWN_CHART_RENDER_CONCURRENCY) || 3)
+const POOL_SIZE = config.ownChartRenderConcurrency
 let _browserPromise = null
 let _active         = 0
 const _waiters      = []

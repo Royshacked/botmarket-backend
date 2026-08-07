@@ -5,9 +5,10 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 import { logger } from '../../services/logger.service.js'
+import { config } from '../../services/config.js'
 
 const LOG = '[transcribe]'
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+const openai = new OpenAI({ apiKey: config.openaiApiKey })
 
 export async function transcribeAudio(req, res) {
     let tmpPath = null

@@ -3,6 +3,7 @@
 // whether to swallow the error (return a string/empty) or rethrow.
 
 import { logger } from './logger.service.js'
+import { config } from './config.js'
 
 const LOG = '[http.meter]'
 
@@ -18,7 +19,7 @@ const LOG = '[http.meter]'
 // question, and one line per ticker would be the noise this exists to replace.
 //
 // Set HTTP_METER_MS=0 to switch it off.
-const METER_MS = Number(process.env.HTTP_METER_MS ?? 60_000)
+const METER_MS = config.httpMeterMs
 
 const _counts = new Map()   // endpoint key → count
 const _errors = new Map()   // status → count

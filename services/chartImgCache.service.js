@@ -3,6 +3,7 @@ import { renderChartImage } from './chartRender/klineRender.provider.js'
 import { createTtlCache } from './ttlCache.util.js'
 import { withTimeout } from './timeout.util.js'
 import { logger } from './logger.service.js'
+import { config } from './config.js'
 
 // Short-lived chart-image cache, keyed by symbol + timeframe + studies. Chart rendering is the
 // same view is often requested more than once in a short window — an agent's internal check then
@@ -24,11 +25,11 @@ const _chartCache  = createTtlCache({ ttlMs: CHART_TTL_MS, max: 100 })   // key 
 // instantly in prod. NOTE: while a chart is fallback-served it's "degraded" — the FMP↔TradingView
 // data-consistency win only holds for own-render-served charts. Retire the fallback once the own
 // renderer is proven stable live.
-const OWN_RENDER_ON     = process.env.OWN_CHART_RENDER !== 'false' && process.env.OWN_CHART_RENDER !== '0'
+const OWN_RENDER_ON     = config.ownChartRender
 // Outer (caller) budget bounds the TOTAL wait incl. pool-queue time. Keep it ABOVE the provider's
 // per-render page timeout (OWN_CHART_RENDER_PAGE_TIMEOUT_MS, default 10s) so a render that actually
 // runs isn't abandoned mid-flight and needlessly re-fetched from chart-img.
-const RENDER_TIMEOUT_MS = Number(process.env.OWN_CHART_RENDER_TIMEOUT_MS) || 12000
+const RENDER_TIMEOUT_MS = config.ownChartRenderTimeoutMs
 
 /** Produce a chart PNG: own renderer first, chart-img as fallback. Returns base64 PNG. */
 async function _renderPng(symbol, timeframe, studies) {

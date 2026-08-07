@@ -33,6 +33,7 @@ import { runAgentStream }          from './agentIO.js'
 import { toolsFor }                from './agentTools.registry.js'
 import { makePromptLoader, LANGUAGE_RULE } from './agentUtils.js'
 import { createTtlCache }          from './ttlCache.util.js'
+import { config } from './config.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[marketBrief]'
@@ -40,7 +41,7 @@ const LOG = '[marketBrief]'
 const _systemPrompt = makePromptLoader(join(__dirname, '../market_brief_prompt.md'), LOG)
 
 /** A brief older than this is rewritten; inside it, every caller reads the same one. */
-export const BRIEF_TTL_MS = Number(process.env.MARKET_BRIEF_TTL_MS) || 45 * 60 * 1000
+export const BRIEF_TTL_MS = config.marketBriefTtlMs
 /** How far ahead the calendar section looks. */
 const CALENDAR_DAYS = 7
 

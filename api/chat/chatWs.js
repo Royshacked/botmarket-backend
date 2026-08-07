@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { parse }                      from 'url'
 import jwt                            from 'jsonwebtoken'
 import { logger }                     from '../../services/logger.service.js'
+import { config } from '../../services/config.js'
 
 const LOG = '[chatWs]'
 
@@ -53,7 +54,7 @@ export function attach(httpServer) {
 
         let userId
         try {
-            const payload = jwt.verify(token, process.env.JWT_SECRET)
+            const payload = jwt.verify(token, config.jwtSecret)
             // JWT payload shape matches the auth middleware: { _id, username, ... }
             userId = String(payload._id ?? payload.id ?? payload.userId)
             if (!userId || userId === 'undefined') throw new Error('no userId in token')

@@ -1,4 +1,5 @@
 import { authService } from './authentication.service.js'
+import { config } from '../../services/config.js'
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -25,7 +26,7 @@ export async function signin(req, res, next) {
         res.cookie('token', token, {
             httpOnly: true,
             sameSite: 'strict',
-            secure: process.env.NODE_ENV === 'production',
+            secure: config.isProduction,
             maxAge: SEVEN_DAYS_MS,
         })
         res.json(user)

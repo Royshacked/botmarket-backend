@@ -1,9 +1,10 @@
 import dotenv from 'dotenv'
 import { logger } from '../services/logger.service.js'
+import { config } from '../services/config.js'
 
 dotenv.config()
 
-const GNEWS_API_KEY = process.env.GNEWS_API_KEY
+const GNEWS_API_KEY = config.gnewsApiKey
 const GNEWS_API_URL = 'https://gnews.io/api/v4'
 const GNEWS_QUERY_MAX = 200
 

@@ -8,6 +8,7 @@
 import YahooFinance from 'yahoo-finance2'
 import { logger } from '../services/logger.service.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
+import { config } from '../services/config.js'
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] })
 
@@ -32,7 +33,7 @@ const TF_MAP = {
  * @returns {Promise<string>}   base64-encoded PNG
  */
 export async function fetchChartImage(symbol, timeframe, studies = []) {
-    const apiKey = process.env.CHART_IMG_API_KEY
+    const apiKey = config.chartImgApiKey
     if (!apiKey) throw new Error('CHART_IMG_API_KEY is not set')
 
     const tvSymbol = await toTVSymbol(symbol)

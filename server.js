@@ -1,13 +1,28 @@
-import 'dotenv/config'
+// config loads .env itself, so importing it first makes the environment available to every module
+// below regardless of import order — see services/config.js for why that ordering was a real trap.
+import { config, validateConfig, unknownConfigKeys } from './services/config.js'
 import dns from 'dns'
 dns.setServers(['8.8.8.8', '1.1.1.1'])  // router blocks Node.js SRV queries; use public DNS
 
-// ── Fail fast on missing required env vars ────────────────────────────────
-const REQUIRED_ENV = ['MONGODB_URI', 'JWT_SECRET']
-const missing = REQUIRED_ENV.filter(k => !process.env[k])
+// ── Fail fast on bad configuration ────────────────────────────────────────
+// Two failures, not one. MISSING is fatal as before. MALFORMED is new and is the more interesting
+// case: a value that IS set but doesn't parse (`CANDLE_CACHE_INTRADAY_MS=abc`) used to fall through
+// to the default in silence, so the system ran correctly-looking on a setting nobody chose.
+const { missing, malformed } = validateConfig()
 if (missing.length) {
     console.error(`[server] Missing required env vars: ${missing.join(', ')}`)
     process.exit(1)
+}
+if (malformed.length) {
+    console.error(`[server] Malformed env vars (unparseable, would silently use the default): `
+        + malformed.map(m => `${m.key}=${JSON.stringify(m.value)}`).join(', '))
+    process.exit(1)
+}
+// A key in .env that no config entry claims is what a typo looks like from the only side it is
+// visible from. A warning, not fatal — an operator may keep unrelated notes in that file.
+const unknown = unknownConfigKeys()
+if (unknown.length) {
+    console.warn(`[server] .env sets keys nothing reads (typo, or leftovers): ${unknown.join(', ')}`)
 }
 
 import http from 'http'
@@ -25,7 +40,6 @@ import { ensureKairosIndexes } from './api/kairos/kairos.service.js'
 import { ensureTradeIndexes } from './services/tradeCapture.service.js'
 import { ensureExperienceIndexes } from './api/experience/experience.model.js'
 import { threadService } from './services/thread.service.js'
-// import { ideaRoutes } from './api/idea/idea.routes.js'   // ARCHIVED — see the mount below
 import { kairosRoutes } from './api/kairos/kairos.routes.js'
 import { mentorRoutes } from './api/mentor/mentor.routes.js'
 import { setupsRoutes } from './api/setups/setups.routes.js'
@@ -64,7 +78,7 @@ const server = http.createServer(app)
 
 // CORS — must come before every route.
 // app.options handles the preflight for non-simple requests (e.g. audio/webm Content-Type).
-if (process.env.NODE_ENV !== 'production') {
+if (!config.isProduction) {
     const corsOptions = {
         origin: [
             'http://127.0.0.1:3030',
@@ -95,13 +109,14 @@ app.use('/api/transcribe', transcribeRoutes)
 // longer conversations and 413s the save/update.
 app.use(express.json({ limit: '10mb' }))
 
-if (process.env.NODE_ENV === 'production') {
+if (config.isProduction) {
     app.use(express.static(path.resolve('public')))
 }
 
-// ARCHIVED 2026-07-29 — the Idea agent (legacy `idea` kind) is superseded by Kairos (`call`) and
-// Mentor (`setup`). Routes left unmounted rather than deleted; re-add this line to revive it.
-// app.use('/api/idea',     ideaRoutes)
+// The Idea agent (legacy `idea` kind) was archived 2026-07-29 — superseded by Kairos (`call`) and
+// Mentor (`setup`) — and DELETED 2026-08-07. It sat unmounted for ten days, so `git log` is the
+// only place it now lives; nothing here reads it. NB the `idea` KIND is not gone: /api/trade-ideas
+// still serves it, and portfolio holdings ride that plumbing.
 app.use('/api/kairos',      kairosRoutes)
 app.use('/api/mentor',      mentorRoutes)
 app.use('/api/setups',      setupsRoutes)
@@ -130,6 +145,14 @@ ensureTradeIndexes()
 ensureExperienceIndexes()
 threadService.ensureThreadIndexes()
 
+// ─── Background loops ─────────────────────────────────────────────────────────
+// SINGLE INSTANCE ONLY. These eleven loops start unconditionally, with no leader election, so a
+// second process runs a second copy of every one of them. Some claim their work through Mongo and
+// are safe (Hermes/Talos via dueLoop's lease, marketOpen via claimIf, paperFill via claimOrder, the
+// brief notifier via its card dedupe); others rely on being the only process alive — above all
+// execution.reconciler's in-memory exit-order lock, which a second instance cannot even see.
+// Read docs/architecture/single-instance.md BEFORE raising an instance/replica count.
+
 // ARCHIVED 2026-07-29 — Minos watched the legacy `idea` kind, which nothing builds any more, and
 // its tick was also picking up `setup` entities that belong to Talos. Not started; re-add this
 // line to revive it (the kind filter it was missing is now in place).
@@ -150,7 +173,7 @@ paperMarkService.start()
 marketBriefNotifier.start()
 
 // SPA fallback: only in production when static assets live in public/
-if (process.env.NODE_ENV === 'production') {
+if (config.isProduction) {
     app.get('/**', (req, res) => {
         res.sendFile(path.resolve('public/index.html'))
     })
@@ -163,7 +186,7 @@ app.use((err, req, res, next) => {
     res.status(err.status || 500).json({ error: err.message || 'Internal server error' })
 })
 
-const port = process.env.PORT || 3030
+const port = config.port
 
 server.on('error', (err) => {
     if (err?.code === 'EADDRINUSE') {

@@ -17,9 +17,10 @@
 import { logger } from '../services/logger.service.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
 import { getJson } from '../services/http.util.js'
+import { config } from '../services/config.js'
 
 const LOG = '[sec]'
-const UA  = process.env.SEC_USER_AGENT || 'ar2trade scanner roy.shacked@mail.huji.ac.il'
+const UA  = config.secUserAgent
 
 // ─── ticker → CIK map (cached for the process; ~10k entries, rarely changes) ──
 let _cikMap     = null   // { AAPL: { cik: '0000320193', title: 'Apple Inc.' } }

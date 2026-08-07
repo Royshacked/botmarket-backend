@@ -14,10 +14,11 @@ import dotenv from 'dotenv'
 import axios from 'axios'
 import { logger } from '../services/logger.service.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
+import { config } from '../services/config.js'
 
 dotenv.config()
 
-const FRED_API_KEY = process.env.FRED_API_KEY
+const FRED_API_KEY = config.fredApiKey
 const BASE = 'https://api.stlouisfed.org/fred'
 
 // Curated high-impact US macro data releases: FRED release_id → display meta.

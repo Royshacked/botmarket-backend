@@ -22,6 +22,7 @@
 
 import { EventEmitter } from 'node:events'
 import { logger }       from '../services/logger.service.js'
+import { config } from '../services/config.js'
 
 const LOG = '[ctrader.ws]'
 
@@ -159,8 +160,8 @@ class CTraderSocket extends EventEmitter {
         try {
             // _send (not send) — app-auth must bypass the ready gate it resolves.
             await this._send(PT.APP_AUTH_REQ, {
-                clientId:     process.env.CTRADER_CLIENTID,
-                clientSecret: process.env.CTRADER_SECRET,
+                clientId:     config.ctraderClientId,
+                clientSecret: config.ctraderSecret,
             })
             this._attempts = 0
             this._startHeartbeat()
