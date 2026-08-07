@@ -1,11 +1,10 @@
-import { mentorAgentService, emptyMentorState } from '../../services/mentor.agent.service.js'
+import { mentorAgentService, emptyMentorState } from '../../services/agents/mentor.agent.service.js'
 import { resolveModel }        from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
-import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
+import { parseStreamBody, parseClientTime } from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
 
 const LOG = '[mentor:controller]'
-const MAX_RECENT_CHAT_TURNS = 4
 
 /**
  * Mentor's build conversation (Pipeline F). Streams tokens / chart / status / coverage; the
@@ -18,6 +17,9 @@ const MAX_RECENT_CHAT_TURNS = 4
 export async function streamMentor(req, res) {
     const parsed = parseStreamBody(req.body)
     if (parsed.error) return res.status(400).json({ error: parsed.error })
+    // Mentor's own extra: the browser clock, so `active_from` / `valid_until` resolve against the
+    // user's calendar rather than the server's.
+    const clientTime = parseClientTime(req.body)
 
     await streamAgentResponse(req, res, {
         log: LOG,
@@ -36,7 +38,7 @@ export async function streamMentor(req, res) {
                 chatState:     parsed.chatState ?? emptyMentorState(),
                 accounts:      parsed.accounts,
                 mainAccountId: parsed.mainAccountId,
-                clientTime:    parsed.clientTime,
+                clientTime,
                 model:           routing.model,
                 reasoningEffort: routing.reasoningEffort,
                 userId:          req.user._id,
@@ -62,56 +64,3 @@ export async function streamMentor(req, res) {
     })
 }
 
-function parseStreamBody(body) {
-    const { messages, userPrompt, chatState, accounts } = body ?? {}
-    const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
-    const mainAccountId = body?.mainAccountId != null ? String(body.mainAccountId) : null
-
-    let priorState = null
-    if (chatState !== undefined && chatState !== null) {
-        if (typeof chatState !== 'object' || Array.isArray(chatState)) {
-            return { error: 'chatState must be an object' }
-        }
-        priorState = chatState
-    }
-
-    const base = {
-        chatState:     priorState,
-        accounts:      parseIdeaAccounts(accounts),
-        mainAccountId,
-        clientTime:    parseClientTime(body),
-    }
-
-    if (messages !== undefined && messages !== null) {
-        if (!Array.isArray(messages)) return { error: 'messages must be an array' }
-        // An empty array with a prompt to fall back on is fine; empty with nothing is not.
-        if (messages.length === 0) {
-            return trimmedPrompt
-                ? { ...base, userPrompt: trimmedPrompt }
-                : { error: 'messages must be a non-empty array' }
-        }
-        const validated = parseChatMessages(messages)
-        if (validated.error) return { error: validated.error }
-        return {
-            ...base,
-            userPrompt: trimmedPrompt || undefined,
-            messages:   validated.messages.slice(-MAX_RECENT_CHAT_TURNS * 2),
-        }
-    }
-
-    if (trimmedPrompt) return { ...base, userPrompt: trimmedPrompt }
-
-    return { error: 'Request must include messages or userPrompt' }
-}
-
-// Browser-supplied local time ({ clientNow: ms, clientTz: IANA }) so Mentor resolves "through
-// Friday" against the user's calendar and stores active_from / valid_until as absolute UTC.
-// Each field is validated independently — a bad value is dropped, never fatal.
-function parseClientTime(body) {
-    const now = Number(body?.clientNow)
-    const tz  = typeof body?.clientTz === 'string' ? body.clientTz.trim() : ''
-    const clientTime = {}
-    if (Number.isFinite(now) && now > 0) clientTime.clientNow = now
-    if (tz) clientTime.clientTz = tz
-    return (clientTime.clientNow || clientTime.clientTz) ? clientTime : null
-}

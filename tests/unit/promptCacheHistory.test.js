@@ -52,6 +52,24 @@ test('no cap given → never trims (unchanged behaviour)', () => {
     assert.equal(trimHistory(turns(50), undefined).length, 50)
 })
 
+// The user-first rule is an invariant of the HISTORY, not a side effect of having trimmed. Kairos
+// and Mentor used to slice(-8) in the controller, which both defeated the high-water mark above AND
+// skipped trimHistory's guard — an even-count slice of a phased Kairos reply (one turn = several
+// assistant bubbles) genuinely lands on an assistant. The slice is gone; this holds the rule at the
+// one place every agent's history passes through.
+test('normalizeMessages opens on a user turn even when nothing is trimmed', () => {
+    const out = normalizeMessages([
+        { role: 'assistant', content: 'a stale leading reply' },
+        { role: 'user', content: 'q' },
+        { role: 'assistant', content: 'a' },
+    ], 50)   // cap far above the input → trimHistory is a no-op, so only this guard can fire
+    assert.equal(out[0].role, 'user')
+    assert.deepEqual(out, [
+        { role: 'user', content: 'q' },
+        { role: 'assistant', content: 'a' },
+    ])
+})
+
 test('normalizeMessages still coalesces, then trims on the mark', () => {
     const out = normalizeMessages([
         { role: 'user', content: 'q' },
@@ -125,11 +143,15 @@ const BREAKPOINT = /cache_control:\s*\{\s*type:\s*'ephemeral'\s*\}/g
 
 test('no agent spends more than 2 of the 4 breakpoints on its system prompt', () => {
     // 2 (system) + 1 (tool list) + 1 (history) = 4, the cap exactly. A third here is one too many.
-    const services = readdirSync(join(ROOT, 'services'))
-        .filter(f => f.endsWith('.agent.service.js') || f === 'marketBrief.service.js')
-    assert.ok(services.length >= 7, 'still finding the agent services')
-    for (const f of services) {
-        const used = (readFileSync(join(ROOT, 'services', f), 'utf8').match(BREAKPOINT) ?? []).length
+    // services/agents/ since 2026-08-07; marketBrief.service stayed in services/ and counts too.
+    const files = [
+        ...readdirSync(join(ROOT, 'services/agents')).filter(f => f.endsWith('.agent.service.js'))
+            .map(f => join(ROOT, 'services/agents', f)),
+        join(ROOT, 'services/marketBrief.service.js'),
+    ]
+    assert.ok(files.length >= 7, 'still finding the agent services')
+    for (const f of files) {
+        const used = (readFileSync(f, 'utf8').match(BREAKPOINT) ?? []).length
         assert.ok(used <= 2, `${f} declares ${used} cache breakpoints; the budget leaves room for 2`)
     }
 })

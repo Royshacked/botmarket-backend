@@ -98,7 +98,13 @@ export function normalizeMessages(messages, maxCount) {
         if (last && last.role === m.role) last.content += `\n\n${m.content}`
         else merged.push({ ...m })
     }
-    return trimHistory(merged, maxCount)
+    // The history handed to a provider ALWAYS opens on a user turn — the API rejects anything else.
+    // trimHistory enforces this on the path where it cuts; enforce it here too so the invariant holds
+    // by construction rather than as a side effect of having trimmed. Otherwise a caller that hands
+    // over an assistant-leading array (a client replaying a greeting, a controller that pre-sliced)
+    // sails through untrimmed and fails at the provider, far from the cause.
+    const opened = merged[0]?.role === 'assistant' ? merged.slice(1) : merged
+    return trimHistory(opened, maxCount)
 }
 
 // ─── Per-turn context placement ───────────────────────────────────────────────

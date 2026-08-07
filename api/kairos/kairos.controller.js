@@ -1,22 +1,23 @@
 import { logger }              from '../../services/logger.service.js'
-import { kairosAgentService, emptyKairosState, _finalizeCall } from '../../services/kairos.agent.service.js'
+import { kairosAgentService, emptyKairosState, _finalizeCall } from '../../services/agents/kairos.agent.service.js'
 import { kairosService }       from './kairos.service.js'
 import { kairosHandoffService } from '../../services/kairos.handoff.service.js'
 import { resolveModel }        from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { sendReason }         from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
-import { parseChatMessages }   from '../_shared/parse.util.js'
+import { parseStreamBody }    from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
 
 const LOG = '[kairos:controller]'
-const MAX_RECENT_CHAT_TURNS = 4
 
 // Build conversation. Streams tokens/chart/status; the agent emits a DRAFT call in `done`
 // (unsaved). Persisting happens only on Generate → generateKairosCall.
 export async function streamKairos(req, res) {
     const parsed = parseStreamBody(req.body)
     if (parsed.error) return res.status(400).json({ error: parsed.error })
+    // Kairos's own extra: the structured Argus candidate that opened this desk.
+    const seed = _sanitizeSeed(req.body?.seed)
 
     await streamAgentResponse(req, res, {
         log: LOG,
@@ -35,7 +36,7 @@ export async function streamKairos(req, res) {
                 chatState:     parsed.chatState ?? emptyKairosState(),
                 accounts:      parsed.accounts,
                 mainAccountId: parsed.mainAccountId,
-                seed:          parsed.seed,
+                seed,
                 model:         routing.model,
                 reasoningEffort: routing.reasoningEffort,
                 userId:        req.user._id,
@@ -185,36 +186,3 @@ export function _sanitizeSeed(raw) {
     }
 }
 
-function parseStreamBody(body) {
-    const { messages, userPrompt, chatState, accounts } = body ?? {}
-    const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
-    const seed = _sanitizeSeed(body?.seed)
-
-    let state = null
-    if (chatState !== undefined && chatState !== null) {
-        if (typeof chatState !== 'object' || Array.isArray(chatState)) return { error: 'chatState must be an object' }
-        state = chatState
-    }
-
-    const acctList = Array.isArray(accounts) ? accounts.filter(a => a && typeof a === 'object') : []
-    // Which marked account is starred main (bank icon) — lets Kairos tell the user which account
-    // the call will bind to during the build, matching what Generate resolves. Normalized to string.
-    const mainAccountId = body?.mainAccountId != null ? String(body.mainAccountId) : null
-
-    if (messages !== undefined && messages !== null) {
-        if (!Array.isArray(messages)) return { error: 'messages must be an array' }
-        // Empty messages with a userPrompt fallback is allowed here (as on the idea endpoint).
-        if (messages.length === 0) {
-            if (trimmedPrompt) return { userPrompt: trimmedPrompt, chatState: state, accounts: acctList, mainAccountId, seed }
-            return { error: 'messages must be a non-empty array' }
-        }
-        // Use the same strict validator as the idea/portfolio/scanner endpoints (was inlined here).
-        const validated = parseChatMessages(messages)
-        if (validated.error) return { error: validated.error }
-        const trimmed = validated.messages.slice(-MAX_RECENT_CHAT_TURNS * 2)
-        return { userPrompt: trimmedPrompt || undefined, messages: trimmed, chatState: state, accounts: acctList, mainAccountId, seed }
-    }
-
-    if (trimmedPrompt) return { userPrompt: trimmedPrompt, chatState: state, accounts: acctList, mainAccountId, seed }
-    return { error: 'Request must include messages or userPrompt' }
-}
