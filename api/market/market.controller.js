@@ -1,118 +1,63 @@
-import { getMarketStatus } from '../../services/market.service.js'
-import { fetchMarketCandles } from '../../services/candleFetch.service.js'
-import { getFmpQuoteFull } from '../../providers/fmp.price.provider.js'
-import { createTtlCache } from '../../services/ttlCache.util.js'
-import { parseChartInterval, defaultLookbackDays } from '../../services/candleInterval.util.js'
-import { logger } from '../../services/logger.service.js'
-import { readMark, publish } from '../../services/priceFeed.service.js'
+/**
+ * /api/market handlers — request in, payload out.
+ *
+ * What stays here is transport judgment only: which query params exist, what a missing or
+ * unsupported one answers with, and the status code. The caches, the window arithmetic, the price
+ * feed and the provider call moved to market.service.js — this was the only controller in the app
+ * importing a provider directly.
+ */
+
+import { getMarketStatus }    from '../../services/market.service.js'
+import { parseChartInterval } from '../../services/candleInterval.util.js'
+import { logger }             from '../../services/logger.service.js'
+import * as marketService     from './market.service.js'
 
 const LOG = '[market:controller]'
 
-// How stale a published mark may be before the chart buys its own. The chart polls the quote every
-// 5s to repaint the live bar, so this is deliberately just under that: fresh enough that the tick
-// still moves, loose enough that a held symbol (marked by the paper loop) is served for free.
-const QUOTE_MAX_AGE_MS = Number(process.env.QUOTE_FEED_MAX_AGE_MS) || 4_000
-const DAY_MS = 86_400_000
+/** The symbol every route here takes, normalized. Empty string when absent — the caller 400s. */
+const _symbol = req => String(req.query.symbol ?? '').toUpperCase().trim()
 
-export async function getStatus(req, res) {
+export async function getStatus(req, res, next) {
     try {
-        const symbol     = req.query.symbol ?? ''
         const assetClass = req.query.assetClass ?? req.query.asset_class ?? undefined
-        res.send(getMarketStatus(symbol, assetClass))
+        res.send(getMarketStatus(req.query.symbol ?? '', assetClass))
     } catch (err) {
         logger.error(LOG, 'getStatus failed', err)
-        res.status(500).send({ error: 'Failed to get market status' })
+        next(err)
     }
 }
 
-// ─── Chart candles ──────────────────────────────────────────────────────────────
-// GET /api/market/candles?symbol=AAPL&interval=5min[&from=<ms>&to=<ms>]
-// OHLCV history for the price chart. FMP-first (real-time intraday on this key) with the
-// unified candle router (Massive/Yahoo) as the fallback for what FMP doesn't serve on this
-// plan: futures / index CFDs / broker symbols and weekly / monthly bars.
-//
-// Closed bars are immutable, so the response is cached in a module-level (shared across all
-// viewers) TTL cache — N users on AAPL/5min collapse to one upstream fetch per window. The
-// default (live) window keys on 'default' so repeated polls hit the cache within the TTL;
-// explicit from/to (historical scrolls) key on the exact window.
-
-const _intradayCache = createTtlCache({ ttlMs: Number(process.env.CANDLE_CACHE_INTRADAY_MS) || 30_000,  max: 300 })
-const _dailyCache    = createTtlCache({ ttlMs: Number(process.env.CANDLE_CACHE_DAILY_MS)    || 300_000, max: 300 })
-const _cacheFor = timeSpan => (timeSpan === 'minute' || timeSpan === 'hour') ? _intradayCache : _dailyCache
-
-/** Parse a from/to query value (epoch ms, epoch sec, or ISO date) to epoch ms, or undefined. */
-function _parseWhenMs(v) {
-    if (v == null || v === '') return undefined
-    const n = Number(v)
-    if (Number.isFinite(n) && n > 0) return n < 1e12 ? n * 1000 : n   // treat < 1e12 as seconds
-    const d = Date.parse(v)
-    return Number.isFinite(d) ? d : undefined
+// GET /api/market/quote?symbol=AAPL
+// Never throws for an unpriceable symbol — see market.service.getQuote for why a blip is a skipped
+// tick rather than a 500.
+export async function getQuote(req, res, next) {
+    const symbol = _symbol(req)
+    if (!symbol) return res.status(400).send({ error: 'symbol is required' })
+    try {
+        res.send(await marketService.getQuote(symbol))
+    } catch (err) {
+        logger.error(LOG, 'getQuote failed', err)
+        next(err)
+    }
 }
 
-// ─── Real-time quote ─────────────────────────────────────────────────────────────
-// GET /api/market/quote?symbol=AAPL
-// The live last price for the chart's current-bar tick. Historical candles alone freeze the
-// price until a bar closes (all session on a daily/4h chart), so the chart patches the current
-// bar's close from this. FMP `/quote` is ~3s-fresh and covers equities/ETF/crypto/forex; it
-// returns null for what it can't price (futures/index) — the client then keeps candle-only.
-// Soft-fails to { price: null } so a transient upstream blip is a skipped tick, not a 500 storm.
-export async function getQuote(req, res) {
-    const symbol = String(req.query.symbol ?? '').toUpperCase().trim()
+// GET /api/market/candles?symbol=AAPL&interval=5min[&from=<ms>&to=<ms>]
+export async function getCandles(req, res, next) {
+    const symbol = _symbol(req)
     if (!symbol) return res.status(400).send({ error: 'symbol is required' })
 
-    // Read before fetching. A symbol the user holds is already priced by the mark loop, and the
-    // chart ticking on it should not buy a second copy of the same number. TOLERANCE IS THE
-    // CHART'S: it repaints the live bar, so a few seconds is fine and a stale minute is not — the
-    // caller states the bound, the feed never assumes one (services/priceFeed.service.js).
-    const cheap = readMark(symbol, { maxAgeMs: QUOTE_MAX_AGE_MS })
-    if (cheap != null) return res.send({ symbol, price: cheap, fromFeed: true })
+    const intervalRaw = String(req.query.interval ?? 'day')
+    const spec = parseChartInterval(intervalRaw)
+    if (!spec) return res.status(400).send({ error: `unsupported interval: ${intervalRaw}` })
 
     try {
-        const q = await getFmpQuoteFull(symbol)
-        if (!q) return res.send({ symbol, price: null })
-        // Pay once, share it. A chart open on a symbol nobody holds now subsidises the mark loop
-        // instead of duplicating it — the reciprocity that makes the feed worth having.
-        publish(symbol, q.price)
-        res.send({ symbol, price: q.price, dayHigh: q.dayHigh, dayLow: q.dayLow, tsSec: q.tsSec })
-    } catch (err) {
-        logger.warn(LOG, `getQuote soft-fail for ${symbol}: ${err.message}`)
-        res.send({ symbol, price: null })
-    }
-}
-
-export async function getCandles(req, res) {
-    try {
-        const symbol = String(req.query.symbol ?? '').toUpperCase().trim()
-        if (!symbol) return res.status(400).send({ error: 'symbol is required' })
-
-        const intervalRaw = String(req.query.interval ?? 'day')
-        const spec = parseChartInterval(intervalRaw)
-        if (!spec) return res.status(400).send({ error: `unsupported interval: ${intervalRaw}` })
-        const { timeSpan, multiplier } = spec
-
-        const fromMs = _parseWhenMs(req.query.from)
-        const toMs   = _parseWhenMs(req.query.to)
-        const explicit = fromMs != null || toMs != null
-
-        const now  = Date.now()
-        const from = fromMs ?? (now - defaultLookbackDays(timeSpan, multiplier) * DAY_MS)
-        const to   = toMs   ?? now
-
-        const cache    = _cacheFor(timeSpan)
-        const windowKey = explicit ? `${fromMs ?? ''}-${toMs ?? ''}` : 'default'
-        const cacheKey  = `${symbol}|${timeSpan}|${multiplier}|${windowKey}`
-
-        const cached = cache.get(cacheKey)
-        if (cached) return res.send(cached)
-
-        // FMP-first (real-time intraday) with the unified router as fallback — see candleFetch.service.
-        const candles = await fetchMarketCandles(symbol, { timeSpan, multiplier, from, to })
-
-        const payload = { symbol, interval: intervalRaw, timeSpan, multiplier, candles }
-        cache.set(cacheKey, payload)
+        const payload = await marketService.getCandles(symbol, intervalRaw, spec, {
+            fromMs: marketService.parseWhenMs(req.query.from),
+            toMs:   marketService.parseWhenMs(req.query.to),
+        })
         res.send(payload)
     } catch (err) {
         logger.error(LOG, 'getCandles failed', err)
-        res.status(500).send({ error: 'Failed to get candles' })
+        next(err)
     }
 }

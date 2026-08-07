@@ -46,7 +46,7 @@ minosService.start()
               │   (crypto USDT/USDC pairs run 24/7 — always evaluated;
               │    a PURE time-only entry is exempt — see §6 Time)
               │
-              ├── getCandles(asset, timeframe, 300)   ← ohlcv.provider → priceService
+              ├── getCandles(asset, timeframe, 300)   ← ohlcv.service → priceService
               │   (separate timeframes for entry / stop / TP)
               │
               ├── status === 'looking' (entry phase):
@@ -614,7 +614,7 @@ monitoring/
   ../monitoring/paperFill.service.js      Global 5s loop: intra-bar touch/limit paper fills
 
   providers/
-    ohlcv.provider.js         Thin wrapper around priceService; normalises to {t,o,h,l,c,v}
+    ohlcv.service.js         Thin wrapper around priceService; normalises to {t,o,h,l,c,v}
 
   test.monitor.js             8-section smoke test (run: node monitoring/test.monitor.js)
   test.tree.js                Condition tree evaluator smoke test
@@ -627,7 +627,7 @@ monitoring/
 - **After-market-close guard:** daily/weekly checks currently happen any time of day.
   Add a check: skip if market is closed and the current candle hasn't closed yet.
 - **IBKR OHLCV:** when a user has IBKR connected, use their broker data instead of Massive.
-  The `ohlcv.provider.js` is the single place to add this.
+  The `ohlcv.service.js` is the single place to add this.
 - **Persistent parse cache:** move condition parse cache from in-memory to MongoDB so
   it survives server restarts.
 - **Per-user monitoring:** currently all active ideas are monitored globally.

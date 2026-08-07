@@ -1,272 +1,60 @@
 /**
- * Broker Routes
+ * Broker Routes — the route table only; handlers live in broker.controller.js.
  *
- * All data routes require authentication (requireAuth middleware).
- * The OAuth callback is the only unauthenticated route — user identity
- * is recovered from the JWT-signed `state` param instead.
+ * All data routes require authentication (requireAuth). The OAuth callback is the ONE
+ * unauthenticated route: the browser arrives from the broker's domain, so there is no session to
+ * read and user identity is recovered from the JWT-signed `state` param instead.
+ *
+ * ORDERING MATTERS. `/:type/...` is a wildcard, so the literal `/connections` and `/callback` paths
+ * are declared before it — otherwise `connections` would bind as a broker type.
  *
  * Route map:
- *   GET  /api/broker/connect/:type         start OAuth for broker
- *   GET  /api/broker/callback              OAuth callback (all brokers)
- *   GET  /api/broker/connections           list user's connected brokers
- *   DEL  /api/broker/connections/:type     disconnect a broker
- *   GET  /api/broker/:type/capabilities    what the broker can do (trading, native SL/TP, …)
- *   GET  /api/broker/:type/account         account summary
- *   GET  /api/broker/:type/positions       open positions
- *   DEL  /api/broker/:type/positions/:id   close an open position (full close)
+ *   GET    /api/broker/connect/:type            start OAuth for broker
+ *   GET    /api/broker/callback                 OAuth callback (all brokers, UNAUTHENTICATED)
+ *   GET    /api/broker/connections              list the user's connected brokers
+ *   DEL    /api/broker/connections/:type        disconnect a broker
+ *   PATCH  /api/broker/connections/:type/account  set the selected trading account
+ *   GET    /api/broker/:type/trading-accounts   the broker's trading accounts + which is selected
+ *   GET    /api/broker/:type/capabilities       what the broker can do (trading, native SL/TP, …)
+ *   GET    /api/broker/:type/account            account summary
+ *   GET    /api/broker/:type/positions          open positions (asset-class + callId enriched)
+ *   DEL    /api/broker/:type/positions/:id      close an open position (full close)
+ *   GET    /api/broker/:type/orders             working (pending) orders
+ *   POST   /api/broker/:type/orders             place a working order
+ *   PATCH  /api/broker/:type/orders/:orderId    re-price a working order
+ *   DEL    /api/broker/:type/orders/:orderId    cancel a working order
  */
 
-import { Router }         from 'express'
-import jwt                from 'jsonwebtoken'
-import { brokerService }  from './broker.service.js'
-import { ideaService }    from '../trade-ideas/tradeIdeas.service.js'
-import { normSymbol }     from '../../services/brokerSymbol.service.js'
-import { requireAuth }    from '../../middleware/auth.middleware.js'
-import { logger }         from '../../services/logger.service.js'
-
-const LOG          = '[broker.routes]'
-const FRONTEND_URL = process.env.CLIENT_URL ?? 'http://localhost:5173'
+import { Router }      from 'express'
+import { requireAuth } from '../../middleware/auth.middleware.js'
+import {
+    connect, callback, listConnections, disconnect,
+    listTradingAccounts, setSelectedAccount, capabilities,
+    getAccount, getPositions, closePosition,
+    listOrders, placeOrder, amendOrder, cancelOrder,
+} from './broker.controller.js'
 
 export const brokerRoutes = Router()
 
-// Fall back to the broker's selected trading account when a caller omits accountId.
-async function _selectedAccountId(type, userId) {
-    const { selectedAccountId } = await brokerService.getTradingAccounts(type, userId)
-    return selectedAccountId
-}
+// OAuth. `connect` needs the session (it signs the user into `state`); `callback` cannot have one.
+brokerRoutes.get('/connect/:type', requireAuth, connect)
+brokerRoutes.get('/callback', callback)
 
-// ─── OAuth start ──────────────────────────────────────────────────────────────
-// Redirect the browser to the broker's consent page.
-// requireAuth reads the JWT cookie — works because this is a browser navigation,
-// so cookies are sent automatically.
+// Everything below is the authenticated data surface.
+brokerRoutes.use(requireAuth)
 
-brokerRoutes.get('/connect/:type', requireAuth, (req, res) => {
-    try {
-        const url = brokerService.getConnectUrl(req.params.type, req.user._id)
-        logger.info(LOG, `OAuth start — type=${req.params.type} user=${req.user._id}`)
-        res.redirect(url)
-    } catch (err) {
-        logger.error(LOG, 'getConnectUrl error:', err.message)
-        res.redirect(`${FRONTEND_URL}/?broker=error&reason=unknown_type`)
-    }
-})
+brokerRoutes.get   ('/connections', listConnections)
+brokerRoutes.delete('/connections/:type', disconnect)
+brokerRoutes.patch ('/connections/:type/account', setSelectedAccount)
 
-// ─── OAuth callback ───────────────────────────────────────────────────────────
-// Broker redirects here after user consent.
-// User identity is recovered from the signed `state` param.
+brokerRoutes.get   ('/:type/trading-accounts', listTradingAccounts)
+brokerRoutes.get   ('/:type/capabilities', capabilities)
+brokerRoutes.get   ('/:type/account', getAccount)
 
-brokerRoutes.get('/callback', async (req, res) => {
-    const { code, state } = req.query
-    if (!code || !state) {
-        logger.warn(LOG, 'OAuth callback: missing code or state')
-        return res.redirect(`${FRONTEND_URL}/?broker=error&reason=missing_params`)
-    }
+brokerRoutes.get   ('/:type/positions', getPositions)
+brokerRoutes.delete('/:type/positions/:positionId', closePosition)
 
-    let userId, brokerType
-    try {
-        const payload = jwt.verify(state, process.env.JWT_SECRET)
-        userId     = payload.userId
-        brokerType = payload.brokerType
-    } catch {
-        logger.warn(LOG, 'OAuth callback: invalid or expired state token')
-        return res.redirect(`${FRONTEND_URL}/?broker=error&reason=invalid_state`)
-    }
-
-    try {
-        await brokerService.handleCallback(brokerType, code, userId)
-        logger.info(LOG, `OAuth success — type=${brokerType} user=${userId}`)
-        res.redirect(`${FRONTEND_URL}/?broker=connected&type=${brokerType}`)
-    } catch (err) {
-        logger.error(LOG, `OAuth callback error (${brokerType}):`, err.message)
-        res.redirect(`${FRONTEND_URL}/?broker=error&reason=callback_failed&type=${brokerType}`)
-    }
-})
-
-// ─── List connections ─────────────────────────────────────────────────────────
-
-brokerRoutes.get('/connections', requireAuth, async (req, res) => {
-    try {
-        const connections = await brokerService.listConnections(req.user._id)
-        res.json({ connections })
-    } catch (err) {
-        logger.error(LOG, 'listConnections error:', err.message)
-        res.status(err.status ?? 500).json({ error: err.message })
-    }
-})
-
-// ─── Disconnect ───────────────────────────────────────────────────────────────
-
-brokerRoutes.delete('/connections/:type', requireAuth, async (req, res) => {
-    try {
-        await brokerService.disconnect(req.params.type, req.user._id)
-        res.json({ ok: true })
-    } catch (err) {
-        logger.error(LOG, 'disconnect error:', err.message)
-        res.status(err.status ?? 500).json({ error: err.message })
-    }
-})
-
-// ─── Per-broker account data ──────────────────────────────────────────────────
-
-// ─── Trading accounts ─────────────────────────────────────────────────────────
-
-brokerRoutes.get('/:type/trading-accounts', requireAuth, async (req, res) => {
-    try {
-        const data = await brokerService.getTradingAccounts(req.params.type, req.user._id)
-        res.json(data)
-    } catch (err) {
-        logger.error(LOG, `getTradingAccounts (${req.params.type}):`, err.message)
-        res.status(err.status ?? 500).json({ error: err.message })
-    }
-})
-
-brokerRoutes.patch('/connections/:type/account', requireAuth, async (req, res) => {
-    try {
-        const { accountId } = req.body
-        if (!accountId) return res.status(400).json({ error: 'accountId required' })
-        await brokerService.setSelectedAccount(req.params.type, req.user._id, accountId)
-        res.json({ ok: true })
-    } catch (err) {
-        logger.error(LOG, `setSelectedAccount (${req.params.type}):`, err.message)
-        res.status(err.status ?? 500).json({ error: err.message })
-    }
-})
-
-// ─── Per-broker capabilities ────────────────────────────────────────────────
-// Static per broker — lets the frontend render generically (show SL/TP inputs only
-// when nativeProtection, etc.) instead of branching on the broker name.
-
-brokerRoutes.get('/:type/capabilities', requireAuth, (req, res) => {
-    try {
-        const capabilities = brokerService.capabilities(req.params.type)
-        res.json({ capabilities })
-    } catch (err) {
-        logger.error(LOG, `capabilities (${req.params.type}):`, err.message)
-        res.status(err.status ?? 500).json({ error: err.message })
-    }
-})
-
-// ─── Per-broker account data ──────────────────────────────────────────────────
-
-brokerRoutes.get('/:type/account', requireAuth, async (req, res) => {
-    try {
-        const account = await brokerService.getAccount(req.params.type, req.user._id)
-        res.json({ account })
-    } catch (err) {
-        logger.error(LOG, `getAccount (${req.params.type}):`, err.message)
-        res.status(err.status ?? 500).json({ error: err.message })
-    }
-})
-
-brokerRoutes.get('/:type/positions', requireAuth, async (req, res) => {
-    try {
-        // Stamp each position with the idea-authored asset_class (when one exists for
-        // that symbol) so the client's market-hours gate is exact rather than relying
-        // on the symbol heuristic — which can't tell a forex pair from a stock. Falls
-        // back to null (→ heuristic) for positions with no matching idea.
-        // Also stamp the owning callId for call-originated positions (whose execution idea is
-        // hidden from the ideas list) so the client can open the Call pop-out instead of a dead
-        // click. Keyed broker:accountId:positionId — `type` is this broker, matching brokerOrders.
-        const [positions, classMap, callMap] = await Promise.all([
-            brokerService.getPositions(req.params.type, req.user._id),
-            ideaService.getAssetClassMap(req.user._id),
-            ideaService.getCallPositionMap(req.user._id),
-        ])
-        const enriched = positions.map(p => ({
-            ...p,
-            assetClass: p.assetClass ?? (p.symbol ? classMap[normSymbol(p.symbol)] ?? null : null),
-            callId: callMap[`${req.params.type}:${p.accountId}:${p.id}`] ?? null,
-        }))
-        res.json({ positions: enriched })
-    } catch (err) {
-        logger.error(LOG, `getPositions (${req.params.type}):`, err.message)
-        res.status(err.status ?? 500).json({ error: err.message })
-    }
-})
-
-// ─── Working orders (the "orders in the air") ──────────────────────────────────
-
-// List an account's working (pending) LIMIT/STOP orders. accountId via query;
-// falls back to the broker's selected account.
-brokerRoutes.get('/:type/orders', requireAuth, async (req, res) => {
-    try {
-        const accountId = req.query.accountId ?? await _selectedAccountId(req.params.type, req.user._id)
-        const orders = await brokerService.listOrders(req.params.type, req.user._id, accountId)
-        res.json({ orders })
-    } catch (err) {
-        logger.error(LOG, `listOrders (${req.params.type}):`, err.message)
-        res.status(err.status ?? 500).json({ error: err.message })
-    }
-})
-
-// Place a new working order (e.g. add a TP limit / stop level to a position).
-brokerRoutes.post('/:type/orders', requireAuth, async (req, res) => {
-    try {
-        const { accountId, symbol, direction, type, quantity, limitPrice, stopPrice, positionId } = req.body ?? {}
-        if (!symbol || !direction || !type || quantity == null) {
-            return res.status(400).json({ error: 'symbol, direction, type and quantity are required' })
-        }
-        const acct = accountId ?? await _selectedAccountId(req.params.type, req.user._id)
-        const order = {
-            symbol, direction, type, quantity,
-            ...(limitPrice != null && { limitPrice }),
-            ...(stopPrice  != null && { stopPrice }),
-            ...(positionId != null && { positionId }),   // closing order for that position
-        }
-        const result = await brokerService.placeOrder(req.params.type, req.user._id, acct, order)
-        res.status(201).json({ ok: true, order: result })
-    } catch (err) {
-        logger.error(LOG, `placeOrder (${req.params.type}):`, err.message)
-        res.status(err.status ?? 500).json({ error: err.message })
-    }
-})
-
-// Change a working order's price (keeps its id). accountId + limitPrice/stopPrice in body.
-brokerRoutes.patch('/:type/orders/:orderId', requireAuth, async (req, res) => {
-    try {
-        const { accountId, limitPrice, stopPrice } = req.body ?? {}
-        if (limitPrice == null && stopPrice == null) {
-            return res.status(400).json({ error: 'limitPrice or stopPrice required' })
-        }
-        const acct = accountId ?? await _selectedAccountId(req.params.type, req.user._id)
-        // amendOrder may return a NEW order id (brokers that amend by cancel-then-place,
-        // e.g. cTrader). Surface it so the client retracks the live order.
-        const result = await brokerService.amendOrder(req.params.type, req.user._id, acct, req.params.orderId, { limitPrice, stopPrice })
-        res.json({ ok: true, orderId: result?.orderId ?? req.params.orderId })
-    } catch (err) {
-        logger.error(LOG, `amendOrder (${req.params.type}):`, err.message)
-        res.status(err.status ?? 500).json({ error: err.message })
-    }
-})
-
-// Cancel a working order. accountId via query; falls back to the selected account.
-brokerRoutes.delete('/:type/orders/:orderId', requireAuth, async (req, res) => {
-    try {
-        const accountId = req.query.accountId ?? await _selectedAccountId(req.params.type, req.user._id)
-        await brokerService.cancelOrder(req.params.type, req.user._id, accountId, req.params.orderId)
-        res.json({ ok: true })
-    } catch (err) {
-        logger.error(LOG, `cancelOrder (${req.params.type}):`, err.message)
-        res.status(err.status ?? 500).json({ error: err.message })
-    }
-})
-
-// Close an open position in full. A position can live on any of the user's trading
-// accounts (an idea may be placed across several accounts of one broker), so the
-// caller passes the position's own accountId; we hand it to the adapter (which maps
-// it to the broker-native account id and looks up the live volume). Falls back to the
-// selected account when no accountId is supplied (single-account / legacy callers).
-brokerRoutes.delete('/:type/positions/:positionId', requireAuth, async (req, res) => {
-    try {
-        let accountId = req.query.accountId
-        if (!accountId) {
-            const { selectedAccountId } = await brokerService.getTradingAccounts(req.params.type, req.user._id)
-            accountId = selectedAccountId
-        }
-        await brokerService.closePosition(req.params.type, req.user._id, accountId, req.params.positionId)
-        res.json({ ok: true })
-    } catch (err) {
-        logger.error(LOG, `closePosition (${req.params.type}):`, err.message)
-        res.status(err.status ?? 500).json({ error: err.message })
-    }
-})
+brokerRoutes.get   ('/:type/orders', listOrders)
+brokerRoutes.post  ('/:type/orders', placeOrder)
+brokerRoutes.patch ('/:type/orders/:orderId', amendOrder)
+brokerRoutes.delete('/:type/orders/:orderId', cancelOrder)

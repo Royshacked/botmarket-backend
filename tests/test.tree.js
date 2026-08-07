@@ -14,7 +14,7 @@
  */
 
 import 'dotenv/config'
-import { getCandles }    from '../providers/ohlcv.provider.js'
+import { getCandles }    from '../services/ohlcv.service.js'
 import { evaluateTree, evaluateConditions } from '../monitoring/monitor.orchestrator.js'
 import {
     resolveConditionTree as _resolveConditionTree,

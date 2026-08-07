@@ -12,13 +12,14 @@
 
 import { randomUUID }        from 'crypto'
 import { paperBrokerService } from './paperBroker.service.js'
-import { getCandles }         from '../../providers/ohlcv.provider.js'
+import { getCandles }         from '../../services/ohlcv.service.js'
 import { getFmpQuote }        from '../../providers/fmp.price.provider.js'
 import { executionBus }       from '../../services/executionBus.js'
 import { isAssetOpen }        from '../../services/market.service.js'
 import { createTtlCache }     from '../../services/ttlCache.util.js'
 import { logger }             from '../../services/logger.service.js'
 import { publish }            from '../../services/priceFeed.service.js'
+import { config } from '../../services/config.js'
 
 const LOG = '[paperExecution]'
 
@@ -54,7 +55,7 @@ export function applySpread(price, isBuy, spreadBps = 0) {
 // createTtlCache.get() evicts on expiry — routing this through it would silently drop
 // the last-known quote and blank P&L on any transient provider error.
 const _quoteCache   = new Map()   // symbol → { quote, at }
-const QUOTE_TTL_MS  = Number(process.env.PAPER_QUOTE_TTL_MS) || 5_000
+const QUOTE_TTL_MS  = config.paperQuoteTtlMs
 
 /**
  * Latest live quote for a symbol from the most recent 1-min candle (day fallback):

@@ -9,7 +9,7 @@
  */
 
 import 'dotenv/config'
-import { getCandles }         from '../providers/ohlcv.provider.js'
+import { getCandles }         from '../services/ohlcv.service.js'
 import { parseCondition }     from '../monitoring/parsers/condition.parser.js'
 import { evaluate }           from '../monitoring/evaluators/structured.evaluator.js'
 import { evaluateIndicator }  from '../monitoring/evaluators/indicator.evaluator.js'

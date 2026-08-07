@@ -37,7 +37,7 @@ monitor.service (unchanged)  →  conditions fire  →  placeOrdersForIdea (unch
         │                                                    │
         │                                         brokerService.placeOrder('paper', …)
         ▼                                                    ▼
-   ohlcv.provider  ◄──── paper fill engine ────►  PaperBroker adapter
+   ohlcv.service  ◄──── paper fill engine ────►  PaperBroker adapter
    (live prices)         (watches working orders)    │
         │                        │                    ▼
         └────────────────────────┴──►  executionBus.emit(position.opened/reduced/closed)
@@ -61,7 +61,7 @@ results predictive of live: identical evaluation engine, identical reconciler, i
   `findOpenPosition:141`), `_finalizeClose:361`, `placeExits:243`. No changes needed.
 - **Account interface:** `api/broker/adapters/broker.interface.js:15` `BrokerAccount`
   (`currency/balance/equity/margin`). Paper `getAccount` returns a synthetic one.
-- **Price feed:** `providers/ohlcv.provider.js:26` `getCandles` (intraday forces live `refresh`).
+- **Price feed:** `services/ohlcv.service.js:26` `getCandles` (intraday forces live `refresh`).
   Reused by the paper fill engine.
 - **Monitor poll:** `monitoring/minos.monitor.service.js` — `_tick` every 60s over `looking/long/short`.
   ARCHIVED 2026-07-29 (not started): paper fills for the LIVE kinds are driven by Hermes (`call`)
@@ -124,7 +124,7 @@ Market orders fill instantly at observed price. **Working orders** (resting STOP
 STOP/LIMIT exits the reconciler places) need a watcher — the job a real broker's execution feed does
 intrabar. `PaperBroker.startExecutionFeed` registers the account with a fill loop that:
 
-1. pulls the latest **quote** per symbol with open paper working orders (reuse `ohlcv.provider`, ~30s),
+1. pulls the latest **quote** per symbol with open paper working orders (reuse `ohlcv.service`, ~30s),
 2. checks whether the candle's **range** reached each order's trigger — an intrabar TOUCH, not a close,
 3. on fill: mutate `paperPositions` + `cashBalance`, then
    `executionBus.emit({ type:'position.opened|reduced|closed', positionId, … })`.

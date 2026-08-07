@@ -13,6 +13,7 @@ import { getBrokerAdapter,
 import { brokerConnectionService } from './brokerConnection.service.js'
 import { paperBrokerService }      from './paperBroker.service.js'
 import { logger }                  from '../../services/logger.service.js'
+import { config } from '../../services/config.js'
 
 const LOG = '[broker.service]'
 
@@ -55,7 +56,7 @@ function getConnectUrl(brokerType, userId) {
     const adapter = getBrokerAdapter(brokerType)  // throws 400 for unknown type
     const state   = jwt.sign(
         { userId, brokerType },
-        process.env.JWT_SECRET,
+        config.jwtSecret,
         { expiresIn: '10m' }
     )
     logger.info(LOG, `OAuth start: ${brokerType} for user ${userId}`)

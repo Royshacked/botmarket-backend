@@ -8,13 +8,14 @@
 | [paper-trading-simulation.md](./paper-trading-simulation.md) | Virtual per-user account; live-price fill engine; equity snapshots; the `paper` broker adapter |
 | [trades-data.md](./trades-data.md) | The canonical trade entity: the `trades` ledger schema, origin model (idea/call/portfolio), stored-vs-derived metrics, capture path, and gaps to close |
 | [ohlcv-price-data.md](./ohlcv-price-data.md) | OHLCV pipeline; Massive/Polygon provider; file cache; priceService; monitoring adapter |
+| [single-instance.md](./single-instance.md) | **The deployment constraint: this backend runs as ONE process.** Which loops claim through Mongo and which rely on being alone; what a second instance breaks, worst first; what it would take to scale out |
 
 ## Quick orientation
 
 ```
 External APIs
   GNews      → news.service (per-symbol news for the monitor's news evaluator)
-  Massive    → massive.provider → priceService → ohlcv.provider (monitoring)
+  Massive    → massive.provider → priceService → ohlcv.service (monitoring)
   Anthropic  → monitor.claude (Haiku) / {trade,portfolio,scanner}.agent.service (Sonnet/Opus)
   cTrader    → ctrader.{provider,ws.provider,session.provider} → CTraderAdapter → broker.service   (live trading)
   IBKR       → ibkr.gateway.provider (IB Gateway socket) → IBKRAdapter → broker.service            (data-only)

@@ -1,19 +1,22 @@
 /**
- * OHLCV candle provider for the monitoring system.
+ * OHLCV candles in the compact { t, o, h, l, c, v } shape the evaluators read.
  *
- * Thin wrapper around the existing priceService — no new data source,
- * no duplicate cache. Normalises the output format to { t, o, h, l, c, v }
- * for the evaluators.
+ * Thin wrapper around priceService — no new data source, no duplicate cache; it only relabels the
+ * timeframe and renames the fields.
+ *
+ * WAS providers/ohlcv.provider.js, which put it in the one layer it does not belong to: providers/
+ * are the thin clients for EXTERNAL systems, and this module reaches nothing outside the process —
+ * it calls a service, which is the arrow pointing the wrong way. Nothing about the code changed.
  *
  * Timeframe format (new): "5min" | "15min" | "30min" | "1hr" | "2hr" | "4hr" | "day" | "week" | "month"
  * Legacy format still supported: "minutes" | "hours" | "daily" | "weekly" | "monthly"
  */
 
-import { priceService } from '../services/price.service.js'
-import { logger }       from '../services/logger.service.js'
-import { parseTimeframe, isIntradaySpan } from '../services/timeframe.service.js'
+import { priceService } from './price.service.js'
+import { logger }       from './logger.service.js'
+import { parseTimeframe, isIntradaySpan } from './timeframe.service.js'
 
-const LOG = '[ohlcv.provider]'
+const LOG = '[ohlcv]'
 
 /**
  * Get the last `count` OHLCV candles for a symbol.

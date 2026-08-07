@@ -7,7 +7,7 @@ OHLCV (candle) data flows through two stacked layers:
 ```
 Consumers
   ├── Trade agent tools (price.sync_candles, price.get_candles)
-  ├── Monitoring system (ohlcv.provider → priceService)
+  ├── Monitoring system (ohlcv.service → priceService)
   └── Future: IBKR broker adapter (getCandles → ibkr.provider)
 
         │
@@ -163,9 +163,9 @@ triggers a sync from Massive.
 
 ---
 
-## ohlcv.provider (monitoring adapter)
+## ohlcv.service (monitoring adapter)
 
-`monitoring/providers/ohlcv.provider.js` — thin adapter between the monitoring system
+`services/ohlcv.service.js` — thin adapter between the monitoring system
 and `priceService`. Translates monitoring timeframe labels to priceService options
 and normalises output to `{ t, o, h, l, c, v }` format.
 
@@ -173,7 +173,7 @@ and normalises output to `{ t, o, h, l, c, v }` format.
 monitoring system
     │  getCandles(symbol, 'daily', 60)
     ▼
-ohlcv.provider
+ohlcv.service
     │  maps 'daily' → { timeSpan: 'day', multiplier: 1 }
     │  priceService.getCandles(symbol, opts)
     │  normalise: { timestamp, open, ... } → { t, o, h, l, c, v }
@@ -213,7 +213,7 @@ When a user has IBKR connected, the monitoring system can use their broker's mar
 instead of Massive. IBKR's Client Portal API returns historical bars directly in
 `{ t, o, h, l, c, v }` format.
 
-The single integration point: `monitoring/providers/ohlcv.provider.js` — add a
+The single integration point: `services/ohlcv.service.js` — add a
 `userId` parameter, check for active IBKR connection, call `ibkr.getHistoricalBars()`
 if available, fall back to `priceService` if not.
 
@@ -231,11 +231,10 @@ providers/
 
 services/
   price.service.js              Core: syncCandles, queryCandles, getCandles, toCompactRow
-  priceCandleSpec.service.js    Candle specification helpers (used by trade agent)
   util.service.js               loadCandlesFromFile / saveCandlesToFile / isCacheFresh
 
 monitoring/
-  providers/ohlcv.provider.js   Monitoring adapter: timeframe label → priceService → {t,o,h,l,c,v}
+  services/ohlcv.service.js   Monitoring adapter: timeframe label → priceService → {t,o,h,l,c,v}
 ```
 
 ---
