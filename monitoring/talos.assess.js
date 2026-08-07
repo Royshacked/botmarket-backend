@@ -4,12 +4,13 @@ import { buildStudies }          from './evaluators/chart.evaluator.js'
 import { sessionPhase }          from '../services/market.service.js'
 import { cachedChartImage }      from '../services/chartImgCache.service.js'
 import { logger }                from '../services/logger.service.js'
-import { extractFirstJSON }      from './monitorUtils.js'
+import { extractFirstJSON }      from './parsers/llmReply.parser.js'
 import { assessRouting, candlesText as _candlesText,
     ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING } from './assess.shared.js'
 import { _thinkingConfig, _allText, _formatEventRisk } from './hermes.assess.js'
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
 import { declaredConditions, pickScenario, scenarioLabel } from '../services/setup.schema.js'
+import { config } from '../services/config.js'
 
 // Talos's assessment — the condition-driven counterpart to Hermes's four-axis read.
 //
@@ -26,7 +27,7 @@ import { declaredConditions, pickScenario, scenarioLabel } from '../services/set
 
 const LOG = '[talos.assess]'
 
-const _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const _client = new Anthropic({ apiKey: config.anthropicApiKey })
 
 // Verdicts Talos may return pre-entry. Anything off-menu is coerced to 'wait' by the monitor.
 export const READINESS_VERDICTS = new Set(['enter', 'wait', 'stand_aside', 'edit', 'let_expire'])

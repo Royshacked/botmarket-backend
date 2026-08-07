@@ -1,6 +1,8 @@
 import { getDb } from '../providers/mongodb.provider.js'
+import { config } from './config.js'
 
-const TOKEN_BUDGET_USD = Number(process.env.TOKEN_BUDGET_USD) || 20
+const TOKEN_BUDGET_USD = config.tokenBudgetUsd
+export const COLLECTION = 'token_usage'
 
 // Pricing per 1M tokens in USD. cacheRead is 0.1x input, cacheWrite 1.25x input
 // (the 5-minute TTL premium — we never set ttl:'1h', which would be 2x).
@@ -58,7 +60,7 @@ export async function recordUsage(userId, model, usage, agent) {
     const cacheRead  = usage.cache_read_input_tokens     ?? 0
     const cacheWrite = usage.cache_creation_input_tokens ?? 0
 
-    await db.collection('token_usage').updateOne(
+    await db.collection(COLLECTION).updateOne(
         { userId, month: key },
         {
             $inc: {
@@ -87,7 +89,7 @@ export async function recordUsage(userId, model, usage, agent) {
 
 export async function getMonthlyUsage(userId, month = monthKey()) {
     const db  = await getDb()
-    const doc = await db.collection('token_usage').findOne({ userId, month })
+    const doc = await db.collection(COLLECTION).findOne({ userId, month })
 
     const totalCost = doc?.totalCost ?? 0
     return {

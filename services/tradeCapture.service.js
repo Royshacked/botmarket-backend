@@ -23,8 +23,11 @@ import { brokerService } from '../api/broker/broker.service.js'
 import { resolveMode } from './venue.resolve.service.js'
 import { logger }       from './logger.service.js'
 import { ENTITIES }     from './entity/entityCollection.js'
+import { COLLECTION as PORTFOLIO_CHATS } from '../api/portfolio/portfolioChat.service.js'
 
-const COLLECTION = 'trades'
+// Exported: Hermes reads the ledger directly to source a broker-authoritative fill/exit price,
+// and was naming 'trades' inline to do it.
+export const COLLECTION = 'trades'
 const LOG        = '[tradeCapture]'
 
 export const tradeCaptureService = { captureOpen, captureOpenBare, captureClose, listTrades, tradeStats }
@@ -159,7 +162,7 @@ async function captureOpen(idea, exec) {
         let portfolioThesis = null
         if (idea.portfolioId) {
             try {
-                const pdoc = await db.collection('portfolio_chats').findOne(
+                const pdoc = await db.collection(PORTFOLIO_CHATS).findOne(
                     { portfolioId: idea.portfolioId, userId: idea.userId },
                     { projection: { thesis: 1, _id: 0 } },
                 )

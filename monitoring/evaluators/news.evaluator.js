@@ -8,7 +8,7 @@
 import { claudeText }   from '../monitor.claude.js'
 import { newsService }  from '../../services/news.service.js'
 import { logger }       from '../../services/logger.service.js'
-import { parseYesNo }   from '../monitorUtils.js'
+import { parseYesNo }   from '../parsers/llmReply.parser.js'
 
 const LOG = '[news.evaluator]'
 

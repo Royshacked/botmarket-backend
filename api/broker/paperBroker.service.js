@@ -32,10 +32,13 @@ import { randomUUID } from 'crypto'
 import { getDb }      from '../../providers/mongodb.provider.js'
 import { logger }     from '../../services/logger.service.js'
 
-const ACCOUNTS  = 'paperAccounts'
-const POSITIONS = 'paperPositions'
-const ORDERS    = 'paperOrders'
-const EQUITY    = 'paperEquity'
+// The paper venue's four collections. EXPORTED because the paper monitors write the same
+// documents: paperFill drains ORDERS, paperMark marks POSITIONS, paperEquity snapshots EQUITY.
+// Each had re-declared the name it needed, so one rename would have half-migrated the venue.
+export const ACCOUNTS  = 'paperAccounts'
+export const POSITIONS = 'paperPositions'
+export const ORDERS    = 'paperOrders'
+export const EQUITY    = 'paperEquity'
 const LOG       = '[paperBroker.service]'
 
 /** Modes that share this virtual-account store. Paper = simulated fills; manual = user-reported. */
@@ -104,6 +107,7 @@ export const paperBrokerService = {
     getOrder,
     insertOrder,
     updateOrder,
+    claimOrder,
     // equity curve
     listActiveAccounts,
     insertEquitySnapshot,
@@ -361,6 +365,28 @@ async function updateOrder(userId, orderId, fields) {
         { userId, orderId: String(orderId) },
         { $set: fields }
     )
+}
+
+/**
+ * Guarded single-winner claim on an order — the same shape as entityRepo.claimIf and
+ * dueLoop._claim. Applies `fields` only if the order still matches `guard`, and returns TRUE only
+ * for the caller that actually made the transition.
+ *
+ * The fill loop needs this and had been making do without it. It called `updateOrder(…, { status:
+ * 'filled' })` under a comment saying that CLAIMED the order — but an unconditional `$set` that
+ * discards its result claims nothing: two readers both see `working`, both write `filled`, and both
+ * go on to open a position. What actually made paper fills exactly-once was the single-flight guard
+ * inside createPollLoop, which is a property of ONE PROCESS, not of the data.
+ *
+ * @returns {Promise<boolean>} true iff this call won
+ */
+async function claimOrder(userId, orderId, guard, fields) {
+    const db  = await getDb()
+    const res = await db.collection(ORDERS).updateOne(
+        { userId, orderId: String(orderId), ...guard },
+        { $set: fields },
+    )
+    return res.modifiedCount === 1
 }
 
 // ─── Equity curve ─────────────────────────────────────────────────────────────

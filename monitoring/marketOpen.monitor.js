@@ -28,7 +28,7 @@ import { logger } from '../services/logger.service.js'
 import { isAssetOpen } from '../services/market.service.js'
 import { entityRepo } from '../services/entity/entityRepo.service.js'
 import { entryTimeGate } from '../services/entryTimeGate.util.js'
-import { createPollLoop } from './monitorUtils.js'
+import { createPollLoop } from './pollLoop.js'
 import {
     notifyIdeaEntryConfirm, notifySetupEntryConfirm, notifyOrdersReady,
 } from '../services/tradeNotify.service.js'

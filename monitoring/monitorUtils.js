@@ -1,4 +1,4 @@
-import { getCandles }          from '../providers/ohlcv.provider.js'
+import { getCandles }          from '../services/ohlcv.service.js'
 import { getNumericQuote }     from '../providers/yahoofinance.provider.js'
 import { getTickerAggregates } from '../providers/candles.provider.js'
 import { extractLeaves }       from '../services/conditionTree.service.js'
@@ -171,63 +171,10 @@ export async function buildVolumeCtx(id, asset, assetClass, tree, flat, ctx = nu
 // unit in case a source changes. Shared by the structured/touch/volume evaluators.
 export const candleMs = t => (t < 1e12 ? t * 1000 : t)
 
-// ─── Poll loop ─────────────────────────────────────────────────────────────────
-
-// A single-flight interval loop shared by the background monitors. start() runs `tick`
-// every intervalMs — and once immediately when `eager` — but skips a tick while the
-// previous one is still running (the re-entrancy guard every monitor hand-rolled); stop()
-// halts it. `tick` is just the loop body: it does NO timer/running bookkeeping, and its
-// throws are caught + logged so one bad tick can't wedge the loop or leak an unhandled
-// rejection. Returns { start, stop }.
-export function createPollLoop({ intervalMs, tick, eager = false, log = '[pollLoop]', name = 'tick' }) {
-    let timer   = null
-    let running = false
-
-    async function run() {
-        if (running) { logger.warn(log, `previous ${name} still running — skipping`); return }
-        running = true
-        try { await tick() }
-        catch (err) { logger.error(log, `${name} failed:`, err.message) }
-        finally { running = false }
-    }
-
-    return {
-        start() {
-            if (timer) return
-            logger.info(log, `${name} loop starting`)
-            if (eager) run()
-            timer = setInterval(run, intervalMs)
-        },
-        stop() {
-            if (!timer) return
-            clearInterval(timer)
-            timer = null
-            logger.info(log, `${name} loop stopped`)
-        },
-    }
-}
-
-// ─── JSON extraction ───────────────────────────────────────────────────────────
-
-// Walk from the first '{' to its matching '}' and JSON.parse that slice — avoids greedy
-// cross-match bugs when the LLM wraps the object in explanatory prose containing braces.
-// Throws on no-JSON / unclosed (callers catch and retry). Shared by monitor.claude + Hermes.
-export function extractFirstJSON(text) {
-    const start = text.indexOf('{')
-    if (start === -1) throw new Error(`no JSON in response — ${String(text).slice(0, 120)}`)
-    let depth = 0
-    for (let i = start; i < text.length; i++) {
-        if (text[i] === '{') depth++
-        else if (text[i] === '}' && --depth === 0) return JSON.parse(text.slice(start, i + 1))
-    }
-    throw new Error('unclosed JSON object in response')
-}
-
-// ─── LLM yes/no parsing ────────────────────────────────────────────────────────
-
-// Standard lenient parse of an LLM yes/no reply: trim, upper-case, first char 'Y'.
-// Shared by the news/indicator/chart evaluators so "YES", "Yes.", "yes" all pass.
-export const parseYesNo = raw => String(raw ?? '').trim().toUpperCase().startsWith('Y')
+// Poll loop → pollLoop.js. LLM-reply parsing (extractFirstJSON / parseYesNo) → parsers/
+// llmReply.parser.js. Both were lifted out 2026-08-07: this module is the CANDLE + timeframe
+// router, and a scheduling primitive and a JSON parser were only ever here because it was the
+// nearest file called "utils".
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
 

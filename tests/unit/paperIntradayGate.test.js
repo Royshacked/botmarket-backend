@@ -4,7 +4,7 @@ import { isAssetOpen } from '../../services/market.service.js'
 
 // The paper price feed (latestQuote / latestMarkPrice in paperExecution.service) skips the
 // intraday 1-min fetch when isAssetOpen(symbol) is false — a closed session has no fresh 1-min
-// bars, so the fetch only returns empty and logs "[ohlcv.provider] No candles returned …" noise.
+// bars, so the fetch only returns empty and logs "[ohlcv] No candles returned …" noise.
 // This locks in that gate decision across sessions. Dates are ET (summer = EDT = UTC-4); pass
 // Date objects (isAssetOpen → session predicates → _etWall uses .toLocaleString).
 const at = (utcIso) => new Date(utcIso)

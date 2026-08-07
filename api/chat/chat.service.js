@@ -1,13 +1,19 @@
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger } from '../../services/logger.service.js'
-import { axlAgentService } from '../../services/axl.agent.service.js'
+import { axlAgentService } from '../../services/agents/axl.agent.service.js'
 import { resolveModel }    from '../../services/modelRouter.service.js'
 import { toAgentMessages } from './axlReply.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
+// The users collection is owned by user.model — chat only JOINS against it (sender name/avatar,
+// the recipient search). It named 'users' inline in three places, which is the same name living in
+// four files once marketBrief.notify (which already imports it from the owner) is counted.
+import { COLLECTION as USERS } from '../user/user.model.js'
 
 const LOG   = '[chat]'
-const CONVS = 'chat_conversations'
-const MSGS  = 'chat_messages'
+// Owned here. Exported so a reader that needs to join against the inbox imports the name rather
+// than re-typing it — the mistake the 'users' import above corrects.
+export const CONVS = 'chat_conversations'
+export const MSGS  = 'chat_messages'
 
 export const BOT_USER_ID = 'axl'   // the default + the one conversational bot
 // One notification bot per agent (ids are the canonical agent keys). Each producer
@@ -212,7 +218,7 @@ export async function postUserMessage(conversationId, senderId, content, aiPref 
             // Attach the sender's display name so the recipient's incoming-message toast can show
             // who it's from — the stored message only carries senderId. Emit-only (not persisted);
             // only for human recipients (bots have no WS client + resolve senders from agent meta).
-            const sender = await db.collection('users').findOne(
+            const sender = await db.collection(USERS).findOne(
                 { id: String(senderId) }, { projection: { fullname: 1, username: 1 } })
             const senderName = sender?.fullname || sender?.username || null
             await _tryEmit(recipientId, 'new_message', { ...msg, senderName })
@@ -262,7 +268,7 @@ export async function getConversations(userId) {
         convs.flatMap(c => c.participants.filter(p => p !== uid && !isBot(p)))
     )]
     const userDocs = otherIds.length
-        ? await db.collection('users')
+        ? await db.collection(USERS)
             .find({ id: { $in: otherIds } }, { projection: { id: 1, username: 1, fullname: 1 } })
             .toArray()
         : []
@@ -426,7 +432,7 @@ export async function searchUsers(query, currentUserId) {
     // backtracking (ReDoS) vector, and stray metachars break intended matching.
     const safe   = query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const regex  = new RegExp(safe, 'i')
-    const users  = await db.collection('users')
+    const users  = await db.collection(USERS)
         .find({
             id:       { $ne: String(currentUserId) },
             username: { $nin: BOT_IDS },

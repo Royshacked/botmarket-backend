@@ -86,6 +86,27 @@ export function nextStatus(verdict) {
 }
 
 /**
+ * Is an `edit` verdict ACTIONABLE? Pure.
+ *
+ * An edit says "the plan has drifted, here is the re-map". Without a proposal describing the re-map
+ * there is nothing to show: the card fires with an empty why and an empty changes list, telling the
+ * user their plan is stale and giving them no way to act on it. So the verdict only counts when the
+ * model actually supplied one.
+ *
+ * Hermes and Talos each carried a byte-identical private copy, the second one commented "Mirrors
+ * hermes._hasEditProposal" — which is an accurate label for a thing that should not have existed.
+ * This is the shared arithmetic of the readiness ladder, exactly like clampGap and gradedGap above;
+ * what stays per-monitor is what an edit DOES to a call versus to a setup.
+ */
+export function hasEditProposal(raw) {
+    const ep = raw?.edit_proposal
+    if (!ep || typeof ep !== 'object') return false
+    const hasWhy     = typeof ep.why === 'string' && ep.why.trim() !== ''
+    const hasChanges = ep.changes && typeof ep.changes === 'object' && Object.keys(ep.changes).length > 0
+    return Boolean(hasWhy || hasChanges)
+}
+
+/**
  * Clamp the model's self-chosen gap (minutes) into the entity's cadence band.
  *
  * `fallback` is what a missing or junk request means, and the two monitors answer it differently on

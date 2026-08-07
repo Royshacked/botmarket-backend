@@ -17,7 +17,9 @@ import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames } fro
 export { _firstAccountId, _deriveMode, _accountLabel }
 
 const LOG        = '[portfolioChat]'
-const COLLECTION = 'portfolio_chats'
+// Exported: tradeCapture reads a portfolio's chat doc to stamp origin metadata onto a trade,
+// and was naming 'portfolio_chats' inline to do it.
+export const COLLECTION = 'portfolio_chats'
 
 const CADENCE_MS = { weekly: 7 * 86400000, monthly: 30 * 86400000, quarterly: 90 * 86400000 }
 

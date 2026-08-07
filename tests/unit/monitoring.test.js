@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { candleMs, parseYesNo, round } from '../../monitoring/monitorUtils.js'
+import { candleMs, round } from '../../monitoring/monitorUtils.js'
+import { parseYesNo } from '../../monitoring/parsers/llmReply.parser.js'
 import { parseIndicators } from '../../monitoring/parsers/indicators.parser.js'
 import { buildExitOrder, exitOrderRecord, closeSide, orderSymbol } from '../../monitoring/exitOrders.util.js'
 

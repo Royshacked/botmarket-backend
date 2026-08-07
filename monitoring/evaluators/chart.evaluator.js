@@ -10,7 +10,7 @@
 import { claudeVision }    from '../monitor.claude.js'
 import { cachedChartImage } from '../../services/chartImgCache.service.js'
 import { logger }          from '../../services/logger.service.js'
-import { parseYesNo }      from '../monitorUtils.js'
+import { parseYesNo }      from '../parsers/llmReply.parser.js'
 import { parseIndicators } from '../parsers/indicators.parser.js'
 
 const LOG = '[chart.evaluator]'

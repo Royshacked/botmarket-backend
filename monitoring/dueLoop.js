@@ -17,7 +17,7 @@
 import { getDb } from '../providers/mongodb.provider.js'
 import { logger } from '../services/logger.service.js'
 import { withTimeout } from '../services/timeout.util.js'
-import { createPollLoop } from './monitorUtils.js'
+import { createPollLoop } from './pollLoop.js'
 import { withJournal } from './monitorJournal.js'
 
 /**

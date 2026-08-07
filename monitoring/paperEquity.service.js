@@ -13,10 +13,11 @@
 import { paperBrokerService }   from '../api/broker/paperBroker.service.js'
 import { computeEquity }        from '../api/broker/paperExecution.service.js'
 import { logger }               from '../services/logger.service.js'
-import { createPollLoop }        from './monitorUtils.js'
+import { createPollLoop }        from './pollLoop.js'
+import { config } from '../services/config.js'
 
 const LOG          = '[paperEquity.service]'
-const INTERVAL_MS  = Number(process.env.PAPER_EQUITY_SNAPSHOT_MS) || 300_000   // 5 min
+const INTERVAL_MS  = config.paperEquitySnapshotMs   // default 5 min
 
 const _loop = createPollLoop({ intervalMs: INTERVAL_MS, tick: _tick, log: LOG, name: 'equity snapshot' })
 

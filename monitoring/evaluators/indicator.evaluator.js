@@ -13,7 +13,7 @@
 
 import { claudeText } from '../monitor.claude.js'
 import { logger }     from '../../services/logger.service.js'
-import { parseYesNo } from '../monitorUtils.js'
+import { parseYesNo } from '../parsers/llmReply.parser.js'
 import { parseIndicators } from '../parsers/indicators.parser.js'
 import {
     calcRSISeries,

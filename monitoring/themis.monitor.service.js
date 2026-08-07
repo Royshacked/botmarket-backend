@@ -24,7 +24,7 @@
 
 import { portfolioChatService } from '../api/portfolio/portfolioChat.service.js'
 import { postBotCard, cardActions } from '../api/chat/chat.service.js'
-import { createPollLoop } from './monitorUtils.js'
+import { createPollLoop } from './pollLoop.js'
 import { withTimeout } from '../services/timeout.util.js'
 import { logger } from '../services/logger.service.js'
 

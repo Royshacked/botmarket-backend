@@ -10,19 +10,20 @@ import { getDerivativesContext }       from '../providers/binance.provider.js'
 import { buildStudies } from './evaluators/chart.evaluator.js'
 import { sessionPhase } from '../services/market.service.js'
 import { cachedChartImage } from '../services/chartImgCache.service.js'
-import { readStructure, STRUCTURE_VISIONS } from '../services/priceStructure.tools.js'
-import { smcReadText, smcBars, SMC_TOOL_NAMES } from '../services/smc.tools.js'
+import { readStructure, STRUCTURE_VISIONS } from '../services/tools/priceStructure.tools.js'
+import { smcReadText, smcBars, SMC_TOOL_NAMES } from '../services/tools/smc.tools.js'
 import { newsService } from '../services/news.service.js'
 import { logger } from '../services/logger.service.js'
-import { extractFirstJSON } from './monitorUtils.js'
+import { extractFirstJSON } from './parsers/llmReply.parser.js'
 // Shared assessment mechanics — routing, token caps, the candle block, the index list. Hermes and
 // Talos had byte-identical copies; the JUDGMENT (prompts, gather strategy, verdicts) stays local.
 import { assessRouting as _hermesRouting, candlesText as _candlesText, BROAD_INDICES,
     ASSESS_MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING } from './assess.shared.js'
+import { config } from '../services/config.js'
 
 const LOG = '[hermes.assess]'
 
-const _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const _client = new Anthropic({ apiKey: config.anthropicApiKey })
 // The browse-confirm pass narrates its searches before the JSON, so it needs more room than the
 // terse first-pass reply to avoid truncating the trailing JSON object.
 const CONFIRM_MAX_TOKENS         = 2_000

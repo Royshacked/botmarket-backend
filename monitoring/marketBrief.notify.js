@@ -27,19 +27,20 @@ import { logger }       from '../services/logger.service.js'
 import { postCard }     from '../services/notifyCard.js'
 import { cardActions, listCardRecipientsSince } from '../api/chat/chat.service.js'
 import { COLLECTION as USERS } from '../api/user/user.model.js'
-import { createPollLoop } from './monitorUtils.js'
+import { createPollLoop } from './pollLoop.js'
+import { config } from '../services/config.js'
 
 const LOG = '[marketBriefNotify]'
 
 export const CARD_TYPE = 'market_brief_offer'
 
-const ENABLED  = process.env.MARKET_BRIEF_OFFER !== 'off'
+const ENABLED  = config.marketBriefOffer
 const POLL_MS  = 15 * 60 * 1000
 /**
  * The hour (UTC) the offer goes out — 12:00 UTC is ~an hour before the US open, late enough that
  * Asia has closed and Europe is well into its session, so the brief has a full overnight to report.
  */
-const OFFER_HOUR_UTC = Number(process.env.MARKET_BRIEF_OFFER_HOUR_UTC ?? 12)
+const OFFER_HOUR_UTC = config.marketBriefOfferHourUtc
 
 const CARD_TEXT = "Want today's market brief? A quick read on global markets, macro and the calendar."
 

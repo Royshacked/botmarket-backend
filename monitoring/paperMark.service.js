@@ -22,12 +22,13 @@ import { quoteMapForSymbols,
          dirSign,
          round2 }       from '../api/broker/paperExecution.service.js'
 import { logger }       from '../services/logger.service.js'
-import { createPollLoop } from './monitorUtils.js'
+import { createPollLoop } from './pollLoop.js'
 import { partitionByFreshness, retainOnly } from '../services/priceFeed.service.js'
+import { POSITIONS } from '../api/broker/paperBroker.service.js'
+import { config } from '../services/config.js'
 
 const LOG              = '[paperMark.service]'
-const POSITIONS        = 'paperPositions'
-const POLL_INTERVAL_MS = Number(process.env.PAPER_MARK_INTERVAL_MS) || 3_000
+const POLL_INTERVAL_MS = config.paperMarkIntervalMs
 
 const _loop = createPollLoop({ intervalMs: POLL_INTERVAL_MS, tick: _tick, log: LOG, name: 'paper mark' })
 
