@@ -212,7 +212,7 @@ test('partial reduce: matched slice filled, broker says still open → resync (n
 
     assert.deepEqual(opLog, [
         'db:findOne',            // findActiveByPosition
-        'db:updateOne',          // mark matched slice filled (setExitOrders)
+        'db:updateOne',          // mark matched slice filled (markExitOrderFilled — arrayFilters, in place)
         'broker:findOpenPosition', // authoritative survival check
         'broker:cancelOrder',    // resync: shrink the 100-lot stop to 60
         'broker:placeOrder',     // re-place at 60

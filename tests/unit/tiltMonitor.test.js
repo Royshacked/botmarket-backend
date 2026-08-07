@@ -21,15 +21,20 @@ const doc = (over = {}) => ({
 })
 
 function harness({ prices = { XLK: 110, XLE: 90, SPY: 104 }, catalystDates = [] } = {}) {
-    const db = { _updates: [], collection: () => ({ updateOne: async (q, u) => { db._updates.push({ q, u }) } }) }
-    const updates = [], reauthors = []
+    // Two write paths, both owned by tilt.service and both injected — the monitor no longer reaches
+    // into the collection itself. `updateTilt` is the PUBLICATION path (appends a revision, for a
+    // real state change like a stance maturing); `recordMonitorState` is the quiet daily grade
+    // refresh, which must NOT append a revision or eleven a day would bury the trail.
+    const db = { collection: () => ({ find: () => ({ toArray: async () => [] }) }) }
+    const updates = [], reauthors = [], writes = []
     const deps = {
         getPrice:      async (sym) => prices[sym] ?? null,
         updateTilt:    async (id, patch) => { updates.push({ id, patch }); return { ok: true } },
+        recordMonitorState: async (id, { set = {}, inc = null } = {}) => { writes.push({ id, set, inc }); return { ok: true } },
         reauthor:      async (d, reason) => { reauthors.push({ id: d.id, reason }); return true },
         catalystDates: async () => catalystDates,
     }
-    return { db, deps, updates, reauthors }
+    return { db, deps, updates, reauthors, writes }
 }
 
 // ── price resolution ─────────────────────────────────────────────────────────
@@ -54,7 +59,7 @@ test('a quiet day writes the grade as BOOKKEEPING — no revision, no card', asy
     assert.equal(res.graded, true)
     assert.equal(h.updates.length, 0, 'a contribution ticking with the tape is not the desk changing its mind')
 
-    const $set = h.db._updates.at(-1).u.$set
+    const $set = h.writes.at(-1).set
     assert.equal($set.tilts[0].contribution_bp, 9)     // 150bp x (+10% - +4%)
     assert.equal($set['monitor.total_bp'], 9)
     assert.equal($set['monitor.next_check_at'], new Date(at(31)).toISOString())
@@ -65,7 +70,7 @@ test('an underweight that beat its benchmark scores POSITIVE', async () => {
     const h = harness()
     const d = doc({ tilts: [row({ sector: 'Energy', stance: 'under', active_bp: -150 })] })
     await _checkTilt(h.db, d, at(30), h.deps)
-    assert.equal(h.db._updates.at(-1).u.$set.tilts[0].contribution_bp, 21)
+    assert.equal(h.writes.at(-1).set.tilts[0].contribution_bp, 21)
 })
 
 // ── maturity ─────────────────────────────────────────────────────────────────
@@ -94,7 +99,7 @@ test('a failed maturity write leaves the view DUE rather than swallowing the ver
     const res = await _checkTilt(h.db, d, at(45), h.deps)
     assert.equal(res.graded, false)
     // No bookkeeping written → next_check_at unchanged → the next tick retries.
-    assert.equal(h.db._updates.length, 0)
+    assert.equal(h.writes.length, 0)
 })
 
 // ── baseline backfill ────────────────────────────────────────────────────────
@@ -102,7 +107,7 @@ test('a stance published without a baseline is backfilled, not left unscoreable'
     const h = harness()
     const d = doc({ tilts: [row({ base_px: null, base_bench_px: null })] })
     await _checkTilt(h.db, d, at(30), h.deps)
-    const stored = h.db._updates.at(-1).u.$set.tilts[0]
+    const stored = h.writes.at(-1).set.tilts[0]
     assert.equal(stored.base_px, 110)          // today's price, a tick late
     assert.equal(stored.base_bench_px, 104)
     assert.equal(stored.contribution_bp, 0)    // graded from today → nothing earned yet, correctly
@@ -111,14 +116,14 @@ test('a stance published without a baseline is backfilled, not left unscoreable'
 test('an EXISTING baseline is never rewritten — it is what the call was made at', async () => {
     const h = harness()
     await _checkTilt(h.db, doc(), at(30), h.deps)
-    assert.equal(h.db._updates.at(-1).u.$set.tilts[0].base_px, 100, 'immutable once stamped')
+    assert.equal(h.writes.at(-1).set.tilts[0].base_px, 100, 'immutable once stamped')
 })
 
 test('a baseline that still cannot be priced stays null rather than being guessed', async () => {
     const h = harness({ prices: { SPY: 104 } })   // no XLK
     const d = doc({ tilts: [row({ base_px: null, base_bench_px: null })] })
     await _checkTilt(h.db, d, at(30), h.deps)
-    const stored = h.db._updates.at(-1).u.$set.tilts[0]
+    const stored = h.writes.at(-1).set.tilts[0]
     assert.equal(stored.base_px, null)
     assert.equal(stored.contribution_bp, null, 'ungradeable is null, never 0')
 })

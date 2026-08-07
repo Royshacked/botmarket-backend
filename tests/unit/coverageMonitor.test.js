@@ -13,18 +13,23 @@ const cov = (over = {}) => ({
     ...over,
 })
 
-// mock db that records collection().updateOne calls
+// Both WRITE paths are injected, because the monitor no longer touches the collection itself:
+//   updateCoverage     → the THESIS (status, gap, an appended revision)
+//   recordMonitorState → the `monitor.*` subtree, the monitor's record of its own work
+// Both are owned by coverage.service; `db` is still passed through for the due-selection read.
 function harness({ price, consensusPt }) {
-    const db = { _updates: [], collection: () => ({ updateOne: async (q, u) => { db._updates.push({ q, u }) } }) }
+    const db = { collection: () => ({ find: () => ({ toArray: async () => [] }) }) }
     const updates = []
+    const writes = []
     const notifies = []
     const deps = {
         getPrice:       async () => price,
         getConsensusPt: async () => consensusPt,
         updateCoverage: async (id, patch, userId, isAdmin) => { updates.push({ id, patch, userId, isAdmin }); return { ok: true } },
+        recordMonitorState: async (id, { set = {}, inc = null } = {}) => { writes.push({ id, set, inc }); return { ok: true } },
         notify:         (c, v) => notifies.push({ symbol: c.symbol, state: v.state }),
     }
-    return { db, deps, updates, notifies }
+    return { db, deps, updates, writes, notifies }
 }
 
 test('target_hit: updates status + gap + revision, notifies, and KEEPS watching', async () => {
@@ -36,8 +41,8 @@ test('target_hit: updates status + gap + revision, notifies, and KEEPS watching'
     assert.equal(h.updates[0].patch.revision_kind, 'target_hit')
     assert.equal(h.notifies.length, 1)
     // Hitting our target ends nothing — it prompts the next question (harvest? re-model?).
-    const book = h.db._updates.at(-1)
-    assert.equal(book.u.$set['monitor.next_check_at'], '1970-01-02T00:00:00.000Z')
+    const book = h.writes.at(-1)
+    assert.equal(book.set['monitor.next_check_at'], '1970-01-02T00:00:00.000Z')
 })
 
 test('validating: updates gap + revision (status unchanged), notifies, stays active (next_check_at set)', async () => {
@@ -48,7 +53,7 @@ test('validating: updates gap + revision (status unchanged), notifies, stays act
     assert.equal('status' in h.updates[0].patch, false)   // signal, not terminal
     assert.equal(h.updates[0].patch.revision_kind, 'validating')
     assert.equal(h.notifies.length, 1)
-    assert.equal(h.db._updates.at(-1).u.$set['monitor.next_check_at'], '1970-01-02T00:00:00.000Z')  // +1 day from 0
+    assert.equal(h.writes.at(-1).set['monitor.next_check_at'], '1970-01-02T00:00:00.000Z')  // +1 day from 0
 })
 
 test('stable: refreshes gap + bookkeeping ONLY — no revision (no updateCoverage), no notify', async () => {
@@ -58,15 +63,15 @@ test('stable: refreshes gap + bookkeeping ONLY — no revision (no updateCoverag
     assert.equal(h.updates.length, 0)     // no revision-appending update
     assert.equal(h.notifies.length, 0)    // quiet
     // single direct db write with the refreshed gap + next check
-    assert.equal(h.db._updates.length, 1)
-    assert.deepEqual(h.db._updates[0].u.$set.gap,
+    assert.equal(h.writes.length, 1)
+    assert.deepEqual(h.writes[0].set.gap,
         { our_pt: 200, consensus_pt: 181, pct: 10.5, low: null, high: null, median: null, pctile: null })
 })
 
 test('the Street distribution is stored whole when the provider returns it', async () => {
     const h = harness({ price: 190, consensusPt: { consensus: 181, low: 150, high: 250, median: 180 } })
     await _checkCoverage(h.db, cov(), 0, h.deps)
-    const gap = h.db._updates[0].u.$set.gap
+    const gap = h.writes[0].set.gap
     assert.deepEqual([gap.low, gap.high, gap.median], [150, 250, 180])
     assert.equal(gap.pctile, 50)   // our 200 sits mid-range of 150–250
 })
@@ -87,14 +92,14 @@ test('target_hit already recorded → refreshed quietly, no second revision or c
     assert.equal(v.applied, false)
     assert.equal(h.updates.length, 0)
     assert.equal(h.notifies.length, 0)
-    assert.equal(h.db._updates.length, 1)   // bookkeeping only
+    assert.equal(h.writes.length, 1)   // bookkeeping only
 })
 
 // ── the expensive tier: the re-model decision rides the same daily fetch ─────
 test('the edge category + next re-model date are persisted on every tick', async () => {
     const h = harness({ price: 190, consensusPt: { consensus: 181, low: 150, high: 250, median: 180 } })
     await _checkCoverage(h.db, cov({ catalysts: [{ date: '2030-05-01' }] }), 0, h.deps)
-    const set = h.db._updates[0].u.$set
+    const set = h.writes[0].set
     assert.equal(set['monitor.edge_category'], 'contained')       // our 200 sits inside 150–250
     assert.equal(set['monitor.next_remodel_at'], '2030-05-02T00:00:00.000Z')
 })
@@ -118,7 +123,7 @@ test('a failed thesis write reports no re-model — an unrecordable run would re
 test('a watched thesis is always re-scheduled — even after target_hit', async () => {
     const h = harness({ price: 205, consensusPt: 190 })
     await _checkCoverage(h.db, cov(), 0, h.deps)
-    assert.equal(h.db._updates.at(-1).u.$set['monitor.next_check_at'], '1970-01-02T00:00:00.000Z')
+    assert.equal(h.writes.at(-1).set['monitor.next_check_at'], '1970-01-02T00:00:00.000Z')
 })
 
 // Regression: a dead price feed must be a QUIET tick, not a book-wide kill. This is the shape the
@@ -139,19 +144,24 @@ test('a failed thesis write suppresses the card AND the bookkeeping (retry next 
     assert.equal(v.state, 'validating')
     assert.equal(v.applied, false)
     assert.equal(h.notifies.length, 0)
-    assert.equal(h.db._updates.length, 0)   // still due → re-checked next tick
+    assert.equal(h.writes.length, 0)   // still due → re-checked next tick
 })
 
 // ── re-model dispatch: the cap, the priority, and the pre-stamp ───────────────
 
-function remodelHarness({ heldSymbols = [] } = {}) {
-    const db = { _updates: [], collection: () => ({ updateOne: async (q, u) => { db._updates.push({ q, u }) } }) }
+// `claimRemodel` replaced an unconditional stamp. It returns a BOOLEAN — true only for the caller
+// that won the compare-and-swap — so the harness records the attempts and answers true by default;
+// a test that wants to exercise the losing side overrides it.
+function remodelHarness({ heldSymbols = [], claimWins = true } = {}) {
+    const db = { collection: () => ({ find: () => ({ toArray: async () => [] }) }) }
     const ran = []
+    const claims = []
     const deps = {
         getHeldSymbols: async () => new Set(heldSymbols),
+        claimRemodel: async (id, { reason } = {}) => { claims.push({ id, reason }); return claimWins },
         remodel: async (c, reason) => { ran.push({ symbol: c.symbol, reason }) },
     }
-    return { db, deps, ran }
+    return { db, deps, ran, claims }
 }
 const cand = (symbol, reason = 'floor') => ({ cov: { id: `cov_${symbol}`, symbol, userId: 'u1' }, reason })
 
@@ -159,8 +169,8 @@ test('re-models are capped per tick, and the deferred ones are never silently dr
     const h = remodelHarness()
     await _runRemodels(h.db, ['A', 'B', 'C', 'D', 'E'].map(s => cand(s)), h.deps)
     assert.equal(h.ran.length, 3)                       // MAX_REMODELS_PER_TICK
-    // The two left over got no stamp either, so they stay due and land on a later tick.
-    assert.equal(h.db._updates.length, 3)
+    // The two left over were never even claimed, so they stay due and land on a later tick.
+    assert.equal(h.claims.length, 3)
 })
 
 test('held names take the scarce slots first', async () => {
@@ -175,9 +185,9 @@ test('the stamp lands BEFORE the run — an hourly tick must not start a second 
     const h = remodelHarness()
     const order = []
     h.deps.remodel = async () => { order.push('run') }
-    const realDb = { collection: () => ({ updateOne: async () => { order.push('stamp') } }) }
-    await _runRemodels(realDb, [cand('A')], h.deps)
-    assert.deepEqual(order, ['stamp', 'run'])
+    h.deps.claimRemodel = async () => { order.push('claim'); return true }
+    await _runRemodels(h.db, [cand('A')], h.deps)
+    assert.deepEqual(order, ['claim', 'run'])
 })
 
 test('a re-model that throws is contained — the rest of the tick still runs', async () => {
@@ -216,7 +226,7 @@ test('target_hit_early: notifies + appends a revision but does NOT retire the th
     assert.equal(h.updates[0].patch.revision_kind, 'target_hit_early')
     assert.equal(h.updates[0].patch.status, undefined)   // stays active — the call is re-opened, not booked
     assert.equal(h.notifies.length, 1)
-    assert.ok(h.db._updates.at(-1).u.$set['monitor.early_hit_at'])   // the ratchet is stamped
+    assert.ok(h.writes.at(-1).set['monitor.early_hit_at'])   // the ratchet is stamped
 })
 
 test('an early hit fires ONCE — a price parked above our PT cannot re-ring it daily', async () => {
@@ -255,5 +265,5 @@ test('the early-hit stamp is scoped to the TARGET, not the name — a re-modelle
     const v = await _checkCoverage(h.db, remodelled, Date.parse('2026-02-20T00:00:00.000Z'), h.deps)
     assert.equal(v.state, 'target_hit_early')
     assert.equal(h.notifies.length, 1)   // heard, not swallowed
-    assert.equal(h.db._updates.at(-1).u.$set['monitor.early_hit_at'], '2026-02-20T00:00:00.000Z')
+    assert.equal(h.writes.at(-1).set['monitor.early_hit_at'], '2026-02-20T00:00:00.000Z')
 })

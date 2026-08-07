@@ -5,7 +5,7 @@
 // pings the user to resume the review. The crossing stays artifact-mediated: Prometheus WRITES the
 // coverage doc, Atlas RE-READS it on resume — no live agent-to-agent judgment injection.
 
-import { analystAgentService } from './analyst.agent.service.js'
+import { analystAgentService } from './agents/analyst.agent.service.js'
 import { coverageService }     from '../api/analyst/coverage.service.js'
 import { notifyCoverageRefreshed } from './coverageNotify.service.js'
 import { withTimeout }         from './timeout.util.js'

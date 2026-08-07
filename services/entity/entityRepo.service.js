@@ -201,6 +201,38 @@ export function makeEntityRepo({ coll = _defaultColl } = {}) {
             const c = await coll()
             return c.updateOne({ id }, { $set: { exitOrders: orders } })
         },
+
+        /**
+         * Mark ONE working exit order filled, in place. Returns true iff this call made the
+         * transition — so it doubles as a claim on the fill.
+         *
+         * WHY NOT setExitOrders. That writes the WHOLE array back from a copy read moments earlier,
+         * which is a lost update waiting for a second writer: two closing fills on the same position
+         * both read `exitOrders`, each flips its own entry, and whichever writes second restores the
+         * other's entry to `working`. A leg that has already filled then looks live — the resync
+         * below can try to cancel or re-place an order the broker has already executed.
+         *
+         * It does not happen today, because every caller runs under `_withLock` in a single process.
+         * That is a property of the PROCESS, not of the data, and it is exactly the kind of guarantee
+         * that evaporates the moment a call site moves or a second instance appears. `arrayFilters`
+         * makes the guarantee belong to the write: the filter pins the order id, the account AND the
+         * `working` status, so a concurrent duplicate matches nothing and reports false.
+         *
+         * NB the lock is still required — see execution.reconciler. It guards more than this write.
+         */
+        async markExitOrderFilled(id, { orderId, accountId, filledAt }) {
+            const c = await coll()
+            const res = await c.updateOne(
+                { id },
+                { $set: { 'exitOrders.$[e].status': 'filled', 'exitOrders.$[e].filledAt': filledAt } },
+                { arrayFilters: [{
+                    'e.orderId':   String(orderId),
+                    'e.accountId': String(accountId),
+                    'e.status':    'working',
+                }] },
+            )
+            return res.modifiedCount === 1
+        },
     }
 }
 

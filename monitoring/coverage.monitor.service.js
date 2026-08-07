@@ -15,18 +15,18 @@
 
 import { getDb }                  from '../providers/mongodb.provider.js'
 import { getPriceTargetConsensus } from '../providers/fmp.provider.js'
-import { coverageService }        from '../api/analyst/coverage.service.js'
+import { coverageService, COLLECTION } from '../api/analyst/coverage.service.js'
 import { classifyGapState, recomputeGap, statusForState, nextCheckAt } from './coverage.assess.js'
 import { remodelDecision }        from './coverage.remodel.js'
 import { notifyCoverageEvent }    from '../services/coverageNotify.service.js'
 import { refreshCoverage }        from '../services/coverageRefresh.service.js'
 import { entityRepo }             from '../services/entity/entityRepo.service.js'
 import { LIVE_POSITION }          from '../services/entity/vocabulary.js'
-import { createPollLoop, fetchLastPrice } from './monitorUtils.js'
+import { fetchLastPrice } from './monitorUtils.js'
+import { createPollLoop } from './pollLoop.js'
 import { logger }                 from '../services/logger.service.js'
 
 const LOG        = '[coverageMonitor]'
-const COLLECTION = 'coverage'
 // Tick hourly; each coverage gates itself to ~daily via monitor.next_check_at (research cadence).
 const POLL_INTERVAL_MS = 60 * 60 * 1000
 const MAX_PER_TICK     = 50
@@ -44,6 +44,11 @@ const _deps = {
     // Street's range, not a percentage off its mean.
     getConsensusPt: (sym) => getPriceTargetConsensus(sym).catch(() => null),
     updateCoverage: coverageService.updateCoverage,
+    // The monitor.* subtree is written through its owner too — see coverage.service. This module
+    // used to reach past the service into the collection, so the shape of that subtree lived in
+    // two files with nothing keeping them in step.
+    recordMonitorState: coverageService.recordMonitorState,
+    claimRemodel:       coverageService.claimRemodel,
     // The expensive tier — the SAME headless-Prometheus hop Atlas triggers mid-review, reused rather
     // than forked, so a re-model persists and notifies identically however it was asked for.
     remodel: (cov, reason) => refreshCoverage({
@@ -125,10 +130,22 @@ export async function _runRemodels(db, candidates, deps = _deps) {
         // Stamp BEFORE the run, not after: a re-model takes minutes, and the hourly tick must not
         // start a second one for the same name in the meantime. It also starts the cooldown at the
         // decision, so a run that fails doesn't immediately re-trigger on the next tick.
-        await db.collection(COLLECTION).updateOne({ id: cov.id }, {
-            $set: { 'monitor.last_remodel_at': new Date().toISOString(), 'monitor.last_remodel_reason': reason },
-            $inc: { 'monitor.remodels': 1 },
+        // CLAIM before the run, not just stamp. A re-model takes MINUTES, so the stamp has to land
+        // first or the next hourly tick starts a second one for the same name — and it also starts
+        // the cooldown at the decision, so a run that fails doesn't re-trigger immediately.
+        //
+        // It is a claim rather than a write because "the next tick" is not the only other caller:
+        // the loop's single-flight guard stops a second TICK, nothing stopped a second PROCESS.
+        // Compare-and-swap on the value we read means the loser stands down instead of paying for a
+        // duplicate multi-phase research run.
+        const won = await deps.claimRemodel(cov.id, {
+            previousAt: cov.monitor?.last_remodel_at ?? null,
+            reason,
         })
+        if (!won) {
+            logger.info(LOG, `re-model already claimed elsewhere — skipping ${cov.symbol}`)
+            continue
+        }
         logger.info(LOG, 'RE-MODEL', { symbol: cov.symbol, held: isHeld({ cov }), reason })
         try { await deps.remodel(cov, reason) }
         catch (err) { logger.warn(LOG, `re-model ${cov.symbol} failed:`, err.message) }
@@ -191,7 +208,7 @@ export async function _checkCoverage(db, cov, nowMs, deps = _deps) {
         // Quiet day — refresh the recorded gap + bookkeeping directly (no revision, no notify).
         // A quiet DAY is not a quiet QUARTER: the re-model decision still stands, since a catalyst
         // landing or the floor expiring has nothing to do with whether today's tape moved.
-        await db.collection(COLLECTION).updateOne({ id: cov.id }, { ...bookkeeping, $set: { ...bookkeeping.$set, gap } })
+        await deps.recordMonitorState(cov.id, { set: { ...bookkeeping.$set, gap }, inc: bookkeeping.$inc })
         return { ...verdict, applied: false, remodel }
     }
 
@@ -213,7 +230,9 @@ export async function _checkCoverage(db, cov, nowMs, deps = _deps) {
         return { ...verdict, applied: false }
     }
 
-    await db.collection(COLLECTION).updateOne({ id: cov.id }, bookkeeping)   // updateCoverage doesn't touch monitor.*
+    // updateCoverage owns the THESIS; this owns the monitor's record of its own work. Both writes
+    // now go through coverageService, which is the only module that knows this collection's shape.
+    await deps.recordMonitorState(cov.id, { set: bookkeeping.$set, inc: bookkeeping.$inc })
     deps.notify(cov, verdict)
     return { ...verdict, remodel }
 }

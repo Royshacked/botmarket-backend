@@ -13,15 +13,15 @@
 // twice about one event — and the running score is on the board regardless.
 
 import { getDb }                from '../providers/mongodb.provider.js'
-import { tiltService }          from '../api/strategy/tilt.service.js'
+import { tiltService, COLLECTION } from '../api/strategy/tilt.service.js'
 import { gradeRow, totalContributionBp, reviewDecision } from './tilt.assess.js'
 import { SECTOR_ETF, BENCHMARK_PROXY } from '../services/entity/vocabulary.js'
 import { fetchMacroCatalystDates } from '../providers/fred.provider.js'
-import { createPollLoop, fetchLastPrice } from './monitorUtils.js'
+import { fetchLastPrice } from './monitorUtils.js'
+import { createPollLoop } from './pollLoop.js'
 import { logger }               from '../services/logger.service.js'
 
 const LOG        = '[tiltMonitor]'
-const COLLECTION = 'tilt'
 // Tick hourly; each view gates itself to ~daily via monitor.next_check_at.
 const POLL_INTERVAL_MS = 60 * 60 * 1000
 const DAY_MS           = 24 * 60 * 60 * 1000
@@ -32,6 +32,10 @@ const _deps = {
     // carrying an open stance.
     getPrice:  (sym) => fetchLastPrice(sym).catch(() => null),
     updateTilt: tiltService.updateTilt,
+    // The quiet grade-refresh path. It deliberately does NOT append a revision (see the service),
+    // but it used to skip the service entirely and write the collection here — this module knowing
+    // both the collection name and the `monitor.*` shape it does not own.
+    recordMonitorState: tiltService.recordMonitorState,
     // The expensive tier. Unbuilt until Pythia's agent exists; until then a wake is LOGGED rather
     // than silently swallowed, so the trigger is observable before the thing it triggers is written.
     reauthor:  async (doc, reason) => {
@@ -132,13 +136,11 @@ export async function _checkTilt(db, doc, nowMs, deps = _deps) {
         }
         logger.info(LOG, 'stances matured', { id: doc.id, note })
     } else {
-        await db.collection(COLLECTION).updateOne({ id: doc.id }, {
-            $set: { tilts: graded, ...bookkeeping }, $inc: { 'monitor.checks': 1 },
-        })
+        await deps.recordMonitorState(doc.id, { set: { tilts: graded, ...bookkeeping }, inc: { 'monitor.checks': 1 } })
     }
 
     if (newlyMatured.length) {
-        await db.collection(COLLECTION).updateOne({ id: doc.id }, { $set: bookkeeping, $inc: { 'monitor.checks': 1 } })
+        await deps.recordMonitorState(doc.id, { set: bookkeeping, inc: { 'monitor.checks': 1 } })
     }
 
     if (remodel.due) await deps.reauthor(doc, remodel.reason)

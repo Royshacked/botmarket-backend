@@ -148,10 +148,23 @@ async function _onReduced(exec) {
 
         let matched = null
         if (idx >= 0) {
-            orders[idx] = { ...orders[idx], status: 'filled', filledAt: exec.at ?? Date.now() }
+            const filledAt = exec.at ?? Date.now()
+            // Mark this ONE order in place rather than writing the whole array back from a copy —
+            // see entityRepo.markExitOrderFilled. The in-memory `orders` is still updated because
+            // everything below (the close finalize, the resync) reads the post-fill picture from it.
+            const won = await _deps.entityRepo.markExitOrderFilled(idea.id, {
+                orderId: orders[idx].orderId, accountId: exec.accountId, filledAt,
+            })
+            orders[idx] = { ...orders[idx], status: 'filled', filledAt }
             matched = orders[idx]
-            await _deps.entityRepo.setExitOrders(idea.id, orders)
-            logger.info(LOG, `Idea ${idea.id}: exit slice filled — ${matched.leg} ${matched.quantity} @ ${matched.price ?? 'mkt'}`)
+            if (won) {
+                logger.info(LOG, `Idea ${idea.id}: exit slice filled — ${matched.leg} ${matched.quantity} @ ${matched.price ?? 'mkt'}`)
+            } else {
+                // The order was not `working` when we got there — already reconciled by someone
+                // else. Carry on: the broker check below is authoritative about the position, and
+                // finalizing a close twice is idempotent. Only the log line would be a lie.
+                logger.info(LOG, `Idea ${idea.id}: exit slice ${matched.leg} was already marked filled — continuing on the broker's answer`)
+            }
         } else {
             logger.info(LOG, `Idea ${idea.id}: closing fill on ${exec.accountId}/${exec.positionId} (order ${exec.orderId}) not tracked — asking broker if the position survived`)
         }
@@ -465,9 +478,25 @@ async function _placeOneExit(idea, accountId, broker, leg, level, qty, positionI
 }
 
 // ─── Per-(account,position) serialization ─────────────────────────────────────
-// Exit-order placement / resync / cancel read-modify-write the idea's exitOrders
-// array, so events for the same position must not interleave. A tiny promise-chain
-// lock keyed by account+position keeps them sequential.
+//
+// A promise-chain lock keyed by account+position, so two executions for the same position are
+// handled one after the other.
+//
+// WHAT IT ACTUALLY GUARDS — larger than it looks, and worth stating precisely because the obvious
+// reading understates it. It is NOT merely the `exitOrders` write: that specific race is now closed
+// in the data by entityRepo.markExitOrderFilled. What the lock still owns is the DECISION WINDOW,
+// which spans network IO:
+//
+//   read the idea → ask the broker whether the position survived → place / cancel / re-size exits
+//
+// Two reconciliations running that concurrently can both see a surviving position and both act on
+// it — cancelling an order the other just placed, or placing a duplicate. No atomic write fixes
+// that, because the thing to be made atomic is a sequence of calls to someone else's system.
+//
+// ⚠ THIS IS A PROCESS-LOCAL LOCK. A second instance does not contend for it — it cannot see it —
+// so the interleaving comes straight back on the live order path. That is the single strongest
+// reason this backend runs as ONE process, and lifting it needs a Mongo lease over the window above
+// plus live broker verification, not a code change alone. See docs/architecture/single-instance.md.
 
 const _locks = new Map()
 

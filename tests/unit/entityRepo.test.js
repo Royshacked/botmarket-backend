@@ -118,6 +118,39 @@ test('pushExitOrders / setExitOrders → correct $push / $set', async () => {
     assert.deepEqual(coll.calls[1], ['updateOne', { id: 'i1' }, { $set: { exitOrders: [{ leg: 'stop', status: 'cancelled' }] } }])
 })
 
+// A closing fill flips ONE leg. Writing the whole array back to do that is a lost update waiting
+// for a second writer — both readers hold a copy, each flips its own entry, and the second write
+// restores the other's to `working`. A leg the broker has already executed then reads as live, and
+// the resync can try to cancel or re-place it. `arrayFilters` moves that guarantee into the write.
+test('markExitOrderFilled patches ONE leg in place, guarded on id + account + working', async () => {
+    const { coll, repo } = spyColl({ updateOne: { modifiedCount: 1 } })
+    const won = await repo.markExitOrderFilled('i1', { orderId: 55, accountId: 7, filledAt: 1234 })
+    assert.equal(won, true)
+    assert.deepEqual(coll.calls[0], ['updateOne',
+        { id: 'i1' },
+        { $set: { 'exitOrders.$[e].status': 'filled', 'exitOrders.$[e].filledAt': 1234 } },
+        { arrayFilters: [{ 'e.orderId': '55', 'e.accountId': '7', 'e.status': 'working' }] },
+    ])
+})
+
+test('markExitOrderFilled reports FALSE when the leg was not working — it is a claim', async () => {
+    // Nothing matched: already filled, already cancelled, or reconciled by another worker. The
+    // caller carries on from the broker's answer rather than trusting its own stale copy.
+    const { repo } = spyColl({ updateOne: { modifiedCount: 0 } })
+    assert.equal(await repo.markExitOrderFilled('i1', { orderId: 55, accountId: 7, filledAt: 1 }), false)
+})
+
+test('markExitOrderFilled compares ids as STRINGS — a numeric order id must still match', async () => {
+    // Order and account ids arrive as either type depending on the broker; the stored documents
+    // carry strings. Coercing at the filter is what keeps a numeric id from silently matching zero
+    // array elements and reporting "already filled" for a fill that just happened.
+    const { coll, repo } = spyColl({ updateOne: { modifiedCount: 1 } })
+    await repo.markExitOrderFilled('i1', { orderId: 55, accountId: 7, filledAt: 1 })
+    const filter = coll.calls[0][3].arrayFilters[0]
+    assert.equal(typeof filter['e.orderId'], 'string')
+    assert.equal(typeof filter['e.accountId'], 'string')
+})
+
 // ── methods added for the ideaExecution / manualIdea / positionMonitor migration ─────────────
 test('patchAndGet → findOneAndUpdate {id} $set returnDocument after (no guard)', async () => {
     const { coll, repo } = spyColl({ findOneAndUpdate: { id: 'i1', status: 'long' } })

@@ -14,22 +14,22 @@
  */
 
 import { getDb }                 from '../providers/mongodb.provider.js'
-import { paperBrokerService }    from '../api/broker/paperBroker.service.js'
+import { paperBrokerService, ORDERS } from '../api/broker/paperBroker.service.js'
 import { openPosition,
          reducePosition,
          quoteMapForSymbols }    from '../api/broker/paperExecution.service.js'
 import { logger }                from '../services/logger.service.js'
-import { createPollLoop }        from './monitorUtils.js'
+import { createPollLoop }        from './pollLoop.js'
+import { config } from '../services/config.js'
 
 const LOG              = '[paperFill.service]'
-const ORDERS           = 'paperOrders'
 // Paper stop/limit entries and stop-loss/take-profit exits don't rest on a real venue —
 // this loop IS the matching engine, so it re-checks the live price every few seconds via
 // latestMarkPrice (FMP real-time /quote on a ~3s cache; intraday-candle fallback for
 // symbols FMP can't price — never a stale day candle). A touched level fills at the next
 // sweep. Point-sampling means a spike that reverts inside the interval can be missed —
 // accepted for a forward sim.
-const POLL_INTERVAL_MS = Number(process.env.PAPER_FILL_INTERVAL_MS) || 3_000
+const POLL_INTERVAL_MS = config.paperFillIntervalMs
 
 const _loop = createPollLoop({ intervalMs: POLL_INTERVAL_MS, tick: _tick, log: LOG, name: 'paper fill' })
 
@@ -97,9 +97,25 @@ async function _tick() {
 async function _fill(order, fillPrice) {
     const { userId, accountId, orderId, positionId } = order
 
-    // Mark filled first — this CLAIMS the order so a slow/overlapping tick can't double-fill
-    // it (openPosition isn't idempotent, so re-processing would open a duplicate position).
-    await paperBrokerService.updateOrder(userId, orderId, { status: 'filled', filledAt: Date.now(), fillPrice })
+    // Claim the order BEFORE doing anything with it, and bail if we didn't win. `openPosition` is
+    // not idempotent, so processing one order twice opens two positions — the user is silently in
+    // double size, with one of the two carrying no idea linkage the reconciler can match.
+    //
+    // The guard `status: 'working'` is what makes this a claim rather than a write. Marking it
+    // filled unconditionally (which is what this did) reads like a claim and is not one: two
+    // readers both see `working`, both write `filled`, and both continue. That it never happened is
+    // down to createPollLoop's single-flight guard — a property of ONE PROCESS, which the data knows
+    // nothing about. Now the transition itself picks the winner, so a second tick, a second worker
+    // or a restart mid-fill all lose the race instead of racing.
+    const won = await paperBrokerService.claimOrder(
+        userId, orderId,
+        { status: 'working' },
+        { status: 'filled', filledAt: Date.now(), fillPrice },
+    )
+    if (!won) {
+        logger.info(LOG, `order ${orderId} already claimed — skipping`)
+        return
+    }
 
     try {
         if (positionId != null) {
