@@ -2,11 +2,13 @@ import { ENTITIES } from '../services/entity/entityCollection.js'
 import { INVALIDATION, isInvalidated, PAST_ENTRY } from '../services/entity/vocabulary.js'
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
+import { toNum } from '../services/format.util.js'
 import { fetchLastPrice, fetchCandles } from './monitorUtils.js'
 import { createDueLoop, makePersist } from './dueLoop.js'
 import { journalEntry } from './monitorJournal.js'
 import {
     isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap, gradedGap,
+    hasEditProposal,
 } from './readinessGates.js'
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
@@ -198,9 +200,9 @@ async function _checkPosition(setup, nowMs, deps) {
 
     // First wake after the fill. `entryTriggeredAt` is when the zone tripped; the broker's own fill
     // price isn't on the setup, so the intended entry stands in until the ledger has it.
-    const fillPrice = _num(ps.entry?.intended) ?? _num(setup.armed_zone_id ? _zoneById(setup, setup.armed_zone_id)?.upper : null)
+    const fillPrice = toNum(ps.entry?.intended) ?? toNum(setup.armed_zone_id ? _zoneById(setup, setup.armed_zone_id)?.upper : null)
     const fillAtMs  = setup.ordersPlacedAt ?? setup.entryTriggeredAt ?? nowMs
-    const stop      = _num(setup.stop_zones?.[0]?.lower) ?? _num(setup.stop_zones?.[0]?.upper)
+    const stop      = toNum(setup.stop_zones?.[0]?.lower) ?? toNum(setup.stop_zones?.[0]?.upper)
 
     const patch = {
         ...base,
@@ -217,7 +219,6 @@ async function _checkPosition(setup, nowMs, deps) {
     return { reason: 'entry', promoted: true }
 }
 
-function _num(n) { return Number.isFinite(Number(n)) ? Number(n) : null }
 // Across every scenario, not just the projected one — a position's armed zone belongs to whichever
 // premise won, and by now the projection agrees, but the lookup must not depend on that ordering.
 function _zoneById(setup, id) {
@@ -538,18 +539,8 @@ export function zoneDistance(zones, price) {
 // whether it is worth PAYING for a candle; the candle's close is what decides the setup's fate.
 // That two-step is why this stays cheap enough to run every wake.
 
-/**
- * An `edit` verdict is only actionable with a proposal describing the re-map — otherwise the card
- * fires with an empty "why" and the user is told their plan is stale with no way to act. Mirrors
- * hermes._hasEditProposal. Pure.
- */
-export function _hasEditProposal(raw) {
-    const ep = raw?.edit_proposal
-    if (!ep || typeof ep !== 'object') return false
-    const hasWhy     = typeof ep.why === 'string' && ep.why.trim() !== ''
-    const hasChanges = ep.changes && typeof ep.changes === 'object' && Object.keys(ep.changes).length > 0
-    return Boolean(hasWhy || hasChanges)
-}
+/** Shared with Hermes — see readinessGates.hasEditProposal. Re-exported under the historical name. */
+export const _hasEditProposal = hasEditProposal
 
 /**
  * The edge whose breach means the premise broke. Pure.

@@ -12,13 +12,17 @@ import { randomUUID }      from 'crypto'
 import { getDb }           from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
+import { toNum }           from '../../services/format.util.js'
 import { makeEntityCrud }  from '../../services/entity/entityCrud.service.js'
 import { HORIZONS, DEFAULT_HORIZON, openWindow } from '../../services/forecastClock.js'
 import { normalizeSector }  from '../../services/entity/vocabulary.js'
 import { newRevision, diffFields } from '../../services/revisionTrail.js'
 
 const LOG        = '[coverage]'
-const COLLECTION = 'coverage'
+// The physical collection. EXPORTED because the coverage monitor reads the same documents on the
+// background path — it used to name 'coverage' itself, so the name lived in two files that had to
+// be changed together and nothing would have failed if they hadn't.
+export const COLLECTION = 'coverage'
 
 // Owner-scoped CRUD (the shared mechanism), same factory the entity kinds use. Coverage differs
 // only in its wiring, not its rules: its own collection, no `kind` discriminator, and recency is
@@ -57,7 +61,54 @@ const DEFAULT_STATUS = 'active'
 const PLAN_FIELDS = ['sector', 'thesis', 'rating', 'price_target', 'estimates', 'gap',
     'catalysts', 'kill_criteria', 'risk_reward', 'conviction', 'status', 'evidence']
 
-export const coverageService = { initiateCoverage, getCoverage, getCoverageById, listActiveBySector, updateCoverage, retireCoverage, deleteCoverage, captureResearchBasis }
+export const coverageService = { initiateCoverage, getCoverage, getCoverageById, listActiveBySector, updateCoverage, retireCoverage, deleteCoverage, captureResearchBasis, recordMonitorState, claimRemodel }
+
+// ─── the monitor.* namespace ──────────────────────────────────────────────────
+// `updateCoverage` deliberately does not touch `monitor.*` — that subtree is the MONITOR's record
+// of its own work (when it last looked, how many times, when it last re-modelled), not part of the
+// thesis a user edits. But "the service doesn't write it" had turned into "the monitor writes the
+// collection itself", so coverage.monitor held its own getDb() + the collection name + the shape of
+// this subtree. Two writers, one schema, and nothing to keep them agreeing.
+//
+// These two functions are that subtree's only writer. The monitor still decides WHEN to call them
+// and WHAT the values mean — the judgment stays there; only the write comes here.
+
+/**
+ * Stamp the monitor's bookkeeping. `set` is a flat map of dotted `monitor.*` paths; `inc` the same
+ * for counters. Fails loudly rather than silently: a bookkeeping write that vanishes leaves the doc
+ * due forever, re-checking on every tick.
+ */
+async function recordMonitorState(id, { set = {}, inc = null } = {}) {
+    const db = await getDb()
+    const update = { $set: set }
+    if (inc) update.$inc = inc
+    const res = await db.collection(COLLECTION).updateOne({ id }, update)
+    return { ok: res.matchedCount === 1 }
+}
+
+/**
+ * Single-winner claim on an expensive re-model. Returns TRUE only for the caller that won.
+ *
+ * A re-model wakes a full multi-phase research run and takes MINUTES, so the stamp has to land
+ * BEFORE the run starts — otherwise the next hourly tick starts a second one for the same name.
+ * The monitor said exactly that in a comment and then wrote unconditionally, which stops a second
+ * TICK (the loop is single-flight) but not a second PROCESS.
+ *
+ * The guard is compare-and-swap on the value just read: if another worker stamped in between, the
+ * match fails and this caller stands down. `null` matches a missing field in Mongo, so a coverage
+ * that has never been re-modelled is handled by the same expression.
+ */
+async function claimRemodel(id, { previousAt = null, reason, at = new Date().toISOString() } = {}) {
+    const db  = await getDb()
+    const res = await db.collection(COLLECTION).updateOne(
+        { id, 'monitor.last_remodel_at': previousAt ?? null },
+        {
+            $set: { 'monitor.last_remodel_at': at, 'monitor.last_remodel_reason': reason },
+            $inc: { 'monitor.remodels': 1 },
+        },
+    )
+    return res.modifiedCount === 1
+}
 
 // Exported for tests + downstream phases (P2 valuation, P3 agent, P5 monitor).
 export { normalizeCoverage, newRevision }
@@ -129,11 +180,7 @@ async function _checkCoherence(doc, io = _io) {
 // ─── pure helpers ──────────────────────────────────────────────────────────────
 const _str = v => (typeof v === 'string' && v.trim() ? v.trim() : null)
 const _arr = v => (Array.isArray(v) ? v : [])
-function _num(v) {
-    if (v === null || v === undefined || v === '') return null
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
-}
+const _num = toNum   // the one safe coercion — see format.util.toNum
 /**
  * OUR price target: the number, the deadline it must arrive by, and the basis that produced it.
  *

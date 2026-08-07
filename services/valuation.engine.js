@@ -6,11 +6,13 @@
 // Mirrors smc.engine.js (deterministic primitives, the agent decides). Shared by the agent (P3) and
 // the coverage monitor (P5) so "our number" has one source of truth.
 
+import { toNum } from './format.util.js'
+
 // Supported per-sector methods. pe → price = multiple × forward EPS. ev_* → EV = multiple × forward
 // metric, then EV→equity→per-share. (DCF/SOTP = T2, deferred.)
 export const VALUATION_METHODS = ['pe', 'ev_sales', 'ev_ebitda']
 
-const _num = v => { const n = Number(v); return Number.isFinite(n) ? n : null }
+const _num = toNum   // the one safe coercion — see format.util.toNum
 const _round2 = x => (x === null ? null : Math.round(x * 100) / 100)
 
 // Percentile over a numeric array (linear interpolation between ranks). Pure.

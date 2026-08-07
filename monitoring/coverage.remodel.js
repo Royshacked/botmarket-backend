@@ -43,13 +43,15 @@
 // make change detectable at all — plus a threshold chosen to clear tape noise. Inputs already exist
 // (get_stock_peers + get_fundamentals); the cooldown and per-tick cap already bound the spend.
 
+import { toNum } from '../services/format.util.js'
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 // A re-model is a multi-minute tool-heavy LLM run. These bound the spend; all are tunable.
 export const COOLDOWN_DAYS = 14   // never re-model the same name twice inside this window
 export const FLOOR_DAYS    = 90   // ...but never leave one un-modelled longer than this
 
-const _num = v => (Number.isFinite(Number(v)) ? Number(v) : null)
+const _num = toNum   // the one safe coercion — see format.util.toNum
 // A leg is {value, multiple, forward_metric} after the scenario change; tolerate a bare legacy number.
 const _legValue = leg => (leg && typeof leg === 'object' ? _num(leg.value) : _num(leg))
 

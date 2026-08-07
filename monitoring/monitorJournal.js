@@ -18,11 +18,12 @@
 //
 // `reason` ∈ pre_active | closed | scheduled | momentum_pulse | zone_trip | expiry_review
 
+import { toNum } from '../services/format.util.js'
+
 /** Default cap. A monitor whose journal spans more eras (Hermes) passes its own. */
 export const JOURNAL_MAX = 50
 
 function _fmt(n) { return Number.isFinite(Number(n)) ? String(Number(n)) : '?' }
-function _num(n) { return Number.isFinite(Number(n)) ? Number(n) : null }
 
 /** "188–189" (single) or "188–189, 192–193" (multi). Calls and setups both carry `entry_zones`. */
 export function zonesLabel(entity) {
@@ -101,12 +102,12 @@ export function journalEntry(reason, {
     if (reason === 'scheduled') {
         const zl  = zonesLabel(entity)
         const gap = gapMin(nextAt, nowMs)
-        return { at, reason, price: _num(price), verdict: null,
+        return { at, reason, price: toNum(price), verdict: null,
             note: `Price ${_fmt(price)} is outside my zone${zl.multi ? 's' : ''} ${zl.text}. No setup forming${gap ? ` — checking back in ${gap}m` : ''}.`,
             next_check_at: nextAt }
     }
     if (failed) {
-        return { at, reason, price: _num(price), verdict: null,
+        return { at, reason, price: toNum(price), verdict: null,
             note: failNote(verb, entity?.asset, failReason),
             next_check_at: nextAt }
     }
@@ -114,7 +115,7 @@ export function journalEntry(reason, {
     const read = (note ?? raw?.read ?? '').toString().trim()
     return {
         at, reason,
-        price:   _num(price),
+        price:   toNum(price),
         zone_id: zone?.id ?? null,
         ...(fetched != null ? { fetched } : {}),
         verdict: raw?.verdict ?? null,

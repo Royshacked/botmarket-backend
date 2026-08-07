@@ -45,6 +45,36 @@ test('classifyEdge: unknown either side → null, never a guess', () => {
     assert.equal(classifyEdge({ price_target: {} }, street()), null)     // no PT of our own
 })
 
+// An ABSENT key and a key carrying an explicit `null` are the same fact — "the Street range is
+// unknown" — and the consensus feed reports the second one. They were NOT the same to the local
+// numeric coercion this module used to carry: `Number(null)` is 0 and 0 is finite, so a null bound
+// became a REAL ZERO that survived the `=== null` guard and classified.
+//
+// It never threw and never logged. A null `low` alone silently answered `contained` — the one
+// verdict that means "no edge here" — and a null on BOTH bounds answered `variant_bull`, the
+// strongest edge in the enum, off a Street range that was never read. Both are worse than the
+// throw would have been, because a re-model schedule is decided from this string.
+test('classifyEdge: an explicitly null Street bound is UNKNOWN, not a zero', () => {
+    assert.equal(classifyEdge(cov(), street({ low: null })), null)
+    assert.equal(classifyEdge(cov(), street({ high: null })), null)
+    assert.equal(classifyEdge(cov(), street({ low: null, high: null })), null)
+    assert.equal(classifyEdge(cov(), street({ low: '', high: '' })), null)   // empty string coerces to 0 too
+})
+
+// The mirror on OUR side of the comparison: a band leg present but unpriced. `bull: null` used to
+// read as a bull case of 0, which is below every Street low — so an ordinary contained thesis was
+// reported as `contrarian_bear`, a conviction we never held.
+test('classifyEdge: an unpriced band leg does not fabricate a contrarian read', () => {
+    const noBull = cov({ risk_reward: { bear: { value: 170 }, base: { value: 200 }, bull: { value: null } } })
+    assert.equal(classifyEdge(noBull, street()), 'contained')
+
+    const noBear = cov({ price_target: { value: 300 }, risk_reward: { bear: { value: null }, bull: { value: 350 } } })
+    assert.equal(classifyEdge(noBear, street()), 'variant_bull')   // not contrarian_bull — the bear leg is unknown
+
+    const legacyNull = cov({ risk_reward: { bear: null, base: null, bull: null } })
+    assert.equal(classifyEdge(legacyNull, street()), 'contained')
+})
+
 test('classifyEdge: a legacy bare-number band still classifies', () => {
     const legacy = cov({ price_target: { value: 300 }, risk_reward: { bear: 250, base: 300, bull: 350 } })
     assert.equal(classifyEdge(legacy, street()), 'contrarian_bull')

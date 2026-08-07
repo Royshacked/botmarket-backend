@@ -28,6 +28,7 @@ import { EventEmitter }      from 'node:events'
 import { getCTraderSocket }  from './ctrader.ws.provider.js'
 import * as ctrader          from './ctrader.provider.js'
 import { logger }            from '../services/logger.service.js'
+import { toNum }             from '../services/format.util.js'
 import { asList }            from '../api/broker/adapters/normalize.js'
 import { normSymbol as _normSymbol, baseSymbol as _baseSymbol } from '../services/brokerSymbol.service.js'
 
@@ -620,7 +621,7 @@ function _int(v, fallback) {
     return Number.isInteger(n) ? n : (Number.isFinite(n) ? Math.round(n) : fallback)
 }
 
-function _num(v) {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
-}
+// A number, or null — see format.util.toNum. The nullish guard matters on broker payloads: a
+// ProtoOA field that arrives explicitly null (rather than omitted) would otherwise coerce to a
+// real 0, and 0 is a legal price/volume — it reads as a filled position at zero, not a missing one.
+const _num = toNum

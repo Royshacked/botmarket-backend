@@ -9,8 +9,11 @@ import { createDueLoop, makePersist } from './dueLoop.js'
 import { journalEntry, zonesLabel, failNote } from './monitorJournal.js'
 import {
     isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap, gradedGap,
+    hasEditProposal,
 } from './readinessGates.js'
 import { withTimeout } from '../services/timeout.util.js'
+import { toNum } from '../services/format.util.js'
+import { COLLECTION as TRADES } from '../services/tradeCapture.service.js'
 import { _defaultAssess, _defaultAssessPosition, _defaultAssessReentry, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses } from './hermes.assess.js'
 
 // The LLM assessment IO lives in hermes.assess.js (wired into _deps below). Re-exported here
@@ -293,7 +296,7 @@ function _promoteToInPosition(call, idea, nowMs, nextAt, bumpCount, trade = null
     const ps        = call.position_state ?? {}
     const dir       = idea.direction ?? (idea.status === 'short' ? 'short' : 'long')
     // Real broker fill from the trades ledger; fall back to the intended entry until it's captured.
-    const fillPrice = _num(trade?.entry?.price) ?? ps.entry?.intended ?? null
+    const fillPrice = toNum(trade?.entry?.price) ?? ps.entry?.intended ?? null
     const fillAtMs  = idea.entryTriggeredAt ?? idea.activatedAt ?? nowMs
     const set = {
         // P3b: no status write — the converged status stays 'long'/'short' (set by the reconciler).
@@ -307,7 +310,7 @@ function _promoteToInPosition(call, idea, nowMs, nextAt, bumpCount, trade = null
         'monitor_state.check_count':       bumpCount,
     }
     const note = `Filled ${call.asset}${fillPrice != null ? ` at ${fillPrice}` : ''} — I'm in. Initial stop ${ps.stop?.initial ?? '?'}; managing from here.`
-    const entry = { at: new Date(nowMs).toISOString(), reason: 'entry', phase: 'in_position', price: _num(fillPrice), verdict: null, note, next_check_at: nextAt }
+    const entry = { at: new Date(nowMs).toISOString(), reason: 'entry', phase: 'in_position', price: toNum(fillPrice), verdict: null, note, next_check_at: nextAt }
     return { set, entry }
 }
 
@@ -319,8 +322,8 @@ function _closeFromIdea(call, idea, nowMs, bumpCount, trade = null) {
     // Broker-authoritative from the trades ledger (real entry/exit price + realized P&L); fall back
     // to the stamped fill / idea fields. NOTE: a scaled-out trade's P&L may undercount — the ledger
     // records only the FINAL close's realizedPnl, not intermediate partials (a ledger-wide gap).
-    const entryPx = ps.entry?.fill_price ?? _num(trade?.entry?.price) ?? ps.entry?.intended ?? null
-    const exitPx  = _num(trade?.exit?.price)
+    const entryPx = ps.entry?.fill_price ?? toNum(trade?.entry?.price) ?? ps.entry?.intended ?? null
+    const exitPx  = toNum(trade?.exit?.price)
     const dir     = ps.entry?.direction ?? idea.direction ?? 'long'
     const reason  = idea.closedReason ?? trade?.exit?.reason ?? 'broker'
     const r       = _rMultiple(entryPx, exitPx, ps.stop?.initial, dir)   // null exit → null R
@@ -487,7 +490,7 @@ export function _applyPositionAssessment(call, ps, raw, price, metrics, nowMs, r
 
     const note  = (raw?.read && String(raw.read).trim()) ? String(raw.read).trim() : _managementFallbackNote(verdict)
     const entry = {
-        at, reason: 'in_position', phase: 'in_position', price: _num(price), verdict,
+        at, reason: 'in_position', phase: 'in_position', price: toNum(price), verdict,
         note,
         axes: { market: raw?.market ?? null, news: raw?.news ?? null, price_action: raw?.price_action ?? null, patterns_seen: Array.isArray(raw?.patterns_seen) ? raw.patterns_seen : [] },
         next_check_at: nextAt,
@@ -534,7 +537,7 @@ async function _managePosition(db, call, idea, nowMs, deps) {
             ..._metricsSet(metrics),
             'monitor_state.next_check_at': nextAt,
             'monitor_state.check_count':   (call?.monitor_state?.check_count ?? 0) + 1,
-        }, { at: new Date(nowMs).toISOString(), reason: 'in_position', phase: 'in_position', price: _num(price), verdict: null,
+        }, { at: new Date(nowMs).toISOString(), reason: 'in_position', phase: 'in_position', price: toNum(price), verdict: null,
              note: failNote('reassess', call.asset, raw?._failReason), next_check_at: nextAt })
         return { reason, failed: true }
     }
@@ -625,15 +628,9 @@ export const _effectiveVerdict = (verdict, reason, pastExpiry) =>
 // _checkCall logs it. Mirrors the hard whitelist the in-position path already applies.
 const _READINESS_VERDICTS = new Set(['enter', 'wait', 'stand_aside', 'let_expire', 'edit'])
 
-// An 'edit' verdict is only actionable with a proposal describing the re-map — otherwise the edit
-// card fires with an empty why/changes. True only when the model supplied a usable edit_proposal.
-export function _hasEditProposal(raw) {
-    const ep = raw?.edit_proposal
-    if (!ep || typeof ep !== 'object') return false
-    const hasWhy     = typeof ep.why === 'string' && ep.why.trim() !== ''
-    const hasChanges = ep.changes && typeof ep.changes === 'object' && Object.keys(ep.changes).length > 0
-    return Boolean(hasWhy || hasChanges)
-}
+// Shared with Talos — see readinessGates.hasEditProposal. Re-exported under the historical name so
+// the existing tests and call sites are unchanged.
+export const _hasEditProposal = hasEditProposal
 
 // Snap a proposed price to the nearest reference level on the correct side of entry, so the
 // stop/TP land on pre-mapped structure rather than a conjured number. No suitable level → keep
@@ -857,8 +854,6 @@ export function _shouldPulse(call, price, nowMs) {
 
 export { zonesLabel as _zonesLabel, failNote as _failNote }
 
-function _num(n) { return Number.isFinite(Number(n)) ? Number(n) : null }
-
 // What the assessment deterministically pulls (mirrors _defaultAssess) — the "fetched" line.
 function _fetchedLabel(call) {
     const tf = call?.timeframe_ladder?.at(-1) ?? '15min'
@@ -900,7 +895,7 @@ const _deps = {
     getTrade:    async (idea) => {
         const slot = (idea?.brokerOrders ?? []).find(b => b?.positionId != null)
         if (!slot) return null
-        try { return await (await getDb()).collection('trades').findOne({ accountId: String(slot.accountId), positionId: String(slot.positionId) }) } catch { return null }
+        try { return await (await getDb()).collection(TRADES).findOne({ accountId: String(slot.accountId), positionId: String(slot.positionId) }) } catch { return null }
     },
     // The in-position four-axis management read (slice 2) and the management-card delivery. onManage
     // logs for now — real notify + user-confirm execution is slice 3 (mirrors Phase 2→3 for onCard).

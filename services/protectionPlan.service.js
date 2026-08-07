@@ -18,7 +18,8 @@
 
 import { parseCondition }                       from '../monitoring/parsers/condition.parser.js'
 import { extractLeaves, resolveConditionTree }   from './conditionTree.service.js'
-import { getCandles }                            from '../providers/ohlcv.provider.js'
+import { getCandles }                            from './ohlcv.service.js'
+import { toNum }                                 from './format.util.js'
 import { logger }                                from './logger.service.js'
 
 const LOG = '[protectionPlan]'
@@ -263,6 +264,16 @@ async function _leafBareLevel(leaf) {
     // A non-price subject (volume, an indicator) parses to a finite number too, so
     // guard against a mis-typed leaf turning e.g. "volume > 2000000" into a $2M order.
     if (parsed.subject && !['close', 'open', 'high', 'low'].includes(parsed.subject)) return null
-    const level = Number(parsed.value)
-    return Number.isFinite(level) ? level : null
+    // toNum, NOT Number(). `parsed.value` is null whenever the parse failed or came back `unknown`,
+    // and `Number(null)` is 0 — which is finite, so the old guard PASSED it and this returned a
+    // price level of ZERO. Nothing downstream questions it: the leaf is reported as offloadable and
+    // a stop (or a stop-market ENTRY, via detectNativeEntryLevel) is built to rest at 0.
+    //
+    // The failure is silent end to end. parseCondition catches its own errors and returns `unknown`,
+    // so an unreachable parser — a missing API key, a rate limit, a timeout — reads exactly like a
+    // condition nobody could interpret, and the leg that should have fallen back to the software
+    // monitor rests a nonsense order at the broker instead. `> 0` on top because a price level of
+    // zero is never a real answer for anything this routes, however it was arrived at.
+    const level = toNum(parsed.value)
+    return (level !== null && level > 0) ? level : null
 }

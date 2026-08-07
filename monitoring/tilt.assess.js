@@ -11,6 +11,7 @@
 //   • expensive     — wake Pythia to re-author. Gated by `reviewDecision` below.
 
 import { windowProgress } from '../services/forecastClock.js'
+import { toNum } from '../services/format.util.js'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -32,17 +33,9 @@ const _price = v => {
 
 const _round2 = x => Math.round(x * 100) / 100
 
-/**
- * A number, or null — strictly. `Number(null)` is 0 and 0 is finite, so a bare `Number.isFinite`
- * guard lets a missing value through as a real zero, which is precisely the confusion this module
- * is built to avoid: an unpriced stance would score as "earned nothing" instead of "unknown".
- * A genuine 0 must still pass, so absence is rejected by identity rather than by falsiness.
- */
-function _num(v) {
-    if (v === null || v === undefined || v === '') return null
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
-}
+// A number, or null — strictly; see format.util.toNum. The distinction is load-bearing here: an
+// unpriced stance must score as "unknown", never as "earned nothing".
+const _num = toNum
 
 /**
  * A stance's relative return over its own window, in PERCENT. Pure → null when either leg is

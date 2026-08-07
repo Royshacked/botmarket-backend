@@ -23,12 +23,15 @@
 import { randomUUID }      from 'crypto'
 import { getDb }           from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
+import { toNum }           from '../../services/format.util.js'
 import { normalizeSector, SECTORS, SECTOR_ETF, BENCHMARK_PROXY } from '../../services/entity/vocabulary.js'
 import { openWindow, HORIZONS, DEFAULT_HORIZON } from '../../services/forecastClock.js'
 import { newRevision, diffFields }  from '../../services/revisionTrail.js'
 
 const LOG        = '[tilt]'
-const COLLECTION = 'tilt'
+// Exported for the tilt monitor, which reads these documents on the background path. One name,
+// owned by the service that owns the schema.
+export const COLLECTION = 'tilt'
 
 // ─── vocabulary ───────────────────────────────────────────────────────────────
 
@@ -62,11 +65,7 @@ export const BALANCE_TOLERANCE_BP = 50
 // ─── pure helpers ─────────────────────────────────────────────────────────────
 const _str = v => (typeof v === 'string' && v.trim() ? v.trim() : null)
 const _arr = v => (Array.isArray(v) ? v : [])
-function _num(v) {
-    if (v === null || v === undefined || v === '') return null
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
-}
+const _num = toNum   // the one safe coercion — see format.util.toNum
 
 /**
  * One sector row. Pure. Returns null when it carries no usable sector — an unrecognised sector
@@ -197,7 +196,26 @@ export function incoherentRows(doc) {
     return _arr(doc?.tilts).map(stanceCoherence).filter(c => !c.ok)
 }
 
-export const tiltService = { publishTilt, getCurrentTilt, getTiltById, listTilts, updateTilt, retireTilt }
+export const tiltService = { publishTilt, getCurrentTilt, getTiltById, listTilts, updateTilt, retireTilt, recordMonitorState }
+
+/**
+ * The monitor's bookkeeping write — the `monitor.*` subtree plus the graded `tilts` array.
+ *
+ * `updateTilt` is the PUBLICATION path: it appends a revision, which is right for a state change a
+ * reader should see (a stance maturing) and wrong for a routine grade refresh — eleven revisions a
+ * day would bury the trail that makes the view auditable. So the monitor had two paths and used a
+ * raw `updateOne` for the quiet one, which put this collection's shape in a second file.
+ *
+ * The split stays; only the write moves here. `set` is a flat map (dotted `monitor.*` paths and/or
+ * top-level fields), `inc` the counters.
+ */
+async function recordMonitorState(id, { set = {}, inc = null } = {}) {
+    const db = await getDb()
+    const update = { $set: set }
+    if (inc) update.$inc = inc
+    const res = await db.collection(COLLECTION).updateOne({ id }, update)
+    return { ok: res.matchedCount === 1 }
+}
 export { HORIZONS, DEFAULT_HORIZON, SECTORS }
 
 /**
