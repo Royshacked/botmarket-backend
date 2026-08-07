@@ -1,13 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { analystAgentService }   from '../../services/analyst.agent.service.js'
-import { axlAgentService }       from '../../services/axl.agent.service.js'
-import { ideaAgentService }      from '../../services/idea.agent.service.js'
-import { kairosAgentService }    from '../../services/kairos.agent.service.js'
-import { mentorAgentService }    from '../../services/mentor.agent.service.js'
-import { portfolioAgentService } from '../../services/portfolio.agent.service.js'
-import { scannerAgentService }   from '../../services/scanner.agent.service.js'
+import { analystAgentService }   from '../../services/agents/analyst.agent.service.js'
+import { axlAgentService }       from '../../services/agents/axl.agent.service.js'
+import { kairosAgentService }    from '../../services/agents/kairos.agent.service.js'
+import { mentorAgentService }    from '../../services/agents/mentor.agent.service.js'
+import { portfolioAgentService } from '../../services/agents/portfolio.agent.service.js'
+import { scannerAgentService }   from '../../services/agents/scanner.agent.service.js'
 
 // The agent-stream contract — ONE assertion body for EVERY streaming agent.
 //
@@ -24,7 +23,6 @@ import { scannerAgentService }   from '../../services/scanner.agent.service.js'
 const AGENTS = [
     { name: 'analyst  (Prometheus)', chatStream: analystAgentService.chatStream,   args: { userPrompt: 'pitch me NVDA' } },
     { name: 'axl',                   chatStream: axlAgentService.chatStream,       args: { messages: [{ role: 'user', content: 'what can you do' }] } },
-    { name: 'idea',                  chatStream: ideaAgentService.chatStream,      args: { userPrompt: 'long NQ off 21000' } },
     { name: 'kairos',                chatStream: kairosAgentService.chatStream,    args: { userPrompt: 'build me a TSLA long' } },
     { name: 'mentor',                chatStream: mentorAgentService.chatStream,    args: { userPrompt: 'walk me through AAPL' } },
     { name: 'portfolio (Atlas)',     chatStream: portfolioAgentService.chatStream, args: { messages: [{ role: 'user', content: 'build me a portfolio' }] } },

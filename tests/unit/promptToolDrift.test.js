@@ -15,11 +15,10 @@ import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
-import { TOOLS as PORTFOLIO_TOOLS } from '../../services/portfolio.agent.service.js'
-import { TOOLS as ANALYST_TOOLS }   from '../../services/analyst.agent.service.js'
-import { TOOLS as IDEA_TOOLS }      from '../../services/idea.agent.service.js'
-import { TOOLS as AXL_TOOLS }       from '../../services/axl.agent.service.js'
-import { TOOLS as SCANNER_TOOLS, SCANNER_TOOLS_FOR_PROFILE } from '../../services/scanner.agent.service.js'
+import { TOOLS as PORTFOLIO_TOOLS } from '../../services/agents/portfolio.agent.service.js'
+import { TOOLS as ANALYST_TOOLS }   from '../../services/agents/analyst.agent.service.js'
+import { TOOLS as AXL_TOOLS }       from '../../services/agents/axl.agent.service.js'
+import { TOOLS as SCANNER_TOOLS, SCANNER_TOOLS_FOR_PROFILE } from '../../services/agents/scanner.agent.service.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../')
 
@@ -29,7 +28,6 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../')
 const DESKS = [
     { prompt: 'portfolio_system_prompt.md',       tools: PORTFOLIO_TOOLS },
     { prompt: 'analyst_system_prompt.md',         tools: ANALYST_TOOLS },
-    { prompt: 'idea_system_prompt.md',            tools: IDEA_TOOLS },
     { prompt: 'axl_system_prompt.md',             tools: AXL_TOOLS },
     { prompt: 'scanner_system_prompt.md',         tools: SCANNER_TOOLS },
     // The investing profile runs a SUBSET — checking it against the full kit would wave through a

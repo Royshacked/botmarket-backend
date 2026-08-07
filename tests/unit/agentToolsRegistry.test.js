@@ -4,15 +4,14 @@ import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { TOOL_SCHEMAS, TOOL_NAMES, toolsFor } from '../../services/agentTools.registry.js'
-import { TOOLS as IDEA_TOOLS }      from '../../services/idea.agent.service.js'
-import { TOOLS as PORTFOLIO_TOOLS } from '../../services/portfolio.agent.service.js'
-import { TOOLS as SCANNER_TOOLS }   from '../../services/scanner.agent.service.js'
-import { TOOLS as ANALYST_TOOLS }   from '../../services/analyst.agent.service.js'
-import { TOOLS as AXL_TOOLS }       from '../../services/axl.agent.service.js'
-import { TOOLS as STRATEGY_TOOLS } from '../../services/strategy.agent.service.js'
-import { KAIROS_TOOLS }             from '../../services/kairos.tools.js'
-import { SMC_TOOLS }                from '../../services/smc.tools.js'
-import { VALUATION_TOOLS }          from '../../services/valuation.tools.js'
+import { TOOLS as PORTFOLIO_TOOLS } from '../../services/agents/portfolio.agent.service.js'
+import { TOOLS as SCANNER_TOOLS }   from '../../services/agents/scanner.agent.service.js'
+import { TOOLS as ANALYST_TOOLS }   from '../../services/agents/analyst.agent.service.js'
+import { TOOLS as AXL_TOOLS }       from '../../services/agents/axl.agent.service.js'
+import { TOOLS as STRATEGY_TOOLS } from '../../services/agents/strategy.agent.service.js'
+import { KAIROS_TOOLS }             from '../../services/tools/kairos.tools.js'
+import { SMC_TOOLS }                from '../../services/tools/smc.tools.js'
+import { VALUATION_TOOLS }          from '../../services/tools/valuation.tools.js'
 
 // EQUIVALENCE HARNESS for the tool-registry consolidation.
 //
@@ -41,7 +40,6 @@ const SNAPSHOT  = JSON.parse(fs.readFileSync(join(__dirname, '../fixtures/agentT
 // wasn't. Its tools are now covered like everyone else's, which is also what stops save_objective
 // reading as an orphan schema below.
 const LIVE = {
-    idea:      IDEA_TOOLS,
     strategy:  STRATEGY_TOOLS,
     portfolio: PORTFOLIO_TOOLS,
     scanner:   SCANNER_TOOLS,

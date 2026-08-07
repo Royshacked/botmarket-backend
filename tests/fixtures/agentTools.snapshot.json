@@ -1,474 +1,4 @@
 {
-  "idea": [
-    {
-      "type": "web_search_20250305",
-      "name": "web_search"
-    },
-    {
-      "name": "get_trading_context",
-      "description": "The user's live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities, whether it is the SELECTED one, and the positions currently open in it. Call it before you size anything, commit to a venue, or answer any question about accounts, balances, buying power or what the user is already holding — never guess these.",
-      "input_schema": {
-        "type": "object",
-        "properties": {}
-      }
-    },
-    {
-      "name": "check_broker_symbol",
-      "description": "Check whether a specific instrument is actually TRADABLE at the user's connected live broker, and what the broker calls it (e.g. NQ → US100.cash). Three answers: tradable true (with brokerSymbol), false (the broker answered and does not list it), or null (the broker could not be reached — UNKNOWN, never treat as unavailable). Call it before recommending or building anything on a live book: a perfect setup on an instrument the broker does not list cannot be traded. Paper and manual accept anything the app can price, so this is a live-broker question.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "The instrument to check, as the user says it e.g. AVGO, NQ, BTCUSD"
-          }
-        },
-        "required": [
-          "ticker"
-        ]
-      }
-    },
-    {
-      "name": "get_quote",
-      "description": "Get the current real-time price quote for a stock ticker. Call this when the user asks about current price, today's levels, or when you need live price data to answer accurately.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "Stock ticker symbol e.g. AAPL, NVDA"
-          }
-        },
-        "required": [
-          "ticker"
-        ]
-      }
-    },
-    {
-      "name": "get_candles",
-      "description": "Fetch recent OHLCV candles for a ticker. Use this whenever the user asks about orderblocks, support/resistance, chart patterns, price levels, or any question that requires seeing recent price action. Never say you cannot see live data — call this tool first.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "Stock ticker symbol e.g. AAPL, NVDA"
-          },
-          "timeframe": {
-            "type": "string",
-            "enum": [
-              "1min",
-              "5min",
-              "15min",
-              "30min",
-              "1hr",
-              "2hr",
-              "4hr",
-              "day",
-              "week",
-              "month"
-            ],
-            "description": "Candle timeframe. 2hr and 4hr are aggregated server-side from native 1hr bars into true 2hr/4hr OHLCV (Yahoo has no native 2hr/4hr); every other resolution is a native interval. Sub-hour history is limited (1min ~5 days, 5/15/30min ~weeks) — match the timeframe to the setup."
-          }
-        },
-        "required": [
-          "ticker",
-          "timeframe"
-        ]
-      }
-    },
-    {
-      "name": "get_price_action",
-      "description": "Momentum/positioning snapshot for a ticker: 1d/5d/1m/3m % moves, position within the 1y range, and relative volume. A fast read early in formation on whether the name is actually moving the way the thesis claims and whether volume backs it — before drilling into exact candles.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "e.g. AAPL, NVDA, SPY"
-          }
-        },
-        "required": [
-          "ticker"
-        ]
-      }
-    },
-    {
-      "name": "get_orderblocks",
-      "description": "Detect ORDER BLOCKS on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: the last opposing candle/cluster before an impulsive structure break (bullish OB = last down-candle before a rally; bearish OB = last up-candle before a selloff), whether each is fresh/untested or mitigated, and its zone vs current price. Reach for this when mapping the setup to find price-action entry zones and triggers — as easily as you would an indicator value. Levels are approximate; confirm exact prices with get_candles.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-          },
-          "timeframe": {
-            "type": "string",
-            "enum": [
-              "1min",
-              "5min",
-              "15min",
-              "30min",
-              "1hr",
-              "2hr",
-              "4hr",
-              "day",
-              "week",
-              "month"
-            ],
-            "description": "Chart timeframe — read the orderblocks on the timeframe(s) you trade on."
-          },
-          "show_to_user": {
-            "type": "boolean",
-            "description": "Set true to render the analyzed chart in the user's chat (the plain chart the read is based on). Leave false for an internal read."
-          }
-        },
-        "required": [
-          "ticker",
-          "timeframe"
-        ]
-      }
-    },
-    {
-      "name": "get_false_breaks",
-      "description": "Detect FALSE BREAKS / liquidity sweeps on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Reach for this when mapping the setup to find price-action triggers. Levels are approximate; confirm exact prices with get_candles.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-          },
-          "timeframe": {
-            "type": "string",
-            "enum": [
-              "1min",
-              "5min",
-              "15min",
-              "30min",
-              "1hr",
-              "2hr",
-              "4hr",
-              "day",
-              "week",
-              "month"
-            ],
-            "description": "Chart timeframe — read the sweeps on the timeframe(s) you trade on."
-          },
-          "show_to_user": {
-            "type": "boolean",
-            "description": "Set true to render the analyzed chart in the user's chat. Leave false for an internal read."
-          }
-        },
-        "required": [
-          "ticker",
-          "timeframe"
-        ]
-      }
-    },
-    {
-      "name": "get_indicators",
-      "description": "Compute exact indicator VALUES from recent candles — the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Confirm a read with hard numbers: ATR for volatility-sizing a stop, price vs EMA / VWAP for location, RSI for momentum/divergence, MACD for trend. Price action leads; indicators only confirm.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "Stock ticker symbol e.g. AAPL, NVDA"
-          },
-          "timeframe": {
-            "type": "string",
-            "enum": [
-              "1min",
-              "5min",
-              "15min",
-              "30min",
-              "1hr",
-              "2hr",
-              "4hr",
-              "day",
-              "week",
-              "month"
-            ],
-            "description": "Candle timeframe to compute on."
-          },
-          "indicators": {
-            "type": "string",
-            "description": "Comma-separated list with optional period, e.g. \"ema(20), ema(50), rsi(14), atr(14), macd, vwap\". Period is optional (defaults: ema/sma 20, rsi/atr 14). VWAP is session-anchored (intraday)."
-          }
-        },
-        "required": [
-          "ticker",
-          "timeframe",
-          "indicators"
-        ]
-      }
-    },
-    {
-      "name": "get_cycle_analysis",
-      "description": "Detect recurring cycles in a stock's price history. Two modes: \"price\" finds the dominant peak-to-peak / trough-to-trough interval, the current phase, and the next estimated turning point. \"calendar\" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking. Use \"price\" for recurring-interval theses, \"calendar\" for seasonal ones. Pass `timeframe` on a \"price\" read: a sub-hourly-to-hourly rung (1min–1hr) times a session-scale INTRADAY cycle (in bars); day/week/month (the default) times the multi-day swing cycle.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "e.g. AAPL, NVDA, SPY"
-          },
-          "mode": {
-            "type": "string",
-            "enum": [
-              "price",
-              "calendar"
-            ],
-            "description": "\"price\" for recurring interval cycles, \"calendar\" for seasonal window analysis"
-          },
-          "timeframe": {
-            "type": "string",
-            "enum": [
-              "1min",
-              "5min",
-              "15min",
-              "30min",
-              "1hr",
-              "day",
-              "week",
-              "month"
-            ],
-            "description": "For \"price\" mode: the cycle resolution. 1min–1hr = intraday cycle (bars); day (default)/week/month = multi-day swing cycle. Ignored for \"calendar\"."
-          },
-          "calendar_window": {
-            "type": "object",
-            "description": "Required for mode \"calendar\". Defines the window to analyze each year.",
-            "properties": {
-              "month_start": {
-                "type": "number",
-                "description": "1-based month number (Jan=1). Start month of the window."
-              },
-              "month_end": {
-                "type": "number",
-                "description": "1-based month number. End month — same as month_start for a single month."
-              },
-              "day_start": {
-                "type": "number",
-                "description": "Optional. Starting day within month_start (default 1)."
-              },
-              "day_end": {
-                "type": "number",
-                "description": "Optional. Ending day within month_end (default last day of month)."
-              }
-            },
-            "required": [
-              "month_start"
-            ]
-          },
-          "lookback_years": {
-            "type": "number",
-            "description": "Years of history to use (default 4, max 6)."
-          }
-        },
-        "required": [
-          "ticker",
-          "mode"
-        ]
-      }
-    },
-    {
-      "name": "get_earnings",
-      "description": "Upcoming earnings date + EPS estimate for a ticker, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use this in early formation when checking if there is a catalyst coming up, whether to hold through earnings, or whether the company has a history of beating/missing. US equities only — no ETFs, crypto, FX or futures.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "e.g. AAPL, NVDA, TSLA"
-          }
-        },
-        "required": [
-          "ticker"
-        ]
-      }
-    },
-    {
-      "name": "get_earnings_calendar",
-      "description": "Forward earnings calendar: upcoming earnings dates (with EPS/revenue estimates) for companies reporting between two dates (YYYY-MM-DD, window up to ~3 months); optionally filter to specific symbols. Use it to see what reports when around your setup — is the ticker itself, a sector peer, or an index heavyweight printing inside the trade horizon (gap / catalyst risk). For ONE ticker's own date plus its past beat/miss history, use get_earnings instead.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "from": {
-            "type": "string",
-            "description": "start date YYYY-MM-DD"
-          },
-          "to": {
-            "type": "string",
-            "description": "end date YYYY-MM-DD"
-          },
-          "symbols": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "optional — narrow to these tickers"
-          }
-        },
-        "required": [
-          "from",
-          "to"
-        ]
-      }
-    },
-    {
-      "name": "get_fundamentals",
-      "description": "Company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B), quality (margins, ROE, debt/equity), and growth. Weight it by horizon — light for intraday/day setups, heavily for swing / position trades where fundamentals matter more than price action. ETFs return exposure/profile only.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "e.g. AAPL, NVDA, SPY"
-          }
-        },
-        "required": [
-          "ticker"
-        ]
-      }
-    },
-    {
-      "name": "get_sec_filings",
-      "description": "Recent earnings-relevant SEC filings for a US-listed equity: latest 8-K (flagging item 2.02 earnings releases), 10-Q and 10-K with filing dates and document links. Use when the user wants to dig into what was actually reported — guidance, material events, or any red flags in recent filings. US equities only (EDGAR filers); not for ETFs, crypto, FX or futures.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "e.g. AAPL, NVDA, TSLA"
-          }
-        },
-        "required": [
-          "ticker"
-        ]
-      }
-    },
-    {
-      "name": "get_chart",
-      "description": "Render an actual TradingView candlestick chart IMAGE (with indicator overlays) and look at it directly, for VISUAL / structural analysis — chart patterns, trendlines, support/resistance, orderblocks, where price sits relative to moving averages. Renders native 4hr candles. For EXACT numeric levels (precise entry/stop/TP prices) prefer get_candles. ONLY call this once the conversation is about building or refining a concrete trade setup on a SINGLE asset — i.e. you are defining or validating an entry, stop, or take-profit, or confirming the market structure behind that setup. Do NOT call it while scanning / screening for stocks, comparing multiple tickers, or answering general questions about a stock; use get_quote / get_candles / web_search for that. One asset, setup stage only.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-          },
-          "timeframe": {
-            "type": "string",
-            "enum": [
-              "1min",
-              "5min",
-              "15min",
-              "30min",
-              "1hr",
-              "2hr",
-              "4hr",
-              "day",
-              "week",
-              "month"
-            ],
-            "description": "Chart timeframe. All resolutions render natively via TradingView."
-          },
-          "indicators": {
-            "type": "string",
-            "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
-          },
-          "show_to_user": {
-            "type": "boolean",
-            "description": "Set true whenever this chart relates to the user's ACTUAL setup — you are defining, validating, or refining their entry / stop / take-profit or reading the market structure behind it, or they asked to see it. In those cases the user wants to see what you are looking at, so show it. Leave false / omit ONLY for a quick throwaway internal peek that does not inform the setup under discussion; such a check must NOT appear in the chat."
-          }
-        },
-        "required": [
-          "ticker",
-          "timeframe"
-        ]
-      }
-    },
-    {
-      "name": "get_short_interest",
-      "description": "Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it for squeeze potential and crowded-bearish positioning when building or pressure-testing a thesis, not as a live read. No data for ETFs, crypto, FX or futures.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "e.g. GME, TSLA, AAPL"
-          }
-        },
-        "required": [
-          "ticker"
-        ]
-      }
-    },
-    {
-      "name": "get_options_context",
-      "description": "Options positioning for a US equity/ETF: put/call ratio (by open interest and by volume) and at-the-money implied volatility for the nearest expiry. Use it to read directional skew and how big a move the market is pricing (elevated IV = expensive options / large expected move, often around a catalyst — relevant for entry timing and event risk). Quotes ~15-min delayed. No data for crypto, FX or futures.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "e.g. NVDA, SPY, AAPL"
-          }
-        },
-        "required": [
-          "ticker"
-        ]
-      }
-    },
-    {
-      "name": "get_derivatives_context",
-      "description": "Crypto-perp positioning from Binance: funding rate (who pays to hold the trade — a crowding signal), open interest (committed leverage), and the global long/short account ratio (retail skew). This is the crypto analog to short-interest/options sentiment — use it when the setup is on a crypto perp. Crypto perps only (BTC, ETH, SOL…), not equities, FX or traditional futures.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "symbol": {
-            "type": "string",
-            "description": "e.g. BTC, ETH, SOL (or BTC-USD / BTCUSDT)"
-          }
-        },
-        "required": [
-          "symbol"
-        ]
-      },
-      "cache_control": {
-        "type": "ephemeral"
-      }
-    },
-    {
-      "name": "get_market_hours",
-      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "e.g. AAPL, NQ, BTCUSD, EURUSD"
-          },
-          "asset_class": {
-            "type": "string",
-            "enum": [
-              "stock",
-              "etf",
-              "futures",
-              "forex",
-              "crypto"
-            ],
-            "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
-          }
-        },
-        "required": [
-          "ticker"
-        ]
-      }
-    }
-  ],
   "portfolio": [
     {
       "type": "web_search_20250305",
@@ -476,7 +6,7 @@
     },
     {
       "name": "get_trading_context",
-      "description": "The book's trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities, whether it is selected, and what is already open in it. The capital base and existing exposure a construction or rebalance must be sized against — read it, never assume it. No arguments.",
+      "description": "The book's trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities, whether it is selected, and what is already open in it. The capital base and existing exposure a construction or rebalance must be sized against \u2014 read it, never assume it. No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -570,7 +100,7 @@
     },
     {
       "name": "get_fundamentals",
-      "description": "Get company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B, EV/EBITDA, FCF yield, earnings yield), quality (margins, ROE, ROIC, debt/equity), growth, AND the forward analyst view — consensus price target with upside vs price, and the buy/hold/sell rating split. Use this to qualify a candidate before including it — especially for multi-month/multi-year holds. For an ETF it returns exposure/profile plus real sector look-through weights (no company statements).",
+      "description": "Get company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B, EV/EBITDA, FCF yield, earnings yield), quality (margins, ROE, ROIC, debt/equity), growth, AND the forward analyst view \u2014 consensus price target with upside vs price, and the buy/hold/sell rating split. Use this to qualify a candidate before including it \u2014 especially for multi-month/multi-year holds. For an ETF it returns exposure/profile plus real sector look-through weights (no company statements).",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -586,7 +116,7 @@
     },
     {
       "name": "get_macro_snapshot",
-      "description": "Hard macro read for the Phase-2 regime call: the current Treasury curve (3M/2Y/10Y/30Y with the 2s10s spread — inversion flag), key economic indicators (real GDP, CPI, inflation YoY, unemployment, Fed funds rate, consumer sentiment), and today's sector rotation (leaders/laggards). Call this alongside web_search — the snapshot is the data, web_search is the narrative. No arguments.",
+      "description": "Hard macro read for the Phase-2 regime call: the current Treasury curve (3M/2Y/10Y/30Y with the 2s10s spread \u2014 inversion flag), key economic indicators (real GDP, CPI, inflation YoY, unemployment, Fed funds rate, consumer sentiment), and today's sector rotation (leaders/laggards). Call this alongside web_search \u2014 the snapshot is the data, web_search is the narrative. No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -594,7 +124,7 @@
     },
     {
       "name": "get_sec_filings",
-      "description": "Primary-source due diligence: a company's latest SEC filings — 10-K (annual) and 10-Q (quarterly) statements, plus 8-K material events (item 2.02 = the earnings release) — with dates and links. Use it to verify the fundamentals story and check for material events before committing to a multi-month/multi-year hold. US filers only; most ETFs and foreign tickers aren't in EDGAR.",
+      "description": "Primary-source due diligence: a company's latest SEC filings \u2014 10-K (annual) and 10-Q (quarterly) statements, plus 8-K material events (item 2.02 = the earnings release) \u2014 with dates and links. Use it to verify the fundamentals story and check for material events before committing to a multi-month/multi-year hold. US filers only; most ETFs and foreign tickers aren't in EDGAR.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -610,7 +140,7 @@
     },
     {
       "name": "get_short_interest",
-      "description": "Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it as crowding/sentiment context (a heavily-shorted name carries squeeze risk in either direction), not as a live read. No data for ETFs, crypto, FX or futures.",
+      "description": "Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag \u2014 use it as crowding/sentiment context (a heavily-shorted name carries squeeze risk in either direction), not as a live read. No data for ETFs, crypto, FX or futures.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -642,7 +172,7 @@
     },
     {
       "name": "get_derivatives_context",
-      "description": "Crypto-perp positioning from Binance: funding rate (crowding), open interest (committed leverage), and global long/short account ratio (retail skew). The crypto analog to short-interest/options sentiment — use it when a holding/candidate is a crypto perp. Crypto perps only (BTC, ETH, SOL…), not equities/FX/futures.",
+      "description": "Crypto-perp positioning from Binance: funding rate (crowding), open interest (committed leverage), and global long/short account ratio (retail skew). The crypto analog to short-interest/options sentiment \u2014 use it when a holding/candidate is a crypto perp. Crypto perps only (BTC, ETH, SOL\u2026), not equities/FX/futures.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -658,7 +188,7 @@
     },
     {
       "name": "get_earnings",
-      "description": "For a SINGLE ticker: its next earnings date + EPS estimate, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use it to judge one holding/candidate — is a print imminent (gap risk), and does the company have a history of beating or missing. For the forward \"who reports when\" across many names, use get_earnings_calendar. US equities only — no ETFs, crypto, FX or futures.",
+      "description": "For a SINGLE ticker: its next earnings date + EPS estimate, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use it to judge one holding/candidate \u2014 is a print imminent (gap risk), and does the company have a history of beating or missing. For the forward \"who reports when\" across many names, use get_earnings_calendar. US equities only \u2014 no ETFs, crypto, FX or futures.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -674,7 +204,7 @@
     },
     {
       "name": "get_earnings_calendar",
-      "description": "Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it.",
+      "description": "Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing \u2014 a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -691,7 +221,7 @@
             "items": {
               "type": "string"
             },
-            "description": "optional — narrow to these tickers"
+            "description": "optional \u2014 narrow to these tickers"
           }
         },
         "required": [
@@ -705,20 +235,20 @@
     },
     {
       "name": "get_coverage",
-      "description": "The Analyst's researched coverage — the living per-name theses you can build a book from (a variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, and the status). Prefer constructing from a RESEARCHED name (a thesis + a target) over a raw screen hit. Optionally filter by sector. Read-only.",
+      "description": "The Analyst's researched coverage \u2014 the living per-name theses you can build a book from (a variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, and the status). Prefer constructing from a RESEARCHED name (a thesis + a target) over a raw screen hit. Optionally filter by sector. Read-only.",
       "input_schema": {
         "type": "object",
         "properties": {
           "sector": {
             "type": "string",
-            "description": "optional — narrow to one sector, e.g. Technology"
+            "description": "optional \u2014 narrow to one sector, e.g. Technology"
           }
         }
       }
     },
     {
       "name": "get_chart",
-      "description": "Render a candlestick chart IMAGE for ONE name and look at it directly. Your job is allocation, not entry timing, so use this for the questions a picture answers better than a number: where a candidate sits in its multi-year range, whether a holding's trend is intact or broken, how ugly a drawdown was, what a long base looks like. Prefer weekly/monthly for a multi-month or multi-year hold; a daily view is for judging whether to phase into a position now or wait. Numbers (valuation, risk metrics, correlations) still decide the WEIGHT — this only informs the read. Set show_to_user true when the picture is part of the case you're making to the user, so they see what you saw.",
+      "description": "Render a candlestick chart IMAGE for ONE name and look at it directly. Your job is allocation, not entry timing, so use this for the questions a picture answers better than a number: where a candidate sits in its multi-year range, whether a holding's trend is intact or broken, how ugly a drawdown was, what a long base looks like. Prefer weekly/monthly for a multi-month or multi-year hold; a daily view is for judging whether to phase into a position now or wait. Numbers (valuation, risk metrics, correlations) still decide the WEIGHT \u2014 this only informs the read. Set show_to_user true when the picture is part of the case you're making to the user, so they see what you saw.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -744,11 +274,11 @@
           },
           "indicators": {
             "type": "string",
-            "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
+            "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) \u2014 best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
           },
           "show_to_user": {
             "type": "boolean",
-            "description": "Set true whenever this chart relates to the user's ACTUAL setup — you are defining, validating, or refining their entry / stop / take-profit or reading the market structure behind it, or they asked to see it. In those cases the user wants to see what you are looking at, so show it. Leave false / omit ONLY for a quick throwaway internal peek that does not inform the setup under discussion; such a check must NOT appear in the chat."
+            "description": "Set true whenever this chart relates to the user's ACTUAL setup \u2014 you are defining, validating, or refining their entry / stop / take-profit or reading the market structure behind it, or they asked to see it. In those cases the user wants to see what you are looking at, so show it. Leave false / omit ONLY for a quick throwaway internal peek that does not inform the setup under discussion; such a check must NOT appear in the chat."
           }
         },
         "required": [
@@ -759,7 +289,7 @@
     },
     {
       "name": "get_market_hours",
-      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
+      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30\u201316:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something \u2014 \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -776,7 +306,7 @@
               "forex",
               "crypto"
             ],
-            "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
+            "description": "the instrument's class, when you know it \u2014 it picks the right trading calendar. Omit it and the class is inferred from the ticker."
           }
         },
         "required": [
@@ -786,7 +316,7 @@
     },
     {
       "name": "get_sector_view",
-      "description": "The house SECTOR VIEW published by Pythia (the strategy desk): the named market regime, what would break that read, and each sector's stance as an active weight against the benchmark — plus how each stance is doing so far. Call it for \"what's our sector view\", \"which sectors do we like\", \"what's the house view\", \"are we overweight tech\", \"what's the current forecast\". READ-ONLY: it reports a view that already exists. It is a broadcast written for everyone and knows NOTHING about this user's book — never connect it to their positions. If the user wants a NEW or CHANGED view, that is Pythia's desk, not this tool.",
+      "description": "The house SECTOR VIEW published by Pythia (the strategy desk): the named market regime, what would break that read, and each sector's stance as an active weight against the benchmark \u2014 plus how each stance is doing so far. Call it for \"what's our sector view\", \"which sectors do we like\", \"what's the house view\", \"are we overweight tech\", \"what's the current forecast\". READ-ONLY: it reports a view that already exists. It is a broadcast written for everyone and knows NOTHING about this user's book \u2014 never connect it to their positions. If the user wants a NEW or CHANGED view, that is Pythia's desk, not this tool.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -800,7 +330,7 @@
     },
     {
       "name": "get_trading_context",
-      "description": "The user's trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities and open positions. Use it to keep a list ACTIONABLE — the account size a name has to be sizeable in, and what the user already holds. No arguments.",
+      "description": "The user's trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities and open positions. Use it to keep a list ACTIONABLE \u2014 the account size a name has to be sizeable in, and what the user already holds. No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -808,7 +338,7 @@
     },
     {
       "name": "check_broker_symbol",
-      "description": "Check whether a candidate is actually TRADABLE at the user's connected live broker, and what the broker calls it. A name that screens beautifully but the broker does not list is a dead candidate — check before you commit it to the list, and drop or flag it if it is unavailable. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.",
+      "description": "Check whether a candidate is actually TRADABLE at the user's connected live broker, and what the broker calls it. A name that screens beautifully but the broker does not list is a dead candidate \u2014 check before you commit it to the list, and drop or flag it if it is unavailable. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -824,7 +354,7 @@
     },
     {
       "name": "screen_candidates",
-      "description": "Screen the US universe for names that fit the scan's shape — the grounded discovery leg (Phase 2). Filter by sector, market cap, price, beta, dividend, and a liquidity floor (volume). NOTE: this is a FUNDAMENTAL & liquidity screen — it CANNOT filter for chart setups (52-week-high, base, RSI). For a technical angle, use it to define a liquid, in-sector universe, then confirm the setup per-name with get_candles/get_indicators. Returns a compact list; qualify each hit before listing it.",
+      "description": "Screen the US universe for names that fit the scan's shape \u2014 the grounded discovery leg (Phase 2). Filter by sector, market cap, price, beta, dividend, and a liquidity floor (volume). NOTE: this is a FUNDAMENTAL & liquidity screen \u2014 it CANNOT filter for chart setups (52-week-high, base, RSI). For a technical angle, use it to define a liquid, in-sector universe, then confirm the setup per-name with get_candles/get_indicators. Returns a compact list; qualify each hit before listing it.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -846,7 +376,7 @@
           },
           "priceMoreThan": {
             "type": "number",
-            "description": "min share price (a tradability floor — e.g. 5 to drop penny names)"
+            "description": "min share price (a tradability floor \u2014 e.g. 5 to drop penny names)"
           },
           "priceLowerThan": {
             "type": "number",
@@ -866,7 +396,7 @@
           },
           "volumeMoreThan": {
             "type": "number",
-            "description": "min average volume — the liquidity floor; set it for tradability"
+            "description": "min average volume \u2014 the liquidity floor; set it for tradability"
           },
           "country": {
             "type": "string",
@@ -878,14 +408,14 @@
           },
           "limit": {
             "type": "number",
-            "description": "max results 1–50 (default 25)"
+            "description": "max results 1\u201350 (default 25)"
           }
         }
       }
     },
     {
       "name": "get_market_movers",
-      "description": "Today's biggest movers — the momentum / gap / \"what's moving\" starting pool for Phase-2 discovery. kind=\"gainers\" (biggest % up), \"losers\" (biggest % down — short pool), or \"active\" (highest volume). Grounded discovery, not a watchlist: qualify every name (relative strength, tradability, a real catalyst) before it makes the list. US-listed.",
+      "description": "Today's biggest movers \u2014 the momentum / gap / \"what's moving\" starting pool for Phase-2 discovery. kind=\"gainers\" (biggest % up), \"losers\" (biggest % down \u2014 short pool), or \"active\" (highest volume). Grounded discovery, not a watchlist: qualify every name (relative strength, tradability, a real catalyst) before it makes the list. US-listed.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -900,7 +430,7 @@
           },
           "limit": {
             "type": "number",
-            "description": "how many to return, 1–50 (default 20)"
+            "description": "how many to return, 1\u201350 (default 20)"
           }
         },
         "required": [
@@ -910,7 +440,7 @@
     },
     {
       "name": "get_sector_snapshot",
-      "description": "Today's sector rotation — every sector ranked leaders→laggards by average move. Use it in Phase 2 for a sector-rotation angle (find the leading/lagging groups, then screen_candidates INSIDE them), and in Phase 3 as the sector leg of the relative-strength check (is the name's sector leading?). No arguments.",
+      "description": "Today's sector rotation \u2014 every sector ranked leaders\u2192laggards by average move. Use it in Phase 2 for a sector-rotation angle (find the leading/lagging groups, then screen_candidates INSIDE them), and in Phase 3 as the sector leg of the relative-strength check (is the name's sector leading?). No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -918,7 +448,7 @@
     },
     {
       "name": "get_analyst_actions",
-      "description": "Recent analyst rating changes — a catalyst pool beyond earnings. With NO symbols: the market-wide latest upgrades/downgrades feed (Phase-2 discovery of ratings-driven names). With symbols: each name's recent rating actions (Phase-3 validation of a shortlist — is a fresh upgrade/downgrade backing the move?). US-listed equities.",
+      "description": "Recent analyst rating changes \u2014 a catalyst pool beyond earnings. With NO symbols: the market-wide latest upgrades/downgrades feed (Phase-2 discovery of ratings-driven names). With symbols: each name's recent rating actions (Phase-3 validation of a shortlist \u2014 is a fresh upgrade/downgrade backing the move?). US-listed equities.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -927,11 +457,11 @@
             "items": {
               "type": "string"
             },
-            "description": "optional — narrow to these tickers for a per-name read; omit for the market-wide discovery feed"
+            "description": "optional \u2014 narrow to these tickers for a per-name read; omit for the market-wide discovery feed"
           },
           "limit": {
             "type": "number",
-            "description": "max rows for the market-wide feed, 1–50 (default 25)"
+            "description": "max rows for the market-wide feed, 1\u201350 (default 25)"
           }
         }
       }
@@ -989,7 +519,7 @@
     },
     {
       "name": "get_candles",
-      "description": "Fetch recent OHLCV candles for a ticker + timeframe — the exact price structure to name the setup and run the structure-respect check (swing highs/lows, prior-day levels, breakout shelves, base/range). Baseline Phase-3 tool: read the structure from the candles before you score `technical`. Always call it before committing to a named setup or a level.",
+      "description": "Fetch recent OHLCV candles for a ticker + timeframe \u2014 the exact price structure to name the setup and run the structure-respect check (swing highs/lows, prior-day levels, breakout shelves, base/range). Baseline Phase-3 tool: read the structure from the candles before you score `technical`. Always call it before committing to a named setup or a level.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1011,7 +541,7 @@
               "week",
               "month"
             ],
-            "description": "Candle timeframe. 2hr and 4hr are aggregated server-side from native 1hr bars into true 2hr/4hr OHLCV (Yahoo has no native 2hr/4hr); every other resolution is a native interval. Sub-hour history is limited (1min ~5 days, 5/15/30min ~weeks) — match the timeframe to the setup."
+            "description": "Candle timeframe. 2hr and 4hr are aggregated server-side from native 1hr bars into true 2hr/4hr OHLCV (Yahoo has no native 2hr/4hr); every other resolution is a native interval. Sub-hour history is limited (1min ~5 days, 5/15/30min ~weeks) \u2014 match the timeframe to the setup."
           }
         },
         "required": [
@@ -1022,7 +552,7 @@
     },
     {
       "name": "get_indicators",
-      "description": "Compute exact indicator VALUES from recent candles — the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Use it to CONFIRM the technical read with hard numbers: price vs EMA/VWAP for location, RSI for momentum/divergence, MACD for trend, ATR for how violent the name is. Price action / structure (get_candles) leads; indicators only confirm — a name clean on price with soft indicators is a lower `technical` score, not a reject.",
+      "description": "Compute exact indicator VALUES from recent candles \u2014 the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Use it to CONFIRM the technical read with hard numbers: price vs EMA/VWAP for location, RSI for momentum/divergence, MACD for trend, ATR for how violent the name is. Price action / structure (get_candles) leads; indicators only confirm \u2014 a name clean on price with soft indicators is a lower `technical` score, not a reject.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1060,7 +590,7 @@
     },
     {
       "name": "get_chart",
-      "description": "Render an actual candlestick chart IMAGE (KLineCharts, optional indicator overlays) and look at it directly for VISUAL / structural analysis — chart patterns, trend, where price sits vs moving averages / VWAP, base/breakout geometry. Use it to CONFIRM the named setup on the strongest names. EXPENSIVE (image render + vision) — reserve it for the top shortlist and the Kairos single-pick, NOT every candidate. For exact numeric levels prefer get_candles.",
+      "description": "Render an actual candlestick chart IMAGE (KLineCharts, optional indicator overlays) and look at it directly for VISUAL / structural analysis \u2014 chart patterns, trend, where price sits vs moving averages / VWAP, base/breakout geometry. Use it to CONFIRM the named setup on the strongest names. EXPENSIVE (image render + vision) \u2014 reserve it for the top shortlist and the Kairos single-pick, NOT every candidate. For exact numeric levels prefer get_candles.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1086,7 +616,7 @@
           },
           "indicators": {
             "type": "string",
-            "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
+            "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) \u2014 best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
           }
         },
         "required": [
@@ -1097,7 +627,7 @@
     },
     {
       "name": "get_orderblocks",
-      "description": "Detect ORDER BLOCKS on a plain candlestick chart (one ticker + timeframe): the last opposing candle/cluster before an impulsive structure break, whether it is fresh/untested or mitigated, and its zone vs current price. Angle-triggered — reach for it when the scan angle is structure / supply-demand / entry-zone hunting. Levels are approximate; confirm exact prices with get_candles.",
+      "description": "Detect ORDER BLOCKS on a plain candlestick chart (one ticker + timeframe): the last opposing candle/cluster before an impulsive structure break, whether it is fresh/untested or mitigated, and its zone vs current price. Angle-triggered \u2014 reach for it when the scan angle is structure / supply-demand / entry-zone hunting. Levels are approximate; confirm exact prices with get_candles.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1119,7 +649,7 @@
               "week",
               "month"
             ],
-            "description": "Chart timeframe — read the orderblocks on the timeframe(s) you trade on."
+            "description": "Chart timeframe \u2014 read the orderblocks on the timeframe(s) you trade on."
           }
         },
         "required": [
@@ -1130,7 +660,7 @@
     },
     {
       "name": "get_false_breaks",
-      "description": "Detect FALSE BREAKS / liquidity sweeps on a plain candlestick chart (one ticker + timeframe): where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Angle-triggered — reach for it for a failed-breakout / reversal / squeeze angle. Levels are approximate; confirm exact prices with get_candles.",
+      "description": "Detect FALSE BREAKS / liquidity sweeps on a plain candlestick chart (one ticker + timeframe): where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Angle-triggered \u2014 reach for it for a failed-breakout / reversal / squeeze angle. Levels are approximate; confirm exact prices with get_candles.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1152,7 +682,7 @@
               "week",
               "month"
             ],
-            "description": "Chart timeframe — read the sweeps on the timeframe(s) you trade on."
+            "description": "Chart timeframe \u2014 read the sweeps on the timeframe(s) you trade on."
           }
         },
         "required": [
@@ -1179,7 +709,7 @@
     },
     {
       "name": "get_earnings",
-      "description": "For a SINGLE ticker: its next earnings date + EPS estimate, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use it to qualify one scan candidate — is a print imminent (gap risk), and does the name have a track record of beating or missing. For the forward \"who reports when\" across a period, use get_earnings_calendar. US equities only.",
+      "description": "For a SINGLE ticker: its next earnings date + EPS estimate, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use it to qualify one scan candidate \u2014 is a print imminent (gap risk), and does the name have a track record of beating or missing. For the forward \"who reports when\" across a period, use get_earnings_calendar. US equities only.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1195,7 +725,7 @@
     },
     {
       "name": "get_earnings_calendar",
-      "description": "Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for the forward-looking \"who reports when\" — especially for week/multi-day scans.",
+      "description": "Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for the forward-looking \"who reports when\" \u2014 especially for week/multi-day scans.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1212,7 +742,7 @@
             "items": {
               "type": "string"
             },
-            "description": "optional — narrow to these tickers"
+            "description": "optional \u2014 narrow to these tickers"
           }
         },
         "required": [
@@ -1239,7 +769,7 @@
     },
     {
       "name": "get_cycle_analysis",
-      "description": "Detect recurring cycles in a stock's price history. Two modes: \"price\" finds the dominant peak-to-peak / trough-to-trough interval, tells you the current phase, and estimates the next turning point. \"calendar\" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking with the historical pattern. Use \"price\" for recurring-interval / cyclic-window theses (\"cycles every ~6 weeks\"); use \"calendar\" for seasonal / calendar-pattern theses (\"June is always weak\"). The angle makes the mode clear — pick it directly rather than asking which they mean.",
+      "description": "Detect recurring cycles in a stock's price history. Two modes: \"price\" finds the dominant peak-to-peak / trough-to-trough interval, tells you the current phase, and estimates the next turning point. \"calendar\" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3\u20135 years \u2014 average return, hit rate, and whether this year is tracking with the historical pattern. Use \"price\" for recurring-interval / cyclic-window theses (\"cycles every ~6 weeks\"); use \"calendar\" for seasonal / calendar-pattern theses (\"June is always weak\"). The angle makes the mode clear \u2014 pick it directly rather than asking which they mean.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1265,7 +795,7 @@
               },
               "month_end": {
                 "type": "number",
-                "description": "1-based month number. End month — same as month_start for a single month."
+                "description": "1-based month number. End month \u2014 same as month_start for a single month."
               },
               "day_start": {
                 "type": "number",
@@ -1293,7 +823,7 @@
     },
     {
       "name": "get_short_interest",
-      "description": "Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it for squeeze potential and crowded-bearish-positioning context on a scan candidate, not as a live read. No data for ETFs, crypto, FX or futures.",
+      "description": "Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag \u2014 use it for squeeze potential and crowded-bearish-positioning context on a scan candidate, not as a live read. No data for ETFs, crypto, FX or futures.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1325,7 +855,7 @@
     },
     {
       "name": "get_derivatives_context",
-      "description": "Crypto-perp positioning from Binance: funding rate (who pays to hold the trade — a crowding signal), open interest (committed leverage), and the global long/short account ratio (retail skew). This is the crypto analog to short-interest/options sentiment. Crypto perps only (BTC, ETH, SOL…) — not equities, FX or traditional futures.",
+      "description": "Crypto-perp positioning from Binance: funding rate (who pays to hold the trade \u2014 a crowding signal), open interest (committed leverage), and the global long/short account ratio (retail skew). This is the crypto analog to short-interest/options sentiment. Crypto perps only (BTC, ETH, SOL\u2026) \u2014 not equities, FX or traditional futures.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1344,7 +874,7 @@
     },
     {
       "name": "get_market_hours",
-      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
+      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30\u201316:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something \u2014 \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1361,7 +891,7 @@
               "forex",
               "crypto"
             ],
-            "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
+            "description": "the instrument's class, when you know it \u2014 it picks the right trading calendar. Omit it and the class is inferred from the ticker."
           }
         },
         "required": [
@@ -1377,7 +907,7 @@
     },
     {
       "name": "get_consensus",
-      "description": "What the Street thinks about a stock — forward consensus estimates (EPS/revenue/EBITDA, next fiscal year), the consensus price target + range, the rating distribution, and the RATING REVISION TREND (are ratings migrating up or down). This is the variant-perception anchor: form your own view, then compare it here. US equities.",
+      "description": "What the Street thinks about a stock \u2014 forward consensus estimates (EPS/revenue/EBITDA, next fiscal year), the consensus price target + range, the rating distribution, and the RATING REVISION TREND (are ratings migrating up or down). This is the variant-perception anchor: form your own view, then compare it here. US equities.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1393,7 +923,7 @@
     },
     {
       "name": "compute_valuation",
-      "description": "Compute OUR price target for a stock, deterministically: a justified multiple × a forward metric, with the GAP vs the Street consensus. Supply `multiple` to express your justified re-rating (the edge lives here) — omit it to anchor on the stock’s own historical range. `forward_metric` overrides the consensus estimate with your own number (the other place an edge can live). Supply `scenarios` to get a REAL bear/bull — each leg priced off its own multiple AND its own earnings; without it the band is only a ±15% re-rate on unchanged earnings, which is NOT a downside case and must never be read as one (the reply states which you got). method: pe (× forward EPS), ev_sales / ev_ebitda (× forward revenue/EBITDA, needs shares_out + net_debt for the equity bridge).",
+      "description": "Compute OUR price target for a stock, deterministically: a justified multiple \u00d7 a forward metric, with the GAP vs the Street consensus. Supply `multiple` to express your justified re-rating (the edge lives here) \u2014 omit it to anchor on the stock\u2019s own historical range. `forward_metric` overrides the consensus estimate with your own number (the other place an edge can live). Supply `scenarios` to get a REAL bear/bull \u2014 each leg priced off its own multiple AND its own earnings; without it the band is only a \u00b115% re-rate on unchanged earnings, which is NOT a downside case and must never be read as one (the reply states which you got). method: pe (\u00d7 forward EPS), ev_sales / ev_ebitda (\u00d7 forward revenue/EBITDA, needs shares_out + net_debt for the equity bridge).",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1412,7 +942,7 @@
           },
           "multiple": {
             "type": "number",
-            "description": "Your justified multiple (e.g. 28 for 28x). Omit to derive from the stock’s own historical range."
+            "description": "Your justified multiple (e.g. 28 for 28x). Omit to derive from the stock\u2019s own historical range."
           },
           "forward_metric": {
             "type": "number",
@@ -1420,19 +950,19 @@
           },
           "current_price": {
             "type": "number",
-            "description": "Optional — current price, to also report upside %."
+            "description": "Optional \u2014 current price, to also report upside %."
           },
           "shares_out": {
             "type": "number",
-            "description": "Shares outstanding — required for ev_* (the EV→equity bridge)."
+            "description": "Shares outstanding \u2014 required for ev_* (the EV\u2192equity bridge)."
           },
           "net_debt": {
             "type": "number",
-            "description": "Net debt — for ev_* (defaults 0)."
+            "description": "Net debt \u2014 for ev_* (defaults 0)."
           },
           "scenarios": {
             "type": "object",
-            "description": "Your bear/bull CASES. In a real downturn the multiple compresses AND earnings fall — model both. Each leg takes its own `multiple` and/or `forward_metric`; whichever you omit inherits the base. Omit a leg to leave that side as plain ±15% sensitivity.",
+            "description": "Your bear/bull CASES. In a real downturn the multiple compresses AND earnings fall \u2014 model both. Each leg takes its own `multiple` and/or `forward_metric`; whichever you omit inherits the base. Omit a leg to leave that side as plain \u00b115% sensitivity.",
             "properties": {
               "bear": {
                 "type": "object",
@@ -1486,7 +1016,7 @@
     },
     {
       "name": "get_sec_filings",
-      "description": "What the company actually filed with the SEC: latest 8-K (2.02 = earnings release), 10-Q, 10-K, with dates + links. Free EDGAR read — confirm what happened, don't rely on memory. US filers only.",
+      "description": "What the company actually filed with the SEC: latest 8-K (2.02 = earnings release), 10-Q, 10-K, with dates + links. Free EDGAR read \u2014 confirm what happened, don't rely on memory. US filers only.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1518,7 +1048,7 @@
     },
     {
       "name": "get_stock_peers",
-      "description": "The fundamental peer cohort (same sector/size) for a ticker — the comp set for a relative-multiple argument.",
+      "description": "The fundamental peer cohort (same sector/size) for a ticker \u2014 the comp set for a relative-multiple argument.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1534,7 +1064,7 @@
     },
     {
       "name": "get_sector_snapshot",
-      "description": "Today’s sector rotation — every sector ranked leaders→laggards. Backdrop for whether the group is a tailwind or headwind. No arguments.",
+      "description": "Today\u2019s sector rotation \u2014 every sector ranked leaders\u2192laggards. Backdrop for whether the group is a tailwind or headwind. No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -1582,7 +1112,7 @@
     },
     {
       "name": "get_trading_context",
-      "description": "The user's live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities, whether it is the SELECTED one, and the positions currently open in it. Call it before you size anything, commit to a venue, or answer any question about accounts, balances, buying power or what the user is already holding — never guess these.",
+      "description": "The user's live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities, whether it is the SELECTED one, and the positions currently open in it. Call it before you size anything, commit to a venue, or answer any question about accounts, balances, buying power or what the user is already holding \u2014 never guess these.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -1590,7 +1120,7 @@
     },
     {
       "name": "check_broker_symbol",
-      "description": "Check whether a name is actually TRADABLE at the user's connected live broker, and what the broker calls it. Coverage on a name the user physically cannot buy is research nobody can act on — check before initiating, and say so in the thesis if the name is unavailable. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.",
+      "description": "Check whether a name is actually TRADABLE at the user's connected live broker, and what the broker calls it. Coverage on a name the user physically cannot buy is research nobody can act on \u2014 check before initiating, and say so in the thesis if the name is unavailable. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1606,7 +1136,7 @@
     },
     {
       "name": "get_market_hours",
-      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
+      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30\u201316:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something \u2014 \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1623,7 +1153,7 @@
               "forex",
               "crypto"
             ],
-            "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
+            "description": "the instrument's class, when you know it \u2014 it picks the right trading calendar. Omit it and the class is inferred from the ticker."
           }
         },
         "required": [
@@ -1655,7 +1185,7 @@
     },
     {
       "name": "get_candles",
-      "description": "Fetch recent OHLCV candles for a ticker. Use this to read exact price structure — swing highs/lows, prior-day levels, breakout shelves — when mapping entry zones and reference levels. Always call this before committing numeric levels.",
+      "description": "Fetch recent OHLCV candles for a ticker. Use this to read exact price structure \u2014 swing highs/lows, prior-day levels, breakout shelves \u2014 when mapping entry zones and reference levels. Always call this before committing numeric levels.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1677,7 +1207,7 @@
               "week",
               "month"
             ],
-            "description": "Candle timeframe. 2hr and 4hr are aggregated server-side from native 1hr bars into true 2hr/4hr OHLCV (Yahoo has no native 2hr/4hr); every other resolution is a native interval. Sub-hour history is limited (1min ~5 days, 5/15/30min ~weeks) — match the timeframe to the setup."
+            "description": "Candle timeframe. 2hr and 4hr are aggregated server-side from native 1hr bars into true 2hr/4hr OHLCV (Yahoo has no native 2hr/4hr); every other resolution is a native interval. Sub-hour history is limited (1min ~5 days, 5/15/30min ~weeks) \u2014 match the timeframe to the setup."
           }
         },
         "required": [
@@ -1688,7 +1218,7 @@
     },
     {
       "name": "get_price_action",
-      "description": "Momentum/positioning snapshot for a ticker: 1d/5d/1m/3m % moves, position within the 1y range, and relative volume. A fast read on whether the name is moving the way the thesis claims and whether volume backs it — call it early, before drilling into candles.",
+      "description": "Momentum/positioning snapshot for a ticker: 1d/5d/1m/3m % moves, position within the 1y range, and relative volume. A fast read on whether the name is moving the way the thesis claims and whether volume backs it \u2014 call it early, before drilling into candles.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1704,7 +1234,7 @@
     },
     {
       "name": "get_peers",
-      "description": "Fetch the fundamental PEER SET for a ticker (same sector/size cohort) — the candidate names it may move with. Use it in the Phase 2 correlation read to STOP GUESSING peers: pull the set, pick the ones that matter (close competitors, the sector/industry ETF, a lead-lag driver), then feed those into get_correlations to measure how tightly the asset ACTUALLY tracks each. US-listed equities/ETFs.",
+      "description": "Fetch the fundamental PEER SET for a ticker (same sector/size cohort) \u2014 the candidate names it may move with. Use it in the Phase 2 correlation read to STOP GUESSING peers: pull the set, pick the ones that matter (close competitors, the sector/industry ETF, a lead-lag driver), then feed those into get_correlations to measure how tightly the asset ACTUALLY tracks each. US-listed equities/ETFs.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1720,7 +1250,7 @@
     },
     {
       "name": "get_macro_snapshot",
-      "description": "Hard macro read for the Phase 2 regime call: the current Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today's sector rotation (leaders/laggards). The DATA half of the regime read — pair it with web_search for the narrative. Weight by horizon: real weight for swing, a lighter backdrop for intraday/day. No arguments.",
+      "description": "Hard macro read for the Phase 2 regime call: the current Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today's sector rotation (leaders/laggards). The DATA half of the regime read \u2014 pair it with web_search for the narrative. Weight by horizon: real weight for swing, a lighter backdrop for intraday/day. No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -1728,7 +1258,7 @@
     },
     {
       "name": "get_sector_snapshot",
-      "description": "Today's sector rotation — every sector ranked leaders→laggards by average move. Institutional mode: the sector leg of the relative-strength read (is the name's sector rotating IN or OUT?). No arguments.",
+      "description": "Today's sector rotation \u2014 every sector ranked leaders\u2192laggards by average move. Institutional mode: the sector leg of the relative-strength read (is the name's sector rotating IN or OUT?). No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -1744,7 +1274,7 @@
     },
     {
       "name": "check_broker_symbol",
-      "description": "Check whether a specific instrument is actually TRADABLE at the user's connected live broker, and what the broker calls it (e.g. NQ → US100.cash). Three answers: tradable true (with brokerSymbol), false (the broker answered and does not list it), or null (the broker could not be reached — UNKNOWN, never treat as unavailable). Call it before recommending or building anything on a live book: a perfect setup on an instrument the broker does not list cannot be traded. Paper and manual accept anything the app can price, so this is a live-broker question.",
+      "description": "Check whether a specific instrument is actually TRADABLE at the user's connected live broker, and what the broker calls it (e.g. NQ \u2192 US100.cash). Three answers: tradable true (with brokerSymbol), false (the broker answered and does not list it), or null (the broker could not be reached \u2014 UNKNOWN, never treat as unavailable). Call it before recommending or building anything on a live book: a perfect setup on an instrument the broker does not list cannot be traded. Paper and manual accept anything the app can price, so this is a live-broker question.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1760,7 +1290,7 @@
     },
     {
       "name": "get_correlations",
-      "description": "Pairwise correlation matrix (1y daily returns) for a set of tickers. Use it in the Phase 2 correlation read: include the traded asset alongside the names you suspect drive it — its sector/industry ETF, close peers (from get_peers), an index (SPY/QQQ), or a lead-lag driver (e.g. SMH for a chip name, BTC for a high-beta alt, a crude proxy for an E&P) — to measure how tightly it actually moves with each, beyond eyeballing charts. The numbers ground the market_sensitivity level + drivers you emit.",
+      "description": "Pairwise correlation matrix (1y daily returns) for a set of tickers. Use it in the Phase 2 correlation read: include the traded asset alongside the names you suspect drive it \u2014 its sector/industry ETF, close peers (from get_peers), an index (SPY/QQQ), or a lead-lag driver (e.g. SMH for a chip name, BTC for a high-beta alt, a crude proxy for an E&P) \u2014 to measure how tightly it actually moves with each, beyond eyeballing charts. The numbers ground the market_sensitivity level + drivers you emit.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1779,7 +1309,7 @@
     },
     {
       "name": "get_chart",
-      "description": "Render an actual TradingView candlestick chart IMAGE (with indicator overlays) and look at it directly, for VISUAL / structural analysis — chart patterns, false breaks, orderblocks, trendlines, where price sits vs moving averages / VWAP. Use this to decide which patterns work for the asset. For EXACT numeric levels prefer get_candles. One asset, setup stage only.",
+      "description": "Render an actual TradingView candlestick chart IMAGE (with indicator overlays) and look at it directly, for VISUAL / structural analysis \u2014 chart patterns, false breaks, orderblocks, trendlines, where price sits vs moving averages / VWAP. Use this to decide which patterns work for the asset. For EXACT numeric levels prefer get_candles. One asset, setup stage only.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1805,11 +1335,11 @@
           },
           "indicators": {
             "type": "string",
-            "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
+            "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) \u2014 best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
           },
           "show_to_user": {
             "type": "boolean",
-            "description": "Set true whenever this chart relates to the user's ACTUAL setup — you are defining, validating, or refining their entry / stop / take-profit or reading the market structure behind it, or they asked to see it. In those cases the user wants to see what you are looking at, so show it. Leave false / omit ONLY for a quick throwaway internal peek that does not inform the setup under discussion; such a check must NOT appear in the chat."
+            "description": "Set true whenever this chart relates to the user's ACTUAL setup \u2014 you are defining, validating, or refining their entry / stop / take-profit or reading the market structure behind it, or they asked to see it. In those cases the user wants to see what you are looking at, so show it. Leave false / omit ONLY for a quick throwaway internal peek that does not inform the setup under discussion; such a check must NOT appear in the chat."
           }
         },
         "required": [
@@ -1820,7 +1350,7 @@
     },
     {
       "name": "get_orderblocks",
-      "description": "Detect ORDER BLOCKS on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: the last opposing candle/cluster before an impulsive structure break (bullish OB = last down-candle before a rally; bearish OB = last up-candle before a selloff), whether each is fresh/untested or mitigated, and its zone vs current price. Reach for this in Phase 2/4 to find price-action entry zones and triggers — as easily as you would an indicator value. Levels are approximate; confirm exact prices with get_candles.",
+      "description": "Detect ORDER BLOCKS on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: the last opposing candle/cluster before an impulsive structure break (bullish OB = last down-candle before a rally; bearish OB = last up-candle before a selloff), whether each is fresh/untested or mitigated, and its zone vs current price. Reach for this in Phase 2/4 to find price-action entry zones and triggers \u2014 as easily as you would an indicator value. Levels are approximate; confirm exact prices with get_candles.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1842,7 +1372,7 @@
               "week",
               "month"
             ],
-            "description": "Chart timeframe — read the orderblocks on the timeframe(s) you trade on."
+            "description": "Chart timeframe \u2014 read the orderblocks on the timeframe(s) you trade on."
           },
           "show_to_user": {
             "type": "boolean",
@@ -1879,7 +1409,7 @@
               "week",
               "month"
             ],
-            "description": "Chart timeframe — read the sweeps on the timeframe(s) you trade on."
+            "description": "Chart timeframe \u2014 read the sweeps on the timeframe(s) you trade on."
           },
           "show_to_user": {
             "type": "boolean",
@@ -1894,7 +1424,7 @@
     },
     {
       "name": "get_indicators",
-      "description": "Compute exact indicator VALUES from recent candles — the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Use it to confirm a read with hard numbers: ATR for sizing an entry zone to volatility, price vs EMA / VWAP for location, RSI for momentum/divergence, MACD for trend. Price action leads; indicators only confirm.",
+      "description": "Compute exact indicator VALUES from recent candles \u2014 the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Use it to confirm a read with hard numbers: ATR for sizing an entry zone to volatility, price vs EMA / VWAP for location, RSI for momentum/divergence, MACD for trend. Price action leads; indicators only confirm.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1932,7 +1462,7 @@
     },
     {
       "name": "get_cycle_analysis",
-      "description": "Detect recurring cycles in a stock's price history. Two modes: \"price\" finds the dominant peak-to-peak / trough-to-trough interval, the current phase, and the next estimated turning point. \"calendar\" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking. Use \"price\" for recurring-interval / cyclic-window theses, \"calendar\" for seasonal / calendar-pattern theses. Pass `timeframe` on a \"price\" read to choose the resolution: a sub-hourly-to-hourly rung (1min–1hr) times a session-scale INTRADAY cycle (in bars); day/week/month (the default) times the multi-day swing cycle.",
+      "description": "Detect recurring cycles in a stock's price history. Two modes: \"price\" finds the dominant peak-to-peak / trough-to-trough interval, the current phase, and the next estimated turning point. \"calendar\" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3\u20135 years \u2014 average return, hit rate, and whether this year is tracking. Use \"price\" for recurring-interval / cyclic-window theses, \"calendar\" for seasonal / calendar-pattern theses. Pass `timeframe` on a \"price\" read to choose the resolution: a sub-hourly-to-hourly rung (1min\u20131hr) times a session-scale INTRADAY cycle (in bars); day/week/month (the default) times the multi-day swing cycle.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1960,7 +1490,7 @@
               "week",
               "month"
             ],
-            "description": "For \"price\" mode: the cycle resolution. 1min–1hr = intraday cycle (bars); day (default)/week/month = multi-day swing cycle. Ignored for \"calendar\"."
+            "description": "For \"price\" mode: the cycle resolution. 1min\u20131hr = intraday cycle (bars); day (default)/week/month = multi-day swing cycle. Ignored for \"calendar\"."
           },
           "calendar_window": {
             "type": "object",
@@ -1972,7 +1502,7 @@
               },
               "month_end": {
                 "type": "number",
-                "description": "1-based month number. End month — same as month_start for a single month."
+                "description": "1-based month number. End month \u2014 same as month_start for a single month."
               },
               "day_start": {
                 "type": "number",
@@ -2000,7 +1530,7 @@
     },
     {
       "name": "get_earnings",
-      "description": "Upcoming earnings date + EPS estimate for a ticker, plus recent quarterly actuals vs estimates. Use it as a catalyst check — is there an event inside the trade horizon that supports or blocks the setup. US equities only.",
+      "description": "Upcoming earnings date + EPS estimate for a ticker, plus recent quarterly actuals vs estimates. Use it as a catalyst check \u2014 is there an event inside the trade horizon that supports or blocks the setup. US equities only.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2016,7 +1546,7 @@
     },
     {
       "name": "get_earnings_calendar",
-      "description": "Upcoming earnings dates (with EPS/revenue estimates) for ALL companies reporting between two dates (YYYY-MM-DD, window up to ~3 months), optionally narrowed to specific symbols. The forward-looking \"who reports when\" — use it to scan for an event inside the call horizon, or to check a shortlist for gap risk. For one ticker's next date plus its beat/miss history, prefer get_earnings.",
+      "description": "Upcoming earnings dates (with EPS/revenue estimates) for ALL companies reporting between two dates (YYYY-MM-DD, window up to ~3 months), optionally narrowed to specific symbols. The forward-looking \"who reports when\" \u2014 use it to scan for an event inside the call horizon, or to check a shortlist for gap risk. For one ticker's next date plus its beat/miss history, prefer get_earnings.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2033,7 +1563,7 @@
             "items": {
               "type": "string"
             },
-            "description": "optional — narrow to these tickers"
+            "description": "optional \u2014 narrow to these tickers"
           }
         },
         "required": [
@@ -2044,7 +1574,7 @@
     },
     {
       "name": "get_fundamentals",
-      "description": "Company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B), quality (margins, ROE, debt/equity), and growth. Weight it by horizon — light for intraday/day calls, heavily for swing calls. ETFs return exposure/profile only.",
+      "description": "Company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B), quality (margins, ROE, debt/equity), and growth. Weight it by horizon \u2014 light for intraday/day calls, heavily for swing calls. ETFs return exposure/profile only.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2060,7 +1590,7 @@
     },
     {
       "name": "get_sec_filings",
-      "description": "Recent SEC filings for a US-listed equity: latest 8-K (item 2.02 earnings releases), 10-Q and 10-K with dates and links. On-demand deep dive when the thesis hinges on filed numbers or a material event — weight it more for swing horizons. US equities only.",
+      "description": "Recent SEC filings for a US-listed equity: latest 8-K (item 2.02 earnings releases), 10-Q and 10-K with dates and links. On-demand deep dive when the thesis hinges on filed numbers or a material event \u2014 weight it more for swing horizons. US equities only.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2127,7 +1657,7 @@
     },
     {
       "name": "get_market_hours",
-      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
+      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30\u201316:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something \u2014 \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2144,7 +1674,7 @@
               "forex",
               "crypto"
             ],
-            "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
+            "description": "the instrument's class, when you know it \u2014 it picks the right trading calendar. Omit it and the class is inferred from the ticker."
           }
         },
         "required": [
@@ -2154,7 +1684,7 @@
     },
     {
       "name": "get_fvg",
-      "description": "Fair-value gaps (3-candle imbalances) computed from OHLCV — exact bullish/bearish gap ranges, newest first, with whether each is still unfilled. Unfilled FVGs are draws + entry zones. SMC mode.",
+      "description": "Fair-value gaps (3-candle imbalances) computed from OHLCV \u2014 exact bullish/bearish gap ranges, newest first, with whether each is still unfilled. Unfilled FVGs are draws + entry zones. SMC mode.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2196,7 +1726,7 @@
     },
     {
       "name": "get_liquidity",
-      "description": "Liquidity pools from OHLCV: near-equal swing highs (buy-side, above) and lows (sell-side, below) where stops cluster — the exact levels price is drawn to sweep. SMC mode.",
+      "description": "Liquidity pools from OHLCV: near-equal swing highs (buy-side, above) and lows (sell-side, below) where stops cluster \u2014 the exact levels price is drawn to sweep. SMC mode.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2217,7 +1747,7 @@
     },
     {
       "name": "get_key_levels",
-      "description": "Exact prior-day and current-day high/low from OHLCV — the session \"draw on liquidity\" references (PDH/PDL). Useful in BOTH discretionary (prior-day levels) and SMC (session liquidity). Best on an intraday/day timeframe.",
+      "description": "Exact prior-day and current-day high/low from OHLCV \u2014 the session \"draw on liquidity\" references (PDH/PDL). Useful in BOTH discretionary (prior-day levels) and SMC (session liquidity). Best on an intraday/day timeframe.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2240,7 +1770,7 @@
   "axl": [
     {
       "name": "get_trading_context",
-      "description": "The user's live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities, whether it is the SELECTED one, and the positions currently open in it. Call it before you size anything, commit to a venue, or answer any question about accounts, balances, buying power or what the user is already holding — never guess these.",
+      "description": "The user's live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities, whether it is the SELECTED one, and the positions currently open in it. Call it before you size anything, commit to a venue, or answer any question about accounts, balances, buying power or what the user is already holding \u2014 never guess these.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -2248,7 +1778,7 @@
     },
     {
       "name": "check_broker_symbol",
-      "description": "Check whether a specific instrument is actually TRADABLE at the user's connected live broker, and what the broker calls it (e.g. NQ → US100.cash). Three answers: tradable true (with brokerSymbol), false (the broker answered and does not list it), or null (the broker could not be reached — UNKNOWN, never treat as unavailable). Call it before recommending or building anything on a live book: a perfect setup on an instrument the broker does not list cannot be traded. Paper and manual accept anything the app can price, so this is a live-broker question.",
+      "description": "Check whether a specific instrument is actually TRADABLE at the user's connected live broker, and what the broker calls it (e.g. NQ \u2192 US100.cash). Three answers: tradable true (with brokerSymbol), false (the broker answered and does not list it), or null (the broker could not be reached \u2014 UNKNOWN, never treat as unavailable). Call it before recommending or building anything on a live book: a perfect setup on an instrument the broker does not list cannot be traded. Paper and manual accept anything the app can price, so this is a live-broker question.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2264,7 +1794,7 @@
     },
     {
       "name": "get_watched_items",
-      "description": "Everything the user keeps in the app: Kairos calls, Mentor setups, portfolios (as books), Prometheus coverage, and Argus scans — with status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Call it for \"what am I watching / what have I got going / what's still open\", and before saying the user has nothing. Finished items are excluded unless asked for.",
+      "description": "Everything the user keeps in the app: Kairos calls, Mentor setups, portfolios (as books), Prometheus coverage, and Argus scans \u2014 with status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Call it for \"what am I watching / what have I got going / what's still open\", and before saying the user has nothing. Finished items are excluded unless asked for.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2280,22 +1810,22 @@
                 "scan"
               ]
             },
-            "description": "optional — narrow to these kinds. Omit for everything, which is the usual case."
+            "description": "optional \u2014 narrow to these kinds. Omit for everything, which is the usual case."
           },
           "symbol": {
             "type": "string",
-            "description": "optional — only items on this one name e.g. NVDA"
+            "description": "optional \u2014 only items on this one name e.g. NVDA"
           },
           "include_finished": {
             "type": "boolean",
-            "description": "include closed/finished items. Default false — finished work is history, not something being watched."
+            "description": "include closed/finished items. Default false \u2014 finished work is history, not something being watched."
           }
         }
       }
     },
     {
       "name": "get_performance",
-      "description": "The user's CLOSED-trade record: how many, win rate, net P&L, profit factor and expectancy, split by mode (paper/live/manual), by origin and by symbol — plus Kairos's own R-multiple record for closed calls. Optionally narrowed to a mode, a symbol or a date window. Win rates come back as PERCENTAGES already — never multiply them again. Use it for \"how have I done\", \"is paper working\", \"what's my win rate\". It reports history only; open positions and unrealized P&L are get_trading_context.",
+      "description": "The user's CLOSED-trade record: how many, win rate, net P&L, profit factor and expectancy, split by mode (paper/live/manual), by origin and by symbol \u2014 plus Kairos's own R-multiple record for closed calls. Optionally narrowed to a mode, a symbol or a date window. Win rates come back as PERCENTAGES already \u2014 never multiply them again. Use it for \"how have I done\", \"is paper working\", \"what's my win rate\". It reports history only; open positions and unrealized P&L are get_trading_context.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2306,11 +1836,11 @@
               "live",
               "manual"
             ],
-            "description": "optional — only trades in this mode. Omit to cover all of them."
+            "description": "optional \u2014 only trades in this mode. Omit to cover all of them."
           },
           "symbol": {
             "type": "string",
-            "description": "optional — only trades on this name e.g. NVDA"
+            "description": "optional \u2014 only trades on this name e.g. NVDA"
           },
           "from": {
             "type": "string",
@@ -2325,7 +1855,7 @@
     },
     {
       "name": "get_upcoming_events",
-      "description": "Dated events in a window (default the next 30 days): company earnings plus Fed and macro releases. By default scoped to the USER'S OWN names — the calls, setups, coverage and holdings they have in the app — so the answer is about their book, not the whole market; pass scope 'market' for everything. Use it for \"anything coming up\", \"what's the risk this week\", or before discussing timing around a name they hold.",
+      "description": "Dated events in a window (default the next 30 days): company earnings plus Fed and macro releases. By default scoped to the USER'S OWN names \u2014 the calls, setups, coverage and holdings they have in the app \u2014 so the answer is about their book, not the whole market; pass scope 'market' for everything. Use it for \"anything coming up\", \"what's the risk this week\", or before discussing timing around a name they hold.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2350,7 +1880,7 @@
     },
     {
       "name": "explain_concept",
-      "description": "A plain-language explanation of a trading concept, written for someone who has never traded — what it is, why it exists, what it costs them, and the mistake beginners make. Call it whenever the user asks what something means, or when you are about to use a term they may not know. Authored explanations cover the basics a beginner meets in this app: stops, targets, entries, risk, position size, drawdown, R, risk-reward, long vs short, order types, fills, invalidation, thesis, conviction, paper vs live, and why a stop being hit is not a failure. Anything else returns guidance on explaining it yourself. Use the text it gives you AS-IS rather than rewriting it. This is TEACHING, not advice: it explains what a stop is, it never says where the user's stop should go.",
+      "description": "A plain-language explanation of a trading concept, written for someone who has never traded \u2014 what it is, why it exists, what it costs them, and the mistake beginners make. Call it whenever the user asks what something means, or when you are about to use a term they may not know. Authored explanations cover the basics a beginner meets in this app: stops, targets, entries, risk, position size, drawdown, R, risk-reward, long vs short, order types, fills, invalidation, thesis, conviction, paper vs live, and why a stop being hit is not a failure. Anything else returns guidance on explaining it yourself. Use the text it gives you AS-IS rather than rewriting it. This is TEACHING, not advice: it explains what a stop is, it never says where the user's stop should go.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2366,7 +1896,7 @@
     },
     {
       "name": "set_experience_level",
-      "description": "Record how much trading experience this user has, so every desk knows how to talk to them. Set 'beginner' when it is clear from how they write — they ask what a basic term means, describe a goal with no mechanics, or say outright they are new. Set 'experienced' ONLY when they tell you so themselves (\"talk to me normally\", \"I've traded for years\"); you may not conclude it from jargon, and the attempt will be refused. Use 'unset' if they ask you to forget it. Pass source 'declared' when the user said it in their own words, 'inferred' when you worked it out. This changes how the desks WORD things — never what they decide, never a level or a size. Call it once when it becomes clear, not every turn.",
+      "description": "Record how much trading experience this user has, so every desk knows how to talk to them. Set 'beginner' when it is clear from how they write \u2014 they ask what a basic term means, describe a goal with no mechanics, or say outright they are new. Set 'experienced' ONLY when they tell you so themselves (\"talk to me normally\", \"I've traded for years\"); you may not conclude it from jargon, and the attempt will be refused. Use 'unset' if they ask you to forget it. Pass source 'declared' when the user said it in their own words, 'inferred' when you worked it out. This changes how the desks WORD things \u2014 never what they decide, never a level or a size. Call it once when it becomes clear, not every turn.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2377,7 +1907,7 @@
               "experienced",
               "unset"
             ],
-            "description": "'experienced' is only accepted with source 'declared' — you may not conclude it yourself."
+            "description": "'experienced' is only accepted with source 'declared' \u2014 you may not conclude it yourself."
           },
           "source": {
             "type": "string",
@@ -2396,7 +1926,7 @@
     },
     {
       "name": "get_market_brief",
-      "description": "Today's MARKET BRIEF — a short broadcast of what the world's markets are doing: the tape (US, Europe, Asia), what drove it overnight, rates, the dollar and commodities, major currency pairs, the macro picture, and the week's Fed releases and major earnings. Call it for \"what's going on today\", \"how are markets\", \"what's happening in the world\", \"anything I should know\", and for any question about global markets, geopolitics, macro data or currencies. It is written for everyone and knows NOTHING about this user — it never mentions their positions, and you must not connect it to them either. Relay it; do not rewrite it into advice. Costs a live write when stale, so call it once per conversation unless the user asks for a refresh.",
+      "description": "Today's MARKET BRIEF \u2014 a short broadcast of what the world's markets are doing: the tape (US, Europe, Asia), what drove it overnight, rates, the dollar and commodities, major currency pairs, the macro picture, and the week's Fed releases and major earnings. Call it for \"what's going on today\", \"how are markets\", \"what's happening in the world\", \"anything I should know\", and for any question about global markets, geopolitics, macro data or currencies. It is written for everyone and knows NOTHING about this user \u2014 it never mentions their positions, and you must not connect it to them either. Relay it; do not rewrite it into advice. Costs a live write when stale, so call it once per conversation unless the user asks for a refresh.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2409,7 +1939,7 @@
     },
     {
       "name": "get_market_hours",
-      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
+      "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30\u201316:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something \u2014 \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2426,7 +1956,7 @@
               "forex",
               "crypto"
             ],
-            "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
+            "description": "the instrument's class, when you know it \u2014 it picks the right trading calendar. Omit it and the class is inferred from the ticker."
           }
         },
         "required": [
@@ -2436,7 +1966,7 @@
     },
     {
       "name": "get_sector_view",
-      "description": "The house SECTOR VIEW published by Pythia (the strategy desk): the named market regime, what would break that read, and each sector's stance as an active weight against the benchmark — plus how each stance is doing so far. Call it for \"what's our sector view\", \"which sectors do we like\", \"what's the house view\", \"are we overweight tech\", \"what's the current forecast\". READ-ONLY: it reports a view that already exists. It is a broadcast written for everyone and knows NOTHING about this user's book — never connect it to their positions. If the user wants a NEW or CHANGED view, that is Pythia's desk, not this tool.",
+      "description": "The house SECTOR VIEW published by Pythia (the strategy desk): the named market regime, what would break that read, and each sector's stance as an active weight against the benchmark \u2014 plus how each stance is doing so far. Call it for \"what's our sector view\", \"which sectors do we like\", \"what's the house view\", \"are we overweight tech\", \"what's the current forecast\". READ-ONLY: it reports a view that already exists. It is a broadcast written for everyone and knows NOTHING about this user's book \u2014 never connect it to their positions. If the user wants a NEW or CHANGED view, that is Pythia's desk, not this tool.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -2458,7 +1988,7 @@
     },
     {
       "name": "get_sector_snapshot",
-      "description": "Today's sector rotation, every sector ranked leaders→laggards. Where money has actually been going — the tape against which your stance is a claim. No arguments.",
+      "description": "Today's sector rotation, every sector ranked leaders\u2192laggards. Where money has actually been going \u2014 the tape against which your stance is a claim. No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -2466,7 +1996,7 @@
     },
     {
       "name": "get_priced_in",
-      "description": "What the MARKET has already discounted: 5y and 10y breakeven inflation, the 5y5y forward, and the 10y TIPS real yield (FRED, daily). This is the benchmark your view has to beat — a regime call that merely restates what is priced is not a view. Breakevens carry an inflation risk premium, so they are not a pure forecast, and the market-implied POLICY PATH is not available to us. No arguments.",
+      "description": "What the MARKET has already discounted: 5y and 10y breakeven inflation, the 5y5y forward, and the 10y TIPS real yield (FRED, daily). This is the benchmark your view has to beat \u2014 a regime call that merely restates what is priced is not a view. Breakevens carry an inflation risk premium, so they are not a pure forecast, and the market-implied POLICY PATH is not available to us. No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -2474,7 +2004,7 @@
     },
     {
       "name": "get_coverage_by_sector",
-      "description": "OUR OWN analysts' book, aggregated by sector: how many active theses per sector, and which sectors we cover at all. The bottom-up cross-check for Phase 4 — where the book agrees with your top-down read that is your strongest basis, and where it disagrees you must say so rather than reconciling it away. No arguments.",
+      "description": "OUR OWN analysts' book, aggregated by sector: how many active theses per sector, and which sectors we cover at all. The bottom-up cross-check for Phase 4 \u2014 where the book agrees with your top-down read that is your strongest basis, and where it disagrees you must say so rather than reconciling it away. No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}

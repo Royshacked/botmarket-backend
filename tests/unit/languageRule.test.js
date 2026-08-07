@@ -29,7 +29,6 @@ const SERVICES = join(ROOT, 'services')
 const DESKS = [
     'analyst.agent.service.js',
     'axl.agent.service.js',
-    'idea.agent.service.js',
     'kairos.agent.service.js',
     'marketBrief.service.js',
     'mentor.agent.service.js',
@@ -38,7 +37,13 @@ const DESKS = [
     'strategy.agent.service.js',
 ]
 
-const src = f => readFileSync(join(SERVICES, f), 'utf-8')
+// A desk file may sit in services/ (marketBrief) or services/agents/ (the seven agents).
+const src = (f) => {
+    for (const d of [join(SERVICES, 'agents'), SERVICES]) {
+        try { return readFileSync(join(d, f), 'utf-8') } catch { /* try the next */ }
+    }
+    throw new Error(`desk source not found: ${f}`)
+}
 
 // ─── 1. what the rule says ────────────────────────────────────────────────────
 
@@ -83,7 +88,9 @@ test('enum fields stay canonical English in every language', () => {
 test('every desk appends the rule to its base prompt, exactly once', () => {
     for (const f of DESKS) {
         const s = src(f)
-        assert.match(s, /import \{[^}]*\bLANGUAGE_RULE\b[^}]*\} from '\.\/agentUtils\.js'/, `${f} does not import LANGUAGE_RULE`)
+        // `./` from services/ (marketBrief), `../` from services/agents/ — the specifier depends on
+        // where the desk lives, which is not what this guard is about.
+        assert.match(s, /import \{[^}]*\bLANGUAGE_RULE\b[^}]*\} from '\.\.?\/agentUtils\.js'/, `${f} does not import LANGUAGE_RULE`)
         const uses = s.match(/\+ LANGUAGE_RULE/g) ?? []
         assert.equal(uses.length, 1, `${f} appends LANGUAGE_RULE ${uses.length} times — expected exactly 1`)
     }
@@ -110,9 +117,14 @@ test('a NEW desk cannot be added without carrying the rule', () => {
     // mounting it (scanner.grounding.js cites `scanner_system_prompt.md L11` to explain which
     // doctrine it backs), and a prose mention is not a reason to demand the rule.
     const MOUNTS_BASE_PROMPT = /['"][^'"]*(_system_prompt|market_brief_prompt)\.md['"]/
-    const mounts = readdirSync(SERVICES)
-        .filter(f => f.endsWith('.js'))
-        .filter(f => MOUNTS_BASE_PROMPT.test(readFileSync(join(SERVICES, f), 'utf-8')))
+    // Both directories: the desks moved to services/agents/ (2026-08-07) but marketBrief.service
+    // mounts a base prompt from services/ and is a desk for this rule's purposes. Scanning only one
+    // would let the guard pass while seeing nothing.
+    const dirs = [SERVICES, join(SERVICES, 'agents')]
+    const mounts = dirs
+        .flatMap(d => readdirSync(d).filter(f => f.endsWith('.js')).map(f => ({ d, f })))
+        .filter(({ d, f }) => MOUNTS_BASE_PROMPT.test(readFileSync(join(d, f), 'utf-8')))
+        .map(({ f }) => f)
         .sort()
     assert.deepEqual(mounts, [...DESKS].sort(),
         'a service mounts a base system prompt but is not on the DESKS list (add it, and give it LANGUAGE_RULE)')

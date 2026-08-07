@@ -33,7 +33,6 @@ All three agents stream over Server-Sent Events; every router applies `requireAu
 
 | Agent | Route file | Endpoint | Controller |
 |---|---|---|---|
-| Trade | `api/idea/idea.routes.js` | `POST /api/idea/stream` | `streamIdea` | **ARCHIVED 2026-07-29 — not mounted** |
 | Portfolio | `api/portfolio/portfolio.routes.js` | `POST /api/portfolio/stream` | `streamPortfolio` |
 | Scanner | `api/scanner/scanner.routes.js` | `POST /api/scanner/stream` | `streamScanner` |
 
@@ -69,42 +68,25 @@ System prompts are hot-reloaded (mtime-gated) by `agentUtils.js` `makePromptLoad
 and sent as two cached content blocks — a stable base (`cache_control: ephemeral`) + a
 volatile context tail.
 
-### Trade agent — `services/idea.agent.service.js` — ⚠ ARCHIVED 2026-07-29
-Unreachable: `/api/idea` is no longer mounted, and its monitor (Minos) is not started.
-Superseded by Kairos (`call`) and Mentor (`setup`). Retained for reference; see the file header.
+### Trade agent — DELETED 2026-08-07
+Archived 2026-07-29 and unmounted throughout; the agent, `api/idea/`, `idea.stateParser.js` and
+`idea_system_prompt.md` were deleted on 2026-08-07. `git log` is the record. Superseded by Kairos
+(`call`) and Mentor (`setup`), both documented below. The `idea` KIND is untouched — it is still
+served by `/api/trade-ideas` and is what portfolio holdings ride.
 
-Prompt `idea_system_prompt.md`. Entry `chatStream` (non-stream `chat`). Tools:
-
-| Tool | Purpose |
-|---|---|
-| `web_search` | live web lookup |
-| `get_quote` | live price |
-| `get_price_action` | 1d/5d/1m/3m moves + range position + rel volume |
-| `get_candles` | OHLCV (2hr/4hr aggregated server-side) |
-| `get_indicators` | exact EMA/SMA/RSI/MACD/ATR/VWAP values — same math the monitor uses (shared `makeIndicatorsHandler`) |
-| `get_chart` | render a chart **image** for vision TA — own KLineCharts headless render (our FMP candles), chart-img/TradingView as fallback; Anthropic-only; shown to UI via `onChart` when `show_to_user` |
-| `get_cycle_analysis` | price-cycle / seasonal-window modes |
-| `get_earnings` | single-ticker earnings + beat/miss history |
-| `get_earnings_calendar` | forward earnings calendar (who reports when) |
-| `get_fundamentals` | sector / valuation / margins / ROE / growth |
-| `get_sec_filings` | SEC filings |
-| `get_short_interest` | short-interest |
-| `get_options_context` | options positioning |
-| `get_derivatives_context` | crypto perps |
-
-### Portfolio agent — `services/portfolio.agent.service.js`
+### Portfolio agent — `services/agents/portfolio.agent.service.js`
 Prompt `portfolio_system_prompt.md`. Tools add `get_quotes` (batch),
 `get_risk_metrics` (annualized vol + ATR → sizing), `get_correlations` (pairwise matrix →
 diversification), `get_fundamentals`, `get_earnings` (single-ticker + history),
 `get_earnings_calendar` (plus the shared sentiment tools).
 
-### Scanner agent — `services/scanner.agent.service.js`
+### Scanner agent — `services/agents/scanner.agent.service.js`
 Prompt `scanner_system_prompt.md`. Tools add `get_price_action` (1d/5d/1m/3m moves + range
 position + rel volume), `get_cycle_analysis` (price-cycle / seasonal modes), `get_quotes`,
 `get_risk_metrics`, `get_fundamentals`, `get_earnings` (single-ticker + history),
 `get_earnings_calendar` (plus shared sentiment tools).
 
-### Kairos agent — `services/kairos.agent.service.js` (tools in `services/kairos.tools.js`)
+### Kairos agent — `services/agents/kairos.agent.service.js` (tools in `services/tools/kairos.tools.js`)
 Prompt `kairos_system_prompt.md`. Discretionary day/swing **call** builder (single asset), a
 self-contained sibling of the Trade agent — it shares the **same 14-tool analysis kit** as Idea
 (reusing the pure providers + shared `marketData.tools.js` factories incl. `makeIndicatorsHandler`).
@@ -129,15 +111,9 @@ still stream to the user, e.g. `<ticker>`.) Each agent registers its own capture
   `<portfolio_mandate>` → `onMandate`, `<portfolio_thesis>` (post-hoc from raw)
 - **Scanner:** `<scan_list>` → `onScan`
 
-**Trade parse** — after streaming, `services/idea.stateParser.js` `_parseResponse` regex-
-extracts `<trade_idea>…</trade_idea>`, JSON-parses it, normalizes timeframes across the
-condition trees, and extracts the rolling `<state>` block. The visible `<state>` block (not
-the JSON) is what drives the frontend **Generate** button.
-
-**Minimum to emit** (`idea_system_prompt.md`): Asset, Direction (long/short),
-≥1 entry condition with a timeframe **or** `immediate:true`, Stop loss (not required for
-immediate), Quantity. When all are present the Generate button activates on its own
-(`ChatPanel.jsx` `generateReady`), tracking the live `<state>` block.
+**Trade parse** — deleted 2026-08-07 with the Trade agent (`idea.stateParser.js`,
+`idea_system_prompt.md`). Kairos and Mentor emit typed blocks captured through
+`buildTagCaptures` instead of a regex over a rolling `<state>` block; see their sections above.
 
 ---
 
@@ -199,9 +175,11 @@ leaf arrays) are accepted and migrated on read (`normalizeTreeNode`). Helpers:
 (cross-asset leaves).
 
 The **seven leaf types** (`touch` / `structured` / `indicator` / `chart` / `news` / `time`
-/ `volume`) are defined for the agent in `idea_system_prompt.md` and evaluated in
-`monitoring/evaluators/` — see [monitoring.md](./monitoring.md) for the evaluation
-semantics of each. A leaf with no `type` defaults to `structured`.
+/ `volume`) are evaluated in `monitoring/evaluators/` — see [monitoring.md](./monitoring.md)
+for the evaluation semantics of each. A leaf with no `type` defaults to `structured`.
+The prompt that used to declare them to an agent (`idea_system_prompt.md`) went with the Trade
+agent on 2026-08-07; the evaluators and `condition.parser.js` are now the only definition, which
+is the one that was ever authoritative.
 
 ---
 
@@ -278,10 +256,10 @@ AND/OR tree). Dialogs: **OrderConfirmDialog** (idea hit → order plan), **PreEn
 
 ```
 SSE            api/_shared/sse.util.js
-routes         api/{idea,portfolio,scanner}/*.routes.js + *.controller.js
-agents         services/{idea,portfolio,scanner}.agent.service.js
-prompts        idea_system_prompt.md / portfolio_system_prompt.md / scanner_system_prompt.md
-emit/parse     services/llmStream.util.js  +  services/idea.stateParser.js
+routes         api/{kairos,mentor,portfolio,scanner}/*.routes.js + *.controller.js
+agents         services/{kairos,mentor,portfolio,scanner}.agent.service.js
+prompts        kairos_system_prompt.md / mentor_system_prompt.md / portfolio_system_prompt.md / scanner_system_prompt.md
+emit/parse     services/llmStream.util.js  +  services/agentIO.js
 trees          services/conditionTree.service.js
 persistence    api/trade-ideas/tradeIdeas.{routes,controller,service}.js
 arming         tradeIdeas.service.updateIdea  +  monitoring/monitor.service.preflightEntry

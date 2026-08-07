@@ -110,23 +110,17 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│         TRADE AGENT CHAT (Idea)  — ARCHIVED 2026-07-29           │
-│  POST /api/idea/stream   (SSE)   — route NOT mounted             │
-│  superseded by Kairos (call) + Mentor (setup)                    │
+│    AUTHORING  —  Kairos (call) · Mentor (setup) · Atlas (book)   │
+│  POST /api/kairos/stream · /api/mentor/stream · /api/portfolio/  │
 │                                                                  │
-│  User ──► ideaAgentService.chatStream()                          │
-│             │  model chosen per-request by modelRouter           │
-│             │  Tools: web_search, get_quote, get_candles,        │
-│             │         get_price_action, get_chart,               │
-│             │         get_indicators, get_cycle_analysis,        │
-│             │         get_earnings, get_earnings_calendar,       │
-│             │         get_fundamentals, get_sec_filings,         │
-│             │         get_short_interest, get_options_context,   │
-│             │         get_derivatives_context                    │
-│             │                                                    │
-│             └──► streams tokens + <trade_idea> JSON block        │
+│  The Trade Agent that used to author the `idea` kind here was    │
+│  archived 2026-07-29 and DELETED 2026-08-07 (see git log).       │
+│  The KIND lives on: /api/trade-ideas still serves it, and it is  │
+│  what portfolio holdings ride — so everything below is current.  │
+│                                                                  │
+│             └──► streams tokens + the desk's typed emit block    │
 └──────────────────────────────┬───────────────────────────────────┘
-                               │ frontend captures <trade_idea>
+                               │ frontend captures the emit block
                                ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │                         SAVE IDEA                                │

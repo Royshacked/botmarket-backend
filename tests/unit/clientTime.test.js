@@ -1,6 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _formatClientTime } from '../../services/idea.agent.service.js'
+// Lives in agentUtils and is shared by every desk that authors an absolute UTC instant from a
+// clock time the user gave. It used to be reached through the Idea agent's re-export, which is
+// gone with that agent; the function and this coverage are unchanged.
+import { formatClientTime as _formatClientTime } from '../../services/agentUtils.js'
 
 // _formatClientTime renders the browser instant in its IANA zone so the idea agent can
 // convert "enter at 16:40" (local) to a correct UTC `after`/`before`. Pins the piece we

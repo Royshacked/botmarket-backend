@@ -11,13 +11,13 @@ reconciler keeps idea state honest against the broker.
 
 ## 1. Trade Idea lifecycle
 
-> **ARCHIVED 2026-07-29.** The `idea` kind described in this section is legacy: nothing authors
-> one any more and neither its agent nor its monitor runs. It is superseded by Kairos's `call`
-> (monitored by Hermes) and Mentor's `setup` (monitored by Talos). `/api/idea` is unmounted and
-> Minos is not started; the condition-tree machinery below is retained but dormant.
-
-An idea is authored by the **Trade Agent** (`POST /api/idea/stream`), which emits
-a `<trade_idea>` block the frontend saves via `POST /api/trade-ideas`.
+> **The AGENT was deleted 2026-08-07** (archived 2026-07-29, unmounted throughout). Nothing
+> authors an `idea` conversationally any more, and its monitor (Minos) does not run. Superseded
+> by Kairos's `call` (monitored by Hermes) and Mentor's `setup` (monitored by Talos).
+>
+> **The KIND is NOT gone.** `/api/trade-ideas` still serves it and portfolio holdings ride that
+> plumbing, so everything below — statuses, the condition tree, the execution path — is LIVE and
+> is the contract those callers hold. Only the authoring agent and `/api/idea/stream` are gone.
 
 ### Statuses
 
