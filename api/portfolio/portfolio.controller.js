@@ -1,4 +1,4 @@
-import { portfolioAgentService } from '../../services/portfolio.agent.service.js'
+import { portfolioAgentService } from '../../services/agents/portfolio.agent.service.js'
 import { portfolioChatService }  from './portfolioChat.service.js'
 import { applyRebalance, snapshotConvictions } from './portfolioRebalance.service.js'
 import { invalidatePortfolioState } from '../../services/portfolioState.service.js'

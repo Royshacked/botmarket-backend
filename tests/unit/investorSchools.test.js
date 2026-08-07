@@ -12,8 +12,8 @@ import {
     ALLOCATION_SCHOOLS, SELECTION_SCHOOLS, ALLOCATION_RULES, SELECTION_RULES, SELECTION_WEIGHTS,
     normalizeAllocation, normalizeSelection, selectionWeights, incoherentCombo, buildSchoolSection,
 } from '../../services/investorSchools.js'
-import { _cleanScore, _normalizeScan } from '../../services/scanner.agent.service.js'
-import { _parseScreenRequest } from '../../services/portfolio.agent.service.js'
+import { _cleanScore, _normalizeScan } from '../../services/agents/scanner.agent.service.js'
+import { _parseScreenRequest } from '../../services/agents/portfolio.agent.service.js'
 
 // ── the vocabulary ────────────────────────────────────────────────────────────
 

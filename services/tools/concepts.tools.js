@@ -17,8 +17,8 @@
  * watchlist reads that already exist.
  */
 
-import { makeToolHandler } from './agentUtils.js'
-import { getConcept } from './concepts.service.js'
+import { makeToolHandler } from '../agentUtils.js'
+import { getConcept } from '../concepts.service.js'
 
 const LOG = '[concepts]'
 

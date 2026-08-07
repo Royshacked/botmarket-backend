@@ -13,7 +13,7 @@
 import dotenv from 'dotenv'
 dotenv.config()
 
-const { axlAgentService } = await import('../services/axl.agent.service.js')
+const { axlAgentService } = await import('../services/agents/axl.agent.service.js')
 
 // ask → what MUST happen. `tool` is required, `route` is asserted exactly (null = must not route).
 const CASES = [

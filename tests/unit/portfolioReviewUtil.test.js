@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { benchmarkTicker, buildFingerprint, computeReviewDelta, computeReviewTriggers } from '../../services/portfolioReview.util.js'
-import { _formatReviewDelta } from '../../services/portfolio.agent.service.js'
+import { _formatReviewDelta } from '../../services/agents/portfolio.agent.service.js'
 
 // Pure review-lifecycle helpers. benchmarkTicker maps a mandate's free-text benchmark to a
 // priceable ETF proxy; buildFingerprint captures the compact "then" the next review deltas against.

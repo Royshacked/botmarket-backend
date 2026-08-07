@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _cleanScore, _normalizeScan, SCANNER_TOOLS_FOR_PROFILE } from '../../services/scanner.agent.service.js'
+import { _cleanScore, _normalizeScan, SCANNER_TOOLS_FOR_PROFILE } from '../../services/agents/scanner.agent.service.js'
 
 // Argus P4a — trading vs investing profiles (scoring axes, tool subset, scan_list profile/destination).
 

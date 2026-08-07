@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { MODES, DEFAULT_MODE, normalizeMode, isMode } from '../../services/kairos.modes.js'
-import { KAIROS_TOOLS_FOR_MODE } from '../../services/kairos.tools.js'
+import { KAIROS_TOOLS_FOR_MODE } from '../../services/tools/kairos.tools.js'
 import { normalizeCall, _buildEditSet } from '../../api/kairos/kairos.service.js'
 import { ACTIVE_STATUSES as HERMES_WATCHES } from '../../monitoring/hermes.monitor.service.js'
 import { _sanitizeSeed } from '../../api/kairos/kairos.controller.js'

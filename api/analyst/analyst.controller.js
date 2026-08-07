@@ -1,6 +1,6 @@
 // HTTP handlers for the Analyst: the streaming research agent (P3) + coverage CRUD (P1).
 import { coverageService }    from './coverage.service.js'
-import { analystAgentService } from '../../services/analyst.agent.service.js'
+import { analystAgentService } from '../../services/agents/analyst.agent.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages }   from '../_shared/parse.util.js'
 import { sendReason }          from '../_shared/reason.util.js'

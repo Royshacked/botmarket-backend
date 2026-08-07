@@ -1,14 +1,14 @@
 import { fileURLToPath } from 'url'
-import { makePhaseCapture, runAgentStream } from './agentIO.js'
-import { parseEmitBlock, mergeDraft } from './agentIO.js'
+import { makePhaseCapture, runAgentStream } from '../agentIO.js'
+import { parseEmitBlock, mergeDraft } from '../agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, resolveMainAccountId, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, TRADE_HORIZONS } from './agentUtils.js'
-import { buildTagCaptures } from './llmStream.util.js'
-import { KAIROS_TOOLS_FOR_MODE, buildKairosToolHandlers } from './kairos.tools.js'
-import { normalizeMode } from './kairos.modes.js'
-import { kairosService } from '../api/kairos/kairos.service.js'
-import { resolveVenue as _resolveVenue } from './venue.resolve.service.js'
-import { logger } from './logger.service.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, resolveMainAccountId, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, TRADE_HORIZONS } from '../agentUtils.js'
+import { buildTagCaptures } from '../llmStream.util.js'
+import { KAIROS_TOOLS_FOR_MODE, buildKairosToolHandlers } from '../tools/kairos.tools.js'
+import { normalizeMode } from '../kairos.modes.js'
+import { kairosService } from '../../api/kairos/kairos.service.js'
+import { resolveVenue as _resolveVenue } from '../venue.resolve.service.js'
+import { logger } from '../logger.service.js'
 
 // Kairos build agent: a conversation → a DRAFT trading "call" (see KAIROS_PLAN.md, Phase 1).
 // Forked from the Idea agent's streaming scaffold but self-contained. The agent emits a single
@@ -17,7 +17,7 @@ import { logger } from './logger.service.js'
 // mirroring Idea's "build in chat, activate to persist" flow. Touches nothing in the Idea agent.
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
-const PROMPT_PATH = join(__dirname, '../kairos_system_prompt.md')
+const PROMPT_PATH = join(__dirname, '../../kairos_system_prompt.md')
 const LOG         = '[kairosAgent]'
 const MAX_RECENT_MESSAGES = 8
 
@@ -26,9 +26,9 @@ const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 // Per-mode lens module (phases 2–4). The base is the shared SPINE; the mode module is injected as its
 // own cached block — one agent, three profiles (KAIROS_MODES.md). Loaders are keyed by mode name.
 const _modePrompt = {
-    discretionary: makePromptLoader(join(__dirname, '../kairos_mode_discretionary.md'), LOG),
-    smc:           makePromptLoader(join(__dirname, '../kairos_mode_smc.md'), LOG),
-    institutional: makePromptLoader(join(__dirname, '../kairos_mode_institutional.md'), LOG),
+    discretionary: makePromptLoader(join(__dirname, '../../kairos_mode_discretionary.md'), LOG),
+    smc:           makePromptLoader(join(__dirname, '../../kairos_mode_smc.md'), LOG),
+    institutional: makePromptLoader(join(__dirname, '../../kairos_mode_institutional.md'), LOG),
 }
 
 export function emptyKairosState() {

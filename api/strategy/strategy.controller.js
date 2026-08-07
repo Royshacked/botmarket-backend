@@ -7,7 +7,7 @@
 // scoping a house view per user would quietly turn it into eleven private opinions.
 
 import { tiltService }          from './tilt.service.js'
-import { strategyAgentService } from '../../services/strategy.agent.service.js'
+import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
 import { diffStances }          from '../../monitoring/tilt.assess.js'
 import { notifyTiltChanged }    from '../../services/tiltNotify.service.js'
 import { streamAgentResponse }  from '../_shared/sse.util.js'

@@ -5,8 +5,8 @@ import { readFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
-import { formatSectorView, makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../../services/sectorView.tools.js'
-import { TOOLS as AXL_TOOLS } from '../../services/axl.agent.service.js'
+import { formatSectorView, makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../../services/tools/sectorView.tools.js'
+import { TOOLS as AXL_TOOLS } from '../../services/agents/axl.agent.service.js'
 import { isToolError, toolErrorText } from '../../services/toolResult.util.js'
 
 // Axl's READ of the house view. Reporting a published view is Axl's half of the line; authoring or
@@ -60,7 +60,7 @@ test('the handler is UNBOUND — Axl mounts it with no userId at all', async () 
     // The structural guarantee, checked where it actually lives: the mount site passes nothing.
     // A handler that cannot see a user cannot leak one into a broadcast — the same reason the
     // market brief is mounted the same way, on the line above it.
-    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../services/axl.agent.service.js'), 'utf-8')
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../services/agents/axl.agent.service.js'), 'utf-8')
     assert.match(src, /\.\.\._sectorViewHandlers\(\),/, 'must be mounted UNBOUND, like _marketBriefHandlers()')
 })
 

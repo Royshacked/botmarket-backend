@@ -1,11 +1,11 @@
 import { fileURLToPath } from 'url'
-import { parseEmitBlock, mergeDraft, runAgentStream } from './agentIO.js'
+import { parseEmitBlock, mergeDraft, runAgentStream } from '../agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE } from './agentUtils.js'
-import { buildTagCaptures } from './llmStream.util.js'
-import { KAIROS_TOOLS, buildKairosToolHandlers } from './kairos.tools.js'
-import { normalizeSetup, setupReadiness, computeRR, validityProblems } from './setup.schema.js'
-import { logger } from './logger.service.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE } from '../agentUtils.js'
+import { buildTagCaptures } from '../llmStream.util.js'
+import { KAIROS_TOOLS, buildKairosToolHandlers } from '../tools/kairos.tools.js'
+import { normalizeSetup, setupReadiness, computeRR, validityProblems } from '../setup.schema.js'
+import { logger } from '../logger.service.js'
 
 // Mentor — the trade ASSISTANT (Pipeline F). A conversation → a draft `setup` entity.
 //
@@ -20,7 +20,7 @@ import { logger } from './logger.service.js'
 // able to weigh a classical candidate against an SMC one inside a single conversation.
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
-const PROMPT_PATH = join(__dirname, '../mentor_system_prompt.md')
+const PROMPT_PATH = join(__dirname, '../../mentor_system_prompt.md')
 const LOG         = '[mentorAgent]'
 const MAX_RECENT_MESSAGES = 8
 

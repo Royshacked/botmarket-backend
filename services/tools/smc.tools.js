@@ -3,9 +3,9 @@
 // (smcReadText) shared by the Kairos build handlers AND Hermes's assessor (DRY) — so the monitor reads
 // SMC calls through the same exact-level lens they were built on. Reusable by Argus too.
 
-import { makeToolHandler } from './agentUtils.js'
+import { makeToolHandler } from '../agentUtils.js'
 import { _fetchCandleRows } from './marketData.tools.js'
-import { detectFVG, detectStructure, detectLiquidity, premiumDiscount, detectOrderBlocks, priorLevels } from './smc.engine.js'
+import { detectFVG, detectStructure, detectLiquidity, premiumDiscount, detectOrderBlocks, priorLevels } from '../smc.engine.js'
 
 const LOG = '[smcTools]'
 const TF_DESC = 'timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day'

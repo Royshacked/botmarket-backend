@@ -21,7 +21,7 @@ dotenv.config()
 // App modules are imported DYNAMICALLY, below, on purpose: ESM hoists every static `import` above
 // module-level code, so a static import here would construct the Anthropic client (and its
 // apiKey) before dotenv.config() had run — "Could not resolve authentication method".
-const { mentorAgentService, emptyMentorState } = await import('../services/mentor.agent.service.js')
+const { mentorAgentService, emptyMentorState } = await import('../services/agents/mentor.agent.service.js')
 const { normalizeSetup, setupReadiness, computeRR, buildLadder, buildCadence, validityProblems,
     scenarioLabel, scenarioView, declaredConditions } = await import('../services/setup.schema.js')
 const { scenarioGate, liveEntryZones, proximityGapMin, zoneDistance } = await import('../monitoring/talos.monitor.service.js')

@@ -1,30 +1,30 @@
 import { fileURLToPath }  from 'url'
-import { makePhaseCapture, runAgentStream } from './agentIO.js'
-import { toolsFor } from './agentTools.registry.js'
+import { makePhaseCapture, runAgentStream } from '../agentIO.js'
+import { toolsFor } from '../agentTools.registry.js'
 import { dirname, join }  from 'path'
-import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../providers/yahoofinance.provider.js'
-import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMarketMovers, getAnalystActions, getSectorSnapshot } from '../providers/fmp.provider.js'
-import { getSecFilings } from '../providers/sec.provider.js'
-import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from './marketData.tools.js'
-import { isMode } from './kairos.modes.js'
-import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
-import { cleanConviction } from './conviction.util.js'
-import { logger }        from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection, LANGUAGE_RULE, TRADE_HORIZONS } from './agentUtils.js'
-import { makeTradingContextHandlers } from './tradingContext.tools.js'
-import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
-import { buildTagCaptures } from './llmStream.util.js'
-import { isToolError } from './toolResult.util.js'
-import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS } from './scanner.grounding.js'
-import { normalizeSelection, selectionWeights } from './investorSchools.js'
+import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../../providers/yahoofinance.provider.js'
+import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMarketMovers, getAnalystActions, getSectorSnapshot } from '../../providers/fmp.provider.js'
+import { getSecFilings } from '../../providers/sec.provider.js'
+import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from '../tools/marketData.tools.js'
+import { isMode } from '../kairos.modes.js'
+import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../tools/priceStructure.tools.js'
+import { cleanConviction } from '../conviction.util.js'
+import { logger }        from '../logger.service.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection, LANGUAGE_RULE, TRADE_HORIZONS } from '../agentUtils.js'
+import { makeTradingContextHandlers } from '../tools/tradingContext.tools.js'
+import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
+import { buildTagCaptures } from '../llmStream.util.js'
+import { isToolError } from '../toolResult.util.js'
+import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS } from '../scanner.grounding.js'
+import { normalizeSelection, selectionWeights } from '../investorSchools.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[scannerAgent]'
 // One prompt per Argus PROFILE (P4a): trading = the technical/catalyst trade scanner (unchanged);
 // investing = the fundamental/quality screen for portfolio candidates (→ Analyst). Hot-reloaded.
 const _profilePrompt = {
-    trading:   makePromptLoader(join(__dirname, '../scanner_system_prompt.md'), LOG),
-    investing: makePromptLoader(join(__dirname, '../scanner_profile_investing.md'), LOG),
+    trading:   makePromptLoader(join(__dirname, '../../scanner_system_prompt.md'), LOG),
+    investing: makePromptLoader(join(__dirname, '../../scanner_profile_investing.md'), LOG),
 }
 // The Kairos hand-off is a MODE of the trading profile, not a profile of its own: it shares the whole
 // screening spine and differs only in what it converges on (one name, not a list) and what it emits
@@ -32,7 +32,7 @@ const _profilePrompt = {
 // on a hand-off turn — the same shape as kairos_mode_*.md. It used to sit INSIDE the trading prompt,
 // where a list-building turn read fifty lines of "find ONE ticker, do not emit a scan_list" that did
 // not apply to it, and a hand-off turn read the list machinery and phase gate it had to override.
-const _handoffMode = makePromptLoader(join(__dirname, '../scanner_mode_handoff.md'), LOG)
+const _handoffMode = makePromptLoader(join(__dirname, '../../scanner_mode_handoff.md'), LOG)
 const MAX_MESSAGES = 10
 
 export const TOOLS = toolsFor({

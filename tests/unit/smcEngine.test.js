@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { swings, detectFVG, detectLiquidity, detectStructure, premiumDiscount, detectOrderBlocks, priorLevels } from '../../services/smc.engine.js'
-import { smcReadText } from '../../services/smc.tools.js'
+import { smcReadText } from '../../services/tools/smc.tools.js'
 import { _smcTools, _handleAssessToolUses } from '../../monitoring/hermes.assess.js'
 
 // K2: the deterministic SMC engine (KAIROS_MODES.md). Pure OHLCV → exact monitorable levels.

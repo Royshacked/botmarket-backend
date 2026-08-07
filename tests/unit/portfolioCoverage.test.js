@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _formatCoverage } from '../../services/portfolio.agent.service.js'
+import { _formatCoverage } from '../../services/agents/portfolio.agent.service.js'
 
 // Atlas P4d — get_coverage read (Analyst→Atlas pull): render coverage for construction (pure).
 

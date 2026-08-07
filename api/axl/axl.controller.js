@@ -1,4 +1,4 @@
-import { axlAgentService } from '../../services/axl.agent.service.js'
+import { axlAgentService } from '../../services/agents/axl.agent.service.js'
 import { resolveModel }    from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages } from '../_shared/parse.util.js'

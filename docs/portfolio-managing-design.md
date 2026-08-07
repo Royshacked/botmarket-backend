@@ -30,7 +30,7 @@ Define **portfolio managing**: what happens *after* a portfolio is generated and
 - **Missing today:** drift monitoring, portfolio-level P&L aggregation, any action on **live** positions (no trim/add), and scheduled reviews.
 
 Key files:
-- `services/portfolio.agent.service.js`, `portfolio_system_prompt.md`
+- `services/agents/portfolio.agent.service.js`, `portfolio_system_prompt.md`
 - `api/trade-ideas/tradeIdeas.service.js` — `saveBatchIdeas` (~623), `updateIdea` (~276), `placeOrdersForIdea` (~434)
 - Frontend: `MainPage.jsx` (`handleEditPortfolio` / `handleUpdatePlan` ~579-651), `TradeIdeasList.jsx` (portfolio grouping ~85-116)
 - `portfolio_chats` MongoDB collection (1:1 by `portfolioId`)
@@ -142,7 +142,7 @@ New file: **`services/portfolioState.service.js`**
 
 ### 1-C. Inject portfolio state into the agent (review mode)
 
-**Where:** `services/portfolio.agent.service.js` → `chatStream()`
+**Where:** `services/agents/portfolio.agent.service.js` → `chatStream()`
 
 Add optional param `portfolioState` (the output of `computePortfolioState`). When present, append a `_buildPortfolioStateSection(state)` block to `dynamicSections` — formatted as a readable performance table the agent can reference without calling any tool.
 
@@ -185,7 +185,7 @@ Total: $X notional, P&L: $Y (Z%)
 |------|------|---------|
 | 1 | Add lifecycle fields to `saveChatState` + the three lifecycle helpers | `portfolioChat.service.js` |
 | 2 | Write `computePortfolioState` | `services/portfolioState.service.js` (new) |
-| 3 | Add `portfolioState` param + `_buildPortfolioStateSection` to agent | `services/portfolio.agent.service.js` |
+| 3 | Add `portfolioState` param + `_buildPortfolioStateSection` to agent | `services/agents/portfolio.agent.service.js` |
 | 4 | Wire `computePortfolioState` into the portfolio stream endpoint | `portfolio.controller.js` |
 | 5 | Add `GET /pending-reviews` + `POST /:id/lifecycle` endpoints | `portfolio.routes.js`, `portfolio.controller.js` |
 | 6 | Frontend: badge + dropdown + review-mode trigger | frontend |

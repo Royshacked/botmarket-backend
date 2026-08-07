@@ -5,23 +5,23 @@
 // exactly as Kairos parses <call> here and normalizeCall runs at save.
 
 import { fileURLToPath } from 'url'
-import { makePhaseCapture, runAgentStream } from './agentIO.js'
-import { parseEmitBlock } from './agentIO.js'
-import { toolsFor } from './agentTools.registry.js'
+import { makePhaseCapture, runAgentStream } from '../agentIO.js'
+import { parseEmitBlock } from '../agentIO.js'
+import { toolsFor } from '../agentTools.registry.js'
 import { dirname, join } from 'path'
 
-import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../providers/fmp.provider.js'
-import { getSecFilings } from '../providers/sec.provider.js'
-import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, COMMON_TOOL_HANDLERS } from './agentUtils.js'
-import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
-import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
-import { buildTagCaptures } from './llmStream.util.js'
-import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from './valuation.tools.js'
-import { logger } from './logger.service.js'
+import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../../providers/fmp.provider.js'
+import { getSecFilings } from '../../providers/sec.provider.js'
+import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, COMMON_TOOL_HANDLERS } from '../agentUtils.js'
+import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
+import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
+import { buildTagCaptures } from '../llmStream.util.js'
+import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from '../tools/valuation.tools.js'
+import { logger } from '../logger.service.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const LOG         = '[analystAgent]'
-const PROMPT_PATH = join(__dirname, '../analyst_system_prompt.md')
+const PROMPT_PATH = join(__dirname, '../../analyst_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 const MAX_RECENT_MESSAGES = 8
 

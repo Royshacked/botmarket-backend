@@ -1,22 +1,22 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
-import { logger }         from './logger.service.js'
-import { normalizeMessages, makePromptLoader, stripEmitTags, buildAudienceSection, LANGUAGE_RULE } from './agentUtils.js'
-import { buildTagCaptures } from './llmStream.util.js'
-import { runAgentStream } from './agentIO.js'
-import { toolsFor } from './agentTools.registry.js'
-import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
-import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
-import { makeUserDataHandlers, USER_DATA_TOOL_SPEC } from './userData.tools.js'
-import { makeConceptHandlers, CONCEPT_TOOL_SPEC } from './concepts.tools.js'
-import { makeExperienceHandlers, EXPERIENCE_TOOL_SPEC } from './experience.tools.js'
-import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from './marketBrief.tools.js'
-import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from './sectorView.tools.js'
+import { logger }         from '../logger.service.js'
+import { normalizeMessages, makePromptLoader, stripEmitTags, buildAudienceSection, LANGUAGE_RULE } from '../agentUtils.js'
+import { buildTagCaptures } from '../llmStream.util.js'
+import { runAgentStream } from '../agentIO.js'
+import { toolsFor } from '../agentTools.registry.js'
+import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
+import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
+import { makeUserDataHandlers, USER_DATA_TOOL_SPEC } from '../tools/userData.tools.js'
+import { makeConceptHandlers, CONCEPT_TOOL_SPEC } from '../tools/concepts.tools.js'
+import { makeExperienceHandlers, EXPERIENCE_TOOL_SPEC } from '../tools/experience.tools.js'
+import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from '../tools/marketBrief.tools.js'
+import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorView.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
 // Hot-reload the system prompt on file change (mtime-gated) — no restart needed.
-const _systemPrompt = makePromptLoader(join(__dirname, '../axl_system_prompt.md'), LOG)
+const _systemPrompt = makePromptLoader(join(__dirname, '../../axl_system_prompt.md'), LOG)
 const MAX_MESSAGES = 12
 
 // Axl is the non-trading meta-layer: the social-chat assistant, app guide, and

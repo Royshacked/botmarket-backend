@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _normalizeScan, _cleanScore, _normalizeKairosPick } from '../../services/scanner.agent.service.js'
+import { _normalizeScan, _cleanScore, _normalizeKairosPick } from '../../services/agents/scanner.agent.service.js'
 
 // A minimal well-formed candidate the model might emit. The 2nd arg drives the
 // `technical` axis — since `total` is now recomputed from the axes (Argus #2), a

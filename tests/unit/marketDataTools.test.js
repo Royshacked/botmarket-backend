@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { fmtVol, aggregateCandles, CANDLE_CFG } from '../../services/marketData.tools.js'
+import { fmtVol, aggregateCandles, CANDLE_CFG } from '../../services/tools/marketData.tools.js'
 
 // ── fmtVol ───────────────────────────────────────────────────────────────
 test('fmtVol: millions get one decimal + M', () => {

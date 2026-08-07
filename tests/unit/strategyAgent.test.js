@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { TOOLS, _parseStrategyResponse, _coverageBySector, _buildTurnContext, _buildMessages } from '../../services/strategy.agent.service.js'
+import { TOOLS, _parseStrategyResponse, _coverageBySector, _buildTurnContext, _buildMessages } from '../../services/agents/strategy.agent.service.js'
 import { ALL_EMIT_TAGS } from '../../services/llmStream.util.js'
 import { SECTORS } from '../../services/entity/vocabulary.js'
 

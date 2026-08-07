@@ -150,7 +150,7 @@ tool subset     : kairos.agent.service:40 — replace `const tools = KAIROS_TOOL
                   KAIROS_TOOLS_FOR_MODE(mode).
 pattern vocab   : free-text already — per-mode enumeration guidance in the prompt only.
 numeric SMC     : NEW service (deterministic OHLCV) — none of FVG/BOS/CHoCH/premium-discount exist
-                  today; only vision OB/FB (services/priceStructure.tools.js). See project_smc_tools.
+                  today; only vision OB/FB (services/tools/priceStructure.tools.js). See project_smc_tools.
 argus seed      : kairos.controller parseStreamBody:196 — add structured `seed`/`candidate` param →
                   _buildSystemPrompt dynamic block. Candidate = <kairos_pick>{ticker,direction,
                   thesis,analysis} (pipeline) unified w/ scan_list candidate (richer; persisted in `scans`).

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { KAIROS_TOOLS, buildKairosToolHandlers } from '../../services/kairos.tools.js'
+import { KAIROS_TOOLS, buildKairosToolHandlers } from '../../services/tools/kairos.tools.js'
 
 // web_search is a provider-native tool (type web_search_20250305) — the LLM runtime
 // executes it, so it has no local handler. Every OTHER tool must have one.

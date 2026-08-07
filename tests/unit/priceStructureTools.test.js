@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../../services/priceStructure.tools.js'
+import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../../services/tools/priceStructure.tools.js'
 
 // The order-block / false-break tools render a PLAIN chart and run a focused vision pass,
 // returning a structured, citable read. Deps are injected so these tests hit neither the

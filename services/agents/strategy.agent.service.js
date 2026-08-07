@@ -12,19 +12,19 @@
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
-import { makePhaseCapture, runAgentStream, parseEmitBlock } from './agentIO.js'
-import { toolsFor } from './agentTools.registry.js'
-import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, attachTurnContext, LANGUAGE_RULE } from './agentUtils.js'
-import { buildTagCaptures } from './llmStream.util.js'
-import { getMacroSnapshot, getSectorSnapshot } from '../providers/fmp.provider.js'
-import { getPricedIn } from '../providers/fred.provider.js'
-import { coverageService } from '../api/analyst/coverage.service.js'
-import { SECTORS } from './entity/vocabulary.js'
-import { logger } from './logger.service.js'
+import { makePhaseCapture, runAgentStream, parseEmitBlock } from '../agentIO.js'
+import { toolsFor } from '../agentTools.registry.js'
+import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, attachTurnContext, LANGUAGE_RULE } from '../agentUtils.js'
+import { buildTagCaptures } from '../llmStream.util.js'
+import { getMacroSnapshot, getSectorSnapshot } from '../../providers/fmp.provider.js'
+import { getPricedIn } from '../../providers/fred.provider.js'
+import { coverageService } from '../../api/analyst/coverage.service.js'
+import { SECTORS } from '../entity/vocabulary.js'
+import { logger } from '../logger.service.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const LOG         = '[strategyAgent]'
-const PROMPT_PATH = join(__dirname, '../strategy_system_prompt.md')
+const PROMPT_PATH = join(__dirname, '../../strategy_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 const MAX_RECENT_MESSAGES = 8
 

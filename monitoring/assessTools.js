@@ -25,9 +25,9 @@ import { toolsFor } from '../services/agentTools.registry.js'
 import { COMMON_TOOL_HANDLERS, makeToolHandler } from '../services/agentUtils.js'
 import {
     makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler, makeIndicatorsHandler,
-} from '../services/marketData.tools.js'
-import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../services/priceStructure.tools.js'
-import { SMC_TOOLS, SMC_TOOL_HANDLERS } from '../services/smc.tools.js'
+} from '../services/tools/marketData.tools.js'
+import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../services/tools/priceStructure.tools.js'
+import { SMC_TOOLS, SMC_TOOL_HANDLERS } from '../services/tools/smc.tools.js'
 import { getPriceAction, getCycleAnalysis, getCorrelations, getQuotes } from '../providers/yahoofinance.provider.js'
 import { getFundamentals } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'

@@ -10,8 +10,8 @@
  * description below and the prompt section that backs it.
  */
 
-import { makeToolHandler } from './agentUtils.js'
-import { getMarketBrief }  from './marketBrief.service.js'
+import { makeToolHandler } from '../agentUtils.js'
+import { getMarketBrief }  from '../marketBrief.service.js'
 
 const LOG = '[marketBrief]'
 

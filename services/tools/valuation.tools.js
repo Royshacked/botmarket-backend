@@ -4,10 +4,10 @@
 // GAP vs the Street. The agent supplies the judgment (which multiple, whose estimate); these tools
 // supply the data + the math. Pure formatters are exported for tests.
 
-import { getAnalystEstimates, getPriceTargetConsensus, getGradesConsensus, getGradesHistorical, getHistoricalMultiples } from '../providers/fmp.provider.js'
-import { computeValuation, VALUATION_METHODS } from './valuation.engine.js'
-import { fetchLastPrice } from '../monitoring/monitorUtils.js'
-import { makeToolHandler } from './agentUtils.js'
+import { getAnalystEstimates, getPriceTargetConsensus, getGradesConsensus, getGradesHistorical, getHistoricalMultiples } from '../../providers/fmp.provider.js'
+import { computeValuation, VALUATION_METHODS } from '../valuation.engine.js'
+import { fetchLastPrice } from '../../monitoring/monitorUtils.js'
+import { makeToolHandler } from '../agentUtils.js'
 
 const LOG = '[valuationTools]'
 

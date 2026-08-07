@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildAudienceSection } from '../../services/agentUtils.js'
-import { kairosAgentService } from '../../services/kairos.agent.service.js'
-import { portfolioAgentService } from '../../services/portfolio.agent.service.js'
-import { analystAgentService } from '../../services/analyst.agent.service.js'
+import { kairosAgentService } from '../../services/agents/kairos.agent.service.js'
+import { portfolioAgentService } from '../../services/agents/portfolio.agent.service.js'
+import { analystAgentService } from '../../services/agents/analyst.agent.service.js'
 import { refreshCoverage } from '../../services/coverageRefresh.service.js'
 
 // The block that tells a desk WHO it is talking to.

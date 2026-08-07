@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'fs'
 
-import { scannerAgentService } from '../../services/scanner.agent.service.js'
+import { scannerAgentService } from '../../services/agents/scanner.agent.service.js'
 
 // Argus's Kairos hand-off is a MODE of the trading profile, not a profile of its own: it shares the
 // whole screening spine and differs only in what it converges on (one name) and what it emits

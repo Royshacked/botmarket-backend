@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatTradingContext, formatBrokerSymbol, makeTradingContextHandlers } from '../../services/tradingContext.tools.js'
+import { formatTradingContext, formatBrokerSymbol, makeTradingContextHandlers } from '../../services/tools/tradingContext.tools.js'
 
 // THE BUG THIS FILE EXISTS FOR
 // Both venue tools returned their service's OBJECT. The Anthropic provider's tool_result branch

@@ -17,10 +17,10 @@
  * but it can no longer be unaware. That is the same reason withBrokerAvailability rides there.
  */
 
-import { getMarketStatus } from './market.service.js'
-import { makeToolHandler } from './agentUtils.js'
-import { isToolError } from './toolResult.util.js'
-import { logger } from './logger.service.js'
+import { getMarketStatus } from '../market.service.js'
+import { makeToolHandler } from '../agentUtils.js'
+import { isToolError } from '../toolResult.util.js'
+import { logger } from '../logger.service.js'
 
 const LOG = '[marketHours]'
 

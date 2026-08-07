@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import { refreshCoverage, _buildRefreshPrompt } from '../../services/coverageRefresh.service.js'
 import { buildCoverageRefreshed } from '../../services/coverageNotify.service.js'
-import { _parseCoverageRefresh } from '../../services/portfolio.agent.service.js'
+import { _parseCoverageRefresh } from '../../services/agents/portfolio.agent.service.js'
 
 // G1 — the async Atlas → Prometheus refresh-by-hop: the emit parser, the "ready" card builder, and
 // the headless refresh orchestration (research → persist → notify) with injected deps.

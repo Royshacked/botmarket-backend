@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
     makeUserDataHandlers, USER_DATA_TOOL_SPEC,
     formatWatchedItems, formatPerformance, formatUpcomingEvents,
-} from '../../services/userData.tools.js'
+} from '../../services/tools/userData.tools.js'
 import { isToolError } from '../../services/toolResult.util.js'
 
 // The ADAPTER layer: structured rows in, compact text out. It must not query anything, and it must

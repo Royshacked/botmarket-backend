@@ -15,9 +15,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { attachTurnContext } from '../../services/agentUtils.js'
-import { _buildTurnContext } from '../../services/kairos.agent.service.js'
-import { _buildTurnContext as analystTurnContext } from '../../services/analyst.agent.service.js'
-import { _buildTurnContext as mentorTurnContext } from '../../services/mentor.agent.service.js'
+import { _buildTurnContext } from '../../services/agents/kairos.agent.service.js'
+import { _buildTurnContext as analystTurnContext } from '../../services/agents/analyst.agent.service.js'
+import { _buildTurnContext as mentorTurnContext } from '../../services/agents/mentor.agent.service.js'
 
 const user = (content) => ({ role: 'user', content })
 

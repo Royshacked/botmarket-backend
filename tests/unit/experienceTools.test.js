@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { makeExperienceHandlers, EXPERIENCE_TOOL_SPEC } from '../../services/experience.tools.js'
+import { makeExperienceHandlers, EXPERIENCE_TOOL_SPEC } from '../../services/tools/experience.tools.js'
 import { setExperienceLevel } from '../../services/experience.service.js'
 import { TOOL_SCHEMAS } from '../../services/agentTools.registry.js'
 import { isToolError } from '../../services/toolResult.util.js'

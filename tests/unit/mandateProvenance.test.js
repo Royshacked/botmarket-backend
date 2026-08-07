@@ -8,9 +8,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _buildAccountsSection, _buildMandateSection } from '../../services/portfolio.agent.service.js'
+import { _buildAccountsSection, _buildMandateSection } from '../../services/agents/portfolio.agent.service.js'
 import { buildAccountLines } from '../../services/agentUtils.js'
-import { formatTradingContext } from '../../services/tradingContext.tools.js'
+import { formatTradingContext } from '../../services/tools/tradingContext.tools.js'
 
 // ── the mandate is established WITH ATLAS, or it is not a mandate ─────────────
 // Bug 1 above was fixed twice. First by TAGGING a mandate derived from the intake objective and
@@ -131,7 +131,7 @@ test('never negative — an over-committed account reports nothing to deploy', (
 // names and allocated, skipping both the screening desk and the research desk. A tool result lands
 // late in the context, right where the model decides what to do next, so it outranks a rule written
 // hundreds of lines earlier in the system prompt. It must not offer a route the prompt forbids.
-import { _formatCoverage } from '../../services/portfolio.agent.service.js'
+import { _formatCoverage } from '../../services/agents/portfolio.agent.service.js'
 
 test('empty coverage tells Atlas to hand off and stop — never to screen itself', () => {
     const out = _formatCoverage([])

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
     mergeCoverage, _mergeSetupDraft, _parseMentorResponse, _parseCandidates, emptyMentorState,
     _buildProblemsSection,
-} from '../../services/mentor.agent.service.js'
+} from '../../services/agents/mentor.agent.service.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
 
 // Mentor's pure seams: the cumulative coverage tag, draft carry-forward, and emit-block

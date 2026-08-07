@@ -5,9 +5,9 @@ import {
     TAPE, MAJOR_EARNINGS, formatTapeRow, formatTape, formatBriefCalendar, buildBriefInput,
     getMarketBrief, _resetBriefCache,
 } from '../../services/marketBrief.service.js'
-import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from '../../services/marketBrief.tools.js'
+import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from '../../services/tools/marketBrief.tools.js'
 import { TOOL_SCHEMAS } from '../../services/agentTools.registry.js'
-import { TOOLS as AXL_TOOLS } from '../../services/axl.agent.service.js'
+import { TOOLS as AXL_TOOLS } from '../../services/agents/axl.agent.service.js'
 import { _isOfferTime, _dayStart } from '../../monitoring/marketBrief.notify.js'
 
 // The brief is a BROADCAST: one text, about the world, identical for every reader. These tests pin

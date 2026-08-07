@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _parseScreenRequest, _parseScreenRequests } from '../../services/portfolio.agent.service.js'
+import { _parseScreenRequest, _parseScreenRequests } from '../../services/agents/portfolio.agent.service.js'
 
 // Atlas P4c — the <screen_request> mandate hand-off to Argus's investing desk (pure).
 

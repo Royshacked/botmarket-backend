@@ -9,8 +9,8 @@
  * Axl's side of the line; authoring or changing a view is Pythia's, and gets a `<route>`.
  */
 
-import { makeToolHandler } from './agentUtils.js'
-import { tiltService }     from '../api/strategy/tilt.service.js'
+import { makeToolHandler } from '../agentUtils.js'
+import { tiltService }     from '../../api/strategy/tilt.service.js'
 
 const LOG = '[sectorView]'
 

@@ -4,7 +4,7 @@ import {
     isForex, sessionFor, isAssetOpen, getMarketStatus,
     isMarketOpen, isForexOpen, isFuturesOpen, nextMarketOpenMs,
 } from '../../services/market.service.js'
-import { formatMarketStatus, withMarketStatus } from '../../services/marketHours.tools.js'
+import { formatMarketStatus, withMarketStatus } from '../../services/tools/marketHours.tools.js'
 import { toolError } from '../../services/toolResult.util.js'
 
 // The market-hours engine had NO direct unit coverage — only sessionPhase and a paper-gate

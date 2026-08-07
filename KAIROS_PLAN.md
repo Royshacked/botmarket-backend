@@ -82,13 +82,13 @@ bound server-side at Generate from the marked accounts.
 
 ## Phase 1 — Build agent (construction) ✅ DONE (backend, not live-verified)
 **Goal:** a conversation produces a valid DRAFT call; the user Generates to persist.
-- `services/kairos.agent.service.js`, forked from `idea.agent.service.js` scaffold: SSE stream,
+- `services/agents/kairos.agent.service.js`, forked from `idea.agent.service.js` scaffold: SSE stream,
   provider wiring, reasoning knob, tool-status chips. Emits a `<call>` draft (parsed by pure
   `_parseKairosResponse`); the stream returns it UNSAVED for preview.
 - `kairos_system_prompt.md` = discretionary build spine: locate → classify → map zones
   (volatility-aware ranges) → reference levels → pattern hypotheses (price-action > indicators,
   evidence honesty) → confirm `max_size` + nudge to mark an account at the bank icon → emit `<call>`.
-- `services/kairos.tools.js` = own tool schemas (`get_chart`/`get_candles`/`get_quote`/
+- `services/tools/kairos.tools.js` = own tool schemas (`get_chart`/`get_candles`/`get_quote`/
   `get_earnings`/`web_search` + sentiment) reusing pure providers; candle machinery duplicated.
 - **Generate → save:** `POST /api/kairos` → `_finalizeCall` binds marked accounts (bank icon) →
   **copied cTrader symbol gate** `_resolveVenue` (resolve `broker_symbol` + `basis_offset` for

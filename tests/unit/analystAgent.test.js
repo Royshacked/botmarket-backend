@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _parseAnalystResponse, analystAgentService } from '../../services/analyst.agent.service.js'
+import { _parseAnalystResponse, analystAgentService } from '../../services/agents/analyst.agent.service.js'
 import { _sanitizeAnalystSeed } from '../../api/analyst/analyst.controller.js'
 
 // Analyst P3 — <coverage> extraction from the streamed research turn (pure).

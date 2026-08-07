@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { formatConsensus, valuationReadText } from '../../services/valuation.tools.js'
+import { formatConsensus, valuationReadText } from '../../services/tools/valuation.tools.js'
 import { computeValuation } from '../../services/valuation.engine.js'
 
 // Analyst P2 — pure LLM-ready formatters over the consensus feeds + the valuation engine.

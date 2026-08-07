@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _buildPortfolioStateSection } from '../../services/portfolio.agent.service.js'
+import { _buildPortfolioStateSection } from '../../services/agents/portfolio.agent.service.js'
 
 // The review-mode context must ground the intact/weakening/broken judgment in the FROZEN thesis
 // (per-holding notes + conviction rationale). Construction/edit context must NOT carry that text.

@@ -5,7 +5,7 @@ import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
-import { _splitRoute, _splitEdit, _cleanOpening, EDIT_KIND_DESKS, axlAgentService } from '../../services/axl.agent.service.js'
+import { _splitRoute, _splitEdit, _cleanOpening, EDIT_KIND_DESKS, axlAgentService } from '../../services/agents/axl.agent.service.js'
 import { _sanitizeRouteSymbol, _sanitizeEditRef, _validateEdit, VALID_PIPELINES, EDIT_KINDS } from '../../api/axl/axl.controller.js'
 
 // Axl's desk hand-off: `<route>research NVDA</route>` — the desk AND the name it should open on.

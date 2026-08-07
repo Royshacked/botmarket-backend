@@ -12,10 +12,10 @@
  * what the app already knows is not authoring a trade.
  */
 
-import { makeToolHandler } from './agentUtils.js'
-import { listWatchedItems, DEFAULT_KINDS } from './watchlist.service.js'
-import { getPerformance } from './performance.service.js'
-import { getUpcomingEvents } from './upcomingEvents.service.js'
+import { makeToolHandler } from '../agentUtils.js'
+import { listWatchedItems, DEFAULT_KINDS } from '../watchlist.service.js'
+import { getPerformance } from '../performance.service.js'
+import { getUpcomingEvents } from '../upcomingEvents.service.js'
 
 const LOG = '[userData]'
 

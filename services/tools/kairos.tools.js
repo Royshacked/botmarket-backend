@@ -1,16 +1,16 @@
-import { getPriceAction, getCycleAnalysis, getCorrelations } from '../providers/yahoofinance.provider.js'
-import { toolsFor } from './agentTools.registry.js'
-import { getEarningsCalendar, getFundamentals, getStockPeers, getMacroSnapshot, getSectorSnapshot } from '../providers/fmp.provider.js'
+import { getPriceAction, getCycleAnalysis, getCorrelations } from '../../providers/yahoofinance.provider.js'
+import { toolsFor } from '../agentTools.registry.js'
+import { getEarningsCalendar, getFundamentals, getStockPeers, getMacroSnapshot, getSectorSnapshot } from '../../providers/fmp.provider.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
-import { getSecFilings } from '../providers/sec.provider.js'
-import { COMMON_TOOL_HANDLERS, makeToolHandler } from './agentUtils.js'
+import { getSecFilings } from '../../providers/sec.provider.js'
+import { COMMON_TOOL_HANDLERS, makeToolHandler } from '../agentUtils.js'
 import {
     makeQuoteHandler, makeCandlesHandler, makeEarningsHandler, makeChartHandler, makeIndicatorsHandler,
 } from './marketData.tools.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
 import { SMC_TOOLS, SMC_TOOL_HANDLERS } from './smc.tools.js'
-import { DEFAULT_MODE } from './kairos.modes.js'
+import { DEFAULT_MODE } from '../kairos.modes.js'
 
 // Kairos's market-data toolset. Deliberately its OWN schemas (not imported from the
 // Idea agent) so Kairos is a self-contained trial — but the heavy lifting reuses the

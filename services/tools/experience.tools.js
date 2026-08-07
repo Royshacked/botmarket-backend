@@ -12,8 +12,8 @@
  * in one sentence, and hardening it would cost more than the failure does.
  */
 
-import { makeToolHandler } from './agentUtils.js'
-import { setExperienceLevel } from './experience.service.js'
+import { makeToolHandler } from '../agentUtils.js'
+import { setExperienceLevel } from '../experience.service.js'
 
 const LOG = '[experienceTools]'
 

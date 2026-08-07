@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { checkBrokerSymbol } from '../../services/tradingContext.service.js'
 // The enforcement moved to the TOOL layer, where the renderer it shares with check_broker_symbol
 // lives — see the note in tradingContext.service.js on why sitting next to the read broke it.
-import { withBrokerAvailability, _clearAvailabilityCache } from '../../services/tradingContext.tools.js'
+import { withBrokerAvailability, _clearAvailabilityCache } from '../../services/tools/tradingContext.tools.js'
 import { toolError } from '../../services/toolResult.util.js'
 
 // "Can I actually trade this here?" — the venue fact a desk must never guess at.

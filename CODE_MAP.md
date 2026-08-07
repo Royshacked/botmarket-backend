@@ -23,7 +23,6 @@ monitoring/   →  services/  →  providers/            background path (poll +
 ```
 server.js                 app wiring, route mounts, background-service boot
 api/
-  idea/                   ARCHIVED 2026-07-29 — Trade Agent SSE chat; route NOT mounted
   trade-ideas/            idea CRUD + order placement /api/trade-ideas/*
     tradeIdeas.service.js     save/get/update/delete, broker forking; getTicker-resolved
                               brokerSymbol + fork-time basisOffset per child; venue gate
@@ -78,8 +77,13 @@ api/
                               kind (the HTTP twin of services/entity/entityCrud); `envelope` carries
                               the legacy `{idea}/{ideas}` body shape, everything else answers bare
 services/
-  idea.agent.service.js   ARCHIVED 2026-07-29 (superseded by kairos + mentor; unreachable)
-                          + idea.stateParser.js (response/state machine — still shared)
+  agents/                 the 7 LLM desks (analyst · axl · kairos · mentor · portfolio · scanner ·
+                          strategy). Moved out of the flat services/ root 2026-08-07 — they are a
+                          distinct KIND of module (a desk, not a service), and they were the
+                          largest single group making an 80-file directory hard to read. Their
+                          system prompts stay at the REPO ROOT (`join(__dirname, '../../x.md')`)
+  tools/                  the 12 agent-facing tool modules (*.tools.js) — the handlers + LLM-ready
+                          formatters an agent is wired with. Schemas stay in agentTools.registry
   portfolio.agent.service.js  scanner.agent.service.js
                           Atlas tools: screen_candidates + get_macro_snapshot + enriched get_fundamentals
                           (FMP Starter); review-state block renders benchmark-relative perf + regime delta
@@ -123,7 +127,7 @@ services/
                           here first, or it leaks raw into the chat AND is never captured
   modelRouter.service.js  resolveModel(); REASONING_EFFORT enum
   conditionTree.service.js  resolve/collect/normalize condition trees
-  orderPlan.service.js  protectionPlan.service.js  priceCandleSpec.service.js
+  orderPlan.service.js  protectionPlan.service.js
   price.service.js  timeframe.service.js  brokerSymbol.service.js
   market.service.js       THE market-hours engine: one class-aware gate (isAssetOpen), one status
                           read (getMarketStatus → open/nextOpenMs/session/phase), sessionPhase +
@@ -131,8 +135,24 @@ services/
                           futures near-24/5 · US equity RTH. sessionFor is the ONE classifier
                           (explicit asset_class first, symbol heuristic second). NO holidays or
                           half-days, and no non-US exchange
+  config.js               THE configuration surface — every env var named once, with its type,
+                          default and purpose. Was 43 vars read as inline `Number(process.env.X)
+                          || d` at ~70 sites. It OWNS dotenv (so no module depends on having been
+                          imported after something that happened to load .env — that ordering was
+                          real and it bit monitor.claude), every value is a live GETTER (tests
+                          override process.env; freezing would break them), and it does NOT load
+                          .env under `node --test` — the unit suite runs offline and several tests
+                          depend on the database being unreachable. server.js fails fast on a
+                          MISSING required value AND on a MALFORMED one (set but unparseable —
+                          previously a silent fallback), and warns on .env keys nothing reads
   format.util.js  http.util.js  ttlCache.util.js  priceStats.util.js  cycleAnalysis.service.js
   logger.service.js  tokenUsage.service.js
+  ohlcv.service.js          getCandles(symbol,timeframe,count) → the compact {t,o,h,l,c,v} the
+                            EVALUATORS read. A relabel over priceService, not a fetcher. Was
+                            providers/ohlcv.provider.js until 2026-08-07 — it reaches nothing
+                            external, so it sat in the one layer defined by doing exactly that.
+                            NB distinct from candleFetch.service below: this one is the monitor/
+                            paper-fill shape, that one is the FMP-first ROUTER behind the chart
   candleFetch.service.js    fetchMarketCandles(symbol,{timeSpan,multiplier,from,to}) + toMsCandles — shared
                             FMP-first (USE_FMP_CANDLES) → Massive/Yahoo fallback (futures/index/broker symbols
                             only) → sec-to-ms pipeline. Massive defaults missing from/to to avoid a crash. One code path for the
@@ -192,7 +212,7 @@ services/
                           Generalizes portfolio_chats; migrating agents off per-agent chat-state.
 providers/
   anthropic.provider.js         LLM chat/streaming (OpenAI SDK is used directly, transcribe only)
-  yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / ohlcv
+  yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance
   fmp.provider.js               Starter plan: getFundamentals (valuation+analyst+ETF look-through), getEarnings(Calendar),
                                 screenCandidates (company-screener), getMacroSnapshot + getMacroRaw (treasury/econ/sector);
                                 getSectorSnapshot / getMarketMovers / getAnalystActions (Argus discovery feeds);
@@ -313,6 +333,15 @@ docs/                       architecture design docs
 | New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince` |
 | New emit tag (any agent) | add the name to `ALL_EMIT_TAGS` (llmStream.util.js) BEFORE anything else — unlisted tags leak into the chat and are never captured — then `buildTagCaptures({ tag })` in the agent + `stripEmitTags` on the return value |
 | New Axl `<edit>` kind | one row in `EDIT_KIND_DESKS` (axl.agent.service.js) + `EDIT_KINDS` (axl.controller.js) + a `case` in the FE `openForEdit` (MainPage.jsx) pointing at that kind's EXISTING pencil handler + the tag in the prompt. The prompt-vs-gate test fails if the prompt teaches a kind the gate drops |
+
+## Deployment shape
+
+ONE process. `server.js` starts eleven background loops unconditionally and there is no leader
+election, and a handful of module-level `Map`s are load-bearing rather than caches — the exit-order
+lock in `execution.reconciler` and the WebSocket registry in `chatWs` most of all. A second instance
+corrupts the first and breaks the second, mostly in silence. Before changing an instance count read
+[docs/architecture/single-instance.md](docs/architecture/single-instance.md), which lists what is
+already claimed through Mongo, what is not, and the order to fix it in.
 
 ## Testing
 

@@ -1,4 +1,4 @@
-import { scannerAgentService } from '../../services/scanner.agent.service.js'
+import { scannerAgentService } from '../../services/agents/scanner.agent.service.js'
 import { scannerChatService }  from './scannerChat.service.js'
 import { scanService }         from './scan.service.js'
 import { logger }              from '../../services/logger.service.js'

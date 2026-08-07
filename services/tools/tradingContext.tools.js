@@ -11,10 +11,10 @@
  * See tradingContext.service.js for what the two reads actually do.
  */
 
-import { getTradingContext, checkBrokerSymbol } from './tradingContext.service.js'
-import { makeToolHandler } from './agentUtils.js'
-import { isToolError } from './toolResult.util.js'
-import { logger } from './logger.service.js'
+import { getTradingContext, checkBrokerSymbol } from '../tradingContext.service.js'
+import { makeToolHandler } from '../agentUtils.js'
+import { isToolError } from '../toolResult.util.js'
+import { logger } from '../logger.service.js'
 
 const LOG = '[tradingContext]'
 

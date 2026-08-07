@@ -15,7 +15,7 @@ dotenv.config()
 
 const persist = process.argv.includes('--persist')
 
-const { strategyAgentService } = await import('../services/strategy.agent.service.js')
+const { strategyAgentService } = await import('../services/agents/strategy.agent.service.js')
 const { normalizeTilt, incoherentRows, tiltService } = await import('../api/strategy/tilt.service.js')
 const { diffStances } = await import('../monitoring/tilt.assess.js')
 

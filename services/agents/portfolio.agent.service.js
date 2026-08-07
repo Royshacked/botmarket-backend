@@ -1,27 +1,27 @@
 import { fileURLToPath }  from 'url'
-import { parseEmitBlock, parseEmitBlocks, makePhaseCapture, runAgentStream } from './agentIO.js'
-import { toolsFor } from './agentTools.registry.js'
+import { parseEmitBlock, parseEmitBlocks, makePhaseCapture, runAgentStream } from '../agentIO.js'
+import { toolsFor } from '../agentTools.registry.js'
 import { dirname, join }  from 'path'
-import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw } from '../providers/yahoofinance.provider.js'
-import { getFundamentals, getEarningsCalendar, getEarnings, getMacroSnapshot } from '../providers/fmp.provider.js'
-import { getSecFilings } from '../providers/sec.provider.js'
-import { cleanConviction } from './conviction.util.js'
-import { formatWorkspaceLine } from '../api/portfolio/portfolioMode.util.js'
-import { logger }         from './logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, LANGUAGE_RULE } from './agentUtils.js'
-import { makeTradingContextHandlers } from './tradingContext.tools.js'
-import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from './marketHours.tools.js'
-import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from './sectorView.tools.js'
-import { makeChartHandler } from './marketData.tools.js'
-import { coverageService } from '../api/analyst/coverage.service.js'
-import { SECTORS } from './entity/vocabulary.js'
-import { buildTagCaptures } from './llmStream.util.js'
-import { buildSchoolSection, normalizeAllocation, normalizeSelection } from './investorSchools.js'
+import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw } from '../../providers/yahoofinance.provider.js'
+import { getFundamentals, getEarningsCalendar, getEarnings, getMacroSnapshot } from '../../providers/fmp.provider.js'
+import { getSecFilings } from '../../providers/sec.provider.js'
+import { cleanConviction } from '../conviction.util.js'
+import { formatWorkspaceLine } from '../../api/portfolio/portfolioMode.util.js'
+import { logger }         from '../logger.service.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, LANGUAGE_RULE } from '../agentUtils.js'
+import { makeTradingContextHandlers } from '../tools/tradingContext.tools.js'
+import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
+import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorView.tools.js'
+import { makeChartHandler } from '../tools/marketData.tools.js'
+import { coverageService } from '../../api/analyst/coverage.service.js'
+import { SECTORS } from '../entity/vocabulary.js'
+import { buildTagCaptures } from '../llmStream.util.js'
+import { buildSchoolSection, normalizeAllocation, normalizeSelection } from '../investorSchools.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[portfolioAgent]'
 // Hot-reload the system prompt on file change (mtime-gated) — no restart needed.
-const _systemPrompt = makePromptLoader(join(__dirname, '../portfolio_system_prompt.md'), LOG)
+const _systemPrompt = makePromptLoader(join(__dirname, '../../portfolio_system_prompt.md'), LOG)
 const MAX_MESSAGES = 10
 
 export const TOOLS = toolsFor({
