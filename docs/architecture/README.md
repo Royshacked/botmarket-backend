@@ -8,6 +8,7 @@
 | [paper-trading-simulation.md](./paper-trading-simulation.md) | Virtual per-user account; live-price fill engine; equity snapshots; the `paper` broker adapter |
 | [trades-data.md](./trades-data.md) | The canonical trade entity: the `trades` ledger schema, origin model (idea/call/portfolio), stored-vs-derived metrics, capture path, and gaps to close |
 | [ohlcv-price-data.md](./ohlcv-price-data.md) | OHLCV pipeline; Massive/Polygon provider; file cache; priceService; monitoring adapter |
+| [../trust-gaps-todo.md](../trust-gaps-todo.md) | **The open work, ranked.** Capture the thesis→execution→management→result chain; make the money path testable without a broker; what still needs live verification |
 | [single-instance.md](./single-instance.md) | **The deployment constraint: this backend runs as ONE process.** Which loops claim through Mongo and which rely on being alone; what a second instance breaks, worst first; what it would take to scale out |
 
 ## Quick orientation
