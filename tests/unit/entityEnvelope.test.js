@@ -3,11 +3,13 @@ import assert from 'node:assert/strict'
 
 import { KINDS, ownerForKind, isKind, kindForDoc, blankMonitorState, blankExecution } from '../../services/entity/envelope.js'
 import { ideaToEnvelope, callToEnvelope, toEnvelope } from '../../services/entity/toEnvelope.js'
-import { buildFilter, makeEntityStore } from '../../services/entity/entityStore.service.js'
 
 // P0 of the entity split (ENTITY_MODEL.md). These are the pure seams the blind execution path
-// and the migrations will stand on: owner-from-kind, the legacy→envelope adapters (incl. the
-// idea camelCase vs call snake_case mismatch), and the sparse entity-store filter.
+// stands on: owner-from-kind and the legacy→envelope adapters (incl. the idea camelCase vs call
+// snake_case mismatch).
+//
+// The third P0 seam, entityStore, was DELETED 2026-08-07 along with its two tests — the migration
+// went a different way and nothing ever consumed it. See ENTITY_MODEL.md.
 
 // ── owner is derived from kind, never stored ──────────────────────────────────────────────
 test('ownerForKind maps each execution-tier kind to its monitor', () => {
@@ -122,37 +124,4 @@ test('toEnvelope dispatches by source tag', () => {
     assert.equal(toEnvelope({ id: 'c', userId: 'u' }, 'call').kind, KINDS.CALL)
     assert.equal(toEnvelope({ id: 'i', userId: 'u' }, 'idea').kind, KINDS.IDEA)
     assert.equal(toEnvelope({ id: 'x', userId: 'u' }).kind, KINDS.IDEA)   // default
-})
-
-// ── entity-store filter + CRUD over an in-memory fake ───────────────────────────────────────
-test('buildFilter omits undefined selectors and $in-wraps a status array', () => {
-    assert.deepEqual(buildFilter({}), {})
-    assert.deepEqual(buildFilter({ kind: 'idea' }), { kind: 'idea' })
-    assert.deepEqual(buildFilter({ kind: 'idea', userId: 'u1' }), { kind: 'idea', userId: 'u1' })
-    assert.deepEqual(buildFilter({ status: ['looking', 'long'] }), { status: { $in: ['looking', 'long'] } })
-    assert.deepEqual(buildFilter({ parentId: null }), { parentId: null })   // null IS a real selector
-})
-
-test('entityStore CRUD works against an injected collection', async () => {
-    const docs = []
-    const fakeColl = {
-        async findOne(f) { return docs.find(d => d.id === f.id) ?? null },
-        find(f) { return { async toArray() { return docs.filter(d => Object.entries(f).every(([k, v]) => d[k] === v)) } } },
-        async insertOne(d) { docs.push(d) },
-        async updateOne(f, u) { Object.assign(docs.find(d => d.id === f.id), u.$set) },
-        async deleteOne(f) { const i = docs.findIndex(d => d.id === f.id); if (i >= 0) docs.splice(i, 1) },
-    }
-    const store = makeEntityStore({ coll: async () => fakeColl })
-
-    await store.insert({ id: 'e1', kind: 'idea', userId: 'u1', status: 'looking' })
-    await store.insert({ id: 'e2', kind: 'call', userId: 'u1', status: 'watching' })
-
-    assert.equal((await store.getById('e1')).status, 'looking')
-    assert.deepEqual((await store.query({ kind: 'idea' })).map(d => d.id), ['e1'])
-
-    const patched = await store.patch('e1', { status: 'hit' })
-    assert.equal(patched.status, 'hit')
-
-    await store.remove('e2')
-    assert.equal(await store.getById('e2'), null)
 })

@@ -22,17 +22,15 @@ import { fileURLToPath } from 'node:url'
 const ROOT = fileURLToPath(new URL('../../', import.meta.url))
 const DIRS = ['api', 'services', 'monitoring', 'providers']
 
-// A dead module is not a second source of truth for anything, but it still LOOKS like one to a
-// reader. Listed explicitly so removing the file removes the exemption with it.
-const IGNORED_FILES = new Set([
-    'entityStore.service.js',   // the kind-blind store seam — no consumers (ENTITY_MODEL P0)
-])
-
+// There is no exemption list. `entityStore.service.js` held one — a dead module carrying a second
+// `'entities'` literal next to entityCollection.ENTITIES — and it went with the file (2026-08-07).
+// If a module ever needs exempting again, prefer deleting it: a name nothing reads is not a source
+// of truth, it is a decoy.
 function sourceFiles(dir, acc = []) {
     for (const name of readdirSync(dir)) {
         const full = join(dir, name)
         if (statSync(full).isDirectory()) { sourceFiles(full, acc); continue }
-        if (name.endsWith('.js') && !IGNORED_FILES.has(name)) acc.push(full)
+        if (name.endsWith('.js')) acc.push(full)
     }
     return acc
 }

@@ -60,12 +60,39 @@ reconciler           → match broker pos → envelope by {id, kind}; write stat
 trades ledger        → frozen-at-fill, keyed by {id, kind}, authoritative pnl
 ```
 
+## 5b. `entityStore` — REJECTED and DELETED (2026-08-07)
+
+P0 below built THREE seams. Two are load-bearing today; the third never was, and the file is gone.
+
+```
+entityCrud   LIVE  owner-SCOPED CRUD per kind. _scope(userId) is the guarantee that a list is
+                   only ever the caller's own. Its HTTP twin is _shared/makeEntityController.
+entityRepo   LIVE  the execution facade. KIND-BLIND — matches on broker linkage, never on kind.
+entityStore  GONE  generic getById/query/insert/patch/remove over `entities`.
+```
+
+WHY IT WENT. It was written as the storage seam P2–P4 would migrate each kind onto, and the
+migration went a different way: `entityCrud` and `entityRepo` were built and adopted, and BOTH call
+`getDb()` directly. Nothing ever imported entityStore except its own test. Its own header still
+said "NO consumers yet (P0)" two phases after P0 closed.
+
+It could not simply be adopted late, either: it has NO OWNERSHIP GUARD. `query({kind:'call'})`
+returns every user's calls. That is precisely the guarantee `entityCrud._scope` exists to provide,
+so wiring it up would have meant rebuilding that guard on top of it — i.e. rebuilding entityCrud.
+
+The cost of leaving it was not zero. A reader met three persistence abstractions and had to work
+out which was canonical, and it carried a second hardcoded `'entities'` literal alongside
+`entityCollection.ENTITIES`, which the collection-name guard had to exempt by name.
+
+If a kind-blind store is ever wanted again, start from `entityRepo` (already kind-blind, already
+the execution path) rather than resurrecting this — and give it a scope argument on day one.
+
 ## 6. Phased plan (strangler — execution stays live every phase)
 
 ```
 P0  Envelope contract + entityStore repo (NEW code, zero consumers)
       - envelope type + owner-from-kind map
-      - entityStore: CRUD by id / query {kind,parentId,userId,status}
+      - entityStore: CRUD by id / query {kind,parentId,userId,status}   ← REJECTED, see 5b
       - toEnvelope(ideaDoc) adapter  ← strangler bridge (legacy idea → envelope view)
 
 P1  Execution blind  [RISKY — money path]  still backed by `ideas`
@@ -154,7 +181,8 @@ GOAL: funnel EVERY execution-path db.collection('ideas') access through one kind
 module, so P2 = flip one collection name (+ run migration) and every exec site follows.
 P1b changes NO behavior and does NOT flip the target — collection stays 'ideas'.
 
-WHY separate from entityStore: entityStore.COLLECTION='entities' (the FUTURE store).
+WHY separate from entityStore (deleted 2026-08-07, see 5b): entityStore.COLLECTION='entities'
+was the FUTURE store.
 entityRepo.EXEC_COLLECTION='ideas' (the CURRENT backing store, strangler window: calls
 execute via an idea shadow, holdings ARE ideas). They are different collections DURING
 the transition; P2 points entityRepo at 'entities' after migrating data. ACTIVE stays
