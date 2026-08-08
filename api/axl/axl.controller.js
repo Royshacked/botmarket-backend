@@ -95,6 +95,10 @@ export async function streamAxl(req, res) {
                 // real route for the same reason the symbol is: with nowhere to land it is a message
                 // sent to no one. The service has already collapsed and capped it.
                 opening: route ? (result.opening ?? null) : null,
+                // Follow-up chips. Already empty on a routing turn (the agent guards it), and
+                // re-gated here for the same reason `route` itself is validated rather than
+                // trusted: this tier is the contract the client reads.
+                suggestions: route ? [] : (Array.isArray(result.suggestions) ? result.suggestions : []),
                 chart: result.chart ?? null,
             }
         },

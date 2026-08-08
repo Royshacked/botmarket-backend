@@ -3,6 +3,7 @@ import { dirname, join }  from 'path'
 import { logger }         from '../logger.service.js'
 import { normalizeMessages, makePromptLoader, stripEmitTags, buildAudienceSection, LANGUAGE_RULE } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
+import { makeSuggestionCapture } from '../suggestions.service.js'
 import { runAgentStream } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
@@ -159,6 +160,9 @@ ${audienceBlock}` : ''}` },
     let routeCapture = null
     let editCapture = null
     let openCapture = null
+    // Follow-up chips. The shared pipe collects and cleans them; WHAT to suggest is this agent's
+    // own judgment, authored in axl_system_prompt.md.
+    const suggest = makeSuggestionCapture()
 
     const toolHandlers = {
         ..._tradingContextHandlers(userId),
@@ -185,12 +189,13 @@ ${audienceBlock}` : ''}` },
             route: (text) => { routeCapture = text.trim() },
             edit:  (text) => { editCapture = text.trim() },
             open:  (text) => { openCapture = text },
+            suggest: suggest.onCapture,
         }),
         onToolStart, onReasoning,
         onChart: (row) => { chartRow = row; onChart?.(row) },
     })
 
-    const reply = stripEmitTags(raw ?? '', ['route', 'edit', 'open']).trim()
+    const reply = stripEmitTags(raw ?? '', ['route', 'edit', 'open', 'suggest']).trim()
     const { desk, symbol } = _splitRoute(routeCapture)
     const edit = _splitEdit(editCapture)
 
@@ -199,7 +204,13 @@ ${audienceBlock}` : ''}` },
     // than beginning again, so an opening turn there would talk over what is already on the page.
     const opening = (desk && !edit) ? _cleanOpening(openCapture) : null
 
-    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, edit: edit ? `${edit.kind}:${edit.ref}` : null, opening: opening ? opening.length : null, replyLength: reply.length })
+    // Chips are for a turn that STAYS here. When Axl is handing the user to a desk, the door he
+    // just opened is the next step — offering three other questions beside it competes with the
+    // one thing he decided. The prompt says the same; this guard is what makes it true, exactly as
+    // the `opening` line above guards its own tag rather than trusting the tag to arrive correctly.
+    const suggestions = (desk || edit) ? [] : suggest.result()
+
+    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, edit: edit ? `${edit.kind}:${edit.ref}` : null, opening: opening ? opening.length : null, suggestions: suggestions.length, replyLength: reply.length })
     // `chart` on the return is the REQUEST, never the image: the row already went out on its own
     // event and doubling it here would double the bytes on the wire.
     return {
@@ -212,6 +223,8 @@ ${audienceBlock}` : ''}` },
         // The desk's first turn, in the user's words. The client sends it as their message on
         // arrival, so the desk starts on the job instead of asking what they came for.
         opening,
+        // Up to three follow-ups the user can send with one click. Empty on a routing turn.
+        suggestions,
         chart: chartRow ? { ticker: chartRow.symbol, timeframe: chartRow.timeframe } : null,
     }
 }
