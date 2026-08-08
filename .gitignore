@@ -5,6 +5,7 @@ newsFeeds.json
 data/
 
 # Local scratch / one-off scripts — never commit (some hit prod DB/broker)
+scratch/
 _tmp_*
 _edit.mjs
 *.backup*.md
