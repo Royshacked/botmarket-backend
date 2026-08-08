@@ -138,6 +138,16 @@ export function makeEntityRepo({ coll = _defaultColl } = {}) {
         },
 
         /**
+         * ONE user's entities sitting in any of these orderStates — the "what is waiting on me"
+         * read behind the queued list. Scoped to the user, unlike listByOrderState above, which is
+         * the monitor's cross-user sweep. Raw docs.
+         */
+        async listByOrderStates(userId, orderStates) {
+            const c = await coll()
+            return c.find({ userId: String(userId), orderState: { $in: orderStates } }).toArray()
+        },
+
+        /**
          * Guarded single-winner claim: findOneAndUpdate({id, ...guard}, $set fields) with the DEFAULT
          * returnDocument (pre-image) — truthy iff the guard held and this call won the race.
          */

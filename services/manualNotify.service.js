@@ -11,10 +11,22 @@
  * See docs/architecture/manual-mode.md.
  */
 
-import { cardActions } from '../api/chat/chat.service.js'
+import { cardActions, botForKind, BOT_USER_ID } from '../api/chat/chat.service.js'
 import { postCard } from './notifyCard.js'
 
 const LOG = '[manualNotify]'
+
+/**
+ * WHO the card comes from. These two cards are the shared PIPE for every desk's manual fills —
+ * Talos's setups, Kairos's calls, Atlas's baskets, a lone legacy idea — so the sender cannot be
+ * hardcoded here. Callers pass their own `botId` (or the `kind` to derive it from); a basket is
+ * Atlas's by construction, and anything with no living desk lands on Axl.
+ */
+export function _sender({ botId = null, kind = null, portfolioId = null }) {
+    if (botId) return botId
+    if (kind)  return botForKind(kind)
+    return portfolioId ? 'portfolio' : BOT_USER_ID
+}
 
 /** One entry leg's UI meta, from an idea doc. */
 export function entryLegFromIdea(idea) {
@@ -43,20 +55,20 @@ export function exitLegFromIdea(idea) {
  * portfolio activation; each leg gets a price (+ editable qty) input in the FillCard, and
  * its position opens the moment the user submits it.
  * @param {string} userId
- * @param {{ legs: object[], portfolioId?: string|null, portfolioName?: string|null }} opts
+ * @param {{ legs: object[], portfolioId?: string|null, portfolioName?: string|null,
+ *           botId?: string|null, kind?: string|null }} opts
  */
-export async function notifyManualEntry(userId, { legs, portfolioId = null, portfolioName = null }) {
+export async function notifyManualEntry(userId, { legs, portfolioId = null, portfolioName = null, botId = null, kind = null }) {
     if (!userId || !Array.isArray(legs) || legs.length === 0) return null
     const content = legs.length === 1
         ? `Manual entry — ${String(legs[0].direction).toUpperCase()} ${legs[0].asset}. Enter your fill at your broker, then confirm your average price and size.`
         : `Manual entry — ${portfolioName || 'portfolio'}: ${legs.length} legs. Enter each at your broker and fill in your average prices.`
-    // Attribute to the authoring agent: a portfolio basket is Atlas's, a lone idea is Idea's.
     return postCard({
         userId,
         content,
         type:    'manual_entry',
         payload: { kind: 'entry', portfolioId, portfolioName, legs },
-        botId:   portfolioId ? 'portfolio' : 'idea',
+        botId:   _sender({ botId, kind, portfolioId }),
         actions: cardActions('Enter fills'),
     }, { tag: `Manual entry card (${legs.map(l => l.asset).join(', ')})`, log: LOG })
 }
@@ -67,21 +79,21 @@ export async function notifyManualEntry(userId, { legs, portfolioId = null, port
  * open leg). Each leg closes incrementally via confirmManualExit as its exit price is
  * submitted; partial baskets are fine (unfilled legs stay open, the card waits).
  * @param {string} userId
- * @param {{ legs: object[], reason?: string, portfolioId?: string|null, portfolioName?: string|null }} opts
+ * @param {{ legs: object[], reason?: string, portfolioId?: string|null, portfolioName?: string|null,
+ *           botId?: string|null, kind?: string|null }} opts
  */
-export async function notifyManualExit(userId, { legs, reason = 'manual', portfolioId = null, portfolioName = null }) {
+export async function notifyManualExit(userId, { legs, reason = 'manual', portfolioId = null, portfolioName = null, botId = null, kind = null }) {
     if (!userId || !Array.isArray(legs) || legs.length === 0) return null
     const label = reason === 'tp' ? 'Take-profit' : reason === 'stop' ? 'Stop' : 'Exit'
     const content = legs.length === 1
         ? `${label} on ${legs[0].asset} — close at your broker and confirm your exit price.`
         : `Exit ${portfolioName || 'portfolio'} — ${legs.length} open legs. Confirm your exit price for each one you've closed.`
-    // Attribute to the authoring agent: a portfolio basket is Atlas's, a lone idea is Idea's.
     return postCard({
         userId,
         content,
         type:    'manual_exit',
         payload: { kind: 'exit', reason, portfolioId, portfolioName, legs },
-        botId:   portfolioId ? 'portfolio' : 'idea',
+        botId:   _sender({ botId, kind, portfolioId }),
         actions: cardActions('Confirm close'),
     }, { tag: `Manual exit card (${legs.map(l => l.asset).join(', ')}, ${reason})`, log: LOG })
 }

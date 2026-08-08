@@ -46,13 +46,38 @@ test('manual trim that floors to 0 is rejected (too small)', async () => {
     assert.deepEqual(r, { ok: false, reason: 'trim_too_small' })
 })
 
+// The manual tests above never reach the hours gate — a manual book places no orders, so there is
+// nothing for hours to gate and the branch returns first. Anything that DOES take the broker path
+// has to say which side of the clock it's testing, or it passes by day and queues by night.
+const OPEN   = async () => ({ deferred: false })
+const CLOSED = async () => ({ deferred: true, ok: true, id: 'q7', nextOpenMs: 1_800_000_000_000 })
+
 test('a non-manual holding takes the broker path, not the manual branch', async () => {
     // An IBKR leg (capabilities().closePosition === false) is SKIPPED without any broker call —
     // proving it did NOT fall into the manual branch (which would have returned manual:true).
     const db = fakeDb(manualItem({ brokerOrders: [{ broker: 'ibkr', accountId: 'a1', positionId: 'p1', quantity: 10 }] }))
-    const r  = await _trimItem(db, 'i1', 'u1', { reduceFraction: 0.5 })
+    const r  = await _trimItem(db, 'i1', 'u1', { reduceFraction: 0.5 }, OPEN)
     assert.equal(r.manual, undefined)
-    assert.deepEqual(r, { ok: false, legsTrimmed: 0, legsSkipped: 1 })
+    // Every leg skipped is a refusal WITH a reason now — an ok:false carrying only counts left the
+    // caller nothing to tell the user, which is how a whole review landed as "Changes applied".
+    assert.deepEqual(r, { ok: false, reason: 'trim_too_small', legsSkipped: 1 })
+})
+
+test('market shut → the trim is queued and no position is touched', async () => {
+    const db = fakeDb(manualItem({ brokerOrders: [{ broker: 'ctrader', accountId: 'a1', positionId: 'p1', quantity: 10 }] }))
+    const r  = await _trimItem(db, 'i1', 'u1', { reduceFraction: 0.5 }, CLOSED)
+
+    assert.equal(r.deferred, true)
+    assert.equal(r.ok, true, 'queued is accepted, not failed')
+    assert.equal(r.queuedId, 'q7')
+    assert.equal(db._updates.length, 0, 'not even the advisory weight is written — nothing happened yet')
+})
+
+test('a MANUAL trim is never gated, whatever the clock says', async () => {
+    const db = fakeDb(manualItem())
+    const r  = await _trimItem(db, 'i1', 'u1', { reduceFraction: 0.5 }, CLOSED)
+    assert.equal(r.manual, true)
+    assert.equal(r.deferred, undefined)
 })
 
 test('bad reduceFraction is rejected before touching the position', async () => {

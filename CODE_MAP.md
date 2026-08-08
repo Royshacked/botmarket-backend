@@ -63,7 +63,9 @@ api/
                           sockets: every tab is a reader of the same inbox, and one socket per user
                           meant a second tab displaced the first WITHOUT closing it — that browser
                           never reconnected and its unread badge silently froze); sendBotMessage funnel,
-                          BOT_IDS = axl·idea·portfolio·scanner·kairos (one notify bot per agent).
+                          BOT_IDS = axl·portfolio·scanner·kairos·mentor·analyst·strategy (one notify
+                          bot per agent) + botForKind (kind → sender) and RETIRED_BOT_IDS (`idea`:
+                          feed gone, thread hidden, its orphan cards fall back to Axl).
                           listCardRecipientsSince(type, since) = the shared dedupe read for any
                           fan-out notifier ("who already got today's?"), conversation→user join
   market/ calendar/ user/ authentication/ transcribe/
@@ -200,9 +202,27 @@ services/
   tradeCapture.service.js   append-only `trades` history (captureOpen / captureOpenBare / captureClose)
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
   tradeNotify.service.js    notify+route cards → social chat: entry_confirm (paper/live idea + Kairos
-                            ready call) + call_expiry (Kairos thesis edit/expired). Pure builders +
-                            thin sendBotMessage wrappers; card is the alert, existing UI is the destination.
+                            ready call) + call_expiry (Kairos thesis edit/expired) + queue_ready (the
+                            market-open nudge, from Axl). Pure builders + thin sendBotMessage wrappers;
+                            card is the alert, existing UI is the destination.
                             entry_confirm carries a `note` (passed_earlier | off_hours | null) for scheduled entries
+  pendingAction/            the OFF-HOURS QUEUE (docs/architecture/off-hours-queue.md). RULE: nothing
+                            executes off-hours, paper included — a decision confirmed while the venue
+                            is shut is queued, not fired and not lost.
+                            executionGate.js  THE market-hours gate. deferIfClosed() → proceed, or
+                                              queued + do not touch the broker. Replaced five call
+                                              sites that each decided hours policy and disagreed
+                            pendingAction.repo.js  `pending_actions`: the record (an intent with no
+                                              entity of its own). enqueue is idempotent per
+                                              (user, entity, verb); transitionFilter is the guard
+                            originRegistry.js  execute + cancel per origin (portfolio_item, call,
+                                              setup, idea). Keyed, not a switch; the gate REFUSES
+                                              to queue an unregistered origin. `_byDecider` splits
+                                              a review's exit from a MONITOR's — both spell `exit`,
+                                              but a monitor's can be a slice, and running that
+                                              through _exitItem would liquidate the position
+                            pendingWork.service.js  listWaiting = the one read unioning queued actions
+                                              + entities awaiting_confirm into one row shape
   thread.service.js  thread.util.js   unified subject-bound conversation threads
                           (`threads` collection). A conversation gets a threadId at the
                           start (subject-independent), is saved as a `draft` once it crosses
@@ -234,15 +254,18 @@ monitoring/
   evaluators/               touch · structured · indicator · time · volume · news · chart
   execution.reconciler.js   broker-authoritative fill/close → idea status
   invalidation.monitor.js   entry-range watcher (advisory, never executes)
-  marketOpen.monitor.js     the market-open sweep — the drain for `awaiting_market`. KIND-BLIND by
-                            design: three paths park orders there (_attachImmediatePlan for the
-                            ticket AND a portfolio add, triggerEntryNow, Talos on a setup), so a
-                            sweep that understands one kind is the bug. Claims each entity
-                            (claimIf → exactly-once card), then notifies: 1 order → the desk's own
-                            entry_confirm; N → ONE `orders_ready` batch card, grouped per user PER
-                            KIND so the notification still belongs to the authoring desk. Places
-                            nothing. It rode inside Minos until 2026-08-01 and was archived with
-                            it, stranding every deferred order in the app
+  marketOpen.monitor.js     the market-open sweep — the ONE drain for everything parked while a
+                            venue was shut. KIND-BLIND by design: three paths park orders at
+                            `awaiting_market` (_attachImmediatePlan for the ticket AND a portfolio
+                            add, triggerEntryNow, Talos on a setup), so a sweep that understands one
+                            kind is the bug. TWO SOURCES since 2026-08-07: entities at
+                            awaiting_market (claimIf → awaiting_confirm) AND queued actions
+                            (pending_actions, transition from QUEUED — both guards are what make it
+                            exactly-once). Then ONE `queue_ready` card per USER, from Axl, pointing
+                            at the queued list — replacing the per-desk per-kind fan-out, which
+                            posted two cards in the same second for one open. Places nothing. It
+                            rode inside Minos until 2026-08-01 and was archived with it, stranding
+                            every deferred order in the app
   hermes.monitor.service.js Hermes — the Kairos-call readiness loop (own tick, `kairos_calls`). THREE-TIER
                             out-of-zone cascade (all cheapest-first): (1) arithmetic zone gate; (1.5) proximity
                             polling (_proximityGapMin: poll faster the nearer price is to a zone) + a momentum-

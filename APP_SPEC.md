@@ -120,8 +120,10 @@ It runs pre-entry AND in-position but only INFORMS; exits stay stop-owned.
 Major events are surfaced as typed cards in social chat via one funnel — `sendBotMessage(userId,
 content, type, payload, botId)` (`api/chat/chat.service.js`) → `chat_messages` → WebSocket →
 `SocialChat/ChatWindow.jsx` dispatches by `type` to a card component. Each `botId` is the authoring
-agent (`BOT_IDS = axl · idea · portfolio · scanner · kairos`; only Axl is conversational, the rest
-are notify-only feeds), so a card reads "from Idea / Atlas / Kairos". The card is the alert + a
+agent (`BOT_IDS = axl · portfolio · scanner · kairos · mentor · analyst · strategy`; only Axl is
+conversational, the rest are notify-only feeds), so a card reads "from Atlas / Kairos / Mentor". A
+kind picks its sender through the one `botForKind` map, and a kind whose desk is retired (`idea` —
+see `RETIRED_BOT_IDS`) falls back to Axl rather than posting into a feed nobody reads. The card is the alert + a
 clickable preview; the **existing action UI stays the destination** (deep-link, not embedded action).
 Dismiss/handled state persists per-message.
 
@@ -348,7 +350,8 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   research — NOT an execution-tier entity, watched by its own monitor, not Hermes/Minos/Themis.
 - `paperAccounts` / `paperPositions` / `paperOrders` — the virtual broker store.
 - `chat_conversations` / `chat_messages` — social DM + bot notifications; one notify bot per agent
-  (`BOT_IDS`, incl. `kairos`). `chat_messages.type`/`payload` drive the typed notification cards
+  (`BOT_IDS`, incl. `kairos`). A RETIRED bot's thread is kept but hidden from `getConversations`
+  (`RETIRED_BOT_IDS` — `idea`). `chat_messages.type`/`payload` drive the typed notification cards
   (invalidation_alert, portfolio_review, manual_entry/exit, entry_confirm, call_expiry — see §2);
   `chat_messages.dismissed`/`dismissOutcome` persist the handled state of an actionable card.
 - `threads` — unified agent conversation threads (idea / portfolio / scanner). A conversation gets a

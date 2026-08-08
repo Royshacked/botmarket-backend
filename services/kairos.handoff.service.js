@@ -167,7 +167,7 @@ export async function confirmCall(id, userId, deps = _deps) {
     let failure = null
     try {
         if (mode === 'manual') {
-            await deps.notifyManualEntry(userId, { legs: [deps.entryLegFromIdea(merged)] })
+            await deps.notifyManualEntry(userId, { legs: [deps.entryLegFromIdea(merged)], kind: 'call' })
         } else {
             const res = await deps.placeOrdersForIdea(id, merged.pendingOrder?.plan ?? [], userId)
             if (res && res.ok === false) failure = res.reason ?? 'placement_failed'

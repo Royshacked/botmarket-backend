@@ -18,14 +18,39 @@ export const MSGS  = 'chat_messages'
 export const BOT_USER_ID = 'axl'   // the default + the one conversational bot
 // One notification bot per agent (ids are the canonical agent keys). Each producer
 // posts under its authoring agent so the social-chat conversation sender matches the
-// card's agent tag — a portfolio review reads "from Atlas", an invalidation "from Idea".
+// card's agent tag — a portfolio review reads "from Atlas", a setup confirm "from Mentor".
 // The specialist threads are notify-only feeds; only Axl handles replies.
 // NB: this list is the GATE, not a label — postBotCard silently falls back to Axl for an id that
 // isn't here, so a missing entry doesn't error, it misattributes. `mentor` was missing while
 // buildSetupEntryConfirm posted under it, which is why Talos's setup cards arrived from Axl.
 // The frontend registry (agentMeta.jsx BOT_IDS) must stay in step with this one.
-export const BOT_IDS = ['axl', 'idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'analyst', 'strategy']
+export const BOT_IDS = ['axl', 'portfolio', 'scanner', 'kairos', 'mentor', 'analyst', 'strategy']
 export const isBot = (id) => BOT_IDS.includes(String(id))
+
+// RETIRED bots. `idea` was dropped when the Idea desk was archived (its agent is gone and its
+// route unmounted), so there is no longer anyone behind that feed. Threads already in Mongo are
+// NOT deleted — the cards in them are real history — they are simply hidden from the sidebar by
+// getConversations. Keep an id here rather than dropping it silently: a reader who finds an old
+// `idea` sender in chat_messages needs to see WHY nothing renders it.
+export const RETIRED_BOT_IDS = ['idea']
+export const isRetiredBot = (id) => RETIRED_BOT_IDS.includes(String(id))
+
+/**
+ * Which bot speaks for an entity KIND. One home for the attribution rule, because the callers that
+ * need it (the market-open sweep, the manual fill/exit cards, the position monitor) are all
+ * kind-blind services posting on a desk's behalf — each re-deriving it is how a Kairos call ended
+ * up announcing its own fill as "Idea".
+ *
+ * A kind with no living desk (the archived `idea`) falls back to Axl, which is the general
+ * notification bot — never a wrong brand, and never a lost card.
+ */
+const BOT_BY_KIND = Object.freeze({
+    call:           'kairos',
+    setup:          'mentor',
+    portfolio_item: 'portfolio',
+    idea:           BOT_USER_ID,
+})
+export const botForKind = (kind) => BOT_BY_KIND[kind] ?? BOT_USER_ID
 const BOT_WELCOME = "Hi, I'm Axl — your trading assistant. I'll notify you here about portfolio reviews, position alerts, and anything that needs your attention, and you can ask me how the app works. Just message me."
 
 // Lazy import to avoid circular dependency (chatWs imports nothing from here).
@@ -246,10 +271,13 @@ export async function getConversations(userId) {
     const db  = await getDb()
     const uid = String(userId)
 
-    const convs = await db.collection(CONVS)
+    // A retired bot's thread stays in Mongo but leaves the sidebar: nothing posts there any more,
+    // so it can only ever show a frozen feed under a desk the app no longer has.
+    const convs = (await db.collection(CONVS)
         .find({ participants: uid })
         .sort({ lastMessageAt: -1 })
-        .toArray()
+        .toArray())
+        .filter(c => !c.participants.some(isRetiredBot))
 
     if (!convs.length) return []
 
@@ -435,7 +463,10 @@ export async function searchUsers(query, currentUserId) {
     const users  = await db.collection(USERS)
         .find({
             id:       { $ne: String(currentUserId) },
-            username: { $nin: BOT_IDS },
+            // RETIRED ids belong here too: a bot seeded as a user doc does not stop existing when
+            // its feed is dropped from BOT_IDS — it just stops being recognised as a bot, and
+            // surfaces in the people search as a findable "user" you can start a DM with.
+            username: { $nin: [...BOT_IDS, ...RETIRED_BOT_IDS] },
             $or: [{ username: regex }, { fullname: regex }],
         })
         .project({ id: 1, username: 1, fullname: 1 })

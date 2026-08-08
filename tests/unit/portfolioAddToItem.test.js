@@ -43,10 +43,16 @@ const liveIdea = (over = {}) => ({
     ...over,
 })
 
+// Every test below is a MARKET-OPEN test: the hours gate is injected open so these keep asserting
+// what they were written to assert (sizing, linkage, guards). The closed-market behaviour — queue,
+// never place — has its own block at the bottom.
+const OPEN  = async () => ({ deferred: false })
+const addTo = (db, id, uid, change, broker = fakeBroker()) => _addToItem(db, id, uid, change, broker, OPEN)
+
 test('happy path: adds floor(qty × fraction) per leg, same direction, no positionId; links new legs', async () => {
     const db = fakeDb(liveIdea())
     const broker = fakeBroker()
-    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5, targetAllocationRatio: 0.3 }, broker)
+    const r = await addTo(db, 'i1', 'u1', { addFraction: 0.5, targetAllocationRatio: 0.3 }, broker)
 
     assert.deepEqual(r, { ok: true, legsAdded: 2, legsSkipped: 0 })
     // 10×0.5=5, 4×0.5=2
@@ -67,7 +73,7 @@ test('happy path: adds floor(qty × fraction) per leg, same direction, no positi
 test('fraction > 1 is allowed (double the position)', async () => {
     const db = fakeDb(liveIdea({ brokerOrders: [{ broker: 'ctrader', accountId: 'a1', positionId: 'p1', quantity: 10 }] }))
     const broker = fakeBroker()
-    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 1.5 }, broker)
+    const r = await addTo(db, 'i1', 'u1', { addFraction: 1.5 }, broker)
     assert.equal(r.legsAdded, 1)
     assert.equal(broker._placed[0].order.quantity, 15)
 })
@@ -75,7 +81,7 @@ test('fraction > 1 is allowed (double the position)', async () => {
 test('short holding adds on the short side', async () => {
     const db = fakeDb(liveIdea({ direction: 'short', status: 'short' }))
     const broker = fakeBroker()
-    await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, broker)
+    await addTo(db, 'i1', 'u1', { addFraction: 0.5 }, broker)
     assert.ok(broker._placed.every(p => p.order.direction === 'short'))
 })
 
@@ -85,16 +91,19 @@ test('legs on a non-trading broker are skipped, not placed', async () => {
         { broker: 'ibkr',    accountId: 'a2', positionId: 'p2', quantity: 8 },
     ] }))
     const broker = fakeBroker({ tradable: new Set(['ctrader']) })
-    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, broker)
+    const r = await addTo(db, 'i1', 'u1', { addFraction: 0.5 }, broker)
     assert.deepEqual(r, { ok: true, legsAdded: 1, legsSkipped: 1 })
     assert.equal(broker._placed.length, 1)
 })
 
-test('a fraction that floors a leg to 0 is skipped', async () => {
+test('a fraction that floors every leg to 0 is a REFUSAL, with a reason', async () => {
+    // This is the exact shape of the MU scale-in that reported "Changes applied" having placed
+    // nothing: floor(qty × fraction) is 0 for any fraction under 1/qty, and an ok:false with no
+    // reason gave the caller nothing to tell the user.
     const db = fakeDb(liveIdea({ brokerOrders: [{ broker: 'ctrader', accountId: 'a1', positionId: 'p1', quantity: 1 }] }))
     const broker = fakeBroker()
-    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.4 }, broker)   // floor(0.4)=0
-    assert.deepEqual(r, { ok: false, legsAdded: 0, legsSkipped: 1 })
+    const r = await addTo(db, 'i1', 'u1', { addFraction: 0.4 }, broker)   // floor(0.4)=0
+    assert.deepEqual(r, { ok: false, reason: 'add_too_small', legsSkipped: 1 })
     assert.equal(broker._placed.length, 0)
 })
 
@@ -106,7 +115,7 @@ test('one leg failing does not abandon the other: the placed leg is still linked
         if (accountId === 'a2') throw new Error('broker rejected')
         return { orderId: `ord-${accountId}`, accountId, positionId: null }
     }
-    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, broker)
+    const r = await addTo(db, 'i1', 'u1', { addFraction: 0.5 }, broker)
     assert.equal(r.ok, true)
     assert.equal(r.legsAdded, 1)
     assert.equal(r.legsFailed, 1)
@@ -118,23 +127,23 @@ test('one leg failing does not abandon the other: the placed leg is still linked
 // ── guards ──
 test('not-live holding → not_live (route new names through add_idea)', async () => {
     const db = fakeDb(liveIdea({ status: 'waiting' }))
-    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, fakeBroker())
+    const r = await addTo(db, 'i1', 'u1', { addFraction: 0.5 }, fakeBroker())
     assert.deepEqual(r, { ok: false, reason: 'not_live' })
 })
 test('addFraction ≤ 0 or non-numeric → bad_addFraction', async () => {
     const db = fakeDb(liveIdea())
-    assert.equal((await _addToItem(db, 'i1', 'u1', { addFraction: 0 }, fakeBroker())).reason, 'bad_addFraction')
-    assert.equal((await _addToItem(db, 'i1', 'u1', { addFraction: -1 }, fakeBroker())).reason, 'bad_addFraction')
-    assert.equal((await _addToItem(db, 'i1', 'u1', {}, fakeBroker())).reason, 'bad_addFraction')
+    assert.equal((await addTo(db, 'i1', 'u1', { addFraction: 0 }, fakeBroker())).reason, 'bad_addFraction')
+    assert.equal((await addTo(db, 'i1', 'u1', { addFraction: -1 }, fakeBroker())).reason, 'bad_addFraction')
+    assert.equal((await addTo(db, 'i1', 'u1', {}, fakeBroker())).reason, 'bad_addFraction')
 })
 test('no open position → no_position', async () => {
     const db = fakeDb(liveIdea({ brokerOrders: [{ broker: 'ctrader', accountId: 'a1', positionId: null, quantity: 10 }] }))
-    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, fakeBroker())
+    const r = await addTo(db, 'i1', 'u1', { addFraction: 0.5 }, fakeBroker())
     assert.deepEqual(r, { ok: false, reason: 'no_position' })
 })
 test('wrong owner → forbidden', async () => {
     const db = fakeDb(liveIdea({ userId: 'someone_else' }))
-    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, fakeBroker())
+    const r = await addTo(db, 'i1', 'u1', { addFraction: 0.5 }, fakeBroker())
     assert.deepEqual(r, { ok: false, reason: 'forbidden' })
 })
 
@@ -148,7 +157,7 @@ const manualIdea = (over = {}) => liveIdea({
 test('manual add → entry leg (add:true) + stamps pendingAddQty, no broker call', async () => {
     const db = fakeDb(manualIdea())
     const broker = fakeBroker()
-    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, broker)
+    const r = await addTo(db, 'i1', 'u1', { addFraction: 0.5 }, broker)
 
     assert.equal(r.ok, true)
     assert.equal(r.manual, true)
@@ -159,6 +168,54 @@ test('manual add → entry leg (add:true) + stamps pendingAddQty, no broker call
 
 test('manual add that floors to 0 is rejected (too small)', async () => {
     const db = fakeDb(manualIdea({ quantity: 10, brokerOrders: [{ broker: 'manual', positionId: 'p1', quantity: 10 }] }))
-    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.05 }, fakeBroker())   // floor(0.5) = 0
+    const r = await addTo(db, 'i1', 'u1', { addFraction: 0.05 }, fakeBroker())   // floor(0.5) = 0
     assert.deepEqual(r, { ok: false, reason: 'add_too_small' })
+})
+
+// ── the hours gate (2026-08-07: nothing executes off-hours, paper included) ──
+// A scale-in used to go straight to the broker with no idea whether the market was open, and the
+// paper venue filled it at the previous close — the entry's cost basis, wrong for the life of the
+// position, with a success message on top.
+
+const CLOSED = async () => ({ deferred: true, ok: true, id: 'q1', nextOpenMs: 1_800_000_000_000 })
+
+test('market shut → the add is QUEUED and no order is placed', async () => {
+    const db = fakeDb(liveIdea())
+    const broker = fakeBroker()
+    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, broker, CLOSED)
+
+    assert.equal(broker._placed.length, 0, 'not one order may reach the venue')
+    assert.equal(r.deferred, true)
+    assert.equal(r.ok, true, 'queued is ACCEPTED — neither applied nor failed')
+    assert.equal(r.queuedId, 'q1')
+    assert.equal(r.nextOpenMs, 1_800_000_000_000)
+    assert.equal(db._updates.length, 0, 'nothing is stamped on the holding either — it never happened')
+})
+
+test('the gate is asked BEFORE the guards it cannot see past', async () => {
+    // Ordering matters: a not-live holding or a bad fraction is wrong whatever the clock says, so
+    // those still refuse on their own terms rather than queueing nonsense for the open.
+    const notLive = fakeDb(liveIdea({ status: 'waiting' }))
+    assert.equal((await _addToItem(notLive, 'i1', 'u1', { addFraction: 0.5 }, fakeBroker(), CLOSED)).reason, 'not_live')
+
+    const bad = fakeDb(liveIdea())
+    assert.equal((await _addToItem(bad, 'i1', 'u1', { addFraction: 0 }, fakeBroker(), CLOSED)).reason, 'bad_addFraction')
+})
+
+test('a MANUAL book is not gated — its card is an instruction, not an execution', async () => {
+    const db = fakeDb(manualIdea())
+    const r  = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, fakeBroker(), CLOSED)
+    assert.equal(r.manual, true)
+    assert.equal(r.deferred, undefined, 'nothing is placed in manual mode, so hours have nothing to gate')
+})
+
+test('a queue write that fails still blocks the order', async () => {
+    const db = fakeDb(liveIdea())
+    const broker = fakeBroker()
+    const lost = async () => ({ deferred: true, ok: false, reason: 'error', nextOpenMs: null })
+    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, broker, lost)
+
+    assert.equal(broker._placed.length, 0)
+    assert.equal(r.ok, false, 'losing the row is a bookkeeping failure; sending the order would be a trading one')
+    assert.equal(r.reason, 'error')
 })

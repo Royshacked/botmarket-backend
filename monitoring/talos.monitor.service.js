@@ -896,7 +896,9 @@ const _deps = {
         reason: assessment?.edit_proposal?.why ?? assessment?.read ?? null,
         edit_proposal: assessment?.edit_proposal ?? null,
     }),
-    onManualCard: (setup) => notifyManualEntry(setup.userId, { legs: [entryLegFromIdea(setup)] }),
+    // `kind` is the SENDER, not the payload: a setup's fill card is Mentor's, like every other
+    // card this desk posts. Left unsaid it fell back to the shared default.
+    onManualCard: (setup) => notifyManualEntry(setup.userId, { legs: [entryLegFromIdea(setup)], kind: 'setup' }),
 }
 
 export const _testDeps = _deps

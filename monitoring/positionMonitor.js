@@ -9,6 +9,8 @@ import {
 import { buildExitOrder, exitOrderRecord } from './exitOrders.util.js'
 import { notifyManualExit, exitLegFromIdea } from '../services/manualNotify.service.js'
 import { entityRepo }                       from '../services/entity/entityRepo.service.js'
+import { kindForDoc }                       from '../services/entity/envelope.js'
+import { deferIfClosed }                    from '../services/pendingAction/executionGate.js'
 
 const LOG = '[positionMonitor]'
 
@@ -21,10 +23,12 @@ const LOG = '[positionMonitor]'
 export async function checkPosition(db, idea, stopCandles, tpCandles, aeCandles, onClose) {
     const { id, asset } = idea
 
-    // Manual idea already alerted for a close — waiting on the user's reported exit price.
-    // Don't re-evaluate exits (which would re-alert every poll) until they confirm.
-    if (idea.orderState === 'awaiting_manual_close') {
-        logger.info(LOG, `[${id}] Awaiting user manual close — skipping exit checks`)
+    // A close is ALREADY pending on this position — either the user has been asked to report a
+    // manual exit, or the venue was shut when it tripped and the close is queued for the open.
+    // Either way the decision is made and waiting on someone; re-evaluating would re-fire it every
+    // poll, and could queue a SECOND leg (a stop and a target both look true on a stale candle).
+    if (idea.orderState === 'awaiting_manual_close' || idea.orderState === 'awaiting_market_close') {
+        logger.info(LOG, `[${id}] Close already pending (${idea.orderState}) — skipping exit checks`)
         return
     }
 
@@ -129,7 +133,11 @@ async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose, exitC
         exitCtx.alerted     = true
         idea.orderState     = 'awaiting_manual_close'   // keep the in-memory doc consistent with the DB write
         await entityRepo.patch(idea.id, { orderState: 'awaiting_manual_close', pendingCloseReason: reason })
-        await notifyManualExit(idea.userId, { legs: [exitLegFromIdea(idea)], reason })
+        // Kind-blind loop, so the SENDER has to come from the entity: this same path closes a
+        // setup, a call and a holding, and each one's exit card belongs to its own desk. `kind`
+        // only picks the bot — `portfolioId` stays unset, since that field is the card's BASKET
+        // (an N-leg portfolio exit), and this is always one leg.
+        await notifyManualExit(idea.userId, { legs: [exitLegFromIdea(idea)], reason, kind: idea.kind ?? kindForDoc(idea) })
         logger.info(LOG, `[${idea.id}] Manual exit alert sent (${reason}) — awaiting user close`)
         return
     }
@@ -137,10 +145,61 @@ async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose, exitC
     const links = (idea.brokerOrders ?? []).filter(b => b.positionId != null)
 
     if (links.length === 0) {
+        // Bookkeeping close — there is no broker position to send anything to, so hours don't
+        // gate it. The entity is simply marked closed.
         await onClose(idea.id, reason)
         return
     }
 
+    // NOTHING EXECUTES OFF-HOURS, paper included (2026-08-07). A stop that trips while the venue is
+    // shut cannot fill: a real broker would reject it, and the paper venue would "fill" it at the
+    // last close, which is a price nobody could have traded.
+    //
+    // Same-tick + persisted guards as the manual branch above, for the same reason: the condition
+    // stays true every tick until the position is gone, so without them the monitor would re-fire
+    // this on every poll. (The queue's enqueue dedupe would absorb it, but a guard here means we
+    // don't ask.)
+    if (idea.orderState !== 'awaiting_market_close') {
+        const gate = await deferIfClosed({
+            userId:     idea.userId,
+            asset:      idea.asset,
+            assetClass: idea.asset_class ?? null,
+            direction:  idea.direction ?? null,
+            origin: {
+                kind:     idea.kind ?? kindForDoc(idea),
+                entityId: idea.id,
+                ref:      idea.portfolioId ?? idea.callId ?? null,
+                label:    _exitLabel(reason),
+            },
+            // Everything needed to replay this exact close at the open — the leg it belongs to, the
+            // slice size (null = the whole position) and the fired-exit tag that stops it repeating.
+            action:   { type: 'exit', reason, quantity: quantity ?? null, leg: leg ?? null, tag: tag ?? null },
+            // A MONITOR's decision, not the user's: it is the mechanical consequence of a stop they
+            // already set, so the list does not offer to cancel it (you change it by moving the
+            // stop, not by dropping the row — dropping it would just re-queue on the next tick).
+            queuedBy: 'monitor',
+        })
+        if (gate.deferred) {
+            idea.orderState = 'awaiting_market_close'
+            await entityRepo.patch(idea.id, { orderState: 'awaiting_market_close', pendingCloseReason: reason })
+            logger.info(LOG, `[${idea.id}] ${leg} close deferred — market shut, queued for the open`)
+            return
+        }
+    }
+
+    await _closeAtBroker(idea, { leg, reason, quantity, tag }, links)
+}
+
+/** How the row reads in the list. The REASON is the whole story for a monitor exit. */
+function _exitLabel(reason) {
+    return { stop: 'Stop hit', tp: 'Target hit', trail: 'Trailing stop' }[reason] ?? 'Monitor exit'
+}
+
+/**
+ * Send the close to the broker. Split out of `_exitNow` so the queue can replay exactly this at the
+ * open — one implementation, whether the stop fires in hours or waits overnight.
+ */
+async function _closeAtBroker(idea, { leg, reason, quantity, tag }, links) {
     if (quantity == null) {
         for (const link of links) {
             try {
@@ -186,6 +245,32 @@ async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose, exitC
     if (newOrders.length) update.$push     = { exitOrders: { $each: newOrders } }
     if (tag)              update.$addToSet = { firedExits: tag }
     if (Object.keys(update).length) await entityRepo.update(idea.id, update)
+}
+
+/**
+ * Replay a close that was queued because its venue was shut — the queued list's Execute.
+ *
+ * Goes through the SAME `_closeAtBroker` the live path uses, so an overnight stop and an in-hours
+ * stop place identical orders. Re-reads the entity rather than trusting the queued snapshot: hours
+ * passed, and the position may have been closed, partly filled or reconciled since.
+ *
+ * @returns {Promise<{ ok: boolean, reason?: string }>}
+ */
+export async function executeDeferredClose(entityId, userId, { leg = null, reason = 'manual', quantity = null, tag = null } = {}) {
+    const idea = await entityRepo.getById(entityId)
+    if (!idea || (idea.userId && idea.userId !== userId)) return { ok: false, reason: 'not_found' }
+
+    const links = (idea.brokerOrders ?? []).filter(b => b.positionId != null)
+    // Closed in the meantime — by the user, by the reconciler, by the broker. Not a failure: the
+    // thing the queued row asked for has already happened.
+    if (links.length === 0) {
+        await entityRepo.patch(entityId, { orderState: null })
+        return { ok: true, reason: 'already_closed' }
+    }
+
+    await _closeAtBroker(idea, { leg, reason, quantity, tag }, links)
+    await entityRepo.patch(entityId, { orderState: null })
+    return { ok: true }
 }
 
 async function _checkAdditionalEntries(db, idea, candles, entryTf) {

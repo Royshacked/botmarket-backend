@@ -35,10 +35,46 @@ import { getNumericQuote }          from '../../providers/yahoofinance.provider.
 import { notifyManualExit, notifyManualEntry, exitLegFromIdea, entryLegFromIdea } from '../../services/manualNotify.service.js'
 import { ENTITIES }               from '../../services/entity/entityCollection.js'
 import { orderSymbol }            from '../../monitoring/exitOrders.util.js'
+import { deferIfClosed }          from '../../services/pendingAction/executionGate.js'
 
 const LOG        = '[portfolio:rebalance]'
 const COLLECTION = ENTITIES
 const LIVE       = new Set(PAST_ENTRY)
+
+/**
+ * The hours gate, in the shape this file needs it.
+ *
+ * Every change below that reaches a broker asks this FIRST. A closed market no longer means "fire
+ * anyway and let the paper venue fill it at yesterday's close" — the action is queued and the user
+ * executes it from the list at the open (docs/architecture/off-hours-queue.md).
+ *
+ * `label` is stamped here rather than at the open because THIS is the only moment that knows the
+ * item came from a review of this book. Manual books never reach it: they place no orders at all,
+ * so their Fill card is an instruction rather than an execution and hours don't gate it.
+ */
+async function _gate(item, action) {
+    return deferIfClosed({
+        userId:     item.userId,
+        asset:      item.asset,
+        assetClass: item.asset_class ?? null,
+        direction:  item.direction ?? null,
+        origin: {
+            kind:     'portfolio_item',
+            entityId: item.id,
+            ref:      item.portfolioId ?? null,
+            label:    `${item.portfolioName || 'Portfolio'} review`,
+        },
+        action,
+    })
+}
+
+/** The shared answer a change gives when the gate parked it — accepted, not executed, not failed. */
+const _deferred = (gate, extra = {}) => ({
+    ok: gate.ok !== false, deferred: true, queuedId: gate.id ?? null,
+    nextOpenMs: gate.nextOpenMs ?? null,
+    ...(gate.ok === false ? { reason: gate.reason ?? 'queue_failed' } : {}),
+    ...extra,
+})
 
 export async function applyRebalance(portfolioId, userId, update) {
     if (!portfolioId) return { ok: false, reason: 'missing_portfolioId' }
@@ -86,16 +122,47 @@ export async function applyRebalance(portfolioId, userId, update) {
         }
     }
 
+    // THREE outcomes, not two. A change that the market couldn't take is neither applied nor
+    // failed — it is queued, and saying so is the difference between "Changes applied" over a
+    // no-op and "3 changes queued for the open".
+    // `deferred && ok:false` is a change whose QUEUE WRITE failed — the market was shut and the row
+    // was lost, so the decision is gone. That is a failure, not a queued item, and must not be
+    // counted in both buckets (which would let a review complete on nothing but lost rows).
+    const deferred = results.filter(r => r?.deferred && r?.ok !== false)
+    const failed   = results.filter(r => !r?.ok)
+    const applied  = results.filter(r => r?.ok && !r?.deferred)
+
+    // Nothing landed and nothing queued → the review was NOT carried out. Refuse, so the caller
+    // keeps the proposal for a retry (the FE already does exactly that on a falsy result) and the
+    // clock does not advance over work that never happened.
+    if (!applied.length && !deferred.length) {
+        logger.warn(LOG, 'rebalance applied NOTHING', { portfolioId, reasons: failed.map(f => f.reason ?? f.error ?? '?') })
+        return { ok: false, reason: 'nothing_applied', results, failed }
+    }
+
     // Trajectory point, then deliberate thesis update (if any), then advance the clock.
     await snapshotConvictions(portfolioId, userId)
     if (update.thesis && typeof update.thesis === 'object') {
         await portfolioChatService.setThesis(portfolioId, userId, update.thesis, 'accepted-rebalance')
     }
+    // The review itself IS done even when every change is queued — the decisions were taken, and
+    // the queue owns their execution from here. Only a total failure (above) leaves it open.
     const rev = await portfolioChatService.completeReview(portfolioId, userId)
     invalidatePortfolioState(portfolioId, userId)
 
-    logger.info(LOG, 'rebalance applied', { portfolioId, changes: results.length, manualExitPosted, manualEntryPosted })
-    return { ok: true, results, manualExitPosted, manualEntryPosted, nextReviewAt: rev?.nextReviewAt ?? null }
+    logger.info(LOG, 'rebalance applied', {
+        portfolioId, applied: applied.length, deferred: deferred.length, failed: failed.length,
+        manualExitPosted, manualEntryPosted,
+    })
+    return {
+        ok: true, results, manualExitPosted, manualEntryPosted,
+        nextReviewAt: rev?.nextReviewAt ?? null,
+        // The counts the UI speaks from; `deferredItems` carries enough to name them in the toast.
+        applied:  applied.length,
+        failed:   failed.map(f => ({ action: f.action, itemId: f.itemId, reason: f.reason ?? f.error ?? 'failed' })),
+        deferredItems: deferred.map(d => ({ action: d.action, itemId: d.itemId, queuedId: d.queuedId ?? null })),
+        nextOpenMs: deferred.find(d => d.nextOpenMs != null)?.nextOpenMs ?? null,
+    }
 }
 
 // A holding is a `portfolio_item`, so the vocabulary is `_item`. The legacy `_idea` verbs are still
@@ -140,7 +207,10 @@ async function _applyOne(portfolioId, userId, change, bookValue = null) {
 
 // Fully close every live leg of a holding. The execution reconciler finalizes the
 // idea to 'closed' as the broker reports the closes.
-async function _exitItem(db, itemId, userId, reason) {
+// Exported since 2026-08-07: the queue replays a released exit through the SAME function that
+// first tried it, so an off-hours decision executes on exactly the path it would have taken had
+// the market been open — not a second implementation that can drift from this one.
+export async function _exitItem(db, itemId, userId, reason, gate = _gate) {
     const item = await db.collection(COLLECTION).findOne({ id: itemId })
     if (!item) return { ok: false, reason: 'not_found' }
     if (item.userId && item.userId !== userId) return { ok: false, reason: 'forbidden' }
@@ -155,6 +225,10 @@ async function _exitItem(db, itemId, userId, reason) {
         return { ok: true, manual: true, manualExitLeg: exitLegFromIdea(item) }
     }
 
+    // Hours gate AFTER the manual branch (nothing is placed there) and BEFORE the first close.
+    const g = await gate(item, { type: 'exit', reason })
+    if (g.deferred) return _deferred(g)
+
     let closed = 0, skipped = 0
     for (const leg of legs) {
         if (!brokerService.capabilities(leg.broker)?.closePosition) { skipped++; continue }
@@ -168,7 +242,7 @@ async function _exitItem(db, itemId, userId, reason) {
 // Partially close a holding: close `reduceFraction` of each leg's volume. Records the
 // new intended weight (targetAllocationRatio) but leaves quantity to the broker truth
 // (the reconciler reconciles the reduce). targetAllocationRatio is advisory only.
-export async function _trimItem(db, itemId, userId, change) {
+export async function _trimItem(db, itemId, userId, change, gate = _gate) {
     const item = await db.collection(COLLECTION).findOne({ id: itemId })
     if (!item) return { ok: false, reason: 'not_found' }
     if (item.userId && item.userId !== userId) return { ok: false, reason: 'forbidden' }
@@ -200,6 +274,9 @@ export async function _trimItem(db, itemId, userId, change) {
         } }
     }
 
+    const g = await gate(item, { type: 'trim', reduceFraction: f, targetAllocationRatio: change.targetAllocationRatio ?? null })
+    if (g.deferred) return _deferred(g)
+
     let trimmed = 0, skipped = 0
     for (const leg of legs) {
         if (!brokerService.capabilities(leg.broker)?.closePosition) { skipped++; continue }
@@ -212,6 +289,10 @@ export async function _trimItem(db, itemId, userId, change) {
     if (change.targetAllocationRatio != null && Number.isFinite(Number(change.targetAllocationRatio))) {
         await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { allocationRatio: Number(change.targetAllocationRatio) } })
     }
+    // Every leg rounded to nothing is a REFUSAL, not a quiet success. `floor(qty * fraction)` is 0
+    // for any fraction under 1/qty — a 12% trim of an 8-share leg — and reporting ok:false with no
+    // reason is what let a whole review land as "Changes applied" having done nothing at all.
+    if (!trimmed && skipped) return { ok: false, reason: 'trim_too_small', legsSkipped: skipped }
     return { ok: trimmed > 0, legsTrimmed: trimmed, legsSkipped: skipped }
 }
 
@@ -301,14 +382,21 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
     for (const i of parked) await updateItem(i.id, { status: 'looking' }, userId)
 
     const awaitingConfirm = items.some(i => i.orderState === 'awaiting_confirm')
-    logger.info(LOG, 'new holding opened for confirmation', {
+    // A NEW holding takes its own deferral route: saveIdea's immediate plan parks at
+    // orderState 'awaiting_market' when the venue is shut, and the market-open sweep surfaces it.
+    // Different mechanism from the queue above (phase 2 merges them), but the SAME thing happened
+    // as far as the user is concerned — so it reports as deferred rather than as applied. Calling
+    // a parked order "applied" is the exact lie this pass exists to remove.
+    const awaitingMarket = items.some(i => i.orderState === 'awaiting_market')
+    logger.info(LOG, `new holding ${awaitingMarket ? 'parked for the open' : 'opened for confirmation'}`, {
         itemId, asset: items[0].asset, quantity: items[0].quantity ?? null,
-        legs: items.length, armed: parked.length, awaitingConfirm,
+        legs: items.length, armed: parked.length, awaitingConfirm, awaitingMarket,
     })
     return {
         ok: true,
         itemId,
         ...(items.length > 1 ? { itemIds: items.map(i => i.id) } : {}),
+        ...(awaitingMarket ? { deferred: true, queuedId: null } : {}),
         armed:          parked.length > 0,
         awaitingConfirm,
         orderState:     items[0].orderState ?? null,
@@ -377,7 +465,7 @@ async function _sizeNewItem(spec, bookValue, quote) {
 // computePortfolioState sums them. Portfolio holdings are review-managed (no native stop/TP), so there
 // are no protective exits to grow. `broker` is injectable for tests. targetAllocationRatio is advisory.
 // LIMITATION: a holding that DOES carry native exits won't have them resized here.
-export async function _addToItem(db, itemId, userId, change, broker = brokerService) {
+export async function _addToItem(db, itemId, userId, change, broker = brokerService, gate = _gate) {
     const item = await db.collection(COLLECTION).findOne({ id: itemId })
     if (!item) return { ok: false, reason: 'not_found' }
     if (item.userId && item.userId !== userId) return { ok: false, reason: 'forbidden' }
@@ -406,6 +494,11 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
             add:       true,
         } }
     }
+
+    // The path that started all this: this used to place a market order with no idea whether the
+    // market was open, and the paper venue filled it at the previous close without complaint.
+    const g = await gate(item, { type: 'add_to', addFraction: f, targetAllocationRatio: change.targetAllocationRatio ?? null })
+    if (g.deferred) return _deferred(g)
 
     const direction = item.direction === 'short' ? 'short' : 'long'
     const symbol    = orderSymbol(item)
@@ -444,6 +537,9 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
             await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { allocationRatio: Number(change.targetAllocationRatio) } })
         }
     }
+    // Same refusal as trim: a scale-in too small to round up to one share did not happen, and must
+    // not read as though it did. This is the exact shape of the MU add that reported success.
+    if (!added && skipped && !failed) return { ok: false, reason: 'add_too_small', legsSkipped: skipped }
     return { ok: added > 0, legsAdded: added, legsSkipped: skipped, ...(failed ? { legsFailed: failed } : {}) }
 }
 

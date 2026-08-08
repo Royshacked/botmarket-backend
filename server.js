@@ -39,6 +39,8 @@ import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
 import { ensureKairosIndexes } from './api/kairos/kairos.service.js'
 import { ensureTradeIndexes } from './services/tradeCapture.service.js'
 import { ensureExperienceIndexes } from './api/experience/experience.model.js'
+import { ensurePendingActionIndexes } from './services/pendingAction/pendingAction.repo.js'
+import { pendingActionRoutes } from './api/pendingAction/pendingAction.routes.js'
 import { threadService } from './services/thread.service.js'
 import { kairosRoutes } from './api/kairos/kairos.routes.js'
 import { mentorRoutes } from './api/mentor/mentor.routes.js'
@@ -127,6 +129,9 @@ app.use('/api/broker',      brokerRoutes)
 app.use('/api/paper',       paperRoutes)
 app.use('/api/trades',      tradesRoutes)
 app.use('/api/portfolio',   portfolioRoutes)
+// The queued list — what is waiting on the user, from both the off-hours queue and the entities
+// the market-open sweep just unparked. See docs/architecture/off-hours-queue.md.
+app.use('/api/pending-actions', pendingActionRoutes)
 app.use('/api/scanner',     scannerRoutes)
 app.use('/api/analyst',     analystRoutes)
 app.use('/api/strategy',    strategyRoutes)
@@ -143,6 +148,7 @@ ensureIdeaIndexes()
 ensureKairosIndexes()
 ensureTradeIndexes()
 ensureExperienceIndexes()
+ensurePendingActionIndexes()
 threadService.ensureThreadIndexes()
 
 // ─── Background loops ─────────────────────────────────────────────────────────

@@ -1,11 +1,14 @@
 /**
- * The market-open sweep — the drain for `awaiting_market`.
+ * The market-open sweep — the ONE drain for everything that parked while a venue was shut.
  *
- * WHAT PARKS HERE. When an entry fires (or a user sends an order from the ticket / a portfolio add)
- * while that asset's market is shut, the order plan is built but NOT placed: the entity is stamped
- * `orderState: 'awaiting_market'` and nothing is shown. Three paths write that state —
- * `_attachImmediatePlan` (the immediate ticket AND a portfolio add), `triggerEntryNow` ("Buy now"),
- * and Talos when a setup's zone trips off-hours.
+ * WHAT PARKS. Two stores, deliberately kept apart (pendingWork.service.js explains why the union is
+ * a read and not a migration):
+ *   • ENTITIES at `orderState: 'awaiting_market'` — an entry whose plan was built but not placed.
+ *     Written by `_attachImmediatePlan` (the immediate ticket AND a portfolio add), `triggerEntryNow`
+ *     ("Buy now"), and Talos when a setup's zone trips off-hours.
+ *   • QUEUED ACTIONS (`pending_actions`) — a trim, exit or scale-in the user confirmed off-hours.
+ *     These own no entity; the record IS the intent. Added 2026-08-07 with the rule that nothing
+ *     executes off-hours, paper included.
  *
  * WHY IT IS ITS OWN MONITOR. The sweep used to live inside Minos, the monitor for the `idea` kind.
  * When Minos was archived (superseded by Hermes/Talos) the sweep went with it, and every deferred
@@ -14,101 +17,83 @@
  * kind's monitor; that mismatch is the bug. So this loop owns exactly one thing, is kind-BLIND, and
  * has no reason to be switched off with any agent.
  *
- * WHAT IT DOES NOT DO. It does not place anything. It moves the order to `awaiting_confirm` and
- * tells the user — the same confirm the user would have got had the market been open. Placement
- * stays behind the OrderConfirmDialog and its authenticated POST, exactly as before.
+ * WHAT IT DOES NOT DO. It does not place anything, and never has. It makes the work executable and
+ * tells the user — the same confirm they would have got had the market been open. Placement stays
+ * behind an authenticated POST.
+ *
+ * ONE CARD, FROM AXL. It used to fan out a card per desk per kind: a batch from Atlas and another
+ * from Mentor in the same second, each answering "what does this desk have for you" — a question
+ * nobody asks. At the open the question is "what is waiting on ME". It has one answer, so it gets
+ * one nudge pointing at one list. The card is Axl's because the QUEUE is Axl's, and it stays a
+ * POINTER: a count and a route, never a summary of another desk's judgment (project_axl_agent).
  *
  * STALENESS. A plan built Friday afternoon is confirmed against Monday's open. We surface it as-is
- * with its AGE attached (card + dialog) rather than rebuilding or expiring it: the plan is what the
- * desk authored, and whether it still stands is the user's call, not a monitor's. See
- * buildOrdersReady / the `builtAt` line in OrderConfirmDialog.
+ * with its AGE attached rather than rebuilding or expiring it: the plan is what the desk authored,
+ * and whether it still stands is the user's call, not a monitor's.
  */
 
 import { logger } from '../services/logger.service.js'
 import { isAssetOpen } from '../services/market.service.js'
 import { entityRepo } from '../services/entity/entityRepo.service.js'
-import { entryTimeGate } from '../services/entryTimeGate.util.js'
 import { createPollLoop } from './pollLoop.js'
-import {
-    notifyIdeaEntryConfirm, notifySetupEntryConfirm, notifyOrdersReady,
-} from '../services/tradeNotify.service.js'
+import { notifyQueueReady } from '../services/tradeNotify.service.js'
+import { listQueued, transition, STATES } from '../services/pendingAction/pendingAction.repo.js'
+import { countReady } from '../services/pendingAction/pendingWork.service.js'
 
 const LOG = '[marketOpen.monitor]'
 
 const POLL_INTERVAL_MS = 60_000
-// Below this, a batch is same-session and its age is not worth saying. Above it, the plan was
-// priced before a close the user slept through.
-const STALE_HOURS = 12
+
+/** Hours since a decision was taken, from whichever stamp its source carries. */
+function _ageHours(item, nowMs) {
+    const at = item?.pendingOrder?.builtAt ?? item?.decidedAt
+    if (!Number.isFinite(at)) return null
+    return Math.max(0, (nowMs - at) / 3_600_000)
+}
 
 /**
- * Which desk owns a kind's confirm card. The BATCH card is grouped by this, so a portfolio's nine
- * legs arrive as one card from the idea bot and a setup arrives from Mentor — the notification
- * still belongs to the desk that authored the order, never to a cross-kind router
- * (project_axl_agent: each agent owns its notifications).
- *
- * Legacy documents predate the `kind` field and read as 'idea', matching entityRepo elsewhere.
+ * Group key: one card per USER. This used to be per user PER KIND, which is exactly what produced
+ * two cards in the same second for one market open.
  */
-const KIND_ROUTING = {
-    idea:           { botId: 'idea',   single: (e) => notifyIdeaEntryConfirm(e, _noteFor(e)) },
-    portfolio_item: { botId: 'idea',   single: (e) => notifyIdeaEntryConfirm(e, _noteFor(e)) },
-    setup:          { botId: 'mentor', single: (e) => notifySetupEntryConfirm(e, null) },
+function _groupKey(item) {
+    return String(item?.userId ?? '')
 }
 
 /**
- * WHY the order surfaced late, for the single-order card's copy.
- *   'off_hours' — a scheduled time fired while the market was closed
- *   null        — an ordinary trigger that simply landed out of hours
- * Only the `idea` kind has time leaves, and entryTimeGate answers "not gated" for anything else.
- */
-function _noteFor(entity) {
-    return entryTimeGate(entity).timeGated ? 'off_hours' : null
-}
-
-/** Hours since the order plan was built, or null when the entity carries no stamp. */
-function _ageHours(entity, nowMs) {
-    const builtAt = entity?.pendingOrder?.builtAt
-    if (!Number.isFinite(builtAt)) return null
-    return Math.max(0, (nowMs - builtAt) / 3_600_000)
-}
-
-/** Group key: one card per user per kind. */
-function _groupKey(entity) {
-    return `${entity?.userId ?? ''}::${entity?.kind ?? 'idea'}`
-}
-
-/**
- * The collaborators, injectable — same shape Hermes and Talos use, so the sweep can be exercised
- * against fixed entities and a fixed clock without a Mongo or a chat server.
+ * The collaborators, injectable — the same shape Hermes and Talos use, so the sweep can be
+ * exercised against fixed data and a fixed clock without a Mongo or a chat server.
  */
 const _DEFAULT_DEPS = {
     list:       () => entityRepo.listByOrderState('awaiting_market'),
     claim:      (id) => entityRepo.claimIf(id, { orderState: 'awaiting_market' }, { orderState: 'awaiting_confirm' }),
+    listQueued: () => listQueued(),
+    // `from: QUEUED` is what makes the release exactly-once. Without it an already-released row
+    // would move again, so two overlapping ticks would each think they woke it and each post a card.
+    release:    (rec) => transition(rec.id, rec.userId, STATES.RELEASED, { releasedAt: Date.now() }, { from: STATES.QUEUED }),
     isAssetOpen,
-    onSingle:   (entity, routing) => routing.single(entity),
-    onBatch:    (batch) => notifyOrdersReady(batch),
+    onReady:    (summary) => notifyQueueReady(summary),
+    countReady,
     now:        () => Date.now(),
 }
 
-async function _tick(deps = _DEFAULT_DEPS) {
-    const d = { ..._DEFAULT_DEPS, ...deps }
-
-    let deferred
+/**
+ * Unpark the entities whose venue just opened.
+ *
+ * CLAIM FIRST, CARD SECOND. The claim is what makes the nudge exactly-once: `claimIf` only succeeds
+ * for the caller that actually moved the entity off 'awaiting_market', so an overlapping tick (or a
+ * second process) claims nothing and therefore says nothing.
+ */
+async function _drainEntities(d) {
+    let parked
     try {
-        deferred = await d.list()
+        parked = await d.list()
     } catch (err) {
         logger.error(LOG, 'market sweep read error:', err.message)
-        return
+        return []
     }
-    if (!deferred?.length) return
+    const surface = (parked ?? []).filter(e => d.isAssetOpen(e?.asset, e?.asset_class))
+    if (!surface.length) return []
 
-    const nowMs   = d.now()
-    const surface = deferred.filter(e => d.isAssetOpen(e?.asset, e?.asset_class))
-    if (!surface.length) return
-
-    // CLAIM FIRST, CARD SECOND, and claim every entity before posting anything. The claim is what
-    // makes the card exactly-once: `claimIf` only succeeds for the caller that actually moved the
-    // entity off 'awaiting_market', so an overlapping tick (or a second process) posts nothing.
-    // Doing all the claims up front also means the batch card knows its true size before it speaks.
     const claimed = []
     for (const entity of surface) {
         try {
@@ -117,47 +102,72 @@ async function _tick(deps = _DEFAULT_DEPS) {
             logger.error(LOG, `[${entity?.id}] claim failed:`, err.message)
         }
     }
-    if (!claimed.length) return
+    return claimed
+}
+
+/**
+ * Release the queued actions whose venue just opened. Same exactly-once shape as the entity claim:
+ * `transition` only moves a record that is still open, so a racing tick releases nothing.
+ */
+async function _drainQueue(d) {
+    let queued
+    try {
+        queued = await d.listQueued()
+    } catch (err) {
+        logger.error(LOG, 'queue read error:', err.message)
+        return []
+    }
+    const surface = (queued ?? []).filter(r => d.isAssetOpen(r?.asset, r?.assetClass))
+    if (!surface.length) return []
+
+    const released = []
+    for (const rec of surface) {
+        try {
+            if (await d.release(rec)) released.push(rec)
+        } catch (err) {
+            logger.error(LOG, `[${rec?.id}] release failed:`, err.message)
+        }
+    }
+    return released
+}
+
+async function _tick(deps = _DEFAULT_DEPS) {
+    const d     = { ..._DEFAULT_DEPS, ...deps }
+    const nowMs = d.now()
+
+    // Both drains complete before anything is said, so the card counts the whole open rather than
+    // whichever source happened to be read first.
+    const [entities, released] = await Promise.all([_drainEntities(d), _drainQueue(d)])
+    const woken = [...entities, ...released]
+    if (!woken.length) return
 
     const groups = new Map()
-    for (const entity of claimed) {
-        const key = _groupKey(entity)
+    for (const item of woken) {
+        const key = _groupKey(item)
         if (!groups.has(key)) groups.set(key, [])
-        groups.get(key).push(entity)
+        groups.get(key).push(item)
     }
 
-    logger.info(LOG, `surfacing ${claimed.length} deferred order(s) in ${groups.size} group(s)`)
+    logger.info(LOG, `market open: woke ${entities.length} parked order(s) + ${released.length} queued action(s) for ${groups.size} user(s)`)
 
-    for (const entities of groups.values()) {
-        const kind    = entities[0]?.kind ?? 'idea'
-        const routing = KIND_ROUTING[kind]
-        // An unknown kind still gets UNPARKED above — the order is live and confirmable in the UI —
-        // it just has no card. Louder than silence, and never a reason to leave it parked.
-        if (!routing) {
-            logger.warn(LOG, `no card routing for kind '${kind}' — ${entities.length} order(s) surfaced silently`)
-            continue
-        }
-
+    for (const [userId, items] of groups) {
         try {
-            if (entities.length === 1) {
-                // One order: the desk's own entry-confirm card, unchanged. The batch card would be
-                // a worse version of it — it says less and knows less about why this one is late.
-                await d.onSingle(entities[0], routing)
-                continue
-            }
-            const ages = entities.map(e => _ageHours(e, nowMs)).filter(v => v != null)
-            await d.onBatch({
-                userId: entities[0]?.userId ?? null,
-                entities,
-                kind,
-                botId: routing.botId,
-                // The OLDEST plan in the batch — the one most likely to have drifted.
+            // The count is EVERYTHING waiting on them, not only this tick's wake-ups: the list they
+            // are about to open shows the lot, and a card that says 2 above a list of 5 reads as a
+            // bug. Falls back to this tick's count if that read fails — never block the nudge.
+            const total  = (await d.countReady(userId)) || items.length
+            const ages   = items.map(i => _ageHours(i, nowMs)).filter(v => v != null)
+            const assets = [...new Set(items.map(i => i?.asset).filter(Boolean))]
+            await d.onReady({
+                userId,
+                count:      total,
+                assets,
                 staleHours: ages.length ? Math.max(...ages) : null,
             })
         } catch (err) {
-            // The entities are already unparked and visible in the UI; a failed card must not undo
-            // that or abort the remaining groups.
-            logger.warn(LOG, `surface notify failed for kind '${kind}':`, err.message)
+            // The work is already executable and visible in the list; a failed card must not undo
+            // that, or abort the remaining users.
+            logger.warn(LOG, `queue-ready card failed for ${userId}:`, err.message)
         }
     }
 }
@@ -168,5 +178,6 @@ const _loop = createPollLoop({
 
 export const marketOpenMonitor = { start: _loop.start, stop: _loop.stop }
 
-// Test seams — the tick and the pure helpers, so the sweep can be exercised without a clock or a DB.
-export { _tick, _noteFor, _ageHours, _groupKey, STALE_HOURS }
+// Test seams — the tick, the two drains and the pure helpers, so the sweep can be exercised
+// without a clock or a DB.
+export { _tick, _ageHours, _groupKey, _drainEntities, _drainQueue }

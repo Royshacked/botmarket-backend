@@ -1,16 +1,28 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildIdeaEntryConfirm, buildCallReady, buildCallExpiry, buildOrdersReady } from '../../services/tradeNotify.service.js'
+import { buildIdeaEntryConfirm, buildCallReady, buildCallExpiry, buildQueueReady } from '../../services/tradeNotify.service.js'
 
 // ── buildIdeaEntryConfirm ───────────────────────────────────────────────────
-test('idea entry-confirm: entry_confirm card attributed to the Idea bot with ideaId', () => {
+test('idea entry-confirm: a lone idea has no living desk, so the card comes from Axl', () => {
     const idea = { id: 'idea_1', userId: 'u1', asset: 'NQ', direction: 'long' }
     const c = buildIdeaEntryConfirm(idea)
     assert.equal(c.type, 'entry_confirm')
-    assert.equal(c.botId, 'idea')
+    assert.equal(c.botId, 'axl', 'the Idea bot is retired — its cards must not vanish into a dead feed')
     assert.equal(c.userId, 'u1')
     assert.deepEqual(c.payload, { kind: 'idea', ideaId: 'idea_1', asset: 'NQ', direction: 'long', note: null })
     assert.match(c.content, /Entry triggered — LONG NQ/)
+})
+
+test('idea entry-confirm: a HOLDING rides the same builder but speaks as Atlas', () => {
+    // The market-open sweep sends both kinds through this one builder, so the sender has to be
+    // derived from the doc — a portfolio leg announcing itself as a lone idea is a misattribution.
+    const held = { id: 'h1', userId: 'u1', asset: 'AAPL', direction: 'long', portfolioId: 'p1' }
+    const c = buildIdeaEntryConfirm(held)
+    assert.equal(c.botId, 'portfolio')
+    assert.equal(c.payload.kind, 'portfolio_item', 'the tag on the card follows the sender')
+
+    // An explicit kind wins over the portfolioId derivation (post-migration docs carry it).
+    assert.equal(buildIdeaEntryConfirm({ ...held, kind: 'portfolio_item' }).botId, 'portfolio')
 })
 
 test('idea entry-confirm: note marks WHY it surfaced (payload + lead-in copy)', () => {
@@ -76,75 +88,63 @@ test('call expiry (expired): terminal card offers edit/delete, null why', () => 
     assert.match(c.content, /thesis expired\. Edit to re-map it or delete/)
 })
 
-// ── buildOrdersReady (the market-open batch card) ────────────────────────────
-// One card for a batch that came off the bench at once, instead of N. The confirm dialog already
-// walks pending orders one at a time, so the card only has to open the queue.
+// ── buildQueueReady (the market-open nudge) ──────────────────────────────────
+// ONE card per user for the whole open, from Axl, pointing at the list. It replaces the per-desk
+// batch card, which answered "what does this desk have for you" — a question nobody asks. It is
+// the one card deliberately not sent by the authoring desk, and it stays legitimate only by
+// remaining a POINTER: a count and a route, never a summary of another desk's judgment.
 
-const order = (id, asset, builtAgoH = 1) => ({
-    id, userId: 'u1', kind: 'idea', asset,
-    pendingOrder: { builtAt: Date.now() - builtAgoH * 3_600_000 },
-})
-
-test('orders ready: one card carrying the count, the assets and the queue entry point', () => {
-    const c = buildOrdersReady({
-        userId: 'u1', kind: 'idea', botId: 'idea',
-        entities: [order('a', 'AAPL'), order('b', 'MSFT'), order('c', 'NVDA')],
-    })
-    assert.equal(c.type, 'orders_ready')
-    assert.equal(c.botId, 'idea')
+test('queue ready: a count, the names, and a route to the list', () => {
+    const c = buildQueueReady({ userId: 'u1', count: 3, assets: ['AAPL', 'MSFT', 'MU'] })
+    assert.equal(c.type, 'queue_ready')
+    assert.equal(c.botId, 'axl', 'the QUEUE is Axl\'s, even though the items in it are other desks\'')
     assert.equal(c.userId, 'u1')
     assert.equal(c.payload.count, 3)
-    assert.equal(c.payload.firstId, 'a', 'the dialog opens on the first order and walks the rest')
-    assert.deepEqual(c.payload.assets, ['AAPL', 'MSFT', 'NVDA'])
-    assert.equal(c.actions.primary.label, 'Review orders')
-    assert.match(c.content, /The market is open — 3 orders/)
-    assert.match(c.content, /one at a time/)
+    assert.deepEqual(c.payload.assets, ['AAPL', 'MSFT', 'MU'])
+    assert.equal(c.actions.primary.label, 'Open the list')
+    assert.match(c.content, /The market is open — 3 items/)
+    assert.match(c.content, /waiting on you/)
 })
 
-test('orders ready: a short list is named, a long one is only counted', () => {
-    const few  = buildOrdersReady({ kind: 'idea', botId: 'idea', entities: [order('a', 'AAPL'), order('b', 'MSFT')] })
-    assert.match(few.content, /\(AAPL, MSFT\)/)
-
-    const many = buildOrdersReady({
-        kind: 'idea', botId: 'idea',
-        entities: ['A', 'B', 'C', 'D', 'E'].map((s, i) => order(String(i), s)),
-    })
-    assert.doesNotMatch(many.content, /\(/, 'past four names the count is the information')
-    assert.match(many.content, /5 orders/)
+test('queue ready: it points, it does not describe', () => {
+    // The guard against this quietly becoming the notification router that was abandoned: no verb,
+    // no desk, no thesis — the list says what each item is.
+    const c = buildQueueReady({ userId: 'u1', count: 2, assets: ['MU', 'AAPL'] })
+    assert.doesNotMatch(c.content, /trim|exit|scale|Atlas|review/i)
 })
 
-test('orders ready: duplicate assets are named once', () => {
-    // Two legs of a forked multi-broker order are the same NAME to a reader, not two positions.
-    const c = buildOrdersReady({ kind: 'idea', botId: 'idea', entities: [order('a', 'AAPL'), order('b', 'AAPL')] })
-    assert.deepEqual(c.payload.assets, ['AAPL'])
-    assert.equal(c.payload.count, 2, 'the COUNT is still the number of orders')
+test('queue ready: one item reads as one item', () => {
+    const c = buildQueueReady({ userId: 'u1', count: 1, assets: ['MU'] })
+    assert.match(c.content, /1 item — MU is waiting on you/)
+    assert.match(c.content, /execute it/)
 })
 
-test('orders ready: a stale batch says so; a fresh one stays quiet', () => {
-    const stale = buildOrdersReady({ kind: 'idea', botId: 'idea', entities: [order('a', 'AAPL')], staleHours: 62 })
+test('queue ready: a short list is named, a long one is only counted', () => {
+    const few = buildQueueReady({ userId: 'u1', count: 2, assets: ['AAPL', 'MSFT'] })
+    assert.match(few.content, /— AAPL, MSFT/)
+
+    // Past four, the count IS the information. (The lead-in carries its own em-dash, so this
+    // asserts the absence of the NAMES rather than of the punctuation.)
+    const many = buildQueueReady({ userId: 'u1', count: 5, assets: ['A', 'B', 'C', 'D', 'E'] })
+    assert.match(many.content, /open — 5 items are waiting/)
+    assert.doesNotMatch(many.content, /A, B, C/)
+})
+
+test('queue ready: a stale decision says so; a fresh one stays quiet', () => {
+    const stale = buildQueueReady({ userId: 'u1', count: 1, assets: ['MU'], staleHours: 62 })
     assert.equal(stale.payload.staleHours, 62)
-    assert.match(stale.content, /priced 62h ago, before the close/)
+    assert.match(stale.content, /decided 62h ago, before the close/)
 
-    const fresh = buildOrdersReady({ kind: 'idea', botId: 'idea', entities: [order('a', 'AAPL')], staleHours: 2 })
-    assert.doesNotMatch(fresh.content, /priced/, 'a same-session plan\'s age says nothing')
+    const fresh = buildQueueReady({ userId: 'u1', count: 1, assets: ['MU'], staleHours: 2 })
+    assert.doesNotMatch(fresh.content, /decided/, 'a same-session decision\'s age says nothing')
 
-    const unknown = buildOrdersReady({ kind: 'idea', botId: 'idea', entities: [order('a', 'AAPL')] })
+    const unknown = buildQueueReady({ userId: 'u1', count: 1, assets: ['MU'] })
     assert.equal(unknown.payload.staleHours, null)
-    assert.doesNotMatch(unknown.content, /priced/)
 })
 
-test('orders ready: the batch belongs to the desk that authored it, never to a router', () => {
-    const c = buildOrdersReady({
-        userId: 'u1', kind: 'setup', botId: 'mentor',
-        entities: [order('s1', 'TSLA'), order('s2', 'NVDA')],
-    })
-    assert.equal(c.botId, 'mentor', 'a setup batch comes from Mentor, not a cross-kind bot')
-    assert.equal(c.payload.kind, 'setup')
-})
-
-test('orders ready: an empty batch degrades to a coherent card, not a crash', () => {
-    const c = buildOrdersReady({ kind: 'idea', botId: 'idea', entities: [] })
+test('queue ready: a nonsense count degrades to a coherent card, not a crash', () => {
+    const c = buildQueueReady({ userId: 'u1', count: undefined, assets: [] })
     assert.equal(c.payload.count, 0)
-    assert.equal(c.payload.firstId, null)
     assert.deepEqual(c.payload.assets, [])
+    assert.match(c.content, /0 items/)
 })

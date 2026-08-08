@@ -37,7 +37,7 @@
  */
 
 import { evaluateTree }                     from './monitor.orchestrator.js'
-import { postBotCard, cardActions }         from '../api/chat/chat.service.js'
+import { postBotCard, cardActions, BOT_USER_ID } from '../api/chat/chat.service.js'
 import { resolveEntryTimeframe }            from './monitorUtils.js'
 import { logger }                           from '../services/logger.service.js'
 import { ENTITIES }                         from '../services/entity/entityCollection.js'
@@ -268,7 +268,9 @@ async function _notify(idea, status, edge, level, anchor, reason, inPosition) {
             reason,
             inPosition,
         },
-        botId:   'idea',   // invalidation alerts are Idea's — post under the Idea bot
+        // Minos runs this only over kind:'idea' (calls and setups stand down), and that desk is
+        // archived — so the alert comes from Axl, the general notification bot.
+        botId:   BOT_USER_ID,
         actions: cardActions('Edit in chat'),
     })
 }

@@ -15,10 +15,19 @@
  * actions } a card sends) and thin async wrappers that hand the builder's output to postBotCard.
  */
 
-import { cardActions } from '../api/chat/chat.service.js'
+import { cardActions, botForKind, BOT_USER_ID } from '../api/chat/chat.service.js'
+import { kindForDoc } from './entity/envelope.js'
 import { postCard } from './notifyCard.js'
 
 const LOG = '[tradeNotify]'
+
+/**
+ * Below this, a decision is same-session and its age is not worth saying; above it, it was taken
+ * before a close the user slept through. Lives here, with the sentence that uses it — it used to
+ * sit in marketOpen.monitor.js, which stopped writing the copy when the per-desk batch card was
+ * retired. The OrderConfirmDialog shows the same age against the same threshold.
+ */
+export const STALE_HOURS = 12
 
 // ── Pure card builders ─────────────────────────────────────────────────────────
 
@@ -31,6 +40,10 @@ const LOG = '[tradeNotify]'
  */
 export function buildIdeaEntryConfirm(idea, note = null) {
     const dir  = String(idea?.direction || '').toUpperCase()
+    // A holding's confirm comes from Atlas, a lone legacy idea's from Axl (the Idea desk is
+    // archived — see RETIRED_BOT_IDS). Derived from the doc, because the market-open sweep sends
+    // both kinds through this one builder.
+    const kind = idea?.kind ?? kindForDoc(idea)
     const lead = note === 'passed_earlier' ? `Scheduled time already passed — ${dir} ${idea?.asset}.`
         :        note === 'off_hours'      ? `Scheduled time reached while the market was closed — ${dir} ${idea?.asset}.`
         :                                    `Entry triggered — ${dir} ${idea?.asset}.`
@@ -38,8 +51,10 @@ export function buildIdeaEntryConfirm(idea, note = null) {
         userId:  idea?.userId ?? null,
         content: `${lead} Confirm to place your order.`,
         type:    'entry_confirm',
-        payload: { kind: 'idea', ideaId: idea?.id, asset: idea?.asset, direction: idea?.direction ?? null, note: note ?? null },
-        botId:   'idea',
+        // `kind` is the card's ROUTE (both kinds open the same OrderConfirmDialog) and its agent
+        // tag — it carries the doc's real kind so the tag matches the sender.
+        payload: { kind, ideaId: idea?.id, asset: idea?.asset, direction: idea?.direction ?? null, note: note ?? null },
+        botId:   botForKind(kind),
         actions: cardActions('Confirm order'),
     }
 }
@@ -160,46 +175,39 @@ export function buildSetupInvalidation(setup, info = null) {
 }
 
 /**
- * SEVERAL orders came off the bench at once — the market opened on a batch that had parked
- * overnight (a portfolio activation is the usual case: nine holdings, nine deferred plans).
+ * THE market-open nudge: work came off the bench and is now executable.
  *
- * ONE card, not N. Nine separate confirm cards at 09:30 is not nine notifications, it is a wall
- * the user scrolls past — and the confirm dialog already walks a queue one order at a time, so the
- * card only has to get them INTO that queue.
+ * ONE card per user, for everything — replacing the per-desk fan-out that used to post a batch from
+ * Atlas and another from Mentor at the same second. That fan-out answered "what does this desk have
+ * for you"; nobody ever asks that. The question at 09:30 is "what is waiting on ME", and it has one
+ * answer, so it gets one card and one list (docs/architecture/off-hours-queue.md).
  *
- * Grouped per KIND, never across kinds: the batch still belongs to the desk that authored it, and
- * one cross-kind "all your orders" card would be exactly the notification router that was
- * deliberately abandoned (see project_axl_agent). So `botId` and the route target are passed in by
- * the caller that owns the kind; the SENTENCE is shared because the event genuinely is one event —
- * the market opened — and there is no per-desk judgment in saying so.
+ * This is the one place a card is deliberately NOT the authoring desk's. It is Axl's, because the
+ * QUEUE is Axl's even though the items in it belong to other desks — and it stays legitimate only
+ * as long as it remains a POINTER. It says how many and routes to the list; it never summarises
+ * what Atlas wants or why. The moment it starts doing that it is the notification router that was
+ * deliberately abandoned (project_axl_agent).
  *
- * `staleHours` is the age of the OLDEST plan in the batch. Surfaced rather than acted on: these
- * plans were priced before the close, and the user decides whether that still stands (the confirm
- * dialog shows the same age). Omitted when nothing in the batch is old enough to be worth saying.
+ * `staleHours` is the age of the OLDEST decision. Surfaced rather than acted on: these were priced
+ * before the close, and whether that still stands is the user's call, not a monitor's.
  */
-export function buildOrdersReady({ userId, entities = [], kind, botId, staleHours = null }) {
-    const n      = entities.length
-    const assets = [...new Set(entities.map(e => e?.asset).filter(Boolean))]
-    // Name them when the list is short enough to read; past that the count is the information.
-    const names  = assets.length && assets.length <= 4 ? ` (${assets.join(', ')})` : ''
-    const stale  = Number.isFinite(staleHours) && staleHours >= 12
-        ? ` These were priced ${Math.round(staleHours)}h ago, before the close — check the levels still make sense.`
+export function buildQueueReady({ userId, count, assets = [], staleHours = null }) {
+    const n     = Number(count) || 0
+    const names = assets.length && assets.length <= 4 ? ` — ${assets.join(', ')}` : ''
+    const stale = Number.isFinite(staleHours) && staleHours >= STALE_HOURS
+        ? ` The oldest was decided ${Math.round(staleHours)}h ago, before the close — check it still makes sense.`
         : ''
     return {
-        userId: userId ?? null,
-        content: `The market is open — ${n} order${n === 1 ? '' : 's'}${names} ${n === 1 ? 'is' : 'are'} ready to place.${stale} Confirm them one at a time.`,
-        type:    'orders_ready',
+        userId:  userId ?? null,
+        content: `The market is open — ${n} item${n === 1 ? '' : 's'}${names} ${n === 1 ? 'is' : 'are'} waiting on you.${stale} Open your queued list to execute ${n === 1 ? 'it' : 'them'}.`,
+        type:    'queue_ready',
         payload: {
-            kind,
-            count: n,
+            count:  n,
             assets,
-            // The queue's entry point. The confirm dialog surfaces the first eligible order by
-            // itself; this just opens it on the right workspace.
-            firstId: entities[0]?.id ?? null,
             staleHours: Number.isFinite(staleHours) ? Math.round(staleHours) : null,
         },
-        botId,
-        actions: cardActions('Review orders'),
+        botId:   BOT_USER_ID,
+        actions: cardActions('Open the list'),
     }
 }
 
@@ -294,8 +302,8 @@ export async function notifySetupEntryConfirm(setup, assessment = null) {
     return _post(buildSetupEntryConfirm(setup, assessment), 'Setup entry-confirm card')
 }
 
-export async function notifyOrdersReady(batch) {
-    return _post(buildOrdersReady(batch), `Orders-ready card (${batch?.entities?.length ?? 0})`)
+export async function notifyQueueReady(summary) {
+    return _post(buildQueueReady(summary), `Queue-ready card (${summary?.count ?? 0})`)
 }
 
 export async function notifySetupInvalidation(setup, info = null) {
@@ -318,4 +326,4 @@ export async function notifyCallReentry(call, read = null, outcome = null) {
     return _post(buildCallReentry(call, read, outcome), 'Call-reentry card')
 }
 
-export const tradeNotifyService = { notifyIdeaEntryConfirm, notifySetupEntryConfirm, notifySetupInvalidation, notifyOrdersReady, notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry }
+export const tradeNotifyService = { notifyIdeaEntryConfirm, notifySetupEntryConfirm, notifySetupInvalidation, notifyQueueReady, notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry }
