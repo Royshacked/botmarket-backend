@@ -1,11 +1,15 @@
 # Project Context
 AI-powered trading assistant backend (ar2trade / TRADVICE) — Express + MongoDB +
-multi-provider LLM agents (Anthropic / OpenAI). Three conversational agents
-(Trade, Portfolio, Scanner) turn natural-language chat into monitored trade ideas,
-which a background monitor evaluates against condition trees and routes to a broker
-(cTrader live, a paper/simulation venue, or IBKR in progress) through one unified
-capability-flag adapter layer. Real-time via SSE (agent streams) and WebSocket
-(social chat). See README.md for the full architecture and app-flow diagrams.
+multi-provider LLM agents (Anthropic / OpenAI). SEVEN conversational desks — Axl
+(reception) · Kairos (`call`) · Mentor (`setup`) · Atlas (portfolio) · Argus (scan) ·
+Prometheus (`coverage`) · Pythia (`tilt`) — turn natural-language chat into monitored
+work, which each kind's own background monitor evaluates against condition trees before
+routing to a broker (cTrader live, a paper/simulation venue, manual, or IBKR in progress)
+through one unified capability-flag adapter layer. Nothing reaches a broker while its
+venue is shut — a confirmed decision is queued, never fired and never lost. Real-time via
+SSE (agent streams) and WebSocket (social chat). The Trade agent that authored the legacy
+`idea` kind was deleted 2026-08-07; the KIND is live and portfolio holdings ride it.
+See README.md for the full architecture and app-flow diagrams.
 
 # Rules
 - Always write tests after implementing a feature

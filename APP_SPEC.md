@@ -4,8 +4,10 @@ Behavioral contracts for the core domain. For the architecture overview + ASCII
 flow diagrams see [README.md](README.md); for file layout see [CODE_MAP.md](CODE_MAP.md).
 
 The app turns natural-language chat into **monitored trade ideas** that route to a
-broker. Three agents produce work; one background monitor evaluates it; one
-reconciler keeps idea state honest against the broker.
+broker. Seven desks produce work — Axl (reception) · Kairos (`call`) · Mentor (`setup`) ·
+Atlas (portfolio) · Argus (scan) · Prometheus (`coverage`) · Pythia (`tilt`) — each kind is
+watched by its own background monitor, and one reconciler keeps entity state honest
+against the broker. Nothing reaches a broker while its venue is shut (§5).
 
 ---
 
@@ -134,6 +136,8 @@ Dismiss/handled state persists per-message.
 | `manual_entry` / `manual_exit` | Broker-less fill needed | Inline FillCard (price/qty) — the one embedded-action card |
 | `entry_confirm` | Entry triggered, confirm needed (`kind: idea`\|`call`) | idea → workspace + `OrderConfirmDialog`; call → `/call/:id` pop-out |
 | `call_expiry` | Kairos thesis expiring/expired (`kind: edit`\|`expired`) | Edit → `/call/:id` pop-out · Delete · Dismiss |
+| `call_reentry` | A call **stopped out** with its thesis still intact (Hermes `_maybeOfferReentry`, one-shot) | Re-enter (`reviveCall` → `waiting`) · Close (`declineReentry`) |
+| `queue_ready` | The venue opened and something is waiting (`marketOpen.monitor`) | Open the queue → the Floor's **Queued** desk. ONE card per USER, from Axl (see §5) |
 | `market_brief_offer` | Daily broadcast offer, one per user per weekday (`marketBrief.notify.js`) | Get the brief → routes to **Axl**, who writes it in his thread · Dismiss |
 
 The market brief is the one card that is **not about the user**: the same text goes to everyone, is
@@ -173,6 +177,16 @@ them over with one of two tags, and they are different acts: a route names a **d
 - `<edit>kind ID</edit>` — reopen something they ALREADY have, in the editor that owns it, with the
   conversation that built it restored. Same destination as the list-surface pencil, by design: an
   edit reached from a sentence and an edit reached from a click are one edit.
+- `<suggest>…</suggest>` — up to three follow-up questions the user can send with one click, offered
+  as chips under the reply. They ride INSIDE the reply already streaming (no second model call, so no
+  added latency), and `services/suggestions.service.js` owns the wire format — the tag, the capture,
+  the cleaning, the cap of 3 — so one line wires any desk in and the client renders one thing. WHAT
+  to suggest is the desk's own judgment and lives in its prompt; a shared "suggestion generator"
+  would be the cross-desk unifier the house rule forbids. **Never on a routing turn**: the door Axl
+  just opened IS the next step, and three questions beside it compete with the one thing he decided.
+  Guarded three times over — the prompt asks, the agent drops them when a `route`/`edit` exists, and
+  the controller re-gates at the contract tier. Zero suggestions is a normal turn; filler ("tell me
+  more") teaches the user to stop reading the chips, and then the good ones go unread too.
 
 | kind | desk | reopens in |
 |---|---|---|
@@ -275,6 +289,54 @@ the `BrokerAdapter` contract. **Consumers branch on `capabilities()` flags, neve
 | `paper` | live | full — virtual venue, fills against the live price feed (`nativeProtection` false → exits rest as `positionId` closing orders) |
 | `ibkr` | in progress | data-only over IB Gateway / TWS socket (`@stoqey/ib`; `ohlcv` true, trading false) — **paused; do not extend without asking** |
 
+### Off-hours: nothing executes while the venue is shut
+
+**RULE (2026-08-07): nothing executes off-hours, paper included.** A real market order cannot fill
+into a shut market, and a simulation that fills anyway — at yesterday's close — is not simulating
+anything. A decision confirmed while the venue is closed is **queued**, the user is told so at the
+moment they act, and they execute it from a list at the open. Full design:
+[docs/architecture/off-hours-queue.md](docs/architecture/off-hours-queue.md).
+
+- **One gate, one place.** `executionGate.deferIfClosed({ userId, asset, assetClass, origin, action })`
+  → `{ deferred:false }` (proceed) or `{ deferred:true, id, nextOpenMs }` (queued — **do not touch the
+  broker**). Every path about to send an order asks it. It replaced five call sites that each decided
+  hours policy and disagreed: two refused, one deferred, and the review's add/trim/exit fired blind
+  into a closed market. It ENQUEUES rather than merely refusing — refusing alone loses the decision.
+- **A queued action is an intent with no entity of its own** (`pending_actions`). Deliberately not an
+  `orderState` flag: `awaiting_market` means one specific thing ("this entity carries a pending
+  ENTRY plan") and cannot hold two intents for one holding. `enqueue` is idempotent per
+  `(user, entity, verb)` while the row is open.
+- **Cancelling reaches back into the desk that decided.** `originRegistry` holds one `execute` +
+  `cancel` per origin (`portfolio_item · call · setup · idea`), keyed not switched; the gate
+  **refuses to queue an unregistered origin**, so nobody can ship a queued item whose desk could
+  never be told it was cancelled (an Atlas holding records the refusal in `rebalance_history`, or the
+  next review re-proposes the identical trim).
+- **`queuedBy` is the dispatch, not the verb.** A holding carries BOTH a review's exit and a
+  monitor's and both spell `exit` — but a monitor's can be a SLICE (a scaled target carrying one leg),
+  and `_exitItem` closes everything, so running it through the user path would liquidate a position
+  meant only to be trimmed (`_byDecider`). `user` rows are cancellable; `monitor` rows are **not** —
+  the stop is still breached, so dropping the row just re-queues it next tick.
+- **Two deferral stores, merged by a READ.** `awaiting_market` on an entity (an entry whose plan is
+  built) and `pending_actions` (an intent). `pendingWork.listWaiting` unions them into one row shape;
+  neither is ever copied into the other, which would give one order two owners and two states to
+  drift. `GET /api/pending-actions` exposes it; `POST /:id/execute` replays the action through the
+  SAME `_trimItem`/`_exitItem`/`_addToItem` that first tried it, `POST /:id/cancel` drops it.
+- **The market-open sweep drains both stores** and posts ONE `queue_ready` card per USER, from Axl,
+  pointing at the list — replacing a per-desk per-kind fan-out that put two cards in the same second.
+  Exactly-once twice over: entities via `claimIf`, queued rows via `transition(…, { from: QUEUED })`
+  (the default is "any OPEN state" and RELEASED *is* open, so without it two overlapping ticks each
+  post a card).
+- **A queued close freezes its position's exit checks** (`awaiting_market_close`, the rule
+  `awaiting_manual_close` already had) — otherwise the still-true condition re-fires every poll and a
+  stop and a target both look true on one stale candle. `awaiting_market_close` is NOT a variant of
+  `awaiting_market`: the sweep's entity drain matches the latter exactly, so a deferred CLOSE is never
+  promoted to `awaiting_confirm`.
+- **Carve-outs.** Manual books are never gated (a Fill card is an instruction, not an execution).
+  Crypto never defers. A failed queue write still BLOCKS the order — losing the row is a bookkeeping
+  failure, sending the order anyway is a trading one.
+- **Known gap:** no expiry. `STATES.EXPIRED` exists and nothing sets it, so an action whose venue
+  never opens (delisted symbol, bad asset class) sits queued forever.
+
 ### Paper mode
 
 - **Account binding is per-idea and explicit** (paper account picked in the selector, exactly one per
@@ -348,6 +410,11 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   watchlist), and an append-only `revisions[]` history. `compute_valuation` (deterministic, `services/
   valuation.engine.js`) fills the PT/gap; the Analyst agent + coverage-monitor are in progress. Buy-side
   research — NOT an execution-tier entity, watched by its own monitor, not Hermes/Minos/Themis.
+- `pending_actions` — the OFF-HOURS QUEUE (§5): one row per decision confirmed while the venue was
+  shut. An intent, not an entity — `{ userId, origin{kind,id,label}, action{verb,…}, queuedBy,
+  cancellable, state }`, idempotent per `(user, entity, verb)`. Lifecycle `QUEUED → RELEASED
+  --claim--> EXECUTING → DONE`, unwinding to RELEASED on failure. Never joined into the entity it
+  acts on; unioned with parked entities only by the `listWaiting` READ.
 - `paperAccounts` / `paperPositions` / `paperOrders` — the virtual broker store.
 - `chat_conversations` / `chat_messages` — social DM + bot notifications; one notify bot per agent
   (`BOT_IDS`, incl. `kairos`). A RETIRED bot's thread is kept but hidden from `getConversations`

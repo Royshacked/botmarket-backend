@@ -2,9 +2,26 @@
 
 AI-powered trading assistant backend — Express + MongoDB + LLM agents (Anthropic / OpenAI).
 
-Three conversational agents (**Trade**, **Portfolio**, **Scanner**) turn natural-language
-chat into monitored trade ideas, then route confirmed entries and exits to a real broker
-(cTrader), a paper venue, or IBKR (data-only for now) through one unified adapter layer.
+**Seven conversational desks** turn natural-language chat into monitored work, then route confirmed
+entries and exits to a real broker (cTrader), a paper venue, or IBKR (data-only for now) through one
+unified adapter layer. Each desk owns a kind; each kind is watched by its own monitor.
+
+| Desk | Route | Produces | Watched by |
+|---|---|---|---|
+| **Axl** — reception / concierge / critic | `/api/axl` | nothing (read-only); hands over to a desk | — |
+| **Kairos** — discretionary trade calls | `/api/kairos` | `call` | Hermes |
+| **Mentor** — the teaching desk | `/api/mentor`, `/api/setups` | `setup` | Talos |
+| **Atlas** — portfolio construction + review | `/api/portfolio` | `portfolio_item` holdings | Themis |
+| **Argus** — the systematic scanner | `/api/scanner` | `scan` | — |
+| **Prometheus** — buy-side research | `/api/analyst` | `coverage` | coverage monitor |
+| **Pythia** — top-down strategy | `/api/strategy` | `tilt` (the house view — a **broadcast**, not per-user) | tilt monitor |
+
+> The **Trade Agent** that authored the legacy `idea` kind was archived 2026-07-29 and **deleted**
+> 2026-08-07. The KIND is not gone — `/api/trade-ideas` still serves it and portfolio holdings ride
+> that plumbing — but nothing authors one conversationally, and its monitor (Minos) does not run.
+
+Behavioral contracts live in [APP_SPEC.md](APP_SPEC.md); file-by-file layout in
+[CODE_MAP.md](CODE_MAP.md).
 
 ---
 
@@ -21,34 +38,29 @@ Massive, Yahoo Finance, Finnhub, FMP, SEC (EDGAR), GNews, Binance (crypto deriva
 Chart images for vision TA are rendered in-house (KLineCharts headless via Playwright, from our
 FMP candles), with chart-img (TradingView) as the fallback.
 
-### External env vars
-```
-# required
-MONGODB_URI            JWT_SECRET
+### Configuration
 
-# LLM
-ANTHROPIC_API_KEY      OPENAI_API_KEY      OPENAI_SYSTEM_PROMPT
-TOKEN_BUDGET_USD
+**`services/config.js` is the single home for every environment variable** — all ~43 of them named
+once, each with its type, default and purpose. Read the file rather than a list here; it is the
+answer to "what configures this system?". Three properties of it are load-bearing:
 
-# market data / news
-MASSIVE_API_KEY        FINNHUB_API_KEY     FMP_API_KEY
-GNEWS_API_KEY          CHART_IMG_API_KEY   SEC_USER_AGENT
-FRED_API_KEY           # macro/Fed calendar (free: fredaccount.stlouisfed.org)
+- **It owns dotenv.** Importing config loads `.env`, so no module depends on having been imported
+  after something that happened to load it.
+- **Every value is a live getter.** Several are legitimately read per call, and tests override
+  `process.env` — ESM hoists imports above top-level statements, so only a live read sees them.
+- **It refuses to load `.env` under `node --test`.** Not hygiene, a safety gate: the unit suite runs
+  offline, and several tests pass *because* the database is unreachable.
 
-# brokers
-CTRADER_CLIENTID       CTRADER_SECRET      CTRADER_REDIRECT_URI   CTRADER_REDIRECT_URL_PROD
-IBKR_GW_HOST           IBKR_GW_PORT        IBKR_GW_CLIENTID
-CLIENT_URL
+Startup fails on a **missing** required value **and** on a malformed one (`CANDLE_CACHE_INTRADAY_MS=abc`
+used to yield NaN, get swallowed by `|| default`, and run on a setting nobody chose). It also warns
+on `.env` keys no schema entry claims — a typo is only detectable from that side.
 
-# optional tuning
-PORT (3030)   NODE_ENV   PAPER_FILL_INTERVAL_MS (30s)   PAPER_EQUITY_SNAPSHOT_MS (5m)
-OWN_CHART_RENDER (on)   OWN_CHART_RENDER_TIMEOUT_MS (8s)   OWN_CHART_RENDER_PAGE_TIMEOUT_MS (10s)
-#   own-chart vision render (KLineCharts headless via Playwright). Set OWN_CHART_RENDER=false to
-#   force chart-img. Prod host must run `npx playwright install chromium` or renders fall back.
-MARKET_BRIEF_OFFER (on)   MARKET_BRIEF_OFFER_HOUR_UTC (12)   MARKET_BRIEF_TTL_MS (45m)
-#   the daily market-brief offer card + how long one written brief is served to everyone.
-#   MARKET_BRIEF_OFFER=off stops the card; Axl's get_market_brief tool keeps working.
-```
+Required: `MONGODB_URI`, `JWT_SECRET`. Then LLM (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` — transcription
+only), market data (`FMP_API_KEY`, `MASSIVE_API_KEY`, `FINNHUB_API_KEY`, `FRED_API_KEY`,
+`GNEWS_API_KEY`, `CHART_IMG_API_KEY`, `SEC_USER_AGENT`), brokers (`CTRADER_*`, `IBKR_*`),
+`CLIENT_URL`, and tuning knobs for the candle caches, the paper engines, the own-chart renderer
+(`OWN_CHART_RENDER` — prod hosts must run `npx playwright install chromium` or renders fall back to
+chart-img) and the market brief.
 
 ### Run
 ```bash
@@ -56,53 +68,118 @@ npm install
 npm run dev          # nodemon + free-port helper
 npm start            # node server.js
 npm run server:prod  # NODE_ENV=production (serves built frontend from public/)
+npm test             # node --test tests/unit/*.test.js
 ```
-`server.js` fails fast if `MONGODB_URI` or `JWT_SECRET` are missing. On boot it starts the
-background services: monitor, execution reconciler, paper fill engine, paper
-equity snapshotter, market-brief offer.
+
+On boot `server.js` ensures the Mongo indexes and starts **eleven background loops**: the
+market-open sweep, four assessment monitors (Hermes / Talos / coverage / tilt), Themis, the execution
+reconciler, the three paper engines (fill / mark / equity) and the market-brief notifier. Minos (the
+archived idea monitor) is deliberately not started.
+
+### Deployment shape — ONE process
+
+Those eleven loops start unconditionally with **no leader election**, and a handful of module-level
+`Map`s are load-bearing rather than caches — above all the exit-order lock in `execution.reconciler`
+and the WebSocket registry in `chatWs`, which a second instance cannot even see. Some loops claim
+their work through Mongo and are safe (Hermes/Talos via dueLoop's lease, marketOpen via `claimIf`,
+paperFill via `claimOrder`, the brief notifier via its card dedupe); the rest rely on being the only
+process alive. **A second instance corrupts the first and breaks the second, mostly in silence.**
+Read [docs/architecture/single-instance.md](docs/architecture/single-instance.md) — what is already
+claimed, what is not, and the order to fix it in — before raising any replica count.
 
 ---
 
 ## Repository layout
 
 ```
-server.js              Express app, route mounts, background-service boot
+server.js              Express app, route mounts, background-loop boot
 api/                   HTTP surface — one folder per feature (routes + controller + service)
   _shared/             the cross-kind HTTP tier: reason.util (ONE reason→status map),
                        entityController.util (list/get/patch/delete for any kind), sse.util, parse
   axl/                 Axl — the concierge/critic meta-layer that hands the user to the specialists:
                        `<route>` opens a desk for new work, `<edit>` reopens an item they already
-                       have in the editor that owns it. Also delivers the daily market brief
-                       (POST /api/axl/brief/stream — streamed into the Axl chat panel, never
-                       posted into the social chat)
+                       have in the editor that owns it, `<open>` carries their own sentence in as
+                       the desk's first message, `<suggest>` offers follow-up chips. Also delivers
+                       the daily market brief (POST /api/axl/brief/stream — streamed into the Axl
+                       chat panel, never posted into the social chat)
   kairos/              Kairos chat + the `call` kind (monitored by Hermes)
   mentor/ setups/      Mentor chat + the `setup` kind (monitored by Talos)
-  analyst/             buy-side analyst chat + the `coverage` research artifact
+  analyst/             Prometheus chat + the `coverage` research artifact (initiate/revise/retire)
+  strategy/            Pythia chat + the `tilt` publication log. NOT owner-scoped — the house view
+                       is a broadcast, so /tilt/current answers the same document to everyone, and
+                       there is deliberately no delete (a desk that can erase its own calls has no
+                       track record; retire archives instead)
   trade-ideas/         entity CRUD + order placement — serves `portfolio_item` (holdings) and the
-                       archived `idea` kind; the name is historical, the route is live
-  idea/                ARCHIVED 2026-07-29 — the Idea agent's SSE chat, no longer mounted
-  portfolio/           Atlas chat + portfolio review lifecycle
+                       legacy `idea` kind; the name is historical, the route is live
+  portfolio/           Atlas chat + portfolio review/rebalance lifecycle
   scanner/             Argus chat + saved scans
+  pendingAction/       the QUEUED list (/api/pending-actions) — everything waiting on the user, from
+                       both the off-hours queue and the entities the market-open sweep unparked
+  experience/          per-user experience level, read by every desk's prompt (indexes only here;
+                       no route of its own)
   threads/ trades/     build-conversation drafts · the frozen-at-fill trade ledger
   broker/              broker connections, orders, positions
     adapters/          BrokerAdapter interface + ctrader / ibkr / paper / manual adapters
   paper/               paper-mode toggle, settings, trades, equity curve
   chat/                user-to-user (social) messaging + bot notifications (WS)
   market/ calendar/ user/ authentication/ transcribe/
-services/              agent services, model routing, condition trees, pricing, order plan…
-  entity/              the entity envelope + makeEntityCrud — ONE owner-scoped CRUD for every kind
-providers/             external clients (LLMs, market data, brokers, Mongo)
+services/              business logic + the desks. No Express here.
+  agents/              the 7 LLM desks — analyst · axl · kairos · mentor · portfolio · scanner ·
+                       strategy. Their system prompts stay at the REPO ROOT (`*_system_prompt.md`)
+  tools/               the 12 agent-facing tool modules (*.tools.js) — handlers + LLM-ready
+                       formatters. Schemas stay in agentTools.registry
+  entity/              the entity envelope + makeEntityCrud (ONE owner-scoped CRUD for every kind)
+                       + entityRepo (the kind-blind execution facade)
+  pendingAction/       the off-hours queue: executionGate (THE market-hours gate) · the record ·
+                       originRegistry (execute + cancel per origin) · pendingWork.listWaiting
+  chartRender/         KLineCharts headless render (Playwright) — the own-chart vision path
+  config.js            THE configuration surface (see above)
+providers/             external clients (LLMs, market data, brokers, Mongo) — the only layer that
+                       talks to the outside world
 monitoring/            one monitor per kind + the shared execution layer
-                       hermes (call) · talos (setup) · themis (portfolio) · coverage (analyst)
-                       minos (idea) is ARCHIVED and not started
+                       hermes (call) · talos (setup) · themis (portfolio) · coverage (analyst) ·
+                       tilt (strategy). minos (idea) is ARCHIVED and not started
+                       marketOpen — kind-blind: the ONE drain for everything parked while shut
+                       execution.reconciler — broker-authoritative fill/close → entity status
+                       invalidation — advisory entry-range watcher, never executes
+                       paperFill / paperMark / paperEquity — the paper venue's engines
                        marketBrief.notify — not a monitor: the weekday market-brief offer card
   evaluators/          touch, structured, indicator, time, volume, news, chart
-docs/architecture/     design docs
+tests/unit/            node:test unit tests (`npm test`). tests/*.js are MANUAL live harnesses
+docs/architecture/     design docs — broker · monitoring · off-hours-queue · single-instance ·
+                       paper-trading-simulation · ohlcv-price-data · trades-data · manual-mode
 ```
 
 ---
 
 ## App Flow Schemas
+
+### 0. Reception — Axl hands the user to a desk
+
+Axl is where the user lands, so he is also the way in. He is **read-only**: he decides only *where*,
+then gets out of the way.
+
+```
+AXL  —  POST /api/axl/stream
+
+  Works out only what decides WHERE: one position or several, do they already
+  have a name for it. Everything else the user said travels as their sentence.
+
+  <route>desk SYMBOL</route>   NEW work → the desk's entryTab
+  <open>…</open>               their sentence, sent on arrival as the desk's
+                               FIRST message (rides with a route, never an edit)
+  <edit>kind ID</edit>         reopen something they ALREADY have, in the editor
+                               that owns it, conversation restored
+  <suggest>…</suggest>         up to 3 follow-up chips — never on a routing turn,
+                               because the door he just opened IS the next step
+        │
+        ▼
+  call → Kairos · setup → Mentor · coverage → Prometheus
+  scan → Argus · portfolio → Atlas (edit or review — the BOOK decides, never the caller)
+```
+
+Risk, horizon, constraints and benchmark are the **receiving desk's** first phase, not reception's —
+asking at the door means answering twice. See APP_SPEC §2 for the hand-off contract.
 
 ### 1. Trade Ideas
 
@@ -124,14 +201,14 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
                                ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │                         SAVE IDEA                                │
-│  POST /api/trade-ideas        (batch: POST /api/trade-ideas/batch)│
+│  POST /api/trade-ideas       (batch: POST /api/trade-ideas/batch)│
 │                                                                  │
 │  ideaService.saveIdea()                                          │
 │    • resolves condition trees (entry / stop / TP)                │
 │    • if multi-broker → forks into per-broker child ideas         │
 │    • if paper mode ON → forks onto broker:'paper'                │
 │    • status = "waiting"  (or "hit" if idea.immediate = true)     │
-│    • persisted to MongoDB  ideas collection                       │
+│    • persisted to MongoDB  ideas collection                      │
 └──────────────────────────────┬───────────────────────────────────┘
                                │
                ┌───────────────┴──────────────────┐
@@ -183,11 +260,11 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 │                                                                  │
 │  Monitor continues evaluating stop/TP condition trees            │
 │  Execution reconciler watches broker fill/close events           │
-│    (broker-authoritative — asks the broker if a position survived)│
+│    (broker-authoritative — asks the broker if the position lives)│
 │  Invalidation monitor watches the entry-range band (advisory)    │
 │                                                                  │
 │  When stop or TP triggers:                                       │
-│    → status = "closed"  (closedReason: "stop" | "tp")           │
+│    → status = "closed"  (closedReason: "stop" | "tp")            │
 │    → trade captured to the append-only `trades` collection       │
 └──────────────────────────────────────────────────────────────────┘
 
@@ -208,7 +285,7 @@ waiting ──► looking ──► hit ──► long / short ──► closed
 ```
 
 **Invalidation monitor** — a deterministic entry-range watcher (`monitoring/invalidation.monitor.js`).
-This is **not an agent and not a condition leaf.** The Trade Agent authors the band once
+This is **not an agent and not a condition leaf.** The authoring desk sets the band once
 (`idea.invalidation.range = { lower, upper, *Anchor }`, derived from chart structure); from then
 on it's checked deterministically — no LLM in the hot path. The band is a separate field on the
 idea, *not* a leaf in the entry/stop/TP tree: on each pass the monitor synthesizes an ephemeral
@@ -231,15 +308,23 @@ A portfolio groups multiple ideas under one AI-planned allocation, with a period
 │  POST /api/portfolio/stream   (SSE)                              │
 │                                                                  │
 │  portfolioAgentService.chatStream()                              │
-│    Tools: get_quote, get_quotes, get_correlations,               │
-│           get_risk_metrics, get_fundamentals, get_sec_filings,   │
-│           get_earnings, get_earnings_calendar,                   │
-│           get_short_interest, get_options_context,               │
-│           get_derivatives_context, web_search                    │
+│    Tools: quotes · correlations · risk metrics · fundamentals    │
+│           (EV/EBITDA, FCF + earnings yield, ROIC, and Street PT) │
+│           · sec_filings · earnings + earnings calendar           │
+│           · short interest / options / derivatives context       │
+│           · screen_candidates (cross-universe discovery)         │
+│           · get_macro_snapshot (Treasury curve + 2s10s, key      │
+│             econ indicators, sector rotation)                    │
+│           · trading_context + market hours · web_search          │
+│                                                                  │
+│  Construction is gated at TWO decision points: lock the mandate, │
+│  present regime + architecture, then selection/sizing/plan.      │
+│  Sizing enforces the mandate's hard constraints (max-position,   │
+│  sector caps, cash floor). Atlas NEVER screens — that's Argus.   │
 │                                                                  │
 │  Agent emits  <portfolio_plan> JSON block                        │
 │    → _sizePlan():  normalizes allocation ratios to sum=1,        │
-│                    fetches live prices, computes quantities        │
+│                    fetches live prices, computes quantities      │
 └──────────────────────────────┬───────────────────────────────────┘
                                │
                                ▼
@@ -266,14 +351,35 @@ A portfolio groups multiple ideas under one AI-planned allocation, with a period
 │                                                                  │
 │  POST /api/portfolio/stream  { reviewMode: true }                │
 │    → computePortfolioState() fetches live P&L, drift, notional   │
-│    → injects live state into agent context for review advice     │
+│    → TWO modes on the one stream: in-position (scoreboard +      │
+│      rebalance memo) and pre-activation (all-pending, ~$0        │
+│      notional — a pre-flight before "Activate all")              │
+│    → thesis-anchored: a fingerprint captured at construction     │
+│      and each review close yields a BENCHMARK-RELATIVE           │
+│      scoreboard + a regime then→now delta, rendered by the       │
+│      SERVER, not estimated by the model                          │
 │                                                                  │
 │  POST /api/portfolio/:portfolioId/rebalance                      │
 │    → applies an agent-proposed rebalance to the linked ideas     │
+│    → reports three buckets: applied / queued / failed, and       │
+│      ok:false when nothing landed (off-hours changes QUEUE)      │
 │                                                                  │
 │  POST /api/portfolio/:portfolioId/complete-review                │
 │    → advances nextReviewAt by cadence interval                   │
 └──────────────────────────────────────────────────────────────────┘
+
+The scheduled cadence NOTIFIES only. The bubble carries a cheap non-LLM
+pre-check (computeReviewSignals → triggers[]: conviction fell / regime shift /
+drift / benchmark lag / imminent earnings); the full memo is generated only when
+the user opens the review. Nothing auto-executes — changes stay Accept-gated.
+
+Edit or review is the BOOK's call, never the caller's:
+  nothing in a position  → reopens as a construction EDIT (every holding goes
+                           back to `waiting` until re-activated)
+  any leg long/short     → opens as a REVIEW instead, because re-planning would
+                           take an open position off monitoring to rewrite a plan
+                           the market has already acted on
+  `hit` sits below the line — a parked order is not a position.
 
 Edit mode (modifying an existing portfolio):
   Agent receives current ideas as context → re-emits <portfolio_plan>
@@ -327,7 +433,7 @@ The scanner agent produces a watchlist of trade candidates for a given timeframe
 │                                                                  │
 │  Chat state saved separately per user:                           │
 │  POST   /api/scanner/chat-state   save conversation              │
-│  GET    /api/scanner/chat-state   restore conversation on reopen  │
+│  GET    /api/scanner/chat-state   restore conversation on reopen │
 │  DELETE /api/scanner/chat-state   clear                          │
 └──────────────────────────────────────────────────────────────────┘
 
@@ -335,6 +441,77 @@ Edit mode (refining an existing scan list):
   Agent receives current candidates as context → emits full updated
   <scan_list> (not just the diff) → frontend calls PUT to replace
 ```
+
+---
+
+### 4. Research & strategy — the two desks that produce no orders
+
+Neither Prometheus nor Pythia touches a broker. They produce **artifacts other desks read**, which is
+the data-vs-judgment split: their output is a document, not an instruction.
+
+```
+PROMETHEUS (buy-side research)        POST /api/analyst/stream
+  ├─ the edge is the GAP: OUR price target vs the Street's consensus
+  ├─ compute_valuation → services/valuation.engine.js (deterministic, not the model's arithmetic)
+  └─ emits a `coverage` doc — variant perception · rating · PT + estimates ·
+     kill_criteria · append-only revisions[]                     /api/analyst/coverage
+        │
+        └─► the coverage monitor re-models on new facts (compare-and-swap: a re-model is a
+            multi-minute run, so the hourly tick's loser stands down). A price target carries a
+            DEADLINE; an early hit reopens the call rather than closing it — a target hit early
+            means the target was too low, not that the thesis is done.
+
+PYTHIA (top-down strategy)            POST /api/strategy/stream
+  ├─ ONE standing house view: a named regime + sector stances as ACTIVE WEIGHT (bps) vs a
+  │  benchmark — a stance, never a return forecast
+  ├─ a BROADCAST: no userId anywhere. /api/strategy/tilt/current answers everyone the same doc
+  └─ retire ARCHIVES; there is no delete, because a desk that can erase its own calls has no
+     track record
+        │
+        ├─► the tilt monitor re-reads the regime; the clock and the baseline are PER ROW
+        └─► CONSUMED, not just published: Atlas reads the house view when constructing and
+            reviewing (portfolioChat + sectorView.tools), and Axl surfaces it — a strategy desk
+            nobody reads is a costume
+```
+
+---
+
+## Off-hours execution queue
+
+**Nothing executes off-hours, paper included** (2026-08-07). A real market order cannot fill into a
+shut market, and a simulation that fills anyway — at yesterday's close — is not simulating anything.
+
+```
+  user confirms a trim at 02:00
+            │
+            ▼
+  executionGate.deferIfClosed({ userId, asset, assetClass, origin, action })
+            │
+     ┌──────┴──────┐
+  open           closed
+     │               │
+  proceed to     QUEUE it (`pending_actions`) — do not touch the broker,
+  the broker     and tell the user at the moment they act
+                     │
+                     ▼
+            marketOpen.monitor drains BOTH stores at the open:
+              • entities parked at `awaiting_market`   (claimIf)
+              • queued actions                          (transition from QUEUED)
+                     │
+                     ▼
+            ONE `queue_ready` card per USER, from Axl → the Floor's Queued desk
+                     │
+            POST /api/pending-actions/:id/execute  → replays through the ORIGINAL
+                                                     function (_trimItem/_exitItem/_addToItem)
+            POST /api/pending-actions/:id/cancel   → drops the row AND tells the deciding desk
+```
+
+Before this there was no rule at all for *changing* a position off-hours: five call sites each
+decided hours policy and disagreed, and the review's add/trim/exit fired blind. Two guarantees are
+easy to lose in a rewrite — a **monitor's** exit is not cancellable from the list (the stop is still
+breached, so dropping the row re-queues it next tick) and is dispatched separately from a user's,
+because a monitor's exit can be a *slice* while `_exitItem` closes everything. Full design +
+carve-outs: [docs/architecture/off-hours-queue.md](docs/architecture/off-hours-queue.md).
 
 ---
 
@@ -349,7 +526,14 @@ adapter + one line in `broker.factory.js`.
 |-----------|-----------------------|----------------------------------------|---------|
 | cTrader   | **Live**              | REST (OAuth/accounts) + ProtoOA WebSocket | full    |
 | paper     | **Live** (simulated)  | in-process virtual venue               | full    |
+| manual    | **Live** (data-only)  | the same virtual store, `mode:'manual'` | none — the USER fills |
 | IBKR      | In progress (data)    | TWS API socket via IB Gateway (`@stoqey/ib`) | none yet |
+
+**Manual** is real money at an institution the app can't be wired to. It reuses the paper adapter's
+read plumbing so positions and mark-to-market work unchanged, but **guards every trading op**: the
+lifecycle is driven by the user's own two confirmations (entry fill, exit fill) through a FillCard,
+never by an order. That is also why manual books are never hours-gated — a Fill card is an
+instruction, not an execution. See `docs/architecture/manual-mode.md`.
 
 - **Capabilities:** `trading`, `nativeProtection`, `modifyProtection`, `closePosition`,
   `cancelOrder`, `listOrders`, `amendOrder`, `ohlcv`. The base class defaults every flag to
@@ -395,10 +579,15 @@ onto `broker:'paper'` / `accountId='paper-<userId>'`.
 
 - **Virtual account per user**, persisted in Mongo (`paperAccounts` / `paperPositions` /
   `paperOrders`). Cash-only margin: `equity = cashBalance + Σ unrealized`, `freeMargin = equity`.
-- **Simulated fills against the live feed.** Market orders fill instantly; resting stop/limit
-  orders are filled by the paper fill engine (`monitoring/paperFill.service.js`), a global ~30s
-  sweep (`PAPER_FILL_INTERVAL_MS`) that fills at the trigger price when live price crosses it and
-  emits normalized events onto the `executionBus`.
+- **Simulated fills against the live feed.** Market orders fill instantly *while the venue is open*
+  — off-hours they queue like any other order, because FMP answers `200` with the last close at 2am
+  and a stale print passing as live was the bug that produced the queue. Resting stop/limit orders
+  are filled by the paper fill engine (`monitoring/paperFill.service.js`), a global ~3s sweep
+  (`PAPER_FILL_INTERVAL_MS`) that fills at the trigger price when live price crosses it and emits
+  normalized events onto the `executionBus`. It **claims** each order (`claimOrder`, guarded on
+  `status:'working'`) rather than blind-`$set`ting it — two readers both seeing `working` would both
+  call the non-idempotent `openPosition` and silently double the size.
+- **Marks** are refreshed by their own loop (`monitoring/paperMark.service.js`, ~3s).
 - **Cost model:** spread crossed via `spreadBps` (buy→ask, sell→bid) baked into effective price,
   plus `commissionPerTrade` debited per fill. Per-user, default ON, set via `PUT /api/paper/settings`.
 - **Equity curve** snapshotted every 5 min (`monitoring/paperEquity.service.js`) for users with
@@ -425,10 +614,26 @@ GET  /equity-curve   equity points (?fromMs=)
   JWT lives in an httpOnly cookie; `requireAuth` guards everything except broker OAuth callback
   and transcribe.
 - **Users** `/api/users` — CRUD + `GET /:id/usage` (token-usage stats).
+- **Kairos** `/api/kairos` — the `call` kind: list/get/delete, `POST /` (Generate → persist a draft),
+  `POST /stream` (build conversation), `PUT /:id` (edit in place), `POST /:id/action`
+  (confirm │ edit │ dismiss │ manage a card), `GET /performance` (closed-call track record).
+- **Mentor / setups** `/api/mentor/stream` + `/api/setups` — the `setup` kind (price zones are
+  RIVAL scenarios, never legs; quantity is never summed across them).
+- **Analyst** `/api/analyst` — `POST /stream` + coverage CRUD; `POST /coverage/:id/retire` archives,
+  `DELETE` removes. Two verbs because retire once answered the DELETE route and the API claimed a
+  removal that never happened.
+- **Strategy** `/api/strategy` — `POST /stream` + the tilt log. `GET /tilt/current` is the house
+  view, the same document for everyone; `POST /tilt/:id/retire` archives, and there is no delete.
+- **Pending actions** `/api/pending-actions` — `GET /` (the queued list), `POST /:id/execute`,
+  `POST /:id/cancel`. See the off-hours queue above.
+- **Threads** `/api/threads` — the unified build-conversation drafts (subject-bound, TTL-expired,
+  linked to their artifact on generate).
+- **Trades** `/api/trades` + `/api/trades/stats` — the frozen-at-fill analytics ledger (paper + live).
 - **Social chat** `/api/chat` — user-to-user messaging (`/conversations`, messages, read
-  receipts, `GET /users/search`). Realtime via WebSocket (`api/chat/chatWs.js`). This is **not**
-  the AI agent chat — that's the idea-agent SSE. Agent notifications (idea hit, invalidation
-  alert) arrive here as bot messages.
+  receipts, `GET /users/search`). Realtime via WebSocket (`api/chat/chatWs.js`, `userId` → a SET of
+  sockets: every tab reads the same inbox). This is **not** the agent chat — those are the per-desk
+  SSE streams. Agent notifications (entry confirm, invalidation alert, queue ready) arrive here as
+  typed bot cards, one notify bot per desk.
 - **Market** `/api/market/status` · **Calendar** `/api/calendar/earnings` (Finnhub, +company logo/name), `/api/calendar/fed` (macro/FOMC via FRED), `/api/calendar/ipo` (Finnhub).
 - **Transcribe** `/api/transcribe` — raw audio → text (registered before `express.json`).
 
@@ -437,13 +642,28 @@ GET  /equity-curve   equity points (?fromMs=)
 ## Data Flow Summary
 
 ```
-Scanner ──► Scan candidates ──► user picks one ──► Trade Chat ──► Idea
-                                                                    │
-                                                               Monitor
-                                                                    │
-                                                     Broker orders (cTrader/paper/IBKR)
-                                                                    │
-Portfolio ──► Batch ideas ──► Monitor (each idea) ──► Positions ──► trades (paper+live)
-                 │
-            Portfolio review cycle
+                        Axl (reception — decides WHERE, executes nothing)
+                                          │
+        ┌──────────────┬──────────────┬───┴────────┬──────────────┬─────────────┐
+        ▼              ▼              ▼            ▼              ▼             ▼
+      Argus         Kairos         Mentor        Atlas       Prometheus      Pythia
+      scan          call           setup       portfolio      coverage        tilt
+        │              │              │            │              │             │
+   candidates ────────►│◄─────────────┘        holdings          the artifacts other
+                       │                            │            desks read (no orders)
+                       ▼                            ▼
+                  Hermes / Talos               Themis (review cadence)
+                       │                            │
+                       └──────────┬─────────────────┘
+                                  ▼
+                       entry conditions met → order plan → USER CONFIRMS
+                                  │
+                       executionGate — venue open?  ──no──►  pending_actions
+                                  │ yes                          │ (drained at the open)
+                                  ▼                              ▼
+                       Broker orders (cTrader / paper / IBKR)  ◄──┘
+                                  │
+                       execution.reconciler (broker-authoritative)
+                                  │
+                       Positions ──► trades (append-only, paper + live)
 ```

@@ -51,6 +51,10 @@ api/
                               index futures only) + applyOffset + real/cash ticker maps
     paperBroker.service.js / paperExecution.service.js
   paper/                  paper mode toggle/settings/reset/trades/equity  /api/paper/*
+  pendingAction/          the QUEUED list  /api/pending-actions (GET · POST /:id/execute ·
+                          POST /:id/cancel). What is waiting on the user, from BOTH stores —
+                          off-hours-queued intents AND entities the market-open sweep unparked.
+                          Execute REPLAYS through the origin's own function, never a copy
   axl/                    Axl chat SSE /api/axl/stream (converse + chart + two hand-off tags:
                           `<route>desk SYMBOL` opens a desk for NEW work, `<edit>kind ID` reopens an
                           item the user already has, in the editor that owns it — see APP_SPEC §2)
@@ -127,6 +131,14 @@ services/
   llmStream.util.js       createTagSuppressor({ onToken, captures }) + ALL_EMIT_TAGS — the ONE list
                           of tags suppressed from every agent's token stream. A new emit tag goes
                           here first, or it leaks raw into the chat AND is never captured
+  suggestions.service.js  follow-up CHIPS — the shared pipe for "what might I ask next". Owns the
+                          `<suggest>` tag, the capture, the cleaning and the cap of 3; one line
+                          (makeSuggestionCapture) wires any desk in and the client renders one
+                          thing. Costs no extra latency: they ride out inside the reply already
+                          streaming, not a second model call. WHAT to suggest is NOT here — that is
+                          judgment and lives in each desk's prompt (a shared generator would be the
+                          cross-desk unifier the house rule forbids). Axl only, so far, and never on
+                          a routing turn (see APP_SPEC §2)
   modelRouter.service.js  resolveModel(); REASONING_EFFORT enum
   conditionTree.service.js  resolve/collect/normalize condition trees
   orderPlan.service.js  protectionPlan.service.js
@@ -355,6 +367,8 @@ docs/                       architecture design docs
 | New agent tool that is a FACT about the venue/instrument | ride it on `get_quote` (`makeQuoteHandler`) as well as giving it a tool — a desk cannot then be unaware of it |
 | New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince` |
 | New emit tag (any agent) | add the name to `ALL_EMIT_TAGS` (llmStream.util.js) BEFORE anything else — unlisted tags leak into the chat and are never captured — then `buildTagCaptures({ tag })` in the agent + `stripEmitTags` on the return value |
+| Follow-up chips on another desk | `makeSuggestionCapture()` (suggestions.service.js) → wire `suggest:` into that agent's `buildTagCaptures` + add `'suggest'` to its `stripEmitTags` list + return `suggestions`. The plumbing is done; write the desk's OWN "what is worth asking next" section in its prompt |
+| New off-hours-queueable action | ask `executionGate.deferIfClosed` before the order, and register the origin's `execute` + `cancel` in `originRegistry.ORIGINS` — the gate REFUSES to queue an unregistered origin. Cancel must reach back into the deciding desk |
 | New Axl `<edit>` kind | one row in `EDIT_KIND_DESKS` (axl.agent.service.js) + `EDIT_KINDS` (axl.controller.js) + a `case` in the FE `openForEdit` (MainPage.jsx) pointing at that kind's EXISTING pencil handler + the tag in the prompt. The prompt-vs-gate test fails if the prompt teaches a kind the gate drops |
 
 ## Deployment shape
