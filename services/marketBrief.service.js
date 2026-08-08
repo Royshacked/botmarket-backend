@@ -38,7 +38,7 @@ import { config } from './config.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[marketBrief]'
 
-const _systemPrompt = makePromptLoader(join(__dirname, '../market_brief_prompt.md'), LOG)
+const _systemPrompt = makePromptLoader(join(__dirname, '../prompts/market_brief_prompt.md'), LOG)
 
 /** A brief older than this is rewritten; inside it, every caller reads the same one. */
 export const BRIEF_TTL_MS = config.marketBriefTtlMs

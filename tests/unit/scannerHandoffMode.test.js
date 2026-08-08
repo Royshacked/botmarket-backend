@@ -10,8 +10,8 @@ import { scannerAgentService } from '../../services/agents/scanner.agent.service
 // lines telling it to find ONE ticker and not emit a scan_list, and a hand-off turn read the list
 // machinery and phase gate it then had to override. It is now its own injected module.
 
-const SPINE   = readFileSync(new URL('../../scanner_system_prompt.md', import.meta.url), 'utf8')
-const HANDOFF = readFileSync(new URL('../../scanner_mode_handoff.md', import.meta.url), 'utf8')
+const SPINE   = readFileSync(new URL('../../prompts/scanner_system_prompt.md', import.meta.url), 'utf8')
+const HANDOFF = readFileSync(new URL('../../prompts/scanner_mode_handoff.md', import.meta.url), 'utf8')
 
 const call = (opts) => {
     let got = null

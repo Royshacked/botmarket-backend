@@ -21,7 +21,7 @@ import { buildSchoolSection, normalizeAllocation, normalizeSelection } from '../
 const __dirname    = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[portfolioAgent]'
 // Hot-reload the system prompt on file change (mtime-gated) — no restart needed.
-const _systemPrompt = makePromptLoader(join(__dirname, '../../portfolio_system_prompt.md'), LOG)
+const _systemPrompt = makePromptLoader(join(__dirname, '../../prompts/portfolio_system_prompt.md'), LOG)
 const MAX_MESSAGES = 10
 
 export const TOOLS = toolsFor({

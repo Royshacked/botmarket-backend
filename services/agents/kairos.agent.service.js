@@ -17,7 +17,7 @@ import { logger } from '../logger.service.js'
 // mirroring Idea's "build in chat, activate to persist" flow. Touches nothing in the Idea agent.
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
-const PROMPT_PATH = join(__dirname, '../../kairos_system_prompt.md')
+const PROMPT_PATH = join(__dirname, '../../prompts/kairos_system_prompt.md')
 const LOG         = '[kairosAgent]'
 const MAX_RECENT_MESSAGES = 8
 
@@ -26,9 +26,9 @@ const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 // Per-mode lens module (phases 2–4). The base is the shared SPINE; the mode module is injected as its
 // own cached block — one agent, three profiles (KAIROS_MODES.md). Loaders are keyed by mode name.
 const _modePrompt = {
-    discretionary: makePromptLoader(join(__dirname, '../../kairos_mode_discretionary.md'), LOG),
-    smc:           makePromptLoader(join(__dirname, '../../kairos_mode_smc.md'), LOG),
-    institutional: makePromptLoader(join(__dirname, '../../kairos_mode_institutional.md'), LOG),
+    discretionary: makePromptLoader(join(__dirname, '../../prompts/kairos_mode_discretionary.md'), LOG),
+    smc:           makePromptLoader(join(__dirname, '../../prompts/kairos_mode_smc.md'), LOG),
+    institutional: makePromptLoader(join(__dirname, '../../prompts/kairos_mode_institutional.md'), LOG),
 }
 
 export function emptyKairosState() {

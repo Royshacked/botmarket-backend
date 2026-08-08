@@ -23,8 +23,8 @@ const LOG   = '[scannerAgent]'
 // One prompt per Argus PROFILE (P4a): trading = the technical/catalyst trade scanner (unchanged);
 // investing = the fundamental/quality screen for portfolio candidates (→ Analyst). Hot-reloaded.
 const _profilePrompt = {
-    trading:   makePromptLoader(join(__dirname, '../../scanner_system_prompt.md'), LOG),
-    investing: makePromptLoader(join(__dirname, '../../scanner_profile_investing.md'), LOG),
+    trading:   makePromptLoader(join(__dirname, '../../prompts/scanner_system_prompt.md'), LOG),
+    investing: makePromptLoader(join(__dirname, '../../prompts/scanner_profile_investing.md'), LOG),
 }
 // The Kairos hand-off is a MODE of the trading profile, not a profile of its own: it shares the whole
 // screening spine and differs only in what it converges on (one name, not a list) and what it emits
@@ -32,7 +32,7 @@ const _profilePrompt = {
 // on a hand-off turn — the same shape as kairos_mode_*.md. It used to sit INSIDE the trading prompt,
 // where a list-building turn read fifty lines of "find ONE ticker, do not emit a scan_list" that did
 // not apply to it, and a hand-off turn read the list machinery and phase gate it had to override.
-const _handoffMode = makePromptLoader(join(__dirname, '../../scanner_mode_handoff.md'), LOG)
+const _handoffMode = makePromptLoader(join(__dirname, '../../prompts/scanner_mode_handoff.md'), LOG)
 const MAX_MESSAGES = 10
 
 export const TOOLS = toolsFor({

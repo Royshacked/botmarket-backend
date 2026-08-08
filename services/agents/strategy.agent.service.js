@@ -24,7 +24,7 @@ import { logger } from '../logger.service.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const LOG         = '[strategyAgent]'
-const PROMPT_PATH = join(__dirname, '../../strategy_system_prompt.md')
+const PROMPT_PATH = join(__dirname, '../../prompts/strategy_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 const MAX_RECENT_MESSAGES = 8
 

@@ -157,7 +157,7 @@ import { benchmarkTicker } from '../../services/portfolioReview.util.js'
 import { readFileSync } from 'fs'
 import { fileURLToPath as _fu } from 'url'
 import { dirname as _dn, join } from 'path'
-const ROOT_MD = join(_dn(_fu(import.meta.url)), '../../')
+const ROOT_MD = join(_dn(_fu(import.meta.url)), '../../prompts/')
 
 test('every benchmark the prompt names resolves to a proxy the app can price', () => {
     for (const [name, expected] of [

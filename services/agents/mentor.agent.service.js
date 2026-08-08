@@ -20,7 +20,7 @@ import { logger } from '../logger.service.js'
 // able to weigh a classical candidate against an SMC one inside a single conversation.
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
-const PROMPT_PATH = join(__dirname, '../../mentor_system_prompt.md')
+const PROMPT_PATH = join(__dirname, '../../prompts/mentor_system_prompt.md')
 const LOG         = '[mentorAgent]'
 const MAX_RECENT_MESSAGES = 8
 

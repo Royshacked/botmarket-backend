@@ -104,7 +104,7 @@ test('no-ledger path (back-compat): nothing dropped, grounding stays null', () =
 // `web_search` did ("This is grounding, not memory") until the theme step was written.
 const PROMPTS = ['scanner_system_prompt.md', 'scanner_profile_investing.md']
 function readPrompt(name) {
-    return readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../', name), 'utf8')
+    return readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../prompts/', name), 'utf8')
 }
 // The doctrine bullet names the grounded sources; pull the backticked tools out of it. The bullet
 // wraps across lines in one prompt and not the other, so read from its marker to the next bullet

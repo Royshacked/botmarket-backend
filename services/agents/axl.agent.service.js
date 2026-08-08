@@ -17,7 +17,7 @@ import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorVi
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
 // Hot-reload the system prompt on file change (mtime-gated) — no restart needed.
-const _systemPrompt = makePromptLoader(join(__dirname, '../../axl_system_prompt.md'), LOG)
+const _systemPrompt = makePromptLoader(join(__dirname, '../../prompts/axl_system_prompt.md'), LOG)
 const MAX_MESSAGES = 12
 
 // Axl is the non-trading meta-layer: the social-chat assistant, app guide, and

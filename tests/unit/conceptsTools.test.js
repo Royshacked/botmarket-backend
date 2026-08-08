@@ -13,7 +13,7 @@ import { TOOL_SCHEMAS } from '../../services/agentTools.registry.js'
 // pin the two halves: authored text arrives untouched, and a miss is guidance rather than a failure.
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const PROMPT = readFileSync(join(__dirname, '../../axl_system_prompt.md'), 'utf8')
+const PROMPT = readFileSync(join(__dirname, '../../prompts/axl_system_prompt.md'), 'utf8')
 const handler = (deps) => makeConceptHandlers(deps).explain_concept
 
 test('an authored concept comes back VERBATIM — the whole reason it was written', () => {

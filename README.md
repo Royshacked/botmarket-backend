@@ -124,7 +124,7 @@ api/                   HTTP surface — one folder per feature (routes + control
   market/ calendar/ user/ authentication/ transcribe/
 services/              business logic + the desks. No Express here.
   agents/              the 7 LLM desks — analyst · axl · kairos · mentor · portfolio · scanner ·
-                       strategy. Their system prompts stay at the REPO ROOT (`*_system_prompt.md`)
+                       strategy. Their prompts live in `prompts/` (see below)
   tools/               the 12 agent-facing tool modules (*.tools.js) — handlers + LLM-ready
                        formatters. Schemas stay in agentTools.registry
   entity/              the entity envelope + makeEntityCrud (ONE owner-scoped CRUD for every kind)
@@ -133,6 +133,12 @@ services/              business logic + the desks. No Express here.
                        originRegistry (execute + cancel per origin) · pendingWork.listWaiting
   chartRender/         KLineCharts headless render (Playwright) — the own-chart vision path
   config.js            THE configuration surface (see above)
+prompts/               every prompt loaded at RUNTIME, in one place — the 7 desk prompts, Kairos's
+                       3 modes, Argus's investing profile + handoff mode, the market brief and
+                       concepts.md. Hot-reloaded (mtime-gated) by `makePromptLoader`, so editing
+                       one takes effect without a restart. Loading is LAZY: a wrong path is an
+                       ENOENT on a live turn, not an import error — `tests/unit/promptPaths.test.js`
+                       is the guard, and it also fails on a prompt nothing loads
 providers/             external clients (LLMs, market data, brokers, Mongo) — the only layer that
                        talks to the outside world
 monitoring/            one monitor per kind + the shared execution layer

@@ -121,7 +121,7 @@ test('validate edit: the whole hand-off survives, or none of it does', () => {
 // so Axl says "taking you there", the desk never opens, and nothing errors. It is exactly how the
 // Assist desk sat unroutable — a desk in the hub with no key in the gate.
 test('every route tag the prompt teaches is one the controller accepts', () => {
-    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../axl_system_prompt.md')
+    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md')
     const prompt = readFileSync(promptPath, 'utf8')
     const taught = [...prompt.matchAll(/<route>([a-z]+)(?:[\s:,][^<]*)?<\/route>/g)].map(m => m[1])
 
@@ -134,7 +134,7 @@ test('every route tag the prompt teaches is one the controller accepts', () => {
 // The same silent-and-total failure, one tag over: the prompt teaches an edit kind nothing can open,
 // so Axl says "opening that call" and the user watches a desk start from scratch instead.
 test('every edit kind the prompt teaches is one the app can actually open', () => {
-    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../axl_system_prompt.md')
+    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md')
     const prompt = readFileSync(promptPath, 'utf8')
     const taught = [...prompt.matchAll(/<edit>([a-z]+)[^<]*<\/edit>/g)].map(m => m[1])
 
@@ -149,7 +149,7 @@ test('every edit kind the prompt teaches is one the app can actually open', () =
 // had Axl collecting a risk number and a timeframe at the door — the desk's own Phase 1 — and
 // writing them down as an objective that then outlived the job.
 test('the prompt teaches the opening hand-off, and keeps reception out of the brief', () => {
-    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../axl_system_prompt.md')
+    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md')
     const prompt = readFileSync(promptPath, 'utf8')
 
     assert.match(prompt, /<open>/, 'the opening tag is taught')
@@ -168,7 +168,7 @@ test('the prompt teaches the opening hand-off, and keeps reception out of the br
 // — so what the prompt must not do is teach Axl to make it, or to promise the wrong one.
 // If this fails because the wording moved, check the two modes are still DESCRIBED, then update it.
 test('the prompt teaches the book edit as one tag with two outcomes, decided by the book', () => {
-    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../axl_system_prompt.md')
+    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md')
     const prompt = readFileSync(promptPath, 'utf8')
 
     assert.match(prompt, /<edit>portfolio/, 'the book edit tag is taught')

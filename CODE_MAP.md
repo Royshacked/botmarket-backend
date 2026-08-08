@@ -87,7 +87,7 @@ services/
                           strategy). Moved out of the flat services/ root 2026-08-07 — they are a
                           distinct KIND of module (a desk, not a service), and they were the
                           largest single group making an 80-file directory hard to read. Their
-                          system prompts stay at the REPO ROOT (`join(__dirname, '../../x.md')`)
+                          prompts live in `prompts/` (`join(__dirname, '../../prompts/x.md')`)
   tools/                  the 12 agent-facing tool modules (*.tools.js) — the handlers + LLM-ready
                           formatters an agent is wired with. Schemas stay in agentTools.registry
   portfolio.agent.service.js  scanner.agent.service.js

@@ -13,7 +13,7 @@ import { getConcept, listConcepts, allConcepts, normalizeKey } from '../../servi
 // you, and the mistake people actually make.
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const SOURCE = readFileSync(join(__dirname, '../../concepts.md'), 'utf8')
+const SOURCE = readFileSync(join(__dirname, '../../prompts/concepts.md'), 'utf8')
 
 // ─── normalisation ────────────────────────────────────────────────────────────
 

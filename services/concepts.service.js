@@ -20,7 +20,7 @@ import { makePromptLoader } from './agentUtils.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[concepts]'
-const _loadFile = makePromptLoader(join(__dirname, '../concepts.md'), LOG)
+const _loadFile = makePromptLoader(join(__dirname, '../prompts/concepts.md'), LOG)
 
 // Memoised on the loader's returned STRING, not on time. makePromptLoader hands back the same
 // string until the file's mtime changes, so this re-parses exactly when the content actually

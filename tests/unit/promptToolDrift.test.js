@@ -20,7 +20,7 @@ import { TOOLS as ANALYST_TOOLS }   from '../../services/agents/analyst.agent.se
 import { TOOLS as AXL_TOOLS }       from '../../services/agents/axl.agent.service.js'
 import { TOOLS as SCANNER_TOOLS, SCANNER_TOOLS_FOR_PROFILE } from '../../services/agents/scanner.agent.service.js'
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../')
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/')
 
 // A prompt may reference a tool it does not own when it is explaining ANOTHER desk's job —
 // Atlas describing what Argus runs, say. Those are prose, not instructions; list them here so the

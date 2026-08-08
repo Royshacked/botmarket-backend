@@ -92,7 +92,7 @@ test('the tool description separates SHOWING a view from AUTHORING one', () => {
 // The prompt is hard-wrapped prose, so asserting a phrase that happens to straddle a line break
 // fails for a reason that has nothing to do with the rule. Collapse whitespace first and assert on
 // the sentence, not on its typography.
-const promptText = () => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../axl_system_prompt.md'), 'utf-8')
+const promptText = () => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md'), 'utf-8')
     .replace(/\s+/g, ' ')
 
 test('Axl is told the BRIEF and the VIEW are different, in both directions', () => {

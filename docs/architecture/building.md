@@ -271,7 +271,7 @@ AND/OR tree). Dialogs: **OrderConfirmDialog** (idea hit → order plan), **PreEn
 SSE            api/_shared/sse.util.js
 routes         api/{axl,kairos,mentor,portfolio,scanner,analyst,strategy}/*.routes.js + *.controller.js
 agents         services/agents/*.agent.service.js       (tools in services/tools/*.tools.js)
-prompts        *_system_prompt.md, at the REPO ROOT (loaded via makePromptLoader)
+prompts        prompts/*.md  (hot-reloaded via makePromptLoader; guarded by promptPaths.test.js)
 emit/parse     services/llmStream.util.js (ALL_EMIT_TAGS)  +  services/agentIO.js
 trees          services/conditionTree.service.js
 persistence    api/trade-ideas/tradeIdeas.{routes,controller,service}.js
