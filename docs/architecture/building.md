@@ -15,9 +15,13 @@ client POST → SSE chat stream → Claude with tools → agent writes XML "emit
 
 | Agent | Persona | Produces | Emit tag |
 |---|---|---|---|
-| **Trade** | "Idea" | one trade idea (stateful `<state>` accumulation) | `<trade_idea>` |
-| **Portfolio** | — | a multi-idea allocation plan (sized server-side) | `<portfolio_plan>` / `<portfolio_update>` |
+| **Axl** | "Axl" | nothing — routes, and hands over a sentence | `<route>` / `<edit>` / `<open>` / `<suggest>` |
+| **Kairos** | "Kairos" | one discretionary call (single asset) | `<call>` / `<kairos_pick>` |
+| **Mentor** | "Mentor" | one teaching setup (rival price-zone scenarios) | `<setup>` / `<setups>` |
+| **Portfolio** | "Atlas" | a multi-holding allocation plan (sized server-side) | `<portfolio_plan>` / `<portfolio_update>` |
 | **Scanner** | "Argus" | candidate list for one period × thesis | `<scan_list>` |
+| **Analyst** | "Prometheus" | a living per-name research thesis | `<coverage>` |
+| **Strategy** | "Pythia" | the house view — regime + sector active weights | `<tilt>` |
 
 > `api/chat/*` is **user-to-user social DM**, not an agent — don't confuse the two.
 
@@ -29,12 +33,17 @@ Once persisted and armed, the idea is handed off to the monitoring system
 
 ## 1. SSE chat routes
 
-All three agents stream over Server-Sent Events; every router applies `requireAuth` + `log`.
+Every desk streams over Server-Sent Events; every router applies `requireAuth` + `log`.
 
 | Agent | Route file | Endpoint | Controller |
 |---|---|---|---|
+| Axl | `api/axl/axl.routes.js` | `POST /api/axl/stream` | `streamAxl` |
+| Kairos | `api/kairos/kairos.routes.js` | `POST /api/kairos/stream` | `streamKairos` |
+| Mentor | `api/mentor/mentor.routes.js` | `POST /api/mentor/stream` | `streamMentor` |
 | Portfolio | `api/portfolio/portfolio.routes.js` | `POST /api/portfolio/stream` | `streamPortfolio` |
 | Scanner | `api/scanner/scanner.routes.js` | `POST /api/scanner/stream` | `streamScanner` |
+| Analyst | `api/analyst/analyst.routes.js` | `POST /api/analyst/stream` | `streamAnalyst` |
+| Strategy | `api/strategy/strategy.routes.js` | `POST /api/strategy/stream` | `streamStrategy` |
 
 **SSE mechanism** — `api/_shared/sse.util.js` `startSseStream(req, res)` sets
 `text/event-stream` headers + `X-Accel-Buffering: no`, sends a 30s `: ping` heartbeat, and
@@ -44,10 +53,15 @@ writes `event: <name>\ndata: <json>\n\n`.
 
 **Events streamed** (named SSE events, terminal event is `done`):
 
-- **Trade:** `token`, `asset`, `interval`, `chart`, `phase`, `status` (tool-status chip),
-  `reasoning`, then `done` → `{ reply, analysisState, phase, tradeIdea? }`
+- **Shared:** `token`, `chart` (open the workspace chart), `status` (tool-status chip),
+  `reasoning`, then a terminal `done`
+- **Axl:** `done` → `{ reply, route, opening, edit, suggestions }`
+- **Kairos:** `done` → `{ reply, call, phase }`
+- **Mentor:** `done` → `{ reply, setups, phase }`
 - **Portfolio:** `done` → `{ reply, plan, update, mandate, thesis, phase }`
 - **Scanner:** `done` → `{ reply, scan, phase }`
+- **Analyst:** `done` → `{ reply, coverage, phase }`
+- **Strategy:** `done` → `{ reply, tilt, phase }`
 
 Client SSE plumbing: `src/services/userPrompt/userPrompt.service.remote.js` posts JSON and
 consumes events via `postSSE` + `buildStreamHandlers`.
@@ -68,12 +82,6 @@ System prompts are hot-reloaded (mtime-gated) by `agentUtils.js` `makePromptLoad
 and sent as two cached content blocks — a stable base (`cache_control: ephemeral`) + a
 volatile context tail.
 
-### Trade agent — DELETED 2026-08-07
-Archived 2026-07-29 and unmounted throughout; the agent, `api/idea/`, `idea.stateParser.js` and
-`idea_system_prompt.md` were deleted on 2026-08-07. `git log` is the record. Superseded by Kairos
-(`call`) and Mentor (`setup`), both documented below. The `idea` KIND is untouched — it is still
-served by `/api/trade-ideas` and is what portfolio holdings ride.
-
 ### Portfolio agent — `services/agents/portfolio.agent.service.js`
 Prompt `portfolio_system_prompt.md`. Tools add `get_quotes` (batch),
 `get_risk_metrics` (annualized vol + ATR → sizing), `get_correlations` (pairwise matrix →
@@ -87,9 +95,9 @@ position + rel volume), `get_cycle_analysis` (price-cycle / seasonal modes), `ge
 `get_earnings_calendar` (plus shared sentiment tools).
 
 ### Kairos agent — `services/agents/kairos.agent.service.js` (tools in `services/tools/kairos.tools.js`)
-Prompt `kairos_system_prompt.md`. Discretionary day/swing **call** builder (single asset), a
-self-contained sibling of the Trade agent — it shares the **same 14-tool analysis kit** as Idea
-(reusing the pure providers + shared `marketData.tools.js` factories incl. `makeIndicatorsHandler`).
+Prompt `kairos_system_prompt.md`. Discretionary day/swing **call** builder (single asset),
+self-contained — it carries a **14-tool analysis kit** built from the pure providers + the shared
+`marketData.tools.js` factories (incl. `makeIndicatorsHandler`).
 Five phases: classify → **analyse & map entry zones** → frame risk → patterns → **validate, size &
 emit**. Emits a `<call>` (entry zones as bands + reference levels + patterns + sizing + `timeframe_ladder`
 + **`rr`/`conviction`**), parsed wholesale then persisted via `normalizeCall` to `kairos_calls`
@@ -106,14 +114,20 @@ buffers the streamed text, **swallows the tag blocks so they never reach the UI*
 forwards each block's inner text to an `onCapture` callback. (`keepText:true` lets a block
 still stream to the user, e.g. `<ticker>`.) Each agent registers its own captures:
 
-- **Trade:** `<state>`, `<trade_idea>`, `<asset>`, `<interval>`, `<phase>`
+- **Axl:** `<route>` → `onRoute`, `<edit>` → `onEdit`, `<open>` → `onOpen`,
+  `<suggest>` → the shared suggestion capture
+- **Kairos:** `<call>` → `onCall`, `<kairos_pick>` → `onPick`
+- **Mentor:** `<setup>` / `<setups>` → `onSetups`
 - **Portfolio:** `<portfolio_plan>` → `onPlan`, `<portfolio_update>` → `onUpdate`,
   `<portfolio_mandate>` → `onMandate`, `<portfolio_thesis>` (post-hoc from raw)
 - **Scanner:** `<scan_list>` → `onScan`
+- **Analyst:** `<coverage>` → `onCoverage`
+- **Strategy:** `<tilt>` → `onTilt`
 
-**Trade parse** — deleted 2026-08-07 with the Trade agent (`idea.stateParser.js`,
-`idea_system_prompt.md`). Kairos and Mentor emit typed blocks captured through
-`buildTagCaptures` instead of a regex over a rolling `<state>` block; see their sections above.
+**A typed block, never a rolling parse.** Each desk emits a complete block captured through
+`buildTagCaptures` and parsed wholesale — not a regex over an accumulating `<state>` buffer, which
+had to survive being read mid-write. `ALL_EMIT_TAGS` is the registry: a tag missing from it is
+**printed at the user** rather than captured, so a new tag goes there first.
 
 ---
 
@@ -177,9 +191,8 @@ leaf arrays) are accepted and migrated on read (`normalizeTreeNode`). Helpers:
 The **seven leaf types** (`touch` / `structured` / `indicator` / `chart` / `news` / `time`
 / `volume`) are evaluated in `monitoring/evaluators/` — see [monitoring.md](./monitoring.md)
 for the evaluation semantics of each. A leaf with no `type` defaults to `structured`.
-The prompt that used to declare them to an agent (`idea_system_prompt.md`) went with the Trade
-agent on 2026-08-07; the evaluators and `condition.parser.js` are now the only definition, which
-is the one that was ever authoritative.
+**The evaluators and `condition.parser.js` are the only definition** — the authoritative one. No
+prompt re-declares the leaf grammar to a model, so the two cannot drift.
 
 ---
 
@@ -189,9 +202,8 @@ Arming is a **status PATCH**, not a new document:
 `PATCH /api/trade-ideas/:id` → `updateTradeIdea` → `ideaService.updateIdea`.
 
 On `status: 'looking'` the service sets `monitorPhase='entry'`, clears `entryTriggeredAt`,
-**stamps `activatedAt = Date.now()`**, and calls `minosService.resetIdea(id)` (still wired, but a
-silent no-op while Minos is archived — it only clears that monitor's in-memory check timer).
-`activatedAt` gates the monitor's "triggered while waiting" logic.
+**stamps `activatedAt = Date.now()`**, and calls `minosService.resetIdea(id)`, which clears that
+module's in-memory check timer. `activatedAt` gates the "triggered while waiting" logic.
 
 **Pre-flight entry check** — after a successful arm, `minosService.preflightEntry(idea)`
 runs on structured-only trees. It evaluates the entry tree two ways — will the monitor's
@@ -227,10 +239,10 @@ ideas: `POST /api/trade-ideas/batch` → `saveBatchIdeas`, one `saveIdea` per id
 `{ period:{label,start,end}, thesis, direction, candidates:[{ ticker, name, direction,
 thesis, analysis, signals, conviction, sources }] }`. Edit mode can pass untouched
 candidates as bare `{ ticker, keep:true }` references, rehydrated from the prior list. Scans
-are saved via their own CRUD (`POST /api/scanner/scans`) and later **hand off** to the Trade
-flow when a user selects a candidate to build a full idea. Both Portfolio and Scanner are
-single-shot generators with server-side finalization, versus Trade's stateful single-idea
-`<state>` accumulation.
+are saved via their own CRUD (`POST /api/scanner/scans`) and later **hand off to Kairos** when a
+user selects a candidate — the same funnel converges to a single `<kairos_pick>` and becomes a
+monitored `call`. Both Portfolio and Scanner are single-shot generators with server-side
+finalization: the model proposes, the server computes the numbers that matter.
 
 ---
 
@@ -240,12 +252,13 @@ Orchestrated by `pages/MainPage.jsx`.
 
 | Agent | Panel | Generate handler |
 |---|---|---|
-| Trade | `cmps/ChatPanel/ChatPanel.jsx` (button gated by `generateReady`) | `MainPage.handleGenerate` → `createIdea` → `POST /api/trade-ideas` |
+| Kairos | `cmps/ChatPanel/ChatPanel.jsx` (button gated by `generateReady`) | `POST /api/kairos` → persists the drafted call |
 | Portfolio | `cmps/PortfolioPanel/PortfolioPanel.jsx` | `handleGeneratePlan` → `POST /api/trade-ideas/batch` |
 | Scanner | `cmps/ScannerPanel/ScannerPanel.jsx` → `cmps/Radar/*` | `handleGenerateList` → scan CRUD |
+| Analyst | `cmps/AnalystPanel/*` | coverage CRUD (`POST /api/analyst/coverage`) |
 
-The live Trade `<state>` block drives the Generate button and a `__building__` preview idea
-(`deriveBuildingIdea`). Emitted/saved ideas surface in `cmps/TradeIdeas/*`
+A desk's live emit block drives the Generate button and a `__building__` preview
+(`deriveBuildingIdea`). Emitted/saved items surface in `cmps/TradeIdeas/*`
 (`TradeIdeasList`, `TradeIdeaCard` status dropdown, `IdeaDetail`, `ConditionTree` renders the
 AND/OR tree). Dialogs: **OrderConfirmDialog** (idea hit → order plan), **PreEntryDialog**
 (arm-time already-satisfied), plus Delete/ClosePosition/EditOrders dialogs.
@@ -256,13 +269,13 @@ AND/OR tree). Dialogs: **OrderConfirmDialog** (idea hit → order plan), **PreEn
 
 ```
 SSE            api/_shared/sse.util.js
-routes         api/{kairos,mentor,portfolio,scanner}/*.routes.js + *.controller.js
-agents         services/{kairos,mentor,portfolio,scanner}.agent.service.js
-prompts        kairos_system_prompt.md / mentor_system_prompt.md / portfolio_system_prompt.md / scanner_system_prompt.md
-emit/parse     services/llmStream.util.js  +  services/agentIO.js
+routes         api/{axl,kairos,mentor,portfolio,scanner,analyst,strategy}/*.routes.js + *.controller.js
+agents         services/agents/*.agent.service.js       (tools in services/tools/*.tools.js)
+prompts        *_system_prompt.md, at the REPO ROOT (loaded via makePromptLoader)
+emit/parse     services/llmStream.util.js (ALL_EMIT_TAGS)  +  services/agentIO.js
 trees          services/conditionTree.service.js
 persistence    api/trade-ideas/tradeIdeas.{routes,controller,service}.js
-arming         tradeIdeas.service.updateIdea  +  monitoring/monitor.service.preflightEntry
+arming         tradeIdeas.service.updateIdea  +  minos.monitor.service.preflightEntry
 models         services/llmModels.js  +  services/modelRouter.service.js
-frontend       src/pages/MainPage.jsx  +  src/cmps/{ChatPanel,PortfolioPanel,ScannerPanel,TradeIdeas}/*
+frontend       src/pages/MainPage.jsx  +  src/cmps/{ChatPanel,PortfolioPanel,ScannerPanel,AnalystPanel,TradeIdeas}/*
 ```

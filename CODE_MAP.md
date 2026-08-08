@@ -126,8 +126,8 @@ services/
                           withBrokerAvailability). Unbound — hours belong to the instrument, not
                           the user, so the handler is static in every agent
   entryTimeGate.util.js  PURE entryTimeGate(entity) — is entry clock-gated, wholly or partly?
-                          Lifted out of the archived Minos when marketOpen.monitor needed the same
-                          read. Drives the market-closed exemption + the `off_hours` card note
+                          Lifted out of minos.monitor once marketOpen.monitor needed the same read.
+                          Drives the market-closed exemption + the `off_hours` card note
   llmStream.util.js       createTagSuppressor({ onToken, captures }) + ALL_EMIT_TAGS — the ONE list
                           of tags suppressed from every agent's token stream. A new emit tag goes
                           here first, or it leaks raw into the chat AND is never captured
@@ -258,10 +258,11 @@ providers/
   ibkr.provider.js (retired) / ibkr.gateway.provider.js
   mongodb.provider.js       getDb(), stripId/stripIds
 monitoring/
-  minos.monitor.service.js  ARCHIVED 2026-07-29 — NOT started (server.js). Minos — the idea monitor:
-                            60s poll loop; preflightEntry (arm-time already-satisfied check);
-                            _entryTimeGate (scheduled/time-only entry: exempt from market-closed skip;
-                            the deferred-order sweep now lives in marketOpen.monitor.js, above)
+  minos.monitor.service.js  the `idea` condition-tree loop. Its POLL is not started (see server.js)
+                            — but the module is NOT dead, and deleting it breaks the arm path:
+                            tradeIdeas.service calls resetIdea (6 sites — the arm/re-arm floor) and
+                            preflightEntry (the arm-time already-satisfied check behind the Buy now
+                            / Edit / Reset prompt). A helper with a dormant loop, not a tombstone
   monitor.orchestrator.js   evaluateTree / evaluateConditions → _evalOne (opts: stateLevel, requireHeld)
   evaluators/               touch · structured · indicator · time · volume · news · chart
   execution.reconciler.js   broker-authoritative fill/close → idea status
@@ -275,9 +276,10 @@ monitoring/
                             (pending_actions, transition from QUEUED — both guards are what make it
                             exactly-once). Then ONE `queue_ready` card per USER, from Axl, pointing
                             at the queued list — replacing the per-desk per-kind fan-out, which
-                            posted two cards in the same second for one open. Places nothing. It
-                            rode inside Minos until 2026-08-01 and was archived with it, stranding
-                            every deferred order in the app
+                            posted two cards in the same second for one open. Places nothing.
+                            It is its OWN loop for a reason: it used to ride inside minos.monitor,
+                            so switching that loop off stranded every deferred order in the app.
+                            A sweep tied to one desk's lifecycle dies with that desk
   hermes.monitor.service.js Hermes — the Kairos-call readiness loop (own tick, `kairos_calls`). THREE-TIER
                             out-of-zone cascade (all cheapest-first): (1) arithmetic zone gate; (1.5) proximity
                             polling (_proximityGapMin: poll faster the nearer price is to a zone) + a momentum-

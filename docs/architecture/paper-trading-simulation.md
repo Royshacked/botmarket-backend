@@ -63,9 +63,8 @@ results predictive of live: identical evaluation engine, identical reconciler, i
   (`currency/balance/equity/margin`). Paper `getAccount` returns a synthetic one.
 - **Price feed:** `services/ohlcv.service.js:26` `getCandles` (intraday forces live `refresh`).
   Reused by the paper fill engine.
-- **Monitor poll:** `monitoring/minos.monitor.service.js` — `_tick` every 60s over `looking/long/short`.
-  ARCHIVED 2026-07-29 (not started): paper fills for the LIVE kinds are driven by Hermes (`call`)
-  and Talos (`setup`); `paperFillService` / `paperMarkService` run on their own loops regardless.
+- **Monitor poll:** paper fills are driven by the per-kind monitors — Hermes (`call`) and Talos
+  (`setup`) — while `paperFillService` / `paperMarkService` run on their own loops regardless.
 - **Per-user broker keying:** connections in `brokerConnections` (`api/broker/brokerConnection.service.js`).
   Paper needs no external connection — presence of the paper account is enough.
 - **Portfolio state:** `services/portfolioState.service.js:54` matches live ideas to broker positions

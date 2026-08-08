@@ -16,9 +16,9 @@ unified adapter layer. Each desk owns a kind; each kind is watched by its own mo
 | **Prometheus** — buy-side research | `/api/analyst` | `coverage` | coverage monitor |
 | **Pythia** — top-down strategy | `/api/strategy` | `tilt` (the house view — a **broadcast**, not per-user) | tilt monitor |
 
-> The **Trade Agent** that authored the legacy `idea` kind was archived 2026-07-29 and **deleted**
-> 2026-08-07. The KIND is not gone — `/api/trade-ideas` still serves it and portfolio holdings ride
-> that plumbing — but nothing authors one conversationally, and its monitor (Minos) does not run.
+Their work lands on **one execution tier**: the `idea` kind served by `/api/trade-ideas`, which
+portfolio holdings ride, plus the per-desk kinds (`call`, `setup`) that their own monitors watch.
+One reconciler keeps every kind's state honest against the broker.
 
 Behavioral contracts live in [APP_SPEC.md](APP_SPEC.md); file-by-file layout in
 [CODE_MAP.md](CODE_MAP.md).
@@ -73,8 +73,7 @@ npm test             # node --test tests/unit/*.test.js
 
 On boot `server.js` ensures the Mongo indexes and starts **eleven background loops**: the
 market-open sweep, four assessment monitors (Hermes / Talos / coverage / tilt), Themis, the execution
-reconciler, the three paper engines (fill / mark / equity) and the market-brief notifier. Minos (the
-archived idea monitor) is deliberately not started.
+reconciler, the three paper engines (fill / mark / equity) and the market-brief notifier.
 
 ### Deployment shape — ONE process
 
@@ -109,8 +108,8 @@ api/                   HTTP surface — one folder per feature (routes + control
                        is a broadcast, so /tilt/current answers the same document to everyone, and
                        there is deliberately no delete (a desk that can erase its own calls has no
                        track record; retire archives instead)
-  trade-ideas/         entity CRUD + order placement — serves `portfolio_item` (holdings) and the
-                       legacy `idea` kind; the name is historical, the route is live
+  trade-ideas/         the EXECUTION tier — entity CRUD + order placement over the `idea` kind,
+                       which is what `portfolio_item` holdings ride
   portfolio/           Atlas chat + portfolio review/rebalance lifecycle
   scanner/             Argus chat + saved scans
   pendingAction/       the QUEUED list (/api/pending-actions) — everything waiting on the user, from
@@ -138,7 +137,7 @@ providers/             external clients (LLMs, market data, brokers, Mongo) — 
                        talks to the outside world
 monitoring/            one monitor per kind + the shared execution layer
                        hermes (call) · talos (setup) · themis (portfolio) · coverage (analyst) ·
-                       tilt (strategy). minos (idea) is ARCHIVED and not started
+                       tilt (strategy)
                        marketOpen — kind-blind: the ONE drain for everything parked while shut
                        execution.reconciler — broker-authoritative fill/close → entity status
                        invalidation — advisory entry-range watcher, never executes
@@ -190,10 +189,9 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 │    AUTHORING  —  Kairos (call) · Mentor (setup) · Atlas (book)   │
 │  POST /api/kairos/stream · /api/mentor/stream · /api/portfolio/  │
 │                                                                  │
-│  The Trade Agent that used to author the `idea` kind here was    │
-│  archived 2026-07-29 and DELETED 2026-08-07 (see git log).       │
-│  The KIND lives on: /api/trade-ideas still serves it, and it is  │
-│  what portfolio holdings ride — so everything below is current.  │
+│  The kinds differ; everything downstream of the save is shared,  │
+│  which is why adding one needs a payload, an evaluator, a prompt │
+│  and a card — but no new plumbing.                               │
 │                                                                  │
 │             └──► streams tokens + the desk's typed emit block    │
 └──────────────────────────────┬───────────────────────────────────┘

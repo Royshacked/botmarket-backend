@@ -11,15 +11,13 @@ against the broker. Nothing reaches a broker while its venue is shut (§5).
 
 ---
 
-## 1. Trade Idea lifecycle
+## 1. The `idea` kind — lifecycle
 
-> **The AGENT was deleted 2026-08-07** (archived 2026-07-29, unmounted throughout). Nothing
-> authors an `idea` conversationally any more, and its monitor (Minos) does not run. Superseded
-> by Kairos's `call` (monitored by Hermes) and Mentor's `setup` (monitored by Talos).
->
-> **The KIND is NOT gone.** `/api/trade-ideas` still serves it and portfolio holdings ride that
-> plumbing, so everything below — statuses, the condition tree, the execution path — is LIVE and
-> is the contract those callers hold. Only the authoring agent and `/api/idea/stream` are gone.
+`idea` is the execution-tier kind served by `/api/trade-ideas`. **Portfolio holdings ride it**, so
+everything below — the statuses, the condition tree, the execution path — is live, and is the
+contract those callers hold. Nothing authors an `idea` conversationally: the authoring kinds are
+Kairos's `call` (watched by Hermes) and Mentor's `setup` (watched by Talos), and Atlas writes
+holdings straight to this kind through `POST /api/trade-ideas/batch`.
 
 ### Statuses
 
@@ -75,9 +73,10 @@ waiting ──► looking ──► hit ──► long / short ──► closed
 
 ## 2. Condition trees & evaluators
 
-Entry / stop / TP are **condition trees**: AND/OR group nodes over typed leaves. The monitor
-(`minos.monitor.service.js`, ~60s) evaluates them via `monitor.orchestrator.evaluateTree`
-(ARCHIVED — Minos is no longer started; `evaluateTree` itself stays in use elsewhere).
+Entry / stop / TP are **condition trees**: AND/OR group nodes over typed leaves, evaluated by the
+one shared `monitor.orchestrator.evaluateTree` — called by `positionMonitor` (stop/TP on an open
+position) and by `invalidation.monitor` (which synthesizes its own leaves and runs them through the
+same evaluator rather than growing a second one).
 
 **7 leaf types** (`monitoring/evaluators/*`):
 
@@ -124,7 +123,7 @@ content, type, payload, botId)` (`api/chat/chat.service.js`) → `chat_messages`
 `SocialChat/ChatWindow.jsx` dispatches by `type` to a card component. Each `botId` is the authoring
 agent (`BOT_IDS = axl · portfolio · scanner · kairos · mentor · analyst · strategy`; only Axl is
 conversational, the rest are notify-only feeds), so a card reads "from Atlas / Kairos / Mentor". A
-kind picks its sender through the one `botForKind` map, and a kind whose desk is retired (`idea` —
+kind picks its sender through the one `botForKind` map, and a kind with no desk of its own (`idea` —
 see `RETIRED_BOT_IDS`) falls back to Axl rather than posting into a feed nobody reads. The card is the alert + a
 clickable preview; the **existing action UI stays the destination** (deep-link, not embedded action).
 Dismiss/handled state persists per-message.
@@ -265,8 +264,8 @@ Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/b
 The **Scanner Agent** ("Argus", `POST /api/scanner/stream`) emits a `<scan_list>` (normalized:
 uppercased tickers, guaranteed period/thesis/direction/signals). A scan is a watchlist of
 candidates (`{ ticker, direction, thesis, analysis, signals, conviction, sources }`), not ideas.
-CRUD at `/api/scanner/scans` (`PUT` to update). A user promotes a candidate into the Trade Agent
-to become a real idea.
+CRUD at `/api/scanner/scans` (`PUT` to update). A user promotes a candidate into **Kairos**, where
+the same funnel converges to a single `<kairos_pick>` and becomes a monitored `call`.
 
 Argus runs a **systematic-discovery funnel** — candidates come from grounded sources, never
 model memory. Phase 2 casts a wide net (`screen_candidates`, `get_market_movers`,
@@ -341,8 +340,8 @@ moment they act, and they execute it from a list at the open. Full design:
 
 - **Account binding is per-idea and explicit** (paper account picked in the selector, exactly one per
   idea). There is **no silent default** — the global toggle (`/api/paper/mode`) is a workspace VIEW
-  switch only, never a router. An idea with no account bound resolves to no venue; the idea agent
-  prompts the user to pick an account before the setup is finalized.
+  switch only, never a router. An item with no account bound resolves to no venue; the authoring
+  desk prompts the user to pick an account before the setup is finalized.
 - Paper is a real broker adapter, so the same monitor + reconciler drive it unchanged. Fills come
   from the app's OHLCV feed (NOT cTrader); cost model = spread (bps) + commission per trade.
 - Decided at **save time**: changing the view does not convert or freeze existing ideas.
@@ -409,7 +408,7 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   the Street — the edge), monitorable `kill_criteria`, `status` (active│thesis_broken│target_hit│retired│
   watchlist), and an append-only `revisions[]` history. `compute_valuation` (deterministic, `services/
   valuation.engine.js`) fills the PT/gap; the Analyst agent + coverage-monitor are in progress. Buy-side
-  research — NOT an execution-tier entity, watched by its own monitor, not Hermes/Minos/Themis.
+  research — NOT an execution-tier entity, watched by its own monitor, not Hermes/Talos/Themis.
 - `pending_actions` — the OFF-HOURS QUEUE (§5): one row per decision confirmed while the venue was
   shut. An intent, not an entity — `{ userId, origin{kind,id,label}, action{verb,…}, queuedBy,
   cancellable, state }`, idempotent per `(user, entity, verb)`. Lifecycle `QUEUED → RELEASED

@@ -7,9 +7,9 @@ work, which each kind's own background monitor evaluates against condition trees
 routing to a broker (cTrader live, a paper/simulation venue, manual, or IBKR in progress)
 through one unified capability-flag adapter layer. Nothing reaches a broker while its
 venue is shut — a confirmed decision is queued, never fired and never lost. Real-time via
-SSE (agent streams) and WebSocket (social chat). The Trade agent that authored the legacy
-`idea` kind was deleted 2026-08-07; the KIND is live and portfolio holdings ride it.
-See README.md for the full architecture and app-flow diagrams.
+SSE (agent streams) and WebSocket (social chat). Their work lands on one execution tier: the
+`idea` kind (`/api/trade-ideas`, which portfolio holdings ride) plus the per-desk kinds
+`call` and `setup`. See README.md for the full architecture and app-flow diagrams.
 
 # Rules
 - Always write tests after implementing a feature

@@ -6,7 +6,7 @@ OHLCV (candle) data flows through two stacked layers:
 
 ```
 Consumers
-  ├── Trade agent tools (price.sync_candles, price.get_candles)
+  ├── Agent tools (services/tools/marketData.tools.js → get_candles / get_indicators)
   ├── Monitoring system (ohlcv.service → priceService)
   └── Future: IBKR broker adapter (getCandles → ibkr.provider)
 
@@ -193,17 +193,13 @@ ohlcv.service
 
 ---
 
-## Trade agent tool registration
+## Agent-facing candle tools
 
-`priceService` is also registered as trade agent tools so the AI can call them:
-
-| Tool ID | Function | Description |
-|---|---|---|
-| `price.sync_candles` | `syncCandles` | Fetch incremental bars, merge into cache |
-| `price.query_candles` | `queryCandles` | Read from cache, no network call |
-| `price.get_candles` | `getCandles` | Cache-first: sync if needed, then query |
-
-These are used by the trade agent when analysing a chart for trade idea construction.
+The desks reach candles through `services/tools/marketData.tools.js` — `get_candles` and
+`get_indicators`, built by shared factories (incl. `makeIndicatorsHandler`) and wired into every
+desk that does chart work. The `price.*` tool IDs this section used to list were retired with the
+agent that registered them; `priceService` is now reached through the service layer, not by a tool
+of its own.
 
 ---
 

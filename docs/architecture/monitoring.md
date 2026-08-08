@@ -5,21 +5,19 @@
 The monitoring system watches active trade ideas and automatically evaluates their conditions
 against live market data. It runs as a background service inside the Express process.
 
-> **⚠ ARCHIVED 2026-07-29 — Minos is NOT started.** Everything below describes the monitor for
-> the legacy `idea` kind (condition trees), which nothing authors any more. The live monitors are
-> **Hermes** (Kairos `call`) and **Talos** (Mentor `setup`), plus Themis (portfolio) and the
-> coverage monitor. Both lines in `server.js` are commented out; uncomment them to revive.
+> **Scope.** Everything below describes the `idea` kind's condition-tree loop
+> (`minos.monitor.service.js`). **That poll is not started** — its two lines in `server.js` are
+> commented out — but the module is not dead: `resetIdea` and `preflightEntry` are called from the
+> arm path in `tradeIdeas.service.js`, and the condition-tree semantics documented here are the
+> live ones, evaluated by `positionMonitor` and `invalidation.monitor` through the same
+> `monitor.orchestrator.evaluateTree`.
 >
-> It was switched off because its tick selected work by STATUS alone (`looking`/`long`/`short`),
-> which is shared vocabulary across every kind — so it was waking on `setup` entities that belong
-> to Talos. It now filters `kind: 'idea'` as well, so a revival can't reintroduce that.
-
-**Reversibility:** The entire system lives in `monitoring/`. Only two lines in `server.js` reference it:
-```js
-import { minosService } from './monitoring/minos.monitor.service.js'
-minosService.start()
-```
-Delete those two lines + the `monitoring/` folder = complete removal.
+> The running per-kind monitors are **Hermes** (`call`), **Talos** (`setup`), **Themis**
+> (portfolio), the **coverage** monitor and the **tilt** monitor.
+>
+> The poll was switched off because its tick selected work by STATUS alone
+> (`looking`/`long`/`short`) — shared vocabulary across every kind — so it woke on `setup` entities
+> that belong to Talos. It now filters `kind: 'idea'` as well, so a revival can't reintroduce that.
 
 ---
 
@@ -484,15 +482,15 @@ armed to `looking` like any idea, and fires when the clock passes `after`. Key r
 - **Never immediate.** `saveIdea` treats `immediate:true` as real only when there is *no*
   gating entry condition (`resolveImmediate` / `hasEntryConditions`). A `time` (or any) entry
   leaf makes the idea conditional, so it can't be turned into a save-time market order.
-- **Timezone.** The idea agent receives the browser's `clientNow` / `clientTz`
+- **Timezone.** The authoring desk receives the browser's `clientNow` / `clientTz`
   (`_formatClientTime`) and converts a user's local clock time to an absolute-UTC
   `after` / `before`. Without a timezone it asks rather than guessing.
 - **Off-hours determinism.** `_entryTimeGate(idea).allTime` marks a *pure* time entry;
   such an entry is **exempt from the market-closed skip**, so it fires on schedule even
   overnight, flips to `hit`, and the order defers as `awaiting_market`. When the market
   re-opens, the market-open sweep (`monitoring/marketOpen.monitor.js`) surfaces it and posts
-  the entry-confirm card (note `off_hours`). That sweep used to live inside Minos and was
-  archived with it, which stranded every deferred order in the app; it is its own loop now.
+  the entry-confirm card (note `off_hours`). The sweep is its OWN loop for a reason: it used to
+  ride inside this one, so switching this one off stranded every deferred order in the app.
 - **Notification note.** The entry-confirm card carries a `note`: `passed_earlier` when the
   scheduled time was already past at arm-time (`after <= activatedAt`), `off_hours` when it
   surfaced at market open, else `null`. See the paper/live entry-confirm flow.
@@ -592,7 +590,8 @@ Same condition string is only parsed once regardless of how many ideas use it.
 
 ```
 monitoring/
-  minos.monitor.service.js    ARCHIVED — Minos, the idea monitor: start() / stop(), poll loop, per-idea dispatch
+  minos.monitor.service.js    the `idea` condition-tree loop (poll not started) + resetIdea /
+                              preflightEntry, both called from the arm path
   hermes.monitor.service.js   Hermes — Kairos-call readiness monitor (own tick, kairos_calls)
   monitor.orchestrator.js     AND/OR logic, condition routing, context injection, legacy normalisation
   monitor.claude.js           Claude Haiku client (claudeJSON, claudeText, claudeVision)
