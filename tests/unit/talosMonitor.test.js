@@ -13,7 +13,7 @@ import { statusesFor, AWAITING_CONFIRM } from '../../services/entity/vocabulary.
 // Talos's gates. Everything here runs on EVERY wake for free — the expensive assessment only fires
 // when these say so — so a wrong gate is either a missed entry or a wasted LLM call on every poll.
 
-// The PLAN, stated flat. A price zone is a scenario now (docs/mentor-talos-refactor.md §10), so
+// The PLAN, stated flat. A price zone is a scenario now (docs/desks/mentor-talos.md), so
 // fixtures are built through normalizeSetup rather than hand-written: that gives every one of them
 // the same `scenarios` + execution projection a persisted document has, and a fixture can never
 // drift from what the service would actually store.
@@ -158,7 +158,7 @@ test('the read is scoped to the setup\'s own asset plus what it declared it lean
 
 // ─── Per-wake cost ────────────────────────────────────────────────────────────
 // Free-text conditions can't be priced before they run, so the build-time estimate is replaced by
-// a measurement (docs/mentor-talos-refactor.md §5).
+// a measurement (docs/desks/mentor-talos.md).
 
 test('tool calls accumulate across wakes, counting only the wakes that paid', () => {
     const first = costPatch(SETUP, ['get_chart', 'get_indicators'])
@@ -621,7 +621,7 @@ test('an enter verdict carries no warning', async () => {
     assert.equal(card.warning, null)
 })
 
-// ── The execution projection (docs/mentor-talos-refactor.md §10.3) ──
+// ── The execution projection (docs/desks/mentor-talos.md) ──
 // The winning premise is stamped onto the flat fields every kind-blind consumer reads, so execution
 // never learns that scenarios exist — and the rivals are simply no longer projected.
 

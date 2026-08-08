@@ -146,7 +146,7 @@ The idea document is constructed in `api/trade-ideas/tradeIdeas.service.js` `sav
   `*_logic` (`topOperator`) kept in sync for legacy consumers.
 - **Extras:** `additional_entries` (each with its own `condition_tree` + `quantity` +
   `triggeredAt`/`filledAt`), `notes`, `conviction`, `invalidation` (the actionable entry
-  price range — see [invalidation-design.md](../invalidation-design.md)), broker
+  price range — advisory only, see APP_SPEC §2), broker
   `accounts` / `mainAccountId`, `chat_state`.
 - **Entry-order routing:** `entryOrderType` (`'stop'` for a resting broker stop-market on a
   pure touch entry) + `entryTriggerPrice`, set by `detectNativeEntryLevel`
@@ -233,7 +233,7 @@ ratios are normalized to sum to 1.0, and with a `positionSize` each
 portfolio vol √(wᵀΣw) from vols + correlations. On Generate the plan becomes a **batch** of
 ideas: `POST /api/trade-ideas/batch` → `saveBatchIdeas`, one `saveIdea` per idea sharing a
 `portfolioId`. Review mode adds a live `portfolioState` snapshot + a rebalance-apply path.
-(See [portfolio-managing-design.md](../portfolio-managing-design.md).)
+(The review lifecycle — two modes, the fingerprint, the non-LLM pre-check — is APP_SPEC §3.)
 
 **Scanner** emits `<scan_list>` — **candidates for one period × thesis**, not a trade:
 `{ period:{label,start,end}, thesis, direction, candidates:[{ ticker, name, direction,

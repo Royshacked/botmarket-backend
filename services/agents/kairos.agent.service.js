@@ -10,7 +10,7 @@ import { kairosService } from '../../api/kairos/kairos.service.js'
 import { resolveVenue as _resolveVenue } from '../venue.resolve.service.js'
 import { logger } from '../logger.service.js'
 
-// Kairos build agent: a conversation → a DRAFT trading "call" (see KAIROS_PLAN.md, Phase 1).
+// Kairos build agent: a conversation → a DRAFT trading "call" (see docs/desks/kairos-hermes.md, Phase 1).
 // Forked from the Idea agent's streaming scaffold but self-contained. The agent emits a single
 // <call> JSON block; the stream returns it as an UNSAVED draft. Nothing persists until the user
 // clicks Generate → the save endpoint calls _finalizeCall (venue-resolve → validate → save),
@@ -24,7 +24,7 @@ const MAX_RECENT_MESSAGES = 8
 const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 
 // Per-mode lens module (phases 2–4). The base is the shared SPINE; the mode module is injected as its
-// own cached block — one agent, three profiles (KAIROS_MODES.md). Loaders are keyed by mode name.
+// own cached block — one agent, three profiles (docs/desks/kairos-hermes.md). Loaders are keyed by mode name.
 const _modePrompt = {
     discretionary: makePromptLoader(join(__dirname, '../../prompts/kairos_mode_discretionary.md'), LOG),
     smc:           makePromptLoader(join(__dirname, '../../prompts/kairos_mode_smc.md'), LOG),
@@ -46,7 +46,7 @@ async function chatStream({
     onToken, onChart, onToolStart, onReasoning, onPhase, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
-    const mode         = normalizeMode(chatState?.mode)   // build-time lens (KAIROS_MODES.md)
+    const mode         = normalizeMode(chatState?.mode)   // build-time lens (docs/desks/kairos-hermes.md)
     const tools        = KAIROS_TOOLS_FOR_MODE(mode)
     const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
@@ -142,7 +142,7 @@ export function _parseScanRequest(raw) {
 
 // ─── Venue resolution (cTrader symbol gate) ───────────────────────────────────
 // Moved to services/venue.resolve.service.js so the `setup` kind binds through the SAME symbol
-// gate instead of forking the cTrader basis logic (docs/setup-entity.md §8). Re-exported under
+// gate instead of forking the cTrader basis logic (docs/desks/mentor-talos.md). Re-exported under
 // its historical name so existing importers and tests resolve unchanged. Imported (not just
 // re-exported) because _finalizeCall calls it in-file — a bare `export … from` creates no local
 // binding.
@@ -206,7 +206,7 @@ function _buildSystemPrompt(chatState, accounts, mode = normalizeMode(), seed = 
     const today = new Date().toISOString().slice(0, 10)
     // The MODE section (the per-mode lens profile) is injected here — the shared spine is the cached
     // base prompt; the mode module lives in the volatile block. K1 declares the mode; K1-step2 fills
-    // the full per-mode profile (analysis lens + phase weighting + fit signal). See KAIROS_MODES.md.
+    // the full per-mode profile (analysis lens + phase weighting + fit signal). See docs/desks/kairos-hermes.md.
     const audienceBlock = buildAudienceSection(audience)
     const dynamicContext = `---
 CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar or setting valid_until.

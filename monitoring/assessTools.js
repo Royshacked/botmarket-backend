@@ -16,7 +16,7 @@
 // WHAT IS THIS MODULE'S OWN: the SYMBOL SCOPE. An agent may look at anything the user asks about;
 // a monitor may look only at the instruments its plan actually named. Free-text conditions can
 // mention any ticker, so the fetch budget is bounded by what was authored at build rather than by
-// whatever the model decides to type — see docs/mentor-talos-refactor.md §4.2.
+// whatever the model decides to type — see docs/desks/mentor-talos.md
 //
 // Shared deliberately: Talos uses it now, Hermes at the merge (Phase 5). Adding a second copy here
 // is what created the problem this module fixes.

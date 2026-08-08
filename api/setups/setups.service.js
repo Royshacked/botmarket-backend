@@ -7,7 +7,7 @@ import { resolveVenue, resolveMode } from '../../services/venue.resolve.service.
 import { normalizeSetup, setupReadiness, projectScenario } from '../../services/setup.schema.js'
 import { resolveMainAccountId } from '../../services/agentUtils.js'
 
-// Persistence for the `setup` kind — Mentor's artifact (docs/setup-entity.md).
+// Persistence for the `setup` kind — Mentor's artifact (docs/desks/mentor-talos.md).
 //
 // Every function here answers in the shared crud's shape — `{ ok:true, doc }` / `{ ok:false,
 // reason }` — including Generate. One shape per service, so a caller never has to remember which

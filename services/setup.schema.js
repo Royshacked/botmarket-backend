@@ -1,7 +1,7 @@
 // The `setup` entity contract — normalisation + readiness, in ONE place.
 //
 // Mentor authors a setup as free-ish JSON; Talos monitors it as a strict shape. This module is
-// the seam: it coerces whatever the model emitted into the documented payload (docs/setup-entity.md
+// the seam: it coerces whatever the model emitted into the documented payload (docs/desks/mentor-talos.md
 // §3) and derives every server-owned field. Pure — no IO, no DB, no model calls — so both the
 // agent (draft preview) and the save path (persist) run the SAME normalisation and can't drift.
 //
@@ -21,7 +21,7 @@ export const TRADE_MODES  = ['classical', 'smc']
 // ─── Conditions ───────────────────────────────────────────────────────────────
 //
 // A condition is TEXT. There is no taxonomy: the monitor reads the sentence and picks its own
-// tools, so an enum here would only ever narrow what can be checked (docs/mentor-talos-refactor.md
+// tools, so an enum here would only ever narrow what can be checked (docs/desks/mentor-talos.md
 // §2). What stays structured is the little that CODE needs:
 //
 //   id           the per-condition ledger key — the monitor answers {id, met, note}, so a verdict
@@ -243,7 +243,7 @@ export function normalizeValidity(raw) {
 
 // ─── scenarios[] ──────────────────────────────────────────────────────────────
 //
-// A PRICE ZONE IS A SCENARIO (docs/mentor-talos-refactor.md §10). A long at 100 on a false break and
+// A PRICE ZONE IS A SCENARIO (docs/desks/mentor-talos.md). A long at 100 on a false break and
 // a long at 104 on a break-and-go are not two legs of one entry — they are two premises that happen
 // to share a ticker and a direction, and they disagree about everything else: what confirms them,
 // where the stop belongs, and what price would prove them dead. So each scenario owns its own
@@ -344,7 +344,7 @@ export function pickScenario(setup, id = null) {
 
 /**
  * THE EXECUTION PROJECTION — a scenario's legs, flattened onto the fields the rest of the app has
- * always read (docs/mentor-talos-refactor.md §10.3).
+ * always read (docs/desks/mentor-talos.md).
  *
  * `entry_zones` / `stop_zones` / `tp_zones` / `quantity` are NOT setup-private: they are the shape
  * the `call` kind uses too, and every kind-blind consumer reads them flat — protectionPlan's
@@ -556,7 +556,7 @@ export function rangeProblems(setup) {
 // ─── Reward-to-risk ───────────────────────────────────────────────────────────
 
 /**
- * Reward-to-risk from the PESSIMISTIC fill, per docs/setup-entity.md §6.
+ * Reward-to-risk from the PESSIMISTIC fill, per docs/desks/mentor-talos.md
  *
  * SCOPED TO ONE PLAN — a scenario (via scenarioView), or the projected document, both of which carry
  * `direction` + the three zone arrays. Pricing a setup's r:r across scenarios would run one

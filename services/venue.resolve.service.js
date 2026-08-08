@@ -8,7 +8,7 @@ import { logger } from './logger.service.js'
 //
 // Extracted from kairos.agent.service.js (which still re-exports it as `_resolveVenue` for its
 // existing importers) so the `setup` kind resolves symbols through the SAME path as calls rather
-// than growing a second copy of the cTrader basis logic. See docs/setup-entity.md §8.
+// than growing a second copy of the cTrader basis logic. See docs/desks/mentor-talos.md
 
 const LOG = '[venue]'
 

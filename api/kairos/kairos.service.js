@@ -13,7 +13,7 @@ import { normalizeMode, isMode }    from '../../services/kairos.modes.js'
 // Kairos produces calls): one document in `kairos_calls` = identity + plan (authored at build,
 // ~immutable) + monitor_state (written each wake). This module owns persistence and the
 // construction-gate validator. It touches NOTHING in `ideas` / the live monitor — Kairos is a
-// self-contained trial (see KAIROS_PLAN.md).
+// self-contained trial (see docs/desks/kairos-hermes.md).
 
 const LOG        = '[kairos]'
 const COLLECTION = ENTITIES   // calls live in the shared entities collection as kind:'call'
@@ -259,7 +259,7 @@ export function normalizeCall(raw, userId = null) {
         kind:        'call',   // entity discriminator (P3) — a call is its own kind in `entities`
         parentId:    null,
         strategy:    'kairos',
-        mode:        normalizeMode(raw.mode),   // build lens (KAIROS_MODES.md) — persisted so edit reopens in-mode
+        mode:        normalizeMode(raw.mode),   // build lens (docs/desks/kairos-hermes.md) — persisted so edit reopens in-mode
         // Envelope field — camelCase like every other kind in `entities`, so the kind-blind
         // readers (getCallPositionMap, getAssetClassMap, toEnvelope) can filter on one name.
         userId,

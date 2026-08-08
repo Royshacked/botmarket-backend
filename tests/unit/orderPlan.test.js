@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { buildOrderPlan } from '../../services/orderPlan.service.js'
 import { ideaToEnvelope } from '../../services/entity/toEnvelope.js'
 
-// P1a of the entity split (ENTITY_MODEL.md): the order-plan builder now reads the shared
+// P1a of the entity split (docs/architecture/entity-model.md): the order-plan builder now reads the shared
 // Envelope's execution binding + sizing, so an idea/call/portfolio_item plan identically.
 // The account-resolver is injected so the scaling math is testable without live brokers.
 

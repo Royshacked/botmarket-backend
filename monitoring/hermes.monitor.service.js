@@ -20,7 +20,7 @@ import { _defaultAssess, _defaultAssessPosition, _defaultAssessReentry, _thinkin
 // under their historical names so the existing unit tests import path is unchanged.
 export { _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses }
 
-// Hermes — the Kairos-call readiness monitor: a self-scheduling readiness loop (KAIROS_PLAN.md,
+// Hermes — the Kairos-call readiness monitor: a self-scheduling readiness loop (docs/desks/kairos-hermes.md,
 // Phase 2). Its own tick, its own collection (`kairos_calls`), sharing NO mutable state with Minos
 // (the live idea monitor).
 // Design: a CHEAP arithmetic gate (is price inside a mapped zone?) runs every wake; the EXPENSIVE

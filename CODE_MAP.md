@@ -318,7 +318,14 @@ tests/
   unit/                     node:test unit tests — run by `npm test`
   test.*.js                 MANUAL harnesses (hit live broker/DB) — NOT run by npm test
 scripts/                    free-port, migrations, seeds
-docs/                       architecture design docs
+prompts/                    every prompt loaded at RUNTIME (7 desks + Kairos's 3 modes + Argus's
+                            profile/handoff + market brief + concepts). Hot-reloaded, lazily —
+                            so a bad path is an ENOENT on a live turn, not an import error.
+                            tests/unit/promptPaths.test.js guards both directions (a path that
+                            resolves to nothing, AND a prompt nothing loads)
+docs/                       docs/README.md is THE index. architecture/ (how it is built) ·
+                            desks/ (each agent + its monitor) · design/ (proposed, not built) ·
+                            trust-gaps-todo + live-verify-checklist (open work)
 ```
 
 ## Naming conventions

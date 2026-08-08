@@ -16,7 +16,7 @@ import { DEFAULT_MODE } from '../kairos.modes.js'
 // Idea agent) so Kairos is a self-contained trial — but the heavy lifting reuses the
 // same PURE providers and shared handler factories (Yahoo candles/quote/price-action,
 // chart-img render, the shared indicator math, the sentiment handlers). See
-// KAIROS_PLAN.md "reuse mechanisms, not schemas".
+// docs/desks/kairos-hermes.md "reuse mechanisms, not schemas".
 
 const LOG = '[kairosTools]'
 
@@ -109,7 +109,7 @@ const _STATIC_HANDLERS = {
     ...makeMarketHoursHandlers(),
 }
 
-// ── Per-mode tool subsets (KAIROS_MODES.md tool allocation) ────────────────────
+// ── Per-mode tool subsets (docs/desks/kairos-hermes.md tool allocation) ────────────────────
 // The model only sees the tool LIST, so subsetting the list is what gates a mode's toolset;
 // the handler map can stay full (extra handlers are never reached). UNIVERSAL tools are shared
 // by all modes (DRY). NEW numeric SMC tools (K2) + get_sector_snapshot/get_rs_chart join later.

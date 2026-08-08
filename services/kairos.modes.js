@@ -1,4 +1,4 @@
-// The single source of truth for Kairos's analytical MODES (KAIROS_MODES.md). ONE agent, three
+// The single source of truth for Kairos's analytical MODES (docs/desks/kairos-hermes.md). ONE agent, three
 // profiles — the mode is a build-time lens (selects prompt profile + tool subset + pattern vocab);
 // it is lens-agnostic to the output schema and never touches the gate or Hermes.
 //

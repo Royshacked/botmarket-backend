@@ -1,7 +1,7 @@
 // ONE home for the vocabulary every entity and every agent speaks: lifecycle statuses, trade
 // horizons, and asset classes.
 //
-// ENTITY_MODEL.md §7.3 called for "a common lifecycle enum + per-kind extension set" and it was
+// docs/architecture/entity-model.md §7.3 called for "a common lifecycle enum + per-kind extension set" and it was
 // never built, so the words scattered instead: 13 status declarations across 8 files, the SAME
 // list `['long','short']` written three times under three different names (ACTIVE_STATUSES,
 // LIVE_STATUSES, LOCKED_DELETE_STATUSES), and no canonical asset-class list at all.

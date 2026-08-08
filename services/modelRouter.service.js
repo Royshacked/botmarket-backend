@@ -53,7 +53,7 @@ const PHASE_TABLES = {
     // Axl is a single-mode agent (no phases) — intentionally empty so it resolves to
     // DEFAULT_ROUTE. Present here so the omission reads as deliberate, not a missing table.
     axl: {},
-    // Mentor has NO phases by design (invariants, not steps — docs/setup-entity.md), so there is
+    // Mentor has NO phases by design (invariants, not steps — docs/desks/mentor-talos.md), so there is
     // no step number to key a table off. Its intended mode is CLASSIFIER, which routes from the
     // last user message; AUTO falls through to DEFAULT_ROUTE. Empty on purpose, like axl.
     mentor: {},

@@ -50,7 +50,7 @@ const EPS        = 1e-6   // quantity comparison slack
 // Injection seam (matches the Hermes monitor's `_deps` pattern). Defaults ARE the real
 // singletons, so production behavior is byte-identical — the seam is inert unless a test
 // overrides it. Enables the regression harness to drive the reconciler against fakes without
-// real IO. See ENTITY_MODEL.md P1b.
+// real IO. See docs/architecture/entity-model.md P1b.
 const _deps = { getDb, brokerService, tradeCaptureService, entityRepo }
 /** Test-only: override IO deps. Returns a restore fn. */
 export function _setDeps(overrides) {

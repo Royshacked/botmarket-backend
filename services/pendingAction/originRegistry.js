@@ -7,7 +7,7 @@
 // that will never be confirmed.
 //
 // REGISTRY, not a switch. The queue itself stays blind to origin kind — same invariant the entity
-// envelope holds (ENTITY_MODEL.md): adding a sixth origin is one entry here, with no change to the
+// envelope holds (docs/architecture/entity-model.md): adding a sixth origin is one entry here, with no change to the
 // queue, the sweep, or the list. `originRegistry.test.js` asserts every kind that can be ENQUEUED
 // has a handler, so a new producer cannot ship with a cancel that silently does nothing.
 

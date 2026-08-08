@@ -4,7 +4,7 @@ import { userService } from '../api/user/user.service.js'
 
 // The mechanical parts every monitor assessment shares — model routing, token budgets, and the
 // numeric candle block. Extracted because Hermes and Talos had byte-identical copies of both the
-// routing helper and the candles formatter (docs/setup-entity.md §8: share the pipe).
+// routing helper and the candles formatter (docs/desks/mentor-talos.md: share the pipe).
 //
 // What is deliberately NOT here: the system prompts, the gather strategy, and the verdict menus.
 // Those ARE the judgment, and they differ by design — Hermes always scores four fixed axes, while

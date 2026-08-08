@@ -16,7 +16,7 @@ import { assessSetup, READINESS_VERDICTS } from './talos.assess.js'
 import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario } from '../services/setup.schema.js'
 import { notifySetupEntryConfirm, notifySetupInvalidation } from '../services/tradeNotify.service.js'
 
-// Talos — the guardian of the `setup` kind (docs/setup-entity.md §5).
+// Talos — the guardian of the `setup` kind (docs/desks/mentor-talos.md).
 //
 // The bronze automaton circled Crete on a fixed rotation and reacted only when something crossed
 // the perimeter; that is exactly this loop. A CHEAP arithmetic gate (is price inside a zone?) runs
@@ -31,7 +31,7 @@ import { notifySetupEntryConfirm, notifySetupInvalidation } from '../services/tr
 // to keep the journal honest through the fill — the position itself is protected by the stop/tp
 // orders RESTING AT THE BROKER, built from the setup's zones by protectionPlan.routeSetupZones.
 // In-position management (re-reading the thesis, scaling, moving stops) is not built and is not
-// pretended: see docs/mentor-talos-refactor.md.
+// pretended: see docs/desks/mentor-talos.md.
 
 const LOG        = '[talos.monitor]'
 const COLLECTION = ENTITIES
@@ -177,7 +177,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
  * NOT HERE, and not pretended: no stop/tp management, no scaling, no re-reads. And no CLOSE line —
  * the reconciler flips a closed setup to 'closed', which drops it out of the polled statuses before
  * this ever sees it, so the exit is recorded by the trades ledger and not by the journal. Both want
- * the in-position brain (docs/mentor-talos-refactor.md, deferred).
+ * the in-position brain (docs/desks/mentor-talos.md, deferred).
  */
 async function _checkPosition(setup, nowMs, deps) {
     const ps     = setup.position_state ?? {}
@@ -405,7 +405,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
     // setup with no pendingOrder would open the confirm dialog onto nothing and dead-end there
     // (the bug that shipped in the first draft).
     if (zone) {
-        // THE PROJECTION (docs/mentor-talos-refactor.md §10.3). The winning premise's legs and its
+        // THE PROJECTION (docs/desks/mentor-talos.md). The winning premise's legs and its
         // whole size are stamped onto the flat fields every kind-blind consumer reads — the order
         // plan, protectionPlan's exit legs, the reconciler, the trades ledger — so execution never
         // learns that scenarios exist. The rivals are simply no longer projected: nothing sums.
@@ -717,7 +717,7 @@ export function normalizeConditionResults(rawResults, declared) {
 }
 
 /**
- * Latch the conditions that have RESOLVED and stay resolved — see docs/mentor-talos-refactor.md
+ * Latch the conditions that have RESOLVED and stay resolved — see docs/desks/mentor-talos.md
  * §2.4. Only `latching` + `met:'yes'` is written, and only once: a settled event should never be
  * re-searched, both because it wastes the call and because a re-run can come back different and
  * talk the model out of a fact it already established.
@@ -749,7 +749,7 @@ export function latchPatch(setup, results, nowMs, declared = null) {
  * and the FE showed that at build time. Free-text conditions can't be: the model decides what to
  * reach for once it has read them, which is the whole point. So the estimate is replaced by a
  * measurement — one that gets more accurate with every wake instead of being a guess frozen at
- * Generate, and that the eventual round cap can be sized from (docs/mentor-talos-refactor.md §5).
+ * Generate, and that the eventual round cap can be sized from (docs/desks/mentor-talos.md).
  *
  * `assessments` counts only the wakes that PAID for a read, not every poll: dividing tool calls by
  * check_count would blend in the free arithmetic wakes and quietly understate what a read costs.

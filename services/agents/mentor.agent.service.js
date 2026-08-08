@@ -15,7 +15,7 @@ import { logger } from '../logger.service.js'
 // has no phases, so there is no phase capture and no PHASE_TABLES entry; it routes through the
 // classifier (see modelRouter). The user always brings the ticker, so there is no scan hand-off.
 //
-// Tools are borrowed WHOLE from Kairos (docs/setup-entity.md §8 — share the pipe). Deliberately
+// Tools are borrowed WHOLE from Kairos (docs/desks/mentor-talos.md — share the pipe). Deliberately
 // un-subsetted: Kairos picks one lens per build, but Mentor's lens is per-SETUP and it must be
 // able to weigh a classical candidate against an SMC one inside a single conversation.
 

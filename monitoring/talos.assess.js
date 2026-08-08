@@ -237,7 +237,7 @@ export async function assessSetup(setup, hit, ctx = {}) {
         // The verification loop: the model checks each condition with whatever tools the sentence
         // needs, pulling another view when the first leaves it unsure.
         //
-        // NO QUALITY CAP while developing (docs/mentor-talos-refactor.md §4.2). A four-condition
+        // NO QUALITY CAP while developing (docs/desks/mentor-talos.md). A four-condition
         // setup spanning two symbols does not fit in the three rounds this used to allow, and
         // capping to a guessed number silently truncates the read into a verdict formed on partial
         // evidence — an invisible failure, because the model still answers. Measure with `calls`

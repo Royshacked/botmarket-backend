@@ -176,7 +176,7 @@ export function _structureTools(ladder) {
 
 // NUMERIC SMC tools (get_structure / get_fvg / get_liquidity), timeframe LOCKED to the call's ladder.
 // Added ONLY for smc-mode calls (call.mode==='smc') so Hermes monitors an SMC call with the SAME exact
-// levels it was built on (the shared smc.engine). See KAIROS_MODES.md K2.
+// levels it was built on (the shared smc.engine). See docs/desks/kairos-hermes.md K2.
 export function _smcTools(ladder) {
     const rungs = Array.isArray(ladder) && ladder.length ? ladder : ['15min']
     const timeframe = { type: 'string', enum: rungs, description: "One of the call's timeframe_ladder rungs." }

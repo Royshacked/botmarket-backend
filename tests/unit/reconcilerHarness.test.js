@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { executionReconciler, _setDeps } from '../../monitoring/execution.reconciler.js'
 import { makeEntityRepo } from '../../services/entity/entityRepo.service.js'
 
-// P1b regression harness (ENTITY_MODEL.md). Drives the REAL reconciler through the riskiest
+// P1b regression harness (docs/architecture/entity-model.md). Drives the REAL reconciler through the riskiest
 // execution sequences against an in-memory Mongo double + fake broker/capture, and characterizes
 // the ordered operation log + final entity state. This is the safety net: after the reconciler is
 // migrated onto entityRepo (which relays the identical collection calls), this fixture must stay

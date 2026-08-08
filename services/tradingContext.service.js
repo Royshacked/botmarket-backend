@@ -1,4 +1,4 @@
-// Shared trading-context accessor (KAIROS_MODES.md cross-cutting). Assembles the user's AUTHORITATIVE
+// Shared trading-context accessor (docs/desks/kairos-hermes.md cross-cutting). Assembles the user's AUTHORITATIVE
 // venue + account menu from existing backend state (broker connections + accounts + capabilities +
 // paper/manual) — NO new persisted state. One read used by all desk agents (idea/kairos/atlas) + the
 // feasibility gate + sizing. Best-effort: never throws; a failed leg just drops from the menu.

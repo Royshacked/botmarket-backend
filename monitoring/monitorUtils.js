@@ -220,7 +220,7 @@ export const resolveTpTimeframe    = idea => resolvePhaseTimeframe(idea, 'tp',  
 // ─── Condition state persistence ──────────────────────────────────────────────
 
 // `db`/`collection` are vestigial (kept so existing monitor callers need no change); the write
-// now funnels through the kind-blind entityRepo. See ENTITY_MODEL.md P1b.
+// now funnels through the kind-blind entityRepo. See docs/architecture/entity-model.md P1b.
 export async function persistConditionStates(db, idea, phase, results, collection) {
     if (!Array.isArray(results) || results.length === 0) return
     const prev = idea.conditionStates?.[phase] ?? {}

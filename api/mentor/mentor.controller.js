@@ -12,7 +12,7 @@ const LOG = '[mentor:controller]'
  *
  * No `currentPhase` is threaded through: Mentor has no phases, so `resolveModel` gets no phase
  * and AUTO falls through to DEFAULT_ROUTE. The intended routing mode here is CLASSIFIER, which
- * picks from the last user message rather than a step number (docs/setup-entity.md §8).
+ * picks from the last user message rather than a step number (docs/desks/mentor-talos.md).
  */
 export async function streamMentor(req, res) {
     const parsed = parseStreamBody(req.body)

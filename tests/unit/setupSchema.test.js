@@ -7,7 +7,7 @@ import {
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
 } from '../../services/setup.schema.js'
 
-// The `setup` entity contract (docs/setup-entity.md §3). Mentor authors loosely, Talos monitors
+// The `setup` entity contract (docs/desks/mentor-talos.md). Mentor authors loosely, Talos monitors
 // strictly — this module is the seam, so these tests pin the coercions the monitor depends on.
 
 // ─── Ladder ───────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-// The execution-path persistence facade (ENTITY_MODEL.md P1b). Owns the ONE place the backing
+// The execution-path persistence facade (docs/architecture/entity-model.md P1b). Owns the ONE place the backing
 // collection is named + the ONE place the broker-linkage match shapes live, so every execution
 // site follows a single definition.
 //

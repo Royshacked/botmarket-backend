@@ -5,7 +5,7 @@ import { swings, detectFVG, detectLiquidity, detectStructure, premiumDiscount, d
 import { smcReadText } from '../../services/tools/smc.tools.js'
 import { _smcTools, _handleAssessToolUses } from '../../monitoring/hermes.assess.js'
 
-// K2: the deterministic SMC engine (KAIROS_MODES.md). Pure OHLCV → exact monitorable levels.
+// K2: the deterministic SMC engine (docs/desks/kairos-hermes.md). Pure OHLCV → exact monitorable levels.
 const mk = (o, h, l, c, t = 0) => ({ open: o, high: h, low: l, close: c, volume: 100, timestamp: t })
 
 // A clean uptrend zig-zag (lookback 1): swing highs at i1(12) i3(14), swing lows at i2(6) i4(8),

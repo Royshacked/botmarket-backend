@@ -7,7 +7,7 @@ import { normalizeCall, _buildEditSet } from '../../api/kairos/kairos.service.js
 import { ACTIVE_STATUSES as HERMES_WATCHES } from '../../monitoring/hermes.monitor.service.js'
 import { _sanitizeSeed } from '../../api/kairos/kairos.controller.js'
 
-// K1: Kairos mode scaffolding (KAIROS_MODES.md) — mode field + per-mode tool subsets.
+// K1: Kairos mode scaffolding (docs/desks/kairos-hermes.md) — mode field + per-mode tool subsets.
 
 // ── normalizeMode / MODES ────────────────────────────────────────────────────
 test('normalizeMode coerces to a known mode; unknown/absent → discretionary', () => {

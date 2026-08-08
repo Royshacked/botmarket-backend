@@ -21,7 +21,7 @@ Teach Atlas the **way** great investors think — not what they hold. (Tracking 
 
 ## The pattern
 
-Copy Kairos exactly (`kairos.modes.js` + `KAIROS_MODES.md`):
+Copy Kairos exactly (`kairos.modes.js` + `docs/desks/kairos-hermes.md`):
 
 - one source-of-truth module + one prompt file per school, injected as its own block
 - a school selects **prompt profile + vocabulary**, nothing else

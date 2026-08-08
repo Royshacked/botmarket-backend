@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import { makeEntityRepo, ACTIVE_STATUSES } from '../../services/entity/entityRepo.service.js'
 
-// P1b faithfulness net (ENTITY_MODEL.md): entityRepo is a behavior-preserving indirection over the
+// P1b faithfulness net (docs/architecture/entity-model.md): entityRepo is a behavior-preserving indirection over the
 // execution path's inline db.collection('ideas') calls. These assert each method issues the EXACT
 // filter/update/options the reconciler used inline — so migrating the reconciler onto entityRepo
 // cannot silently change a query. End-to-end semantics are covered separately by the regression harness.

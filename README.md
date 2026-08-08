@@ -151,8 +151,9 @@ monitoring/            one monitor per kind + the shared execution layer
                        marketBrief.notify — not a monitor: the weekday market-brief offer card
   evaluators/          touch, structured, indicator, time, volume, news, chart
 tests/unit/            node:test unit tests (`npm test`). tests/*.js are MANUAL live harnesses
-docs/architecture/     design docs — broker · monitoring · off-hours-queue · single-instance ·
-                       paper-trading-simulation · ohlcv-price-data · trades-data · manual-mode
+docs/                  README.md is THE index. architecture/ = how the machinery is built ·
+                       desks/ = each agent + the monitor that watches its kind · design/ =
+                       proposed, not yet built · trust-gaps-todo + live-verify-checklist = open work
 ```
 
 ---

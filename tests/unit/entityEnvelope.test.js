@@ -4,12 +4,12 @@ import assert from 'node:assert/strict'
 import { KINDS, ownerForKind, isKind, kindForDoc, blankMonitorState, blankExecution } from '../../services/entity/envelope.js'
 import { ideaToEnvelope, callToEnvelope, toEnvelope } from '../../services/entity/toEnvelope.js'
 
-// P0 of the entity split (ENTITY_MODEL.md). These are the pure seams the blind execution path
+// P0 of the entity split (docs/architecture/entity-model.md). These are the pure seams the blind execution path
 // stands on: owner-from-kind and the legacy→envelope adapters (incl. the idea camelCase vs call
 // snake_case mismatch).
 //
 // The third P0 seam, entityStore, was DELETED 2026-08-07 along with its two tests — the migration
-// went a different way and nothing ever consumed it. See ENTITY_MODEL.md.
+// went a different way and nothing ever consumed it. See docs/architecture/entity-model.md.
 
 // ── owner is derived from kind, never stored ──────────────────────────────────────────────
 test('ownerForKind maps each execution-tier kind to its monitor', () => {

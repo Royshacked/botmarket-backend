@@ -1,4 +1,4 @@
-// The single source of truth for the INVESTOR SCHOOLS (docs/investor-schools-design.md) — how a book
+// The single source of truth for the INVESTOR SCHOOLS (docs/design/investor-schools.md) — how a book
 // is picked, and how it is weighted.
 //
 // TWO AXES, not one enum, because they are not the same kind of thing: selection answers *which names

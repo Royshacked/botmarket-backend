@@ -267,7 +267,7 @@ export function _normalizeKairosPick(p) {
         thesis:    typeof p.thesis === 'string' ? p.thesis : '',
         analysis:  typeof p.analysis === 'string' ? p.analysis : '',
         // K3: Argus's recommended Kairos lens from the dominant driver (feasibility-filtered). null =
-        // no recommendation → the FE keeps the user's current mode chip. See KAIROS_MODES.md.
+        // no recommendation → the FE keeps the user's current mode chip. See docs/desks/kairos-hermes.md.
         recommended_mode: isMode(p.recommended_mode) ? p.recommended_mode : null,
     }
 }

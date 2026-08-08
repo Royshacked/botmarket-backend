@@ -1,6 +1,6 @@
 // The shared entity envelope — the ONLY shape services (monitor loop, reconciler, trades
 // ledger, notify, WS/SSE) are allowed to touch. Per-kind logic lives in the payload + its
-// evaluator/prompt/card renderer, never here. See ENTITY_MODEL.md.
+// evaluator/prompt/card renderer, never here. See docs/architecture/entity-model.md.
 //
 // Invariant / success test: adding a 4th kind = a new payload + evaluator + prompt + card,
 // with ZERO change to any service that consumes an Envelope.
@@ -13,7 +13,7 @@ export const KINDS = Object.freeze({
 })
 
 /**
- * Owner is DERIVED from kind, never stored (open-decision #5 in ENTITY_MODEL.md).
+ * Owner is DERIVED from kind, never stored (open-decision #5 in docs/architecture/entity-model.md).
  * portfolio_item → themis at the item tier; the book aggregate is assessed by themis too.
  */
 const OWNER_BY_KIND = Object.freeze({
