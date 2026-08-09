@@ -87,6 +87,34 @@ export async function recordUsage(userId, model, usage, agent) {
     )
 }
 
+/**
+ * Count ONE user turn for a desk.
+ *
+ * Deliberately NOT folded into recordUsage. That one is driven by `onUsage`, which the provider
+ * fires once per API call — and a tool loop makes many calls per turn — so `byAgent.*.turns` counts
+ * round-trips to the model, not people talking. Read alone it cannot tell a verbose desk from a
+ * tool-heavy one, and those want opposite fixes: prose instructions vs fewer tool rounds.
+ *
+ * `turns / userTurns` is the tool-rounds-per-turn ratio. It is the number the uncached-prompt share
+ * turns on, because every tool result lands AFTER the history breakpoint by design (see
+ * anthropic.provider `_stampHistoryCache`) and is re-sent, uncached, on each following round.
+ */
+export async function recordTurn(userId, agent) {
+    if (!userId) return
+    const db   = await getDb()
+    const key  = monthKey()
+    const aKey = _fieldKey(agent)
+
+    await db.collection(COLLECTION).updateOne(
+        { userId, month: key },
+        {
+            $inc:         { [`byAgent.${aKey}.userTurns`]: 1 },
+            $setOnInsert: { userId, month: key },
+        },
+        { upsert: true }
+    )
+}
+
 export async function getMonthlyUsage(userId, month = monthKey()) {
     const db  = await getDb()
     const doc = await db.collection(COLLECTION).findOne({ userId, month })

@@ -5,7 +5,7 @@ import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError } from './toolResult.util.js'
 import { logger } from './logger.service.js'
 import { resolveStreamFn } from './llmModels.js'
-import { recordUsage } from './tokenUsage.service.js'
+import { recordUsage, recordTurn } from './tokenUsage.service.js'
 
 const LOG = '[agentUtils]'
 
@@ -14,9 +14,15 @@ const LOG = '[agentUtils]'
 // the standard per-request usage recorder (a no-op when there's no userId). Every
 // streaming agent repeats these two lines verbatim; centralizing them means a new
 // agent (e.g. Axl) can't silently diverge on model routing or usage accounting.
-export function resolveAgentStream(requestedModel, userId, agent) {
+// `_recordTurn` is injectable for the same reason `_resolve`/`_run` are elsewhere: it is the one
+// side effect here, and the tests that drive this seam must not need a database.
+export function resolveAgentStream(requestedModel, userId, agent, _recordTurn = recordTurn) {
     const { model, streamFn, provider } = resolveStreamFn(requestedModel)
     const onUsage = userId ? (usage) => recordUsage(userId, model, usage, agent).catch(() => {}) : undefined
+    // ONCE per user turn, while `onUsage` above fires once per tool round. Both counters are needed:
+    // their ratio is the tool-rounds-per-turn figure (see tokenUsage.recordTurn). Fire-and-forget
+    // like the usage write — accounting must never fail a user's reply.
+    if (userId) _recordTurn(userId, agent).catch(() => {})
     return { model, streamFn, provider, onUsage }
 }
 
