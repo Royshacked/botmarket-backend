@@ -255,7 +255,9 @@ async function _checkPosition(setup, nowMs, deps) {
 // that decision in front of them, and re-posting it every wake is how a monitor teaches people to
 // ignore it. A MORE urgent verdict does fire over it: a broken thesis has to be able to interrupt a
 // pending "bank a third".
-const VERDICT_SEVERITY = { hold: 0, let_run: 1, take_partial: 2, move_stop: 3, exit_now: 4 }
+// add_leg sits below every protective verdict on purpose: adding size must never out-rank a
+// pending decision about protecting what is already on.
+const VERDICT_SEVERITY = { hold: 0, let_run: 1, add_leg: 2, take_partial: 3, move_stop: 4, exit_now: 5 }
 
 /**
  * One in-position wake: metrics (always) → cheap gate → assess only if it tripped or a review is
@@ -310,8 +312,16 @@ async function _managePosition(setup, ps, nowMs, deps) {
         return { reason, failed: true }
     }
 
-    const verdict = MANAGEMENT_VERDICTS.has(raw.verdict) ? raw.verdict : 'hold'
+    let verdict = MANAGEMENT_VERDICTS.has(raw.verdict) ? raw.verdict : 'hold'
     if (verdict !== raw.verdict) logger.warn(LOG, `off-menu management verdict "${raw.verdict}" for ${setup.id} — treating as hold`)
+    // `add_leg` is only meaningful with a planned zone actually printing. A model that returns it
+    // on a quiet wake is proposing size the plan never authorised, so it is refused here rather
+    // than trusted — the prompt says the same thing, and this is the half that cannot be talked out
+    // of it.
+    if (verdict === 'add_leg' && !scaleZone) {
+        logger.warn(LOG, `add_leg with no planned zone printing for ${setup.id} — treating as hold`)
+        verdict = 'hold'
+    }
 
     // Self-chosen cadence, clamped to the setup's own bounds: a model that asks to be woken in one
     // minute on a swing burns the budget, and one that asks for three days goes blind.
@@ -329,6 +339,34 @@ async function _managePosition(setup, ps, nowMs, deps) {
         // on whether or not the user takes the partial, because the ARITHMETIC fact (price reached
         // it) does not become untrue if they decline.
         ...(gate.flag === 'scale_out' && gate.target ? { 'position_state.targets': _markTargetHit(ps, gate.target, nowMs) } : {}),
+    }
+
+    // The execution half of a scale-in. Deliberately NOT routed back through the entry flow: that
+    // path drives `_nextStatus`, `armed_zone_id` and `orderState` on the assumption nothing is open
+    // yet, and re-running it on a live position would flip a status that is already correct. What is
+    // actually needed is narrower — an order plan for ONE leg, at that leg's size.
+    //
+    // `status` is untouched. The position is already long/short and adding to it does not change
+    // what it is. `armed_zone_id` moves to the new leg so the fill stamps against the right zone.
+    if (verdict === 'add_leg' && scaleZone) {
+        const projection = projectScenario(setup, setup.armed_scenario_id ?? null)
+        const executable = { ...setup, ...projection, quantity: legQuantity(armed, scaleZone.id) ?? null }
+        if (Number.isFinite(executable.quantity) && executable.quantity > 0) {
+            const plan = await deps.buildOrderPlan(executable).catch(err => {
+                logger.error(LOG, `scale-in order plan failed for ${setup.id}:`, err.message)
+                return []
+            })
+            if (plan.length > 0) {
+                set.armed_zone_id = scaleZone.id
+                set.pendingOrder  = { plan, builtAt: nowMs }
+                // A shut venue parks it rather than dropping it — same rule the first leg follows.
+                set.orderState    = deps.isAssetOpen(setup.asset, setup.asset_class) ? 'awaiting_confirm' : 'awaiting_market'
+            } else {
+                logger.info(LOG, `[${setup.id}] planned leg printed with no placeable accounts — alert only`)
+            }
+        } else {
+            logger.warn(LOG, `[${setup.id}] planned leg ${scaleZone.id} carries no size — nothing to place`)
+        }
     }
 
     const note = (raw.read && String(raw.read).trim()) ? String(raw.read).trim() : _manageFallbackNote(verdict)

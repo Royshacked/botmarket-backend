@@ -269,6 +269,10 @@ export function buildSetupManage(setup, card) {
             content: `Your ${dir} ${asset} — I want to move the stop${Number.isFinite(p?.stop) ? ` to ${p.stop}` : ''}${p?.why ? ` (${p.why})` : ''}.`,
             actions: cardActions('Review'),
         },
+        add_leg: {
+            content: `Your ${dir} ${asset} — the second leg you planned is printing${Number.isFinite(p?.quantity) ? `, ${p.quantity} more` : ''}.${card?.read ? ` ${card.read}` : ''}`,
+            actions: cardActions('Review'),
+        },
         take_partial: {
             content: `Your ${dir} ${asset} — I want to bank ${frac} of the position here.${card?.read ? ` ${card.read}` : ''}`,
             actions: cardActions('Review'),

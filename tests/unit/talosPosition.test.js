@@ -241,3 +241,122 @@ test('every gate edge mirrors for a short', () => {
     assert.equal(positionGate(short, 96).flag,    'breakeven', '+1R down, stop still above entry')
     assert.equal(positionGate(short, 99).flag,    null,        'drifting, nothing earned')
 })
+
+// ─── Scaling in ───────────────────────────────────────────────────────────────
+// A premise with two entry legs. Everything above this line describes a position that is fully on;
+// these describe one still being built.
+
+const TWO_LEG_PLAN = {
+    ...PLAN,
+    // The pullback leg sits ABOVE the stop (234.8) and outside its quarter-R adverse band
+    // (<=235.75). A leg below the stop could never fill — the stop takes you out first — so a
+    // fixture with one would only ever exercise the adverse path.
+    entry_zones: [{ id: 'ez1', lower: 237.8, upper: 238.6, quantity: 60 },
+                  { id: 'ez2', lower: 236.0, upper: 236.6, quantity: 40 }],
+}
+
+/** In on leg ez1 only; ez2 is still pending below. */
+const SCALING = (over = {}, psOver = {}) => {
+    const base = normalizeSetup(TWO_LEG_PLAN)
+    return {
+        id: 'setup_NVDA_1', kind: 'setup', status: 'long',
+        broker: 'ctrader', accounts: ['a1'], mainAccountId: 'a1', valid_until: null,
+        monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {}, scenarios: {} },
+        ...base,
+        armed_scenario_id: base.scenarios?.[0]?.id ?? null,
+        cadence: { min: 30, max: 240 },
+        position_state: {
+            entry: { fill_price: 238.6, fill_at: '2026-07-26T09:00:00.000Z', size: 60, direction: 'long',
+                     legs: [{ zone_id: 'ez1', price: 238.6, quantity: 60 }] },
+            stop:  { initial: 234.8, current: 234.8 },
+            targets: [{ price: 246, hit_at: null }],
+            ...psOver,
+        },
+        ...over,
+    }
+}
+
+test('a planned leg printing buys the read even though the gate is quiet', async () => {
+    // Without this the wake takes the cheap hold and the second leg is never noticed at all.
+    let ctx = null
+    const deps = stubDeps({
+        getPrice: async () => 236.2,                       // inside ez2, nowhere near the stop
+        assessPosition: async (_s, _ps, c) => { ctx = c; return { verdict: 'hold', next_check_min: 60 } },
+    })
+    const res = await _checkSetup(SCALING(), T, deps)
+
+    assert.notEqual(res.reason, 'in_position_idle', 'not the cheap hold')
+    assert.equal(ctx.reason, 'scale_in')
+    assert.equal(ctx.scaleZone.id, 'ez2', 'and the model is told WHICH leg')
+})
+
+test('add_leg places the LEG, at the leg size, and never touches status', async () => {
+    // The whole risk of routing this through the entry flow instead: that path drives _nextStatus
+    // and would flip a status that is already correct.
+    let planned = null
+    const deps = stubDeps({
+        getPrice: async () => 236.2,
+        assessPosition: async () => ({ verdict: 'add_leg', read: 'The dip leg printed.', next_check_min: 60 }),
+        buildOrderPlan: async (executable) => { planned = executable; return [{ accountId: 'a1', quantity: executable.quantity }] },
+    })
+    await _checkSetup(SCALING(), T, deps)
+    const $set = deps.writes[0]
+
+    assert.equal(planned.quantity, 40, 'the pending leg, not the premise total of 100')
+    assert.equal($set.status, undefined, 'already long — adding to it does not change what it is')
+    assert.equal($set.armed_zone_id, 'ez2', 'the fill will stamp against the right zone')
+    assert.equal($set.orderState, 'awaiting_confirm')
+    assert.ok($set.pendingOrder?.plan?.length)
+})
+
+test('a shut venue parks the leg rather than dropping it', async () => {
+    const deps = stubDeps({
+        getPrice: async () => 236.2,
+        isAssetOpen: () => false,
+        assessPosition: async () => ({ verdict: 'add_leg', next_check_min: 60 }),
+        buildOrderPlan: async () => [{ accountId: 'a1', quantity: 40 }],
+    })
+    await _checkSetup(SCALING(), T, deps)
+    assert.equal(deps.writes[0].orderState, 'awaiting_market')
+})
+
+test('NEVER add into a position pressing its stop, whatever the model says', async () => {
+    // The averaging-down reflex is the one thing this must not automate. The gate suppresses the
+    // offer before the model is even asked, so there is no scaleZone for it to act on.
+    let ctx = null
+    const deps = stubDeps({
+        getPrice: async () => 235.0,                       // inside the quarter-R adverse band
+        assessPosition: async (_s, _ps, c) => { ctx = c; return { verdict: 'add_leg', next_check_min: 60 } },
+        buildOrderPlan: async () => { throw new Error('must not be called') },
+    })
+    const res = await _checkSetup(SCALING(), T, deps)
+
+    assert.equal(ctx.reason, 'adverse', 'the wake is about protection, not about adding')
+    assert.equal(ctx.scaleZone, null)
+    assert.equal(deps.writes[0].orderState, undefined, 'nothing placed')
+    assert.notEqual(res.reason, 'scale_in')
+})
+
+test('add_leg with nothing printing is refused rather than trusted', async () => {
+    // The prompt says the same thing; this is the half that cannot be talked out of it. A model
+    // returning add_leg on a quiet wake is proposing size the plan never authorised.
+    const deps = stubDeps({
+        getPrice: async () => 240,                         // outside every entry zone
+        assessPosition: async () => ({ verdict: 'add_leg', next_check_min: 60 }),
+        buildOrderPlan: async () => { throw new Error('must not be called') },
+    })
+    await _checkSetup(SCALING(), T, deps)
+    assert.equal(deps.writes[0].orderState, undefined)
+})
+
+test('a fully-scaled position has nothing pending and behaves as before', async () => {
+    let ctx = null
+    const deps = stubDeps({
+        getPrice: async () => 236.2,
+        assessPosition: async (_s, _ps, c) => { ctx = c; return { verdict: 'hold', next_check_min: 60 } },
+    })
+    const both = SCALING({}, { entry: { fill_price: 236, fill_at: '2026-07-26T09:00:00.000Z', size: 100, direction: 'long',
+        legs: [{ zone_id: 'ez1', price: 238.6, quantity: 60 }, { zone_id: 'ez2', price: 236.2, quantity: 40 }] } })
+    const res = await _checkSetup(both, T, deps)
+    assert.equal(res.reason ?? (ctx && ctx.reason), 'in_position_idle', 'quiet again once both legs are on')
+})
