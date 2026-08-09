@@ -30,7 +30,7 @@ import { COLLECTION as PORTFOLIO_CHATS } from '../api/portfolio/portfolioChat.se
 export const COLLECTION = 'trades'
 const LOG        = '[tradeCapture]'
 
-export const tradeCaptureService = { captureOpen, captureOpenBare, captureClose, listTrades, tradeStats }
+export const tradeCaptureService = { captureOpen, captureOpenBare, capturePartial, captureClose, listTrades, tradeStats }
 
 /**
  * Indexes for the analytics ledger. Best-effort (logs + continues), created once at
@@ -272,7 +272,59 @@ async function captureOpenBare(exec) {
  * open, so `commission`/`spread` become the round-trip total.
  * @param {{ accountId, positionId, price?, reason?, pnl?, commission?, spread?, at? }} opts
  */
-async function captureClose({ accountId, positionId, price, reason, pnl, commission, spread, at }) {
+/**
+ * One exit SLICE on a position that survived it — a scale-out, a partial stop, one leg of a
+ * multi-level exit. Appends to `exits[]` and accrues the running total on `exit.realizedPnl`.
+ *
+ * WHY IT EXISTS. `_onReduced` used to record nothing when the position survived: the slice's
+ * realized P&L simply never reached the ledger, and the eventual full close wrote ONE trade whose
+ * pnl was the last slice's alone. Every scaled trade was silently under-reported, and the ledger is
+ * canonical analytics — those rows cannot be reconstructed afterwards.
+ *
+ * IDEMPOTENCE. `position.reduced` can arrive twice for one fill. The caller's real guard is
+ * `markExitOrderFilled`, which returns true only for the caller that made the working→filled
+ * transition; the `orderId` clause here is a second, self-contained one so this cannot double-write
+ * even if called directly. It is only applied when the order id is known — an untracked exit (a stop
+ * dragged through the panel, placed straight at the broker) has no id and cannot be sized from our
+ * records at all, which is why the caller does not record those.
+ */
+async function capturePartial({ accountId, positionId, orderId, price, quantity, reason, pnl, commission, spread, at }) {
+    try {
+        if (positionId == null || accountId == null) return
+        const db  = await getDb()
+        const now = at ?? Date.now()
+        const filter = { accountId: String(accountId), positionId: String(positionId), status: 'open' }
+        if (orderId != null) filter['exits.orderId'] = { $ne: String(orderId) }
+
+        const res = await db.collection(COLLECTION).updateOne(filter, {
+            $push: { exits: {
+                orderId: orderId != null ? String(orderId) : null,
+                price: price ?? null, ts: now, reason: reason ?? null,
+                quantity: quantity ?? null, realizedPnl: pnl ?? null,
+            } },
+            // The running total lives where every reader already looks. A trade with no partials is
+            // unaffected: one slice summed is that slice.
+            $inc: {
+                ...(Number.isFinite(pnl) ? { 'exit.realizedPnl': pnl } : {}),
+                commission: commission ?? 0, spread: spread ?? 0,
+            },
+        })
+        if (res.matchedCount) logger.info(LOG, `Captured PARTIAL exit — pos ${positionId} (qty=${quantity ?? '·'}, pnl=${pnl ?? '·'})`)
+    } catch (err) {
+        logger.error(LOG, `capturePartial failed (pos ${positionId}): ${err.message}`)
+    }
+}
+
+/**
+ * The final slice — it takes the remainder, so it closes the trade.
+ *
+ * `exit` is written FIELD BY FIELD rather than as a whole object: `exit.realizedPnl` may already
+ * carry the sum of earlier partials, and a wholesale `$set` would discard it. price/ts/reason
+ * describe THIS slice (the last one, which is what the UI shows); realizedPnl is the trade's TOTAL.
+ * For a trade with no partials the two readings coincide, which is why every row already in the
+ * collection stays correct without migration.
+ */
+async function captureClose({ accountId, positionId, orderId, price, quantity, reason, pnl, commission, spread, at }) {
     try {
         if (positionId == null || accountId == null) return
         const db  = await getDb()
@@ -281,11 +333,23 @@ async function captureClose({ accountId, positionId, price, reason, pnl, commiss
             { accountId: String(accountId), positionId: String(positionId), status: 'open' },
             {
                 $set: {
-                    status:   'closed',
-                    closedAt: now,
-                    exit:     { price: price ?? null, ts: now, reason: reason ?? null, realizedPnl: pnl ?? null },
+                    status:      'closed',
+                    closedAt:    now,
+                    'exit.price':  price ?? null,
+                    'exit.ts':     now,
+                    'exit.reason': reason ?? null,
                 },
-                $inc: { commission: commission ?? 0, spread: spread ?? 0 },
+                // The last slice belongs in the ledger too, so `exits[]` is the whole record of how
+                // the position was unwound rather than "everything except the end".
+                $push: { exits: {
+                    orderId: orderId != null ? String(orderId) : null,
+                    price: price ?? null, ts: now, reason: reason ?? null,
+                    quantity: quantity ?? null, realizedPnl: pnl ?? null,
+                } },
+                $inc: {
+                    ...(Number.isFinite(pnl) ? { 'exit.realizedPnl': pnl } : {}),
+                    commission: commission ?? 0, spread: spread ?? 0,
+                },
             },
         )
         if (res.matchedCount) logger.info(LOG, `Captured CLOSE trade — pos ${positionId} (reason=${reason ?? '·'}, pnl=${pnl ?? '·'})`)

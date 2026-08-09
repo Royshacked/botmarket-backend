@@ -108,8 +108,8 @@ async function _onClosed(exec) {
             // reconciler stays broker-agnostic (a second sim/backtest venue works unchanged).
             if (exec.simulated) {
                 await _deps.tradeCaptureService.captureClose({
-                    accountId: exec.accountId, positionId: exec.positionId,
-                    price: exec.price, reason: exec.reason, pnl: exec.pnl,
+                    accountId: exec.accountId, positionId: exec.positionId, orderId: exec.orderId,
+                    price: exec.price, quantity: exec.quantity, reason: exec.reason, pnl: exec.pnl,
                     commission: exec.commission, spread: exec.spread, at: exec.at,
                 })
             }
@@ -124,7 +124,7 @@ async function _onClosed(exec) {
 
         await _finalizeClose(db, idea, {
             reason, pnl: exec.pnl, at: exec.at, accountId: exec.accountId, positionId: exec.positionId, price: exec.price,
-            commission: exec.commission, spread: exec.spread,
+            quantity: exec.quantity, orderId: exec.orderId, commission: exec.commission, spread: exec.spread,
         })
     })
 }
@@ -148,12 +148,15 @@ async function _onReduced(exec) {
             exec.orderId != null && String(o.orderId) === String(exec.orderId))
 
         let matched = null
+        // Hoisted: it gates the ledger write below, not just the log line. `won` is the ONLY
+        // exactly-once signal available here — `position.reduced` can arrive twice for one fill.
+        let won = false
         if (idx >= 0) {
             const filledAt = exec.at ?? Date.now()
             // Mark this ONE order in place rather than writing the whole array back from a copy —
             // see entityRepo.markExitOrderFilled. The in-memory `orders` is still updated because
             // everything below (the close finalize, the resync) reads the post-fill picture from it.
-            const won = await _deps.entityRepo.markExitOrderFilled(idea.id, {
+            won = await _deps.entityRepo.markExitOrderFilled(idea.id, {
                 orderId: orders[idx].orderId, accountId: exec.accountId, filledAt,
             })
             orders[idx] = { ...orders[idx], status: 'filled', filledAt }
@@ -191,9 +194,26 @@ async function _onReduced(exec) {
             const reason = matched?.leg ?? exec.reason ?? 'broker'
             await _finalizeClose(db, { ...idea, exitOrders: orders }, {
                 reason, pnl: exec.pnl, at: exec.at, accountId: exec.accountId, positionId: exec.positionId, price: exec.price,
-                commission: exec.commission, spread: exec.spread,
+                quantity: exec.quantity, orderId: exec.orderId, commission: exec.commission, spread: exec.spread,
             })
             return
+        }
+
+        // The position survived, so this fill was a SLICE — record it. Nothing used to be written
+        // here at all: the slice's realized P&L never reached the ledger, and the eventual full
+        // close wrote one trade carrying only the last slice's pnl. Every scaled-out trade was
+        // under-reported, in the collection that is canonical analytics and cannot be rebuilt.
+        //
+        // Gated on `won` (not merely on `matched`): a duplicate reduce event loses that race and
+        // must not append a second slice. An UNTRACKED exit has no matched order and, as the branch
+        // above says, cannot be sized from our records — recording it would mean inventing a
+        // quantity, so it is deliberately left out rather than guessed at.
+        if (matched && won) {
+            await _deps.tradeCaptureService.capturePartial({
+                accountId: exec.accountId, positionId: exec.positionId, orderId: exec.orderId,
+                price: exec.price, quantity: exec.quantity, reason: matched.leg ?? exec.reason,
+                pnl: exec.pnl, commission: exec.commission, spread: exec.spread, at: exec.at,
+            })
         }
 
         // Still open → shrink/cancel any tracked working exit that now exceeds the
@@ -383,7 +403,7 @@ function _brokerFor(idea, accountId) {
  * cancel EVERY working broker order still bound to the closed position. Shared by the
  * full-close event path and the broker-confirmed full close detected from a reduce.
  */
-async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId, price, commission, spread }) {
+async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId, price, quantity, orderId, commission, spread }) {
     const closedAt = at ?? Date.now()
     const patch = { status: 'closed', closedReason: reason, closedAt }
     if (pnl != null) patch.realizedPnl = pnl
@@ -397,7 +417,7 @@ async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId
     if (!result) return false   // someone else closed it first
     logger.info(LOG, `Idea ${result.id} closed by broker (reason=${reason}, pnl=${patch.realizedPnl ?? '·'})`)
 
-    await _deps.tradeCaptureService.captureClose({ accountId, positionId, price, reason, pnl, commission, spread, at })
+    await _deps.tradeCaptureService.captureClose({ accountId, positionId, orderId, price, quantity, reason, pnl, commission, spread, at })
     await _cancelExitsForPosition(db, result, accountId, positionId)
     return true
 }

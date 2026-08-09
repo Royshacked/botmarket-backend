@@ -87,6 +87,7 @@ const fakeBroker = (opLog, { listOrders = [], findOpenPosition = null } = {}) =>
 const fakeCapture = (opLog) => ({
     async captureOpen()     { opLog.push('capture:captureOpen') },
     async captureClose()    { opLog.push('capture:captureClose') },
+    async capturePartial()  { opLog.push('capture:capturePartial') },
     async captureOpenBare() { opLog.push('capture:captureOpenBare') },
 })
 
@@ -214,6 +215,7 @@ test('partial reduce: matched slice filled, broker says still open → resync (n
         'db:findOne',            // findActiveByPosition
         'db:updateOne',          // mark matched slice filled (markExitOrderFilled — arrayFilters, in place)
         'broker:findOpenPosition', // authoritative survival check
+        'capture:capturePartial',// the slice reaches the ledger — it used to be dropped entirely
         'broker:cancelOrder',    // resync: shrink the 100-lot stop to 60
         'broker:placeOrder',     // re-place at 60
         'db:updateOne',          // persist resized exitOrders

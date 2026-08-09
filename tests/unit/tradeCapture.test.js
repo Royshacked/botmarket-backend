@@ -151,3 +151,54 @@ test('computeTradeStats: origin.type missing → grouped under "unknown"', () =>
     const s = computeTradeStats([cltrade({ origin: null, exit: { realizedPnl: 10 } })])
     assert.equal(s.byOrigin.unknown.count, 1)
 })
+
+// ─── Scaled-out trades ────────────────────────────────────────────────────────
+// A position unwound in slices used to reach the ledger as ONE exit carrying only the last slice's
+// P&L — the partials were never recorded at all. `exits[]` is now the record of how the position
+// came apart, and `exit.realizedPnl` accrues the TOTAL, which is where every reader already looks.
+
+const scaled = {
+    status: 'closed', openedAt: 0, closedAt: 3_600_000,
+    exits: [
+        { orderId: 'o1', price: 110, quantity: 40, realizedPnl: 400, reason: 'tp' },
+        { orderId: 'o2', price: 120, quantity: 30, realizedPnl: 600, reason: 'tp' },
+        { orderId: 'o3', price: 105, quantity: 30, realizedPnl: 150, reason: 'stop' },
+    ],
+    exit: { price: 105, ts: 3_600_000, reason: 'stop', realizedPnl: 1150 },   // final slice + running total
+}
+
+test('a scaled trade counts its TOTAL, not the slice that happened to close it', () => {
+    // The regression this exists to prevent: the old shape would have scored this +150 — a marginal
+    // win — when the trade actually made 1150 across three exits.
+    const s = computeTradeStats([scaled]).overall
+    assert.equal(s.netPnl, 1150)
+    assert.equal(s.wins, 1)
+    assert.equal(s.best, 1150)
+})
+
+test('exit still describes the FINAL slice, which is what the row shows', () => {
+    // price/ts/reason are the last exit; only realizedPnl is aggregated. The UI renders
+    // `entry → exit.price` and `exit.reason`, and both must stay literal.
+    assert.equal(scaled.exit.price, scaled.exits.at(-1).price)
+    assert.equal(scaled.exit.reason, scaled.exits.at(-1).reason)
+    assert.equal(scaled.exit.realizedPnl, scaled.exits.reduce((n, e) => n + e.realizedPnl, 0))
+})
+
+test('a trade with no partials is scored exactly as before', () => {
+    // Every row already in the collection has one exit and no `exits`. Redefining realizedPnl as
+    // "the total" is a no-op for them — one slice summed is that slice — which is why this needed
+    // no migration.
+    const single = { status: 'closed', openedAt: 0, closedAt: 60_000, exit: { price: 90, realizedPnl: -250 } }
+    const s = computeTradeStats([single]).overall
+    assert.equal(s.netPnl, -250)
+    assert.equal(s.losses, 1)
+    assert.equal(s.worst, -250)
+})
+
+test('a scaled winner and a plain loser aggregate together', () => {
+    const s = computeTradeStats([scaled, { status: 'closed', exit: { realizedPnl: -150 } }]).overall
+    assert.equal(s.netPnl, 1000)
+    assert.equal(s.grossProfit, 1150)
+    assert.equal(s.grossLoss, 150)
+    assert.equal(s.count, 2)
+})
