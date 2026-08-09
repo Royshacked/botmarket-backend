@@ -127,5 +127,8 @@ own.
   by the journal. Same root as the above: both want an in-position brain.
 - **Scaling in** — several entries inside one scenario is modelled (`scenarioQuantity` sums them)
   but readiness blocks it until the flow is specified.
-- **Stop/validity coherence is unchecked.** Nothing verifies that a scenario's stop sits inside its
-  own validity range, so the two can be authored in contradiction.
+- ~~**Stop/validity coherence is unchecked.**~~ **DONE** — `rangeProblems` (`setup.schema.js`)
+  checks it per scenario and blocks Generate via `setupReadiness().problems`. It guards the range
+  being **wider** than the stop (the setup would read live at a price where its own plan is already
+  dead); a range tighter than the stop is deliberately allowed — it just warns earlier, and the stop
+  still fires. It also rejects an away pivot sitting inside the envelope, where it could never fire.

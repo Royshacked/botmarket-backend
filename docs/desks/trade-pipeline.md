@@ -242,16 +242,19 @@ If Hermes ever gains a Tier 2, it must be the *same* triage service, not a copy.
 
 | item | state | size |
 |---|---|---|
-| stop/validity coherence | unchecked | **S** |
+| ~~stop/validity coherence~~ | **already built** — `rangeProblems` | — |
 | close journal line | exit never journalled | **S** |
 | in-position management | heartbeat only | **L** |
 | scaling in | blocked at readiness | **M** |
 
-Order: **coherence → close line → in-position → scaling in.**
+Order: **close line → in-position → scaling in.**
 
-- **Coherence** is a pure build-time check beside the existing readiness rules. Severity depends on
-  `on_break`: block when `close` and the stop sits outside validity; warn otherwise. It is a build
-  smell, not a safety hole — the stop is a real broker order and still fires.
+- **Coherence is done.** `rangeProblems` (`setup.schema.js`) checks it per scenario and blocks
+  Generate through `setupReadiness().problems`. The `mentor-talos.md` Open list saying otherwise
+  predates it. Note the direction it actually guards: the fault is a validity range **wider** than
+  the stop — *long entry 238 / stop 234.8 / validity.lower 230 → at 234 the stop is blown but the
+  setup still reads live.* A range **tighter** than the stop is fine and deliberately unflagged: it
+  warns earlier, and the stop is a real broker order that still fires.
 - **Close line** is an ordering fix: the reconciler flips a setup to `closed`, dropping it out of the
   polled statuses before Talos sees it. Recording the exit is small; *explaining* it needs the
   in-position brain.
