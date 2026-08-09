@@ -585,6 +585,24 @@ export function rangeProblems(setup) {
 const _edge = (z, isLong) => (isLong ? z?.lower : z?.upper)
 
 /**
+ * The size of ONE entry leg — the armed zone's own quantity, or null when it carries none. Pure.
+ *
+ * Execution projects a scenario's whole size onto the flat `quantity` field (projectScenario), which
+ * is right while a premise has one leg and wrong the moment it has two: the first zone to print
+ * would place the size of BOTH, so the position would be fully on with only half the plan
+ * confirmed. That is the readiness block's reasoning, and this is what has to exist before it can
+ * be lifted.
+ *
+ * A no-op today. With a single entry zone, `scenarioQuantity` IS that zone's quantity, so the leg
+ * and the scenario agree and nothing changes — which is what makes this safe to land on its own.
+ */
+export function legQuantity(scenario, zoneId) {
+    const zone = (scenario?.entry_zones ?? []).find(z => z?.id === zoneId)
+    const q    = Number(zone?.quantity)
+    return Number.isFinite(q) && q > 0 ? q : null
+}
+
+/**
  * One entry LEG, folded into the running position. Pure.
  *
  * Scaling in means a position is built from several fills at different prices, so `entry` stops

@@ -5,7 +5,7 @@ import {
     normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
-    stopEdge, targetEdges, addEntryLeg,
+    stopEdge, targetEdges, addEntryLeg, legQuantity,
 } from '../../services/setup.schema.js'
 
 // The `setup` entity contract (docs/desks/mentor-talos.md). Mentor authors loosely, Talos monitors
@@ -705,4 +705,37 @@ test('a leg with size but no price anywhere leaves the price unknown, not zero',
 test('the average is rounded, so a third of a cent never reaches a card', () => {
     const e = addEntryLeg(addEntryLeg(null, { price: 10, quantity: 1 }), { price: 11, quantity: 2 })
     assert.equal(e.fill_price, 10.666667)
+})
+
+// ─── Per-leg sizing ───────────────────────────────────────────────────────────
+// Execution projects a scenario's WHOLE size onto the flat quantity field. Right for one leg,
+// wrong for two: the first zone to print would place the size of both, putting the position fully
+// on with half the plan confirmed — and sizing the protective orders to match.
+
+test('a leg is sized by its own zone', () => {
+    const sc = { entry_zones: [{ id: 'ez1', quantity: 60 }, { id: 'ez2', quantity: 40 }] }
+    assert.equal(legQuantity(sc, 'ez1'), 60)
+    assert.equal(legQuantity(sc, 'ez2'), 40)
+})
+
+test('with ONE entry zone the leg and the premise agree — which is why this is inert today', () => {
+    // scenarioQuantity of a single zone IS that zone's quantity, so nothing changes until a
+    // premise actually has two legs.
+    const sc = { entry_zones: [{ id: 'ez1', quantity: 100 }] }
+    assert.equal(legQuantity(sc, 'ez1'), scenarioQuantity(sc.entry_zones))
+})
+
+test('an unsized or unknown zone yields null, so the caller falls back to the premise total', () => {
+    // Never 0 — a zero would place nothing and read as a successful entry.
+    assert.equal(legQuantity({ entry_zones: [{ id: 'ez1' }] }, 'ez1'), null)
+    assert.equal(legQuantity({ entry_zones: [{ id: 'ez1', quantity: 0 }] }, 'ez1'), null)
+    assert.equal(legQuantity({ entry_zones: [{ id: 'ez1', quantity: 10 }] }, 'nope'), null)
+    assert.equal(legQuantity(null, 'ez1'), null)
+})
+
+test('legs never sum across a premise at execution time', () => {
+    // The safety property, from the other side: two legs of 60 and 40 must place 60, not 100.
+    const sc = { entry_zones: [{ id: 'ez1', quantity: 60 }, { id: 'ez2', quantity: 40 }] }
+    assert.equal(scenarioQuantity(sc.entry_zones), 100, 'the premise is 100 in total')
+    assert.notEqual(legQuantity(sc, 'ez1'), 100, 'but the first print is not')
 })

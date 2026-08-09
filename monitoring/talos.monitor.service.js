@@ -13,7 +13,7 @@ import {
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, MANAGEMENT_VERDICTS } from './talos.assess.js'
-import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetEdges, addEntryLeg } from '../services/setup.schema.js'
+import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetEdges, addEntryLeg, legQuantity } from '../services/setup.schema.js'
 import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage } from '../services/tradeNotify.service.js'
 
 // Talos — the guardian of the `setup` kind (docs/desks/mentor-talos.md).
@@ -218,7 +218,9 @@ async function _checkPosition(setup, nowMs, deps) {
     const entry = addEntryLeg(ps.entry, {
         zone_id:  setup.armed_zone_id ?? null,
         price:    fillPrice,
-        quantity: setup.quantity ?? null,
+        // The LEG's size, matching what execution actually placed. `setup.quantity` is the armed
+        // premise's total and stands in only for a zone that carries no size of its own.
+        quantity: toNum(_zoneById(setup, setup.armed_zone_id)?.quantity) ?? setup.quantity ?? null,
         at:       new Date(fillAtMs).toISOString(),
     })
 
@@ -535,7 +537,15 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         // plan, protectionPlan's exit legs, the reconciler, the trades ledger — so execution never
         // learns that scenarios exist. The rivals are simply no longer projected: nothing sums.
         const projection = projectScenario(setup, scenario?.id ?? null)
-        const executable = { ...setup, ...projection }
+        // PER LEG, not per premise. The projection carries the scenario's WHOLE size; what prints
+        // here is one zone. With a single entry zone the two are the same number, which is why this
+        // is inert today — but the moment a premise has two legs, projecting the sum would put the
+        // position fully on with only half the plan confirmed, and size the protective orders to
+        // match. The scenario total remains the fallback for a zone that carries no size of its own.
+        const executable = {
+            ...setup, ...projection,
+            quantity: legQuantity(scenario, zone.id) ?? projection.quantity,
+        }
         const patch = {
             ...base, ...projection,
             status: _nextStatus(raw.verdict, reason),
