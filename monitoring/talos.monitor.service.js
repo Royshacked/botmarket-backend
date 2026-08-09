@@ -27,11 +27,12 @@ import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage } f
 // Shares NO mutable state with Minos (legacy tree-ideas) or Hermes (calls). It polls kind:'setup'
 // exclusively, so the three monitors can never contend for the same document.
 //
-// SCOPE. Readiness is the whole brain here. Past entry the loop still runs (_checkPosition) but only
-// to keep the journal honest through the fill — the position itself is protected by the stop/tp
-// orders RESTING AT THE BROKER, built from the setup's zones by protectionPlan.routeSetupZones.
-// In-position management (re-reading the thesis, scaling, moving stops) is not built and is not
-// pretended: see docs/desks/mentor-talos.md.
+// SCOPE. Two brains, one loop. Pre-entry it is readiness (is this the moment). Past entry it is
+// management (_managePosition — does the reason for this trade still hold), on the same shape: a
+// free arithmetic gate decides whether a model call is worth paying for, and the read only runs when
+// it is. The position is protected either way by the stop/tp orders RESTING AT THE BROKER, built
+// from the setup's zones by protectionPlan.routeSetupZones — management proposes, it never protects.
+// Talos still never executes: every verdict is a card the user confirms.
 
 const LOG        = '[talos.monitor]'
 const COLLECTION = ENTITIES
@@ -174,10 +175,9 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
  *   long/short    the first wake after the fill writes the fill line and stamps position_state, so
  *                 the timeline reads through the entry. After that it parks on the lazy cadence.
  *
- * NOT HERE, and not pretended: no stop/tp management, no scaling, no re-reads. And no CLOSE line —
- * the reconciler flips a closed setup to 'closed', which drops it out of the polled statuses before
- * this ever sees it, so the exit is recorded by the trades ledger and not by the journal. Both want
- * the in-position brain (docs/desks/mentor-talos.md, deferred).
+ * The CLOSE line is not written here either, and cannot be: the reconciler flips a closed setup to
+ * 'closed', which drops it out of the polled statuses before this ever sees it. It rides the same
+ * guarded write as the status flip instead (entityRepo.finalizeClose).
  */
 async function _checkPosition(setup, nowMs, deps) {
     const ps     = setup.position_state ?? {}

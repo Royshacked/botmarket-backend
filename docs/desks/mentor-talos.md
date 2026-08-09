@@ -120,8 +120,13 @@ own.
 
 ## Open
 
-- **In-position management** — re-reading the thesis, scaling, moving stops. Not built, and not
-  pretended.
+- ~~**In-position management**~~ **BUILT 2026-08-09.** `_managePosition`: metrics → cheap gate
+  (`adverse` │ `scale_out` │ `breakeven`) → an in-position read only when the gate trips or a review
+  is due → card. Verdicts `hold` │ `let_run` │ `take_partial` │ `move_stop` │ `exit_now`; partial
+  sizes are `third` │ `half` │ `two_thirds` **of the original position**, so they terminate. The
+  read re-checks the setup's own declared conditions rather than a fixed axis set — the conditions
+  were the reason for the trade, so they are the reason to stay in it.
+  See [trade-pipeline.md](./trade-pipeline.md) for the cascade and the Hermes-duplication expiry.
 - **The CLOSE journal line.** The reconciler flips a closed setup to `closed`, which drops it out of
   the polled statuses before Talos sees it — so the exit is recorded by the trades ledger and never
   by the journal. Same root as the above: both want an in-position brain.

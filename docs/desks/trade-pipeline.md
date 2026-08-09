@@ -243,11 +243,37 @@ If Hermes ever gains a Tier 2, it must be the *same* triage service, not a copy.
 | item | state | size |
 |---|---|---|
 | ~~stop/validity coherence~~ | **already built** — `rangeProblems` | — |
-| close journal line | exit never journalled | **S** |
-| in-position management | heartbeat only | **L** |
+| ~~close journal line~~ | **BUILT 2026-08-09** — `entityRepo.finalizeClose` | — |
+| ~~in-position management~~ | **BUILT 2026-08-09** — see below | — |
 | scaling in | blocked at readiness | **M** |
 
-Order: **close line → in-position → scaling in.**
+Order: **~~close line~~ → ~~in-position~~ → scaling in.**
+
+### In-position management, as built
+
+`_managePosition` in `talos.monitor.service.js`: metrics (always) → cheap gate → assess only if the
+gate tripped or a review is due → persist, and post a card when the verdict asks for something.
+
+Gate flags: `adverse` (price within a quarter of the original risk of the working stop — the look
+*before* the stop, while there is still a decision), `scale_out` (an un-hit target reached), and
+`breakeven` (≥ +1R with the stop not yet protected past entry).
+
+Verdicts, aligned on Hermes's built vocabulary rather than the names sketched above:
+`hold` · `let_run` · `take_partial` · `move_stop` · `exit_now`. **`take_partial` uses the doc's
+enum — `third │ half │ two_thirds` of the ORIGINAL size** — so partials terminate.
+
+**Tier 2 was not built.** Hermes solves the ungated questions with a periodic full review
+(`reviewDue`, one cadence since the last read) rather than a cheap triage call, and that shape is
+adopted here. Cheaper to build, more expensive to run; revisit only with a measured cadence cost,
+not a guess.
+
+**The duplication is deliberate and time-boxed.** `positionGate` / `computeMetrics` / `rMultiple` /
+`reviewDue` are copied from Hermes rather than extracted, because Hermes is silent but still holds
+live positions and refactoring it would touch running money for a caller scheduled for retirement.
+**Delete the copy when Hermes sleeps** — the block carries the same note. Three things differ and
+are the reason a blind copy would have been wrong: cadence is `{min,max}` not `{min_gap_min,…}`;
+targets are zones reduced to their near edge, so `scale_out` fires at-or-beyond; and the stop is the
+widest edge across `stop_zones`, chosen by price.
 
 - **Coherence is done.** `rangeProblems` (`setup.schema.js`) checks it per scenario and blocks
   Generate through `setupReadiness().problems`. The `mentor-talos.md` Open list saying otherwise
