@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { journalEntry, withJournal, zonesLabel, failNote, verdictFallbackNote } from '../../monitoring/monitorJournal.js'
+import { journalEntry, withJournal, zonesLabel, failNote, verdictFallbackNote, readReason } from '../../monitoring/monitorJournal.js'
 
 // The shared monitor journal. Hermes's copy of this is pinned by hermesMonitor.test.js (the prose
 // must not drift for calls); these tests pin that the SAME builder is kind-agnostic, because the
@@ -36,7 +36,7 @@ test('scheduled: one zone → singular "zone", and an unparseable next check dro
 })
 
 test('closed / pre_active: named by the entity, and pre_active says which KIND when there is no asset', () => {
-    const closed = journalEntry('closed', { nowMs: NOW, entity: setup(), nextAt: null })
+    const closed = journalEntry('market_closed', { nowMs: NOW, entity: setup(), nextAt: null })
     assert.match(closed.note, /Market's closed for AER/)
     assert.equal(closed.price, null)
 
@@ -97,7 +97,7 @@ test('zonesLabel: joins bands, flags multi, and survives a zoneless entity', () 
 })
 
 test('withJournal: appends under the cap, and a wake with no entry writes no $push', () => {
-    const entry = journalEntry('closed', { nowMs: NOW, entity: setup() })
+    const entry = journalEntry('market_closed', { nowMs: NOW, entity: setup() })
     const u = withJournal({ status: 'looking' }, entry, 50)
     assert.deepEqual(u.$set, { status: 'looking' })
     assert.deepEqual(u.$push['monitor_state.timeline'], { $each: [entry], $slice: -50 })
@@ -112,4 +112,50 @@ test('a runaway read is described honestly, not as a broken reply', () => {
     assert.match(note, /kept digging/)
     assert.notEqual(note, failNote('read', 'NVDA', 'io'))
     assert.notEqual(note, failNote('read', 'NVDA', 'malformed'))
+})
+
+// ─── exit vs market_closed: two opposite events that used to share a word ──────
+// `closed` meant "the MARKET is shut, I'm holding off", and read to every human as "the POSITION
+// closed". The ambiguity survived long enough to mislead a reader of the docs, so the market one is
+// now spelled out and `exit` is the position one.
+
+test('exit says what happened, and does not promise a next check', () => {
+    // It is the LAST line on the timeline. A next_check_at would advertise a wake that never comes.
+    const e = journalEntry('exit', {
+        nowMs: NOW, entity: setup(), price: 151.45, closedReason: 'stop', pnl: -212.5,
+    })
+    assert.equal(e.reason, 'exit')
+    assert.equal(e.price, 151.45)
+    assert.equal(e.next_check_at, null)
+    assert.match(e.note, /AER/)
+    assert.match(e.note, /151\.45/)
+    assert.match(e.note, /stop hit/, 'the closedReason is spoken, not echoed as a slug')
+    assert.match(e.note, /-212\.5/, 'the number the user actually wants')
+})
+
+test('exit degrades rather than printing holes', () => {
+    // The reconciler can close without a price or a pnl (a broker close with no fill detail).
+    const e = journalEntry('exit', { nowMs: NOW, entity: setup(), closedReason: 'manual' })
+    assert.equal(e.price, null)
+    assert.doesNotMatch(e.note, /null|undefined|NaN/)
+    assert.match(e.note, /closed by hand/)
+})
+
+test('an unknown closedReason is still reported, not swallowed', () => {
+    const e = journalEntry('exit', { nowMs: NOW, entity: setup(), closedReason: 'liquidation' })
+    assert.match(e.note, /liquidation/)
+})
+
+test('market_closed keeps the holding sentence, under its new name', () => {
+    const e = journalEntry('market_closed', { nowMs: NOW, entity: setup(), nextAt: null })
+    assert.equal(e.reason, 'market_closed')
+    assert.match(e.note, /Market's closed for AER/)
+})
+
+test('journals written before the rename still read as the market being shut', () => {
+    // Read-side only. Old entries age out of the cap on their own; until they do they must not
+    // suddenly render as a position close, which is the opposite event.
+    assert.equal(readReason('closed'), 'market_closed')
+    assert.equal(readReason('exit'), 'exit', 'anything current passes through untouched')
+    assert.equal(readReason('zone_trip'), 'zone_trip')
 })

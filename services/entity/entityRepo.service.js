@@ -12,6 +12,8 @@
 // Lookups return RAW docs (no stripId) because the reconciler operates on raw docs today.
 
 import { getDb } from '../../providers/mongodb.provider.js'
+// The journal path and its cap live in ONE place, so a caller cannot half-write the timeline.
+import { withJournal } from '../../monitoring/monitorJournal.js'
 import { LIVE_POSITION } from './vocabulary.js'
 import { ENTITIES } from './entityCollection.js'
 
@@ -179,12 +181,19 @@ export function makeEntityRepo({ coll = _defaultColl } = {}) {
         /**
          * Flip to closed only if still active (so a concurrent close wins once). Returns the updated
          * doc, or null when someone else closed it first.
+         *
+         * `entry` appends the monitor-journal line for the close in the SAME guarded write. The
+         * guard is what makes it exactly-once — a losing concurrent close matches nothing and
+         * therefore writes no line either, with no latch to maintain. Written here rather than in a
+         * monitor because a closed entity drops out of every polled status before its monitor sees
+         * it, which is why the exit was never journalled; and because this is kind-blind, one
+         * implementation covers calls and setups alike.
          */
-        async finalizeClose(id, patch) {
+        async finalizeClose(id, patch, entry = null) {
             const c = await coll()
             return c.findOneAndUpdate(
                 { id, status: { $in: ACTIVE_STATUSES } },
-                { $set: patch },
+                withJournal(patch, entry),
                 { returnDocument: 'after' },
             )
         },

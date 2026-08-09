@@ -16,12 +16,31 @@
 //
 //   { at, reason, price, verdict, note, next_check_at, zone_id?, fetched?, axes?, failed?, fail_reason? }
 //
-// `reason` ∈ pre_active | closed | scheduled | momentum_pulse | zone_trip | expiry_review
+// `reason` ∈ pre_active | market_closed | scheduled | momentum_pulse | zone_trip | expiry_review
+//            | entry | exit
+//
+// NAMING, and why `market_closed` is spelled out. This value used to be `closed`, which read as "the
+// POSITION closed" to everyone who met it — while it actually means "the MARKET is shut, I'm holding
+// off". The two are opposite events on the same timeline, and the ambiguity survived long enough to
+// mislead a reader of the docs. `exit` is now the position-closed line; `market_closed` is the
+// market one. `LEGACY_REASON` below keeps already-persisted entries readable.
 
 import { toNum } from '../services/format.util.js'
 
 /** Default cap. A monitor whose journal spans more eras (Hermes) passes its own. */
 export const JOURNAL_MAX = 50
+
+/**
+ * Read-side only: entries written before the rename carry `closed` and meant the MARKET was shut.
+ * Applied when rendering a stored timeline so old lines keep their meaning; never write through it.
+ * Entries age out of the cap on their own, so this can be deleted once no live journal predates it.
+ */
+const LEGACY_REASON = { closed: 'market_closed' }
+
+/** Normalise a stored entry's `reason` for display. Pure. */
+export function readReason(reason) {
+    return LEGACY_REASON[reason] ?? reason
+}
 
 function _fmt(n) { return Number.isFinite(Number(n)) ? String(Number(n)) : '?' }
 
@@ -85,14 +104,24 @@ export function journalEntry(reason, {
     nowMs, entity = null, price = null, zone = null, nextAt = null,
     raw = null, note = null, axes = null, fetched = null,
     verb = 'read', failed = false, failReason = null,
+    closedReason = null, pnl = null,
 } = {}) {
     const at   = new Date(nowMs).toISOString()
     const noun = entity?.kind ?? 'call'
 
-    if (reason === 'closed') {
+    if (reason === 'market_closed') {
         return { at, reason, price: null, verdict: null,
             note: `Market's closed for ${entity?.asset ?? 'this asset'} — holding. I'll look again at the open.`,
             next_check_at: nextAt }
+    }
+    // The position is flat. The LAST line on the timeline, so it says what happened rather than what
+    // happens next: no `next_check_at`, because there is no next check.
+    if (reason === 'exit') {
+        const why = { stop: 'stop hit', target: 'target hit', manual: 'closed by hand' }[closedReason] ?? closedReason
+        return { at, reason, price: toNum(price), verdict: null,
+            note: `Out of ${entity?.asset ?? 'the position'}${price != null ? ` at ${_fmt(price)}` : ''}`
+                + `${why ? ` — ${why}` : ''}${pnl != null ? `. Realised ${_fmt(pnl)}.` : '.'}`,
+            next_check_at: null }
     }
     if (reason === 'pre_active') {
         return { at, reason, price: null, verdict: null,

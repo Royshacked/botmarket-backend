@@ -107,9 +107,9 @@ export async function _checkCall(db, call, nowMs, deps = _deps) {
         const patch  = _scheduledPatch(call, nowMs)
         const openMs = deps.nextOpenMs?.(call.asset, call.asset_class)
         if (Number.isFinite(openMs) && openMs > nowMs) patch['monitor_state.next_check_at'] = new Date(openMs).toISOString()
-        const entry = _timelineEntry('closed', { nowMs, call, nextAt: patch['monitor_state.next_check_at'] })
+        const entry = _timelineEntry('market_closed', { nowMs, call, nextAt: patch['monitor_state.next_check_at'] })
         await _persist(db, call.id, patch, entry)
-        return { reason: 'closed' }
+        return { reason: 'market_closed' }
     }
 
     const price  = await deps.getPrice(call)

@@ -605,7 +605,7 @@ test('checkCall: market CLOSED + not expiring → skipped (no price, no assess),
         isAssetOpen: () => false,   // market shut for this asset
     }
     const out = await _checkCall(db, call(), NOW, deps)
-    assert.equal(out.reason, 'closed')
+    assert.equal(out.reason, 'market_closed')
     assert.equal(priced, false)
     assert.equal(assessed, false)
     assert.equal(db.updates[0].set['monitor_state.next_check_at'], new Date(NOW + 60 * 60_000).toISOString())
@@ -624,7 +624,7 @@ test('checkCall: market CLOSED sleeps until the next open', async () => {
     const openMs = NOW + 3 * 3600_000
     const deps = { getPrice: async () => 248, assess: async () => ({}), onCard: async () => {}, isAssetOpen: () => false, nextOpenMs: () => openMs }
     const out = await _checkCall(db, call({ status: 'looking' }), NOW, deps)
-    assert.equal(out.reason, 'closed')
+    assert.equal(out.reason, 'market_closed')
     assert.equal(db.updates[0].set['monitor_state.next_check_at'], new Date(openMs).toISOString())  // sleeps to the open
 })
 
@@ -651,8 +651,8 @@ test('zonesLabel: joins bands and flags multi', () => {
 })
 
 test('timelineEntry: closed wake → holding note, no price, deterministic at', () => {
-    const e = _timelineEntry('closed', { nowMs: NOW, call: call(), nextAt: new Date(NOW + 3600_000).toISOString() })
-    assert.equal(e.reason, 'closed')
+    const e = _timelineEntry('market_closed', { nowMs: NOW, call: call(), nextAt: new Date(NOW + 3600_000).toISOString() })
+    assert.equal(e.reason, 'market_closed')
     assert.equal(e.price, null)
     assert.equal(e.verdict, null)
     assert.equal(e.at, new Date(NOW).toISOString())
@@ -722,7 +722,7 @@ test('checkCall: closed wake appends a holding entry', async () => {
     const db = fakeDb()
     const deps = { getPrice: async () => 248, assess: async () => ({}), onCard: async () => {}, isAssetOpen: () => false, nextOpenMs: () => NOW + 3600_000 }
     await _checkCall(db, call(), NOW, deps)
-    assert.equal(pushedEntry(db.updates[0]).reason, 'closed')
+    assert.equal(pushedEntry(db.updates[0]).reason, 'market_closed')
 })
 
 // ── _withTimeout: a hung check can't wedge the loop ────────────────────────

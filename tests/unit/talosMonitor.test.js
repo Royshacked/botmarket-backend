@@ -525,7 +525,7 @@ test('a closed market skips the price fetch AND the assessment entirely', async 
         getPrice:    async () => { fetched = true; return 238 },
         assess:      async () => { assessed = true; return {} },
     }))
-    assert.equal(res.reason, 'closed')
+    assert.equal(res.reason, 'market_closed')
     assert.equal(fetched, false, 'a shut market must cost nothing')
     assert.equal(assessed, false)
 })

@@ -43,6 +43,7 @@ import { tradeCaptureService } from '../services/tradeCapture.service.js'
 import { round, remainingForAccount } from './monitorUtils.js'
 import { buildExitOrder, exitOrderRecord } from './exitOrders.util.js'
 import { entityRepo }    from '../services/entity/entityRepo.service.js'
+import { journalEntry }  from './monitorJournal.js'
 
 const LOG        = '[execution.reconciler]'
 const EPS        = 1e-6   // quantity comparison slack
@@ -383,10 +384,16 @@ function _brokerFor(idea, accountId) {
  * full-close event path and the broker-confirmed full close detected from a reduce.
  */
 async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId, price, commission, spread }) {
-    const patch = { status: 'closed', closedReason: reason, closedAt: at ?? Date.now() }
+    const closedAt = at ?? Date.now()
+    const patch = { status: 'closed', closedReason: reason, closedAt }
     if (pnl != null) patch.realizedPnl = pnl
 
-    const result = await _deps.entityRepo.finalizeClose(idea.id, patch)
+    // The exit line. It rides the same guarded write as the status flip, so the close that wins is
+    // the close that journals — and a closed entity is out of every polled status before its monitor
+    // wakes, which is why this cannot be left to Hermes or Talos.
+    const entry = journalEntry('exit', { nowMs: closedAt, entity: idea, price, closedReason: reason, pnl })
+
+    const result = await _deps.entityRepo.finalizeClose(idea.id, patch, entry)
     if (!result) return false   // someone else closed it first
     logger.info(LOG, `Idea ${result.id} closed by broker (reason=${reason}, pnl=${patch.realizedPnl ?? '·'})`)
 

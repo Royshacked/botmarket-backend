@@ -118,8 +118,8 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
         const patch = _reschedule(setup, nowMs, null)
         const openMs = deps.nextOpenMs(setup.asset, setup.asset_class)
         if (Number.isFinite(openMs) && openMs > nowMs) patch['monitor_state.next_check_at'] = new Date(openMs).toISOString()
-        await deps.persist(setup.id, patch, _entry('closed', { setup, nowMs, nextAt: patch['monitor_state.next_check_at'] }))
-        return { reason: 'closed' }
+        await deps.persist(setup.id, patch, _entry('market_closed', { setup, nowMs, nextAt: patch['monitor_state.next_check_at'] }))
+        return { reason: 'market_closed' }
     }
 
     const price = await deps.getPrice(setup)
