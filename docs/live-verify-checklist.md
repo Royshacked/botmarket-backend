@@ -256,3 +256,60 @@ re-worded.
   real look.
 - [ ] **Ten confirms, one brief** — have two users confirm at once on a cold cache and check the log:
   exactly ONE `brief built` line. The single-flight is unit-tested, but not against real latency.
+
+---
+
+# Talos in-position management + the trades ledger (2026-08-09)
+
+Everything below shipped today with unit coverage and **has never run against a real filled
+position**. That matters more here than usual for two reasons: `take_partial` produces a card that
+places a real order at a broker, and the gate was written by two agents working in parallel — my
+`position_state` seeding and their `positionGate` only meet at runtime, never in a test.
+
+Commits: `ef1f6ba` · `b26e777` (in-position) · `f6bd284` (exit journal) · `97f70dd` (partial ledger).
+
+### G1 — the gate sees what the fill wrote `[BLOCKED — needs a real fill]`
+
+- [ ] **A fill seeds the stop and the ladder.** After a real entry, read `position_state`: `stop.initial`
+  and `stop.current` both equal the WIDEST stop edge of the armed scenario, and `targets[]` is
+  nearest-first with `hit_at: null`. Unseeded, `positionGate` reads undefined and simply never trips —
+  the symptom is "the manager does nothing", which looks like an LLM problem and is not one.
+- [ ] **A short seeds the opposite edges.** Same check on a short: stop from the band's HIGH side,
+  targets descending. Three direction-dependent comparisons live in the gate and a sign error in any
+  one turns a losing short into "target reached".
+- [ ] **`breakeven` fires once and then stops.** Take a position to +1R with the stop still behind
+  entry: expect one `breakeven` wake, then silence after the stop is moved. A gate that re-fires
+  every wake is an LLM call per poll per position — the cost that scales with users.
+- [ ] **A quiet position costs nothing.** Watch several wakes on a position sitting mid-range:
+  `in_position_idle`, no journal line, no model call, metrics still moving.
+
+### G2 — the partial actually reaches the ledger `[BLOCKED — needs a real fill]`
+
+This is the one to do first. It is the whole path `97f70dd` exists for, and every partial taken
+before it is verified is an unrecoverable row in a frozen ledger.
+
+- [ ] **A `take_partial` card → confirm → order → slice recorded.** After the fill, the trade doc has
+  an `exits[]` entry with the right qty and pnl, and `exit.realizedPnl` equals the RUNNING TOTAL, not
+  the slice.
+- [ ] **The eventual full close ADDS to the total rather than replacing it.** `captureClose` writes
+  `exit` field-by-field precisely so it cannot wipe the accrued partial — a wholesale `$set` was the
+  original bug and it would look identical until you scaled out twice.
+- [ ] **`/api/trades/stats` reflects the total.** A scaled winner must not score as its final slice.
+- [ ] **A duplicated `position.reduced` writes ONE slice.** The guard is `markExitOrderFilled`'s
+  return plus the `orderId` clause; both are unit-tested and neither has met a real duplicate event.
+
+### G3 — `exec.pnl` per adapter `[ANY — paper is runnable now]`
+
+- [ ] **Paper.** Scale out of a paper position and confirm the slice carries a `realizedPnl`. If the
+  paper adapter omits pnl on a reduce, slices land `null` and the running total silently under-counts —
+  the same class of bug as the one just fixed, one layer down. **cTrader is confirmed** (it populates
+  price/quantity/pnl/commission on `position.reduced`); paper and manual are not.
+- [ ] **Manual.** Same, via the manual-fill confirm path.
+
+### G4 — the exit journal line `[BLOCKED — needs a real close]`
+
+- [ ] **A broker close writes one `exit` line**, with price, reason and realized P&L, and no
+  `next_check_at` (there is no next check). It is written in `entityRepo.finalizeClose`, so verify it
+  on a CALL too — the fix is kind-blind and Hermes gets it for free, which is untested.
+- [ ] **The FE renders it as "closed out"**, and a pre-rename journal still renders "market closed"
+  rather than the raw `closed` slug.
