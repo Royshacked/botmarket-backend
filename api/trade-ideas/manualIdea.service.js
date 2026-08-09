@@ -155,8 +155,18 @@ export async function confirmManualExit(id, { price, quantity } = {}, userId) {
                 quantity: remaining, brokerOrders,
                 pendingTrimQty: null, pendingCloseReason: null,   // consumed
             })
-            // A partial trim intentionally does NOT captureClose — that would finalize the trade in the
-            // analytics ledger. The FINAL close captures it (a known scaled-out-P&L ledger limitation).
+            // The trim IS recorded now. It used to be skipped because captureClose was the only
+            // writer available and it finalizes the trade — so a scaled-out manual position reached
+            // the ledger carrying only its final slice's P&L, which the comment here called a known
+            // limitation. capturePartial records a slice without closing anything, so the limitation
+            // is gone and the exception with it.
+            //
+            // No orderId: a manual trim is a user-confirmed one-shot, not a broker event that can
+            // arrive twice, so there is no duplicate to guard against and nothing to key one on.
+            await tradeCaptureService.capturePartial({
+                accountId: link.accountId, positionId: link.positionId,
+                price: px, quantity: reqQty, reason, pnl: res?.pnl, at: Date.now(),
+            })
             logger.info(LOG, `Manual trim confirmed for ${id}: closed ${reqQty} @ ${px}, ${remaining} left (pnl ${res?.pnl})`)
             return { ok: true, partial: true, remainingQty: remaining, idea: stripId(updated) }
         }

@@ -300,11 +300,18 @@ before it is verified is an unrecoverable row in a frozen ledger.
 
 ### G3 — `exec.pnl` per adapter `[ANY — paper is runnable now]`
 
-- [ ] **Paper.** Scale out of a paper position and confirm the slice carries a `realizedPnl`. If the
-  paper adapter omits pnl on a reduce, slices land `null` and the running total silently under-counts —
-  the same class of bug as the one just fixed, one layer down. **cTrader is confirmed** (it populates
-  price/quantity/pnl/commission on `position.reduced`); paper and manual are not.
-- [ ] **Manual.** Same, via the manual-fill confirm path.
+- [x] **Paper — VERIFIED 2026-08-09 by inspection.** `reducePosition` emits `position.reduced` with
+  `quantity`, `price`, `pnl`, `commission` and `spread` — everything `capturePartial` needs. A
+  partial keeps the position open and emits; a full reduction closes it instead. Nothing to fix.
+- [x] **Manual — GAP FOUND AND FIXED 2026-08-09.** It was not a missing `pnl`: a manual trim emitted
+  no execution event at all (`manualExecution` is deliberately no-emit) and its caller SKIPPED the
+  ledger on purpose, with a comment naming the reason — captureClose was the only writer available
+  and it would have finalised the trade, so a scaled-out manual position reached the ledger carrying
+  only its final slice. `capturePartial` removed that constraint, so `manualIdea.confirmManualExit`
+  now records the trim. Still worth a live pass to confirm the row lands.
+- [ ] **Manual, live.** Trim a manual position through the confirm path and check `exits[]` gains a
+  slice and `exit.realizedPnl` accrues. No `orderId` on this path — a manual trim is a user-confirmed
+  one-shot rather than a broker event that can arrive twice, so it carries no duplicate guard.
 
 ### G4 — the exit journal line `[BLOCKED — needs a real close]`
 
