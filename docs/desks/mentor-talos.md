@@ -127,9 +127,11 @@ own.
   read re-checks the setup's own declared conditions rather than a fixed axis set — the conditions
   were the reason for the trade, so they are the reason to stay in it.
   See [trade-pipeline.md](./trade-pipeline.md) for the cascade and the Hermes-duplication expiry.
-- **The CLOSE journal line.** The reconciler flips a closed setup to `closed`, which drops it out of
-  the polled statuses before Talos sees it — so the exit is recorded by the trades ledger and never
-  by the journal. Same root as the above: both want an in-position brain.
+- ~~**The CLOSE journal line.**~~ **BUILT 2026-08-09.** Written in `entityRepo.finalizeClose`, not
+  in a monitor: a closed entity drops out of every polled status before its monitor wakes, and the
+  guarded `findOneAndUpdate` there is already the exactly-once property. Kind-blind, so calls got
+  the same fix. The journal reason is `exit`; `closed` was renamed `market_closed`, because it
+  meant the MARKET was shut and read as the POSITION closing.
 - **Scaling in** — several entries inside one scenario is modelled (`scenarioQuantity` sums them)
   but readiness blocks it until the flow is specified.
 - ~~**Stop/validity coherence is unchecked.**~~ **DONE** — `rangeProblems` (`setup.schema.js`)

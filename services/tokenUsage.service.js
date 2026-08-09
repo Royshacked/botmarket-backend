@@ -1,4 +1,5 @@
 import { getDb } from '../providers/mongodb.provider.js'
+import { COLLECTION as USERS } from '../api/user/user.model.js'
 import { config } from './config.js'
 
 const TOKEN_BUDGET_USD = config.tokenBudgetUsd
@@ -100,19 +101,59 @@ export async function recordUsage(userId, model, usage, agent) {
  * anthropic.provider `_stampHistoryCache`) and is re-sent, uncached, on each following round.
  */
 export async function recordTurn(userId, agent) {
-    if (!userId) return
+    if (!userId) return null
     const db   = await getDb()
     const key  = monthKey()
     const aKey = _fieldKey(agent)
 
-    await db.collection(COLLECTION).updateOne(
+    // Returns the post-increment doc so the caller gets this month's spend from the write it was
+    // making anyway — the degrade check costs no extra round trip.
+    const doc = await db.collection(COLLECTION).findOneAndUpdate(
         { userId, month: key },
         {
             $inc:         { [`byAgent.${aKey}.userTurns`]: 1 },
             $setOnInsert: { userId, month: key },
         },
-        { upsert: true }
+        { upsert: true, returnDocument: 'after' }
     )
+    return doc ?? null
+}
+
+/**
+ * This user's ceiling, read from their account. One small indexed lookup per turn; a TTL cache
+ * would be the obvious optimisation if it ever shows up in a profile, but a ceiling that changes
+ * rarely and is read cheaply is not worth stale reads yet.
+ */
+export async function userCeiling(userId) {
+    const db   = await getDb()
+    const user = await db.collection(USERS).findOne(
+        { id: userId }, { projection: { budgetUsd: 1, exemptFromBudget: 1, _id: 0 } })
+    return ceilingFor(user)
+}
+
+/**
+ * The spend ceiling for one user, USD, or `null` for no ceiling. Pure.
+ *
+ * `exemptFromBudget` is the escape hatch rather than `isAdmin`, which auth.middleware force-sets to
+ * false on every request by design — reading it here would mean silently re-enabling a flag that was
+ * deliberately switched off. Admin can map onto this whenever that decision is revisited.
+ */
+export function ceilingFor(user, configured = config.tokenDegradeUsd) {
+    if (user?.exemptFromBudget) return null
+    const own = Number(user?.budgetUsd)
+    if (Number.isFinite(own)) return own > 0 ? own : null
+    return configured
+}
+
+/**
+ * Has this user spent past their ceiling this month? Pure, so the policy is testable without a
+ * database and without a model.
+ *
+ * DEGRADE, NOT REFUSE: over the line the chat keeps working on the cheap model. A hard block reads
+ * as an outage, and the ceiling is a cost control, not a safety one.
+ */
+export function overCeiling(totalCost, ceiling) {
+    return ceiling != null && Number(totalCost ?? 0) >= ceiling
 }
 
 export async function getMonthlyUsage(userId, month = monthKey()) {

@@ -6,6 +6,8 @@
 import { streamAnthropicWithTools } from '../providers/anthropic.provider.js'
 
 export const DEFAULT_MODEL = 'claude-sonnet-4-6'
+/** Where a user past their spend ceiling is routed. Named here so it stays one of MODELS. */
+export const CHEAP_MODEL   = 'claude-haiku-4-5-20251001'
 
 const MODELS = {
     'claude-opus-5':            { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Opus 5' },

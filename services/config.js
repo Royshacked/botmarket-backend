@@ -106,8 +106,15 @@ export const config = {
     // ── LLM ──
     get anthropicApiKey() { return process.env.ANTHROPIC_API_KEY },
     get openaiApiKey()    { return process.env.OPENAI_API_KEY },        // transcription only
-    /** Soft monthly spend ceiling per user, USD — see tokenUsage.service. */
+    /** Monthly spend per user shown as a percentage in the profile, USD — see tokenUsage.service. */
     get tokenBudgetUsd()  { return _num('TOKEN_BUDGET_USD', 20) },
+    /**
+     * The spend at which a user's chat DEGRADES to the cheap model, USD. 0 or unset = no ceiling,
+     * which is the default ON PURPOSE: the display budget above is a placeholder nobody has ratified,
+     * and enforcing a number that was never chosen would quietly change every user's model. Separate
+     * key so turning enforcement on is a decision, not a side effect of the display default.
+     */
+    get tokenDegradeUsd() { const n = _num('TOKEN_DEGRADE_USD', 0); return n > 0 ? n : null },
 
     // ── market data providers ──
     get fmpApiKey()     { return process.env.FMP_API_KEY },
@@ -179,7 +186,7 @@ const REQUIRED = ['MONGODB_URI', 'JWT_SECRET']
 /** Every key the schema above claims — the basis for the unknown-key (typo) report. */
 export const KNOWN_KEYS = new Set([
     'MONGODB_URI', 'JWT_SECRET', 'PORT', 'NODE_ENV', 'CLIENT_URL',
-    'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'TOKEN_BUDGET_USD',
+    'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'TOKEN_BUDGET_USD', 'TOKEN_DEGRADE_USD',
     'FMP_API_KEY', 'MASSIVE_API_KEY', 'FINNHUB_API_KEY', 'FRED_API_KEY', 'GNEWS_API_KEY',
     'CHART_IMG_API_KEY', 'SEC_USER_AGENT', 'USE_FMP_CANDLES', 'FMP_QUOTE_TTL_MS',
     'CANDLE_CACHE_INTRADAY_MS', 'CANDLE_CACHE_DAILY_MS', 'QUOTE_FEED_MAX_AGE_MS',

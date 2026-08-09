@@ -18,7 +18,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { agentKeyFromLog } from '../../services/agentIO.js'
-import { calcCost } from '../../services/tokenUsage.service.js'
+import { calcCost, ceilingFor, overCeiling } from '../../services/tokenUsage.service.js'
 import { resolveAgentStream } from '../../services/agentUtils.js'
 
 // ─── the log tag → field key ──────────────────────────────────────────────────
@@ -86,11 +86,12 @@ test('an unpriced model falls back rather than costing nothing', () => {
 // separate a wordy desk from a tool-heavy one — and those want opposite fixes. `userTurns` is the
 // denominator that makes the ratio readable, so what matters is that it counts turns and NOT rounds.
 
-test('a user turn is booked exactly once, however many tool rounds follow', () => {
+test('a user turn is booked exactly once, however many tool rounds follow', async () => {
     // The whole point of the second counter: if it ever rode along with onUsage it would equal
     // `turns`, the ratio would be a constant 1, and the measurement would silently say nothing.
     const calls = []
-    const { onUsage } = resolveAgentStream(undefined, 'u1', 'analystAgent', async (...a) => { calls.push(a) })
+    const { onUsage } = await resolveAgentStream(undefined, 'u1', 'analystAgent',
+        async (...a) => { calls.push(a); return null }, async () => null)
 
     onUsage?.({ input_tokens: 10 })   // tool round 1
     onUsage?.({ input_tokens: 10 })   // tool round 2
@@ -100,21 +101,27 @@ test('a user turn is booked exactly once, however many tool rounds follow', () =
     assert.deepEqual(calls[0], ['u1', 'analystAgent'])
 })
 
-test('an anonymous run books no turn', () => {
+test('an anonymous run books no turn, and is never degraded', async () => {
     // Headless/scheduled work (the coverage refresh, the market brief) has no reader. Booking a
-    // turn for it would inflate the denominator and make every desk look artificially efficient.
+    // turn for it would inflate the denominator and make every desk look artificially efficient —
+    // and there is no account whose ceiling it could be measured against.
     const calls = []
-    const { onUsage } = resolveAgentStream(undefined, null, 'analystAgent', async (...a) => { calls.push(a) })
+    const { onUsage, degraded } = await resolveAgentStream(undefined, null, 'analystAgent',
+        async (...a) => { calls.push(a); return null }, async () => 0.01)
+    assert.equal(degraded, false, 'no user, no ceiling, no degrade')
 
     assert.equal(calls.length, 0)
     assert.equal(onUsage, undefined, 'no userId means no usage recorder either — the two agree')
 })
 
-test('a failed turn write never reaches the caller', () => {
-    // Accounting is fire-and-forget on purpose: a Mongo hiccup must never take down a user's reply.
-    // An unhandled rejection here would surface as a crash far from this line.
-    assert.doesNotThrow(() =>
-        resolveAgentStream(undefined, 'u1', 'analystAgent', async () => { throw new Error('mongo down') }))
+test('a failed turn write never reaches the caller', async () => {
+    // Accounting is best-effort on purpose: a Mongo hiccup must never take down a user's reply, and
+    // an unreadable ceiling must read as "no ceiling" rather than as a degrade.
+    const out = await resolveAgentStream(undefined, 'u1', 'analystAgent',
+        async () => { throw new Error('mongo down') },
+        async () => { throw new Error('mongo down') })
+    assert.ok(out.streamFn, 'the turn still runs')
+    assert.equal(out.degraded, false, 'a failed read never degrades the user')
 })
 
 test('a usage payload missing the cache fields costs the same as explicit zeros', () => {
@@ -127,4 +134,71 @@ test('a usage payload missing the cache fields costs the same as explicit zeros'
     })
     assert.equal(bare, full)
     assert.ok(Number.isFinite(bare))
+})
+
+// ─── The spend ceiling ────────────────────────────────────────────────────────
+// DEGRADE, not refuse: past the line the chat keeps working on the cheap model. A hard block reads
+// as an outage, and this is a cost control rather than a safety one.
+
+test('no ceiling configured means no ceiling — the default, deliberately', () => {
+    // TOKEN_DEGRADE_USD is unset by default because the DISPLAY budget is a placeholder nobody
+    // ratified. Enforcing a number no one chose would quietly re-model every user.
+    assert.equal(ceilingFor({}, null), null)
+    assert.equal(overCeiling(9999, null), false, 'no ceiling can never be exceeded')
+})
+
+test("a user's own budget overrides the configured one, in both directions", () => {
+    assert.equal(ceilingFor({ budgetUsd: 100 }, 20), 100)
+    assert.equal(ceilingFor({ budgetUsd: 5 },  20), 5)
+})
+
+test('an exempt account has no ceiling, whatever else is set', () => {
+    // The escape hatch is a field on the account, NOT `isAdmin` — auth.middleware force-sets that
+    // to false on every request by design, so reading it would silently revive a disabled flag.
+    assert.equal(ceilingFor({ exemptFromBudget: true, budgetUsd: 5 }, 20), null)
+})
+
+test('a zero or junk override reads as unlimited, never as "blocked at $0"', () => {
+    // A 0 that meant "no spend allowed" would brick an account on a typo.
+    assert.equal(ceilingFor({ budgetUsd: 0 }, 20), null)
+    assert.equal(ceilingFor({ budgetUsd: 'lots' }, 20), 20, 'unparseable falls back to configured')
+    assert.equal(ceilingFor(null, 20), 20, 'no user doc at all → configured')
+})
+
+test('the line is crossed AT the ceiling, not past it', () => {
+    assert.equal(overCeiling(19.99, 20), false)
+    assert.equal(overCeiling(20, 20), true)
+    assert.equal(overCeiling(undefined, 20), false, 'no spend recorded yet is not over')
+})
+
+test('an over-ceiling user is moved to the cheap model, not cut off', () => {
+    const spent = { totalCost: 25 }
+    assert.equal(overCeiling(spent.totalCost, ceilingFor({}, 20)), true)
+    assert.equal(overCeiling(spent.totalCost, ceilingFor({ exemptFromBudget: true }, 20)), false)
+})
+
+test('past the ceiling the turn runs on the cheap model instead of failing', () => {
+    // End to end through the seam: the same call that books the turn reads the month's spend back,
+    // so the check costs no extra round trip.
+    return resolveAgentStream('claude-opus-5', 'u1', 'kairosAgent',
+        async () => ({ totalCost: 25 }), async () => 20,
+    ).then(out => {
+        assert.equal(out.degraded, true)
+        assert.equal(out.model, 'claude-haiku-4-5-20251001', 'routed to the cheap model')
+        assert.ok(out.streamFn, 'and still runs — degrade, not refuse')
+    })
+})
+
+test('under the ceiling the requested model is honoured untouched', async () => {
+    const out = await resolveAgentStream('claude-opus-5', 'u1', 'kairosAgent',
+        async () => ({ totalCost: 4 }), async () => 20)
+    assert.equal(out.degraded, false)
+    assert.equal(out.model, 'claude-opus-5')
+})
+
+test('an exempt account keeps its model however much it has spent', async () => {
+    const out = await resolveAgentStream('claude-opus-5', 'u1', 'kairosAgent',
+        async () => ({ totalCost: 9999 }), async () => null)   // null ceiling = exempt/unset
+    assert.equal(out.degraded, false)
+    assert.equal(out.model, 'claude-opus-5')
 })

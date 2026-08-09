@@ -4,8 +4,8 @@ import { getShortInterest, getOptionsContext } from '../providers/yahoofinance.p
 import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError } from './toolResult.util.js'
 import { logger } from './logger.service.js'
-import { resolveStreamFn } from './llmModels.js'
-import { recordUsage, recordTurn } from './tokenUsage.service.js'
+import { resolveStreamFn, CHEAP_MODEL } from './llmModels.js'
+import { recordUsage, recordTurn, userCeiling, overCeiling } from './tokenUsage.service.js'
 
 const LOG = '[agentUtils]'
 
@@ -14,16 +14,44 @@ const LOG = '[agentUtils]'
 // the standard per-request usage recorder (a no-op when there's no userId). Every
 // streaming agent repeats these two lines verbatim; centralizing them means a new
 // agent (e.g. Axl) can't silently diverge on model routing or usage accounting.
-// `_recordTurn` is injectable for the same reason `_resolve`/`_run` are elsewhere: it is the one
-// side effect here, and the tests that drive this seam must not need a database.
-export function resolveAgentStream(requestedModel, userId, agent, _recordTurn = recordTurn) {
-    const { model, streamFn, provider } = resolveStreamFn(requestedModel)
+/**
+ * Resolve the model+recorder for one user turn, and DEGRADE it when the user is past their spend
+ * ceiling.
+ *
+ * The ceiling lands here because this is the one seam every chat desk funnels through — and, just as
+ * importantly, the one the MONITORS do not. Hermes, Talos, the coverage and tilt monitors and the
+ * market brief all call the provider directly, so an over-ceiling user still has their live position
+ * managed. That is the correct behaviour and it should be deliberate rather than incidental: a cost
+ * control must never turn into an unmanaged position.
+ *
+ * It also means the ceiling only counts CHAT. Monitor spend is not recorded at all today, so the
+ * number it compares against is half the truth — see docs; counting the other half is separate work,
+ * and when it lands it must be counted without being blocked, for the reason above.
+ *
+ * `_recordTurn` / `_ceiling` are injectable for the same reason `_resolve`/`_run` are elsewhere:
+ * these are the IO here, and the tests that drive this seam must not need a database.
+ */
+export async function resolveAgentStream(requestedModel, userId, agent, _recordTurn = recordTurn, _ceiling = userCeiling) {
+    let requested = requestedModel
+    let degraded  = false
+
+    if (userId) {
+        // The turn counter was always being written; it now returns the month's spend, so the check
+        // costs no extra round trip. Both are best-effort: accounting must never fail a user's
+        // reply, and an unreadable ceiling means "no ceiling", never "blocked".
+        const [doc, ceiling] = await Promise.all([
+            _recordTurn(userId, agent).catch(() => null),
+            _ceiling(userId).catch(() => null),
+        ])
+        if (overCeiling(doc?.totalCost, ceiling)) {
+            requested = CHEAP_MODEL
+            degraded  = true
+        }
+    }
+
+    const { model, streamFn, provider } = resolveStreamFn(requested)
     const onUsage = userId ? (usage) => recordUsage(userId, model, usage, agent).catch(() => {}) : undefined
-    // ONCE per user turn, while `onUsage` above fires once per tool round. Both counters are needed:
-    // their ratio is the tool-rounds-per-turn figure (see tokenUsage.recordTurn). Fire-and-forget
-    // like the usage write — accounting must never fail a user's reply.
-    if (userId) _recordTurn(userId, agent).catch(() => {})
-    return { model, streamFn, provider, onUsage }
+    return { model, streamFn, provider, onUsage, degraded }
 }
 
 // ─── Tool handler wrapper ─────────────────────────────────────────────────────

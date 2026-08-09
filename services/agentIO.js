@@ -343,11 +343,11 @@ export async function runAgentStream({
     // already passes its own tag here and nothing else in the bag identifies the caller, so taking
     // it from the tag is what makes this zero edits at the eight call sites — a new agent is
     // attributed the moment it exists, with nothing to remember to wire.
-    const { model, streamFn, provider, onUsage } = _resolve(requestedModel, userId, agentKeyFromLog(log))
+    const { model, streamFn, provider, onUsage, degraded } = await _resolve(requestedModel, userId, agentKeyFromLog(log))
 
     const chart = onChart ? makeChartChatPipe(onChart, { log }) : null
 
-    logger.info(log, 'chatStream start', { messageCount: messages?.length ?? 0, model, provider, ...meta })
+    logger.info(log, 'chatStream start', { messageCount: messages?.length ?? 0, model, provider, ...(degraded ? { degraded: true } : {}), ...meta })
 
     const raw = await streamFn({
         model, promptOrMessages: messages,
