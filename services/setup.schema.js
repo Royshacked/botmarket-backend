@@ -577,19 +577,52 @@ export function rangeProblems(setup) {
  *
  * Returns null when any leg is missing or risk is zero (an entry inside its own stop).
  */
+/**
+ * The price a leg is REACHED at, per side. A zone is a band, so which edge counts depends on which
+ * way price arrives: a long's stop is hit at the band's `lower`, its target at the band's `lower`
+ * too (price rises into the near edge). Mirrored for a short. Pure.
+ */
+const _edge = (z, isLong) => (isLong ? z?.lower : z?.upper)
+
+/**
+ * The working stop: the WIDEST stop edge, i.e. the most risk the plan admits. Null when none is
+ * authored. Pure.
+ *
+ * Selected by price, never by array position — the model emits zones in whatever order it reasoned
+ * about them, so `stop_zones[0]` is not the far one.
+ */
+export function stopEdge(setup) {
+    const isLong = setup?.direction === 'long'
+    const edges  = (setup?.stop_zones ?? []).map(z => _edge(z, isLong)).filter(Number.isFinite)
+    if (!edges.length) return null
+    return isLong ? Math.min(...edges) : Math.max(...edges)
+}
+
+/**
+ * Target edges NEAREST-FIRST — the order price will actually reach them, which is the order a
+ * partial ladder fires in. Empty when none is authored. Pure.
+ *
+ * Same rule as the stop: ordered by price, never by array position. Trusting `tp_zones[0]` would
+ * quietly hand a multi-target setup the rr of its furthest leg, and would fire its partials in the
+ * order the model happened to type them.
+ */
+export function targetEdges(setup) {
+    const isLong = setup?.direction === 'long'
+    const edges  = (setup?.tp_zones ?? []).map(z => _edge(z, isLong)).filter(Number.isFinite)
+    return edges.sort((a, b) => (isLong ? a - b : b - a))
+}
+
 export function computeRR(setup, entryPrice = null) {
     const isLong = setup?.direction === 'long'
     const entryZone = setup?.entry_zones?.[0]
-    if (!entryZone || !setup?.stop_zones?.length || !setup?.tp_zones?.length) return null
+    if (!entryZone) return null
 
-    const entry = Number.isFinite(entryPrice) ? entryPrice : (isLong ? entryZone.upper : entryZone.lower)
-    // Widest stop = most risk; nearest target = least reward.
-    const stopEdges = setup.stop_zones.map(z => (isLong ? z.lower : z.upper)).filter(Number.isFinite)
-    const tpEdges   = setup.tp_zones.map(z => (isLong ? z.lower : z.upper)).filter(Number.isFinite)
-    if (!stopEdges.length || !tpEdges.length) return null
+    const entry   = Number.isFinite(entryPrice) ? entryPrice : (isLong ? entryZone.upper : entryZone.lower)
+    const stop    = stopEdge(setup)
+    const targets = targetEdges(setup)
+    if (stop == null || !targets.length) return null
 
-    const stop = isLong ? Math.min(...stopEdges) : Math.max(...stopEdges)
-    const tp   = isLong ? Math.min(...tpEdges)   : Math.max(...tpEdges)
+    const tp = targets[0]   // nearest = least reward
     if (!Number.isFinite(entry)) return null
 
     const risk   = isLong ? entry - stop : stop - entry

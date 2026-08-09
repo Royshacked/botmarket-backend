@@ -5,16 +5,16 @@ import { logger } from '../services/logger.service.js'
 import { toNum } from '../services/format.util.js'
 import { fetchLastPrice, fetchCandles } from './monitorUtils.js'
 import { createDueLoop, makePersist } from './dueLoop.js'
-import { journalEntry } from './monitorJournal.js'
+import { journalEntry, failNote } from './monitorJournal.js'
 import {
     isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap, gradedGap,
     hasEditProposal,
 } from './readinessGates.js'
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
-import { assessSetup, READINESS_VERDICTS } from './talos.assess.js'
-import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario } from '../services/setup.schema.js'
-import { notifySetupEntryConfirm, notifySetupInvalidation } from '../services/tradeNotify.service.js'
+import { assessSetup, assessPosition, READINESS_VERDICTS, MANAGEMENT_VERDICTS } from './talos.assess.js'
+import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetEdges } from '../services/setup.schema.js'
+import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage } from '../services/tradeNotify.service.js'
 
 // Talos — the guardian of the `setup` kind (docs/desks/mentor-talos.md).
 //
@@ -191,18 +191,25 @@ async function _checkPosition(setup, nowMs, deps) {
         'monitor_state.check_count':   (setup.monitor_state?.check_count ?? 0) + 1,
     }
 
-    // Awaiting confirm/fill, or already promoted → just keep the schedule moving. No journal entry:
-    // an idle wake that writes a line turns the monologue into noise.
-    if (!inPos || ps.entry?.fill_at != null) {
+    // Awaiting confirm/fill → keep the schedule moving. No journal entry: an idle wake that writes a
+    // line turns the monologue into noise, and the entry card already said everything there is.
+    if (!inPos) {
         await deps.persist(setup.id, base, null)
-        return { reason: inPos ? 'in_position_idle' : 'awaiting_fill' }
+        return { reason: 'awaiting_fill' }
     }
+
+    // Already stamped → the management path. This used to return here, which is what made the
+    // journal go quiet for the whole life of a position.
+    if (ps.entry?.fill_at != null) return _managePosition(setup, ps, nowMs, deps)
 
     // First wake after the fill. `entryTriggeredAt` is when the zone tripped; the broker's own fill
     // price isn't on the setup, so the intended entry stands in until the ledger has it.
     const fillPrice = toNum(ps.entry?.intended) ?? toNum(setup.armed_zone_id ? _zoneById(setup, setup.armed_zone_id)?.upper : null)
     const fillAtMs  = setup.ordersPlacedAt ?? setup.entryTriggeredAt ?? nowMs
-    const stop      = toNum(setup.stop_zones?.[0]?.lower) ?? toNum(setup.stop_zones?.[0]?.upper)
+    // The WORKING stop, chosen by price rather than by array position (setup.schema stopEdge). The
+    // old read here took `stop_zones[0].lower ?? .upper`, which picks the wrong edge on a short and
+    // the wrong zone whenever the model emitted them out of order.
+    const stop = stopEdge(setup)
 
     const patch = {
         ...base,
@@ -211,12 +218,118 @@ async function _checkPosition(setup, nowMs, deps) {
         'position_state.entry.size':       setup.quantity ?? null,
         'position_state.entry.direction':  setup.direction ?? (setup.status === 'short' ? 'short' : 'long'),
         'position_state.phase':            'running',
+        // FROZEN AT FILL, and deliberately not read live off the scenario afterwards. What protects
+        // the position is the order resting at the broker, not whatever the plan says later — an
+        // edited scenario must not silently move the level the gate measures against. `current`
+        // starts equal to `initial` and is what a `move_stop` verdict advances; `initial` stays put
+        // because every R multiple is measured from the risk originally taken.
+        'position_state.stop.initial':     stop,
+        'position_state.stop.current':     stop,
+        // Nearest-first — the order price reaches them, which is the order partials fire in.
+        'position_state.targets':          targetEdges(setup).map(price => ({ price, hit_at: null })),
     }
     const note = `In on ${setup.asset}${fillPrice != null ? ` around ${fillPrice}` : ''}${stop != null ? `, stop resting at ${stop}` : ''}. The broker is holding the exits from here.`
     await deps.persist(setup.id, patch, { at: new Date(nowMs).toISOString(), reason: 'entry', price: fillPrice, verdict: null, note, next_check_at: nextAt })
 
     logger.info(LOG, `[${setup.id}] position opened (${setup.status}) — journal continues`)
     return { reason: 'entry', promoted: true }
+}
+
+// ─── In-position management ────────────────────────────────────────────────────
+//
+// Verdict urgency. A pending card is NOT re-fired by a same-or-lower verdict — the user already has
+// that decision in front of them, and re-posting it every wake is how a monitor teaches people to
+// ignore it. A MORE urgent verdict does fire over it: a broken thesis has to be able to interrupt a
+// pending "bank a third".
+const VERDICT_SEVERITY = { hold: 0, let_run: 1, take_partial: 2, move_stop: 3, exit_now: 4 }
+
+/**
+ * One in-position wake: metrics (always) → cheap gate → assess only if it tripped or a review is
+ * due → persist, and post a card when the verdict wants the user to do something.
+ *
+ * The shape is Hermes's, deliberately (see the duplication note above positionGate). What differs
+ * is the read itself: this one re-checks the setup's DECLARED conditions, where Hermes grades four
+ * fixed axes.
+ */
+async function _managePosition(setup, ps, nowMs, deps) {
+    const price   = await deps.getPrice(setup)
+    const metrics = computeMetrics(ps, price, nowMs)
+    const gate    = positionGate(ps, price)
+    const assessNow = !!gate.flag || reviewDue(ps, nowMs, setup.cadence)
+
+    const bump = (nextAt) => ({
+        ...metricsSet(metrics),
+        'monitor_state.next_check_at': nextAt,
+        'monitor_state.check_count':   (setup.monitor_state?.check_count ?? 0) + 1,
+    })
+
+    // The cheap hold — the overwhelmingly common wake. Metrics stay fresh so the eventual read has
+    // history to reason about, but nothing is spent and nothing is written to the journal.
+    if (!assessNow) {
+        await deps.persist(setup.id, bump(new Date(nowMs + _minGapMs(setup.cadence)).toISOString()), null)
+        return { reason: 'in_position_idle' }
+    }
+
+    const reason = gate.flag ?? 'review'
+    const raw    = await deps.assessPosition(setup, ps, { price, reason, gate, metrics })
+
+    if (!raw || raw._failReason) {
+        const nextAt = new Date(nowMs + _minGapMs(setup.cadence)).toISOString()
+        await deps.persist(setup.id, bump(nextAt), {
+            at: new Date(nowMs).toISOString(), reason: 'in_position', price: toNum(price), verdict: null,
+            note: failNote('reassess', setup.asset, raw?._failReason), next_check_at: nextAt,
+        })
+        return { reason, failed: true }
+    }
+
+    const verdict = MANAGEMENT_VERDICTS.has(raw.verdict) ? raw.verdict : 'hold'
+    if (verdict !== raw.verdict) logger.warn(LOG, `off-menu management verdict "${raw.verdict}" for ${setup.id} — treating as hold`)
+
+    // Self-chosen cadence, clamped to the setup's own bounds: a model that asks to be woken in one
+    // minute on a swing burns the budget, and one that asks for three days goes blind.
+    const nextAt  = _nextCheckAt(setup, nowMs, raw.next_check_min)
+    const pending = ps?.pending_action ?? null
+    const fires   = verdict !== 'hold'
+        && (VERDICT_SEVERITY[verdict] ?? 0) > (pending ? (VERDICT_SEVERITY[pending.verdict] ?? 0) : -1)
+
+    const set = {
+        ...bump(nextAt),
+        'position_state.last_management': { at: new Date(nowMs).toISOString(), verdict },
+        ...(raw.memo_update ? { 'monitor_state.memo': String(raw.memo_update) } : {}),
+        ...(fires ? { 'position_state.pending_action': { verdict, proposal: raw.proposal ?? null, at: new Date(nowMs).toISOString(), read: raw.read ?? null } } : {}),
+        // A target that earned this wake is stamped so it cannot re-trip forever — the ladder moves
+        // on whether or not the user takes the partial, because the ARITHMETIC fact (price reached
+        // it) does not become untrue if they decline.
+        ...(gate.flag === 'scale_out' && gate.target ? { 'position_state.targets': _markTargetHit(ps, gate.target, nowMs) } : {}),
+    }
+
+    const note = (raw.read && String(raw.read).trim()) ? String(raw.read).trim() : _manageFallbackNote(verdict)
+    await deps.persist(setup.id, set, {
+        at: new Date(nowMs).toISOString(), reason: 'in_position', price: toNum(price), verdict,
+        note, next_check_at: nextAt,
+    })
+
+    if (fires) await deps.onManageCard(setup, { verdict, proposal: raw.proposal ?? null, read: raw.read ?? null }).catch(() => {})
+
+    logger.info(LOG, `[${setup.id}] ${reason} → ${verdict}${fires ? ' (card)' : ''}`)
+    return { reason, verdict, card: fires }
+}
+
+/** Stamp the tripped target as hit, leaving the rest of the ladder alone. Pure. */
+function _markTargetHit(ps, target, nowMs) {
+    return (ps?.targets ?? []).map(t =>
+        (t.price === target.price && t.hit_at == null) ? { ...t, hit_at: new Date(nowMs).toISOString() } : t)
+}
+
+/** A verdict with no sentence still has to read as a decision someone made. Pure. */
+function _manageFallbackNote(verdict) {
+    switch (verdict) {
+        case 'move_stop':    return 'Tightening the protection — proposing a new stop.'
+        case 'take_partial': return 'Banking part of this into strength — proposing a partial.'
+        case 'exit_now':     return 'The reason for this trade has gone — proposing we get flat.'
+        case 'let_run':      return 'This is working — letting it run rather than trimming.'
+        default:             return 'Read the trade; it is doing what it was meant to do. Holding.'
+    }
 }
 
 // Across every scenario, not just the projected one — a position's armed zone belongs to whichever
@@ -518,6 +631,130 @@ export function zoneDistance(zones, price) {
         return gap / width
     }))
 }
+
+// ─── In-position arithmetic ────────────────────────────────────────────────────
+//
+// The cheap tier for a LIVE position, mirroring what the zone gate does pre-entry: decide for free
+// whether this wake is worth a model call, so a quiet position costs nothing to hold.
+//
+// ┌ DELIBERATE DUPLICATION — copied from hermes.monitor.service.js, DELETE WHEN HERMES SLEEPS ─────┐
+// │ Hermes owns the original (`_positionGate`, `_computeMetrics`, `_rMultiple`). It is silent but  │
+// │ still managing live calls, so extracting a shared module would refactor code holding real      │
+// │ positions for the benefit of a caller scheduled for retirement. The copy is time-boxed: when   │
+// │ Hermes's last position closes and it is retired, this becomes the only implementation and the  │
+// │ note goes with it.                                                                             │
+// │                                                                                                │
+// │ NOT A VERBATIM COPY, and the differences are the reason a blind copy would have been wrong:    │
+// │   • cadence is `{min,max}` here, `{min_gap_min,max_gap_min}` on a call                         │
+// │   • targets are ZONES, reduced to their NEAR edge by setup.schema.targetEdges — so `scale_out` │
+// │     fires at-or-beyond, and a gap straight through a target still trips it                     │
+// │   • the stop is the widest edge across `stop_zones`, chosen by price, never `stop_zones[0]`    │
+// │                                                                                                │
+// │ THE RISK THIS NOTE EXISTS FOR: Talos already grew one copy of a Hermes mechanism — the journal │
+// │ — and it drifted, dropping every sentence, which is why monitorJournal.js had to be extracted. │
+// │ If this block and Hermes's diverge, extract rather than patch both.                            │
+// └────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+/** The fill price, falling back to the intended entry until the ledger has the real one. Pure. */
+function _entryPx(ps) { return toNum(ps?.entry?.fill_price) ?? toNum(ps?.entry?.intended) ?? null }
+
+/**
+ * Where price sits in multiples of the risk originally taken. Measured from `stop.initial`, never
+ * from `stop.current`: moving a stop banks risk, it does not rewrite how much was risked. Pure.
+ */
+export function rMultiple(entry, exit, initialStop, dir) {
+    if (![entry, exit, initialStop].every(Number.isFinite)) return null
+    const risk = Math.abs(entry - initialStop)
+    if (!(risk > 0)) return null
+    const move = dir === 'short' ? (entry - exit) : (exit - entry)
+    return Math.round((move / risk) * 100) / 100
+}
+
+/**
+ * Running trade metrics, recomputed every wake and never authored. `mae`/`mfe` are the R extremes
+ * carried ACROSS wakes (adverse ≤ 0, favourable ≥ 0) — a position that spiked to +2R and came back
+ * has to still know it did, because that is the difference between "let it run" and "you gave it
+ * back". An unpriceable wake preserves the previous extremes rather than resetting them. Pure.
+ */
+export function computeMetrics(ps, price, nowMs) {
+    const r       = rMultiple(_entryPx(ps), price, toNum(ps?.stop?.initial), ps?.entry?.direction ?? 'long')
+    const prevMae = Number.isFinite(ps?.metrics?.mae) ? ps.metrics.mae : null
+    const prevMfe = Number.isFinite(ps?.metrics?.mfe) ? ps.metrics.mfe : null
+    return {
+        r_multiple_now: r,
+        mae: r == null ? prevMae : (prevMae == null ? Math.min(0, r) : Math.min(prevMae, r)),
+        mfe: r == null ? prevMfe : (prevMfe == null ? Math.max(0, r) : Math.max(prevMfe, r)),
+        updated_at: new Date(nowMs).toISOString(),
+    }
+}
+
+/** Flatten metrics into a `$set`. One place owns the paths. Pure. */
+export function metricsSet(m) {
+    return {
+        'position_state.metrics.r_multiple_now': m.r_multiple_now,
+        'position_state.metrics.mae':            m.mae,
+        'position_state.metrics.mfe':            m.mfe,
+        'position_state.metrics.updated_at':     m.updated_at,
+    }
+}
+
+/**
+ * The cheap in-position gate: an arithmetic flag that makes a model call worth paying for.
+ * `{flag:null}` is an obvious hold — the overwhelmingly common case, and the whole reason this runs
+ * before anything expensive. Pure.
+ *
+ * Priority is most-urgent-first and the order is load-bearing: a position pressing its stop while a
+ * target is also in reach is an `adverse` wake, not a victory lap.
+ *
+ *   adverse     price within a quarter of the original risk of the WORKING stop. Not "the stop was
+ *               hit" — the broker owns that. This is the look BEFORE it, while there is still a
+ *               decision to make.
+ *   scale_out   an un-hit target reached. `targets[].price` is the NEAR edge of its zone, so this
+ *               is at-or-beyond: a gap clean through the target still trips.
+ *   breakeven   ≥ +1R with the stop not yet protected past entry — the one free improvement in
+ *               trading, and the trigger a `move_stop` verdict acts on.
+ */
+export function positionGate(ps, price) {
+    if (!Number.isFinite(price)) return { flag: null }
+    const entry       = _entryPx(ps)
+    const initialStop = toNum(ps?.stop?.initial)
+    const stopCur     = toNum(ps?.stop?.current) ?? initialStop
+    const isLong      = (ps?.entry?.direction ?? 'long') !== 'short'
+    const risk        = (Number.isFinite(entry) && Number.isFinite(initialStop)) ? Math.abs(entry - initialStop) : null
+    const band        = risk != null ? 0.25 * risk : null
+
+    if (band != null && Number.isFinite(stopCur)) {
+        if (isLong  && price <= stopCur + band) return { flag: 'adverse' }
+        if (!isLong && price >= stopCur - band) return { flag: 'adverse' }
+    }
+
+    const target = (ps?.targets ?? []).find(t =>
+        t?.hit_at == null && Number.isFinite(t?.price) && (isLong ? price >= t.price : price <= t.price))
+    if (target) return { flag: 'scale_out', target }
+
+    const r = rMultiple(entry, price, initialStop, ps?.entry?.direction ?? 'long')
+    if (r != null && r >= 1 && Number.isFinite(stopCur) && Number.isFinite(entry)) {
+        const protectedBE = isLong ? stopCur >= entry : stopCur <= entry
+        if (!protectedBE) return { flag: 'breakeven' }
+    }
+    return { flag: null }
+}
+
+/**
+ * Is a periodic thesis review due? The gate above only fires on price events; without this, a
+ * position that simply sits there is never re-read, and "nothing moved" is not the same as "nothing
+ * changed" — the news that breaks a thesis rarely moves price first.
+ *
+ * Measured from the last management read, falling back to the fill so a fresh position gets its
+ * first review one full cadence in rather than immediately. Pure.
+ */
+export function reviewDue(ps, nowMs, cadence) {
+    const lastAt = Date.parse(ps?.last_management?.at ?? ps?.entry?.fill_at ?? '')
+    return !Number.isFinite(lastAt) || (nowMs - lastAt) >= _maxGapMs(cadence)
+}
+
+function _minGapMs(cadence) { return (Number(cadence?.min) || 5)  * 60_000 }
+function _maxGapMs(cadence) { return (Number(cadence?.max) || 30) * 60_000 }
 
 // ─── The validity gate ─────────────────────────────────────────────────────────
 //
@@ -869,6 +1106,10 @@ const _deps = {
     // can never trip, so this must not diverge (monitorUtils.fetchLastPrice).
     getPrice:   (setup) => fetchLastPrice(setup.asset),
     assess:     assessSetup,
+    // The in-position read. Separate from `assess` because it asks a different question of a
+    // different document state — "does the reason for this trade still hold" rather than "is this
+    // the moment" — and injecting them separately keeps either one testable alone.
+    assessPosition,
     persist:    _persist,
     // The CLOSE of the last completed candle on a timeframe — the validity gate's verdict, as
     // opposed to `getPrice`'s live tick which is only its trigger. Deliberately the SECOND-TO-LAST
@@ -899,6 +1140,9 @@ const _deps = {
     // `kind` is the SENDER, not the payload: a setup's fill card is Mentor's, like every other
     // card this desk posts. Left unsaid it fell back to the shared default.
     onManualCard: (setup) => notifyManualEntry(setup.userId, { legs: [entryLegFromIdea(setup)], kind: 'setup' }),
+    // The management proposal — its own copy rather than the call's, which is branded Kairos and
+    // keyed on a callId. Shares the one card transport, nothing else.
+    onManageCard: notifySetupManage,
 }
 
 export const _testDeps = _deps

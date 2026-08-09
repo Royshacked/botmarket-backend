@@ -5,6 +5,7 @@ import {
     _nextStatus, _isPastExpiry, _effectiveVerdict, normalizeConditionResults, latchPatch, costPatch,
     validityBreach, breachPatch, awayEdge, adverseEdge,
     scenarioGate, liveScenarios, liveEntryZones, rollUpBreaches, scenarioState,
+    positionGate, reviewDue, computeMetrics, rMultiple,
 } from '../../monitoring/talos.monitor.service.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
 import { buildToolsFor, symbolScope } from '../../monitoring/talos.assess.js'
@@ -499,6 +500,7 @@ test('an already-latched condition is not re-stamped', () => {
 // status bug lived here undetected. `writes[i]` is the $set of the i-th persist call.
 function stubDeps(over = {}) {
     const writes = []
+    const entries = []
     return {
         isAssetOpen: () => true,
         nextOpenMs:  () => T + 3600_000,
@@ -510,8 +512,13 @@ function stubDeps(over = {}) {
         onEditCard:     async () => {},
         onInvalidation: async () => {},
         getClose:       async () => null,
+        assessPosition: async () => ({ verdict: 'hold', read: 'Doing what it should.', next_check_min: 30 }),
+        onManageCard:   async () => {},
         writes,
-        persist: async (_id, $set) => { writes.push($set) },
+        // The journal line rides alongside the $set. Kept as a SECOND array rather than folded into
+        // `writes` so the existing assertions on writes[0] stay exact.
+        entries,
+        persist: async (_id, $set, entry = null) => { writes.push($set); entries.push(entry) },
         ...over,
     }
 }
@@ -888,6 +895,59 @@ test('the first wake after a fill writes the entry into the journal', async () =
     assert.equal($set['position_state.phase'], 'running')
 })
 
+// The fill also SEEDS what an in-position gate measures against. Without this the gate reads
+// undefined stops and an empty target ladder, and silently never trips — the failure looks like
+// "the manager isn't doing anything" rather than like a missing field.
+
+test('the fill freezes the working stop and the target ladder onto the position', async () => {
+    const withTargets = { ...FILLED, ...mk({
+        tp_zones: [{ lower: 260, upper: 261 }, { lower: 244, upper: 245 }],   // authored far-then-near
+    }), status: 'long', ordersPlacedAt: T - 60_000, quantity: 100 }
+
+    const deps = stubDeps()
+    await _checkSetup(withTargets, T, deps)
+    const $set = deps.writes[0]
+
+    assert.equal($set['position_state.stop.initial'], 234.8, 'the WIDEST stop edge, not stop_zones[0].upper')
+    assert.equal($set['position_state.stop.current'], 234.8, 'current starts equal to initial')
+    assert.deepEqual($set['position_state.targets'], [
+        { price: 244, hit_at: null },
+        { price: 260, hit_at: null },
+    ], 'nearest-first — the order price reaches them, not the order they were typed')
+})
+
+test('a short seeds the opposite edges', async () => {
+    const short = { ...mk({
+        direction: 'short',
+        stop_zones: [{ lower: 240, upper: 241 }],
+        tp_zones:   [{ lower: 220, upper: 221 }, { lower: 230, upper: 231 }],
+    }, VENUE), status: 'short', ordersPlacedAt: T - 60_000, quantity: 100 }
+
+    const deps = stubDeps()
+    await _checkSetup(short, T, deps)
+    const $set = deps.writes[0]
+
+    assert.equal($set['position_state.stop.initial'], 241, 'a short works against the HIGH edge')
+    assert.deepEqual($set['position_state.targets'].map(t => t.price), [231, 221], 'falls INTO its targets')
+})
+
+test('a setup with no targets seeds an empty ladder rather than undefined', async () => {
+    // The gate iterates this. `undefined` would throw on the first in-position wake.
+    const deps = stubDeps()
+    await _checkSetup(FILLED, T, deps)
+    assert.deepEqual(deps.writes[0]['position_state.targets'], [])
+})
+
+test('the frozen stop is never re-stamped from the plan on a later wake', async () => {
+    // What protects the position is the order resting at the broker. If the scenario is edited
+    // afterwards, the level the gate measures against must not quietly follow it.
+    const promoted = { ...FILLED, position_state: { entry: { fill_at: '2026-07-26T11:00:00Z' }, stop: { initial: 234.8, current: 236 } } }
+    const deps = stubDeps()
+    await _checkSetup(promoted, T, deps)
+    assert.equal(deps.writes[0]['position_state.stop.initial'], undefined)
+    assert.equal(deps.writes[0]['position_state.stop.current'], undefined, 'a moved stop stays moved')
+})
+
 test('later wakes stay quiet — an idle line every cadence is noise, not a monologue', async () => {
     const promoted = { ...FILLED, position_state: { entry: { fill_at: '2026-07-26T11:00:00Z' } } }
     const deps = stubDeps()
@@ -909,4 +969,123 @@ test('a live position parks on the lazy end of the cadence', async () => {
     const deps = stubDeps()
     await _checkSetup(FILLED, T, deps)
     assert.equal(deps.writes[0]['monitor_state.next_check_at'], new Date(T + 240 * 60_000).toISOString())
+})
+
+// ─── In-position gate + metrics ───────────────────────────────────────────────
+// These run on EVERY in-position wake for free, and the expensive management read fires only when
+// they say so. A gate that never trips is a manager that does nothing; one that always trips is an
+// LLM call every poll on every open position — the cost that scales with users.
+
+// entry 100, initial stop 96 → risk 4, so the adverse band is 1.00 wide (0.25R).
+const POS = (over = {}) => ({
+    entry: { fill_price: 100, direction: 'long' },
+    stop:  { initial: 96, current: 96 },
+    targets: [{ price: 110, hit_at: null }, { price: 120, hit_at: null }],
+    ...over,
+})
+
+test('adverse fires BEFORE the stop, while there is still a decision to make', () => {
+    // The broker owns "the stop was hit". This is the look before it.
+    assert.equal(positionGate(POS(), 96.9).flag, 'adverse', 'inside the quarter-R band')
+    assert.equal(positionGate(POS(), 99).flag, null, 'comfortably above → nothing to say')
+})
+
+test('a moved stop moves the adverse band with it', () => {
+    // The band tracks the WORKING stop; the risk it is a quarter of stays the original.
+    const moved = POS({ stop: { initial: 96, current: 104 } })
+    assert.equal(positionGate(moved, 104.9).flag, 'adverse')
+})
+
+test('scale_out trips at OR BEYOND the target, so a gap through it still fires', () => {
+    // targets[].price is the near edge of the zone. An "inside the band" test would miss a gap.
+    assert.equal(positionGate(POS(), 110).flag, 'scale_out', 'exactly at the edge')
+    assert.equal(positionGate(POS(), 130).flag, 'scale_out', 'gapped clean past both')
+    assert.equal(positionGate(POS(), 130).target.price, 110, 'the NEAREST un-hit target, not the furthest')
+})
+
+test('a target already taken is not offered again', () => {
+    // Stop moved to entry so `breakeven` cannot fire and this isolates the scale_out tier — by 112
+    // the position is +3R, which would otherwise trip breakeven first and mask the question.
+    const partly = POS({
+        stop: { initial: 96, current: 100 },
+        targets: [{ price: 110, hit_at: '2026-07-26T11:00:00Z' }, { price: 120, hit_at: null }],
+    })
+    assert.equal(positionGate(partly, 112).flag, null, '110 is spent and 120 is not reached')
+    assert.equal(positionGate(partly, 120).target.price, 120)
+})
+
+test('pressing the stop outranks a target in reach — no victory lap on a losing wake', () => {
+    // Priority order is load-bearing: both conditions can be true at once on a whipsaw.
+    const wide = POS({ stop: { initial: 96, current: 109.5 }, targets: [{ price: 110, hit_at: null }] })
+    assert.equal(positionGate(wide, 110).flag, 'adverse')
+})
+
+test('breakeven fires once and stops once the stop is protected', () => {
+    assert.equal(positionGate(POS(), 104).flag, 'breakeven', '+2R with the stop still below entry')
+    const beProtected = POS({ stop: { initial: 96, current: 100 } })
+    assert.equal(positionGate(beProtected, 104).flag, null, 'already protected → nothing free left')
+})
+
+test('a short mirrors every edge', () => {
+    const short = { entry: { fill_price: 100, direction: 'short' }, stop: { initial: 104, current: 104 },
+                    targets: [{ price: 90, hit_at: null }] }
+    assert.equal(positionGate(short, 103.1).flag, 'adverse')
+    assert.equal(positionGate(short, 88).flag, 'scale_out', 'a short falls INTO its target')
+    assert.equal(positionGate(short, 96).flag, 'breakeven')
+})
+
+test('an unknown price never trips a gate', () => {
+    // A failed quote must read as "don't know", never as "all clear" — and never as an entry to act on.
+    for (const p of [NaN, null, undefined, 'abc']) assert.equal(positionGate(POS(), p).flag, null, String(p))
+})
+
+test('an unseeded position gates to nothing rather than throwing', () => {
+    // This is exactly the state before the fill seeds stop/targets — it must be inert, not fatal.
+    assert.equal(positionGate({}, 100).flag, null)
+    assert.equal(positionGate({ entry: { fill_price: 100 } }, 100).flag, null, 'no stop → no risk → no band')
+})
+
+test('R is measured from the ORIGINAL risk, so moving a stop never rewrites it', () => {
+    assert.equal(rMultiple(100, 108, 96, 'long'), 2)
+    assert.equal(rMultiple(100, 92, 104, 'short'), 2, 'a short gains as price falls')
+    assert.equal(rMultiple(100, 100, 100, 'long'), null, 'zero risk is not 0R, it is unanswerable')
+    assert.equal(rMultiple(100, 108, null, 'long'), null)
+})
+
+test('the R extremes are carried across wakes, not recomputed from now', () => {
+    // A position that spiked to +2R and gave it back has to still know it did — that is the whole
+    // difference between "let it run" and "you gave it back".
+    const spiked = POS({ metrics: { mae: -0.5, mfe: 2 } })
+    const m = computeMetrics(spiked, 100, T)
+    assert.equal(m.r_multiple_now, 0)
+    assert.equal(m.mfe, 2, 'the peak survives the round trip')
+    assert.equal(m.mae, -0.5)
+})
+
+test('an unpriceable wake preserves the extremes rather than resetting them', () => {
+    const m = computeMetrics(POS({ metrics: { mae: -1, mfe: 3 } }), NaN, T)
+    assert.equal(m.r_multiple_now, null)
+    assert.deepEqual([m.mae, m.mfe], [-1, 3])
+})
+
+test('a fresh position starts its extremes at zero, not at the current R', () => {
+    // Seeding mae from a first wake already in profit would hide a drawdown that comes later.
+    const m = computeMetrics(POS(), 104, T)   // risk 4 → 104 is +1R
+    assert.equal(m.mfe, 1)
+    assert.equal(m.mae, 0, 'never adverse yet → 0, not +1')
+})
+
+test('a review is due a full cadence after the last read, and immediately if there never was one', () => {
+    const cadence = { min: 5, max: 30 }
+    assert.equal(reviewDue({ entry: { fill_at: new Date(T - 31 * 60_000).toISOString() } }, T, cadence), true)
+    assert.equal(reviewDue({ entry: { fill_at: new Date(T - 10 * 60_000).toISOString() } }, T, cadence), false,
+        'a fresh position waits one cadence rather than being read on arrival')
+    assert.equal(reviewDue({}, T, cadence), true, 'no timestamp at all → look now')
+})
+
+test('the last management read resets the review clock, not the fill', () => {
+    const cadence = { min: 5, max: 30 }
+    const ps = { entry: { fill_at: new Date(T - 5 * 60_000).toISOString() },
+                 last_management: { at: new Date(T - 31 * 60_000).toISOString() } }
+    assert.equal(reviewDue(ps, T, cadence), true, 'read 31m ago wins over a 5m-old fill')
 })

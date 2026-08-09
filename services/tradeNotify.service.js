@@ -249,6 +249,60 @@ export function buildCallExpiry(call, kind, why = null) {
 }
 
 /** Kairos in-position MANAGEMENT proposal → open the call to accept/dismiss (Phase 5). */
+/**
+ * Talos wants to change something about a LIVE setup position. Its own copy rather than
+ * buildCallManage's: that one is branded Kairos, keyed on `callId`, and speaks about a call. Share
+ * the pipe (`_post`), not the judgment.
+ *
+ * The proposal is spelled out in the content, not hidden behind "open it to see" — a partial or a
+ * stop move is a number the user can accept or reject at a glance, and burying it costs a round
+ * trip on something time-sensitive.
+ */
+export function buildSetupManage(setup, card) {
+    const dir   = String(setup?.direction || '').toUpperCase()
+    const asset = setup?.asset ?? 'your setup'
+    const p     = card?.proposal ?? null
+    const frac  = { third: 'a third', half: 'half', two_thirds: 'two thirds' }[p?.fraction] ?? 'part'
+
+    const copy = {
+        move_stop: {
+            content: `Your ${dir} ${asset} — I want to move the stop${Number.isFinite(p?.stop) ? ` to ${p.stop}` : ''}${p?.why ? ` (${p.why})` : ''}.`,
+            actions: cardActions('Review'),
+        },
+        take_partial: {
+            content: `Your ${dir} ${asset} — I want to bank ${frac} of the position here.${card?.read ? ` ${card.read}` : ''}`,
+            actions: cardActions('Review'),
+        },
+        exit_now: {
+            content: `Your ${dir} ${asset} — I think the reason for this trade has gone and we should get flat now.${card?.read ? ` ${card.read}` : ''}`,
+            actions: cardActions('Review'),
+        },
+        // Not a request — a deliberate decision NOT to take profit, which the user should know was
+        // made on purpose rather than by nobody looking. No action to take, so no button.
+        let_run: {
+            content: `Your ${dir} ${asset} is working — I'm letting it run rather than trimming here.${card?.read ? ` ${card.read}` : ''}`,
+            actions: null,
+        },
+    }[card?.verdict] ?? { content: `Your ${dir} ${asset} needs a look.`, actions: cardActions('Review') }
+
+    return {
+        userId:  setup?.userId ?? null,
+        content: copy.content,
+        type:    'setup_manage',
+        payload: {
+            kind:      'setup',
+            setupId:   setup?.id,
+            asset:     setup?.asset,
+            direction: setup?.direction ?? null,
+            verdict:   card?.verdict ?? null,
+            proposal:  p,
+            read:      card?.read ?? null,
+        },
+        botId:   'mentor',
+        ...(copy.actions ? { actions: copy.actions } : {}),
+    }
+}
+
 export function buildCallManage(call, card) {
     const verb  = card?.verdict
     const asset = call?.asset
@@ -318,6 +372,10 @@ export async function notifyCallExpiry(call, kind, why = null) {
     return _post(buildCallExpiry(call, kind, why), `Call-expiry card (${kind})`)
 }
 
+export async function notifySetupManage(setup, card) {
+    return _post(buildSetupManage(setup, card), `Setup-manage card (${card?.verdict})`)
+}
+
 export async function notifyCallManage(call, card) {
     return _post(buildCallManage(call, card), `Call-manage card (${card?.verdict})`)
 }
@@ -326,4 +384,4 @@ export async function notifyCallReentry(call, read = null, outcome = null) {
     return _post(buildCallReentry(call, read, outcome), 'Call-reentry card')
 }
 
-export const tradeNotifyService = { notifyIdeaEntryConfirm, notifySetupEntryConfirm, notifySetupInvalidation, notifyQueueReady, notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry }
+export const tradeNotifyService = { notifyIdeaEntryConfirm, notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage, notifyQueueReady, notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry }

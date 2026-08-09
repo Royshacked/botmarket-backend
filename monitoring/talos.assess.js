@@ -218,10 +218,31 @@ export async function assessSetup(setup, hit, ctx = {}) {
             ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: g.png } }, { type: 'text', text: userText }]
             : userText
 
+        return _runRead(setup, _SYSTEM, primary)
+    } catch (err) {
+        logger.warn(LOG, `assessment failed for ${setup?.id}:`, err.message)
+        return { _failReason: 'io' }
+    }
+}
+
+/**
+ * The model loop both reads share: route, run tools until the model stops asking, parse.
+ *
+ * Extracted rather than copied when the in-position read arrived — the verification loop is the one
+ * part of an assessment that is pure mechanism (round handling, the server-tool empty-turn trap, the
+ * runaway backstop, the failure taxonomy), and it is identical whether the question is "enter?" or
+ * "still holding?". What differs between the two is only the SYSTEM prompt and the user content,
+ * which is exactly the judgment each read owns.
+ *
+ * Never throws: a failed read returns a typed marker so the caller can be honest about WHY and
+ * reschedule, rather than wedging the loop.
+ */
+async function _runRead(setup, systemText, primary) {
+    try {
         const { model, reasoningEffort } = await assessRouting(setup.userId)
         const thinking  = _thinkingConfig(reasoningEffort)
         const maxTokens = thinking ? MAX_TOKENS_THINKING : MAX_TOKENS
-        const system    = [{ type: 'text', text: _SYSTEM, cache_control: { type: 'ephemeral' } }]
+        const system    = [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
         const tools     = buildToolsFor(setup)
         const messages  = [{ role: 'user', content: primary }]
 
@@ -289,5 +310,101 @@ export async function assessSetup(setup, hit, ctx = {}) {
     } catch (err) {
         logger.warn(LOG, `assessment failed for ${setup?.id}:`, err.message)
         return { _failReason: 'io' }
+    }
+}
+
+// ─── In-position read ──────────────────────────────────────────────────────────
+
+/** What a management wake may decide. Ordered by urgency in the monitor's severity table. */
+export const MANAGEMENT_VERDICTS = new Set(['hold', 'let_run', 'take_partial', 'move_stop', 'exit_now'])
+
+const _SYSTEM_POSITION = `You are Talos, watching a trade the user is ALREADY IN. The entry is done and the broker is holding the protective orders. You were woken because something arithmetic changed — price is pressing the stop, a target came into reach, the trade crossed +1R, or enough time passed that the thesis is due a re-read.
+
+YOU ARE NOT DECIDING WHETHER TO ENTER. That question is settled. You are deciding whether the reason for being in this trade still holds, and whether the protection around it is still right.
+
+THE THESIS AND ITS CONDITIONS ARE STILL THE MANDATE. They were the reason for the trade; they are the reason to stay in it. Re-read them against what is happening NOW — a condition that was true at entry can stop being true, and that is the single most useful thing you can tell the user. Judge exactly the declared conditions, the same way you did at entry: "measured" means apply the user's own test, "discretionary" means they handed you the judgment. If you cannot check one, mark it "unchecked" and say why — never mark it met because it probably still is.
+
+WHAT THE NUMBERS MEAN. R is measured from the risk originally taken, so it does not move when the stop moves. MAE and MFE are how far the trade went against and in favour SINCE ENTRY — a position at +0.4R that has already seen +2.1R is a trade giving back its gains, and that is a different conversation from one grinding up to +0.4R for the first time.
+
+Verdicts, and be strict — "hold" is the right answer most of the time:
+- "hold" — the thesis is intact and the protection is right. Nothing to do. Say so plainly.
+- "let_run" — working, and working for the reason you expected. Explicitly declining to take profit here.
+- "take_partial" — bank part of it. Say WHICH fraction of the ORIGINAL position: "third", "half" or "two_thirds". Never a share of what is left, or the position never reaches flat.
+- "move_stop" — the protection is wrong for where the trade now is. Give the new level and say what it is anchored to (structure, breakeven, a level price has now defended). Never move a stop further from entry — protection only ever tightens.
+- "exit_now" — the reason for the trade has gone, and waiting for the stop would be paying for information you already have. This is the strongest thing you can say; the thesis must actually be broken, not merely uncomfortable.
+
+You never execute. Every verdict becomes a card the user confirms, so write for someone deciding in ten seconds.
+
+Always include "read": ONE short first-person sentence — what you see and what you are doing about it.
+
+Output ONLY a JSON object, no prose:
+{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw"}],"verdict":"hold|let_run|take_partial|move_stop|exit_now","proposal":{"fraction":"third|half|two_thirds","stop":123.45,"why":"<what the level is anchored to>"},"next_check_min":15,"memo_update":"..."}
+Include "proposal" ONLY for take_partial (fraction) or move_stop (stop + why). Omit it entirely otherwise.`
+
+/**
+ * Run one in-position management read.
+ *
+ * Deliberately given the SAME conditions block as the readiness read. The alternative — a fresh
+ * "how does it look" — throws away the only objective record of why this trade was taken, and turns
+ * management into a second opinion rather than a re-check of the first.
+ */
+export async function assessPosition(setup, ps, ctx = {}) {
+    try {
+        const scenario = _armedScenario(setup)
+        const ladder   = setup?.ladder?.length ? setup.ladder : ['15min']
+        const tf       = ladder[ladder.length - 1]
+        const g        = await gatherFor(setup, tf)
+
+        const m = ps?.metrics ?? {}
+        const userText = [
+            `SETUP: ${JSON.stringify({
+                asset: setup.asset, direction: setup.direction, type: setup.type,
+                trade_mode: setup.trade_mode, timeframe: setup.timeframe, thesis: setup.thesis,
+                conviction: setup.conviction,
+            })}`,
+            `THE POSITION: ${JSON.stringify({
+                entry: ps?.entry?.fill_price ?? ps?.entry?.intended ?? null,
+                size: ps?.entry?.size ?? null,
+                direction: ps?.entry?.direction ?? setup.direction,
+                stop_initial: ps?.stop?.initial ?? null,
+                stop_current: ps?.stop?.current ?? null,
+                targets: (ps?.targets ?? []).map(t => ({ price: t.price, hit: t.hit_at != null })),
+            })}`,
+            `WHERE IT STANDS: ${JSON.stringify({
+                r_now: m.r_multiple_now ?? null, worst_r: m.mae ?? null, best_r: m.mfe ?? null,
+            })}`,
+            _conditionsBlock(setup, scenario),
+            `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
+            `SESSION NOW: ${sessionPhase(setup.asset, setup.asset_class)}`,
+            // The arithmetic that earned this wake. Naming it stops the read starting from scratch —
+            // "price is pressing the stop" is a different question from "a target came into reach".
+            `WHY YOU WERE WOKEN: ${_wakeReason(ctx.reason)}`,
+            `PRIOR MEMO: ${setup.monitor_state?.memo || '(none)'}`,
+            ..._dataBlocks(setup, g, tf),
+        ].filter(Boolean).join('\n\n')
+
+        const primary = g.png
+            ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: g.png } }, { type: 'text', text: userText }]
+            : userText
+
+        return _runRead(setup, _SYSTEM_POSITION, primary)
+    } catch (err) {
+        logger.warn(LOG, `position assessment failed for ${setup?.id}:`, err.message)
+        return { _failReason: 'io' }
+    }
+}
+
+/** The premise that actually won the entry — its conditions are the ones still on the hook. */
+function _armedScenario(setup) {
+    const id = setup?.armed_scenario_id
+    return (setup?.scenarios ?? []).find(s => s.id === id) ?? pickScenario(setup)
+}
+
+function _wakeReason(reason) {
+    switch (reason) {
+        case 'adverse':   return 'price is pressing the working stop — this is the look BEFORE it, while there is still a decision to make.'
+        case 'scale_out': return 'an un-hit target has been reached.'
+        case 'breakeven': return 'the trade is at or past +1R and the stop is not yet protected past entry.'
+        default:          return 'a periodic thesis review is due — price has not done anything in particular, which is not the same as nothing having changed.'
     }
 }

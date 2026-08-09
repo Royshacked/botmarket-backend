@@ -5,6 +5,7 @@ import {
     normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
+    stopEdge, targetEdges,
 } from '../../services/setup.schema.js'
 
 // The `setup` entity contract (docs/desks/mentor-talos.md). Mentor authors loosely, Talos monitors
@@ -365,6 +366,57 @@ test('rr picks the NEAREST target and the WIDEST stop, whatever order they were 
     assert.equal(computeRR(jumbled), 1.95)
 })
 
+// ─── stopEdge / targetEdges — the levels the in-position gate measures against ──
+// Both are selected BY PRICE, never by array position. The model emits zones in the order it
+// reasoned about them, so `[0]` is a coin flip: it would hand the gate the near stop instead of the
+// working one, and fire a partial ladder in whatever order the sentences came out.
+
+test('stopEdge takes the WIDEST edge — the most risk the plan actually admits', () => {
+    const long = normalizeSetup({
+        ...DRAFT,
+        stop_zones: [{ lower: 236, upper: 236.5 }, { lower: 234.8, upper: 235.9 }],
+    })
+    assert.equal(stopEdge(long), 234.8, 'the far edge of the far zone, not stop_zones[0]')
+
+    // Mirrored on a short: widest means the HIGHEST edge, because that is where the risk ends.
+    const short = normalizeSetup({ ...DRAFT, direction: 'short',
+        entry_zones: [{ lower: 238, upper: 238.6, quantity: 100 }],
+        stop_zones:  [{ lower: 240, upper: 240.5 }, { lower: 241, upper: 242.2 }],
+        tp_zones:    [{ lower: 230, upper: 231, quantity: 100 }],
+    })
+    assert.equal(stopEdge(short), 242.2)
+})
+
+test('stopEdge is null when nothing is authored, rather than 0', () => {
+    // A 0 here would read as "the stop is at zero", i.e. infinite risk on a long — and the gate
+    // would then never see price press it.
+    assert.equal(stopEdge(normalizeSetup({ ...DRAFT, stop_zones: [] })), null)
+    assert.equal(stopEdge(null), null)
+})
+
+test('targetEdges come back NEAREST-FIRST — the order price reaches them', () => {
+    // That is also the order a partial ladder must fire in. Array order would take the far leg first.
+    const long = normalizeSetup({
+        ...DRAFT,
+        tp_zones: [{ lower: 260, upper: 261, quantity: 50 }, { lower: 246, upper: 247.2, quantity: 50 }],
+    })
+    assert.deepEqual(targetEdges(long), [246, 260], 'nearest first, despite being emitted second')
+
+    const short = normalizeSetup({ ...DRAFT, direction: 'short',
+        entry_zones: [{ lower: 238, upper: 238.6, quantity: 100 }],
+        stop_zones:  [{ lower: 241, upper: 242 }],
+        tp_zones:    [{ lower: 220, upper: 221, quantity: 50 }, { lower: 232, upper: 233, quantity: 50 }],
+    })
+    assert.deepEqual(targetEdges(short), [233, 221], 'a short reaches the HIGHEST target first')
+})
+
+test('targetEdges is empty, never [null], when none is authored', () => {
+    // The fill path maps this into position_state.targets — a null in there would become a target
+    // the gate compares price against forever.
+    assert.deepEqual(targetEdges(normalizeSetup({ ...DRAFT, tp_zones: [] })), [])
+    assert.deepEqual(targetEdges(null), [])
+})
+
 test('rr is null when a leg is missing or the entry sits inside its own stop', () => {
     assert.equal(computeRR(normalizeSetup({ ...DRAFT, tp_zones: [] })), null)
     assert.equal(computeRR(normalizeSetup({ ...DRAFT, stop_zones: [{ lower: 239, upper: 240 }] })), null)
@@ -539,4 +591,57 @@ test('an unsized zone does not become a zone at 0 on the second pass', () => {
     const twice = normalizeZone(once, 0, 'ez')
     assert.deepEqual([twice.lower, twice.upper], [238.6, 238.6], 'a one-edged band stays that level')
     assert.equal(twice.quantity, null)
+})
+
+// ─── plan edges: chosen by PRICE, never by array position ─────────────────────
+// The model emits zones in whatever order it reasoned about them. computeRR already depended on
+// this rule; the position gate now does too, so it lives in one place rather than being re-derived
+// by every caller that needs "which stop am I actually working against".
+
+test('the working stop is the WIDEST edge, whatever order the zones arrived in', () => {
+    // Widest = most risk the plan admits. Taking the nearest would understate risk and overstate R.
+    const long = { direction: 'long', stop_zones: [{ lower: 96, upper: 97 }, { lower: 94, upper: 95 }] }
+    assert.equal(stopEdge(long), 94)
+
+    const short = { direction: 'short', stop_zones: [{ lower: 103, upper: 104 }, { lower: 105, upper: 106 }] }
+    assert.equal(stopEdge(short), 106, 'a short works against the HIGH edge')
+})
+
+test('a long and a short read opposite edges of the same band', () => {
+    // The band is where price ARRIVES: a long is stopped at the low side, a short at the high side.
+    const zones = [{ lower: 94, upper: 95 }]
+    assert.equal(stopEdge({ direction: 'long',  stop_zones: zones }), 94)
+    assert.equal(stopEdge({ direction: 'short', stop_zones: zones }), 95)
+})
+
+test('targets come back nearest-first, which is the order partials fire in', () => {
+    const long = { direction: 'long', tp_zones: [{ lower: 120, upper: 121 }, { lower: 105, upper: 106 }] }
+    assert.deepEqual(targetEdges(long), [105, 120], 'authored far-then-near, returned near-then-far')
+
+    const short = { direction: 'short', tp_zones: [{ lower: 80, upper: 81 }, { lower: 95, upper: 96 }] }
+    assert.deepEqual(targetEdges(short), [96, 81], 'a short falls INTO its targets')
+})
+
+test('no zones authored → null stop and an empty ladder, never a thrown or a NaN', () => {
+    assert.equal(stopEdge({ direction: 'long' }), null)
+    assert.equal(stopEdge(null), null)
+    assert.deepEqual(targetEdges({ direction: 'long' }), [])
+    assert.deepEqual(targetEdges(null), [])
+})
+
+test('an unusable edge is skipped rather than poisoning the selection', () => {
+    // One malformed zone must not make Math.min return NaN and take the whole gate down with it.
+    const s = { direction: 'long', stop_zones: [{ lower: null, upper: 97 }, { lower: 94, upper: 95 }] }
+    assert.equal(stopEdge(s), 94)
+})
+
+test('computeRR still quotes the widest stop against the nearest target', () => {
+    // The extraction must not change the number: rr is what the plan advertises to the user.
+    const setup = {
+        direction: 'long',
+        entry_zones: [{ lower: 99, upper: 100 }],
+        stop_zones:  [{ lower: 96, upper: 97 }, { lower: 94, upper: 95 }],   // widest = 94 → risk 6
+        tp_zones:    [{ lower: 120, upper: 121 }, { lower: 106, upper: 107 }], // nearest = 106 → reward 6
+    }
+    assert.equal(computeRR(setup), 1)
 })
