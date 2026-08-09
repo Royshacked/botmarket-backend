@@ -13,7 +13,7 @@ import {
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, MANAGEMENT_VERDICTS } from './talos.assess.js'
-import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetEdges } from '../services/setup.schema.js'
+import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetEdges, addEntryLeg } from '../services/setup.schema.js'
 import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage } from '../services/tradeNotify.service.js'
 
 // Talos — the guardian of the `setup` kind (docs/desks/mentor-talos.md).
@@ -211,11 +211,23 @@ async function _checkPosition(setup, nowMs, deps) {
     // the wrong zone whenever the model emitted them out of order.
     const stop = stopEdge(setup)
 
+    // Recorded as a LEG rather than as a single fact. A position built by scaling in has several
+    // fills at different prices, and `fill_price` must be their size-weighted average because every
+    // R in the system is measured from it. One leg is the average of one, so this is a no-op until
+    // per-leg execution lands — which is exactly why it lands first.
+    const entry = addEntryLeg(ps.entry, {
+        zone_id:  setup.armed_zone_id ?? null,
+        price:    fillPrice,
+        quantity: setup.quantity ?? null,
+        at:       new Date(fillAtMs).toISOString(),
+    })
+
     const patch = {
         ...base,
-        'position_state.entry.fill_price': fillPrice,
+        'position_state.entry.legs':       entry.legs,
+        'position_state.entry.fill_price': entry.fill_price,
         'position_state.entry.fill_at':    new Date(fillAtMs).toISOString(),
-        'position_state.entry.size':       setup.quantity ?? null,
+        'position_state.entry.size':       entry.size,
         'position_state.entry.direction':  setup.direction ?? (setup.status === 'short' ? 'short' : 'long'),
         'position_state.phase':            'running',
         // FROZEN AT FILL, and deliberately not read live off the scenario afterwards. What protects

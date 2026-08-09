@@ -5,7 +5,7 @@ import {
     normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
-    stopEdge, targetEdges,
+    stopEdge, targetEdges, addEntryLeg,
 } from '../../services/setup.schema.js'
 
 // The `setup` entity contract (docs/desks/mentor-talos.md). Mentor authors loosely, Talos monitors
@@ -644,4 +644,65 @@ test('computeRR still quotes the widest stop against the nearest target', () => 
         tp_zones:    [{ lower: 120, upper: 121 }, { lower: 106, upper: 107 }], // nearest = 106 → reward 6
     }
     assert.equal(computeRR(setup), 1)
+})
+
+// ─── Entry legs — the arithmetic scaling in rests on ──────────────────────────
+// A scaled position is several fills at different prices, so `entry` becomes an aggregate. This
+// lands BEFORE per-leg execution because everything downstream measures from `fill_price`:
+// rMultiple feeds positionGate's adverse and breakeven tiers and computeMetrics' mae/mfe, so an
+// average that is wrong misreports R on every wake of every scaled position.
+
+test('one leg is the average of one — today\'s behaviour, unchanged', () => {
+    // The whole reason this is safe to ship before the rest of scaling in.
+    const e = addEntryLeg(null, { price: 238.6, quantity: 100 })
+    assert.equal(e.fill_price, 238.6)
+    assert.equal(e.size, 100)
+    assert.equal(e.legs.length, 1)
+})
+
+test('two legs weight by SIZE, not by count', () => {
+    // 100 @ 100 then 300 @ 108 is 106, not 104. A plain mean flatters a position that added into
+    // strength and would report it a full R nearer its stop than it is.
+    const e = addEntryLeg(addEntryLeg(null, { price: 100, quantity: 100 }), { price: 108, quantity: 300 })
+    assert.equal(e.fill_price, 106)
+    assert.equal(e.size, 400)
+    assert.equal(e.legs.length, 2)
+})
+
+test('legs accumulate in fill order and keep what they were', () => {
+    // The average is derived; the legs are the record. A user asking "where did I get in" wants both.
+    const e = addEntryLeg(addEntryLeg(null,
+        { zone_id: 'ez1', price: 50, quantity: 10 }), { zone_id: 'ez2', price: 60, quantity: 10 })
+    assert.deepEqual(e.legs.map(l => l.zone_id), ['ez1', 'ez2'])
+    assert.equal(e.fill_price, 55)
+})
+
+test('an unsized leg falls back to the last price rather than to NaN', () => {
+    // The single-leg path has always written a price with no quantity when sizing was unresolved.
+    // It must keep working, not divide by zero.
+    const e = addEntryLeg(null, { price: 238.6 })
+    assert.equal(e.fill_price, 238.6)
+    assert.equal(e.size, null)
+})
+
+test('a priceless leg still counts toward SIZE, but never toward the average', () => {
+    // Two separate facts. Number(null) is 0, not NaN, so an unpriced leg left in the weighting
+    // enters as a free share and halves the reported entry — every R after that is wrong.
+    // But it still filled: dropping its quantity would under-report the position, and a stop sized
+    // to less than is held is the more dangerous error of the two.
+    const e = addEntryLeg(addEntryLeg(null, { price: 100, quantity: 10 }), { price: null, quantity: 10 })
+    assert.equal(e.fill_price, 100, 'the unpriced leg does not drag the average to 50')
+    assert.equal(e.size, 20, 'but the position really is 20')
+    assert.equal(e.legs.length, 2, 'and both fills are on the record')
+})
+
+test('a leg with size but no price anywhere leaves the price unknown, not zero', () => {
+    const e = addEntryLeg(null, { price: null, quantity: 10 })
+    assert.equal(e.fill_price, null)
+    assert.equal(e.size, 10)
+})
+
+test('the average is rounded, so a third of a cent never reaches a card', () => {
+    const e = addEntryLeg(addEntryLeg(null, { price: 10, quantity: 1 }), { price: 11, quantity: 2 })
+    assert.equal(e.fill_price, 10.666667)
 })

@@ -585,6 +585,50 @@ export function rangeProblems(setup) {
 const _edge = (z, isLong) => (isLong ? z?.lower : z?.upper)
 
 /**
+ * One entry LEG, folded into the running position. Pure.
+ *
+ * Scaling in means a position is built from several fills at different prices, so `entry` stops
+ * being a single fact and becomes an aggregate: `legs[]` is what actually happened, `size` their
+ * sum, and `fill_price` their SIZE-WEIGHTED average.
+ *
+ * The average is the load-bearing part. `rMultiple` measures from `entry.fill_price`, and it feeds
+ * `positionGate`'s adverse and breakeven tiers plus `computeMetrics`' mae/mfe — so a plain mean of
+ * the leg prices, or simply keeping the first fill, would misreport R on every wake of every scaled
+ * position. Weight by size or the number is fiction.
+ *
+ * A no-op for a single-leg position: one leg weighted by its own size is that leg's price, which is
+ * why this can land before per-leg execution exists.
+ */
+export function addEntryLeg(entry, leg) {
+    // EVERY leg is kept: it happened, and a fill we could not price still added size. Only the
+    // AVERAGE is selective.
+    const legs = [...(entry?.legs ?? []), leg].filter(Boolean)
+
+    // Size counts any leg with a quantity, priced or not — discarding it would under-report the
+    // position, which is the more dangerous direction (the stop would cover less than is held).
+    const size = legs.reduce((n, l) => n + (Number(l?.quantity) > 0 ? Number(l.quantity) : 0), 0)
+
+    // The average weights only legs carrying BOTH a price and a size. `price != null` is checked
+    // before coercion because Number(null) is 0, not NaN — without it an unpriced leg enters as a
+    // free share and halves the reported entry, misreporting R on every subsequent wake.
+    const priced = legs.filter(l => l?.price != null && Number.isFinite(Number(l.price)) && Number(l?.quantity) > 0)
+    const weight = priced.reduce((n, l) => n + Number(l.quantity), 0)
+
+    // Nothing weighable — the last price we DO have is the honest answer, and it is what the
+    // single-leg path has always written when sizing was unresolved.
+    const lastPriced = [...legs].reverse().find(l => l?.price != null && Number.isFinite(Number(l.price)))
+    const price = weight > 0
+        ? priced.reduce((n, l) => n + Number(l.price) * Number(l.quantity), 0) / weight
+        : Number(lastPriced?.price ?? NaN)
+
+    return {
+        legs,
+        size:       size > 0 ? size : (entry?.size ?? null),
+        fill_price: Number.isFinite(price) ? Math.round(price * 1e6) / 1e6 : null,
+    }
+}
+
+/**
  * The working stop: the WIDEST stop edge, i.e. the most risk the plan admits. Null when none is
  * authored. Pure.
  *
