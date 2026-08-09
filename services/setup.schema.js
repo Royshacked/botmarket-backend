@@ -603,6 +603,35 @@ export function legQuantity(scenario, zoneId) {
 }
 
 /**
+ * The armed premise's entry zones that have NOT filled yet — the legs still to scale into. Pure.
+ *
+ * Keyed on the zone ids already recorded in `entry.legs[]`, not on a count, because legs can fill
+ * out of order: a premise with a dip leg and a reclaim leg fills whichever prints first.
+ *
+ * Empty for a single-leg premise the moment it fills, which is what keeps the scale-in path inert
+ * for every setup that exists today.
+ */
+export function pendingLegs(scenario, entry) {
+    const filled = new Set((entry?.legs ?? []).map(l => l?.zone_id).filter(Boolean))
+    return (scenario?.entry_zones ?? []).filter(z => z?.id && !filled.has(z.id))
+}
+
+/**
+ * May this position be added to right now? Pure.
+ *
+ * The rule that matters: NEVER scale into a position the gate calls `adverse`. Adding size to a
+ * trade already pressing its stop is the single worst thing this feature could do — it is the
+ * averaging-down reflex, automated, and it turns one planned loss into a larger unplanned one. The
+ * plan said "add at this level"; it did not say "add while the thesis is failing".
+ *
+ * `scale_out` and `breakeven` are not blockers: those are a position doing WELL, which is exactly
+ * when a second planned leg is legitimate.
+ */
+export function mayScaleIn(gateFlag) {
+    return gateFlag !== 'adverse'
+}
+
+/**
  * One entry LEG, folded into the running position. Pure.
  *
  * Scaling in means a position is built from several fills at different prices, so `entry` stops

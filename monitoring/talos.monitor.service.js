@@ -13,7 +13,7 @@ import {
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, MANAGEMENT_VERDICTS } from './talos.assess.js'
-import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetEdges, addEntryLeg, legQuantity } from '../services/setup.schema.js'
+import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetEdges, addEntryLeg, legQuantity, pendingLegs, mayScaleIn } from '../services/setup.schema.js'
 import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage } from '../services/tradeNotify.service.js'
 
 // Talos — the guardian of the `setup` kind (docs/desks/mentor-talos.md).
@@ -269,7 +269,21 @@ async function _managePosition(setup, ps, nowMs, deps) {
     const price   = await deps.getPrice(setup)
     const metrics = computeMetrics(ps, price, nowMs)
     const gate    = positionGate(ps, price)
-    const assessNow = !!gate.flag || reviewDue(ps, nowMs, setup.cadence)
+
+    // A planned SECOND LEG printing is its own reason to look, independent of the management gate:
+    // the position is fine, and the plan says there is more to add here. Pending legs are keyed on
+    // zone id rather than counted, because legs fill in whatever order price reaches them.
+    //
+    // NEVER while the gate says `adverse`. Adding to a position already pressing its stop is the
+    // averaging-down reflex with a scheduler attached — it turns one planned loss into a larger
+    // unplanned one. The plan said "add at this level", not "add while the thesis is failing".
+    // `scale_out` and `breakeven` do not block it: those are a position doing well, which is when a
+    // planned leg is legitimate.
+    const armed     = (setup.scenarios ?? []).find(sc => sc?.id === setup.armed_scenario_id) ?? null
+    const openLegs  = pendingLegs(armed, ps.entry)
+    const scaleZone = (openLegs.length && mayScaleIn(gate.flag)) ? zoneGate(openLegs, price) : null
+
+    const assessNow = !!gate.flag || !!scaleZone || reviewDue(ps, nowMs, setup.cadence)
 
     const bump = (nextAt) => ({
         ...metricsSet(metrics),
@@ -284,8 +298,8 @@ async function _managePosition(setup, ps, nowMs, deps) {
         return { reason: 'in_position_idle' }
     }
 
-    const reason = gate.flag ?? 'review'
-    const raw    = await deps.assessPosition(setup, ps, { price, reason, gate, metrics })
+    const reason = gate.flag ?? (scaleZone ? 'scale_in' : 'review')
+    const raw    = await deps.assessPosition(setup, ps, { price, reason, gate, metrics, scaleZone })
 
     if (!raw || raw._failReason) {
         const nextAt = new Date(nowMs + _minGapMs(setup.cadence)).toISOString()

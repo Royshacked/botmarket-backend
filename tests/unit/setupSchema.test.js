@@ -5,7 +5,7 @@ import {
     normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
-    stopEdge, targetEdges, addEntryLeg, legQuantity,
+    stopEdge, targetEdges, addEntryLeg, legQuantity, pendingLegs, mayScaleIn,
 } from '../../services/setup.schema.js'
 
 // The `setup` entity contract (docs/desks/mentor-talos.md). Mentor authors loosely, Talos monitors
@@ -738,4 +738,45 @@ test('legs never sum across a premise at execution time', () => {
     const sc = { entry_zones: [{ id: 'ez1', quantity: 60 }, { id: 'ez2', quantity: 40 }] }
     assert.equal(scenarioQuantity(sc.entry_zones), 100, 'the premise is 100 in total')
     assert.notEqual(legQuantity(sc, 'ez1'), 100, 'but the first print is not')
+})
+
+// ─── Pending legs, and when adding is allowed ─────────────────────────────────
+
+const TWO_LEG = { entry_zones: [{ id: 'ez1', lower: 100, upper: 101, quantity: 60 },
+                                { id: 'ez2', lower: 95,  upper: 96,  quantity: 40 }] }
+
+test('a filled leg drops out, and the rest stay pending', () => {
+    const pend = pendingLegs(TWO_LEG, { legs: [{ zone_id: 'ez1' }] })
+    assert.deepEqual(pend.map(z => z.id), ['ez2'])
+})
+
+test('legs are matched by ID, not by count — they fill in whatever order price reaches them', () => {
+    // A dip leg and a reclaim leg fill in the order the market offers, not the order authored.
+    const pend = pendingLegs(TWO_LEG, { legs: [{ zone_id: 'ez2' }] })
+    assert.deepEqual(pend.map(z => z.id), ['ez1'], 'the SECOND authored leg filled first')
+})
+
+test('a single-leg premise has nothing pending once it fills — the whole path stays inert today', () => {
+    const one = { entry_zones: [{ id: 'ez1', quantity: 100 }] }
+    assert.equal(pendingLegs(one, { legs: [{ zone_id: 'ez1' }] }).length, 0)
+})
+
+test('an unfilled premise is entirely pending, and a missing scenario is not a crash', () => {
+    assert.equal(pendingLegs(TWO_LEG, null).length, 2)
+    assert.equal(pendingLegs(TWO_LEG, { legs: [] }).length, 2)
+    assert.equal(pendingLegs(null, { legs: [] }).length, 0)
+})
+
+test('NEVER add to a position that is pressing its stop', () => {
+    // The averaging-down reflex is the one thing this feature must not automate: it turns one
+    // planned loss into a larger unplanned one.
+    assert.equal(mayScaleIn('adverse'), false)
+})
+
+test('a position doing well may still take its planned leg', () => {
+    // scale_out and breakeven mean the trade is working — exactly when a second planned leg is
+    // legitimate. Blocking on any flag at all would make the feature unreachable in practice.
+    assert.equal(mayScaleIn('scale_out'), true)
+    assert.equal(mayScaleIn('breakeven'), true)
+    assert.equal(mayScaleIn(null), true)
 })
