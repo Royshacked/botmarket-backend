@@ -6,6 +6,15 @@ monitor, from the first map of a zone to the closed position.
 Replaces `KAIROS_PLAN.md`, `KAIROS_MODES.md` and `KAIROS_HERMES_ROADMAP.md` (2026-08-08), which
 split one subject across three files and disagreed about what was built.
 
+> ⚠️ **SILENT since 2026-08-09 — this is no longer the path a new trade takes.** New work goes
+> Argus → Mentor → Talos; see [trade-pipeline.md](./trade-pipeline.md) for why, and for where the
+> autonomous build returns as a premium Mentor mode.
+>
+> **Silent, not archived.** Hermes keeps running: calls already in flight run to their natural close
+> under it, the same strangler used for legacy tree-`idea`s. Nothing in flight migrates, and nothing
+> below is wrong — it describes a path that is frozen, not one that was removed. Read it when
+> touching a live call.
+
 ---
 
 ## The split

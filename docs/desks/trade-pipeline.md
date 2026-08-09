@@ -1,0 +1,280 @@
+# The trade pipeline — Argus → Mentor → Talos
+
+How a single asset becomes a monitored trade. One path, three desks, one entity kind (`setup`), one
+monitor (Talos).
+
+Design record, 2026-08-09. Nothing here is built yet except where marked **BUILT**.
+
+---
+
+## Status
+
+| | state |
+|---|---|
+| Argus → Mentor → Talos | the live path going forward |
+| Kairos + Hermes | **silent** — not deleted, not archived |
+| Argus → Mentor handoff | **not built.** Deferred to the end of the work |
+| `call` kind | frozen. Calls in flight run to natural close under Hermes |
+
+**Silent, not gone.** Hermes must keep running until the last live `call` closes — the same strangler
+used for legacy tree-`idea`s. Nothing in flight migrates. See
+[kairos-hermes.md](./kairos-hermes.md) for what stays alive meanwhile.
+
+---
+
+## Why Mentor and not Kairos
+
+The difference between the two desks was never the schema. It is **authorship**:
+
+- **Kairos authors, and stops.** It picks the levels; the user presses Generate.
+- **Mentor works on what the user brought.** It analyses, proposes, pushes back, then hands the
+  decision back.
+
+That is a *mode*, not a second codebase — so it collapses into one agent with two authoring styles,
+and the better schema wins. Mentor's is the better schema:
+
+| | `call` | `setup` |
+|---|---|---|
+| shape | flat zone lists, one `bias` | **scenarios** — each owns its entry, stop, targets, conditions, validity |
+| conditions | patterns the desk hypothesised | **free text**, no taxonomy — the monitor reads the sentence and picks its tools |
+| dies by | `valid_until` (a time) | `validity` (a price range, with `on_break`) |
+| repeat work | — | `persistence: latching` — a settled fact is never re-litigated |
+
+`setup.schema.js` states the reason a taxonomy was refused: an enum "would only ever narrow what can
+be checked." The intelligence lives in the monitor, not the shape.
+
+**The autonomous build (today's Kairos behaviour) returns later as a premium mode of Mentor.** It is
+deliberately the expensive one: measured at ~6.7 model round-trips and ~122k prompt tokens per user
+turn, against Mentor's ~2. Pricing it as premium aligns cost with revenue instead of fighting it.
+
+---
+
+## The three lenses
+
+`discretionary` · `smc` · `institutional`
+
+- Mentor **recommends** one and names it. It never blends two — that rule already exists for the
+  current pair and extends unchanged.
+- **Talos is aware of the lens.** This is a deliberate break from Hermes, where `mode` never reaches
+  the monitor. The reason: a setup's conditions reference the lens's own computations, so *"an SMC
+  setup built on them is monitored on them."*
+- Scope it tightly. The lens selects the **tool subset in Tier 3**. It does **not** change the
+  questions or the verdicts, and it never reaches Tier 2 (which has no tools).
+
+**Two blockers before the third lens ships:**
+
+1. **Name collision.** Conditions already carry `mode: measured │ discretionary`. Adding a
+   `discretionary` *lens* puts the same word in one document meaning two unrelated things. Rename the
+   condition values — suggest `measured │ judgment`. The lens names are user-facing and must win.
+   Cheap now, painful once setups exist.
+2. **`institutional` tools must exist** in `assessTools.js`. The SMC ones do. Confirm before
+   committing to the lens.
+
+---
+
+## Talos — the three-tier cascade
+
+One assessment path, gated cheapest-first, running both flat and in position.
+
+### Tier 1 — arithmetic
+Free. Every wake. Pure comparison, no IO.
+
+**Flat**
+
+| trip | goes to |
+|---|---|
+| price inside an entry zone | Tier 3 · *entry* |
+| close past a validity edge | Tier 3 · *invalidation* |
+| `valid_until` within threshold | Tier 3 · *expiry* |
+| price moved N band widths from the anchor | **Tier 2** |
+| nothing | reschedule, silent |
+
+**In position**
+
+| trip | goes to |
+|---|---|
+| close past the **adverse** validity edge | Tier 3 · *invalidation* |
+| price at or beyond a target zone | Tier 3 · *exit* |
+| adverse move past N band widths | Tier 3 · *risk* |
+| nothing | **Tier 2** |
+
+### Tier 2 — cheap triage
+Haiku · no tools · no thinking · 32-token cap · ~$0.0005.
+
+This tier exists because **exits, scaling and change-of-setup have no natural arithmetic gate.**
+"Should I take partial profit?" is not answered by price crossing a line. A cheap model call is the
+gate those questions never had.
+
+- In: position summary, entry, stop, targets, price, unrealized R.
+- Ask: "anything here worth a real look?"
+- Out: `{look: bool, reason: <one word>, next_check_min: int}`.
+- **Unsure → `look: true`.** Fail-open, matching the existing fail-open confirmation pass.
+- `reason` selects which Tier 3 question runs.
+
+### Tier 3 — full assessment
+Sonnet · tools per lens · chart when the read is genuinely visual · ~$0.03–0.05.
+
+**One question per wake. The gate picks it — the model never chooses among six.** A six-way decision
+is a bigger prompt and a worse answer than a narrow one.
+
+| question | verdicts |
+|---|---|
+| entry | `enter` · `wait` · `stand_aside` |
+| invalidation | `dead` · `revise` · `hold` |
+| exit | `take` · `partial` · `trail` · `hold` |
+| risk | `move_stop` · `reduce` · `hold` |
+| re-map | `edit_proposal` · `keep` |
+| expiry | `let_expire` · `edit` |
+
+---
+
+## Invariants
+
+1. **Talos never executes.** Every verdict is a card the user confirms. This is what makes a wrong
+   verdict survivable, and it is the first thing that will feel tempting to break once exits exist.
+2. **Tier 1 always runs first.** Tier 2 is cheap per call, not free — a thousand users with three
+   open positions is ~144k triage calls a day. Fine as an escalation; ruinous as a base cadence.
+3. **One question per wake.**
+4. **Journal on Tier 3 only.** Tiers 1 and 2 stay silent. A monitor that writes a line every wake
+   turns the monologue into noise.
+5. **Latch per event, not per verdict type** — `partial` must be able to re-arm.
+6. **The model proposes `next_check_min`; the cadence clamps it.** Reuses `_nextCheckAt`. The
+   timeframe is the anchor: a 5-minute setup and a daily setup must not share a floor. Unclamped, a
+   model that says "1 minute" on a swing setup burns the budget, and one that says "3 days" goes
+   blind.
+7. **Re-anchor on Tier 3 only.** Tier 2 sees numbers, not a chart — that is not a real look. If the
+   anchor moved on every Tier 2 run, a slow grind would reset forever and never accumulate. Throttle
+   Tier 2 by clock instead.
+
+---
+
+## Zones
+
+**Targets become zones**, `lower`/`upper`, the same shape as entry zones — so Tier 1's exit gate is
+the same `zoneGate` as entry. One mechanism, parameterised. Not two.
+
+**But the comparison differs, and this is easy to get wrong:**
+
+- **Entry gate — price *inside* the zone.** You want in at that price, not worse.
+- **Exit gate — price *at or beyond*.** You will happily take better than target. If the exit gate
+  reuses `zoneGate` unchanged, a gap straight through the target never fires, because price was
+  never "inside".
+
+**Targets are mandatory at readiness.** No targets, no Generate. The exit gate is then always
+available. Existing setups without them keep running.
+
+Target zones need **no validity of their own** — the scenario's covers it. A target price blows past
+is exceeded, not dead.
+
+**Ten zones is a supported answer**, and the arithmetic gate makes it nearly free to watch. Three
+things to warn the user about at build time:
+
+- Ten zones across ten scenarios are **rivals**: the first to fill takes the whole trade and the rest
+  die. Ten zones inside *one* scenario is scaling in, which is a different thing and currently
+  blocked.
+- Overlap is resolved by **authored order**, which is fine at two scenarios and arbitrary at ten.
+- Scattered zones keep the proximity cadence permanently at its floor — the cheap tier stops being
+  cheap. Mentor should push back during the build.
+
+---
+
+## Partials
+
+- Size is an **enum**: `third │ half │ two_thirds`. A free float is money chosen by a model; an enum
+  is validatable and renderable. Still a card — the user confirms.
+- **Fractions are of the ORIGINAL size, never of the remainder.** Thirds of the original terminate at
+  three; thirds of the remainder are 1/3, 2/9, 4/27 … and never reach flat.
+- **`partial` re-arms.** After a third, Tier 3 may propose another later. Hence invariant 5.
+- **`position_state` must track `remaining`.** Today it records `entry.size` at fill, which is no
+  longer enough — Tier 3 will otherwise propose a third that does not exist.
+- **A floor.** Below some remainder the verdict is `take`, not `partial`. Otherwise: death by a
+  thousand thirds.
+- **`partial` and `move_stop` are separate verdicts.** They will often be proposed together; they are
+  not one action.
+
+**Off-hours — already solved, needs wiring.** The queue was built for this case:
+
+> *"a queued trim, exit or scale-in is **not** an entry, owns no entity of its own, and can outlive
+> the review that produced it."*
+
+- Call `deferIfClosed({userId, asset, assetClass, origin, action})` before sending.
+- Register a Talos origin in `services/pendingAction/originRegistry.js` — one entry.
+- `executionGate` **refuses to queue an unregistered origin**, so this cannot ship half-done.
+- `enqueue` is idempotent per `(user, entity, verb)` — which is also the double-accept guard for
+  re-arming partials.
+
+---
+
+## Rewrite, don't overlay
+
+| file / function | why |
+|---|---|
+| `_checkSetup` + `_checkPosition` | two entry points today; the cascade is one, gated by flat/in-position |
+| `_checkPosition` | a heartbeat with no brain — nothing to preserve |
+| `_applyVerdict` | built for one verdict set; six questions will not overlay |
+| `_checkValidity` | becomes a Tier 3 question instead of a deterministic close-check |
+
+**Carry one thing forward through the rewrite: the wick guard.** `_checkValidity` deliberately
+fetches the **close**, not the tick — *"The close is the verdict, and it may disagree with the tick:
+that IS the wick guard working."* Easy to lose in a rewrite, expensive to rediscover.
+
+---
+
+## Shared services
+
+Reuse, do not fork:
+
+- `assessTools.js` — the one tool registry. Tier 3 draws from it, scoped by lens.
+- `monitorJournal.js` — journal shape and cap mechanics.
+- `_nextCheckAt` / `next_check_min` — Tier 2 reuses this; no new scheduling code.
+- `sendBotMessage` — one card transport.
+- `zoneGate` — one function for entry and exit, parameterised by comparison direction.
+- `deferIfClosed` / `originRegistry` — the off-hours queue.
+
+Stays per-desk — **share the pipe, not the judgment**: the six questions, their verdict sets, and
+the card copy.
+
+If Hermes ever gains a Tier 2, it must be the *same* triage service, not a copy.
+
+---
+
+## Talos completion backlog
+
+| item | state | size |
+|---|---|---|
+| stop/validity coherence | unchecked | **S** |
+| close journal line | exit never journalled | **S** |
+| in-position management | heartbeat only | **L** |
+| scaling in | blocked at readiness | **M** |
+
+Order: **coherence → close line → in-position → scaling in.**
+
+- **Coherence** is a pure build-time check beside the existing readiness rules. Severity depends on
+  `on_break`: block when `close` and the stop sits outside validity; warn otherwise. It is a build
+  smell, not a safety hole — the stop is a real broker order and still fires.
+- **Close line** is an ordering fix: the reconciler flips a setup to `closed`, dropping it out of the
+  polled statuses before Talos sees it. Recording the exit is small; *explaining* it needs the
+  in-position brain.
+- **In-position** is the cascade above. It is most of the work.
+- **Scaling in** last — it is the only item that touches the order layer.
+
+**Not in this backlog:** the momentum pulse. It dissolves into Tier 1 — it was never a mechanism,
+only a name for *anchor + distance → escalate*. Keep the anchor field, drop the word, and escalate to
+Tier 2 rather than straight to a full visual read. Same trigger, ~100× cheaper response.
+
+---
+
+## Open
+
+- **Tier 1 anchor threshold.** Hermes used 4 band widths because each trigger bought a full visual
+  read. A trigger now buys a $0.0005 call, which argues for being *more* sensitive — 2 bands is the
+  starting suggestion.
+- **In position with no targets authored** — legacy setups predate the readiness rule. What gates
+  their exit question?
+- **Does the `trades` ledger support partial exits?** It is frozen-at-fill with `pnl =
+  exit.realizedPnl`, which reads as a single exit. Confirm before Tier 3 can propose `partial` — if
+  it does not, that is a dependency, not a detail.
+- **Argus → Mentor handoff.** Not built. Deferred by decision.
+- **[entity-model.md](../architecture/entity-model.md) is stale** — its per-kind payload and
+  ownership tables list only `idea` / `call` / `portfolio_item`. `setup` and Talos are absent though
+  live-verified since 2026-08-03. Fix when this lands.
