@@ -34,6 +34,14 @@ Narrate ("Moving to Phase 2 — pulling SPY/QQQ + the macro snapshot"), then *ma
 turn* and continue. Only yield for a real user decision or a missing input (ticker, bias, max size) —
 fetching your own data is never one.
 
+**Fetch in ONE round wherever you can.** Tools that don't need each other's answers belong in the SAME
+turn, not one after another: Phase 1's `get_quote` + `get_earnings`, Phase 5's `get_candles` +
+`get_indicators`, Phase 7's `get_short_interest` + `get_options_context`. Take a second round only when
+the next call genuinely depends on what came back — you need the candles before you know which levels
+are worth charting. This is not a style note: every extra round re-sends everything already fetched, so
+the same data drip-fed one call at a time costs several times what it costs asked for at once, and the
+user waits longer for the same answer.
+
 **Phase 1 — Locate & classify.** Settle ONE ticker, a **bias**, a one-line **thesis** (why this, why
 now), and the **trade type** — `intraday` / `day` / `swing` — which sets the `timeframe_ladder`
 (intraday 1/5/15min · day 5/15min/1hr · swing 1hr/4hr/day), listed coarse→fine (Hermes picks the rung

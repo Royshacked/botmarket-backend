@@ -141,6 +141,89 @@ test('onChart buys an agent the instruction, the capture, the live row and the s
     assert.equal(got.systemPrompt[1].text, CHART_INSTRUCTION)
 })
 
+// ─── chart-image discipline: one rule, every chat desk, no monitor ────────────
+// A chart image is ~1,500 tokens against 100–300 for a numeric tool — the only payload in the app
+// big enough to be worth a rule. It rides CHART_INSTRUCTION so it is written once and every
+// chart-wired desk inherits it, rather than being copied into six prompts that then drift.
+
+test('the shared rule tells a desk what an image costs and what to reach for instead', () => {
+    // The number is the whole argument. Without it "prefer numbers" is a preference a model can
+    // reasonably ignore; with it, it is a budget.
+    assert.match(CHART_INSTRUCTION, /1,500 tokens/, 'the cost must be stated, not implied')
+    assert.match(CHART_INSTRUCTION, /get_candles/, 'the cheaper alternative must be named')
+    assert.match(CHART_INSTRUCTION, /get_indicators/)
+})
+
+test('the free tag and the costly tool are kept apart', () => {
+    // The two are both "charts" and the failure mode is conflating them: spending an image to show
+    // the user something the tag renders for nothing.
+    assert.match(CHART_INSTRUCTION, /Never fetch an image just to put a chart in front of the user/)
+})
+
+test('the rule rides the cached prefix instead of being re-read every turn', async () => {
+    // Static text in a block of its own sits PAST the breakpoint and is billed at full price on
+    // every turn of every chart desk — forever. Merging it into the cached block costs one re-write
+    // and is then free, and spends no extra breakpoint (the budget is four and already fully used
+    // on the widest path).
+    let got = null
+    await runAgentStream({
+        log: '[t]', messages: [],
+        systemPrompt: [{ type: 'text', text: 'base', cache_control: { type: 'ephemeral' } }],
+        tagCaptures: buildTagCaptures({}), onChart: () => {},
+        _resolve: fakeResolve(async (args) => { got = args; return 'ok' }),
+    })
+    assert.equal(got.systemPrompt.length, 1, 'no new block, so no new breakpoint pressure')
+    assert.deepEqual(got.systemPrompt[0].cache_control, { type: 'ephemeral' }, 'still cached')
+    assert.match(got.systemPrompt[0].text, /^base\n\n/, 'the base prompt still leads')
+    assert.match(got.systemPrompt[0].text, /1,500 tokens/, 'the rule is inside the cached block')
+})
+
+test('a volatile tail is never used as the cache target, and stays last', async () => {
+    // Atlas appends per-request sections after its cached base, and the audience block must remain
+    // the final block (audienceSection.test). Folding static text into either would defeat the point
+    // — they are re-read anyway — and reordering them would blow the cached prefix for every user.
+    let got = null
+    await runAgentStream({
+        log: '[t]', messages: [],
+        systemPrompt: [
+            { type: 'text', text: 'base', cache_control: { type: 'ephemeral' } },
+            { type: 'text', text: 'WHO YOU ARE TALKING TO: beginner' },
+        ],
+        tagCaptures: buildTagCaptures({}), onChart: () => {},
+        _resolve: fakeResolve(async (args) => { got = args; return 'ok' }),
+    })
+    assert.equal(got.systemPrompt.length, 2)
+    assert.match(got.systemPrompt[0].text, /1,500 tokens/, 'merged into the cached block')
+    assert.equal(got.systemPrompt[1].text, 'WHO YOU ARE TALKING TO: beginner', 'the tail is untouched and still last')
+})
+
+test('with nothing cached to ride, the block is appended rather than dropped', async () => {
+    // The fallback must never silently lose the rules — an uncached instruction still works, it
+    // just costs more.
+    let got = null
+    await runAgentStream({
+        log: '[t]', messages: [], systemPrompt: [{ type: 'text', text: 'base' }],
+        tagCaptures: buildTagCaptures({}), onChart: () => {},
+        _resolve: fakeResolve(async (args) => { got = args; return 'ok' }),
+    })
+    assert.equal(got.systemPrompt.length, 2)
+    assert.equal(got.systemPrompt[1].text, CHART_INSTRUCTION)
+})
+
+test('a desk with no chart wiring is never charged for the rule', async () => {
+    // This is the monitor boundary, enforced structurally rather than by remembering: monitors run
+    // their assessments outside runAgentStream and pass onChart: null, so the block cannot reach
+    // them. The same gate keeps it off any desk that has no chart at all (Pythia).
+    let got = null
+    await runAgentStream({
+        log: '[t]', messages: [], systemPrompt: [{ type: 'text', text: 'base' }],
+        tagCaptures: buildTagCaptures({}),   // no onChart
+        _resolve: fakeResolve(async (args) => { got = args; return 'ok' }),
+    })
+    assert.equal(got.systemPrompt.length, 1, 'no chart block appended')
+    assert.equal(got.systemPrompt[0].text, 'base')
+})
+
 test('no image is rendered for a chart the user asked for — nothing to wait on', async () => {
     // The point of the live row: the reply used to sit for 1–12s behind a headless-Chromium render
     // before `done`. The row now goes out the instant the tag closes, mid-stream.

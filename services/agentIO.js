@@ -208,7 +208,22 @@ that chart" — show it by emitting a chart tag:
   your own analysis (use your chart/candle tools for that), and answering an unrelated question is
   not a reason to re-show the chart already in front of them — a chart you showed earlier is still
   there. If they asked something ELSE in the same breath, answer that in full: the silence rule
-  covers the chart, never a question you owe them.`
+  covers the chart, never a question you owe them.
+
+## Spending a chart IMAGE (\`get_chart\`)
+
+The tag above is free. A chart IMAGE is not — at roughly 1,500 tokens it is by far the most expensive
+thing any tool here returns, where a numeric tool costs 100–300. Make it a considered call, not a
+reflex.
+
+- **Numbers first.** "Where are the levels", "is it trending", "what's the ATR" are answered outright
+  by \`get_candles\` + \`get_indicators\` at a fraction of the cost. Spend the image only when the read is
+  genuinely VISUAL — structure, the shape of a base, a pattern the series alone won't carry.
+- **One look, not one per step.** Re-pulling the same name at a new timeframe at every phase is the
+  expensive habit. Pick the timeframe that decides the question, look once, and carry what you saw
+  forward in your own words.
+- Never fetch an image just to put a chart in front of the user — that is the tag above, and it costs
+  nothing.`
 
 // Point the `<chart>` descriptor at our capture. All emit tags are suppressed by default
 // (buildTagCaptures), so the descriptor is normally already there — appended defensively for a
@@ -224,11 +239,30 @@ function _withChartCapture(tagCaptures, onCapture) {
     return found ? next : [...next, { open: '<chart>', close: '</chart>', onCapture }]
 }
 
-// The system prompt is either a plain string or an array of cacheable text blocks. Appending a
-// block leaves any cache_control'd prefix untouched.
+// The system prompt is either a plain string or an array of cacheable text blocks.
+//
+// MERGE into the last cached block rather than appending after it. The chart rules are STATIC — the
+// same bytes on every turn of every chart desk — so a block of their own would sit past the
+// breakpoint and be re-read at full price forever, which is the exact waste the rules exist to cut.
+// Merging keeps the breakpoint COUNT unchanged (the four-per-request budget is already fully spent
+// on the widest path), and only the block's own bytes grow: one cache re-write per desk, then free.
+//
+// Only a block that is already cached is a valid target. A desk whose tail is volatile (Atlas
+// appends per-request account/edit sections) must not have static text folded into a block that is
+// re-read anyway, and the audience section must stay last — so we merge at the LAST cache_control'd
+// block, not the last block. With no cached block at all there is nothing to ride, and appending is
+// the honest fallback.
 function _appendSystemBlock(systemPrompt, text) {
-    if (Array.isArray(systemPrompt)) return [...systemPrompt, { type: 'text', text }]
-    return `${systemPrompt ?? ''}\n\n${text}`
+    if (!Array.isArray(systemPrompt)) return `${systemPrompt ?? ''}\n\n${text}`
+
+    let target = -1
+    for (let i = systemPrompt.length - 1; i >= 0; i--) {
+        if (systemPrompt[i]?.cache_control && typeof systemPrompt[i].text === 'string') { target = i; break }
+    }
+    if (target === -1) return [...systemPrompt, { type: 'text', text }]
+
+    const merged = { ...systemPrompt[target], text: `${systemPrompt[target].text}\n\n${text}` }
+    return systemPrompt.map((b, i) => (i === target ? merged : b))
 }
 
 /** Drop `<chart>…</chart>` from a raw reply — the payload was already captured. */
