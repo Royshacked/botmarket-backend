@@ -532,12 +532,36 @@ test('a scenario with nothing to check anywhere arms blind, and is refused', () 
     assert.ok(setupReadiness(s, true).missing.includes('condition on false break'))
 })
 
-test('two entries in ONE scenario is scaling in — refused until per-leg execution exists', () => {
+test('two entries in ONE scenario is scaling in — allowed, once every leg carries a size', () => {
+    // The block this replaces refused a second leg outright, because execution placed the premise's
+    // whole size on the first print. It places the LEG's size now, so the rule narrows to the thing
+    // that still has to hold.
     const s = normalizeSetup({ ...RIVALS, scenarios: [{
         ...RIVALS.scenarios[0],
-        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }, { lower: 235, upper: 236, quantity: 50 }],
+        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 60 }, { lower: 236.2, upper: 236.8, quantity: 40 }],
     }, RIVALS.scenarios[1]] })
-    assert.match(setupReadiness(s, true).missing[0], /single entry zone/)
+    assert.deepEqual(setupReadiness(s, true).missing, [])
+})
+
+test('a scale-in leg with no size of its own is refused', () => {
+    // A sized leg falls back to the premise total, so an unsized second leg would place the WHOLE
+    // position on the first print — exactly the failure the old blanket block existed to prevent.
+    const s = normalizeSetup({ ...RIVALS, scenarios: [{
+        ...RIVALS.scenarios[0],
+        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 60 }, { lower: 236.2, upper: 236.8 }],
+    }, RIVALS.scenarios[1]] })
+    assert.match(setupReadiness(s, true).missing.join(' '), /size on every entry leg/)
+})
+
+test('a leg drawn PAST the stop is refused — price could never reach it', () => {
+    // Found while writing scale-in fixtures: a second leg under the stop made every gate report
+    // `adverse`, correctly. It reads like a plan to add twice and can only ever add once.
+    const s = normalizeSetup({ ...RIVALS, scenarios: [{
+        ...RIVALS.scenarios[0],
+        stop_zones:  [{ lower: 234.8, upper: 235.9 }],
+        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 60 }, { lower: 231, upper: 232, quantity: 40 }],
+    }, RIVALS.scenarios[1]] })
+    assert.match(setupReadiness(s, true).problems.join(' '), /past the stop/)
 })
 
 test('a setup with no scenario at all is not a plan', () => {

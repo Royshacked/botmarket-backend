@@ -494,10 +494,15 @@ export function setupReadiness(setup, hasAccount = false) {
         const at = (what) => (multi ? `${what} on ${scenarioLabel(sc)}` : what)
 
         if (!(sc.entry_zones?.length)) missing.push(at('entry zone'))
-        // Two entries in ONE scenario is scaling in, and execution fires once for the scenario's
-        // whole size — so the position would be both legs while only one zone printed. Two PREMISES
-        // are two scenarios; two legs of one premise wait for per-leg execution.
-        else if (sc.entry_zones.length > 1) missing.push(at('a single entry zone (two premises are two scenarios; scaling in is not supported yet)'))
+        // Scaling in is supported now: execution places the ARMED ZONE's size (legQuantity), the
+        // monitor watches the rest (pendingLegs) and the resting stop grows to cover each new leg.
+        // What the block used to guarantee still has to hold, so it becomes a narrower rule: with
+        // more than one leg EVERY leg must carry its own size, because a leg with none falls back
+        // to the premise total and would place the whole position on the first print — the exact
+        // failure the old block existed to prevent.
+        else if (sc.entry_zones.length > 1 && sc.entry_zones.some(z => !(Number(z?.quantity) > 0))) {
+            missing.push(at('a size on every entry leg (scaling in places each leg separately)'))
+        }
 
         if (!(sc.stop_zones?.length)) missing.push(at('stop zone'))
         if (!Number.isFinite(sc.quantity) || sc.quantity <= 0) missing.push(at('quantity'))
@@ -544,10 +549,35 @@ export function validityProblems(setup) {
  * trades. Pure.
  */
 export function rangeProblems(setup) {
-    const v = setup?.validity
-    if (!v) return []
     const out  = []
     const long = setup?.direction === 'long'
+
+    // An entry zone BEYOND the stop can never fill — price arriving there means the stop already
+    // went, so the leg is unreachable by construction. Harmless-looking on one zone and actively
+    // misleading on several: a scale-in ladder drawn through its own stop reads like a plan to add
+    // twice and can only ever add once.
+    //
+    // Checked before the validity guard below, because it has nothing to do with validity: a setup
+    // with no range at all can still be drawn this way. (Found while writing scale-in fixtures — a
+    // second leg placed under the stop made every gate report `adverse`, correctly.)
+    //
+    // Skipped entirely when any zone is INVERTED (lower > upper). The normaliser sorts edges, so that
+    // only happens on a raw document that bypassed it — and then this check reads a garbage edge and
+    // reports an unreachable entry, which is a conclusion derived from the malformation rather than
+    // the malformation itself. A bad zone is reported as a bad zone, by the rule that owns it.
+    const sane = z => Number.isFinite(z?.lower) && Number.isFinite(z?.upper) && z.lower <= z.upper
+    const zones = [...(setup?.entry_zones ?? []), ...(setup?.stop_zones ?? [])]
+    const working = zones.every(sane) ? stopEdge(setup) : null
+    if (working != null) {
+        const unreachable = (setup?.entry_zones ?? [])
+            .map(z => (long ? z?.lower : z?.upper))
+            .filter(Number.isFinite)
+            .filter(e => (long ? e <= working : e >= working))
+        if (unreachable.length) out.push('an entry zone sits past the stop, where price could never reach it')
+    }
+
+    const v = setup?.validity
+    if (!v) return out
 
     // The far stop edge = the most risk the plan admits. Beyond it the trade is dead by its own
     // terms, so the validity floor/ceiling must not sit further out than that.

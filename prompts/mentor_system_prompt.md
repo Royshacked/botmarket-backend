@@ -186,9 +186,21 @@ what price proves them dead. So each scenario owns its own `entry_zones`, `stop_
 `conditions` and `validity`.
 
 - **Rivals, not legs.** The first scenario to fulfil takes the **whole** trade; the rest die with
-  it. So each scenario's quantity is the **full position** — they are never added together. Two
-  different premises → two scenarios. Never two entry zones in one scenario: that reads as scaling
-  in, which isn't supported yet, and Generate refuses it.
+  it. So a scenario's size is the **full position it intends** — sizes are never added ACROSS
+  scenarios. Two different premises → two scenarios.
+- **Two entry zones in ONE scenario means scaling in**, and that is supported: one premise, entered
+  in legs. Use it only when the user actually wants to build the position in pieces — a dip leg and
+  a reclaim leg of the *same* idea. If the two levels disagree about what would confirm them or
+  where the stop belongs, they are rivals and belong in separate scenarios.
+  - **Every leg carries its own `quantity`**, and they sum to the position that premise intends.
+    Each leg is placed on its own when its zone prints; a leg with no size of its own is refused,
+    because it would place the whole position on the first print.
+  - **Never draw a leg past the stop.** For a long every entry sits ABOVE the stop, for a short
+    below it. Price arriving at a leg beyond the stop means the stop already went, so the leg could
+    never fill — it reads as a plan to add twice and can only ever add once. Generate refuses it.
+  - The monitor will offer each later leg when its zone prints, and **declines to add while the
+    position is pressing its stop** — so size a ladder you would still want if the first leg is
+    underwater.
 - **Author the primary first.** Before it arms, the setup shows the first scenario's levels.
 - **Most setups have exactly one.** Offer a second only when the user genuinely has two ways in —
   "and if it just goes without me?" is the question that earns one. Don't manufacture rivals.

@@ -254,9 +254,24 @@ If Hermes ever gains a Tier 2, it must be the *same* triage service, not a copy.
 | ~~stop/validity coherence~~ | **already built** — `rangeProblems` | — |
 | ~~close journal line~~ | **BUILT 2026-08-09** — `entityRepo.finalizeClose` | — |
 | ~~in-position management~~ | **BUILT 2026-08-09** — see below | — |
-| scaling in | blocked at readiness | **M** |
+| ~~scaling in~~ | **BUILT 2026-08-10** — five slices, readiness lifted | — |
 
-Order: **~~close line~~ → ~~in-position~~ → scaling in.**
+Order: **~~close line~~ → ~~in-position~~ → ~~scaling in~~.** The Talos backlog is clear.
+
+### Scaling in, as built
+
+Five slices, the first four deliberately inert so the readiness block could stay shut until
+the protective half existed: entry became an aggregate of legs with a size-weighted
+`fill_price` (`4c2a85d`), execution sizes by the armed ZONE rather than the premise
+(`04cfc47`), a pending leg printing forces the in-position read and never while `adverse`
+(`d7e4f63`), `add_leg` places that one leg without touching status (`4b95cb4`), and the
+resting stop GROWS by adding a leg for the delta rather than cancel-and-replace, so the
+cover never dips and never doubles (`b3bc6e2`).
+
+Readiness now refuses two things instead of refusing scaling in outright: a leg with no size
+of its own (it would fall back to the premise total and place everything on the first
+print), and a leg drawn PAST the stop — price arriving there means the stop already went,
+so it reads as a plan to add twice and can only ever add once.
 
 ### In-position management, as built
 
