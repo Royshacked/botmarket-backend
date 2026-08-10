@@ -58,9 +58,9 @@ export async function refreshAdoptionDraft(req, res) {
     try {
         const { draftId } = req.params
         if (!draftId) return res.status(400).send({ error: 'Missing draftId' })
-        const { paste, statedTotal, freeCash, mandate } = req.body ?? {}
+        const { paste, statedTotal, freeCash, currency, mandate } = req.body ?? {}
         const result = await adoptBookService.refreshDraft({
-            draftId, userId: req.user._id, paste, statedTotal, freeCash, mandate,
+            draftId, userId: req.user._id, paste, statedTotal, freeCash, currency, mandate,
         })
         _sendAdopt(res, result, r => ({ draft: r.draft }))
     } catch (err) {

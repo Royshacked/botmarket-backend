@@ -366,6 +366,29 @@ and live books get none of it: those fills we placed and watched ourselves.
 
 ---
 
+## 8b. The venue is DECLARED, never looked up
+
+A manual book belongs to no broker of ours, so its venue is knowable locally and with certainty: the
+account id carries its own mode (`manual-<userId>-<short>`) and the account is one document read.
+
+`resolveUserAccounts` used to prove that only AFTER probing every connected live broker, which meant
+one throw from `getTradingAccounts` took the whole resolution down — and a manual adoption was refused
+because cTrader's socket was down. Nothing about a bank book depends on cTrader. **Fixed 2026-08-10:**
+virtual accounts resolve first, an all-local resolution never reaches for a broker at all, and each
+broker's fetch is guarded so one unreachable venue cannot lose another's accounts.
+
+That also removes the orphan-position failure it caused, where the commit had written real positions
+and every entity then failed with `no_venue`. The fix is that the resolution cannot fail for unrelated
+reasons — not a guard bolted on in front of it.
+
+**LIVE adoption is deferred** (2026-08-10). Adoption binds to a manual account today. Declaring a real
+broker + account is mostly plumbing, but it raises the question to answer first: if the venue is one we
+can READ, the user should probably not be typing holdings at all — we would pull the positions from the
+API and skip the paste, the parse and the confirm grid, all of which exist precisely because a bank
+cannot be read.
+
+---
+
 ## 9. Traps
 
 1. **Cost basis vs market value** in `startingBalance` — the double-count (§3).

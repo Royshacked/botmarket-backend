@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { resolveMode, resolveBroker, resolveAccountIds, knownVenue } from '../../services/venue.resolve.service.js'
 
 // The venue chain — mode → broker → accounts — is the answer to "is this real money?", so it is
@@ -131,4 +132,40 @@ test('a garbage stamped mode is not trusted — it falls through to derivation',
     // Mirrors the frontend guard: only a known workspace short-circuits.
     assert.equal(resolveMode({ mode: 'sandbox', broker: 'paper' }), 'paper')
     assert.equal(resolveMode({ mode: '', accountId: 'manual-u1' }), 'manual')
+})
+
+// ─── Account resolution: local first, so an unrelated broker cannot break a book ──
+// A paper or manual account resolves from our OWN store — a string prefix and one document read. It
+// used to be resolved only AFTER probing every connected live broker, so one throw from
+// getTradingAccounts took the whole resolution down and a manual book was refused because cTrader's
+// socket was down. Nothing about a bank book depends on cTrader.
+
+test('a virtual account resolves before any broker is asked', () => {
+    const src = readFileSync(new URL('../../services/orderPlan.service.js', import.meta.url), 'utf8')
+    const fn  = src.slice(src.indexOf('export async function resolveUserAccounts'), src.indexOf('export async function buildOrderPlan'))
+    const localAt  = fn.indexOf('accountMode(id)')
+    const remoteAt = fn.indexOf('listConnections')
+    assert.ok(localAt > 0 && remoteAt > 0, 'both paths still exist')
+    assert.ok(localAt < remoteAt, 'the local read comes first')
+})
+
+test('an all-local resolution never reaches for a broker at all', () => {
+    const src = readFileSync(new URL('../../services/orderPlan.service.js', import.meta.url), 'utf8')
+    const fn  = src.slice(src.indexOf('export async function resolveUserAccounts'), src.indexOf('export async function buildOrderPlan'))
+    assert.match(fn, /if \(byId\.size === want\.size\) return byId/,
+        'a paper or manual book should touch no network on this path')
+})
+
+test('one unreachable broker no longer loses the others', () => {
+    const src = readFileSync(new URL('../../services/orderPlan.service.js', import.meta.url), 'utf8')
+    const fn  = src.slice(src.indexOf('export async function resolveUserAccounts'), src.indexOf('export async function buildOrderPlan'))
+    // Order, not distance: the fetch sits inside a try/catch, so a broker that throws is logged and
+    // skipped instead of taking every other account down with it.
+    // The CALL, not the prose: the comment above it names getTradingAccounts too, and matching that
+    // measured the wrong thing entirely.
+    const tryAt   = fn.indexOf('try {')
+    const fetchAt = fn.indexOf('await brokerService.getTradingAccounts')
+    const catchAt = fn.indexOf('catch', fetchAt)
+    assert.ok(tryAt > 0 && tryAt < fetchAt, 'the fetch is inside a try')
+    assert.ok(catchAt > fetchAt, 'and something catches after it')
 })

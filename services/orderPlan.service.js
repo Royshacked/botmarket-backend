@@ -29,33 +29,48 @@ export async function resolveUserAccounts(userId, wantedIds) {
     const byId = new Map()
     if (want.size === 0) return byId
 
-    const connections = await brokerService.listConnections(userId)
-    for (const [broker, connected] of Object.entries(connections)) {
-        // Virtual modes (paper/manual) are resolved below straight from their store —
-        // per-idea-bound and not gated on the global connection/toggle — so skip them
-        // here to keep ONE canonical resolution path (no divergent double-mapping).
-        if (!connected || VIRTUAL_MODES.includes(broker)) continue
-        const { accounts: accs = [] } = await brokerService.getTradingAccounts(broker, userId)
-        for (const a of accs) {
-            const id = String(a.id)
-            if (want.has(id)) byId.set(id, { ...a, broker })
-        }
-    }
-
-    // Virtual accounts: resolve any still-unmatched wanted id straight from the store,
-    // tagging it with its mode as the broker. Only modes with a REGISTERED adapter are
-    // tagged — a 'manual' id (no adapter yet) is left unresolved rather than producing a
-    // broker:'manual' partition that placeOrder can't service (400). This is how an idea
-    // bound to a chosen paper account partitions onto broker:'paper' through the normal path.
+    // VIRTUAL ACCOUNTS FIRST. A paper or manual account resolves from our OWN store — a string
+    // prefix and one document read, both certain — so it never needed a broker to be knowable.
+    // It used to be resolved AFTER the live probe below, which meant an unrelated broker outage
+    // could fail it: one throw from getTradingAccounts and the whole function threw, the caller
+    // read "no venue", and a manual book was refused because cTrader's socket was down. Nothing
+    // about a bank book depends on cTrader.
+    //
+    // Ordering is safe because the two id spaces cannot collide: a virtual id is
+    // `<mode>-<userId>-<short>` and `accountMode` matches only that prefix, where a live id is a
+    // broker login.
     for (const id of want) {
-        if (byId.has(id)) continue
         const mode = paperBrokerService.accountMode(id)
+        // Only modes with a REGISTERED adapter are tagged, so an id whose mode has no adapter is
+        // left unresolved rather than producing a partition the execution path can't service.
         if (!mode || !SUPPORTED_BROKERS.includes(mode)) continue
         const acct = await paperBrokerService.getAccount(userId, id)
         if (acct) byId.set(id, {
             id: acct.accountId, login: acct.accountId, name: acct.name,
             currency: acct.currency, balance: acct.cashBalance, broker: mode,
         })
+    }
+
+    // Everything the caller asked for was local → there is nothing a broker could add, so don't
+    // reach for one. A paper or manual book now touches no network at all on this path.
+    if (byId.size === want.size) return byId
+
+    const connections = await brokerService.listConnections(userId)
+    for (const [broker, connected] of Object.entries(connections)) {
+        // Virtual modes are already done above — skipped here to keep ONE canonical resolution
+        // path per account (no divergent double-mapping).
+        if (!connected || VIRTUAL_MODES.includes(broker)) continue
+        // Per-broker guard: one unreachable broker must not lose the accounts of another, nor
+        // discard what already resolved. It used to take the whole resolution down with it.
+        try {
+            const { accounts: accs = [] } = await brokerService.getTradingAccounts(broker, userId)
+            for (const a of accs) {
+                const id = String(a.id)
+                if (want.has(id)) byId.set(id, { ...a, broker })
+            }
+        } catch (err) {
+            logger.warn(LOG, `account resolve: ${broker} unreachable, its accounts stay unresolved: ${err.message}`)
+        }
     }
     return byId
 }

@@ -116,9 +116,17 @@ export function normalizeHolding(raw = {}) {
 export function partitionHoldings(priced) {
     const included = [], excluded = []
     for (const h of priced) {
+        // A row with no name is a PARSE problem, not an exclusion. Left to fall through it would be
+        // unpriceable (nothing to price), and so would appear under "not in the book" as a blank
+        // line — which reads as the app having lost a holding. It stays in the book so
+        // holdingProblems reports `missing_symbol` against it and the grid can ask.
+        if (!h.symbol)                   { included.push(h); continue }
         if (isNonUsListing(h.symbol))    { excluded.push({ ...h, reason: 'non_us_listing' }); continue }
         if (h.mark == null)              { excluded.push({ ...h, reason: 'no_price' });       continue }
-        included.push(h)
+        // `reason` is stripped on the way in: a row that was excluded on an earlier turn and has
+        // since become priceable must not carry the old verdict around with it.
+        const { reason: _was, ...clean } = h
+        included.push(clean)
     }
     return { included, excluded }
 }
@@ -199,7 +207,7 @@ export async function createDraft({ userId, bank = null, currency = 'USD', state
  * instead of replacing the table. A turn that parses to nothing (ordinary conversation) leaves the
  * draft untouched and simply returns it.
  */
-export async function refreshDraft({ draftId, userId, paste = null, statedTotal = null, freeCash = null, mandate = null }) {
+export async function refreshDraft({ draftId, userId, paste = null, statedTotal = null, freeCash = null, currency = null, mandate = null }) {
     try {
         const draft = await _deps.store.getDraft(draftId, userId)
         if (!draft)                                                  return { ok: false, reason: 'not_found' }
@@ -209,7 +217,7 @@ export async function refreshDraft({ draftId, userId, paste = null, statedTotal 
         const fresh  = (parsed?.rows ?? []).map(normalizeHolding).filter(h => h.symbol)
 
         // Nothing new in this turn — conversation, not a paste. Hand back what we hold.
-        if (!fresh.length && statedTotal == null && freeCash == null && !mandate) return { ok: true, draft }
+        if (!fresh.length && statedTotal == null && freeCash == null && currency == null && !mandate) return { ok: true, draft }
 
         // Excluded lines stay in the merge pool: a user correcting a typo'd ticker must be able to
         // bring that row back into the book, and one that is genuinely foreign must not silently
@@ -229,19 +237,33 @@ export async function refreshDraft({ draftId, userId, paste = null, statedTotal 
         const marks   = symbols.length ? await _deps.quotes(symbols).catch(() => new Map()) : new Map()
         const priced  = merged.map(h => ({ ...h, mark: toNum(marks.get(h.symbol)) }))
 
+        const { included, excluded } = partitionHoldings(priced)
+
         const total = statedTotal != null ? toNum(statedTotal) : draft.statedTotal
         const cash  = freeCash    != null ? toNum(freeCash)    : draft.freeCash
-        const { included, excluded } = partitionHoldings(priced)
+
+        // The currency can arrive AFTER the first stage ("those numbers are in shekels"), so it is
+        // re-resolvable rather than frozen at creation — otherwise a user who says it a turn late has
+        // no way to correct a book priced against the wrong rate. Unchanged → the stored rate stands,
+        // so an ordinary turn costs no quote.
+        const stated = currency != null ? (String(currency).trim().toUpperCase() || 'USD') : (draft.statedCurrency ?? 'USD')
+        const rate   = stated === (draft.statedCurrency ?? 'USD')
+            ? (draft.fxToUsd ?? 1)
+            : (stated === 'USD' ? 1 : await _deps.fxToUsd(stated).catch(() => null))
+
         const reconciliation = reconcileAccount({
-            holdings: included, statedTotal: total, freeCash: cash, fxToUsd: draft.fxToUsd ?? 1, excluded: excluded.length,
+            holdings: included, statedTotal: total, freeCash: cash, fxToUsd: rate, excluded: excluded.length,
         })
         if (parsed?.problems?.length) reconciliation.problems.push(...parsed.problems)
 
         const patch = {
             holdings:    included,
             excluded,
-            statedTotal: total,
-            freeCash:    cash,
+            statedTotal:    total,
+            freeCash:       cash,
+            statedCurrency: stated,
+            fxToUsd:        rate,
+            fxAt:           rate != null && stated !== 'USD' ? Date.now() : null,
             reconciliation,
             warnings:    parsed?.warnings ?? draft.warnings ?? [],
             ...(mandate ? { mandate: { ...(draft.mandate ?? {}), ...mandate } } : {}),

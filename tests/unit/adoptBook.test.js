@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createDraft, commitDraft, correctHolding, removeHolding, normalizeHolding, _pastOnly, _setDeps } from '../../api/portfolio/adoptBook.service.js'
+import { createDraft, refreshDraft, commitDraft, correctHolding, removeHolding, normalizeHolding, partitionHoldings, _pastOnly, _setDeps } from '../../api/portfolio/adoptBook.service.js'
+import { reconcileAccount } from '../../services/bookValuation.util.js'
 import { bornLiveStamp } from '../../api/trade-ideas/tradeIdeas.service.js'
 
 // Adopting a book the app didn't build (docs/design/adopted-book.md). What is pinned here is the
@@ -469,4 +470,61 @@ test('a purchase date can only be in the past', () => {
     assert.equal(_pastOnly(now + 86_400_000, now), now, 'clamped, not rejected — the rest of the line is fine')
     assert.equal(_pastOnly(BOUGHT_2020, now), BOUGHT_2020)
     assert.equal(_pastOnly(null, now), null)
+})
+
+// ─── Closing the gaps the bug hunt found ────────────────────────────────────────
+
+test('a nameless row stays IN the book as a problem, not out of it as a blank line', () => {
+    // Left to fall through it is unpriceable (nothing to price), so it would appear under "not in the
+    // book" with no name — which reads as the app having lost a holding.
+    const { included, excluded } = partitionHoldings([
+        { symbol: '', quantity: 100, avgCost: 150, mark: null },
+        { symbol: 'AAPL', quantity: 100, avgCost: 150, mark: 200 },
+    ])
+    assert.equal(excluded.length, 0)
+    assert.deepEqual(included.map(h => h.symbol), ['', 'AAPL'])
+    // And it is reported against the row, which is what lets the grid ask about it.
+    assert.ok(reconcileAccount({ holdings: included, freeCash: 0 }).problems.includes('missing_symbol'))
+})
+
+test('a row that becomes priceable drops its old exclusion verdict', () => {
+    const { included } = partitionHoldings([{ symbol: 'AAPL', mark: 200, reason: 'no_price' }])
+    assert.equal('reason' in included[0], false, 'a stale verdict must not travel with a live holding')
+})
+
+test('the stated currency can arrive a turn late', async () => {
+    // "those numbers are in shekels", said after the book was staged. Frozen at creation, the user
+    // would have no way to correct a book priced against the wrong rate.
+    const calls = { patched: [], rates: [] }
+    const restore = _setDeps({
+        quotes:  async (syms) => new Map(syms.map(s => [s, 100])),
+        fxToUsd: async (cur) => { calls.rates.push(cur); return 0.27 },
+        store: {
+            getDraft:   async () => ({ draftId: 'd1', status: 'draft', holdings: [{ symbol: 'AAPL', quantity: 10, avgCost: 50 }], statedTotal: 10_000 }),
+            patchDraft: async (_d, _u, patch) => { calls.patched.push(patch) },
+        },
+    })
+    try {
+        const res = await refreshDraft({ draftId: 'd1', userId: 'u1', currency: 'ils' })
+        assert.equal(res.ok, true)
+        assert.deepEqual(calls.rates, ['ILS'])
+        assert.equal(calls.patched[0].statedCurrency, 'ILS')
+        assert.equal(calls.patched[0].fxToUsd, 0.27)
+    } finally { restore() }
+})
+
+test('an ordinary turn costs no FX quote', async () => {
+    const calls = { rates: [] }
+    const restore = _setDeps({
+        quotes:  async (syms) => new Map(syms.map(s => [s, 100])),
+        fxToUsd: async (cur) => { calls.rates.push(cur); return 0.27 },
+        store: {
+            getDraft:   async () => ({ draftId: 'd1', status: 'draft', holdings: [], statedCurrency: 'ILS', fxToUsd: 0.27 }),
+            patchDraft: async () => {},
+        },
+    })
+    try {
+        await refreshDraft({ draftId: 'd1', userId: 'u1', paste: 'AAPL 10 50' })
+        assert.deepEqual(calls.rates, [], 'the stored rate stands when the currency has not changed')
+    } finally { restore() }
 })
