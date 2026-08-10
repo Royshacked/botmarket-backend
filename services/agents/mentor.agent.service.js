@@ -37,7 +37,7 @@ export const mentorAgentService = { chatStream }
 
 async function chatStream({
     messages, userPrompt, chatState = emptyMentorState(), accounts = [], mainAccountId = null,
-    clientTime = null, audience = null,
+    clientTime = null, audience = null, seed = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
@@ -46,7 +46,7 @@ async function chatStream({
     const tools        = KAIROS_TOOLS
     const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
-    const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, audience)
+    const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, audience, seed)
     const builtMessages = attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState, clientTime))
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
@@ -204,7 +204,7 @@ export function _buildProblemsSection(draft) {
  * would have been enough to keep the history breakpoint from hitting — the cache prefix does not
  * care how small the volatile block is, only that it sits ahead of the conversation.
  */
-function _buildSystemPrompt(chatState, accounts, mainAccountId, audience = null) {
+function _buildSystemPrompt(chatState, accounts, mainAccountId, audience = null, seed = null) {
     const asset = chatState?.active_asset || 'none'
     const today = new Date().toISOString().slice(0, 10)
     const audienceBlock = buildAudienceSection(audience)
@@ -215,12 +215,45 @@ ${audienceBlock}
 
 ` : ''}
 CONVERSATION CONTEXT:
-Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}`
+Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}${_buildSeedSection(seed)}`
 
     return [
         { type: 'text', text: _baseSystemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamicContext },
     ]
+}
+
+/**
+ * The name Argus handed over, and the lens it recommends. PURE; empty string when the user arrived
+ * on their own, which is the ordinary case.
+ *
+ * The LENS IS A RECOMMENDATION, not a decision, and the prompt says so out loud because the two
+ * read identically to a model handed a field called `recommended_mode`. Mentor's whole contract is
+ * that it works on what the user brought and hands the decision back — silently adopting a scanner's
+ * lens would be the desk quietly authoring for them, which is the one thing it must not do.
+ *
+ * It also has to be SAID. A recommendation the user never hears is indistinguishable from Mentor
+ * having decided.
+ */
+function _buildSeedSection(seed) {
+    if (!seed?.ticker) return ''
+    const lens = String(seed.recommended_mode ?? '').trim()
+    return `
+
+ARGUS HANDED YOU THIS NAME: ${seed.ticker}${seed.direction ? ` (${seed.direction})` : ''}`
+        + `${seed.thesis ? `
+  thesis: ${seed.thesis}` : ''}`
+        + `${seed.analysis ? `
+  Argus's read: ${seed.analysis}` : ''}`
+        + (lens ? `
+  Argus recommends the ${lens} lens.` : '')
+        + `
+
+Open on it: say the name, relay Argus's read in a sentence rather than restating it wholesale, and`
+        + (lens
+            ? ` NAME THE RECOMMENDED LENS AND WHY IT FITS — then ask whether they want to build it that way. It is Argus's recommendation, not a decision: if the user wants a different lens, or the chart disagrees with it, say so and use theirs. A lens adopted without the user hearing it is one they never chose.`
+            : ` ask which lens they want to build it through.`)
+        + ` The ticker is settled unless they change it; everything else is still theirs to shape.`
 }
 
 /**

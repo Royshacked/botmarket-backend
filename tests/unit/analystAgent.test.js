@@ -75,10 +75,17 @@ test('chatStream: the turn flows through — messages, system prompt, phase + co
 
 // ── _sanitizeAnalystSeed (Argus investing candidate → research hand-off, P4b) ──
 test('seed: uppercases ticker, keeps sector/thesis/analysis, requires a ticker', () => {
-    assert.deepEqual(
-        _sanitizeAnalystSeed({ ticker: 'msft', sector: 'Technology', thesis: 'quality compounder', analysis: 'ROIC 28%, net cash' }),
-        { ticker: 'MSFT', sector: 'Technology', thesis: 'quality compounder', analysis: 'ROIC 28%, net cash' })
-    assert.deepEqual(_sanitizeAnalystSeed({ ticker: 'aapl' }), { ticker: 'AAPL', sector: null, thesis: null, analysis: null })
+    // One shared parser now serves Kairos, Analyst and Mentor, so it returns the UNION of what a
+    // hand-off can carry and each desk reads the fields it has a use for. Analyst reads `sector`
+    // and ignores `direction`/`recommended_mode`/`window` — they arrive as nulls, never as absent
+    // keys, so a desk cannot tell "not sent" from "not parsed".
+    const s = _sanitizeAnalystSeed({ ticker: 'msft', sector: 'Technology', thesis: 'quality compounder', analysis: 'ROIC 28%, net cash' })
+    assert.equal(s.ticker, 'MSFT')
+    assert.equal(s.sector, 'Technology')
+    assert.equal(s.thesis, 'quality compounder')
+    assert.equal(s.analysis, 'ROIC 28%, net cash')
+    assert.deepEqual(_sanitizeAnalystSeed({ ticker: 'aapl' }),
+        { ticker: 'AAPL', direction: null, sector: null, thesis: null, analysis: null, recommended_mode: null, window: null })
     assert.equal(_sanitizeAnalystSeed({ thesis: 'no ticker' }), null)
     assert.equal(_sanitizeAnalystSeed({ ticker: '  ' }), null)
     assert.equal(_sanitizeAnalystSeed(null), null)

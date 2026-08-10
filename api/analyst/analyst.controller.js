@@ -7,18 +7,13 @@ import { sendReason }          from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { logger }             from '../../services/logger.service.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
+import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 
 const LOG = '[analystCtrl]'
 
-// A structured Argus INVESTING candidate seed (P4b): a hand-off arrives as a typed object, not free
-// text. Kept lean + string-only; ticker required. Mirrors Kairos's _sanitizeSeed.
-export function _sanitizeAnalystSeed(raw) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-    const s = k => (typeof raw[k] === 'string' && raw[k].trim() ? raw[k].trim() : null)
-    const ticker = s('ticker')
-    if (!ticker) return null
-    return { ticker: ticker.toUpperCase(), sector: s('sector'), thesis: s('thesis'), analysis: s('analysis') }
-}
+// The hand-off parser is shared (services/scanSeed.util.js). Analyst reads `sector`; the fields it
+// has no use for are simply ignored rather than parsed a second time here.
+export const _sanitizeAnalystSeed = sanitizeScanSeed
 
 // Streaming research chat → emits a <coverage> draft (returned for preview; POST /coverage initiates it).
 export async function streamAnalyst(req, res) {

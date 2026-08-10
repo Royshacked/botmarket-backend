@@ -8,6 +8,7 @@ import { sendReason }         from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { parseStreamBody }    from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
+import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 
 const LOG = '[kairos:controller]'
 
@@ -168,21 +169,8 @@ export async function getKairosPerformance(req, res) {
     }
 }
 
-// Structured Argus candidate seed (K3): a scan hand-off arrives as a typed object, not free text.
-// Kept lean + string-only; unknown/absent → null. recommended_mode is a FE concern (pre-fills the
-// mode chip) and is NOT part of the prompt seed. `window` (a forward-dated list's period) rides along
-// so the model can narrate the gated window; the actual time-gate is set by code at save.
-export function _sanitizeSeed(raw) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-    const s = k => (typeof raw[k] === 'string' && raw[k].trim() ? raw[k].trim() : null)
-    const ticker = s('ticker')
-    if (!ticker) return null   // a seed without a ticker is meaningless
-    const w    = (raw.window && typeof raw.window === 'object') ? raw.window : {}
-    const from = (typeof w.from === 'string' && w.from.trim()) ? w.from.trim() : null
-    const to   = (typeof w.to   === 'string' && w.to.trim())   ? w.to.trim()   : null
-    return {
-        ticker: ticker.toUpperCase(), direction: s('direction'), thesis: s('thesis'), analysis: s('analysis'),
-        window: (from || to) ? { from, to } : null,
-    }
-}
+// Kept as a named export because the mode tests drive it directly. The parser itself is shared —
+// see services/scanSeed.util.js for why, and for why `recommended_mode` is carried there but not
+// used here (Kairos's lens is the caller's choice; the field only pre-fills a UI chip).
+export const _sanitizeSeed = sanitizeScanSeed
 

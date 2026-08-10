@@ -3,6 +3,7 @@ import { resolveModel }        from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseStreamBody, parseClientTime } from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
+import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 
 const LOG = '[mentor:controller]'
 
@@ -20,6 +21,9 @@ export async function streamMentor(req, res) {
     // Mentor's own extra: the browser clock, so `active_from` / `valid_until` resolve against the
     // user's calendar rather than the server's.
     const clientTime = parseClientTime(req.body)
+    // Argus hand-off: the validated name, its read, and the lens Argus recommends. Absent for a
+    // user who opened Mentor on their own, which is the ordinary path.
+    const seed = sanitizeScanSeed(req.body?.seed)
 
     await streamAgentResponse(req, res, {
         log: LOG,
@@ -39,6 +43,7 @@ export async function streamMentor(req, res) {
                 accounts:      parsed.accounts,
                 mainAccountId: parsed.mainAccountId,
                 clientTime,
+                seed,
                 model:           routing.model,
                 reasoningEffort: routing.reasoningEffort,
                 userId:          req.user._id,

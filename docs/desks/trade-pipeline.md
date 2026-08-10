@@ -13,7 +13,7 @@ Design record, 2026-08-09. Nothing here is built yet except where marked **BUILT
 |---|---|
 | Argus → Mentor → Talos | the live path going forward |
 | Kairos + Hermes | **silent** — not deleted, not archived |
-| Argus → Mentor handoff | **not built.** Deferred to the end of the work |
+| Argus → Mentor handoff | **BUILT 2026-08-10** — seed + lens recommendation |
 | `call` kind | frozen. Calls in flight run to natural close under Hermes |
 
 **Silent, not gone.** Hermes must keep running until the last live `call` closes — the same strangler
@@ -327,7 +327,6 @@ Tier 2 rather than straight to a full visual read. Same trigger, ~100× cheaper 
 - **Does the `trades` ledger support partial exits?** It is frozen-at-fill with `pnl =
   exit.realizedPnl`, which reads as a single exit. Confirm before Tier 3 can propose `partial` — if
   it does not, that is a dependency, not a detail.
-- **Argus → Mentor handoff.** Not built. Deferred by decision.
 - **[entity-model.md](../architecture/entity-model.md) is stale** — its per-kind payload and
   ownership tables list only `idea` / `call` / `portfolio_item`. `setup` and Talos are absent though
   live-verified since 2026-08-03. Fix when this lands.

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     mergeCoverage, _mergeSetupDraft, _parseMentorResponse, _parseCandidates, emptyMentorState,
-    _buildProblemsSection,
+    _buildProblemsSection, mentorAgentService,
 } from '../../services/agents/mentor.agent.service.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
 
@@ -180,4 +180,47 @@ test('MISSING fields are never fed back — an unfinished setup is the normal st
     // Reciting the gaps every turn pushes the agent to fill them by guessing instead of asking.
     const bare = normalizeSetup({ asset: 'NVDA', direction: 'long' })
     assert.equal(_buildProblemsSection(bare), '')
+})
+
+// ─── The Argus hand-off ───────────────────────────────────────────────────────
+// Mentor is the destination for a scanned name now. Two things have to be true: it opens ON that
+// name, and the LENS Argus recommends reaches the user as a recommendation rather than as a
+// decision Mentor quietly made for them.
+
+const seedOf = async (seed) => {
+    let blocks = null
+    await mentorAgentService.chatStream({
+        messages: [{ role: 'user', content: 'hi' }], seed,
+        _run: async ({ systemPrompt }) => { blocks = systemPrompt; return '' },
+    })
+    return blocks.map(b => b.text).join('\n')
+}
+
+test('a handed-over name reaches the prompt with Argus\'s read', async () => {
+    const text = await seedOf({ ticker: 'NVDA', direction: 'long', thesis: 'AI leader', analysis: 'clean base' })
+    assert.match(text, /NVDA/)
+    assert.match(text, /AI leader/)
+    assert.match(text, /clean base/)
+})
+
+test('the recommended lens is named AND framed as a recommendation', async () => {
+    // The failure this guards is silent: a model handed a field called `recommended_mode` reads it
+    // as an instruction, adopts the lens, and the user never learns a choice was made. Mentor's
+    // whole contract is that it works on what the user brought and hands the decision back.
+    const text = await seedOf({ ticker: 'NVDA', recommended_mode: 'institutional' })
+    assert.match(text, /institutional/)
+    assert.match(text, /recommendation, not a decision/i)
+    assert.match(text, /use theirs/i, 'the user can override it')
+})
+
+test('a hand-off with no lens asks instead of assuming one', async () => {
+    const text = await seedOf({ ticker: 'NVDA', thesis: 'momentum' })
+    assert.match(text, /ask which lens/i)
+    assert.doesNotMatch(text, /recommends the/i)
+})
+
+test('no seed leaves the prompt exactly as it was', async () => {
+    // The ordinary path — a user who opened Mentor themselves must not be told a name was handed over.
+    const text = await seedOf(null)
+    assert.doesNotMatch(text, /ARGUS HANDED YOU/)
 })

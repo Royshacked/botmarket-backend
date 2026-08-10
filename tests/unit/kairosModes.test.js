@@ -105,10 +105,17 @@ test('_buildEditSet: in-position (long) → LIGHT edit, NO re-arm, NO entry/exec
 
 // ── K3: Argus candidate seed ─────────────────────────────────────────────────
 test('_sanitizeSeed: uppercases ticker, keeps string fields, requires a ticker', () => {
-    assert.deepEqual(
-        _sanitizeSeed({ ticker: 'nvda', direction: 'long', thesis: 'AI leader', analysis: 'clean base' }),
-        { ticker: 'NVDA', direction: 'long', thesis: 'AI leader', analysis: 'clean base', window: null })
-    assert.deepEqual(_sanitizeSeed({ ticker: 'aapl' }), { ticker: 'AAPL', direction: null, thesis: null, analysis: null, window: null })
+    // The parser is shared across the three desks a scanned name can be handed to, so it returns
+    // the UNION of what a hand-off carries. Kairos reads direction/thesis/analysis/window and
+    // ignores the rest — notably `recommended_mode`, which is parsed here but deliberately kept out
+    // of Kairos's prompt: its lens is the caller's choice, and the field only pre-fills a UI chip.
+    const s = _sanitizeSeed({ ticker: 'nvda', direction: 'long', thesis: 'AI leader', analysis: 'clean base' })
+    assert.equal(s.ticker, 'NVDA')
+    assert.equal(s.direction, 'long')
+    assert.equal(s.thesis, 'AI leader')
+    assert.equal(s.window, null)
+    assert.deepEqual(_sanitizeSeed({ ticker: 'aapl' }),
+        { ticker: 'AAPL', direction: null, sector: null, thesis: null, analysis: null, recommended_mode: null, window: null })
     assert.equal(_sanitizeSeed({ thesis: 'no ticker' }), null)   // ticker required
     assert.equal(_sanitizeSeed(null), null)
     assert.equal(_sanitizeSeed('nope'), null)
