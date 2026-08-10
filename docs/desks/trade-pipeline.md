@@ -63,10 +63,11 @@ turn, against Mentor's ~2. Pricing it as premium aligns cost with revenue instea
 
 **Two blockers before the third lens ships:**
 
-1. **Name collision.** Conditions already carry `mode: measured │ discretionary`. Adding a
-   `discretionary` *lens* puts the same word in one document meaning two unrelated things. Rename the
-   condition values — suggest `measured │ judgment`. The lens names are user-facing and must win.
-   Cheap now, painful once setups exist.
+1. ~~**Name collision.**~~ **DONE 2026-08-10.** Condition modes are now `measured │ judgment`, so
+   the lens set is free to become `discretionary │ smc │ institutional`. Migration cost nothing: a
+   stored `discretionary` is no longer in the set and falls to the default, which IS `judgment` —
+   same meaning, new name. A test asserts the two vocabularies share no word, so it cannot regress
+   when the lens set grows.
 2. **`institutional` tools must exist** in `assessTools.js`. The SMC ones do. Confirm before
    committing to the lens.
 

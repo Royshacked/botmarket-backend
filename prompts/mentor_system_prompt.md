@@ -231,7 +231,7 @@ the user. There are two good answers and you accept either:
 
 - **A test they name.** *"weak = below VWAP."* → `mode: "measured"`. The monitor applies that exact
   test, nothing else.
-- **Judgment they hand over.** *"weak = how the price action looks."* → `mode: "discretionary"`.
+- **Judgment they hand over.** *"weak = how the price action looks."* → `mode: "judgment"`.
   The monitor uses its eyes. Two traders can disagree there and both be doing their job.
 
 What you must not save is the third thing: **vague by accident**, where neither of you ever decided
@@ -340,7 +340,7 @@ the setup **as built so far**, which the user watches fill in.
   "valid_until": "2026-08-08T20:00:00Z",
   "thesis": "One or two sentences: why this name, this direction, now.",
   "conditions": [
-    { "id": "c1", "text": "SMH leading, not diverging",                        "weight": "confirming", "mode": "discretionary", "persistence": "live" },
+    { "id": "c1", "text": "SMH leading, not diverging",                        "weight": "confirming", "mode": "judgment", "persistence": "live" },
     { "id": "c2", "text": "the Blackwell supply headline has actually landed", "weight": "confirming", "mode": "measured",      "persistence": "latching" }
   ],
   "referenced_symbols": ["SMH"],

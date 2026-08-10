@@ -5,8 +5,9 @@ import {
     normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
-    stopEdge, targetEdges, addEntryLeg, legQuantity, pendingLegs, mayScaleIn,
+    stopEdge, targetEdges, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, CONDITION_MODES,
 } from '../../services/setup.schema.js'
+import { MODES } from '../../services/kairos.modes.js'
 
 // The `setup` entity contract (docs/desks/mentor-talos.md). Mentor authors loosely, Talos monitors
 // strictly — this module is the seam, so these tests pin the coercions the monitor depends on.
@@ -117,10 +118,10 @@ test('weight defaults to confirming, never to primary', () => {
 
 test('an unstamped condition re-checks and claims no test — the safe defaults', () => {
     // live: caching something that could flip is a WRONG ANSWER; re-checking is merely a wasted call.
-    // discretionary: claiming "measured" without a named test would overstate how hard the check is.
+    // judgment: claiming "measured" without a named test would overstate how hard the check is.
     const [c] = normalizeConditions([{ text: 'NVDA weak' }])
     assert.equal(c.persistence, 'live')
-    assert.equal(c.mode, 'discretionary')
+    assert.equal(c.mode, 'judgment')
     assert.equal(normalizeConditions([{ text: 'x', persistence: 'latching' }])[0].persistence, 'latching')
     assert.equal(normalizeConditions([{ text: 'x', mode: 'measured' }])[0].mode, 'measured')
     assert.equal(normalizeConditions([{ text: 'x', persistence: 'sometimes' }])[0].persistence, 'live')
@@ -779,4 +780,29 @@ test('a position doing well may still take its planned leg', () => {
     assert.equal(mayScaleIn('scale_out'), true)
     assert.equal(mayScaleIn('breakeven'), true)
     assert.equal(mayScaleIn(null), true)
+})
+
+// ─── The condition-mode rename ────────────────────────────────────────────────
+// `discretionary` moved to `judgment` because the LENS set becomes
+// discretionary|smc|institutional, and one document carrying `mode` for both meanings is a trap.
+
+test('a setup stored before the rename still reads as judgment, not as garbage', () => {
+    // The migration, and the whole reason it costs nothing: 'discretionary' is no longer in the set,
+    // so it falls to the default — which IS 'judgment'. Same meaning, new name, no rewrite.
+    const [c] = normalizeConditions([{ text: 'weak here', mode: 'discretionary' }])
+    assert.equal(c.mode, 'judgment')
+})
+
+test('measured still survives a re-normalise untouched', () => {
+    // The half that must NOT move: a named test is a different claim about how checkable the
+    // condition is, and silently downgrading it would overstate the monitor's freedom.
+    const [c] = normalizeConditions([{ text: 'below VWAP', mode: 'measured' }])
+    assert.equal(c.mode, 'measured')
+})
+
+test('the lens vocabulary and the condition vocabulary no longer share a word', () => {
+    // The point of the rename, stated as an invariant so it cannot quietly regress when the lens
+    // set grows to three.
+    const overlap = CONDITION_MODES.filter(m => MODES.includes(m))
+    assert.deepEqual(overlap, [], `"${overlap}" means two unrelated things`)
 })

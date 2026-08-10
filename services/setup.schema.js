@@ -35,7 +35,15 @@ export const TRADE_MODES  = ['classical', 'smc']
 //                correctness risk (a re-run search can return a different answer and talk the
 //                model out of a settled fact). live = a state that can flip; re-check every wake.
 export const CONDITION_WEIGHTS     = ['primary', 'confirming']
-export const CONDITION_MODES       = ['measured', 'discretionary']
+// `judgment`, not `discretionary`. The lens set is about to become discretionary|smc|institutional
+// (kairos.modes already spells it that way), and a document carrying `mode` for the LENS and `mode`
+// for a CONDITION with the same value meaning two unrelated things is a trap laid for whoever reads
+// it next. The lens names are user-facing and win; this one moves.
+//
+// MIGRATION IS FREE. A stored condition saying 'discretionary' is no longer in the set, so it falls
+// to the default below — which IS 'judgment', the same meaning under the new name. Nothing to
+// rewrite and nothing that reads wrong in the meantime.
+export const CONDITION_MODES       = ['measured', 'judgment']
 export const CONDITION_PERSISTENCE = ['live', 'latching']
 
 /** What happens when price leaves the validity range. Authored, never assumed. */
@@ -194,9 +202,9 @@ export function normalizeConditions(arr, { used, prefix = 'c' } = {}) {
             id:          claim(typeof c.id === 'string' ? c.id.trim() : '', i),
             text,
             weight:      CONDITION_WEIGHTS.includes(c.weight) ? c.weight : 'confirming',
-            // Unstamped → 'discretionary'. Claiming 'measured' without the conversation having
+            // Unstamped → 'judgment'. Claiming 'measured' without the conversation having
             // established a test would overstate how hard the check is.
-            mode:        CONDITION_MODES.includes(c.mode) ? c.mode : 'discretionary',
+            mode:        CONDITION_MODES.includes(c.mode) ? c.mode : 'judgment',
             // Unstamped → 'live'. Re-checking something that didn't need it costs a call;
             // caching something that did is a WRONG ANSWER, so the safe default re-checks.
             persistence: CONDITION_PERSISTENCE.includes(c.persistence) ? c.persistence : 'live',
