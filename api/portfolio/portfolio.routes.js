@@ -10,6 +10,7 @@ import {
     completeReview,
     applyPortfolioRebalance,
     createAdoptionDraft,
+    refreshAdoptionDraft,
     commitAdoptionDraft,
     listAdoptionDrafts,
     discardAdoptionDraft,
@@ -36,6 +37,7 @@ router.post('/:portfolioId/rebalance',        log, applyPortfolioRebalance)
 // literal segment, so no collision, but keep them grouped.
 router.post('/adopt/draft',                   log, createAdoptionDraft)
 router.get('/adopt/drafts',                   log, listAdoptionDrafts)
+router.patch('/adopt/draft/:draftId',          log, refreshAdoptionDraft)
 router.post('/adopt/:draftId/commit',         log, commitAdoptionDraft)
 router.delete('/adopt/draft/:draftId',        log, discardAdoptionDraft)
 router.patch('/adopt/holding/:id',            log, correctAdoptedHolding)

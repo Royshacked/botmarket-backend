@@ -54,6 +54,21 @@ function _sendAdopt(res, result, onOk) {
     })
 }
 
+export async function refreshAdoptionDraft(req, res) {
+    try {
+        const { draftId } = req.params
+        if (!draftId) return res.status(400).send({ error: 'Missing draftId' })
+        const { paste, statedTotal, freeCash, mandate } = req.body ?? {}
+        const result = await adoptBookService.refreshDraft({
+            draftId, userId: req.user._id, paste, statedTotal, freeCash, mandate,
+        })
+        _sendAdopt(res, result, r => ({ draft: r.draft }))
+    } catch (err) {
+        logger.error(LOG, 'refreshAdoptionDraft failed', err)
+        res.status(500).send({ error: 'Failed to update the staged book' })
+    }
+}
+
 export async function createAdoptionDraft(req, res) {
     try {
         // `paste` is the raw text; `holdings` is the grid handing back edited cells. Either or both.
@@ -149,6 +164,17 @@ export async function streamPortfolio(req, res) {
             })
 
             const lastMessage = messages.at(-1)?.content ?? ''
+
+            // ADOPT MODE. The client says which staged book this conversation is about, and the raw text
+            // of the turn is parsed HERE — deterministically, before the model sees it — so a pasted
+            // book becomes rows without the model ever reading a number (holdingsParse.util). Refreshing
+            // rather than re-staging keeps one draft per adoption, so corrections land on the same book.
+            const adoptDraft = req.body?.adoptDraftId
+                ? await adoptBookService.refreshDraft({
+                    draftId: String(req.body.adoptDraftId), userId: req.user._id, paste: String(lastMessage ?? ''),
+                }).then(r => r.draft ?? null).catch(() => null)
+                : null
+
             const routing = await resolveModel({ routingMode, agent: 'portfolio', phase: currentPhase, model, reasoningEffort, lastMessage })
 
             const result = await portfolioAgentService.chatStream({
@@ -164,6 +190,7 @@ export async function streamPortfolio(req, res) {
                 mandate,
                 audience: await getExperienceLevel(req.user._id),
                 thesis: storedThesis,
+                adoptDraft,
                 model:           routing.model,
                 reasoningEffort: routing.reasoningEffort,
                 userId:   req.user._id,

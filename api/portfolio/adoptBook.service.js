@@ -153,6 +153,67 @@ export async function createDraft({ userId, bank = null, currency = 'USD', state
     }
 }
 
+/**
+ * Fold another turn of conversation into an existing draft, and hand the draft back for the model to
+ * read (portfolio.controller, adopt mode).
+ *
+ * Two reasons this is not just `createDraft` again. One: a new draft mints a new `portfolioId`, so a
+ * user who pastes the rest of their book in a second message would end up adopting two half-books.
+ * Two: the parse must happen on EVERY turn, because that is how a paste arrives — mid-conversation,
+ * unannounced — and the model must never be the thing that read the numbers.
+ *
+ * Rows are MERGED by symbol, last write winning, so "actually TSLA is 60 not 50" corrects one line
+ * instead of replacing the table. A turn that parses to nothing (ordinary conversation) leaves the
+ * draft untouched and simply returns it.
+ */
+export async function refreshDraft({ draftId, userId, paste = null, statedTotal = null, freeCash = null, mandate = null }) {
+    try {
+        const draft = await _deps.store.getDraft(draftId, userId)
+        if (!draft)                                                  return { ok: false, reason: 'not_found' }
+        if (draft.status === adoptDraftStore.DRAFT_STATUS.COMMITTED) return { ok: false, reason: 'already_committed' }
+
+        const parsed = paste ? parseHoldings(paste) : null
+        const fresh  = (parsed?.rows ?? []).map(normalizeHolding).filter(h => h.symbol)
+
+        // Nothing new in this turn — conversation, not a paste. Hand back what we hold.
+        if (!fresh.length && statedTotal == null && freeCash == null && !mandate) return { ok: true, draft }
+
+        const bySymbol = new Map((draft.holdings ?? []).map(h => [h.symbol, h]))
+        for (const h of fresh) {
+            const prev = bySymbol.get(h.symbol)
+            // A correction states a number; it does not un-state the ones it left out. `why` in
+            // particular is gathered a phase later and must survive a re-paste of the same row.
+            bySymbol.set(h.symbol, prev ? { ...prev, ...h, why: h.why ?? prev.why } : h)
+        }
+        const merged = [...bySymbol.values()]
+
+        // Re-price and re-reconcile the WHOLE book: a new row changes the market value, which changes
+        // the derived cash, which changes the starting balance.
+        const symbols = [...new Set(merged.map(h => h.symbol))]
+        const marks   = symbols.length ? await _deps.quotes(symbols).catch(() => new Map()) : new Map()
+        const priced  = merged.map(h => ({ ...h, mark: toNum(marks.get(h.symbol)) }))
+
+        const total = statedTotal != null ? toNum(statedTotal) : draft.statedTotal
+        const cash  = freeCash    != null ? toNum(freeCash)    : draft.freeCash
+        const reconciliation = reconcileAccount({ holdings: priced, statedTotal: total, freeCash: cash, fxToUsd: draft.fxToUsd ?? 1 })
+        if (parsed?.problems?.length) reconciliation.problems.push(...parsed.problems)
+
+        const patch = {
+            holdings:    priced,
+            statedTotal: total,
+            freeCash:    cash,
+            reconciliation,
+            warnings:    parsed?.warnings ?? draft.warnings ?? [],
+            ...(mandate ? { mandate: { ...(draft.mandate ?? {}), ...mandate } } : {}),
+        }
+        await _deps.store.patchDraft(draftId, userId, patch)
+        return { ok: true, draft: { ...draft, ...patch } }
+    } catch (err) {
+        logger.error(LOG, `refreshDraft failed (${draftId})`, err)
+        return { ok: false, error: err }
+    }
+}
+
 // ─── Commit ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -442,5 +503,6 @@ async function _deleteAdoptedEntity(id, userId) {
 }
 
 export const adoptBookService = {
-    createDraft, commitDraft, discardDraft, listDrafts, correctHolding, removeHolding, normalizeHolding,
+    createDraft, refreshDraft, commitDraft, discardDraft, listDrafts,
+    correctHolding, removeHolding, normalizeHolding,
 }

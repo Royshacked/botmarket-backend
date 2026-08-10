@@ -8,7 +8,7 @@ import { getSecFilings } from '../../providers/sec.provider.js'
 import { cleanConviction } from '../conviction.util.js'
 import { formatWorkspaceLine } from '../../api/portfolio/portfolioMode.util.js'
 import { logger }         from '../logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, LANGUAGE_RULE } from '../agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE } from '../agentUtils.js'
 import { makeTradingContextHandlers } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorView.tools.js'
@@ -167,10 +167,14 @@ function makeCoverageHandler(userId) {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, audience = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, audience = null, adoptDraft = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
-    const normalized   = _buildMessages(messages)
+    // The staged book rides the USER TURN, not the system tail: it changes every time a row is
+    // corrected, and a per-turn block sitting ahead of the chat is exactly what stops the conversation
+    // breakpoint from being hit (see project_prompt_cache_history). The adopt INSTRUCTION is stable and
+    // goes in the tail with everything else.
+    const normalized = attachTurnContext(_buildMessages(messages), _buildStagedBook(adoptDraft))
 
     // Stable base (cached) + volatile per-request sections (accounts, edit
     // context). cache_control on the base lets Anthropic cache the
@@ -183,6 +187,9 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // Who we're talking to comes FIRST: it frames how everything below is said.
     const audienceSection = buildAudienceSection(audience)
     if (audienceSection) dynamicSections.push(audienceSection)
+    // Before the mandate section, because in adopt mode it governs HOW the mandate is elicited — the
+    // anchoring rule has to be read before the mandate fields are.
+    if (adoptDraft) dynamicSections.push(_buildAdoptSection())
     if (mandate)    dynamicSections.push(_buildMandateSection(mandate))
     // Right after the mandate, because it IS a mandate field — and because it governs how everything
     // below is read: the selection school sets the bar for Phase 4, the allocation school sets the
@@ -418,6 +425,110 @@ export function _buildAccountsSection(accounts, mainAccountId = null) {
 // CARRIED OVER from the goal the user gave Axl — a proposal to confirm rather than a settled fact —
 // and it is gone with the objective record (2026-08-05). Nothing arrives from reception as fields any
 // more; what arrives is the user's own opening message, which Atlas answers in Phase 1 like any other.
+/**
+ * ADOPT MODE — the instruction half. Stable text, so it rides the cached system tail; the draft
+ * itself is volatile and goes on the user turn instead (see _buildStagedBook).
+ *
+ * Adoption is construction run backwards: the holdings exist and the intent has to be recovered from
+ * them (docs/design/adopted-book.md). Everything here is about not letting that direction corrupt the
+ * mandate.
+ */
+export function _buildAdoptSection() {
+    return [
+        'ADOPT MODE — THIS USER ALREADY OWNS THIS BOOK.',
+        'They hold it at a bank we cannot connect to. You are not choosing what to buy: you are',
+        'recovering the intent behind holdings that already exist, so that this book ends up with what a',
+        'constructed one gets for free — a mandate, and later a target and a conviction per name.',
+        '',
+        'PHASE ORDER. Do not reorder these and do not merge them.',
+        '  1. THE HOLDINGS — ticker, quantity, average cost, for every line. Quantity is NOT optional:',
+        '     with no quantity there are no weights, and weights are your whole job. Invite a paste (a',
+        '     bank export, a spreadsheet, a screenshot of their statement typed out) rather than asking',
+        '     for lines one at a time — nobody types twenty holdings into a chat box.',
+        '     YOU DO NOT READ THE NUMBERS. They are parsed deterministically and handed to you as the',
+        '     STAGED BOOK. If a row there is wrong or missing, ask about that row.',
+        '  2. THE MANDATE — objective, risk tolerance, time horizon, review cadence, benchmark.',
+        '  3. THE REASON, per holding — why they hold it, and what would make them sell. One line each.',
+        '     Offer a reading and let them confirm it; do not interrogate twenty names in a row.',
+        '  4. CONFIRM — the user reviews the staged table and commits it. You never commit anything.',
+        '',
+        'THE ANCHORING RULE, and it is the one that matters. Establish the objective, the risk',
+        'tolerance, the horizon and the benchmark BEFORE you comment on what the book contains, and',
+        'never justify a mandate with what is already held. If the holdings lead, the mandate becomes a',
+        'DESCRIPTION of the book instead of a yardstick to measure it against — and then the whole',
+        'exercise is worthless, because a book can only be judged against something it did not choose.',
+        'Say what the mandate implies about the book. Never the reverse.',
+        '',
+        'WHAT YOU ARE NOT DOING YET. No target weights, no conviction, no verdict on any holding:',
+        'research has not run on these names. That is the Allocate step, after every name has coverage.',
+        'Asked "is this a good portfolio?" the honest answer is that you cannot say yet, and why.',
+        '',
+        'IF THEY HAVE NO VIEW on risk or horizon — the most likely arrival for someone with a bank book',
+        '— PROPOSE a mandate from the account size and what they hold, and ask them to accept or change',
+        'it. Do not leave them stuck on a question they came here to have answered.',
+    ].join('\n')
+}
+
+/** One holding, as the model should see it: no invented precision, no derived numbers. */
+function _stagedLine(h) {
+    const qty  = h.quantity != null ? h.quantity : '?'
+    const cost = h.avgCost  != null ? h.avgCost  : '?'
+    const mark = h.mark == null ? ' (unpriceable — tracked, not marked)' : ''
+    return `  ${h.symbol}: ${qty} @ ${cost}${h.direction === 'short' ? ' SHORT' : ''}${mark}${h.why ? ` — "${h.why}"` : ''}`
+}
+
+/**
+ * ADOPT MODE — the state half. VOLATILE (it changes every time the user corrects a row), so it is
+ * attached to the user turn rather than to the cached system tail: a block that changes each turn
+ * sitting ahead of the chat is what stops the conversation breakpoint from ever being hit.
+ *
+ * States what is parsed, what is unresolved, and what is still missing — so the model asks for the
+ * next thing instead of re-asking for what it already has.
+ */
+export function _buildStagedBook(draft) {
+    if (!draft) return ''
+    const holdings = Array.isArray(draft.holdings) ? draft.holdings : []
+    const rec      = draft.reconciliation ?? {}
+    const out      = [`STAGED BOOK — parsed for you. Do not re-read these numbers; ask about a row that looks wrong.`]
+
+    out.push(holdings.length ? `${holdings.length} holding(s):` : 'No holdings staged yet.')
+    holdings.forEach(h => out.push(_stagedLine(h)))
+
+    const money = []
+    if (draft.statedCurrency && draft.statedCurrency !== 'USD') {
+        money.push(`stated in ${draft.statedCurrency}${draft.fxToUsd ? ` (rate ${draft.fxToUsd} to USD)` : ''}`)
+    }
+    if (rec.costBasis   != null) money.push(`cost basis ${rec.costBasis}`)
+    if (rec.marketValue != null) money.push(`market value ${rec.marketValue}`)
+    if (rec.freeCash    != null) money.push(`cash ${rec.freeCash}`)
+    if (money.length) out.push(`Account (USD): ${money.join(' · ')}`)
+
+    if (rec.problems?.length) {
+        out.push('UNRESOLVED — this book cannot be adopted until these are fixed:')
+        rec.problems.forEach(p => out.push(`  - ${p}`))
+    }
+    if (draft.warnings?.length) {
+        out.push('READ, BUT WORTH A LOOK — a column was assumed from a wider export:')
+        draft.warnings.forEach(w => out.push(`  - ${w}`))
+    }
+
+    // What to ask for NEXT, stated plainly, so the model doesn't re-ask for what it already holds.
+    const missing = []
+    const noQty  = holdings.filter(h => h.quantity == null).length
+    const noCost = holdings.filter(h => h.avgCost  == null).length
+    const noWhy  = holdings.filter(h => !h.why).length
+    if (!holdings.length)          missing.push('the holdings')
+    if (noQty)                     missing.push(`quantity for ${noQty} row(s)`)
+    if (noCost)                    missing.push(`average cost for ${noCost} row(s)`)
+    if (rec.problems?.includes('no_account_value')) missing.push('what the bank says the account is worth')
+    if (rec.problems?.includes('cash_not_derivable_unpriced')) missing.push('the cash balance (a holding cannot be priced, so it cannot be derived)')
+    if (!draft.mandate?.objective) missing.push('the mandate')
+    if (holdings.length && noWhy)  missing.push(`a reason for ${noWhy} name(s)`)
+    out.push(missing.length ? `STILL NEEDED: ${missing.join(' · ')}.` : 'NOTHING OUTSTANDING — walk them through the table and let them confirm it.')
+
+    return out.join('\n')
+}
+
 export function _buildMandateSection(mandate) {
     const lines = ['INVESTMENT MANDATE (already established — do not re-ask for any field listed here):']
     if (mandate.objective)     lines.push(`Objective: ${mandate.objective}`)

@@ -124,6 +124,18 @@ async function releaseDraft(draftId, userId) {
     )
 }
 
+/**
+ * Update the staged table in place. Only ever an UNSPENT draft: once a book is committed its rows are
+ * real positions, and the way to change those is the repair path, not the draft.
+ */
+async function patchDraft(draftId, userId, patch) {
+    const db = await getDb()
+    await db.collection(COLLECTION).updateOne(
+        { draftId: String(draftId), userId, status: DRAFT_STATUS.DRAFT },
+        { $set: { ...patch, updatedAt: Date.now() } },
+    )
+}
+
 async function setStatus(draftId, userId, status, patch = {}) {
     const db = await getDb()
     await db.collection(COLLECTION).updateOne({ draftId: String(draftId), userId }, { $set: { status, ...patch } })
@@ -136,7 +148,7 @@ async function deleteDraft(draftId, userId) {
 }
 
 export const adoptDraftStore = {
-    createDraft, getDraft, listDrafts, recordAccount, recordPosition,
+    createDraft, getDraft, listDrafts, patchDraft, recordAccount, recordPosition,
     claimDraft, releaseDraft, setStatus, deleteDraft,
     DRAFT_STATUS, CLAIM_LEASE_MS,
 }
