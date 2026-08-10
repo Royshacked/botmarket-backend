@@ -18,7 +18,7 @@ import { extractFirstJSON } from './parsers/llmReply.parser.js'
 // Shared assessment mechanics — routing, token caps, the candle block, the index list. Hermes and
 // Talos had byte-identical copies; the JUDGMENT (prompts, gather strategy, verdicts) stays local.
 import { assessRouting as _hermesRouting, candlesText as _candlesText, BROAD_INDICES,
-    ASSESS_MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING } from './assess.shared.js'
+    ASSESS_MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING, bookAssessUsage } from './assess.shared.js'
 import { config } from '../services/config.js'
 
 const LOG = '[hermes.assess]'
@@ -325,6 +325,7 @@ async function _runAssessment(call, systemPrompt, buildUserText, label) {
                 ...(round < MAX_ASSESS_TOOL_CALLS ? { tools } : {}),
                 ...(thinking ?? {}),
             })
+            bookAssessUsage(call?.userId, model, msg?.usage, 'hermesAssess')
             if (msg.stop_reason !== 'tool_use') break
             messages.push({ role: 'assistant', content: msg.content })
             messages.push({ role: 'user', content: await _handleAssessToolUses(call, msg.content, ladder) })
@@ -413,6 +414,9 @@ async function _confirmEntryWithBrowse(call, zone, raw) {
             messages: [{ role: 'user', content: userText }],
             ...(thinking ?? {}),
         })
+        // The second pass is a whole extra model call with web_search behind it — the most
+        // expensive single thing a wake can do, and the easiest to forget to count.
+        bookAssessUsage(call?.userId, model, msg?.usage, 'hermesAssess')
         const confirm = extractFirstJSON(_allText(msg))
         if (confirm?.confirm === false) logger.info(LOG, `entry vetoed by live market for ${call.id}: ${confirm.reason || confirm.backdrop || ''}`)
         return _applyEntryConfirmation(raw, confirm)

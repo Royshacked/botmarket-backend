@@ -20,6 +20,7 @@ import assert from 'node:assert/strict'
 import { agentKeyFromLog } from '../../services/agentIO.js'
 import { calcCost, ceilingFor, overCeiling } from '../../services/tokenUsage.service.js'
 import { resolveAgentStream } from '../../services/agentUtils.js'
+import { bookAssessUsage } from '../../monitoring/assess.shared.js'
 
 // ─── the log tag → field key ──────────────────────────────────────────────────
 
@@ -201,4 +202,30 @@ test('an exempt account keeps its model however much it has spent', async () => 
         async () => ({ totalCost: 9999 }), async () => null)   // null ceiling = exempt/unset
     assert.equal(out.degraded, false)
     assert.equal(out.model, 'claude-opus-5')
+})
+
+// ─── Monitor spend ────────────────────────────────────────────────────────────
+// The ceiling shipped counting CHAT only: resolveAgentStream was the sole recorder and the
+// assessments call the provider directly. That left the half which scales with users — and which
+// in-position management just added a call per open position to — invisible.
+
+test('a monitor wake books against the entity owner', async () => {
+    const calls = []
+    bookAssessUsage('u1', 'claude-sonnet-4-6', { input_tokens: 100 }, 'talosAssess', async (...a) => { calls.push(a) })
+    assert.deepEqual(calls[0]?.slice(0, 2), ['u1', 'claude-sonnet-4-6'])
+    assert.equal(calls[0]?.[3], 'talosAssess', 'its own row — monitor spend is not blended into the desk chat')
+})
+
+test('an ownerless or usage-less call books nothing', async () => {
+    // A wake with no owner has no account to charge, and a failed call has nothing to count.
+    const calls = []
+    bookAssessUsage(null, 'm', { input_tokens: 1 }, 'talosAssess', async (...a) => { calls.push(a) })
+    bookAssessUsage('u1', 'm', null, 'talosAssess', async (...a) => { calls.push(a) })
+    assert.equal(calls.length, 0)
+})
+
+test('a failed booking never reaches the wake', () => {
+    // Accounting must never take down a monitor: the position it is watching is real.
+    assert.doesNotThrow(() =>
+        bookAssessUsage('u1', 'm', { input_tokens: 1 }, 'talosAssess', async () => { throw new Error('mongo down') }))
 })

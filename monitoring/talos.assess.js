@@ -6,7 +6,7 @@ import { cachedChartImage }      from '../services/chartImgCache.service.js'
 import { logger }                from '../services/logger.service.js'
 import { extractFirstJSON }      from './parsers/llmReply.parser.js'
 import { assessRouting, candlesText as _candlesText,
-    ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING } from './assess.shared.js'
+    ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING, bookAssessUsage } from './assess.shared.js'
 import { _thinkingConfig, _allText, _formatEventRisk } from './hermes.assess.js'
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
 import { declaredConditions, pickScenario, scenarioLabel } from '../services/setup.schema.js'
@@ -276,6 +276,7 @@ async function _runRead(setup, systemText, primary) {
                 model, max_tokens: maxTokens, system, messages, tools,
                 ...(thinking ?? {}),
             })
+            bookAssessUsage(setup?.userId, model, msg?.usage, 'talosAssess')
             if (msg.stop_reason !== 'tool_use') break
 
             const results = await runToolUses(msg.content)

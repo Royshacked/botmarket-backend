@@ -1,6 +1,7 @@
 import { getTickerAggregates } from '../providers/candles.provider.js'
 import { CANDLE_CFG, aggregateCandles } from '../services/tools/marketData.tools.js'
 import { userService } from '../api/user/user.service.js'
+import { recordUsage } from '../services/tokenUsage.service.js'
 
 // The mechanical parts every monitor assessment shares — model routing, token budgets, and the
 // numeric candle block. Extracted because Hermes and Talos had byte-identical copies of both the
@@ -32,6 +33,31 @@ export const BROAD_INDICES = ['SPY', 'QQQ', '^VIX']
  * Both monitors read the same `hermesModel` / `hermesReasoning` preference keys — one knob for
  * "how hard should my monitors think", not one per monitor.
  */
+/**
+ * Book one monitor model call against the user who owns the entity.
+ *
+ * Monitor spend was invisible to the ledger: only resolveAgentStream recorded anything, and the
+ * assessments call the provider directly. So the per-user total counted CHAT only — and the monitors
+ * are the half that scales linearly with users, the half in-position management just added a call
+ * per open position to.
+ *
+ * COUNTED, NEVER BLOCKED. The spend ceiling lives in resolveAgentStream, which nothing here goes
+ * through, so recording cannot gate a monitor — a cost control that stops a live position being
+ * managed is the one failure this must not have. The consequence of a monitor-heavy month therefore
+ * lands on the user's CHAT (degraded to the cheap model) and never on their protection. That is the
+ * asymmetry working as intended, not a side effect.
+ *
+ * Called PER ROUND. Both assessments loop over tool calls, so booking only the final reply would
+ * under-report a tool-heavy wake exactly the way `turns` once under-reported a tool-heavy turn.
+ *
+ * Its own agent tag, so the byAgent rollup separates monitor spend from the desk's chat rather than
+ * blending the two into one row. Fire-and-forget: accounting must never fail a wake.
+ */
+export function bookAssessUsage(userId, model, usage, agent, _record = recordUsage) {
+    if (!userId || !usage) return
+    _record(userId, model, usage, agent).catch(() => {})
+}
+
 export async function assessRouting(userId) {
     if (!userId) return { model: ASSESS_MODEL, reasoningEffort: 'off' }
     try {
