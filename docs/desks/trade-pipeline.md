@@ -58,8 +58,9 @@ turn, against Mentor's ~2. Pricing it as premium aligns cost with revenue instea
 - **Talos is aware of the lens.** This is a deliberate break from Hermes, where `mode` never reaches
   the monitor. The reason: a setup's conditions reference the lens's own computations, so *"an SMC
   setup built on them is monitored on them."*
-- Scope it tightly. The lens selects the **tool subset in Tier 3**. It does **not** change the
-  questions or the verdicts, and it never reaches Tier 2 (which has no tools).
+- Scope it tightly. The lens changes the monitor's **voice and where it looks first** — a line in
+  the prompt (`assess.shared.lensLine`). It does **not** gate tools, change the questions or change
+  the verdicts, and it never reaches Tier 2 (which has no tools).
 
 **Two blockers before the third lens ships:**
 
@@ -68,8 +69,13 @@ turn, against Mentor's ~2. Pricing it as premium aligns cost with revenue instea
    stored `discretionary` is no longer in the set and falls to the default, which IS `judgment` —
    same meaning, new name. A test asserts the two vocabularies share no word, so it cannot regress
    when the lens set grows.
-2. **`institutional` tools must exist** in `assessTools.js`. The SMC ones do. Confirm before
-   committing to the lens.
+2. ~~**`institutional` tools must exist**~~ **CHECKED 2026-08-10 — they effectively do.** The kit
+   mounts correlations, short interest, options/derivatives context, fundamentals, filings and
+   earnings; only `get_macro_snapshot` and `get_peers` are absent, and neither is needed to check a
+   DECLARED condition. More to the point, the premise was wrong: Talos does not gate tools by lens
+   at all — everything is mounted and the model picks, deliberately, because conditions are free
+   text and gating on a declared kind never served it. The lens is a SENTENCE in the prompt, not a
+   filter.
 
 ---
 

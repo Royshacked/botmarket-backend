@@ -53,6 +53,29 @@ export const BROAD_INDICES = ['SPY', 'QQQ', '^VIX']
  * Its own agent tag, so the byAgent rollup separates monitor spend from the desk's chat rather than
  * blending the two into one row. Fire-and-forget: accounting must never fail a wake.
  */
+/**
+ * How the monitor should VERIFY, given the lens the setup was built through.
+ *
+ * The lens changes the monitor's voice and where it looks first — never its tool set. Everything is
+ * mounted regardless (assessTools) because conditions are free text and gating a tool by a declared
+ * kind never served the model: it read the factors back as prose either way. So this is a sentence,
+ * not a filter.
+ *
+ * Pure, and shared so the readiness read and the in-position read cannot drift into two different
+ * descriptions of the same three lenses — which is exactly what happened to the condition-mode
+ * sentence before it was deduplicated.
+ */
+export function lensLine(tradeMode) {
+    switch (tradeMode) {
+        case 'smc':
+            return 'this setup was built on Smart-Money structure — verify the structural trigger with get_structure / get_fvg / get_liquidity rather than trusting the build-time map.'
+        case 'institutional':
+            return 'this setup was built on an institutional read — flows, relative strength and positioning lead here, so verify with get_correlations against the peers the plan names, get_short_interest / get_options_context for crowding, and fundamentals where the thesis rests on the business. Price structure CONFIRMS; it does not decide.'
+        default:
+            return 'this setup was built on classical price action — verify with the chart, order blocks and false breaks.'
+    }
+}
+
 export function bookAssessUsage(userId, model, usage, agent, _record = recordUsage) {
     if (!userId || !usage) return
     _record(userId, model, usage, agent).catch(() => {})

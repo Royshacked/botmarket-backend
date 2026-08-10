@@ -16,7 +16,15 @@ import { TRADE_HORIZONS } from './entity/vocabulary.js'
 // Coarse → fine. The ladder is a contiguous slice of this, centred on the authored timeframe.
 export const TF_RUNGS = ['month', 'week', 'day', '4hr', '2hr', '1hr', '30min', '15min', '5min', '1min']
 
-export const TRADE_MODES  = ['classical', 'smc']
+// The LENS a setup was built through — the same three Kairos offers (kairos.modes MODES), so a
+// user hears one vocabulary across both desks. `classical` was the old name for the first one and
+// meant exactly what `discretionary` means: classical price action, indicators confirming rather
+// than leading.
+//
+// Migration is free for the same reason the condition rename was: a stored `classical` is no
+// longer in the set, so it falls to the default below — which IS `discretionary`. Same lens, new
+// name, no rewrite.
+export const TRADE_MODES  = ['discretionary', 'smc', 'institutional']
 
 // ─── Conditions ───────────────────────────────────────────────────────────────
 //
@@ -430,7 +438,7 @@ export function normalizeSetup(raw) {
         asset_class: normalizeAssetClass(raw.asset_class),
         direction,
         type,
-        trade_mode:  TRADE_MODES.includes(raw.trade_mode) ? raw.trade_mode : 'classical',
+        trade_mode:  TRADE_MODES.includes(raw.trade_mode) ? raw.trade_mode : 'discretionary',
         timeframe,
         active_from: isoOrNull(raw.active_from),
         valid_until: isoOrNull(raw.valid_until),

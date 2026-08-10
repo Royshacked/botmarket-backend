@@ -120,12 +120,12 @@ test('a turn with no blocks returns the reply unchanged', () => {
 test('candidates are normalised so the cards are comparable, with rr computed per option', () => {
     const raw = `<setups>${JSON.stringify({ candidates: [
         { label: 'Sweep and reclaim', pitch: 'Best risk.', setup: SETUP },
-        { label: 'Break of the shelf', pitch: 'Momentum.', setup: { ...SETUP, trade_mode: 'classical', entry_zones: [{ lower: 241, upper: 242, quantity: 100 }] } },
+        { label: 'Break of the shelf', pitch: 'Momentum.', setup: { ...SETUP, trade_mode: 'discretionary', entry_zones: [{ lower: 241, upper: 242, quantity: 100 }] } },
     ] })}</setups>`
     const { candidates } = _parseCandidates(raw)
     assert.equal(candidates.length, 2)
     assert.ok(candidates.every(c => Number.isFinite(c.setup.rr)), 'every card shows an rr')
-    assert.deepEqual(candidates.map(c => c.setup.trade_mode), ['smc', 'classical'])
+    assert.deepEqual(candidates.map(c => c.setup.trade_mode), ['smc', 'discretionary'])
     // The worse fill must produce the worse rr — that's the whole point of showing them together.
     assert.ok(candidates[0].setup.rr > candidates[1].setup.rr)
 })

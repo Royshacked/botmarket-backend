@@ -5,7 +5,7 @@ import {
     normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
-    stopEdge, targetEdges, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, CONDITION_MODES,
+    stopEdge, targetEdges, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, CONDITION_MODES, TRADE_MODES,
 } from '../../services/setup.schema.js'
 import { MODES } from '../../services/kairos.modes.js'
 
@@ -278,7 +278,7 @@ test('an invalid enum falls back rather than reaching the monitor', () => {
     const s = normalizeSetup({ ...DRAFT, direction: 'sideways', type: 'scalp', trade_mode: 'astrology', timeframe: 'fortnight' })
     assert.equal(s.direction, null)
     assert.equal(s.type, null)
-    assert.equal(s.trade_mode, 'classical', 'unknown lens → the default lens')
+    assert.equal(s.trade_mode, 'discretionary', 'unknown lens → the default lens')
     assert.equal(s.timeframe, null)
 })
 
@@ -805,4 +805,24 @@ test('the lens vocabulary and the condition vocabulary no longer share a word', 
     // set grows to three.
     const overlap = CONDITION_MODES.filter(m => MODES.includes(m))
     assert.deepEqual(overlap, [], `"${overlap}" means two unrelated things`)
+})
+
+// ─── The three lenses ─────────────────────────────────────────────────────────
+// Mentor now offers the same three Kairos does, so a user hears one vocabulary across both desks.
+
+test('a setup built before the rename keeps its lens, under the new name', () => {
+    // `classical` meant exactly what `discretionary` means. It is no longer in the set, so it falls
+    // to the default — which IS `discretionary`. Same migration-for-free as the condition rename.
+    assert.equal(normalizeSetup({ ...DRAFT, trade_mode: 'classical' }).trade_mode, 'discretionary')
+})
+
+test('institutional is a real lens, not coerced away', () => {
+    assert.equal(normalizeSetup({ ...DRAFT, trade_mode: 'institutional' }).trade_mode, 'institutional')
+    assert.equal(normalizeSetup({ ...DRAFT, trade_mode: 'smc' }).trade_mode, 'smc')
+})
+
+test('Mentor and Kairos offer the SAME three lenses', () => {
+    // The point of the change. Two desks describing one concept with different words is how a user
+    // ends up thinking they are different concepts.
+    assert.deepEqual([...TRADE_MODES].sort(), [...MODES].sort())
 })

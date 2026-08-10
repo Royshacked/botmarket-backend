@@ -6,7 +6,7 @@ import { cachedChartImage }      from '../services/chartImgCache.service.js'
 import { logger }                from '../services/logger.service.js'
 import { extractFirstJSON }      from './parsers/llmReply.parser.js'
 import { assessRouting, candlesText as _candlesText,
-    ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING, bookAssessUsage } from './assess.shared.js'
+    ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING, bookAssessUsage, lensLine } from './assess.shared.js'
 import { _thinkingConfig, _allText, _formatEventRisk } from './hermes.assess.js'
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
 import { declaredConditions, pickScenario, scenarioLabel } from '../services/setup.schema.js'
@@ -207,9 +207,7 @@ export async function assessSetup(setup, hit, ctx = {}) {
             `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
             `SESSION NOW: ${sessionPhase(setup.asset, setup.asset_class)}`,
             `REASON WOKEN: ${ctx.reason ?? 'zone_trip'}`,
-            `LENS: ${setup.trade_mode === 'smc'
-                ? 'this setup was built on Smart-Money structure — verify the structural trigger with get_structure / get_fvg / get_liquidity rather than trusting the build-time map.'
-                : 'this setup was built on classical price action — verify with the chart, order blocks and false breaks.'}`,
+            `LENS: ${lensLine(setup.trade_mode)}`,
             `PRIOR MEMO: ${setup.monitor_state?.memo || '(none)'}`,
             ..._dataBlocks(setup, g, tf),
         ].filter(Boolean).join('\n\n')
