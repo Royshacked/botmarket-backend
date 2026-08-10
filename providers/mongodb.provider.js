@@ -31,6 +31,30 @@ export async function getDb() {
     return _db
 }
 
+/**
+ * The other half of the lazy singleton above. A connected MongoClient keeps a pool AND a topology
+ * monitor that pings every replica-set member on a heartbeat — all of it `ref`'d, so the event loop
+ * can never drain and the process can never exit on its own.
+ *
+ * The long-lived server doesn't care: it exits by signal. A TEST process does. Without this, one
+ * test reaching any of getDb's ~48 caller modules meant `npm test` passed every assertion and then
+ * hung forever — and three of those orphans sat on Atlas connections for three days before anyone
+ * noticed, because a leaked handle looks exactly like a suite that is still running.
+ *
+ * Idempotent, and safe to call having never connected: both callers (the test teardown, and anyone
+ * adding a server shutdown path later) should be able to call it blind.
+ */
+export async function closeDb() {
+    const client = _client
+    // Cleared BEFORE the await, so a getDb() racing this one builds a fresh client rather than
+    // handing back the connection being torn down.
+    _client = null
+    _db = null
+    if (!client) return
+    await client.close()
+    logger.info(LOG, 'Closed the MongoDB connection')
+}
+
 /** Return `doc` without its Mongo `_id` field. Passes through falsy values. */
 export function stripId(doc) {
     if (!doc) return doc
