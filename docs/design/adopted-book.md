@@ -277,6 +277,15 @@ unmanaged."* Silent exclusion is the failure mode.
 
 Not a normal review. Its job is to build the spine a constructed book gets for free:
 
+0. **the targets already exist** (BUILT 2026-08-10). `allocationRatio` is seeded at commit from each
+   holding's own weight — fractions summing to 1.0 at 4dp, the same scale `_sizePlan` normalizes a
+   constructed book to. So Atlas arrives at Allocate with the allocations already in hand and its job
+   is **conviction, then keep-or-change** — which is why this is the ORDINARY review and not a phase of
+   its own. Accepting a change rewrites `allocationRatio` through the existing rebalance path, exactly
+   as for any book.
+   Consequence, accepted: `drift` then measures how far the MARKET has moved the book since it arrived,
+   not how far it sits from what it should be. The mandate-vs-book judgment stays Atlas's to make from
+   the mandate and the live weights; it is not a stored number a gate fires on by itself.
 1. **the count gap** — the first and bluntest comparison:
    - **over the cap** (22 held, max 12) → keep-or-change becomes a concrete exit list: *here are the
      ten I would drop, and why*, ranked by what coverage just produced (PT vs what you paid,
@@ -299,7 +308,7 @@ Not a normal review. Its job is to build the spine a constructed book gets for f
 
 ## 7. What monitoring turns on, and when
 
-Seven of ten Themis gates fire on day one (`services/portfolioReview.util.js:69`) — six from pure
+Eight of ten Themis gates fire on day one (`services/portfolioReview.util.js:69`) — six from pure
 data, plus the cap the user stated at intake. Only the two that need Atlas's own numbers must wait:
 
 | Gate | Needs | Live |
@@ -312,7 +321,7 @@ data, plus the cap the user stated at intake. Only the two that need Atlas's own
 | `coverage` — PT ≤ **what we paid** | coverage row + `entryPrice` | when coverage lands |
 | `coverage` — PT cut vs basis | a frozen basis PT | from adoption onward |
 | `conviction` fell | Atlas's conviction + a previous | **after Allocate** |
-| `drift` from target | target weights | **after Allocate** |
+| `drift` from target | target weights | day 0 — seeded at commit (§6) |
 | `count` over the cap — NEW (§3.1) | `max_names` + live leg count | day 0 |
 
 The strongest coverage gate works immediately, because avg cost *is* `entryPrice`: *our own analyst's
@@ -457,9 +466,9 @@ cannot be read.
 5. **Research batch — LEFT AS IS 2026-08-10** (user's call). The hop is the ordinary one: the names go
    to Prometheus and he researches them, through the headless path `coverageRefresh` already provides.
    What the user SEES during a long run — progress, notification, resumption — is designed separately.
-6. **Allocate as the adoption review** — the count gap, targets, conviction, thesis confirm,
-   keep-or-change recorded, re-fingerprint. Then live-verify the whole path: `spine_state` walks
-   `adopted → covered → under_mandate` and Themis rings.
+6. **Allocate — the ORDINARY review, not a phase** (targets seeded at commit, §6.0). What is left is
+   conviction per holding, the thesis confirm, a RECORDED keep-or-change, and the re-fingerprint that
+   gives `conviction fell` a previous to compare against. Then live-verify the whole path.
 7. **Drift ritual — BUILT 2026-08-10**, and reclassified as MANUAL-MODE behaviour rather than
    adoption's (§8): the review-time re-confirm (`_buildUnreadableVenueSection`, keyed on the venue)
    and cash movements. The standalone monthly confirm-holdings CARD is DROPPED from this feature — a

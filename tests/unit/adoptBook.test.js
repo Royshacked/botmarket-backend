@@ -472,6 +472,55 @@ test('a purchase date can only be in the past', () => {
     assert.equal(_pastOnly(null, now), null)
 })
 
+// ─── Target weights, seeded from what the user holds ────────────────────────────
+//
+// `allocationRatio` IS the target, and drift reads it as `actualWeight − allocationRatio/total`.
+// Adoption used to leave it null, which is the whole reason the drift gate was dead — not a missing
+// phase, a missing number. Seeding it from the user's own weights says the honest thing: they chose
+// these, so they are the starting intent, and Atlas proposing a change is what moves them.
+
+test('every adopted leg is born with its own weight as its target', async () => {
+    const { deps, calls } = stubs()
+    const restore = _setDeps(deps)
+    try {
+        await commitDraft({ draftId: 'd1', userId: 'u1' })
+        const legs = calls.batch[0].plan.ideas
+        // AAPL 100 @ mark 200 = 20,000; MSFT 50 @ 400 = 20,000 → half each.
+        assert.deepEqual(legs.map(l => l.allocationRatio), [0.5, 0.5])
+    } finally { restore() }
+})
+
+test('the targets are FRACTIONS summing to 1, matching a constructed book', async () => {
+    // The two scales must agree: a later review rewriting ONE leg in a different scale would corrupt
+    // the total that every other leg's drift is normalized against.
+    const { deps, calls } = stubs({
+        store: { getDraft: async () => draftDoc({ holdings: [
+            { symbol: 'AAPL', quantity: 100, avgCost: 150, mark: 300, direction: 'long', why: 'x' },
+            { symbol: 'MSFT', quantity: 50,  avgCost: 300, mark: 200, direction: 'long', why: 'y' },
+        ] }) },
+    })
+    const restore = _setDeps(deps)
+    try {
+        await commitDraft({ draftId: 'd1', userId: 'u1' })
+        const ratios = calls.batch[0].plan.ideas.map(l => l.allocationRatio)
+        assert.deepEqual(ratios, [0.75, 0.25])
+        assert.equal(ratios.reduce((a, b) => a + b, 0), 1)
+    } finally { restore() }
+})
+
+test('a resumed commit writes the weight it would have written the first time', async () => {
+    // Computed over the WHOLE book, not just the legs still pending — otherwise a leg written on the
+    // retry would be weighted as if it were the only holding.
+    const { deps, calls } = stubs({ legsFor: async () => [{ asset: 'AAPL' }] })
+    const restore = _setDeps(deps)
+    try {
+        await commitDraft({ draftId: 'd1', userId: 'u1' })
+        const legs = calls.batch[0].plan.ideas
+        assert.deepEqual(legs.map(l => l.asset), ['MSFT'])
+        assert.equal(legs[0].allocationRatio, 0.5, 'still half the book, not all of it')
+    } finally { restore() }
+})
+
 // ─── Closing the gaps the bug hunt found ────────────────────────────────────────
 
 test('a nameless row stays IN the book as a problem, not out of it as a blank line', () => {

@@ -19,7 +19,7 @@
  * trim: nothing happened in the market, so no P&L is ever banked.
  */
 
-import { reconcileAccount }      from '../../services/bookValuation.util.js'
+import { reconcileAccount, actualWeights } from '../../services/bookValuation.util.js'
 import { fxToUsd }               from '../../services/fxRate.service.js'
 import { parseHoldings }         from '../../services/holdingsParse.util.js'
 import { isNonUsListing }        from '../../services/market.service.js'
@@ -329,6 +329,26 @@ export async function commitDraft({ draftId, userId }) {
             await _deps.store.recordAccount(draftId, userId, accountId)
         }
 
+        // THE TARGET WEIGHTS, seeded from what the user actually holds.
+        //
+        // `allocationRatio` is the target, and `drift = actualWeight − allocationRatio/total` reads it.
+        // Adoption used to leave it null, which left the drift gate permanently dead — not for want of a
+        // phase, for want of a number. Seeding it from each holding's own weight says the honest thing:
+        // the user chose these weights, so they are the starting intent, and it is Atlas PROPOSING a
+        // change (and the user accepting it) that moves them — through the ordinary rebalance path,
+        // which already rewrites this field for any book.
+        //
+        // Consequence, accepted: drift then measures how far the MARKET has moved this book since it
+        // arrived, not how far it sits from what it should be. The mandate-vs-book judgment is still
+        // Atlas's to make at review — it reads the mandate against the live weights — it is simply not
+        // a stored number a gate fires on by itself.
+        //
+        // Fractions summing to 1.0 at 4dp, matching what _sizePlan normalizes a constructed book to:
+        // the two scales must agree or a later review that rewrites ONE leg would corrupt the total
+        // every other leg's drift is normalized against.
+        const targets = new Map(actualWeights(draft.holdings).weights
+            .map(w => [w.symbol, Number(w.weight.toFixed(4))]))
+
         const existing = new Set((await _deps.legsFor(portfolioId, userId) ?? [])
             .map(l => String(l.asset ?? '').toUpperCase()))
         const pending = draft.holdings.filter(h => h.symbol && !existing.has(h.symbol))
@@ -360,6 +380,9 @@ export async function commitDraft({ draftId, userId }) {
                 direction:   h.direction,
                 quantity:    h.quantity,
                 notes:       h.why,
+                // Computed over the WHOLE book, not just this pass: a resumed commit writes the same
+                // weight it would have written the first time.
+                allocationRatio: targets.get(h.symbol) ?? null,
                 adopted:     true,
                 adoptedAt:   now,
                 fill:        { broker: 'manual', accountId, positionId, quantity: h.quantity, at: h.openedAt ?? now },
