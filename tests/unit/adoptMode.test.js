@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { _buildAdoptSection, _buildStagedBook } from '../../services/agents/portfolio.agent.service.js'
-import { refreshDraft, _setDeps } from '../../api/portfolio/adoptBook.service.js'
+import { refreshDraft, partitionHoldings, _setDeps } from '../../api/portfolio/adoptBook.service.js'
+import { reconcileAccount } from '../../services/bookValuation.util.js'
 
 // Atlas's ADOPT mode (docs/design/adopted-book.md §3). Two halves, split by how volatile they are:
 // the instruction is stable and rides the cached system tail; the staged book changes every time a row
@@ -67,14 +68,19 @@ test('what is STILL NEEDED is stated, so the model asks for the next thing', () 
     assert.match(s, /STILL NEEDED: a reason for 1 name\(s\)/)
 })
 
-test('an unpriceable line is named as tracked, not dropped', () => {
+test('an unpriceable line is EXCLUDED, not carried as a holding', () => {
+    // Superseded a "tracked, not marked" row: being in the book means being priced, weighted,
+    // researched and reviewed, and a line we cannot price gets none of that — so carrying it would put
+    // a number in the book that no gate can ever read.
     const s = _buildStagedBook({
         ...DRAFT,
-        holdings: [{ symbol: 'BANKFUND', quantity: 10, avgCost: 1000, mark: null, direction: 'long', why: null }],
+        holdings: [],
+        excluded: [{ symbol: 'BANKFUND', quantity: 10, avgCost: 1000, mark: null, reason: 'no_price' }],
         reconciliation: { problems: ['cash_not_derivable_unpriced'] },
     })
-    assert.match(s, /BANKFUND: 10 @ 1000 \(unpriceable — tracked, not marked\)/)
-    assert.match(s, /UNRESOLVED/)
+    assert.match(s, /NOT IN THE BOOK/)
+    assert.match(s, /BANKFUND: we could not price it at all/)
+    assert.ok(!/1 holding\(s\)/.test(s), 'it is not counted as a holding')
     assert.match(s, /the cash balance/, 'and it says what to ask for instead of the derivation')
 })
 
@@ -166,4 +172,71 @@ test('a committed book is not a draft any more', async () => {
     try {
         assert.equal((await refreshDraft({ draftId: 'd1', userId: 'u1', paste: 'AAPL 1 2' })).reason, 'already_committed')
     } finally { restore() }
+})
+
+// ─── Exclusion: only a US-listed holding can be IN the book ──────────────────────
+// Being in the book means being priced, weighted, researched and reviewed. None of that exists for a
+// foreign listing, so it is excluded and NAMED — never carried as a row no gate can read, and never
+// silently dropped either.
+
+test('a foreign listing is excluded; an ADR is not', () => {
+    const { included, excluded } = partitionHoldings([
+        { symbol: 'AAPL',    mark: 200 },
+        { symbol: 'NESN.SW', mark: 95 },    // priceable, still unmanageable
+        { symbol: 'NSRGY',   mark: 105 },   // the US line for the same company
+        { symbol: 'BRK.B',   mark: 410 },   // a share CLASS, not an exchange
+    ])
+    assert.deepEqual(included.map(h => h.symbol), ['AAPL', 'NSRGY', 'BRK.B'])
+    assert.deepEqual(excluded.map(h => [h.symbol, h.reason]), [['NESN.SW', 'non_us_listing']])
+})
+
+test('an unpriceable line is excluded as a QUESTION, not a verdict', () => {
+    // Most often a mis-typed ticker, which is why it carries its own reason.
+    const { excluded } = partitionHoldings([{ symbol: 'BANKFUND', mark: null }])
+    assert.deepEqual(excluded.map(h => h.reason), ['no_price'])
+})
+
+test('an excluded line stops cash being DERIVED from the stated total', () => {
+    // The stated total covers the whole bank account including what we are not adopting, so
+    // subtracting only the adopted market value would hand the excluded holding's value to "cash" —
+    // the double-count error arriving from the other side.
+    const r = reconcileAccount({
+        holdings: [{ symbol: 'AAPL', quantity: 100, avgCost: 150, mark: 200 }],
+        statedTotal: 100_000, excluded: 1,
+    })
+    assert.deepEqual(r.problems, ['cash_not_derivable_excluded'])
+    assert.equal(r.startingBalance, null)
+
+    // Stated cash needs no derivation, so the same book commits fine.
+    const ok = reconcileAccount({
+        holdings: [{ symbol: 'AAPL', quantity: 100, avgCost: 150, mark: 200 }],
+        freeCash: 5_000, excluded: 1,
+    })
+    assert.deepEqual(ok.problems, [])
+    assert.equal(ok.startingBalance, 20_000)
+})
+
+test('the staged book gives each exclusion its own sentence', () => {
+    const s = _buildStagedBook({
+        holdings: [{ symbol: 'AAPL', quantity: 100, avgCost: 150, mark: 200, direction: 'long', why: 'x' }],
+        excluded: [
+            { symbol: 'NESN.SW', reason: 'non_us_listing' },
+            { symbol: 'BANKFUND', reason: 'no_price' },
+        ],
+        reconciliation: { problems: ['cash_not_derivable_excluded'] },
+    })
+    assert.match(s, /NOT IN THE BOOK/)
+    assert.match(s, /NESN\.SW: listed outside the US/)
+    assert.match(s, /Offer the US line \(an ADR\)/)
+    assert.match(s, /BANKFUND: we could not price it at all — check the ticker/)
+    assert.match(s, /the cash balance directly/)
+})
+
+test('the instruction tells Atlas to say it, and how the two reasons differ', () => {
+    const s = _buildAdoptSection()
+    assert.match(s, /Only a US-listed holding can be in it/)
+    assert.match(s, /SAY SO PLAINLY/)
+    assert.match(s, /an ADR, e\.g\. NSRGY/)
+    assert.match(s, /MIS-TYPED TICKER/)
+    assert.match(s, /ask for the CASH balance directly/)
 })

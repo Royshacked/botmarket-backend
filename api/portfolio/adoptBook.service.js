@@ -22,6 +22,7 @@
 import { reconcileAccount }      from '../../services/bookValuation.util.js'
 import { fxToUsd }               from '../../services/fxRate.service.js'
 import { parseHoldings }         from '../../services/holdingsParse.util.js'
+import { isNonUsListing }        from '../../services/market.service.js'
 import { adoptDraftStore }       from './adoptBook.store.js'
 import { paperBrokerService }    from '../broker/paperBroker.service.js'
 import { openManualPosition }    from '../broker/manualExecution.service.js'
@@ -96,6 +97,33 @@ export function normalizeHolding(raw = {}) {
 }
 
 /**
+ * Split what the user stated into the book we can actually manage, and the lines we cannot.
+ *
+ * A holding is only IN the book if we can value, weight, research and review it — and for a listing
+ * outside the US market we can do none of those: no price in USD, no coverage, no market hours, no
+ * broker symbol. Carrying such a row would put a number in a book that no gate can ever read.
+ *
+ * So it is EXCLUDED and NAMED, never silently dropped and never quietly carried: `excluded` travels on
+ * the draft with a reason per line, the staged book states it, and Atlas says it out loud.
+ *
+ * Two reasons, deliberately distinct, because they need different sentences:
+ *   • `non_us_listing` — we know what it is and cannot manage it (NESN.SW). Suggest the US line if one
+ *     exists (an ADR); otherwise it stays at the bank, untracked.
+ *   • `no_price`       — we could not price it at all: a bank fund, a bond, a mis-typed ticker. This
+ *     one is often a TYPO, so it is a question, not a verdict.
+ * Pure.
+ */
+export function partitionHoldings(priced) {
+    const included = [], excluded = []
+    for (const h of priced) {
+        if (isNonUsListing(h.symbol))    { excluded.push({ ...h, reason: 'non_us_listing' }); continue }
+        if (h.mark == null)              { excluded.push({ ...h, reason: 'no_price' });       continue }
+        included.push(h)
+    }
+    return { included, excluded }
+}
+
+/**
  * Stage an adoption: price the lines, reconcile the account, persist the draft.
  *
  * Deliberately does NOT refuse. Every problem it finds — a bad quantity, a total that doesn't add
@@ -127,7 +155,12 @@ export async function createDraft({ userId, bank = null, currency = 'USD', state
         // "you told us ₪650,000, at 0.27 that's $175,500".
         const stated  = String(currency ?? 'USD').trim().toUpperCase() || 'USD'
         const rate    = stated === 'USD' ? 1 : await _deps.fxToUsd(stated).catch(() => null)
-        const reconciliation = reconcileAccount({ holdings: priced, statedTotal, freeCash, fxToUsd: rate })
+        // Only the manageable book is valued. An excluded line is not part of the portfolio, so it is
+        // not part of its cost basis or its weights either.
+        const { included, excluded } = partitionHoldings(priced)
+        const reconciliation = reconcileAccount({
+            holdings: included, statedTotal, freeCash, fxToUsd: rate, excluded: excluded.length,
+        })
         // The parser's findings ride ALONGSIDE the reconciliation rather than being merged into it: one
         // is "we could not read your paste", the other is "your numbers do not add up", and the grid
         // shows them in different places. Warnings never block (a bank export whose columns we assumed).
@@ -141,7 +174,7 @@ export async function createDraft({ userId, bank = null, currency = 'USD', state
             fxToUsd:        rate,
             fxAt:           rate != null && stated !== 'USD' ? Date.now() : null,
             statedTotal: toNum(statedTotal), freeCash: toNum(freeCash),
-            holdings: priced, reconciliation,
+            holdings: included, excluded, reconciliation,
             warnings: parsed?.warnings ?? [],
             // Minted here, not at commit, so a retry writes into the SAME book instead of a second one.
             portfolioId: `portfolio_${Date.now()}`,
@@ -178,7 +211,10 @@ export async function refreshDraft({ draftId, userId, paste = null, statedTotal 
         // Nothing new in this turn — conversation, not a paste. Hand back what we hold.
         if (!fresh.length && statedTotal == null && freeCash == null && !mandate) return { ok: true, draft }
 
-        const bySymbol = new Map((draft.holdings ?? []).map(h => [h.symbol, h]))
+        // Excluded lines stay in the merge pool: a user correcting a typo'd ticker must be able to
+        // bring that row back into the book, and one that is genuinely foreign must not silently
+        // reappear as manageable either — the partition below decides again, every turn.
+        const bySymbol = new Map([...(draft.holdings ?? []), ...(draft.excluded ?? [])].map(h => [h.symbol, h]))
         for (const h of fresh) {
             const prev = bySymbol.get(h.symbol)
             // A correction states a number; it does not un-state the ones it left out. `why` in
@@ -195,11 +231,15 @@ export async function refreshDraft({ draftId, userId, paste = null, statedTotal 
 
         const total = statedTotal != null ? toNum(statedTotal) : draft.statedTotal
         const cash  = freeCash    != null ? toNum(freeCash)    : draft.freeCash
-        const reconciliation = reconcileAccount({ holdings: priced, statedTotal: total, freeCash: cash, fxToUsd: draft.fxToUsd ?? 1 })
+        const { included, excluded } = partitionHoldings(priced)
+        const reconciliation = reconcileAccount({
+            holdings: included, statedTotal: total, freeCash: cash, fxToUsd: draft.fxToUsd ?? 1, excluded: excluded.length,
+        })
         if (parsed?.problems?.length) reconciliation.problems.push(...parsed.problems)
 
         const patch = {
-            holdings:    priced,
+            holdings:    included,
+            excluded,
             statedTotal: total,
             freeCash:    cash,
             reconciliation,
@@ -504,5 +544,5 @@ async function _deleteAdoptedEntity(id, userId) {
 
 export const adoptBookService = {
     createDraft, refreshDraft, commitDraft, discardDraft, listDrafts,
-    correctHolding, removeHolding, normalizeHolding,
+    correctHolding, removeHolding, normalizeHolding, partitionHoldings,
 }

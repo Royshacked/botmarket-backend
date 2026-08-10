@@ -138,7 +138,7 @@ export function actualWeights(holdings = []) {
  * @returns {{ costBasis:number, marketValue:number, unpriced:string[], freeCash:number|null,
  *             startingBalance:number|null, problems:string[] }}
  */
-export function reconcileAccount({ holdings = [], statedTotal = null, freeCash = null, fxToUsd = 1 } = {}) {
+export function reconcileAccount({ holdings = [], statedTotal = null, freeCash = null, fxToUsd = 1, excluded = 0 } = {}) {
     const problems = holdingProblems(holdings)
     const basis    = costBasis(holdings)
     const { value: market, unpriced } = marketValue(holdings)
@@ -162,6 +162,12 @@ export function reconcileAccount({ holdings = [], statedTotal = null, freeCash =
         else cash = _round2(statedCash)
     } else if (stated == null) {
         problems.push('no_account_value')
+    } else if (excluded > 0) {
+        // The stated total covers the WHOLE bank account, including holdings we are not adopting (a
+        // foreign listing — see market.isNonUsListing). Subtracting only the market value of what we
+        // DO adopt would hand every excluded holding's value to "cash", which is the same
+        // double-counting error as seeding the balance with market value, arriving from the other side.
+        problems.push('cash_not_derivable_excluded')
     } else if (unpriced.length) {
         // The derivation is unavailable, not the intake: ask for cash instead (see above).
         problems.push('cash_not_derivable_unpriced')

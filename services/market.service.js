@@ -80,6 +80,43 @@ export function isFutures(symbol) {
         || INDEX_FUTURES.has(baseSymbol(symbol))   // 'US100.cash' → 'US100'
 }
 
+// Exchange suffixes that mean "listed somewhere other than a US venue". Yahoo/FMP style, and the
+// reason this list is explicit rather than "anything after a dot": a dotted suffix is ALSO how a US
+// share class is written (BRK.B, BF.B), and treating those as foreign would drop a real US holding.
+// So a suffix is foreign only if it is named here; anything else after the dot is read as a class.
+const NON_US_EXCHANGE_SUFFIXES = new Set([
+    'TA',                                            // Tel Aviv
+    'L', 'IL',                                       // London
+    'TO', 'V', 'NE', 'CN',                           // Canada
+    'AX', 'NZ',                                      // Australia / NZ
+    'HK', 'SS', 'SZ', 'SI', 'KS', 'KQ', 'TW', 'TWO', // Asia
+    'T', 'JP',                                       // Tokyo
+    'NS', 'BO',                                      // India
+    'DE', 'F', 'BE', 'MU', 'SG', 'DU', 'HM',         // Germany
+    'PA', 'AS', 'BR', 'LS', 'MC', 'MI', 'VI', 'IR',  // Euronext + southern Europe
+    'SW', 'ST', 'OL', 'CO', 'HE', 'IC', 'RG', 'TL',  // Switzerland + Nordics/Baltics
+    'MX', 'SA', 'BA', 'SN',                          // Latin America
+    'JO', 'IS', 'WA', 'PR', 'BD', 'AT',              // Africa / CEE / Greece
+])
+
+/**
+ * True when a symbol names a listing on a non-US venue.
+ *
+ * Used by adoption (docs/design/adopted-book.md): a holding we cannot price, hold or monitor in the
+ * US market is EXCLUDED from an adopted book rather than carried as an unmanageable row — being in a
+ * book means being valued, weighted, researched and reviewed, and none of that is available for a
+ * foreign line today. The user is told which ones and why; they are not silently dropped.
+ *
+ * ADRs are deliberately NOT caught here: NSRGY and BABA are US-quoted, priced in USD by the feed, and
+ * tradable — which is the whole test. Only the foreign PRIMARY listing (NESN.SW) is excluded.
+ */
+export function isNonUsListing(symbol) {
+    const s = String(symbol ?? '').trim().toUpperCase()
+    const dot = s.lastIndexOf('.')
+    if (dot < 1) return false
+    return NON_US_EXCHANGE_SUFFIXES.has(s.slice(dot + 1))
+}
+
 // ISO-4217 codes for the currencies our data feeds actually quote pairs in. A six-character
 // symbol made of two of these is a forex pair (EURUSD, GBPJPY, USDCHF…).
 const FIAT_CODES = new Set([

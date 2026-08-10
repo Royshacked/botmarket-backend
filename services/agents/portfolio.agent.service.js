@@ -459,6 +459,18 @@ export function _buildAdoptSection() {
         'exercise is worthless, because a book can only be judged against something it did not choose.',
         'Say what the mandate implies about the book. Never the reverse.',
         '',
+        'WHAT IS NOT IN THIS BOOK. Only a US-listed holding can be in it, because being in the book',
+        'means being priced, weighted, researched and reviewed, and none of that exists for a foreign',
+        'listing. Anything excluded is listed for you below. SAY SO PLAINLY — do not carry it as a line',
+        'you cannot manage, and do not let it disappear either. The two reasons need different sentences:',
+        '  - a foreign listing (NESN.SW): we cannot manage it. If a US line for the same company exists',
+        '    (an ADR, e.g. NSRGY), offer it as the way to bring the position in; otherwise it simply',
+        '    stays at their bank, untracked by us, and their book here is the rest.',
+        '  - no price at all: often a MIS-TYPED TICKER, so ask before concluding anything. If it is real',
+        '    (a bank fund, a bond) it is outside what we can manage, like the above.',
+        'Their account total covers the WHOLE bank account including those lines, so when anything is',
+        'excluded you must ask for the CASH balance directly instead of working it out from the total.',
+        '',
         'WHAT YOU ARE NOT DOING YET. No target weights, no conviction, no verdict on any holding:',
         'research has not run on these names. That is the Allocate step, after every name has coverage.',
         'Asked "is this a good portfolio?" the honest answer is that you cannot say yet, and why.',
@@ -473,8 +485,7 @@ export function _buildAdoptSection() {
 function _stagedLine(h) {
     const qty  = h.quantity != null ? h.quantity : '?'
     const cost = h.avgCost  != null ? h.avgCost  : '?'
-    const mark = h.mark == null ? ' (unpriceable — tracked, not marked)' : ''
-    return `  ${h.symbol}: ${qty} @ ${cost}${h.direction === 'short' ? ' SHORT' : ''}${mark}${h.why ? ` — "${h.why}"` : ''}`
+    return `  ${h.symbol}: ${qty} @ ${cost}${h.direction === 'short' ? ' SHORT' : ''}${h.why ? ` — "${h.why}"` : ''}`
 }
 
 /**
@@ -503,6 +514,14 @@ export function _buildStagedBook(draft) {
     if (rec.freeCash    != null) money.push(`cash ${rec.freeCash}`)
     if (money.length) out.push(`Account (USD): ${money.join(' · ')}`)
 
+    const excluded = Array.isArray(draft.excluded) ? draft.excluded : []
+    if (excluded.length) {
+        out.push('NOT IN THE BOOK — say this plainly, and do not carry them as holdings:')
+        excluded.forEach(h => out.push(`  ${h.symbol}: ${h.reason === 'non_us_listing'
+            ? 'listed outside the US — we cannot price, research or review it. Offer the US line (an ADR) if one exists.'
+            : 'we could not price it at all — check the ticker first, it is often a typo.'}`))
+    }
+
     if (rec.problems?.length) {
         out.push('UNRESOLVED — this book cannot be adopted until these are fixed:')
         rec.problems.forEach(p => out.push(`  - ${p}`))
@@ -522,6 +541,7 @@ export function _buildStagedBook(draft) {
     if (noCost)                    missing.push(`average cost for ${noCost} row(s)`)
     if (rec.problems?.includes('no_account_value')) missing.push('what the bank says the account is worth')
     if (rec.problems?.includes('cash_not_derivable_unpriced')) missing.push('the cash balance (a holding cannot be priced, so it cannot be derived)')
+    if (rec.problems?.includes('cash_not_derivable_excluded')) missing.push('the cash balance directly (their stated total includes holdings we are not adopting, so cash cannot be worked out from it)')
     if (!draft.mandate?.objective) missing.push('the mandate')
     if (holdings.length && noWhy)  missing.push(`a reason for ${noWhy} name(s)`)
     out.push(missing.length ? `STILL NEEDED: ${missing.join(' · ')}.` : 'NOTHING OUTSTANDING — walk them through the table and let them confirm it.')

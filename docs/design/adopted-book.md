@@ -125,8 +125,8 @@ The **cost basis is never converted**, and that asymmetry is the point: cash is 
 today, whereas those lots were bought at historical rates, so spot-converting a basis would fold years
 of currency drift into what then reads as market P&L. Per-lot historical FX is out of scope. A holding
 that genuinely *trades* in another currency needs its whole price space converted, not one rate at
-intake (project_broker_native_price_space) — today it is simply unpriceable to us, which the
-explicit-cash branch already handles.
+intake (project_broker_native_price_space) — so today it is EXCLUDED from the book outright (trap 4),
+and its exclusion is what forces cash to be stated rather than derived.
 
 **Anchoring rule.** Elicit objective, risk, horizon and benchmark BEFORE commenting on composition,
 and never justify a mandate with what is held. Otherwise the mandate becomes a *description* of the
@@ -345,13 +345,23 @@ divergence is guaranteed and the only source of truth is the user.
 2. **Adopted ≠ ours** in the `trades` ledger — attribution poisoning (§4).
 3. **`basisPt` is frozen at adoption, not at entry.** "PT cut since basis" honestly means "since we
    met this position". Label it, or a review claims research was cut against work nobody did.
-4. **Unpriceable holdings** must be first-class *tracked, not marked* — excluded from the equity
-   roll-up and flagged, never silently worth zero. FMP `/stable/quote` covers equities and ETFs;
-   marks only need `/quote` (intraday candles are off-plan).
+4. **ONLY A US-LISTED HOLDING IS IN THE BOOK** — decided 2026-08-10, and it supersedes the earlier
+   "tracked, not marked" row. Being in the book means being priced, weighted, researched and reviewed,
+   and a foreign listing gets none of that: no USD price, no coverage, no market hours, no broker
+   symbol. Carrying it would put a number in a book that no gate can ever read. So it is **excluded
+   and named**, with two reasons that need different sentences:
+   `non_us_listing` (offer the ADR if one exists — otherwise it stays at the bank, untracked by us)
+   and `no_price` (usually a mis-typed ticker, so ask before concluding anything).
+   **ADRs are IN.** NSRGY is US-quoted, priced in USD and tradable, which is the whole test; only the
+   foreign primary listing (NESN.SW) is out. A dotted suffix is matched against a known exchange list
+   rather than treated as foreign by default, or `BRK.B` would be dropped as a share class.
+   **Consequence for the arithmetic:** the stated total covers the whole bank account *including* the
+   excluded lines, so any exclusion means cash can no longer be derived from it — ask for cash
+   directly (`cash_not_derivable_excluded`). Subtracting only the adopted market value would hand
+   every excluded holding's value to "cash": the §3 double-count, arriving from the other side.
 5. **One account = one currency, and that currency is USD.** Stated totals and cash convert at spot;
-   a cost basis never does; a holding denominated in another currency stays unpriceable rather than
-   being converted at one intake rate (§3). A mixed-currency book of US-listed names is therefore fine
-   — a book of genuinely foreign-listed lines is not yet.
+   a cost basis never does (§3). A mixed-currency book of US-listed names is therefore fine, and a
+   foreign-listed line is now excluded outright rather than carried unpriced.
 6. **Manual is a venue, not the intake.** *Where the book lives* (bank vs a connectable broker) is
    orthogonal to *how positions got in* (typed vs read from an API). A cTrader user with an existing
    book should adopt too, without typing. Manual is the right v1 target — it is the venue whose
@@ -372,6 +382,13 @@ divergence is guaranteed and the only source of truth is the user.
 ---
 
 ## 10. Build order
+
+1a. **Paste parsing + Atlas's adopt mode — BUILT 2026-08-10** (backend, not live-verified).
+   `holdingsParse.util` reads a pasted book deterministically (cells before numbers, so a comma or a
+   space can be both a grouping separator and a delimiter); the model never reads a number. Atlas
+   gains an `adopt` mode split by volatility — a stable instruction in the cached system tail, the
+   staged book on the user turn — carrying the phase order, the anchoring rule, and the exclusion
+   sentences. `refreshDraft` folds each turn into the same draft, merging rows by symbol.
 
 1. **Intake + write — BUILT 2026-08-10** (backend only, not live-verified). `openedAt` +
    `currentPrice` seeding on `openManualPosition`; `bookValuation.util` (pure) and `fxRate.service`;
@@ -402,8 +419,9 @@ divergence is guaranteed and the only source of truth is the user.
 - Kind: **reuse the existing portfolio-holding shape** (`portfolio_item`, derived from `portfolioId`)
   with an `adopted` flag. It is the same "a fill, not a thesis" shape ruled for the deferred
   immediate-ticket kind; if that lands, adopted holdings migrate onto it.
-- Asset scope: **equities and ETFs priced; everything else tracked-unpriced** rather than holding the
-  feature for a funds/bonds feed.
+- Asset scope: **US-listed equities and ETFs (ADRs included) are the book; everything else is
+  excluded and named** (decided 2026-08-10) rather than carried as a row nothing can price, research
+  or review.
 - Currency: **USD account, stated figures converted at spot, cost basis never** (decided 2026-08-10).
 - Research depth: **every named ticker** (decided 2026-08-10), paced rather than truncated.
 - `max_names`: **a user-stated ceiling, no minimum** (decided 2026-08-10). Hard on what Atlas
