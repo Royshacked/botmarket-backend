@@ -145,6 +145,26 @@ test('every read is mounted regardless of what the conditions say', () => {
     }
 })
 
+test('the two REGIME reads are mounted, because no symbol can answer them', () => {
+    // Every other tool here answers a question ABOUT a symbol, so a condition naming its instruments
+    // could always be checked. An institutional setup resting on "while the curve keeps steepening"
+    // or "as long as semis are getting flows" had nothing to look at, and `unchecked` was the only
+    // honest answer available.
+    const names = toolNames(SETUP)
+    assert.ok(names.includes('get_macro_snapshot'))
+    assert.ok(names.includes('get_sector_snapshot'))
+})
+
+test('the regime reads take no ticker, so the symbol scope has nothing to bound', () => {
+    // A deliberate exception to this module's own rule. They cannot pull a wake onto an instrument
+    // the plan never named, because they name none — which is exactly why letting them through is
+    // safe rather than a hole in the scope.
+    for (const name of ['get_macro_snapshot', 'get_sector_snapshot']) {
+        const spec = buildToolsFor(SETUP).find(t => t.name === name)
+        assert.deepEqual(spec.input_schema?.required ?? [], [], `${name} requires nothing`)
+    }
+})
+
 test('the mounted set is still bounded — no duplicate schemas reach the model', () => {
     const names = toolNames(SETUP)
     assert.equal(new Set(names).size, names.length, 'a duplicated tool name is an API error')

@@ -71,8 +71,10 @@ turn, against Mentor's ~2. Pricing it as premium aligns cost with revenue instea
    when the lens set grows.
 2. ~~**`institutional` tools must exist**~~ **CHECKED 2026-08-10 — they effectively do.** The kit
    mounts correlations, short interest, options/derivatives context, fundamentals, filings and
-   earnings; only `get_macro_snapshot` and `get_peers` are absent, and neither is needed to check a
-   DECLARED condition. More to the point, the premise was wrong: Talos does not gate tools by lens
+   earnings; `get_macro_snapshot` and `get_sector_snapshot` were added 2026-08-10 (no symbol can
+   answer a regime condition, so `unchecked` was the only honest verdict available). `get_peers`
+   is deliberately NOT mounted: it is a DISCOVERY tool, and a monitor checks the peers a condition
+   NAMES rather than re-deriving the peer set — that judgment belongs to the build. More to the point, the premise was wrong: Talos does not gate tools by lens
    at all — everything is mounted and the model picks, deliberately, because conditions are free
    text and gating on a declared kind never served it. The lens is a SENTENCE in the prompt, not a
    filter.

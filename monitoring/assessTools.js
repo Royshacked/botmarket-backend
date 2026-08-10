@@ -29,7 +29,7 @@ import {
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../services/tools/priceStructure.tools.js'
 import { SMC_TOOLS, SMC_TOOL_HANDLERS } from '../services/tools/smc.tools.js'
 import { getPriceAction, getCycleAnalysis, getCorrelations, getQuotes } from '../providers/yahoofinance.provider.js'
-import { getFundamentals } from '../providers/fmp.provider.js'
+import { getFundamentals, getMacroSnapshot, getSectorSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
 import { logger } from '../services/logger.service.js'
 
@@ -57,6 +57,13 @@ export const ASSESS_TOOL_SPEC = {
     get_short_interest: 'Short interest for a ticker — short % of float, days-to-cover, month-over-month change. Has the crowding a condition rests on actually shifted? US equities only.',
     get_options_context: 'Options positioning for a ticker — put/call ratio and at-the-money implied vol. Is the directional skew still backing the plan?',
     get_derivatives_context: 'Crypto-perp positioning for a symbol — funding, open interest, long/short account ratio.',
+    // The two REGIME reads. Every other tool here answers a question about a symbol, so a condition
+    // naming its instruments could always be checked. These answer questions no symbol can: an
+    // institutional setup resting on "while the curve keeps steepening" or "as long as semis are
+    // getting flows" had nothing to look at, and the monitor's only honest answer was `unchecked`.
+    // That is the same gap this module was written to close, one layer up.
+    get_macro_snapshot:  'The macro backdrop right now — curve, rates, the econ prints that moved. For a condition resting on the REGIME rather than on any one instrument. Takes no ticker.',
+    get_sector_snapshot: 'Sector performance right now — which groups are getting flows and which are being sold. For a condition resting on the SECTOR an asset sits in leading or lagging. Takes no ticker.',
     get_fundamentals: 'Fundamentals for a ticker — for a condition resting on the business rather than the tape.',
     get_sec_filings: 'Recent SEC filings for a ticker. Use it to confirm a filing-based condition actually landed, rather than assuming.',
     get_earnings: 'Reported and upcoming earnings for a ticker.',
@@ -98,6 +105,14 @@ const _HANDLERS = {
     get_correlations: makeToolHandler('get_correlations',
         ({ tickers }) => getCorrelations(Array.isArray(tickers) ? tickers : [tickers]),
         (err, { tickers }) => `Could not compute correlations for ${tickers}: ${err.message}`, LOG),
+    // No ticker, so the symbol scope has nothing to bound — deliberately outside it. Both are cheap
+    // (~120-150 tokens) and neither can pull the wake onto an instrument the plan never named.
+    get_macro_snapshot: makeToolHandler('get_macro_snapshot',
+        () => getMacroSnapshot(),
+        (err) => `Could not fetch the macro snapshot: ${err.message}`, LOG),
+    get_sector_snapshot: makeToolHandler('get_sector_snapshot',
+        () => getSectorSnapshot(),
+        (err) => `Could not fetch the sector snapshot: ${err.message}`, LOG),
     get_fundamentals: makeToolHandler('get_fundamentals',
         ({ ticker }) => getFundamentals(ticker),
         (err, { ticker }) => `Could not fetch fundamentals for ${ticker}: ${err.message}`, LOG),
