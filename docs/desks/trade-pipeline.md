@@ -13,12 +13,19 @@ Design record, 2026-08-09. Nothing here is built yet except where marked **BUILT
 |---|---|
 | Argus → Mentor → Talos | the live path going forward |
 | Kairos + Hermes | **silent** — not deleted, not archived |
-| Argus → Mentor handoff | **BUILT 2026-08-10** — seed + lens recommendation |
+| Argus → Mentor handoff | **BUILT 2026-08-10** — backend seed + lens recommendation, FE wired end to end |
+| Trading Desk steps | **REWIRED 2026-08-10** — build step is Mentor, not Kairos (`agentMeta.jsx`) |
 | `call` kind | frozen. Calls in flight run to natural close under Hermes |
 
 **Silent, not gone.** Hermes must keep running until the last live `call` closes — the same strangler
 used for legacy tree-`idea`s. Nothing in flight migrates. See
 [kairos-hermes.md](./kairos-hermes.md) for what stays alive meanwhile.
+
+**One capability was dropped, deliberately.** Kairos emitted `<scan_request>` — "let's look for
+another name" — which walked the desk BACKWARDS to Argus. Mentor emits nothing, so on the trading
+desk that hop is now reachable but unused: the route still resolves, there is simply no sender. The
+user re-enters the scan by hand instead. Recorded in `deskSteps.test.jsx` rather than deleted,
+because the premium autonomous Mentor mode is the natural place for it to come back.
 
 ---
 
