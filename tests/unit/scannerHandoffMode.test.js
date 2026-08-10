@@ -112,6 +112,58 @@ test('the module states what it overrides rather than silently contradicting the
     assert.match(HANDOFF, /the same build lens the spine defines in Phase 3/)
 })
 
+// ── the two branches ─────────────────────────────────────────────────────────
+// A named ticker and an empty brief are two different jobs, and the module used to state the
+// angle-first rule as an unconditional "your FIRST turn must ask" with the named-ticker branch
+// fifty lines further down. A user who typed "tsla" got asked what angle to hunt — a screening
+// question about a universe one name wide. Ordering is the fix: the branch is decided FIRST, and
+// each rule lives under the branch it belongs to rather than in a shared preamble.
+const sectionsOf = (md) => md.split(/^## /m).slice(1).map(s => '## ' + s)
+const sectionWith = (md, needle) => sectionsOf(md).find(s => s.includes(needle)) ?? ''
+
+test('the branch fork is decided BEFORE the angle-first rule, not after it', () => {
+    const fork  = HANDOFF.indexOf('does it name a specific ticker?')
+    const angle = HANDOFF.indexOf('ASK for the scan angle FIRST')
+    assert.ok(fork > -1, 'no branch fork')
+    assert.ok(angle > -1, 'no angle rule')
+    assert.ok(fork < angle, 'the angle rule is read before the branch that may cancel it')
+})
+
+test('the angle-first rule lives under the no-ticker branch, never in a shared preamble', () => {
+    const owner = sectionWith(HANDOFF, 'ASK for the scan angle FIRST')
+    assert.match(owner, /^## FIND-ONE-TICKER/)
+})
+
+test('the named-ticker branch forbids the angle question outright', () => {
+    const validate = sectionWith(HANDOFF, 'VALIDATE-A-NAME — ')
+    assert.match(validate, /Do NOT ask for an angle/)
+    // …and it must not send the user away to answer one before any tool has run.
+    assert.match(validate, /do \*\*not\*\* open with a\s+question/)
+})
+
+// ── the phase tag, per branch ────────────────────────────────────────────────
+// `<phase>` is not decoration: the client shows the Phase-1 angle chips off it (ScannerPanel's
+// showAngleStrip) and modelRouter routes phase 1 to HAIKU as "thesis extraction". A validate turn
+// tagged 1 therefore asked the screening question a SECOND time in the UI after the prose had been
+// told not to, and sent the next tool-heavy turn to the cheap model. The branch decides the floor.
+test('the validate branch starts at phase 3 and forbids 1 and 2', () => {
+    const validate = sectionWith(HANDOFF, 'VALIDATE-A-NAME — ')
+    assert.match(validate, /never emit\s+`?<phase>1<\/phase>`?/)
+    assert.match(validate, /<phase>3<\/phase>/)
+    // …and it says WHY, so the rule survives an edit by someone who never saw the chips.
+    assert.match(validate, /strip of screening angles/)
+})
+
+test('the find-one branch keeps phase 1 — the chips are help there', () => {
+    const find = sectionWith(HANDOFF, 'FIND-ONE-TICKER — ')
+    assert.match(find, /Phase 1 is correct here and only here/)
+})
+
+test('the overrides list points at the per-branch phase rule', () => {
+    const preamble = HANDOFF.split(/^## /m)[0]
+    assert.match(preamble, /`<phase>` tag still rides on every response/)
+})
+
 // The spine is read on EVERY trading turn, hand-off or not, so a desk name in it reaches users the
 // mode module never touches. It named Kairos in four places while the trade desk built with Mentor.
 test('the spine never names a build desk — it does not know which one is listening', () => {
