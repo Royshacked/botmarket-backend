@@ -200,11 +200,12 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     if (thesis)     dynamicSections.push(_buildThesisSection(thesis))
     if (lifecycle)  dynamicSections.push(_buildLifecycleSection(lifecycle))
     if (portfolioState) dynamicSections.push(_buildPortfolioStateSection(portfolioState, isReviewMode, reviewDelta))
-    // A book we cannot read has to be re-confirmed by the only source of truth there is: the user.
-    // Review mode only — it is a review ritual, not something to raise mid-construction.
+    // A book at a venue we cannot READ has to be re-confirmed by the only source of truth there is:
+    // the user. Keyed on the venue, not on how the book arrived — see _buildUnreadableVenueSection.
+    // Review mode only: it is a review ritual, not something to raise mid-construction.
     if (isReviewMode) {
-        const adoptedSection = _buildAdoptedReviewSection(portfolioState)
-        if (adoptedSection) dynamicSections.push(adoptedSection)
+        const unreadable = _buildUnreadableVenueSection(portfolioState)
+        if (unreadable) dynamicSections.push(unreadable)
     }
 
     // Two cache breakpoints: the static instructions, and the dynamic context
@@ -654,36 +655,40 @@ export function _formatReviewDelta(d) {
 }
 
 /**
- * THE DRIFT RITUAL (docs/design/adopted-book.md §8), for a review of an ADOPTED book.
+ * THE DRIFT RITUAL — for a book at a venue we cannot READ.
  *
- * We cannot read the bank. The user will sell, buy, take a dividend and receive a split without us
- * ever seeing it, so divergence is not a bug to be fixed once — it is the permanent condition of this
- * kind of book, and the only source of truth is the person who owns it. A reconciler cannot be written;
- * a ritual can.
+ * Gated on the VENUE, not on how the book arrived. A broker-less book drifts because nobody can see
+ * it: the user sells, buys, takes a dividend or receives a split at their bank, and none of it reaches
+ * us. That is equally true of a book this desk built leg by leg on a manual account and of one adopted
+ * whole from a bank — the numbers came from what the user told us, and nothing has checked them since.
  *
- * So every review of an adopted book OPENS by asking whether it is still their book. One tap for
- * unchanged, otherwise the numbers get corrected — and only then is the review worth having, because
- * every gate underneath it (drift, weights, P&L) reads quantities we were told once and never checked.
+ * Gating it on `adopted` was wrong on both axes: it would have special-cased adoption for the life of
+ * the book (an adopted book behaves exactly like any other once it is set up), and it would have
+ * missed a manual book built right here, which has the identical problem.
  *
- * Returns '' for a book that was built here: those holdings came from fills we placed and watched, and
- * asking the user to verify our own execution would be both odd and corrosive.
+ * Paper and live books get nothing: a fill there was placed and watched by us, and asking the user to
+ * verify our own execution would be both odd and corrosive.
+ *
+ * So every review of a broker-less book OPENS by confirming it. One tap for unchanged, otherwise the
+ * numbers get corrected first — because every gate underneath reads quantities nobody has verified.
  */
-export function _buildAdoptedReviewSection(state) {
-    const adopted = (state?.ideas ?? []).filter(i => i?.adopted === true)
-    if (!adopted.length) return ''
+export function _buildUnreadableVenueSection(state) {
+    if (state?.workspace?.mode !== 'manual') return ''
+    const held = (state?.ideas ?? []).filter(i => i?.actualWeight != null).length
+    if (!held) return ''
 
     return [
-        'THIS IS AN ADOPTED BOOK — CONFIRM IT BEFORE YOU READ IT.',
-        `${adopted.length} of these holdings were recorded on the user's word, at a bank we cannot read.`,
-        'Nothing has verified them since. They may have sold, trimmed, added, been paid a dividend or',
-        'taken a split, and none of it reached us.',
+        'THIS BOOK IS HELD SOMEWHERE WE CANNOT READ — CONFIRM IT BEFORE YOU READ IT.',
+        `Its ${held} open holding(s) are recorded on the user's word. Nothing has verified them since:`,
+        'they may have sold, trimmed, added, been paid a dividend or taken a split, and none of it',
+        'reached us.',
         '',
         'So OPEN this review by asking whether the book below is still right — the names and the sizes.',
         'Keep it to one short question with an easy "yes, unchanged": it is a checkpoint, not an audit,',
         'and a review that starts with an interrogation is a review nobody comes back to.',
         '',
         'If anything HAS changed, fix that before reading anything into the numbers. Every judgment',
-        'below rests on quantities we were told once: a position they sold months ago still shows here',
+        'below rests on quantities nobody has checked: a position they sold months ago still shows here',
         'as held, at a price that has kept moving, and a weight computed from it is fiction. Correcting',
         'the book IS the first move of the review, not an interruption to it.',
         '',

@@ -17,6 +17,13 @@ Relates to: [pipeline-service.md](./pipeline-service.md), `docs/architecture/man
 Same two objects, opposite direction. That is why the pipeline, the artifacts and the book-commit
 writer are all reusable — and why it is *not* the same act (see §2).
 
+**ADOPTION ENDS.** Decided 2026-08-10: once the book is committed and taken through Allocate, it
+behaves EXACTLY like a book the portfolio desk built itself — same reviews, scheduled and triggered,
+same Themis gates, same coverage cadence, same rebalance. Nothing may special-case an adopted book for
+the life of the book, and `adopted` is a fact for the LEDGER (we recorded this, we did not choose it),
+never a branch in behaviour. Where behaviour does differ it follows the VENUE, which an adopted book
+shares with any other manual book — see §8.
+
 Adopting a book = manufacturing the state Atlas would have produced **after** construction and
 **after** the fills, and skipping both. Nothing downstream learns a new concept: Themis, Atlas
 review, coverage, Pythia's tilt audience and the manual rebalance cards all read `portfolioId` on
@@ -317,17 +324,27 @@ P&L, equity curve, the Floor's Manual workspace. Themis puts the book in rotatio
 cadence. `portfolioRebalance` already posts manual trim/add cards, so acting on a review works end
 to end — the basket path is the part of manual mode that is complete.
 
-**`spine_state` on the lifecycle doc: `adopted` → `covered` → `under_mandate`.** It is the honest
-status ("we watch your prices" vs "we manage against a mandate"), it drives the nag if the user never
-completes Allocate, and it gives Themis a far better first interaction than waiting out a cadence:
-*coverage is ready* beats *a week passed*.
+**`spine_state` on the lifecycle doc: `adopted` → `covered` → `under_mandate`.** The honest status
+("we watch your prices" vs "we manage against a mandate"), and what drives the nag if the user never
+completes Allocate.
+
+It is a SETUP state, not an ongoing mode: it stops moving at `under_mandate`, and from there Themis
+runs its ordinary cycle. The "coverage is ready" prompt this doc once attributed to Themis is the
+research batch's own RESUME PING (§5) — the pipeline resuming at Allocate, not a review gate. Themis
+gets no adoption-specific ring, per the ruling above.
 
 ---
 
-## 8. Drift — a ritual, not a reconciler
+## 8. Drift — a ritual, not a reconciler, and it belongs to the VENUE
 
 We cannot read the bank. The user will trade, take dividends and receive splits outside the app, so
 divergence is guaranteed and the only source of truth is the user.
+
+**Keyed on the venue, not on adoption** (corrected 2026-08-10). What drifts is a book held somewhere
+we cannot READ — which is equally true of a manual book this desk built leg by leg. Gating this on
+`adopted` was wrong twice: it would have special-cased adoption forever, against the ruling at the top
+of this doc, and it would have missed a manual book built here, which has the identical problem. Paper
+and live books get none of it: those fills we placed and watched ourselves.
 
 - **BUILT 2026-08-10.** Every review of an adopted book opens by confirming it
   (`_buildAdoptedReviewSection`, review mode only): one short question with an easy "yes, unchanged",
@@ -414,14 +431,17 @@ divergence is guaranteed and the only source of truth is the user.
 3. **Atlas `adopt` mode** — phase order (holdings → mandate → why → confirm), the anchoring rule, the
    deterministic paste parser, symbol resolution, the proposed-mandate path for beginners.
 4. **FE** — the reception door, the paste/confirm/edit grid, an ADOPTED badge, no activation affordance.
-5. **Research batch** — paced headless coverage over every named ticker, progress, completion ping →
-   `startAt(portfolio, 'Allocate')`. (Long-run handling per its own design.)
+5. **Research batch — LEFT AS IS 2026-08-10** (user's call). The hop is the ordinary one: the names go
+   to Prometheus and he researches them, through the headless path `coverageRefresh` already provides.
+   What the user SEES during a long run — progress, notification, resumption — is designed separately.
 6. **Allocate as the adoption review** — the count gap, targets, conviction, thesis confirm,
    keep-or-change recorded, re-fingerprint. Then live-verify the whole path: `spine_state` walks
    `adopted → covered → under_mandate` and Themis rings.
-7. **Drift ritual — PARTLY BUILT 2026-08-10.** The review-time re-confirm and the cash movement are
-   in (§8). What remains is the standalone monthly confirm-holdings CARD: it needs a card type and a
-   frontend renderer of its own, where the review-time question needed neither.
+7. **Drift ritual — BUILT 2026-08-10**, and reclassified as MANUAL-MODE behaviour rather than
+   adoption's (§8): the review-time re-confirm (`_buildUnreadableVenueSection`, keyed on the venue)
+   and cash movements. The standalone monthly confirm-holdings CARD is DROPPED from this feature — a
+   separate cadence and surface would be exactly the ongoing special-casing the ruling forbids. If it
+   is ever wanted it is manual-mode work, keyed on the venue, not adoption's.
 8. **The `count` Themis gate** — cheap and deterministic, once targets exist.
 
 ## 11. Defaults taken (override freely)
