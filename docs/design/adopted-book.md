@@ -1,8 +1,9 @@
 # The adopted book — a portfolio that wasn't built here
 
-**Status: DESIGN, nothing built.** Design settled 2026-08-10. Covers a user who arrives with a
-real portfolio already running somewhere we can't wire to (a bank brokerage), and wants Atlas to
-take it over from today: monitor it, review it, notify, propose.
+**Status: PHASE 1 (backend intake + write) BUILT 2026-08-10, not live-verified. The rest is design.**
+Design settled 2026-08-10. Covers a user who arrives with a real portfolio already running somewhere
+we can't wire to (a bank brokerage), and wants Atlas to take it over from today: monitor it, review it,
+notify, propose. See §10 for what is built.
 
 Relates to: [pipeline-service.md](./pipeline-service.md), `docs/architecture/manual-mode.md`,
 `docs/architecture/paper-trading-simulation.md`.
@@ -113,6 +114,20 @@ unrealized gain. A negative free cash means the numbers don't reconcile → Atla
 guesses. This is why account size belongs **here**, with the positions, not at signup: signup
 creates a manual account with a name and a currency, nothing more.
 
+**Currency (BUILT 2026-08-10).** The account is denominated in **USD** — the unit the price feed
+speaks, and therefore the unit the holdings are already valued in. A total or a cash figure stated in
+another currency is converted at **spot** (`fxRate.service`, FMP prices forex on this key), and the
+rate is recorded on the draft so the grid can show its own arithmetic back. A rate we cannot resolve
+is a refusal, never a silent 1 — reading a shekel book as dollars would open an account nearly four
+times too large.
+
+The **cost basis is never converted**, and that asymmetry is the point: cash is worth today's rate
+today, whereas those lots were bought at historical rates, so spot-converting a basis would fold years
+of currency drift into what then reads as market P&L. Per-lot historical FX is out of scope. A holding
+that genuinely *trades* in another currency needs its whole price space converted, not one rate at
+intake (project_broker_native_price_space) — today it is simply unpriceable to us, which the
+explicit-cash branch already handles.
+
 **Anchoring rule.** Elicit objective, risk, horizon and benchmark BEFORE commenting on composition,
 and never justify a mandate with what is held. Otherwise the mandate becomes a *description* of the
 book instead of a yardstick — the costume failure in a new place.
@@ -196,11 +211,16 @@ Manual accounts already default to zero-cost settings; a real fill carries real 
   `Date.now()` (`manualExecution.service.js:38`). An adopted lot has a real open date, and holding
   period plus the ledger both depend on it. Seed `currentPrice = avgPrice` so equity isn't blind for
   one mark tick.
-- one `idea`-kind entity: `portfolioId`, `portfolioName`, `broker:'manual'`, `mainAccountId`,
-  `status:'long'`, `ordersPlacedAt`/`activatedAt` = the real open date,
-  `brokerOrders:[{ broker:'manual', positionId, quantity }]`, `entryPrice` = avg cost, the A4
-  thesis, `origin:'adopted'`, `adoptedAt`. **No entry tree** — nothing to trigger. Stop/TP trees stay
-  null unless the user actually runs levels; Atlas proposes them at Allocate.
+- one entity per holding, through the SAME writer the generate path uses. Its kind is
+  `portfolio_item`, not `idea` — `kindForDoc` derives that from the presence of `portfolioId`, so
+  adoption inherits it for free. It carries `portfolioId`, `portfolioName`, `broker:'manual'`,
+  `mainAccountId`, `status:'long'`, `ordersPlacedAt`/`activatedAt` = the real open date,
+  `brokerOrders:[{ broker:'manual', positionId, quantity }]`, the A4 reason (on `notes`, the channel a
+  portfolio leg already has), and `adopted: true` + `adoptedAt`. **No entry tree** — nothing to
+  trigger. Stop/TP trees stay null unless the user actually runs levels; Atlas proposes them at
+  Allocate.
+  `entryPrice` is deliberately NOT stamped: it is derived from the position (`portfolioState` reads
+  `pos.entryPrice`), and a second copy on the entity would be a second truth to keep in step.
 
 **Per book.** `setMandate` · `setPortfolioLifecycle({ reviewCadence, nextReviewAt, benchmark })` ·
 `setThesis(reason:'adoption')` · **`captureFingerprint(reason:'adoption')`**. The fingerprint is not
@@ -328,7 +348,10 @@ divergence is guaranteed and the only source of truth is the user.
 4. **Unpriceable holdings** must be first-class *tracked, not marked* — excluded from the equity
    roll-up and flagged, never silently worth zero. FMP `/stable/quote` covers equities and ETFs;
    marks only need `/quote` (intraday candles are off-plan).
-5. **One account = one currency.** A mixed USD/ILS book gets two manual accounts in v1. No faked FX.
+5. **One account = one currency, and that currency is USD.** Stated totals and cash convert at spot;
+   a cost basis never does; a holding denominated in another currency stays unpriceable rather than
+   being converted at one intake rate (§3). A mixed-currency book of US-listed names is therefore fine
+   — a book of genuinely foreign-listed lines is not yet.
 6. **Manual is a venue, not the intake.** *Where the book lives* (bank vs a connectable broker) is
    orthogonal to *how positions got in* (typed vs read from an API). A cTrader user with an existing
    book should adopt too, without typing. Manual is the right v1 target — it is the venue whose
@@ -350,8 +373,11 @@ divergence is guaranteed and the only source of truth is the user.
 
 ## 10. Build order
 
-1. **Intake + write** — `openedAt` on `openManualPosition`; the book-commit service with its
-   born-live terminal state; draft/commit; routes; tests on the arithmetic and the idempotency.
+1. **Intake + write — BUILT 2026-08-10** (backend only, not live-verified). `openedAt` +
+   `currentPrice` seeding on `openManualPosition`; `bookValuation.util` (pure) and `fxRate.service`;
+   `saveBatchIdeas` widened with `born: 'proposed'|'live'` and per-leg outcomes; `adoptBook.service`
+   + a leased draft store; the repair pair; `adopted` on the ledger's origin block with a guarded
+   withdrawal; routes. 51 tests.
 2. **`max_names` as a mandate field** — schema + normalization (integer or null) + the coherence
    checks, `_buildMandateSection`, and `RESEARCH_TOP_N` derived from it instead of hardcoded. **This
    one is not adoption-specific** — it changes the generate path too.
@@ -370,10 +396,12 @@ divergence is guaranteed and the only source of truth is the user.
 
 - Intake surface: chat + paste grid + editable confirm. **Statement upload (PDF/screenshot → parse)
   deferred** — a feature of its own.
-- Kind: **reuse `idea`** with `origin:'adopted'`. It is the same "a fill, not a thesis" shape ruled
-  for the deferred immediate-ticket kind; if that lands, adopted holdings migrate onto it.
+- Kind: **reuse the existing portfolio-holding shape** (`portfolio_item`, derived from `portfolioId`)
+  with an `adopted` flag. It is the same "a fill, not a thesis" shape ruled for the deferred
+  immediate-ticket kind; if that lands, adopted holdings migrate onto it.
 - Asset scope: **equities and ETFs priced; everything else tracked-unpriced** rather than holding the
   feature for a funds/bonds feed.
+- Currency: **USD account, stated figures converted at spot, cost basis never** (decided 2026-08-10).
 - Research depth: **every named ticker** (decided 2026-08-10), paced rather than truncated.
 - `max_names`: **a user-stated ceiling, no minimum** (decided 2026-08-10). Hard on what Atlas
   *proposes*, never on what the app *records*, moved only by the user, breaches recorded with a

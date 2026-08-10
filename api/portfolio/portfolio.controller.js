@@ -11,8 +11,118 @@ import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util
 import { threadService }          from '../../services/thread.service.js'
 import { resolvePortfolioReviewCard } from '../chat/chat.service.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
+import { adoptBookService }  from './adoptBook.service.js'
+import { sendReason }        from '../_shared/reason.util.js'
 
 const LOG = '[portfolio:controller]'
+
+// ─── Adopting a book the app didn't build (docs/design/adopted-book.md) ────────
+//
+// Refusals ride the SHARED reason vocabulary, so an adoption refusal answers with the same status
+// codes as the manual confirmations and the entity CRUD. Only the reasons unique to adoption are
+// named here.
+const _adoptErr = {
+    no_holdings:         [400, 'No holdings to adopt'],
+    // Not the client's fault and not a server error: the numbers the user gave don't add up, and the
+    // grid needs the per-row problems back to say which ones.
+    unreconciled:        [409, 'The book does not reconcile — see problems'],
+    already_committed:   [409, 'This book has already been adopted'],
+    account_failed:      [500, 'Could not open the account'],
+    // Another commit of the same draft is mid-flight (a double-clicked button).
+    in_progress:         [409, 'This book is already being adopted'],
+    // A genuinely partial write: some holdings landed, some didn't. The draft stays open, so the
+    // honest answer is "retry", not "failed".
+    partial_write:       [409, 'Some holdings could not be written — retry to finish'],
+    not_adopted:         [400, 'Not an adopted holding'],
+    nothing_to_correct:  [400, 'Nothing to correct'],
+    no_position:         [409, 'No position linked to this holding'],
+    not_in_position:     [409, 'Holding is not in a position'],
+}
+
+function _sendAdopt(res, result, onOk) {
+    if (result.ok) return res.send(onOk(result))
+    return sendReason(res, result.reason, {
+        overrides:       _adoptErr,
+        fallback:        500,
+        fallbackMessage: 'Adoption failed',
+        // The per-row problems / per-leg failures travel WITH the refusal: the confirm grid has to
+        // show the user which line to fix, and a bare 409 can't.
+        extra: {
+            ...(result.problems ? { problems: result.problems } : {}),
+            ...(result.failed   ? { failed:   result.failed }   : {}),
+        },
+    })
+}
+
+export async function createAdoptionDraft(req, res) {
+    try {
+        const { bank, currency, statedTotal, freeCash, holdings, mandate, name } = req.body ?? {}
+        const result = await adoptBookService.createDraft({
+            userId: req.user._id, bank, currency, statedTotal, freeCash, holdings, mandate, name,
+        })
+        _sendAdopt(res, result, r => ({ draft: r.draft }))
+    } catch (err) {
+        logger.error(LOG, 'createAdoptionDraft failed', err)
+        res.status(500).send({ error: 'Failed to stage the adoption' })
+    }
+}
+
+export async function commitAdoptionDraft(req, res) {
+    try {
+        const { draftId } = req.params
+        if (!draftId) return res.status(400).send({ error: 'Missing draftId' })
+        const result = await adoptBookService.commitDraft({ draftId, userId: req.user._id })
+        _sendAdopt(res, result, r => ({ portfolioId: r.portfolioId, accountId: r.accountId, legs: r.legs }))
+    } catch (err) {
+        logger.error(LOG, 'commitAdoptionDraft failed', err)
+        res.status(500).send({ error: 'Failed to adopt the book' })
+    }
+}
+
+export async function listAdoptionDrafts(req, res) {
+    try {
+        const result = await adoptBookService.listDrafts({ userId: req.user._id })
+        _sendAdopt(res, result, r => ({ drafts: r.drafts }))
+    } catch (err) {
+        logger.error(LOG, 'listAdoptionDrafts failed', err)
+        res.status(500).send({ error: 'Failed to list staged books' })
+    }
+}
+
+export async function discardAdoptionDraft(req, res) {
+    try {
+        const { draftId } = req.params
+        if (!draftId) return res.status(400).send({ error: 'Missing draftId' })
+        const result = await adoptBookService.discardDraft({ draftId, userId: req.user._id })
+        _sendAdopt(res, result, () => ({ ok: true }))
+    } catch (err) {
+        logger.error(LOG, 'discardAdoptionDraft failed', err)
+        res.status(500).send({ error: 'Failed to discard the staged book' })
+    }
+}
+
+export async function correctAdoptedHolding(req, res) {
+    try {
+        const { id } = req.params
+        const { quantity, avgCost } = req.body ?? {}
+        const result = await adoptBookService.correctHolding({ id, userId: req.user._id, quantity, avgCost })
+        _sendAdopt(res, result, r => ({ quantity: r.quantity, avgCost: r.avgCost }))
+    } catch (err) {
+        logger.error(LOG, 'correctAdoptedHolding failed', err)
+        res.status(500).send({ error: 'Failed to correct the holding' })
+    }
+}
+
+export async function removeAdoptedHolding(req, res) {
+    try {
+        const { id } = req.params
+        const result = await adoptBookService.removeHolding({ id, userId: req.user._id })
+        _sendAdopt(res, result, r => ({ asset: r.asset }))
+    } catch (err) {
+        logger.error(LOG, 'removeAdoptedHolding failed', err)
+        res.status(500).send({ error: 'Failed to remove the holding' })
+    }
+}
 
 export async function streamPortfolio(req, res) {
     const { messages, ideaAccounts, mainAccountId, portfolioId, portfolioIdeas, threadId, model, reasoningEffort, routingMode, currentPhase } = req.body ?? {}

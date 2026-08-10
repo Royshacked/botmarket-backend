@@ -22,9 +22,16 @@ const LOG = '[manualExecution]'
  * Record a manual position the user opened off-platform, at the price/size they report.
  * No spread/commission is applied — the reported price is the effective entry. Emits
  * nothing (the manual lifecycle is driven by the user's confirmations, not a reconciler).
+ *
+ * `openedAt` exists for positions that were opened BEFORE the app knew about them — an adopted
+ * bank book (docs/design/adopted-book.md), and any future import that carries history. It defaults
+ * to now, so every existing caller behaves exactly as before. Passing the real date matters
+ * because holding period and the analytics ledger both measure from it, and a lot of adopted lots
+ * are years old.
+ *
  * @returns {Promise<string>} the new positionId
  */
-export async function openManualPosition({ userId, accountId, symbol, direction, qty, price }) {
+export async function openManualPosition({ userId, accountId, symbol, direction, qty, price, openedAt = null }) {
     const acct = await paperBrokerService.getAccount(userId, accountId)
     if (!acct) throw new Error(`manual openPosition: account ${accountId} not found`)
     if (!(qty > 0))    throw new Error(`manual openPosition: quantity must be > 0 (got ${qty})`)
@@ -36,7 +43,11 @@ export async function openManualPosition({ userId, accountId, symbol, direction,
         symbol, direction, qty,
         avgPrice:        price,   // reported fill — no cost adjustment
         entryCommission: 0,
-        openedAt:        Date.now(),
+        // Seeded with the fill so the position is never "never marked": rollUpPositions contributes
+        // NOTHING for a position with no `currentPrice`, so between the insert and the first sweep of
+        // the mark loop an unseeded book would report its whole unrealized P&L as zero.
+        currentPrice:    price,
+        openedAt:        openedAt ?? Date.now(),
         status:          'open',
     })
     logger.info(LOG, `Manual position ${positionId} opened: ${direction} ${qty} ${symbol} @ ${price} (acct ${accountId})`)

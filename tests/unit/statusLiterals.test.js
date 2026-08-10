@@ -38,6 +38,9 @@ const NOT_ENTITY_STATUSES = new Set([
     'working',            // broker ORDER state (exitOrders / reconciler)
     'cancelled',          // broker ORDER state — written onto brokerOrders[].status, not the entity
     'open',               // broker POSITION state
+    'removed',            // broker POSITION state — an ADOPTED holding the user says was never held
+                          // (adoptBook.removeHolding). Deliberately not 'closed': nothing was sold,
+                          // so no P&L is booked. Every position read filters positively on 'open'.
     'filled',             // broker ORDER fill
     'awaiting_manual_fill', 'manual_filling', 'awaiting_confirm', 'awaiting_market', 'placed',
                           // `orderState`, not `status` — a separate field with its own words

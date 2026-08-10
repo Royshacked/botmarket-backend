@@ -1,5 +1,5 @@
 import { randomUUID }       from 'crypto'
-import { LIVE_POSITION, statusesFor, isRestingEntry } from '../../services/entity/vocabulary.js'
+import { LIVE_POSITION, STATUS, statusesFor, isRestingEntry } from '../../services/entity/vocabulary.js'
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { minosService }     from '../../monitoring/minos.monitor.service.js'
@@ -107,6 +107,45 @@ export function isClosedIdeaFrozen(existingStatus, patchStatus) {
     return existingStatus === 'closed' && patchStatus != null && patchStatus !== 'closed'
 }
 
+/**
+ * The post-fill stamps for a leg born ALREADY AT A VENUE — the terminal state a book that wasn't
+ * built here arrives in (docs/design/adopted-book.md), where the fill happened before the app ever
+ * saw the name.
+ *
+ * The generate path writes a PROPOSAL: `waiting`, unactivated, gated by the pre-activation review
+ * before anything becomes real. A born-live leg skips all of that, because there is nothing to
+ * activate — offering it would invite the user to buy what they already own. One writer, one
+ * parameter, two terminal states.
+ *
+ * Pure, and `at` is SUPPLIED rather than read from the clock: an adopted lot is routinely years old,
+ * and holding period, the timeline and the ledger all measure from the real date.
+ *
+ * @param {{ direction:string|null,
+ *           fill:{ broker:string, accountId:string, positionId:string, quantity:number, at:number } }} args
+ */
+export function bornLiveStamp({ direction, fill }) {
+    const at = fill.at
+    return {
+        status:           direction === 'short' ? STATUS.SHORT : STATUS.LONG,
+        entryTriggeredAt: at,
+        // Also the double-place guard: `ordersPlacedAt` is what stops anything ever placing an entry
+        // for this leg, which for a position that already exists is the whole point.
+        ordersPlacedAt:   at,
+        activatedAt:      at,
+        orderState:       'placed',
+        immediate:        undefined,
+        brokerOrders: [{
+            broker:     fill.broker,
+            accountId:  String(fill.accountId),
+            // No broker order ever existed, so the position IS the record. Both ids point at it, which
+            // is what every downstream reader (exit routing, capture, the positions join) expects.
+            orderId:    String(fill.positionId),
+            positionId: String(fill.positionId),
+            quantity:   Number(fill.quantity),
+        }],
+    }
+}
+
 // Legs that can be stated as a BARE PRICE, with the numeric field a caller may send instead of
 // a condition. Ordered entry → stop → tp only for readable logs; the mapping is what matters.
 const PRICE_LEVEL_LEGS = [
@@ -150,7 +189,7 @@ export function applyPriceLevels(input = {}) {
  * execution fields onto the call entity instead of minting a shadow). Returns
  * { ok, children, forked } or { ok:false, reason?, error }.
  */
-async function buildIdeaChildren(rawIdea, userId) {
+async function buildIdeaChildren(rawIdea, userId, { born = 'proposed' } = {}) {
     const tradeIdea = applyPriceLevels(rawIdea)
     const entryTree = resolveConditionTree(tradeIdea.entry_condition,  tradeIdea.entry_conditions, tradeIdea.entry_logic ?? 'AND')
     const stopTree  = resolveConditionTree(tradeIdea.stop_loss,        tradeIdea.stop_conditions,  tradeIdea.stop_logic  ?? 'OR')
@@ -229,6 +268,11 @@ async function buildIdeaChildren(rawIdea, userId) {
         allocationRatio: tradeIdea.allocationRatio ?? undefined,
         callId:          tradeIdea.callId           ?? undefined,   // set ⟺ spawned from a Kairos call; flows to the trade's origin block
         conviction:      cleanConviction(tradeIdea.conviction),
+        // We RECORDED this position but never DECIDED it — the entry was made at a bank before we saw
+        // the name. Orthogonal to `born` (a future broker-read import is born live and NOT adopted),
+        // and it rides to the ledger's origin block so the track record can't claim the entry.
+        adopted:         tradeIdea.adopted === true ? true : undefined,
+        adoptedAt:       tradeIdea.adopted === true ? (tradeIdea.adoptedAt ?? Date.now()) : undefined,
     }
 
     try {
@@ -256,6 +300,15 @@ async function buildIdeaChildren(rawIdea, userId) {
         const forked  = partitions.length > 1
         const groupId = forked ? `grp_${enriched.id}` : null
 
+        // A born-live leg carries ONE position, on ONE account. Forking would stamp that single
+        // positionId onto two documents, and both would then believe they own the same position —
+        // so this refuses rather than half-recording a real holding.
+        if (born === 'live') {
+            if (!enriched.quantity) return { ok: false, reason: 'bad_quantity', error: new Error('born-live leg needs a quantity') }
+            if (rawIdea.fill?.positionId == null) return { ok: false, reason: 'no_fill', error: new Error('born-live leg needs a fill') }
+            if (forked) return { ok: false, reason: 'fill_spans_accounts', error: new Error('a born-live leg cannot fork across accounts') }
+        }
+
         const children = []
         for (let i = 0; i < partitions.length; i++) {
             const part         = partitions[i]
@@ -281,7 +334,22 @@ async function buildIdeaChildren(rawIdea, userId) {
                 basisOffset:   await _basisOffset(brokerSymbol, enriched.asset),
             }
 
-            if (isImmediate) await _attachImmediatePlan(child)
+            // Born live → the post-fill stamps and NO order plan: the fill already happened, so
+            // building one would be an order for a position we are holding.
+            if (born === 'live') {
+                Object.assign(child, bornLiveStamp({
+                    direction: child.direction,
+                    fill: {
+                        ...rawIdea.fill,
+                        broker:    rawIdea.fill.broker    ?? child.broker,
+                        accountId: rawIdea.fill.accountId ?? accountId,
+                        quantity:  rawIdea.fill.quantity  ?? child.quantity,
+                        at:        rawIdea.fill.at        ?? Date.now(),
+                    },
+                }))
+            } else if (isImmediate) {
+                await _attachImmediatePlan(child)
+            }
             children.push(child)
         }
 
@@ -292,8 +360,8 @@ async function buildIdeaChildren(rawIdea, userId) {
     }
 }
 
-async function saveIdea(tradeIdea, userId) {
-    const built = await buildIdeaChildren(tradeIdea, userId)
+async function saveIdea(tradeIdea, userId, opts = {}) {
+    const built = await buildIdeaChildren(tradeIdea, userId, opts)
     if (!built.ok) return built
     try {
         const { children } = built
@@ -545,13 +613,37 @@ async function updateIdea(id, rawPatch, userId) {
     }
 }
 
-async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null, portfolioId = null) {
-    const pid   = portfolioId || `portfolio_${Date.now()}`
-    const saved = []
+/**
+ * Write a whole book: one entity per leg, under one portfolioId. The ONE writer for a portfolio,
+ * whoever assembled it.
+ *
+ * `born` is the terminal state, and it is the only thing that differs between a book Atlas
+ * constructed and a book that already exists somewhere (docs/design/adopted-book.md):
+ *   • `'proposed'` (default) — legs at `waiting`, gated by the pre-activation review. Today's path,
+ *     byte-identical.
+ *   • `'live'` — legs born in position, each leg carrying its own `fill` (see bornLiveStamp).
+ *
+ * PER-LEG OUTCOMES, not a blanket ok. A failed leg used to be a `logger.warn` inside a call that
+ * returned `ok: true` regardless — fine for a proposal the user is about to review, and not fine for
+ * a book of real positions, where a half-written result reported as success is how someone ends up
+ * with holdings the app doesn't know it holds. So the mechanism REPORTS and the caller JUDGES:
+ * construction stays lenient, adoption refuses on any `failed`.
+ *
+ * @param {{ name?:string, ideas:object[] }} plan
+ * @param {{ accounts?:string[], mainAccountId?:string|null, portfolioId?:string|null,
+ *           born?:'proposed'|'live' }} [opts]
+ * @returns {Promise<{ ok:boolean, ideas:object[], failed:Array<{asset:string, reason:string}>, portfolioId:string }>}
+ */
+async function saveBatchIdeas(plan, userId, opts = {}) {
+    const { accounts = [], mainAccountId = null, portfolioId = null, born = 'proposed' } = opts
+    const pid    = portfolioId || `portfolio_${Date.now()}`
+    const saved  = []
+    const failed = []
 
     for (const idea of plan.ideas) {
         const result = await saveIdea({
             asset:           idea.asset,
+            asset_class:     idea.asset_class,
             direction:       idea.direction,
             type:            idea.type,
             quantity:        idea.quantity,
@@ -561,13 +653,21 @@ async function saveBatchIdeas(plan, userId, accounts = [], mainAccountId = null,
             portfolioName:   plan.name,
             accounts,
             mainAccountId,
-        }, userId)
+            // Born-live extras — inert on the proposal path, where a plan leg carries neither.
+            adopted:         idea.adopted,
+            adoptedAt:       idea.adoptedAt,
+            fill:            idea.fill,
+        }, userId, { born })
         if (result.ok) saved.push(...(result.ideas ?? [result.idea]))
-        else logger.warn(LOG, 'Batch idea save failed', { asset: idea.asset, error: result.error })
+        else {
+            const reason = result.reason ?? 'save_failed'
+            failed.push({ asset: idea.asset, reason })
+            logger.warn(LOG, 'Batch idea save failed', { asset: idea.asset, reason, error: result.error })
+        }
     }
 
-    logger.info(LOG, 'Batch saved', { portfolioId: pid, total: plan.ideas.length, saved: saved.length })
-    return { ok: true, ideas: saved, portfolioId: pid }
+    logger.info(LOG, 'Batch saved', { portfolioId: pid, born, total: plan.ideas.length, saved: saved.length, failed: failed.length })
+    return { ok: true, ideas: saved, failed, portfolioId: pid }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

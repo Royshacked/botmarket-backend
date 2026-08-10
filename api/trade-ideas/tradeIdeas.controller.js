@@ -143,7 +143,10 @@ export async function createBatchIdeas(req, res) {
         const { plan, accounts = [], mainAccountId = null, portfolioId = null } = req.body ?? {}
         if (!plan?.ideas?.length) return res.status(400).send({ error: 'Missing plan.ideas' })
 
-        const result = await ideaService.saveBatchIdeas(plan, req.user._id, accounts, mainAccountId, portfolioId)
+        // Construction stays LENIENT about a failed leg (`result.failed`): the book is a proposal the
+        // user is about to review, where a missing line is visible and fixable. Adoption reads the
+        // same field and refuses — see adoptBook.service.
+        const result = await ideaService.saveBatchIdeas(plan, req.user._id, { accounts, mainAccountId, portfolioId })
         if (!result.ok) return res.status(500).send({ error: 'Failed to save batch' })
 
         res.status(201).send({ ideas: result.ideas, portfolioId: result.portfolioId })

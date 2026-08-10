@@ -10,6 +10,7 @@ test('buildOrigin: plain idea → type "idea", callId + portfolio null', () => {
     assert.deepEqual(o, {
         type: 'idea', ideaId: 'idea1', callId: null,
         groupId: null, portfolioId: null, portfolioName: null, allocationRatio: null,
+        adopted: false,
     })
 })
 
@@ -39,9 +40,27 @@ test('buildOrigin: idealess (no idea) → all-null origin, type null', () => {
     assert.deepEqual(buildOrigin(), {
         type: null, ideaId: null, callId: null,
         groupId: null, portfolioId: null, portfolioName: null, allocationRatio: null,
+        adopted: false,
     })
     // explicit empty object behaves the same as the default
     assert.deepEqual(buildOrigin({}), buildOrigin())
+})
+
+// An ADOPTED holding is a real position we RECORDED but never DECIDED — the entry was made at a bank
+// before we saw the name. It rides as its own flag rather than as a `type`, because it is orthogonal
+// to what spawned the trade and widening `type` would re-bucket every existing analytics read.
+// Without it the track record credits the app for entries it did not make.
+test('buildOrigin: an adopted holding is flagged, and stays typed "portfolio"', () => {
+    const o = buildOrigin({ id: 'idea4', portfolioId: 'pf1', adopted: true })
+    assert.equal(o.adopted, true)
+    assert.equal(o.type, 'portfolio', 'adopted is orthogonal to what spawned the trade')
+})
+
+test('buildOrigin: adopted defaults to false, never undefined', () => {
+    // A missing flag must read as "we decided this", so an analytics filter on `adopted: false`
+    // cannot silently miss every pre-existing row.
+    assert.equal(buildOrigin({ id: 'i1' }).adopted, false)
+    assert.equal(buildOrigin({ id: 'i1', adopted: 'yes' }).adopted, false, 'only a real boolean counts')
 })
 
 // ── pickCallReasoning: freeze the originating call's thesis onto the trade ──────

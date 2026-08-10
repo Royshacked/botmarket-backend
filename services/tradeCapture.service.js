@@ -30,7 +30,7 @@ import { COLLECTION as PORTFOLIO_CHATS } from '../api/portfolio/portfolioChat.se
 export const COLLECTION = 'trades'
 const LOG        = '[tradeCapture]'
 
-export const tradeCaptureService = { captureOpen, captureOpenBare, capturePartial, captureClose, listTrades, tradeStats }
+export const tradeCaptureService = { captureOpen, captureOpenBare, capturePartial, captureClose, dropAdoptedOpen, listTrades, tradeStats }
 
 /**
  * Indexes for the analytics ledger. Best-effort (logs + continues), created once at
@@ -67,6 +67,14 @@ const modeOf = (broker, accountId) => resolveMode({ broker, accountId })
  * vehicle (almost always set; null only for idealess capture). `callId != null` is the
  * canonical "this is a Kairos call" flag. `type` is derived, call taking precedence over
  * portfolio over plain idea. Pure — no `idea` (idealess) yields the all-null origin.
+ *
+ * `adopted` is the one fact that cannot be derived from the others: an adopted holding
+ * (docs/design/adopted-book.md) is a real position the app RECORDED but never decided — the entry
+ * was made at a bank before we ever saw the name. It rides as its own flag rather than as a `type`,
+ * because it is orthogonal to what spawned the trade (an adopted holding is still a `portfolio`
+ * trade) and because widening `type` would silently re-bucket every existing analytics read.
+ * Without it the track record credits the app for entries it did not make.
+ *
  * @param {object} [idea] the persisted idea doc (omit for idealess capture)
  */
 export function buildOrigin(idea = {}) {
@@ -85,6 +93,7 @@ export function buildOrigin(idea = {}) {
         portfolioId,
         portfolioName:   idea.portfolioName ?? null,
         allocationRatio: idea.allocationRatio ?? null,
+        adopted:         idea.adopted === true,
     }
 }
 
@@ -228,6 +237,38 @@ async function captureOpen(idea, exec) {
  * idea matches — the two are mutually exclusive per position).
  * @param {import('../api/broker/adapters/broker.interface.js').BrokerExecution} exec
  */
+/**
+ * Withdraw an ADOPTED open row for a holding the user says was never held (a line already sold, a
+ * typo'd ticker — see adoptBook.removeHolding).
+ *
+ * The only deletion in this file, and it is narrow on purpose. The ledger is otherwise append-only
+ * because a fill is a fact; an adopted row is not a fill, it is something we were TOLD, and a
+ * retraction leaves nothing behind worth keeping — an `open` trade whose position no longer exists
+ * would sit in analytics as a live holding forever.
+ *
+ * Guarded three ways so it can never reach a real trade: the row must be `open`, must be
+ * `origin.adopted`, and must match the exact (accountId, positionId) identity key. Best-effort, like
+ * every other capture — a failed retraction must not fail the removal the user asked for.
+ * @returns {Promise<boolean>} whether a row was withdrawn
+ */
+async function dropAdoptedOpen({ accountId, positionId }) {
+    try {
+        if (accountId == null || positionId == null) return false
+        const db  = await getDb()
+        const res = await db.collection(COLLECTION).deleteOne({
+            accountId:        String(accountId),
+            positionId:       String(positionId),
+            status:           'open',
+            'origin.adopted': true,
+        })
+        if (res.deletedCount) logger.info(LOG, `Withdrew adopted trade row for position ${positionId}`)
+        return res.deletedCount > 0
+    } catch (err) {
+        logger.warn(LOG, `dropAdoptedOpen failed for ${positionId}: ${err.message}`)
+        return false
+    }
+}
+
 async function captureOpenBare(exec) {
     try {
         if (exec?.positionId == null || exec?.accountId == null || exec?.userId == null) return

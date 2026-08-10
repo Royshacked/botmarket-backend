@@ -21,7 +21,9 @@ const LOG        = '[portfolioChat]'
 // and was naming 'portfolio_chats' inline to do it.
 export const COLLECTION = 'portfolio_chats'
 
-const CADENCE_MS = { weekly: 7 * 86400000, monthly: 30 * 86400000, quarterly: 90 * 86400000 }
+// Exported so a second writer of `nextReviewAt` (adoption stamps one at commit) schedules off the
+// SAME cadence truth rather than its own copy of these three numbers.
+export const CADENCE_MS = { weekly: 7 * 86400000, monthly: 30 * 86400000, quarterly: 90 * 86400000 }
 
 export const portfolioChatService = {
     saveChatState,
