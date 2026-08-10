@@ -257,6 +257,11 @@ async function _onOpened(exec) {
     const linked = await _deps.entityRepo.findLinkedByPosition(exec.accountId, exec.positionId)
     if (linked) {
         await _deps.tradeCaptureService.captureOpen(linked, exec)
+        // A fill on an ALREADY-OPEN position is a scale-in: the position just grew, and the stop
+        // resting behind it was sized for what was on BEFORE this leg. Until it covers the new
+        // total, part of the position is unprotected — so this runs under the same lock as
+        // placement, on every such fill, and no-ops when the cover is already right.
+        await _withLock(exec.accountId, exec.positionId, () => _growStops(linked, exec.accountId, exec.positionId))
         return
     }
 
@@ -381,6 +386,58 @@ async function _resyncExits(db, idea, accountId, remainingOverride) {
     }
 
     if (changed) await _deps.entityRepo.setExitOrders(idea.id, orders)
+}
+
+/**
+ * Grow the protective cover after a scale-in. The mirror of _resyncExits, and deliberately NOT the
+ * same function: that one exists so an exit can never OVER-close, and treats an order smaller than
+ * the position as "still safe". Coming the other way that is precisely the danger — an order
+ * smaller than the position means part of it has no stop behind it.
+ *
+ * ADDS a leg rather than resizing the existing one. Cancel-then-replace would leave a window with
+ * no protection at all; place-then-cancel would briefly double the cover, which on a netting account
+ * can over-close and open a position the other way. Adding the DELTA has neither hazard: the stops
+ * sum to the position at every instant, and it composes with a ladder instead of flattening it.
+ *
+ * Only STOPS. Take-profits are an intentional ladder whose legs are meant to be smaller than the
+ * position — growing each to the total would turn a scale-out plan into a full exit.
+ *
+ * The broker is asked for the live size rather than trusting the fill event, for the same reason
+ * _onReduced asks: a single event does not always describe the whole position.
+ */
+async function _growStops(idea, accountId, positionId) {
+    const acct   = String(accountId)
+    const broker = _brokerFor(idea, acct)
+    if (!broker) return
+
+    let position
+    try {
+        position = await _deps.brokerService.findOpenPosition(broker, idea.userId, acct, positionId)
+    } catch (err) {
+        logger.warn(LOG, `Idea ${idea.id}: size check failed (${err.message}) — leaving the stop alone`)
+        return   // never guess at protection: an unknown size is not a reason to place an order
+    }
+    const total = round(Number(position?.volume))
+    if (!Number.isFinite(total) || total <= 0) return
+
+    const orders  = idea.exitOrders ?? []
+    const stops   = orders.filter(o => o.status === 'working' && String(o.accountId) === acct && o.leg === 'stop')
+    if (!stops.length) return   // nothing resting to extend; placement owns the first one
+
+    const covered = stops.reduce((n, o) => n + (Number(o.quantity) || 0), 0)
+    const delta   = round(total - covered)
+    if (delta <= EPS) return    // already covered — the common case, and a re-delivered event
+
+    try {
+        const placed = await _placeOneExit(idea, acct, stops[0].broker, 'stop', stops[0].price, delta, positionId)
+        await _deps.entityRepo.setExitOrders(idea.id, [...orders, exitOrderRecord({
+            accountId: acct, broker: stops[0].broker, leg: 'stop', type: 'stop',
+            price: stops[0].price, quantity: delta, orderId: placed.orderId, positionId,
+        })])
+        logger.info(LOG, `Idea ${idea.id}: scale-in covered — added ${delta} stop @ ${stops[0].price} (position ${total})`)
+    } catch (err) {
+        logger.error(LOG, `Idea ${idea.id}: FAILED to cover scale-in (${delta} @ ${stops[0].price}): ${err.message}`)
+    }
 }
 
 // ─── Close finalisation ───────────────────────────────────────────────────────

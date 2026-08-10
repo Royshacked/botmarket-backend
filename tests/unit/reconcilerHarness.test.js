@@ -77,7 +77,13 @@ function makeMongoDouble(seed, opLog) {
 }
 
 const fakeBroker = (opLog, { listOrders = [], findOpenPosition = null } = {}) => ({
-    async findOpenPosition() { opLog.push('broker:findOpenPosition'); return findOpenPosition },
+    // An Error VALUE is thrown rather than returned, so a test can express a transport failure —
+    // which the reconciler treats very differently from "the position is gone".
+    async findOpenPosition() {
+        opLog.push('broker:findOpenPosition')
+        if (findOpenPosition instanceof Error) throw findOpenPosition
+        return findOpenPosition
+    },
     async placeOrder()       { opLog.push('broker:placeOrder');       return { orderId: `ord${opLog.filter(x => x === 'broker:placeOrder').length}` } },
     async cancelOrder()      { opLog.push('broker:cancelOrder');      return { ok: true } },
     async listOrders()       { opLog.push('broker:listOrders');       return listOrders },
@@ -235,4 +241,79 @@ test('idealess sim close: captureClose only (no linked idea)', async () => {
         'db:findOne',            // findActiveByPosition → null
         'capture:captureClose',  // sim venue still records the close
     ])
+})
+
+// ── Scenario F: scale-in → the stop grows to cover the bigger position ────────────────────────
+// The safety-critical half of scaling in. Between a second leg filling and the stop covering it,
+// part of the position has nothing behind it — so this runs on every fill against an already-linked
+// position, and no-ops when the cover is already right.
+
+const SCALED = (stopQty) => ([{
+    id: 'idea1', userId: 'u1', asset: 'AAPL', direction: 'long', status: 'long', quantity: 60,
+    brokerSymbol: 'AAPL', basisOffset: 0,
+    brokerOrders: [{ accountId: 'a1', positionId: 'p1', orderId: 'e1', broker: 'ctrader', quantity: 60 }],
+    exitOrders: [
+        { accountId: 'a1', broker: 'ctrader', leg: 'stop', type: 'stop',  price: 90,  quantity: stopQty, orderId: 'ord1', status: 'working', positionId: 'p1' },
+        { accountId: 'a1', broker: 'ctrader', leg: 'tp',   type: 'limit', price: 110, quantity: 40,      orderId: 'ord2', status: 'working', positionId: 'p1' },
+    ],
+    exitPlacedAccounts: ['a1'],
+}])
+
+test('scale-in: a stop covering only the first leg is topped up to the whole position', async () => {
+    // Broker says 100 is open; 60 is covered. The 40 delta gets its own stop at the same level.
+    const { opLog, store, restore } = harness(SCALED(60), { findOpenPosition: { volume: 100 } })
+    try {
+        await executionReconciler.handleExecution({ type: 'position.opened', accountId: 'a1', positionId: 'p1', symbol: 'AAPL', direction: 'long', quantity: 40, at: 9 })
+    } finally { restore() }
+
+    assert.ok(opLog.includes('broker:placeOrder'), 'the uncovered delta is placed')
+    const stops = store.get('idea1').exitOrders.filter(o => o.leg === 'stop')
+    assert.equal(stops.length, 2, 'ADDED rather than resized — no window with the stop cancelled')
+    assert.equal(stops.reduce((n, o) => n + o.quantity, 0), 100, 'the stops now sum to the position')
+    assert.deepEqual(stops.map(o => o.price), [90, 90], 'both rest at the planned level')
+})
+
+test('scale-in: an already-covered position places nothing', async () => {
+    // The common case, and every re-delivered fill event. A second stop here would double the
+    // cover, which on a netting account can over-close and open a position the other way.
+    const { opLog, restore } = harness(SCALED(100), { findOpenPosition: { volume: 100 } })
+    try {
+        await executionReconciler.handleExecution({ type: 'position.opened', accountId: 'a1', positionId: 'p1', symbol: 'AAPL', direction: 'long', at: 9 })
+    } finally { restore() }
+
+    assert.equal(opLog.filter(x => x === 'broker:placeOrder').length, 0)
+})
+
+test('scale-in: a transport failure never places a guess', async () => {
+    // An unknown size is not a reason to place a protective order — it is a reason to leave the
+    // one that is already resting alone and try again on the next event.
+    const { opLog, store, restore } = harness(SCALED(60), { findOpenPosition: new Error('transport') })
+    try {
+        await executionReconciler.handleExecution({ type: 'position.opened', accountId: 'a1', positionId: 'p1', symbol: 'AAPL', direction: 'long', at: 9 })
+    } finally { restore() }
+
+    assert.equal(opLog.filter(x => x === 'broker:placeOrder').length, 0)
+    assert.equal(store.get('idea1').exitOrders.filter(o => o.leg === 'stop').length, 1, 'untouched')
+})
+
+test('scale-in: a position the broker cannot size is left alone too', async () => {
+    // Distinct from the throw above: the call succeeds but reports no usable volume. Same rule.
+    const { opLog, restore } = harness(SCALED(60), { findOpenPosition: { volume: null } })
+    try {
+        await executionReconciler.handleExecution({ type: 'position.opened', accountId: 'a1', positionId: 'p1', symbol: 'AAPL', direction: 'long', at: 9 })
+    } finally { restore() }
+    assert.equal(opLog.filter(x => x === 'broker:placeOrder').length, 0)
+})
+
+test('scale-in: take-profits are left alone — a ladder is not under-protection', async () => {
+    // TP legs are DELIBERATELY smaller than the position. Growing them the way the stop grows
+    // would turn a scale-out plan into a full exit at the first target.
+    const { store, restore } = harness(SCALED(60), { findOpenPosition: { volume: 100 } })
+    try {
+        await executionReconciler.handleExecution({ type: 'position.opened', accountId: 'a1', positionId: 'p1', symbol: 'AAPL', direction: 'long', at: 9 })
+    } finally { restore() }
+
+    const tps = store.get('idea1').exitOrders.filter(o => o.leg === 'tp')
+    assert.equal(tps.length, 1)
+    assert.equal(tps[0].quantity, 40, 'still the authored ladder size')
 })
