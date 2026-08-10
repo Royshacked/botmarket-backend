@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { commitDraft, correctHolding, removeHolding, normalizeHolding, _pastOnly, _setDeps } from '../../api/portfolio/adoptBook.service.js'
+import { createDraft, commitDraft, correctHolding, removeHolding, normalizeHolding, _pastOnly, _setDeps } from '../../api/portfolio/adoptBook.service.js'
 import { bornLiveStamp } from '../../api/trade-ideas/tradeIdeas.service.js'
 
 // Adopting a book the app didn't build (docs/design/adopted-book.md). What is pinned here is the
@@ -379,6 +379,68 @@ test('removal refuses anything the app placed itself', async () => {
     const restore = _setDeps(deps)
     try {
         assert.equal((await removeHolding({ id: 'e1', userId: 'u1' })).reason, 'not_adopted')
+    } finally { restore() }
+})
+
+// ─── Intake: paste vs grid ──────────────────────────────────────────────────────
+
+// Marks for the paste tests: without them every line is unpriceable, which correctly forces the
+// explicit-cash branch and would drown out what these tests are actually checking.
+const MARKS = async () => new Map([['AAPL', 200], ['MSFT', 400]])
+
+test('a paste reaches the draft through the deterministic parser', async () => {
+    let staged = null
+    const { deps } = stubs({
+        quotes: MARKS,
+        store: { createDraft: async (_u, d) => { staged = d; return { ...d, draftId: 'd1' } } },
+    })
+    const restore = _setDeps(deps)
+    try {
+        const res = await createDraft({
+            userId: 'u1', statedTotal: 50_000,
+            paste: 'Symbol\tQty\tAvg Cost\nAAPL\t100\t150.25\nMSFT\t50\t300',
+        })
+        assert.equal(res.ok, true)
+        assert.deepEqual(staged.holdings.map(h => [h.symbol, h.quantity, h.avgCost]),
+            [['AAPL', 100, 150.25], ['MSFT', 50, 300]])
+        assert.deepEqual(staged.reconciliation.problems, [])
+    } finally { restore() }
+})
+
+test('an edited grid WINS over the paste it came from', async () => {
+    // A grid edit is the user correcting exactly what the parser read wrong; it must not be re-parsed.
+    let staged = null
+    const { deps } = stubs({ quotes: MARKS, store: { createDraft: async (_u, d) => { staged = d; return { ...d, draftId: 'd1' } } } })
+    const restore = _setDeps(deps)
+    try {
+        await createDraft({
+            userId: 'u1', statedTotal: 50_000,
+            paste:    'AAPL 100 150.25',
+            holdings: [{ symbol: 'AAPL', quantity: 90, avgCost: 151 }],
+        })
+        assert.deepEqual(staged.holdings.map(h => [h.quantity, h.avgCost]), [[90, 151]])
+    } finally { restore() }
+})
+
+test("a paste the parser could not read blocks the commit, and says which line", async () => {
+    let staged = null
+    const { deps } = stubs({ store: { createDraft: async (_u, d) => { staged = d; return { ...d, draftId: 'd1' } } } })
+    const restore = _setDeps(deps)
+    try {
+        await createDraft({ userId: 'u1', statedTotal: 50_000, paste: 'AAPL 100 150.25\n100 150.25' })
+        assert.ok(staged.reconciliation.problems.includes('missing_symbol:line 2'))
+    } finally { restore() }
+})
+
+test('an assumed-columns warning is carried, and does NOT block', async () => {
+    let staged = null
+    const { deps } = stubs({ quotes: MARKS, store: { createDraft: async (_u, d) => { staged = d; return { ...d, draftId: 'd1' } } } })
+    const restore = _setDeps(deps)
+    try {
+        // A full bank export row: qty, cost, last, value.
+        await createDraft({ userId: 'u1', freeCash: 0, paste: 'AAPL 100 150.25 200.00 20,000.00' })
+        assert.deepEqual(staged.warnings, ['assumed_columns:AAPL'])
+        assert.deepEqual(staged.reconciliation.problems, [], 'advisory, not blocking')
     } finally { restore() }
 })
 

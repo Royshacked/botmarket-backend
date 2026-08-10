@@ -56,9 +56,10 @@ function _sendAdopt(res, result, onOk) {
 
 export async function createAdoptionDraft(req, res) {
     try {
-        const { bank, currency, statedTotal, freeCash, holdings, mandate, name } = req.body ?? {}
+        // `paste` is the raw text; `holdings` is the grid handing back edited cells. Either or both.
+        const { bank, currency, statedTotal, freeCash, holdings, paste, mandate, name } = req.body ?? {}
         const result = await adoptBookService.createDraft({
-            userId: req.user._id, bank, currency, statedTotal, freeCash, holdings, mandate, name,
+            userId: req.user._id, bank, currency, statedTotal, freeCash, holdings, paste, mandate, name,
         })
         _sendAdopt(res, result, r => ({ draft: r.draft }))
     } catch (err) {

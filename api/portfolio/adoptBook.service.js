@@ -21,6 +21,7 @@
 
 import { reconcileAccount }      from '../../services/bookValuation.util.js'
 import { fxToUsd }               from '../../services/fxRate.service.js'
+import { parseHoldings }         from '../../services/holdingsParse.util.js'
 import { adoptDraftStore }       from './adoptBook.store.js'
 import { paperBrokerService }    from '../broker/paperBroker.service.js'
 import { openManualPosition }    from '../broker/manualExecution.service.js'
@@ -101,10 +102,17 @@ export function normalizeHolding(raw = {}) {
  * up, a line we can't price — is returned for the confirm grid to render against the offending row.
  * The refusal lives at commit, so the user gets to fix things first.
  */
-export async function createDraft({ userId, bank = null, currency = 'USD', statedTotal = null, freeCash = null, holdings = [], mandate = null, name = null }) {
+export async function createDraft({ userId, bank = null, currency = 'USD', statedTotal = null, freeCash = null, holdings = [], paste = null, mandate = null, name = null }) {
     try {
         if (!userId) return { ok: false, reason: 'forbidden' }
-        const rows = (Array.isArray(holdings) ? holdings : []).map(normalizeHolding)
+
+        // TWO WAYS IN, one draft. `holdings` is the grid handing back edited cells; `paste` is the raw
+        // text the user dropped into the chat. The paste is read by the deterministic parser — the model
+        // never extracts a number (holdingsParse.util) — and explicit rows always WIN, because a grid
+        // edit is the user correcting exactly what the parser got wrong.
+        const parsed = paste ? parseHoldings(paste) : null
+        const source = (Array.isArray(holdings) && holdings.length) ? holdings : (parsed?.rows ?? [])
+        const rows   = source.map(normalizeHolding)
 
         // One quote read for the whole book. Unpriceable lines come back null and stay first-class:
         // they are tracked, just not marked (and they force the explicit-cash branch below).
@@ -120,6 +128,10 @@ export async function createDraft({ userId, bank = null, currency = 'USD', state
         const stated  = String(currency ?? 'USD').trim().toUpperCase() || 'USD'
         const rate    = stated === 'USD' ? 1 : await _deps.fxToUsd(stated).catch(() => null)
         const reconciliation = reconcileAccount({ holdings: priced, statedTotal, freeCash, fxToUsd: rate })
+        // The parser's findings ride ALONGSIDE the reconciliation rather than being merged into it: one
+        // is "we could not read your paste", the other is "your numbers do not add up", and the grid
+        // shows them in different places. Warnings never block (a bank export whose columns we assumed).
+        if (parsed?.problems?.length) reconciliation.problems.push(...parsed.problems)
 
         const draft = await _deps.store.createDraft(userId, {
             bank, name, mandate,
@@ -130,6 +142,7 @@ export async function createDraft({ userId, bank = null, currency = 'USD', state
             fxAt:           rate != null && stated !== 'USD' ? Date.now() : null,
             statedTotal: toNum(statedTotal), freeCash: toNum(freeCash),
             holdings: priced, reconciliation,
+            warnings: parsed?.warnings ?? [],
             // Minted here, not at commit, so a retry writes into the SAME book instead of a second one.
             portfolioId: `portfolio_${Date.now()}`,
         })
