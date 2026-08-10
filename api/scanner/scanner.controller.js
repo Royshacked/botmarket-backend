@@ -13,7 +13,7 @@ import { getExperienceLevel } from '../../services/experience.service.js'
 const LOG = '[scanner:controller]'
 
 export async function streamScanner(req, res) {
-    const { messages, model, editList, handoff, profile, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
+    const { messages, model, editList, handoff, handoffTo, profile, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
 
     const validatedMessages = parseChatMessages(messages)
     if (validatedMessages.error) {
@@ -32,6 +32,11 @@ export async function streamScanner(req, res) {
                 model:           routing.model,
                 editList:        editList && typeof editList === 'object' ? editList : null,
                 handoff:         handoff === true,
+                // Which desk the pick goes back to — the CLIENT knows, because it is the pipeline's
+                // next step. Whitelisted rather than passed through: this string lands in the prompt,
+                // and an unknown value degrades to the generic phrasing instead of putting whatever
+                // the body carried in front of the user.
+                handoffTo:       handoffTo === 'mentor' || handoffTo === 'kairos' ? handoffTo : null,
                 profile:         profile === 'investing' ? 'investing' : 'trading',
                 reasoningEffort: routing.reasoningEffort,
                 userId:   req.user._id,

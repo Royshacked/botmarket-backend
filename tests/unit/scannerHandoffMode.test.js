@@ -4,11 +4,16 @@ import { readFileSync } from 'fs'
 
 import { scannerAgentService } from '../../services/agents/scanner.agent.service.js'
 
-// Argus's Kairos hand-off is a MODE of the trading profile, not a profile of its own: it shares the
+// Argus's build hand-off is a MODE of the trading profile, not a profile of its own: it shares the
 // whole screening spine and differs only in what it converges on (one name) and what it emits
 // (<kairos_pick>). It used to live INSIDE the trading prompt, so a list-building turn read fifty
 // lines telling it to find ONE ticker and not emit a scan_list, and a hand-off turn read the list
 // machinery and phase gate it then had to override. It is now its own injected module.
+//
+// The DESTINATION is the other thing this file guards. The module is a cached block and the desk
+// name is per-request, so the name lives in the volatile tail — and the module must not name a desk
+// itself. It did, for two months after the trade desk moved its build step from Kairos to Mentor,
+// which is how Argus came to tell users their pick was going somewhere it wasn't.
 
 const SPINE   = readFileSync(new URL('../../prompts/scanner_system_prompt.md', import.meta.url), 'utf8')
 const HANDOFF = readFileSync(new URL('../../prompts/scanner_mode_handoff.md', import.meta.url), 'utf8')
@@ -26,7 +31,7 @@ test('a list turn never sees the hand-off module', async () => {
     const got = await call({})
     assert.equal(got.systemPrompt.length, 2, 'spine + dynamic tail only')
     const all = got.systemPrompt.map(b => b.text).join('\n')
-    assert.doesNotMatch(all, /KAIROS HAND-OFF/)
+    assert.doesNotMatch(all, /BUILD HAND-OFF/)
     assert.doesNotMatch(all, /kairos_pick/)
     assert.doesNotMatch(all, /find ONE ticker/)
 })
@@ -34,11 +39,42 @@ test('a list turn never sees the hand-off module', async () => {
 test('a hand-off turn gets the module as its own cached block, after the spine', async () => {
     const got = await call({ handoff: true })
     assert.equal(got.systemPrompt.length, 3, 'spine + mode module + dynamic tail')
-    assert.match(got.systemPrompt[1].text, /KAIROS HAND-OFF MODE — find ONE ticker/)
+    assert.match(got.systemPrompt[1].text, /BUILD HAND-OFF MODE — find ONE ticker/)
     assert.match(got.systemPrompt[1].text, /<kairos_pick>/)
     assert.equal(got.systemPrompt[1].cache_control?.type, 'ephemeral')
     // The marker declares the live mode in the volatile tail; the module carries what it means.
-    assert.match(got.systemPrompt[2].text, /ACTIVE MODE: KAIROS HAND-OFF/)
+    assert.match(got.systemPrompt[2].text, /ACTIVE MODE: BUILD HAND-OFF/)
+})
+
+// ── the destination ──────────────────────────────────────────────────────────
+test('the destination desk is named in the VOLATILE tail, never the cached module', async () => {
+    for (const handoffTo of ['mentor', 'kairos']) {
+        const got = await call({ handoff: true, handoffTo })
+        const expected = handoffTo === 'mentor' ? /Mentor/ : /Kairos/
+        assert.match(got.systemPrompt[2].text, expected, `${handoffTo} unnamed in the tail`)
+        // The module may DISTINGUISH the two desks (it tells Argus how they differ, naming both);
+        // what it must never do is assert which one sent this user, because it is one shared cached
+        // block and that sentence would be wrong for half of them.
+        assert.doesNotMatch(got.systemPrompt[1].text, /sent here by (Mentor|Kairos)/,
+            'the cached module claims a specific sender')
+    }
+})
+
+test('the two destinations produce DIFFERENT tails and an IDENTICAL cached module', async () => {
+    const toMentor = await call({ handoff: true, handoffTo: 'mentor' })
+    const toKairos = await call({ handoff: true, handoffTo: 'kairos' })
+    assert.notEqual(toMentor.systemPrompt[2].text, toKairos.systemPrompt[2].text)
+    // Byte-identical, or the shared block stops being one cache entry.
+    assert.equal(toMentor.systemPrompt[1].text, toKairos.systemPrompt[1].text)
+})
+
+test('an unknown or absent destination degrades to generic — never a guessed desk', async () => {
+    for (const handoffTo of [null, undefined, 'atlas', 'DROP TABLE']) {
+        const tail = (await call({ handoff: true, handoffTo })).systemPrompt[2].text
+        assert.match(tail, /the build desk that sent them/)
+        assert.doesNotMatch(tail, /\bMentor\b/)
+        assert.doesNotMatch(tail, /\bKairos\b/)
+    }
 })
 
 // BREAKPOINT BUDGET: four per request — tools take one, _stampHistoryCache takes one, so the system
@@ -59,7 +95,7 @@ test('the hand-off is a TRADING path — the investing profile never gets the mo
 
 // ── the two files, as text ───────────────────────────────────────────────────
 test('the spine no longer carries the hand-off section', () => {
-    assert.doesNotMatch(SPINE, /KAIROS HAND-OFF MODE/)
+    assert.doesNotMatch(SPINE, /BUILD HAND-OFF MODE/)
     assert.doesNotMatch(SPINE, /VALIDATE-A-NAME/)
     assert.doesNotMatch(SPINE, /kairos_pick/)
     // …but it keeps what BOTH modes use: the screening spine and the shared lens vocabulary.
@@ -73,5 +109,24 @@ test('the module states what it overrides rather than silently contradicting the
     assert.match(HANDOFF, /VALIDATE-A-NAME/)
     // recommended_mode is DEFINED once, in the spine's Phase 3 — the module points at it instead of
     // carrying a second copy that can drift.
-    assert.match(HANDOFF, /the same Kairos build lens the spine defines in Phase 3/)
+    assert.match(HANDOFF, /the same build lens the spine defines in Phase 3/)
+})
+
+// The spine is read on EVERY trading turn, hand-off or not, so a desk name in it reaches users the
+// mode module never touches. It named Kairos in four places while the trade desk built with Mentor.
+test('the spine never names a build desk — it does not know which one is listening', () => {
+    assert.doesNotMatch(SPINE, /\bKairos\b/)
+    assert.doesNotMatch(SPINE, /\bMentor\b/)
+})
+
+// The module MAY name desks — it has to, to tell Argus how the two differ and to explain why the
+// wire tag is spelled `kairos_pick`. What it must not do is name one ALONE: a lone "Kairos" in a
+// block both destinations read is the exact shape of the bug this fixes. Checked per paragraph,
+// because that is the unit a reader takes a claim from.
+test('the module never names one desk without the other', () => {
+    for (const para of HANDOFF.split(/\n\s*\n/)) {
+        const kairos = /\bKairos\b/.test(para), mentor = /\bMentor\b/.test(para)
+        assert.equal(kairos, mentor,
+            `a paragraph names ${kairos ? 'Kairos' : 'Mentor'} alone:\n${para.trim()}`)
+    }
 })

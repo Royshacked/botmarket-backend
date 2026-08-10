@@ -171,15 +171,30 @@ function SCANNER_TOOLS_FOR_PROFILE(profile) {
     return profile === 'investing' ? TOOLS.filter(t => INVESTING_TOOL_NAMES.has(t.name)) : TOOLS
 }
 
-// Injected into the volatile context when Argus is invoked as a Kairos discovery hand-off: it flips
-// Argus from "build a watchlist" to "find ONE ticker + emit <kairos_pick>" (see the prompt's
-// KAIROS HAND-OFF MODE section). The bias/horizon ride in the seeded opening message.
+// Injected into the volatile context when Argus is invoked as a discovery hand-off: it flips Argus
+// from "build a watchlist" to "find ONE ticker + emit <kairos_pick>" (see the prompt's BUILD
+// HAND-OFF MODE section). The bias/horizon ride in the seeded opening message.
 // The mode MARKER only — what the mode means is the module (scanner_mode_handoff.md), injected as
 // its own cached block. Mirrors Kairos's "ACTIVE MODE: x" line: the volatile block declares which
 // lens is live, the cached module carries it.
-const HANDOFF_CONTEXT = 'ACTIVE MODE: KAIROS HAND-OFF — the user was sent here by Kairos to find ONE ticker for a single call. The KAIROS HAND-OFF MODE module is in force: it replaces the list-building shape of the spine.'
+//
+// The DESTINATION belongs here and not in the module for a mechanical reason: the module is a cached
+// block, so interpolating a per-request desk name into it would give every destination its own cache
+// entry and defeat the breakpoint. The volatile tail is already rebuilt per turn, so naming the desk
+// here is free.
+const HANDOFF_DESKS = {
+    mentor: 'Mentor, which builds a `setup` the user shapes zone by zone',
+    kairos: 'Kairos, which authors a single `call`',
+}
+// Unknown/absent destination degrades to the generic phrasing rather than guessing a desk: the
+// module already tells Argus to name only what this line names, so "the build desk" is honest where
+// a wrong brand name would be a lie the user reads.
+function _handoffContext(handoffTo) {
+    const desk = HANDOFF_DESKS[handoffTo] ?? 'the build desk that sent them'
+    return `ACTIVE MODE: BUILD HAND-OFF — the user was sent here by ${desk}, to find ONE ticker to build a single trade on. Refer to that desk by that name. The BUILD HAND-OFF MODE module is in force: it replaces the list-building shape of the spine.`
+}
 
-async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, profile = 'trading', audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, handoffTo = null, profile = 'trading', audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
     const prof = profile === 'investing' ? 'investing' : 'trading'
@@ -200,7 +215,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     const editSection = _buildEditSection(editList)
     if (editSection) dynamic.push(editSection)
     const inHandoff = handoff && prof === 'trading'   // hand-off is a trading-only path
-    if (inHandoff) dynamic.push(HANDOFF_CONTEXT)
+    if (inHandoff) dynamic.push(_handoffContext(handoffTo))
 
     const promptLoader = _profilePrompt[prof] ?? _profilePrompt.trading
     // Spine (cached) + the mode module on a hand-off turn (its own cached block, so the list-mode
