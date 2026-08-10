@@ -378,9 +378,12 @@ divergence is guaranteed and the only source of truth is the user.
    `saveBatchIdeas` widened with `born: 'proposed'|'live'` and per-leg outcomes; `adoptBook.service`
    + a leased draft store; the repair pair; `adopted` on the ledger's origin block with a guarded
    withdrawal; routes. 51 tests.
-2. **`max_names` as a mandate field** — schema + normalization (integer or null) + the coherence
-   checks, `_buildMandateSection`, and `RESEARCH_TOP_N` derived from it instead of hardcoded. **This
-   one is not adoption-specific** — it changes the generate path too.
+2. **`max_names` as a mandate field — PARKED 2026-08-10** (user's call). Schema + normalization
+   (integer or null) + the coherence checks, `_buildMandateSection`, and `RESEARCH_TOP_N` derived from
+   it instead of hardcoded. **Not adoption-specific** — it changes the generate path too, which is
+   why it can wait. Parked with it: the `count` gate (step 8) and the derived research width, so
+   `RESEARCH_TOP_N` stays the hardcoded 4 in `ScannerPanel.jsx` meanwhile. The design in §3.1 stands
+   as decided; only the build is deferred.
 3. **Atlas `adopt` mode** — phase order (holdings → mandate → why → confirm), the anchoring rule, the
    deterministic paste parser, symbol resolution, the proposed-mandate path for beginners.
 4. **FE** — the reception door, the paste/confirm/edit grid, an ADOPTED badge, no activation affordance.
