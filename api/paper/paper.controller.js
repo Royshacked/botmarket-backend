@@ -120,6 +120,23 @@ export async function resetAccount(req, res) {
     } catch (err) { _fail(res, err, 'reset account error') }
 }
 
+/**
+ * Record a cash movement that happened outside any trade — a dividend, a deposit, a withdrawal, a fee.
+ *
+ * The drift ritual for a book we cannot read (docs/design/adopted-book.md §8): the bank pays a
+ * dividend, we never see it, and the account's equity drifts a little further from the user's real one
+ * every quarter. Signed amount; the store refuses an overdraw and never counts this as P&L.
+ */
+export async function adjustAccountCash(req, res) {
+    try {
+        const { accountId } = req.params
+        const { amount, reason } = req.body ?? {}
+        await paperBrokerService.adjustCash(req.user._id, accountId, { amount, reason })
+        const acct = await paperBrokerService.getAccount(req.user._id, accountId)
+        res.json(await _accountState(req.user._id, acct))
+    } catch (err) { _fail(res, err, 'adjust cash error') }
+}
+
 export async function accountEquityCurve(req, res) {
     try {
         const { accountId } = req.params

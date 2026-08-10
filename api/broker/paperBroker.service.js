@@ -41,6 +41,10 @@ export const ORDERS    = 'paperOrders'
 export const EQUITY    = 'paperEquity'
 const LOG       = '[paperBroker.service]'
 
+// Local rather than imported: `round2` lives in paperExecution, which imports THIS file, so taking it
+// from there would close a cycle for the sake of one line of arithmetic.
+const _round2 = v => Number(Number(v).toFixed(2))
+
 /** Modes that share this virtual-account store. Paper = simulated fills; manual = user-reported. */
 export const VIRTUAL_MODES = ['paper', 'manual']
 
@@ -93,6 +97,7 @@ export const paperBrokerService = {
     getOrCreateDefaultAccount,
     updateSettings,
     adjustBalance,
+    adjustCash,
     resetAccount,
     // mode toggle (transitional — rides the default account)
     setEnabled,
@@ -259,6 +264,50 @@ async function adjustBalance(userId, accountId, { cash = 0, realizedPnl = 0 } = 
         { userId, accountId: String(accountId) },
         { $inc: { cashBalance: cash, realizedPnl }, $set: { updatedAt: Date.now() } }
     )
+}
+
+/**
+ * Move cash in or out of a virtual account, for something that happened OUTSIDE any trade: a
+ * dividend, a deposit, a withdrawal, a fee. The drift ritual for an adopted book
+ * (docs/design/adopted-book.md §8) rests on this — we cannot read the bank, so a dividend the user
+ * received is a number only they can tell us, and without a way to record it the account's equity
+ * drifts further from their real one every quarter.
+ *
+ * NEVER touches `realizedPnl`, and that is the whole point of it being its own function rather than a
+ * call to adjustBalance: a deposit is not a gain. Folded into realized P&L it would inflate the track
+ * record by exactly the amount of money the user put in — the most flattering possible lie, and one
+ * nothing downstream could detect afterwards.
+ *
+ * Rejects a move that would overdraw the account: cash below zero is a margin balance, which is not
+ * something this store models.
+ *
+ * @param {{ amount:number, reason?:string }} args `amount` is signed — negative withdraws.
+ * @returns {Promise<{ accountId:string, cashBalance:number, amount:number }>}
+ */
+async function adjustCash(userId, accountId, { amount, reason = null } = {}) {
+    const db   = await getDb()
+    const aid  = String(accountId)
+    const acct = await getAccount(userId, aid)
+    if (!acct) throw Object.assign(new Error(`account ${aid} not found`), { status: 404 })
+
+    const delta = Number(amount)
+    if (!Number.isFinite(delta) || delta === 0) throw Object.assign(new Error('a cash movement needs a non-zero amount'), { status: 400 })
+
+    const next = _round2(acct.cashBalance + delta)
+    if (next < 0) throw Object.assign(new Error(`that would overdraw the account (balance ${_round2(acct.cashBalance)})`), { status: 409 })
+
+    await db.collection(ACCOUNTS).updateOne(
+        { userId, accountId: aid },
+        {
+            $inc:  { cashBalance: delta },
+            $set:  { updatedAt: Date.now() },
+            // Kept as a LEDGER rather than just a balance, because "why is my cash different" is the
+            // question this feature exists to answer, and a bare balance cannot answer it.
+            $push: { cashMovements: { $each: [{ amount: delta, reason, at: Date.now() }], $slice: -200 } },
+        },
+    )
+    logger.info(LOG, `Cash ${delta > 0 ? '+' : ''}${delta} on ${aid}${reason ? ` (${reason})` : ''} → ${next}`)
+    return { accountId: aid, cashBalance: next, amount: delta }
 }
 
 /** Wipe one account's positions/orders/equity and restore its balance — a fresh sim run. */

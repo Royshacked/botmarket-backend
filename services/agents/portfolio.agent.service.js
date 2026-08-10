@@ -200,6 +200,12 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     if (thesis)     dynamicSections.push(_buildThesisSection(thesis))
     if (lifecycle)  dynamicSections.push(_buildLifecycleSection(lifecycle))
     if (portfolioState) dynamicSections.push(_buildPortfolioStateSection(portfolioState, isReviewMode, reviewDelta))
+    // A book we cannot read has to be re-confirmed by the only source of truth there is: the user.
+    // Review mode only — it is a review ritual, not something to raise mid-construction.
+    if (isReviewMode) {
+        const adoptedSection = _buildAdoptedReviewSection(portfolioState)
+        if (adoptedSection) dynamicSections.push(adoptedSection)
+    }
 
     // Two cache breakpoints: the static instructions, and the dynamic context
     // tail. The tail (date + accounts + mandate + lifecycle + snapshotted
@@ -645,6 +651,45 @@ export function _formatReviewDelta(d) {
     }
 
     return lines.length ? lines.join('\n') : null
+}
+
+/**
+ * THE DRIFT RITUAL (docs/design/adopted-book.md §8), for a review of an ADOPTED book.
+ *
+ * We cannot read the bank. The user will sell, buy, take a dividend and receive a split without us
+ * ever seeing it, so divergence is not a bug to be fixed once — it is the permanent condition of this
+ * kind of book, and the only source of truth is the person who owns it. A reconciler cannot be written;
+ * a ritual can.
+ *
+ * So every review of an adopted book OPENS by asking whether it is still their book. One tap for
+ * unchanged, otherwise the numbers get corrected — and only then is the review worth having, because
+ * every gate underneath it (drift, weights, P&L) reads quantities we were told once and never checked.
+ *
+ * Returns '' for a book that was built here: those holdings came from fills we placed and watched, and
+ * asking the user to verify our own execution would be both odd and corrosive.
+ */
+export function _buildAdoptedReviewSection(state) {
+    const adopted = (state?.ideas ?? []).filter(i => i?.adopted === true)
+    if (!adopted.length) return ''
+
+    return [
+        'THIS IS AN ADOPTED BOOK — CONFIRM IT BEFORE YOU READ IT.',
+        `${adopted.length} of these holdings were recorded on the user's word, at a bank we cannot read.`,
+        'Nothing has verified them since. They may have sold, trimmed, added, been paid a dividend or',
+        'taken a split, and none of it reached us.',
+        '',
+        'So OPEN this review by asking whether the book below is still right — the names and the sizes.',
+        'Keep it to one short question with an easy "yes, unchanged": it is a checkpoint, not an audit,',
+        'and a review that starts with an interrogation is a review nobody comes back to.',
+        '',
+        'If anything HAS changed, fix that before reading anything into the numbers. Every judgment',
+        'below rests on quantities we were told once: a position they sold months ago still shows here',
+        'as held, at a price that has kept moving, and a weight computed from it is fiction. Correcting',
+        'the book IS the first move of the review, not an interruption to it.',
+        '',
+        'A dividend, deposit or fee is a CASH movement, not a trade — say so plainly and record it as',
+        'one; folded into P&L it would read as a gain the user never made.',
+    ].join('\n')
 }
 
 export function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = null) {

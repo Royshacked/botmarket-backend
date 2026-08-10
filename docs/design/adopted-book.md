@@ -329,12 +329,22 @@ completes Allocate, and it gives Themis a far better first interaction than wait
 We cannot read the bank. The user will trade, take dividends and receive splits outside the app, so
 divergence is guaranteed and the only source of truth is the user.
 
-- Every review card for an adopted book opens with "is this still your book?" — one tap for
-  *unchanged*, otherwise the edit grid.
+- **BUILT 2026-08-10.** Every review of an adopted book opens by confirming it
+  (`_buildAdoptedReviewSection`, review mode only): one short question with an easy "yes, unchanged",
+  and if anything changed, correcting the book is the FIRST move of the review rather than an
+  interruption to it. The section states its own reason, because a rule without one gets optimised
+  away: every judgment below it rests on quantities we were told once, so a position sold months ago
+  still shows as held at a price that kept moving, and a weight computed from it is fiction.
+  A book built HERE gets no ritual — we watched those fills ourselves.
 - A monthly **confirm-holdings** card: the same N-leg card mechanism, quantities pre-filled, used as
   verification.
-- Dividends and deposits = a cash adjustment on the account; splits = edit quantity + avg. No
-  corporate-actions engine.
+- **BUILT 2026-08-10.** Dividends, deposits, withdrawals and fees are a CASH MOVEMENT on the account
+  (`paperBroker.adjustCash`, `POST /api/paper/accounts/:accountId/cash`), which never touches
+  `realizedPnl` — folded into P&L a deposit would inflate the track record by exactly the amount the
+  user paid in, the most flattering possible lie and undetectable afterwards. Kept as a bounded ledger
+  (`cashMovements`), because "why is my cash different" is the question this exists to answer and a
+  bare balance cannot answer it. An overdraw is refused rather than modelled. Splits = edit quantity +
+  avg (the repair path). Still no corporate-actions engine.
 - The copy never claims parity with the bank: the app shows the book **as you last confirmed it**.
 
 ---
@@ -409,7 +419,9 @@ divergence is guaranteed and the only source of truth is the user.
 6. **Allocate as the adoption review** — the count gap, targets, conviction, thesis confirm,
    keep-or-change recorded, re-fingerprint. Then live-verify the whole path: `spine_state` walks
    `adopted → covered → under_mandate` and Themis rings.
-7. **Drift ritual** — the confirm-holdings card and the cash adjustment.
+7. **Drift ritual — PARTLY BUILT 2026-08-10.** The review-time re-confirm and the cash movement are
+   in (§8). What remains is the standalone monthly confirm-holdings CARD: it needs a card type and a
+   frontend renderer of its own, where the review-time question needed neither.
 8. **The `count` Themis gate** — cheap and deterministic, once targets exist.
 
 ## 11. Defaults taken (override freely)

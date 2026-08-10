@@ -12,6 +12,7 @@
  *   PATCH  /api/paper/accounts/:accountId           { name?, spreadBps?, commissionPerTrade? } → rename + settings
  *   DELETE /api/paper/accounts/:accountId           → delete (409 if it holds an open position)
  *   POST   /api/paper/accounts/:accountId/reset     { startingBalance? } → wipe + restore balance
+ *   POST   /api/paper/accounts/:accountId/cash      { amount, reason? }  → a dividend / deposit / fee
  *   GET    /api/paper/accounts/:accountId/equity-curve ?fromMs=
  *   GET    /api/paper/accounts/:accountId/trades       ?status=&limit=
  *
@@ -38,6 +39,7 @@ paperRoutes.post  ('/accounts',                       log, ctrl.createAccount)
 paperRoutes.patch ('/accounts/:accountId',            log, ctrl.patchAccount)
 paperRoutes.delete('/accounts/:accountId',            log, ctrl.deleteAccount)
 paperRoutes.post  ('/accounts/:accountId/reset',      log, ctrl.resetAccount)
+paperRoutes.post  ('/accounts/:accountId/cash',       log, ctrl.adjustAccountCash)
 paperRoutes.get   ('/accounts/:accountId/equity-curve', log, ctrl.accountEquityCurve)
 paperRoutes.get   ('/accounts/:accountId/trades',     log, ctrl.accountTrades)
 

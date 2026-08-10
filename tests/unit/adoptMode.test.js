@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _buildAdoptSection, _buildStagedBook } from '../../services/agents/portfolio.agent.service.js'
+import { _buildAdoptSection, _buildStagedBook, _buildAdoptedReviewSection } from '../../services/agents/portfolio.agent.service.js'
 import { refreshDraft, partitionHoldings, _setDeps } from '../../api/portfolio/adoptBook.service.js'
 import { reconcileAccount } from '../../services/bookValuation.util.js'
 
@@ -239,4 +239,40 @@ test('the instruction tells Atlas to say it, and how the two reasons differ', ()
     assert.match(s, /an ADR, e\.g\. NSRGY/)
     assert.match(s, /MIS-TYPED TICKER/)
     assert.match(s, /ask for the CASH balance directly/)
+})
+
+// ─── The drift ritual: a book we cannot read must be re-confirmed ────────────────
+// Divergence is not a bug to fix once, it is the permanent condition of a book at a bank we cannot
+// read. A reconciler can't be written for it; a ritual can — every review opens by asking whether the
+// book is still right, because every gate underneath reads quantities we were told once.
+
+test('a review of an adopted book opens by confirming it', () => {
+    const s = _buildAdoptedReviewSection({ ideas: [{ asset: 'AAPL', adopted: true }, { asset: 'MSFT', adopted: true }] })
+    assert.match(s, /ADOPTED BOOK — CONFIRM IT BEFORE YOU READ IT/)
+    assert.match(s, /2 of these holdings were recorded on the user's word/)
+    assert.match(s, /still right/)
+})
+
+test('the ritual says WHY, so it cannot be optimised away as a pleasantry', () => {
+    const s = _buildAdoptedReviewSection({ ideas: [{ adopted: true }] })
+    assert.match(s, /rests on quantities we were told once/)
+    assert.match(s, /a weight computed from it is fiction/)
+    // And it must stay light, or nobody completes a second one.
+    assert.match(s, /easy "yes, unchanged"/)
+})
+
+test('a dividend is named as cash, never as P&L', () => {
+    assert.match(_buildAdoptedReviewSection({ ideas: [{ adopted: true }] }),
+        /CASH movement, not a trade/)
+})
+
+test('a book built HERE gets no ritual — we watched those fills ourselves', () => {
+    assert.equal(_buildAdoptedReviewSection({ ideas: [{ asset: 'AAPL' }, { asset: 'MSFT' }] }), '')
+    assert.equal(_buildAdoptedReviewSection(null), '')
+})
+
+test('a MIXED book still gets it, counting only the adopted lines', () => {
+    // Adding a name to an adopted book must not silence the ritual for the ones we never verified.
+    const s = _buildAdoptedReviewSection({ ideas: [{ adopted: true }, { asset: 'NEW' }] })
+    assert.match(s, /1 of these holdings/)
 })
