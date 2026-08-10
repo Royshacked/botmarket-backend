@@ -91,6 +91,10 @@ export async function streamAxl(req, res) {
                 // Reopen an item the user already has, in the desk that owns it, instead of opening
                 // that desk on a blank page. Independent of `route` — it carries its own desk.
                 edit: _validateEdit(result.edit),
+                // The user already owns the book they want managed → the portfolio desk opens in
+                // ADOPT mode instead of on a blank construction. Re-gated on a real portfolio route
+                // for the same reason the symbol and the opening are: this tier is the contract.
+                adopt: route === 'portfolio' && result.adopt === true,
                 // The desk's opening turn, in the user's own words — the whole hand-off. Gated on a
                 // real route for the same reason the symbol is: with nowhere to land it is a message
                 // sent to no one. The service has already collapsed and capped it.

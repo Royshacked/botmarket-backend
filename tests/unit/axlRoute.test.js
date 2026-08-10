@@ -7,6 +7,7 @@ import { dirname, join } from 'path'
 
 import { _splitRoute, _splitEdit, _cleanOpening, EDIT_KIND_DESKS, axlAgentService } from '../../services/agents/axl.agent.service.js'
 import { _sanitizeRouteSymbol, _sanitizeEditRef, _validateEdit, VALID_PIPELINES, EDIT_KINDS } from '../../api/axl/axl.controller.js'
+import { ALL_EMIT_TAGS } from '../../services/llmStream.util.js'
 
 // Axl's desk hand-off: `<route>research NVDA</route>` — the desk AND the name it should open on.
 // The symbol is what turns "routing you to Prometheus" into Prometheus already researching NVDA,
@@ -300,4 +301,31 @@ test('_cleanOpening: nothing but whitespace is nothing', () => {
     assert.equal(_cleanOpening('   \n  '), null)
     assert.equal(_cleanOpening(null), null)
     assert.equal(_cleanOpening(undefined), null)
+})
+
+// ─── <adopt>: the door for a book that already exists elsewhere ──────────────────
+// A third sibling of <route>, for the same reason <edit> is a second one: "they already own this" is
+// not a destination, it is what the portfolio desk must DO on arrival. Squeezing it into the route tag
+// would collide with the symbol slot (`portfolio adopt` vs `portfolio AAPL`).
+
+test('adopt is registered as an emit tag, or the first turn prints it at the user', () => {
+    assert.ok(ALL_EMIT_TAGS.includes('adopt'),
+        'an unregistered tag is not suppressed — it reaches the chat as literal text')
+})
+
+test('adopt rides ONLY with the portfolio desk', () => {
+    // A mode with no desk to arrive at is a flag nothing reads.
+    for (const [route, adopt, expected] of [
+        ['portfolio', true,  true],
+        ['portfolio', false, false],
+        ['trade',     true,  false],
+        [null,        true,  false],
+    ]) {
+        assert.equal(route === 'portfolio' && adopt === true, expected,
+            `route=${route} adopt=${adopt}`)
+    }
+})
+
+test('every desk adopt can arrive at is a real desk', () => {
+    assert.ok(VALID_PIPELINES.has('portfolio'))
 })

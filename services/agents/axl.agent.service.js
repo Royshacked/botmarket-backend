@@ -160,6 +160,11 @@ ${audienceBlock}` : ''}` },
     let routeCapture = null
     let editCapture = null
     let openCapture = null
+    // <adopt> is a THIRD sibling of <route>, for the same reason <edit> is a second one: "the user
+    // already owns this book" is not a destination, it is what the portfolio desk must do on arrival.
+    // Squeezing it into the route tag would collide with the symbol slot (`portfolio adopt` vs
+    // `portfolio AAPL`), and a mode that arrives as a symbol is a mode that silently never arrives.
+    let adoptCapture = false
     // Follow-up chips. The shared pipe collects and cleans them; WHAT to suggest is this agent's
     // own judgment, authored in axl_system_prompt.md.
     const suggest = makeSuggestionCapture()
@@ -189,13 +194,14 @@ ${audienceBlock}` : ''}` },
             route: (text) => { routeCapture = text.trim() },
             edit:  (text) => { editCapture = text.trim() },
             open:  (text) => { openCapture = text },
+            adopt: () => { adoptCapture = true },
             suggest: suggest.onCapture,
         }),
         onToolStart, onReasoning,
         onChart: (row) => { chartRow = row; onChart?.(row) },
     })
 
-    const reply = stripEmitTags(raw ?? '', ['route', 'edit', 'open', 'suggest']).trim()
+    const reply = stripEmitTags(raw ?? '', ['route', 'edit', 'open', 'adopt', 'suggest']).trim()
     const { desk, symbol } = _splitRoute(routeCapture)
     const edit = _splitEdit(editCapture)
 
@@ -210,13 +216,20 @@ ${audienceBlock}` : ''}` },
     // the `opening` line above guards its own tag rather than trusting the tag to arrive correctly.
     const suggestions = (desk || edit) ? [] : suggest.result()
 
-    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, edit: edit ? `${edit.kind}:${edit.ref}` : null, opening: opening ? opening.length : null, suggestions: suggestions.length, replyLength: reply.length })
+    // Only ever alongside the PORTFOLIO desk, and never alongside an edit. Gated here for the reason
+    // `opening` and `routeSymbol` are: a mode with no desk to arrive at is a flag nothing reads, and
+    // an edit reopens a book that already exists — adoption is how a book that exists ELSEWHERE
+    // arrives, so the two cannot both be true.
+    const adopt = (adoptCapture && desk === 'portfolio' && !edit)
+
+    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, adopt, edit: edit ? `${edit.kind}:${edit.ref}` : null, opening: opening ? opening.length : null, suggestions: suggestions.length, replyLength: reply.length })
     // `chart` on the return is the REQUEST, never the image: the row already went out on its own
     // event and doubling it here would double the bytes on the wire.
     return {
         reply,
         route: desk,
         routeSymbol: symbol,
+        adopt,
         // { kind, ref, desk } — reopen this exact item. Stands apart from `route` rather than
         // folding into it: a route hands over a desk and a blank page, an edit hands over a document.
         edit,
