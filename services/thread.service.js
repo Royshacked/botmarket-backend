@@ -33,7 +33,7 @@ export async function ensureThreadIndexes() {
 // Save/refresh a DRAFT thread. The caller has already decided the conversation is
 // substantive (thread.util.isSubstantive over the agent's emitted phase/blocks).
 // Upserts by threadId, refreshes the TTL, then enforces the per-user draft cap.
-async function saveDraft({ threadId, userId, agent, messages, phase = null, subjectType = null, mandate = null, state = null }) {
+async function saveDraft({ threadId, userId, agent, messages, phase = null, subjectType = null, mandate = null, state = null, pipeline = null }) {
     try {
         const db  = await getDb()
         const id  = threadId || newThreadId()
@@ -51,6 +51,11 @@ async function saveDraft({ threadId, userId, agent, messages, phase = null, subj
         // Agent-specific building state to restore a session (e.g. the idea agent's
         // analysisState). Opaque to the thread layer — stored and handed back verbatim.
         if (state && typeof state === 'object') set.state = state
+        // WHICH DESK this conversation belongs to, when it belongs to one. An agent is shared between
+        // desks — Argus screens for a portfolio build and also scans standalone — so `agent` alone
+        // cannot say what the user left unfinished, nor which other doors to that agent must close
+        // while this one holds it. Null for a conversation opened at a desk with no pipeline.
+        if (pipeline) set.pipeline = pipeline
 
         await db.collection(COLLECTION).updateOne(
             { threadId: id },
@@ -163,7 +168,8 @@ export function _yourTurn(messages) {
  * Only DRAFTS count. A linked thread produced its artifact and is finished business; badging it would
  * mark every book the user ever built as outstanding.
  *
- * @returns {Promise<Array<{agent:string, threadId:string, title:string|null, updatedAt:number, yourTurn:boolean}>>}
+ * @returns {Promise<Array<{agent:string, pipeline:string|null, threadId:string, title:string|null,
+ *                           updatedAt:number, yourTurn:boolean}>>}
  */
 async function listUnfinished({ userId }) {
     try {
@@ -173,7 +179,7 @@ async function listUnfinished({ userId }) {
                 { userId: String(userId), tier: 'draft' },
                 // The last message only: the list is a badge, not a replay, and pulling whole
                 // conversations to decide whose turn it is would read every thread in full.
-                { projection: { threadId: 1, agent: 1, title: 1, updatedAt: 1, phase: 1, messages: { $slice: -1 } } },
+                { projection: { threadId: 1, agent: 1, pipeline: 1, title: 1, updatedAt: 1, phase: 1, messages: { $slice: -1 } } },
             )
             .sort({ updatedAt: -1 })
             .limit(50)
@@ -182,6 +188,7 @@ async function listUnfinished({ userId }) {
         return docs.map(d => ({
             threadId:  d.threadId,
             agent:     d.agent,
+            pipeline:  d.pipeline ?? null,
             title:     d.title ?? null,
             phase:     d.phase ?? null,
             updatedAt: d.updatedAt ?? null,

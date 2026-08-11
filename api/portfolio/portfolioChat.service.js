@@ -157,7 +157,7 @@ async function buildReviewDelta(fingerprint, state) {
  * accepted rebalance), and, during first-time construction, refresh the draft thread once the
  * mandate floor is crossed. The caller gates this on the client still listening (!aborted).
  */
-function persistStreamOutcome({ userId, portfolioId, threadId, isReviewMode, messages, mandate, storedThesis, result }) {
+function persistStreamOutcome({ userId, portfolioId, threadId, isReviewMode, messages, mandate, storedThesis, result, pipeline = null }) {
     if (result.mandate && portfolioId) {
         setMandate(portfolioId, userId, result.mandate)
             .then(r => { if (!r.ok) logger.warn(LOG, 'setMandate returned not-ok, mandate may not be persisted') })
@@ -174,6 +174,9 @@ function persistStreamOutcome({ userId, portfolioId, threadId, isReviewMode, mes
             threadId, userId, agent: 'portfolio',
             messages: draftMessages, phase: result.phase ?? null,
             subjectType: 'portfolio', mandate: knownMandate ?? null,
+            // The desk, so an unfinished build can be told apart from a standalone chat at the same
+            // agent — see thread.service.saveDraft.
+            pipeline,
         }).catch(err => logger.warn(LOG, 'construction saveDraft failed', err))
     }
 }

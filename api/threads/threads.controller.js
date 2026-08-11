@@ -13,7 +13,7 @@ const AGENTS = new Set(['idea', 'portfolio', 'scanner', 'kairos', 'axl'])
 
 export async function saveDraftThread(req, res) {
     try {
-        const { threadId, agent, messages, phase = null, subjectType = null, state = null, mandate = null } = req.body ?? {}
+        const { threadId, agent, messages, phase = null, subjectType = null, state = null, mandate = null, pipeline = null } = req.body ?? {}
         if (!threadId || typeof threadId !== 'string') return res.status(400).json({ error: 'threadId is required' })
         if (!AGENTS.has(agent))    return res.status(400).json({ error: 'invalid agent' })
         if (!Array.isArray(messages)) return res.status(400).json({ error: 'messages must be an array' })
@@ -27,6 +27,8 @@ export async function saveDraftThread(req, res) {
 
         const result = await threadService.saveDraft({
             threadId, userId: req.user._id, agent, messages, phase, subjectType, state, mandate,
+            // The desk this conversation belongs to — validated as a string, never trusted as a key.
+            pipeline: typeof pipeline === 'string' && pipeline.trim() ? pipeline.trim() : null,
         })
         if (!result.ok) return res.status(500).json({ error: 'Failed to save draft' })
         res.json({ ok: true, threadId: result.threadId })

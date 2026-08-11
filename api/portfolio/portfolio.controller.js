@@ -141,7 +141,7 @@ export async function removeAdoptedHolding(req, res) {
 }
 
 export async function streamPortfolio(req, res) {
-    const { messages, ideaAccounts, mainAccountId, portfolioId, portfolioIdeas, threadId, model, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
+    const { messages, ideaAccounts, mainAccountId, portfolioId, portfolioIdeas, threadId, model, reasoningEffort, routingMode, currentPhase, pipeline } = req.body ?? {}
 
     const validatedMessages = parseChatMessages(messages)
     if (validatedMessages.error) {
@@ -210,6 +210,9 @@ export async function streamPortfolio(req, res) {
                 // statedMandate, not mandate: only what the user established WITH ATLAS is written back.
                 userId: req.user._id, portfolioId, threadId, isReviewMode, messages,
                 mandate: statedMandate, storedThesis, result,
+                // Which desk this conversation belongs to, so the badge and the lock can tell an
+                // unfinished BUILD from a standalone chat at the same agent.
+                pipeline: typeof pipeline === 'string' && pipeline.trim() ? pipeline.trim() : null,
             })
 
             // G1: Atlas asked Prometheus to re-research a held name. Fire the async refresh-by-hop
