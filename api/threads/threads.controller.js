@@ -13,7 +13,13 @@ const LOG    = '[threads:controller]'
 // save was rejected 400 and a setup the user walked out of mid-build vanished — the desk badge had
 // nothing to read, the lock had nothing to close, and returning to the trade desk resumed the Argus
 // step because the Mentor thread it should have picked up did not exist.
-const AGENTS = new Set(['idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'axl'])
+//
+// `analyst` and `strategy` were missing for the same reason and cost the same thing (2026-08-11): both
+// declare a desk in agentMeta, so the hub was asking for a marker and a lock that nothing could ever
+// answer. THIS LIST IS THE SECOND HALF OF A PAIR — a panel that saves and an agent named here — and a
+// new desk needs both. Neither half fails loudly on its own: a missing name is a silent 400, and a
+// panel that never saves simply has nothing to reject.
+export const AGENTS = new Set(['idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'axl', 'analyst', 'strategy'])
 
 export async function saveDraftThread(req, res) {
     try {
