@@ -29,9 +29,27 @@ export function isSubstantive({ agent, phase, hasArtifact = false, mandateReady 
     // Axl (concierge) never generates an artifact and has no phases — every real
     // exchange the client chooses to save is substantive. The client only saves
     // once an assistant reply exists, so this never persists an empty conversation.
-    if (agent === 'axl') return true
+    //
+    // Mentor is the same shape for the same reason: it is a WORKSHEET desk, not a
+    // phased build, so it emits no phase to clear a floor with. Gating it on a setup
+    // draft instead would lose precisely the conversation this floor exists to keep —
+    // the one the user walked out of BEFORE the setup was written.
+    if (agent === 'axl' || agent === 'mentor') return true
     const p = Number(phase)
     return Number.isFinite(p) && p >= 2
+}
+
+/**
+ * The filter for "this desk run is over — drop what fed it".
+ *
+ * Pure, and separate from the deleteMany that uses it, because this is the one destructive query in
+ * the thread store and `tier: 'draft'` is the whole of its safety: a LINKED thread is the conversation
+ * behind a live setup or book, reached by editing that artifact, and must survive its desk being
+ * finished with. Dropping that one key would delete the reasoning behind everything the user owns —
+ * so it is asserted in a test rather than trusted to stay typed correctly.
+ */
+export function pipelineDraftsQuery(userId, pipeline) {
+    return { userId: String(userId), tier: 'draft', pipeline: String(pipeline) }
 }
 
 // expiresAt for a tier: a future Date for drafts (Mongo TTL auto-prunes past it),

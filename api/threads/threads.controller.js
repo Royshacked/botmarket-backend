@@ -9,7 +9,11 @@ import { isSubstantive } from '../../services/thread.util.js'
 import { logger }        from '../../services/logger.service.js'
 
 const LOG    = '[threads:controller]'
-const AGENTS = new Set(['idea', 'portfolio', 'scanner', 'kairos', 'axl'])
+// Every agent whose panel drives its own draft persistence. `mentor` was missing, so every Mentor
+// save was rejected 400 and a setup the user walked out of mid-build vanished — the desk badge had
+// nothing to read, the lock had nothing to close, and returning to the trade desk resumed the Argus
+// step because the Mentor thread it should have picked up did not exist.
+const AGENTS = new Set(['idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'axl'])
 
 export async function saveDraftThread(req, res) {
     try {
@@ -95,6 +99,23 @@ export async function getThread(req, res) {
     } catch (err) {
         logger.error(LOG, 'getThread failed', err)
         res.status(500).json({ error: 'Failed to get thread' })
+    }
+}
+
+/**
+ * The desk finished: its artifact exists, so the drafts that fed the run go with it. Drafts only —
+ * the thread that AUTHORED the artifact was linked to it and is reached by editing that artifact.
+ */
+export async function discardPipelineDrafts(req, res) {
+    try {
+        const { pipeline } = req.params
+        if (!pipeline || typeof pipeline !== 'string') return res.status(400).json({ error: 'pipeline is required' })
+        const result = await threadService.discardPipelineDrafts({ userId: req.user._id, pipeline })
+        if (!result.ok) return res.status(500).json({ error: 'Failed to discard pipeline drafts' })
+        res.json({ ok: true, deleted: result.deleted })
+    } catch (err) {
+        logger.error(LOG, 'discardPipelineDrafts failed', err)
+        res.status(500).json({ error: 'Failed to discard pipeline drafts' })
     }
 }
 

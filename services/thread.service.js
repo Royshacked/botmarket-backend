@@ -9,7 +9,7 @@
 
 import { getDb, stripId, stripIds } from '../providers/mongodb.provider.js'
 import { logger } from './logger.service.js'
-import { newThreadId, computeExpiry, draftsToEvict, deriveTitle, DRAFT_CAP } from './thread.util.js'
+import { newThreadId, computeExpiry, draftsToEvict, deriveTitle, pipelineDraftsQuery, DRAFT_CAP } from './thread.util.js'
 
 const LOG        = '[thread]'
 const COLLECTION = 'threads'
@@ -200,6 +200,33 @@ async function listUnfinished({ userId }) {
     }
 }
 
+/**
+ * A DESK RUN IS OVER — drop what fed it.
+ *
+ * The artifact exists, so every conversation that built it is spent. The ones still worth reading are
+ * not drafts any more: the thread that authored the artifact was LINKED to it (that is what `tier`
+ * distinguishes), and it is reached by editing the artifact, not by resuming a desk. What is left
+ * here is scaffolding — the Argus scan that produced a name, the mandate that framed a screen — and
+ * leaving it behind meant the hub went on marking the desk as unfinished, and went on holding that
+ * agent's other doors shut, over a run the user had finished.
+ *
+ * DRAFTS ONLY, which is the whole safety of it: a linked thread is untouchable here, so this can
+ * never delete the conversation attached to a live setup or book.
+ *
+ * @returns {Promise<{ok:boolean, deleted:number}>}
+ */
+async function discardPipelineDrafts({ userId, pipeline }) {
+    try {
+        if (!pipeline) return { ok: true, deleted: 0 }
+        const db = await getDb()
+        const r  = await db.collection(COLLECTION).deleteMany(pipelineDraftsQuery(userId, pipeline))
+        return { ok: true, deleted: r.deletedCount ?? 0 }
+    } catch (err) {
+        logger.error(LOG, 'discardPipelineDrafts failed', err)
+        return { ok: false, deleted: 0 }
+    }
+}
+
 async function discardThread({ threadId, userId }) {
     try {
         const db = await getDb()
@@ -220,4 +247,5 @@ export const threadService = {
     listThreads,
     listUnfinished,
     discardThread,
+    discardPipelineDrafts,
 }
