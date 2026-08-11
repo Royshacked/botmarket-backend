@@ -61,6 +61,19 @@ export async function pinThread(req, res) {
     }
 }
 
+/**
+ * Unfinished work across every desk — what the route badges read. Drafts only, each saying whether
+ * it is waiting on the user.
+ */
+export async function listUnfinishedThreads(req, res) {
+    try {
+        res.json({ threads: await threadService.listUnfinished({ userId: req.user._id }) })
+    } catch (err) {
+        logger.error(LOG, 'listUnfinishedThreads failed', err)
+        res.status(500).send({ error: 'Failed to list unfinished threads' })
+    }
+}
+
 export async function listThreads(req, res) {
     try {
         const agent = typeof req.query.agent === 'string' ? req.query.agent : null

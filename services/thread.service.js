@@ -138,6 +138,61 @@ async function listThreads({ userId, agent = null }) {
     }
 }
 
+/**
+ * Is this conversation waiting on the USER? True when the last thing said was the assistant's.
+ *
+ * Derived from the messages rather than stored as a flag, because the messages ARE the truth: a
+ * second field saying whose turn it is would be a copy of them, and a copy can rot. Pure.
+ */
+export function _yourTurn(messages) {
+    const last = (Array.isArray(messages) ? messages : []).at(-1)
+    return last?.role === 'assistant'
+}
+
+/**
+ * UNFINISHED WORK, per desk — what the route badges read.
+ *
+ * A conversation the user walked away from is already here as a DRAFT thread, resumable, surviving
+ * whatever the client tore down when they left. The only thing missing was that nothing outside the
+ * desk ever said so, which is how a half-finished portfolio quietly becomes invisible.
+ *
+ * WHOSE TURN IT IS is DERIVED, not stored: a draft whose last message is the assistant's is waiting
+ * on the user. Deriving it means there is no second piece of state to keep in step with the
+ * conversation — the messages are the truth, and a stored flag would be a copy of them that can rot.
+ *
+ * Only DRAFTS count. A linked thread produced its artifact and is finished business; badging it would
+ * mark every book the user ever built as outstanding.
+ *
+ * @returns {Promise<Array<{agent:string, threadId:string, title:string|null, updatedAt:number, yourTurn:boolean}>>}
+ */
+async function listUnfinished({ userId }) {
+    try {
+        const db = await getDb()
+        const docs = await db.collection(COLLECTION)
+            .find(
+                { userId: String(userId), tier: 'draft' },
+                // The last message only: the list is a badge, not a replay, and pulling whole
+                // conversations to decide whose turn it is would read every thread in full.
+                { projection: { threadId: 1, agent: 1, title: 1, updatedAt: 1, phase: 1, messages: { $slice: -1 } } },
+            )
+            .sort({ updatedAt: -1 })
+            .limit(50)
+            .toArray()
+
+        return docs.map(d => ({
+            threadId:  d.threadId,
+            agent:     d.agent,
+            title:     d.title ?? null,
+            phase:     d.phase ?? null,
+            updatedAt: d.updatedAt ?? null,
+            yourTurn:  _yourTurn(d.messages),
+        }))
+    } catch (err) {
+        logger.error(LOG, 'listUnfinished failed', err)
+        return []
+    }
+}
+
 async function discardThread({ threadId, userId }) {
     try {
         const db = await getDb()
@@ -156,5 +211,6 @@ export const threadService = {
     pinThread,
     getThread,
     listThreads,
+    listUnfinished,
     discardThread,
 }
