@@ -59,7 +59,7 @@ const DEFAULT_STATUS = 'active'
 // Plan fields re-written on an update; identity (id/userId/symbol/created_at) + revisions history
 // are preserved out of band.
 const PLAN_FIELDS = ['sector', 'thesis', 'rating', 'price_target', 'estimates', 'gap',
-    'catalysts', 'kill_criteria', 'risk_reward', 'conviction', 'status', 'evidence']
+    'catalysts', 'kill_criteria', 'risk_reward', 'conviction', 'status', 'evidence', 'flags']
 
 export const coverageService = { initiateCoverage, getCoverage, getCoverageById, listActiveBySector, updateCoverage, retireCoverage, deleteCoverage, captureResearchBasis, recordMonitorState, claimRemodel }
 
@@ -156,15 +156,110 @@ export function ratingCoherence({ rating, price_target, price } = {}) {
     return { ok: true }
 }
 
-// The price read for the gate. Injected so tests exercise the branching, and imported LAZILY so that
-// merely importing this service (the schema normalizer is used in pure unit tests, and half the app
-// imports coverageService) never drags in the monitor's whole provider stack.
+// ─── the plausibility flags ───────────────────────────────────────────────────
+// RECORDED, NEVER REFUSED — and that is the whole difference from the gate above. `ratingCoherence`
+// catches a LOGIC error: a rating that contradicts its own target is never right, in any thesis, so
+// refusing it costs nothing. These two catch a JUDGMENT that may well be correct — arguing a name
+// re-rates outside its own history is precisely the variant view Prometheus exists to write. Refusing
+// those would make the desk unable to say the very thing it is for.
+//
+// So they stamp `flags[]` and let the thesis through, the same way `risk_reward.ordered` records a
+// hand-written band rather than dropping it. The cost of the alternative is silence: TSLA was
+// initiated with a $42 bear (a 30x trough multiple, BELOW the lowest annual P/E the stock has ever
+// printed) sitting next to a $420 bull and a `high` conviction — a 10x valuation band, which is a way
+// of saying "I don't know", stamped 0.78 sure. Every field was individually well-formed; nothing
+// compared them, so nothing said a word.
+
+/**
+ * The widest bear→bull spread each conviction level can honestly carry. A band IS an uncertainty
+ * statement, so it and the conviction are two answers to one question and they have to agree.
+ * `low` is unbounded on purpose: a wide band with low conviction is not a contradiction, it is a
+ * correctly-labelled unknown.
+ */
+const BAND_CEILING = { high: 4, medium: 8, low: Infinity }
+
+/**
+ * Does the valuation band agree with the stated conviction? PURE.
+ * → `{ ok: true }` | `{ ok: false, reason, detail, spread }`.
+ *
+ * ABSTAINS when either side is missing (no level, no bear/bull, a non-positive bear) — there is no
+ * contradiction to find between a number and nothing.
+ */
+export function bandConviction({ risk_reward, conviction } = {}) {
+    const bear = _num(risk_reward?.bear?.value), bull = _num(risk_reward?.bull?.value)
+    const level = conviction?.level
+    const ceiling = BAND_CEILING[level]
+    if (!ceiling || bear === null || bull === null || bear <= 0 || bull <= 0) return { ok: true }
+
+    // Compare the RAW ratio, report the rounded one — rounding first would let a 4.04x band through a
+    // 4x ceiling on a display concern.
+    const ratio  = bull / bear
+    const spread = Math.round(ratio * 10) / 10
+    if (ratio <= ceiling) return { ok: true }
+    return { ok: false, reason: 'band_contradicts_conviction', spread, detail:
+        `The bear/bull band spans ${bear}–${bull} — a ${spread}x spread — while conviction is \`${level}\` `
+        + `(a ${level} call carries at most ${ceiling}x). A band that wide is a statement that the outcome `
+        + `is unknown; pick one, and if the band is right the conviction should come down.` }
+}
+
+// A leg is judged against a P/E history only when its own arithmetic IS a P/E: multiple x forward
+// metric lands on the leg's value. The EV methods bridge through net debt and shares, so the product
+// misses by a mile — which makes this a deterministic method discriminator, and means an ev_sales
+// thesis silently abstains instead of being compared against the wrong series.
+const _looksLikePE = leg => {
+    const v = _num(leg?.value), m = _num(leg?.multiple), f = _num(leg?.forward_metric)
+    return v !== null && m !== null && f !== null && v > 0 && Math.abs(m * f - v) / v < 0.02
+}
+// Below this many annual observations the range is not a range. FMP returns one row per fiscal year,
+// and a young or newly-covered name can come back with two.
+const MIN_MULTIPLE_HISTORY = 5
+
+/**
+ * Where does a leg's multiple sit inside the stock's OWN history? PURE.
+ * → `{ ok: true, pctile }` | `{ ok: false, reason, detail, pctile, min, max }`.
+ *
+ * The mirror of `gap.pctile`, which places our TARGET inside the STREET's range: this places our
+ * MULTIPLE inside the range the market has actually paid for this name. Fires only OUTSIDE the
+ * observed range — inside it, however far from the median, some year already traded there and the
+ * assumption has a precedent. (TSLA's own annual P/E runs 31x–941x, so the $210 base at 100x is
+ * unremarkable; the $42 bear at 30x is the leg with no precedent at all.)
+ *
+ * ABSTAINS on a thin sample, a missing multiple, or a non-P/E leg — see `_looksLikePE`.
+ */
+export function multipleStretch({ multiple, history, leg = 'base' } = {}) {
+    const m = _num(multiple)
+    const obs = (Array.isArray(history) ? history : []).map(_num).filter(x => x !== null && x > 0).sort((a, b) => a - b)
+    if (m === null || m <= 0 || obs.length < MIN_MULTIPLE_HISTORY) return { ok: true, pctile: null }
+
+    const r1 = x => Math.round(x * 10) / 10
+    const min = r1(obs[0]), max = r1(obs[obs.length - 1])
+    const pctile = Math.round(obs.filter(x => x < m).length / obs.length * 100)
+    if (m >= obs[0] && m <= obs[obs.length - 1]) return { ok: true, pctile }
+
+    const below = m < obs[0]
+    return { ok: false, reason: 'multiple_outside_history', pctile, min, max, below, detail:
+        `The ${leg} leg applies a ${m}x multiple — ${below ? 'BELOW' : 'ABOVE'} the entire range this name `
+        + `has traded at over ${obs.length} years (${min}x–${max}x). ${below
+            ? 'A trough the market has never actually paid is an assumption, not a downside case'
+            : 'A peak the market has never actually paid is an assumption, not an upside case'} — `
+        + `say what re-rates it there, or move the leg inside the range.` }
+}
+
+// The reads the gate and the flags need. Injected so tests exercise the branching, and imported
+// LAZILY so that merely importing this service (the schema normalizer is used in pure unit tests, and
+// half the app imports coverageService) never drags in the monitor's whole provider stack.
 const _io = {
     getPrice: async (symbol) => {
         try {
             const { fetchLastPrice } = await import('../../monitoring/monitorUtils.js')
             return await fetchLastPrice(symbol)
         } catch { return null }   // no price → the gate abstains (see ratingCoherence)
+    },
+    getMultipleHistory: async (symbol) => {
+        try {
+            const { getHistoricalMultiples } = await import('../../providers/fmp.provider.js')
+            return await getHistoricalMultiples(symbol, 'pe')
+        } catch { return [] }     // no history → multipleStretch abstains
     },
 }
 export function _setCoverageIO(io) { Object.assign(_io, io) }
@@ -175,6 +270,55 @@ async function _checkCoherence(doc, io = _io) {
     if (!BULLISH_RATINGS.has(rating) && !BEARISH_RATINGS.has(rating)) return { ok: true }
     if (_num(doc?.price_target?.value) === null) return { ok: true }
     return ratingCoherence({ rating, price_target: doc.price_target, price: await io.getPrice(doc.symbol) })
+}
+
+/**
+ * Run the plausibility checks over a normalized doc → the `flags[]` to stamp on it. Never throws and
+ * never rejects: the caller stores what comes back and saves the thesis either way.
+ *
+ * The history is fetched ONCE and shared across the three legs (it is a per-name series, not a
+ * per-leg one), and only when at least one leg is a P/E leg worth judging — so an EV-method thesis
+ * costs no request at all.
+ */
+export async function _plausibilityFlags(doc, io = _io) {
+    const flags = []
+    try {
+        const band = bandConviction(doc)
+        if (!band.ok) flags.push({ code: band.reason, leg: null, detail: band.detail })
+
+        const legs = ['bear', 'base', 'bull']
+            .map(name => ({ name, leg: doc?.risk_reward?.[name] }))
+            .filter(({ leg }) => _looksLikePE(leg))
+        if (legs.length) {
+            const history = await io.getMultipleHistory(doc.symbol)
+            const judged = legs.map(({ name, leg }) => ({ name, s: multipleStretch({ multiple: leg.multiple, history, leg: name }) }))
+            const missed = judged.filter(({ s }) => !s.ok)
+
+            // WHOLESALE OFFSET = A METRIC MISMATCH, NOT A BAD ASSUMPTION. `_looksLikePE` proves a leg is
+            // an equity per-share multiple; it cannot prove the EARNINGS underneath it are the GAAP ones
+            // FMP's ratios series divides by. A thesis valued off adjusted EPS is a different metric
+            // against the same price, so every leg lands outside the range together and the comparison
+            // is apples-to-oranges — INTU (11/22/30x against a 39x–69x GAAP series) and SHOP (11/15/18x
+            // against 59x–779x) are both that, and both would have cried wolf on all three legs.
+            //
+            // The signal this flag is actually for is a leg out of line with its OWN siblings: TSLA's
+            // 30x bear next to a 100x base and a 150x bull, on one shared earnings basis. So when every
+            // judged leg misses the same way, stay quiet — a flag that fires on a units mismatch is a
+            // flag the desk learns to scroll past.
+            const wholesale = judged.length > 1 && missed.length === judged.length
+                && new Set(missed.map(({ s }) => s.below)).size === 1
+            if (wholesale) {
+                logger.info(LOG, 'multiple history skipped — every leg offset the same way, reading as a metric mismatch',
+                    { symbol: doc.symbol, ours: judged.map(({ s }) => s.pctile === 0 ? 'below' : 'above')[0], range: `${missed[0].s.min}-${missed[0].s.max}x` })
+            } else {
+                for (const { name, s } of missed) flags.push({ code: s.reason, leg: name, detail: s.detail })
+            }
+        }
+    } catch (err) {
+        // A flag that can't be computed is a flag that isn't raised — never a thesis that isn't saved.
+        logger.warn(LOG, 'plausibility flags failed (thesis unaffected)', err.message)
+    }
+    return flags
 }
 
 // ─── pure helpers ──────────────────────────────────────────────────────────────
@@ -253,6 +397,14 @@ function _riskReward(rr) {
     }
 }
 
+// The plausibility flags, on the way back IN. They are DERIVED — `_plausibilityFlags` is their only
+// author — so the normalizer's job is to let a stored one round-trip through the monitor's patches
+// without letting an agent-emitted `flags` invent one: anything outside the known codes is dropped.
+const FLAG_CODES = new Set(['band_contradicts_conviction', 'multiple_outside_history'])
+const _flags = v => _arr(v)
+    .filter(f => f && typeof f === 'object' && FLAG_CODES.has(f.code))
+    .map(f => ({ code: f.code, leg: _str(f.leg), detail: _str(f.detail) }))
+
 /**
  * Defensively normalize a raw coverage object (from the agent, an update patch, or a manual create)
  * into the stored shape. Pure. Symbol is uppercased; unknown rating/status → null/default; numeric
@@ -281,6 +433,7 @@ function normalizeCoverage(raw, userId = null) {
         kill_criteria: _arr(r.kill_criteria),          // MONITORABLE (P5)
         risk_reward:   _riskReward(r.risk_reward),      // {bull, base, bear}
         conviction:    cleanConviction(r.conviction),
+        flags:         _flags(r.flags),                 // DERIVED plausibility warnings — see _plausibilityFlags
         status:        STATUSES.includes(r.status) ? r.status : DEFAULT_STATUS,
         revisions:     _arr(r.revisions),               // append-only history (the "living" part)
         evidence:      _arr(r.evidence),
@@ -328,6 +481,9 @@ async function initiateCoverage(raw, userId) {
             logger.warn(LOG, 'coverage REJECTED — rating contradicts target', { symbol, rating: doc.rating, pt: doc.price_target?.value, detail: coherent.detail })
             return coherent
         }
+        // Recorded, not refused — the thesis is stored either way (see the plausibility flags).
+        doc.flags = await _plausibilityFlags(doc)
+        if (doc.flags.length) logger.warn(LOG, 'coverage FLAGGED — implausible, stored anyway', { symbol, codes: doc.flags.map(f => f.code) })
         doc.revisions = [newRevision({ kind: 'initiate', note: _str(raw?.init_note) ?? `Initiated coverage on ${symbol}` })]
         const saved = await crud.insert(doc)
         logger.info(LOG, 'coverage initiated', { id: doc.id, symbol, sector: doc.sector })
@@ -405,6 +561,14 @@ async function updateCoverage(id, patch, userId) {
             logger.warn(LOG, 'coverage update REJECTED — rating contradicts target', { id, symbol: merged.symbol, rating: merged.rating, pt: merged.price_target?.value, detail: coherent.detail })
             return coherent
         }
+    }
+
+    // Re-derive the flags whenever the patch touches an input they are computed FROM — otherwise the
+    // stored ones spread through untouched (the monitor's status/gap patches must not silently clear
+    // a warning they never addressed, nor pay for a history fetch on every tick).
+    if (['rating', 'price_target', 'risk_reward', 'conviction'].some(k => k in p)) {
+        merged.flags = await _plausibilityFlags(merged)
+        if (merged.flags.length) logger.warn(LOG, 'coverage FLAGGED — implausible, stored anyway', { id, symbol: merged.symbol, codes: merged.flags.map(f => f.code) })
     }
 
     const revision = newRevision({ kind: _str(p.revision_kind) ?? 'update', note: _str(p.revision_note), changed: _diffPlan(cur, merged) })
