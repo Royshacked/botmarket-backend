@@ -64,27 +64,60 @@ test('streamAgentResponse: handler throws → emits `error`, no `done`', async (
     assert.equal(res.ended, true)
 })
 
-test('streamAgentResponse: client aborted mid-handler → no `done`, no end', async () => {
+// ─── Walking away is not stopping (2026-08-11) ──────────────────────────────────
+//
+// These two used to assert the opposite, and that was the bug: `res.close` aborted the model call, so
+// leaving a desk mid-answer killed the turn and threw away work the user had already paid for. A closed
+// socket now means only "nobody is watching" — the handler runs to completion and its side effects
+// (persisting the thread) happen. Nothing is WRITTEN, because there is no one to write to.
+
+test('the client leaving does not abort the turn — the handler finishes and persists', async () => {
+    const { req, res } = makeReqRes()
+    let ranToCompletion = false
+    let sawAbort        = null
+    await streamAgentResponse(req, res, {
+        log: '[test]',
+        handler: async ({ signal }) => {
+            res.emit('close')          // the user navigates away mid-answer
+            ranToCompletion = true
+            sawAbort = signal.aborted  // the gate every controller uses for persistence
+            return { reply: 'saved anyway' }
+        },
+    })
+    assert.equal(ranToCompletion, true, 'the turn is still worth finishing')
+    assert.equal(sawAbort, false, 'so `signal.aborted` must NOT read as stopped — that gate guards saving')
+    // Nothing written: the socket is gone. Silence here is correct; losing the work was not.
+    assert.equal(events(res).some(e => e.event === 'done'), false)
+})
+
+test('writes after the client leaves are no-ops, not errors on a dead socket', async () => {
     const { req, res } = makeReqRes()
     await streamAgentResponse(req, res, {
         log: '[test]',
-        handler: async () => {
-            res.emit('close')   // client disconnects → startSseStream aborts the signal
+        handler: async ({ sendEvent }) => {
+            res.emit('close')
+            sendEvent('token', { text: 'nobody is listening' })   // must not throw
+            return {}
+        },
+    })
+    assert.equal(events(res).some(e => e.event === 'token'), false)
+})
+
+test('an explicit stop DOES silence the turn — no done, no end', async () => {
+    // The other half of the split: stopping still means stopping. Simulated by aborting the signal the
+    // way the turn registry does, rather than by closing the socket.
+    const { req, res } = makeReqRes()
+    await streamAgentResponse(req, res, {
+        log: '[test]',
+        handler: async ({ signal }) => {
+            // eslint-disable-next-line no-undef
+            const ac = signal
+            // Reach the same end state stopTurn produces.
+            Object.defineProperty(ac, 'aborted', { value: true, configurable: true })
             return { reply: 'ignored' }
         },
     })
     const evs = events(res)
     assert.equal(evs.some(e => e.event === 'done'), false)
-    assert.equal(res.ended, false)
-})
-
-test('streamAgentResponse: aborted handler that throws → stays silent (no error frame)', async () => {
-    const { req, res } = makeReqRes()
-    await streamAgentResponse(req, res, {
-        log: '[test]',
-        handler: async () => { res.emit('close'); throw new Error('post-abort') },
-    })
-    const evs = events(res)
-    assert.equal(evs.some(e => e.event === 'error'), false)
     assert.equal(res.ended, false)
 })

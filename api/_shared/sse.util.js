@@ -1,47 +1,70 @@
 // Shared Server-Sent-Events boilerplate for the streaming endpoints
 // (orchestrator / portfolio / scanner / analyst / kairos / axl). Sets the SSE headers,
-// disables proxy buffering, starts a keep-alive heartbeat, and wires an
-// AbortController to the response close so a client disconnect (Stop / navigate
-// away) aborts the work instead of letting it finish silently.
+// disables proxy buffering, and starts a keep-alive heartbeat.
+//
+// STOP AND WALKING AWAY ARE DIFFERENT THINGS, and this file used to treat them as one: it aborted the
+// model call on `res.close`, which both gestures cause. So leaving a desk mid-answer killed the turn and
+// threw away work the user had already paid for — the reason a conversation could not be left running.
+//
+// Now: closing the connection means only "nobody is watching". The turn runs to completion and persists
+// itself, and the user finds it waiting when they return. Aborting takes an explicit say-so, routed
+// through the turn registry by id. Which also makes `signal.aborted` mean what every caller already
+// assumed it meant — the user stopped this — rather than "the socket went away".
 //
 // Listen on res, not req — req's 'close' fires as soon as the request body is
 // fully received (Node ≥ ~18), which would abort every stream instantly. res
 // 'close' fires only when the response connection actually closes.
 
 import { logger } from '../../services/logger.service.js'
+import { registerTurn } from './turnRegistry.js'
 
 const HEARTBEAT_MS = 30000
 
-export function startSseStream(req, res) {
+export function startSseStream(req, res, { turnId = null, userId = null } = {}) {
     res.setHeader('Content-Type',       'text/event-stream')
     res.setHeader('Cache-Control',      'no-cache')
     res.setHeader('Connection',         'keep-alive')
     res.setHeader('X-Accel-Buffering',  'no') // disable Render/nginx proxy buffering
     res.flushHeaders()
 
+    const ac = new AbortController()
+    let finished   = false
+    // The client has gone, but the WORK has not. Writes become no-ops rather than errors on a dead
+    // socket, and the handler carries on to its own completion and persistence.
+    let clientGone = false
+
     function sendEvent(event, data) {
+        if (clientGone) return
         res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     }
 
-    const ac = new AbortController()
-    let finished = false
-
     // keep-alive ping so an idle proxy (Render/nginx) doesn't cut the connection
-    const heartbeat = setInterval(() => res.write(': ping\n\n'), HEARTBEAT_MS)
+    const heartbeat = setInterval(() => { if (!clientGone) res.write(': ping\n\n') }, HEARTBEAT_MS)
+
+    // Stoppable by id for as long as it runs. Released in finish(), however the turn ends.
+    const release = registerTurn(turnId, ac, userId)
 
     res.on('close', () => {
         clearInterval(heartbeat)
-        if (!finished) ac.abort()
+        // Deliberately NOT ac.abort(): a closed socket means the user navigated away, and the turn
+        // they started is still worth finishing. Only an explicit stop aborts.
+        clientGone = true
     })
 
-    // Mark the stream finished so a normal close after completion doesn't abort,
-    // and stop the heartbeat once the work is done.
+    // Stop the heartbeat once the work is done, and let go of the turn id.
     function finish() {
         finished = true
         clearInterval(heartbeat)
+        release()
     }
 
-    return { sendEvent, signal: ac.signal, finish, get finished() { return finished } }
+    return {
+        sendEvent, signal: ac.signal, finish,
+        get finished()   { return finished },
+        // For a handler that wants to know nobody is watching — to skip a chart render, say. It must
+        // NOT be used to skip persistence: saving the turn is the entire point of finishing it.
+        get clientGone() { return clientGone },
+    }
 }
 
 // Run a streaming agent turn with the standard SSE lifecycle every agent controller
@@ -50,13 +73,19 @@ export function startSseStream(req, res) {
 // (or stay silent if the client is gone). The controller supplies only `handler`,
 // which receives { sendEvent, signal } — it does its own resolveModel + chatStream
 // (wiring token/tool/reasoning events via sendEvent) and RETURNS the `done` payload.
-// Any post-stream side effects belong inside the handler (gate them on !signal.aborted
-// to match the "only when the client is still listening" rule).
+// Post-stream side effects belong inside the handler. Gate them on `!signal.aborted` — which now means
+// "the user did not stop this" and NOT "the client is still connected", so a turn the user walked away
+// from still saves itself.
 //
 // Body validation that may 4xx must happen in the controller BEFORE calling this — once
 // the SSE headers are flushed we can't send a normal status code.
 export async function streamAgentResponse(req, res, { log, handler }) {
-    const { sendEvent, signal, finish } = startSseStream(req, res)
+    // The client mints the id and sends it with the turn, so Stop has something to name. A request
+    // without one still streams; it just cannot be stopped remotely.
+    const { sendEvent, signal, finish } = startSseStream(req, res, {
+        turnId: typeof req.body?.turnId === 'string' ? req.body.turnId : null,
+        userId: req.user?._id ?? null,
+    })
     try {
         const donePayload = await handler({ sendEvent, signal })
         finish()
@@ -66,7 +95,7 @@ export async function streamAgentResponse(req, res, { log, handler }) {
         }
     } catch (err) {
         finish()
-        if (signal.aborted) return   // client gone — nothing to send
+        if (signal.aborted) return   // the user stopped it — the error is not news
         logger.error(log, 'stream failed', err)
         sendEvent('error', { message: 'Streaming failed' })
         res.end()

@@ -58,6 +58,7 @@ import { analystRoutes }     from './api/analyst/analyst.routes.js'
 import { strategyRoutes }    from './api/strategy/strategy.routes.js'
 import { axlRoutes }         from './api/axl/axl.routes.js'
 import { threadsRoutes }     from './api/threads/threads.routes.js'
+import { turnsRoutes }       from './api/turns/turns.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
 // import { minosService } from './monitoring/minos.monitor.service.js'   // ARCHIVED — see the start() below
@@ -137,6 +138,9 @@ app.use('/api/analyst',     analystRoutes)
 app.use('/api/strategy',    strategyRoutes)
 app.use('/api/axl',         axlRoutes)
 app.use('/api/threads',     threadsRoutes)
+// Stopping an agent turn — its own endpoint because stopping and walking away are different
+// intentions that used to arrive as the same closed socket (see api/_shared/sse.util.js).
+app.use('/api/turns',       turnsRoutes)
 app.use('/api/market',      marketRoutes)
 app.use('/api/calendar',    calendarRoutes)
 app.use('/api/chat',        chatRoutes)
