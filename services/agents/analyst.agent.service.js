@@ -109,6 +109,29 @@ function _cleanDraft(c) {
     return { ...c, symbol: c.symbol.toUpperCase().trim() }
 }
 
+// The plausibility flags standing against the last model (coverage.service `_plausibilityFlags`).
+//
+// They ride on the stored doc, so update mode already showed them to the agent — as two unlabelled
+// objects in a 60-line JSON dump, which is the same as not showing them. The last re-model read a
+// flagged 30x bear leg and moved it FURTHER out (TSLA, 42 → 36, widening the band to 11.7x), because
+// nothing in the prompt said what the array was or that it was owed an answer.
+//
+// So they come out of the dump and get named. Framed as the desk's objections rather than as
+// instructions: the analyst may defend a leg — arguing a name re-rates outside its own history is a
+// legitimate variant view, which is exactly why these RECORD rather than refuse — but it must now
+// answer instead of stepping over.
+const _withoutFlags = ({ flags, ...rest }) => rest   // eslint-disable-line no-unused-vars
+function _objectionsBlock(flags) {
+    const list = (Array.isArray(flags) ? flags : [])
+        .map(f => ({ leg: typeof f?.leg === 'string' ? f.leg.trim() : '', detail: typeof f?.detail === 'string' ? f.detail.trim() : '' }))
+        .filter(f => f.detail)
+    if (!list.length) return ''
+    return `\n\nSTANDING OBJECTIONS to the model above — the desk's automated coherence checks flagged these`
+        + ` and they are UNANSWERED. Address every one: either fix the leg, or state plainly in the thesis`
+        + ` what justifies it. Do not re-emit the same numbers without saying which you chose and why.\n`
+        + list.map(f => `  • ${f.leg ? `[${f.leg} leg] ` : ''}${f.detail}`).join('\n')
+}
+
 /**
  * SESSION-STABLE only. The draft moved to _buildTurnContext — it changes every turn, and in
  * `system` that sat ahead of the whole conversation in the cache prefix, so the history breakpoint
@@ -117,11 +140,13 @@ function _cleanDraft(c) {
  * `existing_coverage` deliberately STAYS: it is the stored thesis, fetched once for the session and
  * byte-identical thereafter — it is the draft that moves, not everything shaped like JSON.
  */
-function _buildSystemPrompt(chatState, seed = null, audience = null) {
+export function _buildSystemPrompt(chatState, seed = null, audience = null) {
     const today  = new Date().toISOString().slice(0, 10)
     const active = chatState?.active_symbol || 'none'
     const existingBlock = chatState?.existing_coverage
-        ? `\nEXISTING COVERAGE — update mode: this name is already in the book. Revise the thesis rather than starting from scratch. Reference what's changed since the prior view.\n${JSON.stringify(chatState.existing_coverage, null, 2)}`
+        ? `\nEXISTING COVERAGE — update mode: this name is already in the book. Revise the thesis rather than starting from scratch. Reference what's changed since the prior view.\n`
+            + `${JSON.stringify(_withoutFlags(chatState.existing_coverage), null, 2)}`
+            + _objectionsBlock(chatState.existing_coverage?.flags)
         : ''
     // P4b: an Argus INVESTING-profile candidate handed over for research. Start Phase 1 with this name +
     // Argus's screen read as a provisional input — VERIFY it, don't take it on faith, and form your OWN view.

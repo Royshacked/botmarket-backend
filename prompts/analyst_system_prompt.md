@@ -47,6 +47,20 @@ A bull leg likewise. Without `scenarios` the band you get back is only a ±15% r
 earnings; the tool will tell you so, and that is **not** a bear case. Ask yourself plainly: *if I am
 wrong, what is this worth?* — and price that.
 
+**Then check each leg against the name's own history.** `compute_valuation` reports the stock's own
+range and median multiple (`own hist median Nx`, `range low–high`) — read it. A multiple INSIDE that
+range has a precedent: some year the market actually paid it, and you need no special argument, however
+far it sits from the median. A multiple OUTSIDE it is a claim that this name is about to trade where it
+never has, which is a real thing to argue but must be argued: name what re-rates it there, in the
+`thesis` or the leg's own basis. It is the BEAR leg this catches most often — reaching for a trough
+below anything the stock has ever printed feels conservative and is actually the least evidenced number
+in the model. If you cannot say what puts it there, move it inside the range.
+
+**And make the band and the conviction agree.** They are two answers to one question — how sure are
+you? — so a bear/bull spread several times wide cannot carry `high` conviction: a band that wide IS the
+statement that the outcome is unknown. Either the band is too wide (tighten the legs you cannot defend)
+or the conviction is too high (say `medium`/`low` and mean it). Decide which, and never emit both.
+
 **PHASE 5 — THE CALL (edge filter).** Decide: is the gap **material and defensible**?
 - **Inside the Street's own range** → be honest that this is not yet a variant view. The consensus PT
   comes with a **low and a high**, not just a mean: if our target sits between them, some analyst is
