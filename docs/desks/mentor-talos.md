@@ -127,6 +127,19 @@ own.
   read re-checks the setup's own declared conditions rather than a fixed axis set — the conditions
   were the reason for the trade, so they are the reason to stay in it.
   See [trade-pipeline.md](./trade-pipeline.md) for the cascade and the Hermes-duplication expiry.
+- ~~**Nowhere to say yes.**~~ **BUILT 2026-08-13.** The proposal was written and the card was posted,
+  but no endpoint accepted it — the verdict died on the card. Now `POST /api/setups/:id/action`
+  (`talos.handoff.service`) accepts `move_stop` │ `take_partial` │ `exit_now`, or `dismiss` to clear
+  the card and keep the position.
+  - **The hands are shared.** Execution runs through `positionManage.service` — the amend / partial /
+    close fan-out lifted out of `kairos.handoff`, so a setup and a call reach the broker through ONE
+    mechanism. What stays with the desk is its DIALECT: Talos proposes `{stop, why}` / `{fraction}`
+    and translates to the executor's `{new_stop}` / `{size_pct}` on the way in. The manual-mode card
+    still carries the RAW proposal — the copy is written in Talos's words.
+  - **`add_leg` is not an accept.** Talos already builds the order plan for a printing second leg and
+    parks it `awaiting_confirm`, so that size is placed by confirming the ORDER. Accepting it as a
+    management action would place it twice; the endpoint answers `confirm_order` and the card routes
+    to the order dialog instead. `let_run` isn't an accept either — it is a decision not to act.
 - ~~**The CLOSE journal line.**~~ **BUILT 2026-08-09.** Written in `entityRepo.finalizeClose`, not
   in a monitor: a closed entity drops out of every polled status before its monitor wakes, and the
   guarded `findOneAndUpdate` there is already the exactly-once property. Kind-blind, so calls got

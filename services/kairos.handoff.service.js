@@ -9,6 +9,9 @@ import { normalizeZones, normalizeReferenceLevels } from '../api/kairos/kairos.s
 import { knownVenue } from './venue.resolve.service.js'
 import { touchLeaf as _touch } from './protectionPlan.service.js'
 import { ownsEntity } from './entity/entityCrud.service.js'
+// The shared in-position executor (the hands). Imported as a namespace so the two dozen references
+// below read as "the shared mechanism", not as a pile of loose helpers of unclear origin.
+import * as _sharedManage from './positionManage.service.js'
 import { isLivePosition, isAwaitingConfirm, isInvalidated } from './entity/vocabulary.js'
 import { logger } from './logger.service.js'
 
@@ -288,12 +291,15 @@ export async function declineReentry(id, userId, deps = _deps) {
 
 // ── In-position management (Phase 5, slice 3 — the hands) ──────────────────────
 // The user accepts a management card (or dismisses it). Accept EXECUTES the pending proposal against
-// the linked idea's broker position via the shared primitives (amend stop/TP, partial/full close);
-// the execution reconciler then captures fills / resizes exits / finalizes closes off the resulting
-// events. exit_now may also be user-initiated without a pending card. Broker-authoritative
-// idempotency: if the position is already flat, just clear the card (Hermes reconciles the close).
-
-const MANAGE_VERBS = new Set(['move_stop', 'take_partial', 'exit_now', 'let_run'])
+// the linked idea's broker position through positionManage — the SHARED executor (amend stop/TP,
+// partial/full close), which Talos's setups now go through too; the execution reconciler then
+// captures fills / resizes exits / finalizes closes off the resulting events. exit_now may also be
+// user-initiated without a pending card. Broker-authoritative idempotency: if the position is
+// already flat, just clear the card (Hermes reconciles the close).
+//
+// What stays here is Kairos's own: ownership + status guards, the call→idea indirection (the
+// position hangs off the materialized idea, not off the call), manual-mode notification, and
+// Hermes's proposal vocabulary — which is already the execution contract, so it needs no mapping.
 
 const _mdeps = {
     getDb,
@@ -303,19 +309,13 @@ const _mdeps = {
     amendOrder:       (broker, userId, acct, orderId, fields) => brokerService.amendOrder(broker, userId, acct, orderId, fields),
     cancelOrder:      (broker, userId, acct, orderId)         => brokerService.cancelOrder(broker, userId, acct, orderId),
     notifyManage:     (call, card)                            => notifyCallManage(call, card),
-    // Keep the idea's tracked native exit in step with a broker amend/cancel so the reconciler's
-    // resize (on a later partial) doesn't cancel-and-replace it at the STALE price/id.
-    syncIdeaExit:     async (ideaId, accountId, leg, patch)   => {
-        const set = {}
-        if (patch?.price   != null) set['exitOrders.$[e].price']   = patch.price
-        if (patch?.orderId != null) set['exitOrders.$[e].orderId'] = String(patch.orderId)
-        if (patch?.status  != null) set['exitOrders.$[e].status']  = patch.status
-        if (!Object.keys(set).length) return
-        const db = await getDb()
-        await db.collection(ENTITIES).updateOne({ id: ideaId }, { $set: set },
-            { arrayFilters: [{ 'e.accountId': String(accountId), 'e.leg': leg, 'e.status': 'working' }] })
-    },
+    syncIdeaExit:     (ideaId, accountId, leg, patch)         => _sharedManage._deps.syncExit(ideaId, accountId, leg, patch),
 }
+
+// The shared executor reads `syncExit`; this module's dep is named `syncIdeaExit` and every test
+// harness injects it under that name. Adapt rather than rename — the indirection is one line, a
+// rename would be a silent no-op in any harness that missed it.
+const _toSharedDeps = (deps) => ({ ...deps, syncExit: deps.syncIdeaExit })
 
 // The main account's open-position linkage on the idea (broker/account/positionId/entry qty). Pure.
 export function _resolveMainLink(idea, call) {
@@ -327,101 +327,18 @@ export function _resolveMainLink(idea, call) {
     return { broker: slot.broker, accountId: slot.accountId, positionId: slot.positionId, quantity: Number(slot.quantity) || 0 }
 }
 
-// EVERY account's open-position linkage — a call is placed one-position-per-account, so a management
-// action fans out across ALL of them, not just the main. Pure. Scoped to the call's declared accounts
-// when present; falls back to all open-position slots (so a live position is never left unmanaged).
-export function _resolveAllLinks(idea, call) {
-    const links  = (Array.isArray(idea?.brokerOrders) ? idea.brokerOrders : []).filter(b => b?.positionId != null)
-    const accts  = Array.isArray(call?.accounts) ? call.accounts.map(String) : []
-    const scoped = accts.length ? links.filter(b => accts.includes(String(b.accountId))) : links
-    const chosen = scoped.length ? scoped : links   // never manage NONE while positions are open
-    return chosen.map(slot => ({ broker: slot.broker, accountId: slot.accountId, positionId: slot.positionId, quantity: Number(slot.quantity) || 0 }))
-}
-
-// The still-working native exit order for a leg on an account (the one to amend/cancel). Pure.
-export function _workingExit(idea, accountId, leg) {
-    return (idea?.exitOrders ?? []).find(o =>
-        o?.leg === leg && o?.status === 'working' && o?.orderId != null && String(o.accountId) === String(accountId)) ?? null
-}
-
-// Idea-unit quantity for a percentage partial, capped at what's live. Pure.
-export function _partialQty(remaining, sizePct) {
-    const rem = Number(remaining)
-    const pct = Number(sizePct)
-    if (!(rem > 0) || !(pct > 0)) return 0
-    return Math.min(rem, Math.round(rem * Math.min(100, pct) / 100 * 10000) / 10000)
-}
-
-function _phaseAfterStop(newStop, entry, isLong) {
-    if (!Number.isFinite(newStop) || !Number.isFinite(entry)) return 'trailing'
-    const atBreakeven = isLong ? newStop >= entry : newStop <= entry
-    return atBreakeven ? 'breakeven' : 'trailing'
-}
-
-// The persisted change after an executed action: $set (stop/phase, clear pending) + $push
-// (taken ledger for a partial, always the journal). `extra.qty` is the executed partial size. Pure.
-export function _manageAppliedUpdate(verb, proposal, ps, extra, nowMs) {
-    const at    = new Date(nowMs).toISOString()
-    const isLong = (ps?.entry?.direction ?? 'long') !== 'short'
-    const entry  = ps?.entry?.fill_price ?? ps?.entry?.intended ?? null
-    const set  = { 'position_state.pending_action': null }
-    const push = {}
-
-    let note
-    if (verb === 'move_stop') {
-        set['position_state.stop.current'] = proposal?.new_stop ?? ps?.stop?.current ?? null
-        set['position_state.stop.ref']     = proposal?.ref ?? null
-        set['position_state.phase']        = _phaseAfterStop(proposal?.new_stop, entry, isLong)
-        note = `Moved my stop to ${proposal?.new_stop} — ${set['position_state.phase'] === 'breakeven' ? 'locking in breakeven' : 'tightening protection'}.`
-    } else if (verb === 'let_run') {
-        set['position_state.phase'] = 'runner'
-        note = proposal?.cancel_tp ? 'Cancelled the take-profit — letting this run.' : `Raised the take-profit to ${proposal?.new_tp} — letting it run.`
-    } else if (verb === 'take_partial') {
-        push['position_state.taken'] = { at, size: extra?.qty ?? null, price: null, r_multiple: null, kind: 'partial' }
-        note = `Banked ${proposal?.size_pct}% here — taking money off the table.`
-    } else if (verb === 'exit_now') {
-        note = 'Flattening the rest now — the trade is done for me.'
-    }
-
-    push['monitor_state.timeline'] = { $each: [{ at, reason: 'in_position', phase: 'in_position', price: null, verdict: verb, note, next_check_at: null }], $slice: -80 }
-    return { $set: set, $push: push }
-}
-
-// Execute the resolved proposal against the broker. Returns { qty } (executed partial size) for the
-// applied-update. Throws on a broker failure (caller maps to execution_failed).
-async function _executeManage(verb, proposal, idea, link, open, userId, deps) {
-    const { broker, accountId, positionId } = link
-    if (verb === 'move_stop' || verb === 'let_run') {
-        const leg = verb === 'move_stop' ? 'stop' : 'tp'
-        const ord = _workingExit(idea, accountId, leg)
-        if (!ord) throw new Error(`no working ${leg} order to amend`)
-        if (verb === 'let_run' && proposal?.cancel_tp) {
-            await deps.cancelOrder(broker, userId, accountId, ord.orderId)
-            await deps.syncIdeaExit(idea.id, accountId, leg, { status: 'cancelled' })
-            return {}
-        }
-        const level  = verb === 'move_stop' ? Number(proposal.new_stop) : Number(proposal.new_tp)
-        const fields = verb === 'move_stop' ? { stopPrice: level } : { limitPrice: level }
-        const res    = await deps.amendOrder(broker, userId, accountId, ord.orderId, fields)
-        await deps.syncIdeaExit(idea.id, accountId, leg, { price: level, orderId: res?.orderId ?? null })
-        return {}
-    }
-    if (verb === 'take_partial') {
-        const remaining = Number(open?.volume) || link.quantity
-        const qty = _partialQty(remaining, proposal?.size_pct)
-        if (!(qty > 0)) throw new Error('partial size resolved to 0')
-        await deps.closePosition(broker, userId, accountId, positionId, { quantity: qty })
-        return { qty }
-    }
-    // exit_now → full close
-    await deps.closePosition(broker, userId, accountId, positionId)
-    return {}
-}
+// The mechanical half of management now lives in positionManage (shared with Talos). Re-exported
+// under their historical underscore names: they are imported by name from this module in several
+// places, and a rename would be churn with no reader benefit.
+export const _resolveAllLinks      = _sharedManage.resolveAllLinks
+export const _workingExit          = _sharedManage.workingExit
+export const _partialQty           = _sharedManage.partialQty
+export const _manageAppliedUpdate  = _sharedManage.manageAppliedUpdate
 
 // Handle an in-position management action. verb ∈ MANAGE_VERBS. Accept executes the pending proposal
 // (exit_now also works bare); dismiss clears the card.
 export async function manageCall(id, userId, verb, deps = _mdeps) {
-    if (!MANAGE_VERBS.has(verb)) return { ok: false, reason: 'bad_action' }
+    if (!_sharedManage.MANAGE_VERBS.has(verb)) return { ok: false, reason: 'bad_action' }
     const db = await deps.getDb()
     const { call, err } = await _loadOwned(db, id, userId)
     if (err) return { ok: false, reason: err }
@@ -432,59 +349,26 @@ export async function manageCall(id, userId, verb, deps = _mdeps) {
     const ps  = call.position_state ?? {}
     const now = Date.now()
 
-    // Resolve the proposal from the pending card (verb must match) — or a bare user-initiated exit_now.
-    const pending = ps.pending_action
-    let proposal
-    if (pending && pending.verdict === verb) proposal = pending.proposal
-    else if (verb === 'exit_now')            proposal = {}
-    else return { ok: false, reason: 'no_pending_action' }
+    // Hermes already speaks the execution contract (new_stop / size_pct), so there is nothing to
+    // translate here — unlike Talos, which has its own proposal vocabulary.
+    const { proposal, err: pErr } = _sharedManage.resolveProposal(ps.pending_action, verb)
+    if (pErr) return { ok: false, reason: pErr }
 
+    // A call's position hangs off the idea it materialized at confirm — that doc holds the broker
+    // linkage. (A setup holds its own, which is why the executor takes the holder separately.)
     const idea = await deps.getIdea(call.linked_idea_id)
     if (!idea) return { ok: false, reason: 'idea_not_found' }
 
     // Manual (broker-less): notify the instruction + record intent; the user acts at their broker.
     if (deriveMode(call.broker) === 'manual') {
         await deps.notifyManage(call, { verdict: verb, proposal, manual: true })
-        await db.collection(COLLECTION).updateOne({ id }, _manageAppliedUpdate(verb, proposal, ps, {}, now))
+        await db.collection(COLLECTION).updateOne({ id }, _sharedManage.manageAppliedUpdate(verb, proposal, ps, {}, now))
         return { ok: true, manual: true, verb }
     }
 
-    const links = _resolveAllLinks(idea, call)
-    if (!links.length) return { ok: false, reason: 'no_position_link' }
-
-    // Fan out across EVERY account the call is placed on (one position per account). Each is checked
-    // broker-authoritatively (skip if already flat) and the action applied independently — a partial
-    // failure on one account doesn't strand the others. The aggregate position_state (new stop level /
-    // total partial qty summed across accounts) is written once, after all accounts have run.
-    const perAccount = []
-    let anyReachable = false, anyOpen = false, anyApplied = false, totalQty = 0
-    for (const link of links) {
-        let open
-        try { open = await deps.findOpenPosition(link.broker, userId, link.accountId, link.positionId); anyReachable = true }
-        catch { perAccount.push({ accountId: link.accountId, reason: 'broker_unreachable' }); continue }
-        if (open === null) { perAccount.push({ accountId: link.accountId, alreadyFlat: true }); continue }
-        anyOpen = true
-        try {
-            const applied = await _executeManage(verb, proposal, idea, link, open, userId, deps)
-            anyApplied = true
-            totalQty += Number(applied?.qty) || 0
-            perAccount.push({ accountId: link.accountId, ok: true })
-        } catch (e) {
-            logger.error(LOG, `manage ${verb} failed for ${id} acct ${link.accountId}:`, e.message)
-            perAccount.push({ accountId: link.accountId, reason: 'execution_failed' })
-        }
-    }
-
-    if (!anyReachable) return { ok: false, reason: 'broker_unreachable', accounts: perAccount }
-    if (!anyOpen) {   // every account already flat → clear the card, let Hermes reconcile the close(s)
-        await db.collection(COLLECTION).updateOne({ id }, { $set: { 'position_state.pending_action': null } })
-        return { ok: true, alreadyFlat: true }
-    }
-    if (!anyApplied) return { ok: false, reason: 'execution_failed', accounts: perAccount }   // every open account errored
-
-    await db.collection(COLLECTION).updateOne({ id }, _manageAppliedUpdate(verb, proposal, ps, { qty: totalQty }, now))
-    logger.info(LOG, `call ${id} managed → ${verb} across ${links.length} account(s)`)
-    return { ok: true, verb, accounts: perAccount }
+    return _sharedManage.applyManage({
+        entity: call, holder: idea, verb, proposal, userId, nowMs: now, deps: _toSharedDeps(deps),
+    })
 }
 
 export const kairosHandoffService = { confirmCall, editCall, dismissCall, manageCall, reviveCall, declineReentry }

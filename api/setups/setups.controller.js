@@ -2,6 +2,7 @@ import { logger }       from '../../services/logger.service.js'
 import { sendReason }   from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { setupService } from './setups.service.js'
+import { talosHandoffService } from '../../services/talos.handoff.service.js'
 
 const LOG = '[setups:controller]'
 
@@ -16,6 +17,12 @@ const SETUP_REASONS = {
     invalid_setup: [400, 'The draft is not a usable setup'],
     invalid_zone:  [400, 'A zone is inverted or not numeric'],
     no_venue:      [400, 'Mark a trading account before generating'],
+    // Management refusals. `confirm_order` is not an error the user caused: a printing second leg is
+    // placed by confirming its order, so the client is being told WHERE the action lives.
+    confirm_order:     [409, 'That leg is placed by confirming its order, not from here'],
+    no_pending_action: [409, 'Talos has not proposed that'],
+    bad_proposal:      [422, 'The proposal is missing the level it needs'],
+    no_position_link:  [409, 'No broker position is linked to this setup'],
 }
 // Named reasons win over the prefix rules — `invalid_setup` / `invalid_zone` have their own copy and
 // must not be swallowed by the generic `invalid_*` passthrough below them.
@@ -42,6 +49,33 @@ const crud = makeEntityController({
 
 export const listSetups  = crud.list
 export const getSetup    = crud.get
+
+/**
+ * Act on a setup's in-position management card: accept the pending proposal, or dismiss the card
+ * and keep the position. The Mentor twin of `POST /api/kairos/:id/action` — same verb names, same
+ * refusal vocabulary, so a client that can drive one can drive the other.
+ *
+ * `add_leg` is deliberately NOT here: Talos parks that leg as a pending ORDER, so it is taken by
+ * confirming the order. Asking for it returns `confirm_order` rather than a flat 400 — the client
+ * needs to know it should route, not that it made a bad request.
+ */
+export async function actOnSetup(req, res) {
+    try {
+        const { id }     = req.params
+        const { action } = req.body ?? {}
+        const userId     = req.user._id
+
+        const result = action === 'dismiss'
+            ? await talosHandoffService.dismissSetupCard(id, userId)
+            : await talosHandoffService.manageSetup(id, userId, action)
+
+        if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallbackMessage: 'action_failed' })
+        res.send(result)
+    } catch (err) {
+        logger.error(LOG, 'actOnSetup failed:', err.message)
+        res.status(500).send({ error: 'action_failed' })
+    }
+}
 /** Status transitions (arm / disarm) and chat-state saves. Plan rewrites go through generate. */
 export const patchSetup  = crud.patch
 export const deleteSetup = crud.remove

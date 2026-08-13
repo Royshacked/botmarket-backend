@@ -215,9 +215,23 @@ services/
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
   tradeNotify.service.js    notify+route cards → social chat: entry_confirm (paper/live idea + Kairos
                             ready call) + call_expiry (Kairos thesis edit/expired) + queue_ready (the
-                            market-open nudge, from Axl). Pure builders + thin sendBotMessage wrappers;
+                            market-open nudge, from Axl) + setup_invalidation / setup_manage (Talos,
+                            from Mentor). Pure builders + thin sendBotMessage wrappers;
                             card is the alert, existing UI is the destination.
                             entry_confirm carries a `note` (passed_earlier | off_hours | null) for scheduled entries
+                            A card WITHOUT `actions` is a statement, not a request (ran_away /
+                            invalidated_fyi / let_run) — no buttons, no pending lifecycle
+  positionManage.service.js THE HANDS of in-position management, shared by every desk: resolve the
+                            broker links, fan the accepted action across ALL accounts (amend stop/TP,
+                            partial/full close), write position_state once. Kind-BLIND — the caller
+                            passes `entity` (owns position_state) + `holder` (owns brokerOrders); for a
+                            setup they are the same doc, for a call the holder is its materialized idea.
+                            Execution contract: move_stop{new_stop} take_partial{size_pct}
+                            let_run{new_tp|cancel_tp} exit_now{}. Each desk translates its own dialect in
+  talos.handoff.service.js  Mentor's half: POST /api/setups/:id/action → accept (move_stop|take_partial|
+                            exit_now) or dismiss. Translates Talos's {stop,why}/{fraction} into the
+                            contract above. `add_leg` → `confirm_order` (it is a parked ORDER, not a
+                            manage action — accepting here would place the size twice)
   pendingAction/            the OFF-HOURS QUEUE (docs/architecture/off-hours-queue.md). RULE: nothing
                             executes off-hours, paper included — a decision confirmed while the venue
                             is shut is queued, not fired and not lost.
