@@ -90,7 +90,13 @@ export async function getFmpQuoteFull(symbol, { fresh = false } = {}) {
 
     if (!API_KEY) throw new Error('FMP_API_KEY is not set')
 
-    const arr = await getJson(`${BASE}/quote?symbol=${encodeURIComponent(key)}&apikey=${API_KEY}`, { label: `FMP /quote ${key}` })
+    // retries: 0 — THE POLL IS THE RETRY. This is the app's highest-frequency call (the paper mark
+    // and fill loops price every open symbol every 3s), and it is what spends the quota that
+    // produces the 429s in the first place. Retrying here would add load precisely when the limit
+    // is already breached, and buy nothing: a skipped tick is re-priced 3s later by the next cycle,
+    // while an order that needs a price NOW asks with `fresh` and can fall back. Retries are for
+    // the one-shot calls (candles, fundamentals) where a blip is a visible failure.
+    const arr = await getJson(`${BASE}/quote?symbol=${encodeURIComponent(key)}&apikey=${API_KEY}`, { label: `FMP /quote ${key}`, retries: 0 })
     const quote = normalizeFmpQuote(Array.isArray(arr) ? arr[0] : arr)
     _quoteCache.set(key, { v: quote })   // cache null too (uncovered) — short TTL, avoids re-hitting
     if (quote == null) logger.info(LOG, `no FMP price for ${key} (uncovered on this plan)`)

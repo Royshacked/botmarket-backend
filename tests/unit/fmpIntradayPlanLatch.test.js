@@ -2,6 +2,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 process.env.FMP_API_KEY ??= 'test-key'
+// The transport retries a 429 twice by default, so ONE logical request would reach the wire three
+// times and the call counts below would stop meaning what they say. Turn it off here — this file
+// pins the LATCH; the retry policy is pinned by httpRetry.test.js. Must be set before the import:
+// http.util reads the value once, at module scope.
+process.env.HTTP_RETRIES = '0'
 const { getFmpCandles } = await import('../../providers/fmp.price.provider.js')
 
 // Intraday candles are a PLAN feature, sliced by RESOLUTION. A refused interval answers 402

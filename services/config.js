@@ -176,6 +176,10 @@ export const config = {
     // ── misc ──
     /** How often the outbound-HTTP meter logs its rolling counts. */
     get httpMeterMs() { return _num('HTTP_METER_MS', 60_000) },
+    /** Retries after a TRANSIENT provider failure (429 / 5xx). 0 disables. Per-call overridable. */
+    get httpRetries()     { return _num('HTTP_RETRIES', 2) },
+    /** Backoff base: the first wait is a jittered 0…base ms, then doubling. */
+    get httpRetryBaseMs() { return _num('HTTP_RETRY_BASE_MS', 300) },
 }
 
 // ─── validation ───────────────────────────────────────────────────────────────
@@ -198,7 +202,7 @@ export const KNOWN_KEYS = new Set([
     'CTRADER_CLIENTID', 'CTRADER_SECRET', 'CTRADER_REDIRECT_URI', 'CTRADER_REDIRECT_URL_PROD',
     'IBKR_CLIENT_ID', 'IBKR_CLIENT_SECRET', 'IBKR_REDIRECT_URI',
     'IBKR_GW_HOST', 'IBKR_GW_PORT', 'IBKR_GW_CLIENTID',
-    'HTTP_METER_MS',
+    'HTTP_METER_MS', 'HTTP_RETRIES', 'HTTP_RETRY_BASE_MS',
 ])
 
 /**
