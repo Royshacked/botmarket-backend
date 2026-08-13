@@ -146,6 +146,31 @@ test('every edit kind the prompt teaches is one the app can actually open', () =
     }
 })
 
+// Kairos is ASLEEP, not deleted (docs/desks/trade-pipeline.md): Mentor took the trading over, and
+// the autonomous call builder comes back later as a premium mode. The failure this catches is the
+// one the user actually hit — Axl still introducing Kairos as a desk you can go to, so someone asks
+// for a call and lands nowhere. The prompt has to say BOTH halves: no new work there, and the one
+// thing that still opens it (an edit on a call already in flight).
+test('the prompt puts Kairos to sleep and names Mentor as the trader', () => {
+    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md')
+    const prompt = readFileSync(promptPath, 'utf8')
+
+    assert.match(prompt, /Kairos\*\*[^.]*is\s+\*\*asleep\*\*/, 'the state is stated outright')
+    assert.match(prompt, /premium/i, 'and why it is asleep rather than gone')
+    assert.match(prompt, /never\s+route\s+anyone\s+there\s+for\s+a\s+new\s+trade/,
+        'the rule, not just the fact')
+    assert.match(prompt, /A\s+new\s+trade\s+is\s+Mentor's,\s+always/, 'and who took it over')
+
+    // The roster is what Axl describes when asked "who works here" — Kairos must not be a bullet in
+    // it, or the sleep rule argues with the list three lines above it.
+    const roster = prompt.slice(prompt.indexOf('## Who you are'), prompt.indexOf('Nothing they produce'))
+    assert.doesNotMatch(roster, /- \*\*Kairos\*\*/, 'a sleeping desk is not a bullet on the roster')
+    assert.match(roster, /- \*\*Mentor\*\* — the trader/, 'Mentor leads it instead')
+
+    // ...but the edit door stays open: live calls are still Hermes's and still editable.
+    assert.match(prompt, /<edit>call ID<\/edit>/, 'an existing call can still be reopened')
+})
+
 // Reception's whole job is WHERE, and the sentence that travels with them. The rules this replaces
 // had Axl collecting a risk number and a timeframe at the door — the desk's own Phase 1 — and
 // writing them down as an objective that then outlived the job.

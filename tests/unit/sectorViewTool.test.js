@@ -126,7 +126,9 @@ test('SHOWING the view is terminal — the prompt forbids routing off a read tur
 test('Axl KNOWS Pythia exists — an agent missing from the roster is one he cannot describe', () => {
     const prompt = promptText()
     assert.match(prompt, /\*\*Pythia\*\*/)
-    assert.match(prompt, /six specialist agents/, 'the count must track the roster it introduces')
+    // Five, not six: Kairos went to sleep when Mentor took the trading over, and the count has to
+    // track the roster it introduces or Axl describes a desk that isn't in the list.
+    assert.match(prompt, /five specialist agents/, 'the count must track the roster it introduces')
 })
 
 test('the strategy route is registered as a desk key the hub can resolve', () => {
