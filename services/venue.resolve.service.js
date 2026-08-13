@@ -3,6 +3,7 @@ import { brokerService } from '../api/broker/broker.service.js'
 import { accountMode } from '../api/broker/paperBroker.service.js'
 import { computeBasisOffset } from '../api/broker/brokerPrice.service.js'
 import { logger } from './logger.service.js'
+import { resolveWorkspace } from '../api/workspace/workspace.model.js'
 
 // The venue/symbol gate, shared by every entity that binds to a broker at Generate.
 //
@@ -106,20 +107,26 @@ export function resolveMode(source = {}) {
  * answers where an existing trade LIVES. A user with a cTrader account connected can still be sat
  * in the paper workspace, and everything an agent says should be about the book in front of them.
  *
- * Paper being connected IS the switch: the frontend's useWorkspaceMode derives the workspace the
- * same way (paper ON ⇔ the paper workspace, straight off this flag), so the two stay in step
- * without the client having to tell us. Kept here beside resolveMode so the two "which world is
- * this" answers live together.
+ * THREE of them, not two — `manual` is a full sibling, not a flavour of live. It is real money at an
+ * institution we cannot wire to, so it has no broker connection to derive itself from, which is
+ * exactly why it needs the second argument. Paper and live need nothing: paper being connected IS
+ * the switch.
  *
- * KNOWN GAP: 'manual' is a frontend-local overlay (localStorage) with no server-side flag, so a
- * user sitting in the manual workspace reads as 'live' here. Closing that needs the client to send
- * its workspace on the chat request; paper — the reported case — needs nothing.
+ * The rule itself lives in api/workspace/workspace.model.js, next to the record it reads, because
+ * the frontend's useWorkspaceMode holds the same rule and the two must not drift. This function is
+ * the venue-side door onto it, kept here beside resolveMode so the two "which world is this"
+ * answers live together.
+ *
+ * `stored` is null for any caller that hasn't got it, which resolves to the paper-or-live answer
+ * this returned before manual was persisted — so a missing read degrades to the old behaviour
+ * rather than to a wrong one.
  *
  * @param {object} connections  brokerService.listConnections(userId)
- * @returns {'paper'|'live'}
+ * @param {string|null} stored  getStoredWorkspace(userId) — the user's own last choice
+ * @returns {'paper'|'live'|'manual'}
  */
-export function activeWorkspace(connections = {}) {
-    return connections?.paper ? 'paper' : 'live'
+export function activeWorkspace(connections = {}, stored = null) {
+    return resolveWorkspace(!!connections?.paper, stored)
 }
 
 /**

@@ -1,9 +1,10 @@
 import { fileURLToPath } from 'url'
 import { parseEmitBlock, mergeDraft, runAgentStream } from '../agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE } from '../agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { KAIROS_TOOLS, buildKairosToolHandlers } from '../tools/kairos.tools.js'
+import { buildVenueSection } from '../tools/tradingContext.tools.js'
 import { normalizeSetup, setupReadiness, computeRR, validityProblems } from '../setup.schema.js'
 import { logger } from '../logger.service.js'
 
@@ -41,13 +42,19 @@ async function chatStream({
     model: requestedModel, reasoningEffort, userId,
     onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
+    _venueSection = buildVenueSection,
 }) {
 
     const tools        = KAIROS_TOOLS
     const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, audience, seed)
-    const builtMessages = attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState, clientTime))
+    // The venue (mode / broker / accounts / free cash) rides the last USER message rather than
+    // the system prompt: free cash moves whenever anything fills, so a volatile system block
+    // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
+    const builtMessages = attachTurnContext(
+        attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState, clientTime)),
+        await _venueSection(userId))
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
     // but a turn that forgets a dimension must not un-read it. Union with the prior state.
@@ -218,7 +225,7 @@ CONVERSATION CONTEXT:
 Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}${_buildSeedSection(seed)}`
 
     return [
-        { type: 'text', text: _baseSystemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: _baseSystemPrompt() + LANGUAGE_RULE + VENUE_RULE, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamicContext },
     ]
 }

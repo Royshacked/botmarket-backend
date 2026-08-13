@@ -18,7 +18,7 @@ import { readFileSync, readdirSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
-import { LANGUAGE_RULE } from '../../services/agentUtils.js'
+import { LANGUAGE_RULE, VENUE_RULE } from '../../services/agentUtils.js'
 
 const ROOT     = join(dirname(fileURLToPath(import.meta.url)), '../../')
 const SERVICES = join(ROOT, 'services')
@@ -102,10 +102,60 @@ test('the rule rides on the CACHED prefix, not the volatile tail', () => {
     for (const f of DESKS) {
         assert.match(
             src(f),
-            /\{ type: 'text', text: \w+\(\) \+ LANGUAGE_RULE, cache_control: \{ type: 'ephemeral' \} \}/,
+            /\{ type: 'text', text: \w+\(\) \+ LANGUAGE_RULE(?: \+ VENUE_RULE)?, cache_control: \{ type: 'ephemeral' \} \}/,
             `${f} appends LANGUAGE_RULE somewhere other than the cached system-prompt entry`,
         )
     }
+})
+
+// ─── 3. the venue rule, which rides the same seam for the same reasons ────────
+// Same shape as the language rule and the same failure mode: one paragraph, authored once, that has
+// to be on every desk that can be asked "are we in paper or live?". Wired as a constant rather than
+// eight prompt paragraphs because eight copies drift, and a desk asking for something another desk
+// was handed is the exact bug this fixes.
+//
+// TWO desks are deliberately absent, and the list below is the record of why — both write for
+// EVERYBODY at once, so they have no user whose venue could be read: marketBrief and strategy
+// (Pythia) are broadcasts, and neither carries the venue TOOLS either, for the same reason.
+const VENUE_DESKS = DESKS.filter(f => !['marketBrief.service.js', 'strategy.agent.service.js'].includes(f))
+
+test('every desk that has a user carries the venue rule, exactly once', () => {
+    for (const f of VENUE_DESKS) {
+        const s = src(f)
+        assert.match(s, /import \{[^}]*\bVENUE_RULE\b[^}]*\} from '\.\.?\/agentUtils\.js'/, `${f} does not import VENUE_RULE`)
+        const uses = s.match(/\+ VENUE_RULE/g) ?? []
+        assert.equal(uses.length, 1, `${f} appends VENUE_RULE ${uses.length} times — expected exactly 1`)
+    }
+})
+
+test('a broadcast desk carries NO venue rule — it has no user to read one for', () => {
+    for (const f of ['marketBrief.service.js', 'strategy.agent.service.js']) {
+        assert.doesNotMatch(src(f), /VENUE_RULE/,
+            `${f} writes for every user at once; a venue block there would be one user's book leaking into a broadcast`)
+    }
+})
+
+test('the venue rule forbids ASKING, not DECIDING', () => {
+    // The line it must not cross. Venue FACTS are the app's and may be enforced in code; what a desk
+    // DOES with them stays the desk's judgment, and a rule that blurred the two would stop agents
+    // asking the questions they SHOULD ask (which account fits, is this cash enough).
+    assert.match(VENUE_RULE, /NEVER ASK/)
+    assert.match(VENUE_RULE, /available to deploy/, 'the free-cash number is named, and named the same way everywhere')
+    assert.match(VENUE_RULE, /never against balance/, 'and the trap it exists to prevent is stated')
+    assert.match(VENUE_RULE, /is still yours|still your judgment|that is your judgment/i,
+        'the decide-half must survive: this rule governs facts, not choices')
+})
+
+test('the rule names THREE workspaces and keeps manual distinct from both neighbours', () => {
+    // Manual is real money at an institution the app cannot reach, built and monitored exactly like
+    // paper. Collapsed into live, a desk claims the app placed an order nobody placed; collapsed
+    // into paper, it discusses real money as practice. Both directions are named so neither is left
+    // to inference.
+    assert.match(VENUE_RULE, /THREE WORKSPACES/)
+    assert.match(VENUE_RULE, /MANUAL is real money/)
+    assert.match(VENUE_RULE, /built and monitored exactly like paper/)
+    assert.match(VENUE_RULE, /Never collapse manual into live/)
+    assert.match(VENUE_RULE, /its money is real/)
 })
 
 test('a NEW desk cannot be added without carrying the rule', () => {

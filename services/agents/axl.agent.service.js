@@ -1,12 +1,12 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { logger }         from '../logger.service.js'
-import { normalizeMessages, makePromptLoader, stripEmitTags, buildAudienceSection, LANGUAGE_RULE } from '../agentUtils.js'
+import { normalizeMessages, makePromptLoader, stripEmitTags, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeSuggestionCapture } from '../suggestions.service.js'
 import { runAgentStream } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
-import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
+import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeUserDataHandlers, USER_DATA_TOOL_SPEC } from '../tools/userData.tools.js'
 import { makeConceptHandlers, CONCEPT_TOOL_SPEC } from '../tools/concepts.tools.js'
@@ -136,14 +136,18 @@ async function chatStream({ messages = [], audience = null, model: requestedMode
     _marketBriefHandlers = makeMarketBriefHandlers,
     _marketHoursHandlers = makeMarketHoursHandlers,
     _sectorViewHandlers = makeSectorViewHandlers,
+    _venueSection = buildVenueSection,
 } = {}) {
-    const normalized = normalizeMessages(messages, MAX_MESSAGES)
+    // The venue rides the last USER message, not the system prompt: free cash moves whenever
+    // anything fills, and a volatile system block sits ahead of the whole conversation in the cache
+    // prefix. See buildVenueSection.
+    const normalized = attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), await _venueSection(userId))
 
     // Stable cached base + volatile tail (today's date, so "this week" resolves).
     const today = new Date().toISOString().slice(0, 10)
     const audienceBlock = buildAudienceSection(audience)
     const systemPrompt = [
-        { type: 'text', text: _systemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: _systemPrompt() + LANGUAGE_RULE + VENUE_RULE, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: `CURRENT DATE: ${today}. Resolve relative timeframes (today, this week, this month) against this date.${audienceBlock ? `
 
 ${audienceBlock}` : ''}` },

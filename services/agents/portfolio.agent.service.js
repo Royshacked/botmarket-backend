@@ -8,8 +8,8 @@ import { getSecFilings } from '../../providers/sec.provider.js'
 import { cleanConviction } from '../conviction.util.js'
 import { formatWorkspaceLine } from '../../api/portfolio/portfolioMode.util.js'
 import { logger }         from '../logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE } from '../agentUtils.js'
-import { makeTradingContextHandlers } from '../tools/tradingContext.tools.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE } from '../agentUtils.js'
+import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorView.tools.js'
 import { makeChartHandler } from '../tools/marketData.tools.js'
@@ -169,12 +169,18 @@ export const portfolioAgentService = { chatStream }
 
 async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, audience = null, adoptDraft = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
+    _venueSection = buildVenueSection,
 }) {
     // The staged book rides the USER TURN, not the system tail: it changes every time a row is
     // corrected, and a per-turn block sitting ahead of the chat is exactly what stops the conversation
     // breakpoint from being hit (see project_prompt_cache_history). The adopt INSTRUCTION is stable and
     // goes in the tail with everything else.
-    const normalized = attachTurnContext(_buildMessages(messages), _buildStagedBook(adoptDraft))
+    // The venue (mode / broker / accounts / free cash) rides the last USER message rather than
+    // the system prompt: free cash moves whenever anything fills, so a volatile system block
+    // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
+    const normalized = attachTurnContext(
+        attachTurnContext(_buildMessages(messages), _buildStagedBook(adoptDraft)),
+        await _venueSection(userId))
 
     // Stable base (cached) + volatile per-request sections (accounts, edit
     // context). cache_control on the base lets Anthropic cache the
@@ -214,7 +220,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // session, so caching it lets turns 2+ read it at ~0.1× instead of re-paying
     // full price every turn. A turn where it does change just re-writes it once.
     const systemPrompt = [
-        { type: 'text', text: _systemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: _systemPrompt() + LANGUAGE_RULE + VENUE_RULE, cache_control: { type: 'ephemeral' } },
         ...(dynamicSections.length
             ? [{ type: 'text', text: dynamicSections.join('\n\n'), cache_control: { type: 'ephemeral' } }]
             : []),

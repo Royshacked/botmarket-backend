@@ -5,7 +5,7 @@
 //
 // Returns:
 //   { modes: { paper: bool, manual: bool, live_brokers: [name] },
-//     workspace: 'paper'|'live',   ← the one the user is SITTING IN (see activeWorkspace)
+//     workspace: 'paper'|'live'|'manual',   ← the one the user is SITTING IN (see activeWorkspace)
 //     accounts: [ { id, broker, mode, name, balance, freeMargin, currency, capabilities, selected, positions } ],
 //     unavailable: [broker] }   ← brokers whose position read failed; their book is UNKNOWN, not flat
 //
@@ -16,8 +16,9 @@
 // book stays that desk's call.
 
 import { brokerService } from '../api/broker/broker.service.js'
-import { paperBrokerService, VIRTUAL_MODES } from '../api/broker/paperBroker.service.js'
+import { VIRTUAL_MODES } from '../api/broker/paperBroker.service.js'
 import { activeWorkspace } from './venue.resolve.service.js'
+import { getStoredWorkspace } from './workspace.service.js'
 import { toBrokerSymbol } from './brokerSymbol.service.js'
 import { positionPnlPct } from './agentUtils.js'
 import { logger } from './logger.service.js'
@@ -36,12 +37,12 @@ function _caps(broker, svc = brokerService) {
 // an unanswered one are the same shape and opposite facts, and "you hold nothing" is the more
 // dangerous of the two to say by accident. Same rule performance/watchlist already keep with their
 // `unavailable` list.
-async function _positionsByAccount(userId, brokers) {
+async function _positionsByAccount(userId, brokers, svc = brokerService) {
     const byAccount = new Map()
     const failed = []
     await Promise.all(brokers.map(async (broker) => {
         try {
-            const raw = await brokerService.getPositions(broker, userId)
+            const raw = await svc.getPositions(broker, userId)
             for (const p of (Array.isArray(raw) ? raw : [])) {
                 const key = String(p.accountId ?? p.accountNo ?? '')
                 if (!byAccount.has(key)) byAccount.set(key, [])
@@ -67,12 +68,17 @@ async function _positionsByAccount(userId, brokers) {
 
 const _round = (v) => (v == null || !Number.isFinite(Number(v))) ? null : Number(Number(v).toFixed(2))
 
-export async function getTradingContext(userId) {
+export async function getTradingContext(userId, deps = {}) {
+    const { broker: svc = brokerService, storedWorkspace = getStoredWorkspace } = deps
     const empty = { modes: { paper: false, manual: false, live_brokers: [] }, workspace: 'live', accounts: [], unavailable: [] }
     if (!userId) return empty
 
-    let connections
-    try { connections = await brokerService.listConnections(userId) }
+    // Fetched alongside the connections because neither answers the workspace question on its own:
+    // the paper flag decides paper-vs-not, the stored choice decides manual-vs-live. Best-effort —
+    // a failed read is null, which resolves to the paper-or-live answer this gave before manual was
+    // a server-side fact.
+    let connections, stored
+    try { [connections, stored] = await Promise.all([svc.listConnections(userId), storedWorkspace(userId)]) }
     catch (err) { logger.warn(LOG, 'listConnections failed', err.message); return empty }
 
     const liveBrokers = Object.entries(connections)
@@ -83,14 +89,14 @@ export async function getTradingContext(userId) {
     const activeBrokers = Object.entries(connections).filter(([, on]) => on).map(([b]) => b)
     // Fetched once for every venue, then attached per account below — so "which positions are open
     // in each account" is answered in the same read as "which accounts do I have".
-    const { byAccount: positionsByAccount, failed: unavailable } = await _positionsByAccount(userId, activeBrokers)
+    const { byAccount: positionsByAccount, failed: unavailable } = await _positionsByAccount(userId, activeBrokers, svc)
     const posFor = (id) => positionsByAccount.get(String(id)) ?? []
 
     // Live broker accounts.
     for (const broker of liveBrokers) {
         try {
-            const { accounts: accs = [], selectedAccountId = null } = await brokerService.getTradingAccounts(broker, userId)
-            const caps = _caps(broker)
+            const { accounts: accs = [], selectedAccountId = null } = await svc.getTradingAccounts(broker, userId)
+            const caps = _caps(broker, svc)
             for (const a of accs) accounts.push({
                 id: String(a.id), broker, mode: 'live',
                 name: a.name ?? a.login ?? String(a.id),
@@ -107,26 +113,42 @@ export async function getTradingContext(userId) {
         } catch (err) { logger.warn(LOG, `getTradingAccounts(${broker}) failed`, err.message) }
     }
 
-    // Virtual (paper / manual) accounts.
+    // Virtual (paper / manual) accounts — through the SAME accessor as the live branch above, and
+    // that is the whole point of this loop looking identical to it.
+    //
+    // It used to read `paperBrokerService.listAccounts` directly, which returns the raw account
+    // DOCUMENTS — and a virtual account document has no `freeMargin` at all. Cash is never debited
+    // when a virtual position opens (see bookValuation.util), so deployable cash is cash MINUS what
+    // open positions already committed, and only the adapter derives it. Going around the adapter
+    // meant paper and manual reported no free cash whatsoever: the one number a desk needs before it
+    // sizes anything was silently absent in exactly the mode most users are sitting in.
+    //
+    // SAFE DESPITE the paper adapter's getTradingAccounts creating a default account when the user
+    // has none: `connections.paper` is `isEnabled`, which reads the oldest paper account and returns
+    // its `enabled` flag, so a true here already implies one exists. (`connections.manual` is
+    // literally "owns ≥1 manual account".) The guard is that invariant, not a check — worth knowing
+    // if isEnabled ever changes, because this read now runs on every chat turn and a read that
+    // creates an account is not one you want on that path.
     for (const mode of ['paper', 'manual']) {
         if (!connections[mode]) continue
         try {
-            const accs = await paperBrokerService.listAccounts(userId, { mode })
-            const caps = _caps(mode)
+            const { accounts: accs = [] } = await svc.getTradingAccounts(mode, userId)
+            const caps = _caps(mode, svc)
             for (const a of accs) {
-                const id = String(a.accountId ?? a.id)
+                const id = String(a.id ?? a.accountId)
                 accounts.push({
                     id, broker: mode, mode,
                     name: a.name ?? id,
-                    balance: a.cashBalance ?? a.balance ?? null, currency: a.currency ?? null, capabilities: caps,
+                    balance: a.balance ?? null, currency: a.currency ?? null, capabilities: caps,
                     freeMargin: a.freeMargin ?? null,   // see the live branch above
                     // Virtual accounts are picked per artifact, not globally — there is no
-                    // "selected" one to report.
+                    // "selected" one to report, so the selectedAccountId this read also returns is
+                    // deliberately dropped.
                     selected: false,
                     positions: posFor(id),
                 })
             }
-        } catch (err) { logger.warn(LOG, `listAccounts(${mode}) failed`, err.message) }
+        } catch (err) { logger.warn(LOG, `getTradingAccounts(${mode}) failed`, err.message) }
     }
 
     return {
@@ -134,7 +156,7 @@ export async function getTradingContext(userId) {
         // Which workspace the user is SITTING IN, not merely which are available. Without it the
         // menu reads as a flat list and a desk answers about the live cTrader book while the user
         // is in paper — the accounts are all true, just not the ones they are looking at.
-        workspace: activeWorkspace(connections),
+        workspace: activeWorkspace(connections, stored),
         accounts,
         // Brokers whose position read failed — their accounts appear with an empty book that is NOT
         // a flat one. Additive: existing consumers that only read modes/accounts are unaffected.

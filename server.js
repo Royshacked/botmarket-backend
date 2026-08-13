@@ -39,6 +39,7 @@ import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
 import { ensureKairosIndexes } from './api/kairos/kairos.service.js'
 import { ensureTradeIndexes } from './services/tradeCapture.service.js'
 import { ensureExperienceIndexes } from './api/experience/experience.model.js'
+import { ensureWorkspaceIndexes } from './api/workspace/workspace.model.js'
 import { ensurePendingActionIndexes } from './services/pendingAction/pendingAction.repo.js'
 import { pendingActionRoutes } from './api/pendingAction/pendingAction.routes.js'
 import { threadService } from './services/thread.service.js'
@@ -50,6 +51,7 @@ import { authRoutes }   from './api/authentication/authentication.routes.js'
 import { userRoutes }   from './api/user/user.routes.js'
 import { brokerRoutes }      from './api/broker/broker.routes.js'
 import { paperRoutes }       from './api/paper/paper.routes.js'
+import { workspaceRoutes }   from './api/workspace/workspace.routes.js'
 import { tradesRoutes }      from './api/trades/trades.routes.js'
 import { transcribeRoutes }  from './api/transcribe/transcribe.routes.js'
 import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
@@ -128,6 +130,9 @@ app.use('/api/auth',        authRoutes)
 app.use('/api/users',       userRoutes)
 app.use('/api/broker',      brokerRoutes)
 app.use('/api/paper',       paperRoutes)
+// Which of the three books (live / paper / manual) the user is standing in. Persisted server-side
+// because `manual` is broker-less and so has no connection flag to derive itself from.
+app.use('/api/workspace',   workspaceRoutes)
 app.use('/api/trades',      tradesRoutes)
 app.use('/api/portfolio',   portfolioRoutes)
 // The queued list — what is waiting on the user, from both the off-hours queue and the entities
@@ -152,6 +157,7 @@ ensureIdeaIndexes()
 ensureKairosIndexes()
 ensureTradeIndexes()
 ensureExperienceIndexes()
+ensureWorkspaceIndexes()
 ensurePendingActionIndexes()
 threadService.ensureThreadIndexes()
 

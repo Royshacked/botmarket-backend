@@ -365,6 +365,38 @@ Switch only when the user EXPLICITLY asks you to use another language. The reque
 
 Vocabulary fields are canonical English ALWAYS, in every language — rating, status, side, horizon, band_basis and the like are validated enum values, not prose.`
 
+// ─── The venue is given, not asked for ────────────────────────────────────────
+// Authored ONCE and appended to every desk's base prompt for the reason LANGUAGE_RULE is: eight
+// copies of one rule is eight chances for it to drift, and this one has to be identical everywhere
+// or a user gets asked by one desk what another already knew.
+//
+// It exists because the tool alone did not work. `get_trading_context` has been wired into every
+// agent since July, and desks still opened with "are we in paper or live?" — a tool is an invitation,
+// and a model mid-thought about a chart declines it. The facts are now PUSHED into every turn (see
+// buildVenueSection in tradingContext.tools.js); this is the instruction that tells the model the
+// block is there and that asking anyway is a failure. Data and rule in two places on purpose: the
+// block carries the same sentence, so whichever half the model reads, it reads the rule.
+//
+// Note the boundary — it forbids ASKING for facts, never DECIDING with them. Which account to use
+// when two fit, whether $9k of free cash is enough for this trade, whether to trade at all: still
+// the desk's own call, and still something it may put to the user (feedback_agent_decides_no_hardcoded_rules).
+//
+// Appended to the BASE prompt only, never to a mode/profile fragment — those concatenate onto the
+// base and would repeat it.
+export const VENUE_RULE = `
+
+VENUE — YOU ARE ALREADY TOLD, SO NEVER ASK. Every turn carries a VENUE block: the current workspace, which modes exist, which live broker is connected, every account the user has, its balance, and how much of it is actually available to deploy. It is read fresh from the app each turn, it is authoritative, and it is more current than anything in the conversation history.
+
+So do not ask the user which mode they are in, whether this is paper, live or manual, which broker they use, which account to use, or how much money they have. They told the app already; asking again reads as an assistant that is not connected to it. Do not infer any of it from an earlier turn either — the user may have switched since.
+
+THERE ARE THREE WORKSPACES, and the block names the one they are in. LIVE is real money at a broker the app trades through. PAPER is simulated money. MANUAL is real money at an institution the app cannot reach — built and monitored exactly like paper, but the user places the order at their bank and confirms the actual fill here, so the app executes nothing. Never collapse manual into live (we do not place its orders) or into paper (its money is real), and never describe a manual position as something the app will open or close.
+
+Size against "available to deploy", never against balance: balance still contains whatever the open positions tie up, so sizing on it spends the same money twice. Where a venue does not report it, say so rather than quietly falling back to balance.
+
+Call \`get_trading_context\` when you need what the block deliberately leaves out — open positions, live P&L, per-account capabilities — or when the user says they have just switched account or workspace. If a turn's venue block says the read FAILED, do not guess and do not ask the user to fill the gap: try the tool, and if that fails too, say plainly that you could not check.
+
+What you DECIDE with those facts is still yours. Which of two eligible accounts fits, whether the free cash supports the trade, whether to take it at all — that is your judgment, and asking the user about THAT is fine. The rule is about facts the app already holds, not about choices.`
+
 // ─── Emit-tag cleanup ─────────────────────────────────────────────────────────
 // Strip the given emit blocks (<name>…</name>) from a raw model reply. Each name
 // is removed globally, matching the per-agent hand-written `.replace(...)` chains.

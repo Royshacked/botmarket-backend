@@ -2,9 +2,10 @@ import { fileURLToPath } from 'url'
 import { makePhaseCapture, runAgentStream } from '../agentIO.js'
 import { parseEmitBlock, mergeDraft } from '../agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, resolveMainAccountId, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, TRADE_HORIZONS } from '../agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, resolveMainAccountId, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE, TRADE_HORIZONS } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { KAIROS_TOOLS_FOR_MODE, buildKairosToolHandlers } from '../tools/kairos.tools.js'
+import { buildVenueSection } from '../tools/tradingContext.tools.js'
 import { normalizeMode } from '../kairos.modes.js'
 import { kairosService } from '../../api/kairos/kairos.service.js'
 import { resolveVenue as _resolveVenue } from '../venue.resolve.service.js'
@@ -45,13 +46,19 @@ async function chatStream({
     model: requestedModel, reasoningEffort, userId,
     onToken, onChart, onToolStart, onReasoning, onPhase, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
+    _venueSection = buildVenueSection,
 }) {
     const mode         = normalizeMode(chatState?.mode)   // build-time lens (docs/desks/kairos-hermes.md)
     const tools        = KAIROS_TOOLS_FOR_MODE(mode)
     const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, mode, seed, mainAccountId, audience)
-    const builtMessages = attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState))
+    // The venue (mode / broker / accounts / free cash) rides the last USER message rather than
+    // the system prompt: free cash moves whenever anything fills, so a volatile system block
+    // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
+    const builtMessages = attachTurnContext(
+        attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState)),
+        await _venueSection(userId))
 
     // The model emits <phase>N</phase> (1–7) at the start of each turn; capture it for the UI
     // progress + next-turn model routing. <call> is suppressed from the token stream and parsed
@@ -219,7 +226,7 @@ Active asset: ${asset}${seedBlock}${_buildAccountsSection(accounts, mainAccountI
 
     const modeModule = (_modePrompt[mode] ?? _modePrompt.discretionary)()
     return [
-        { type: 'text', text: _baseSystemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: _baseSystemPrompt() + LANGUAGE_RULE + VENUE_RULE, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: modeModule, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamicContext },
     ]

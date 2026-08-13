@@ -10,8 +10,8 @@ import { isMode } from '../kairos.modes.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../tools/priceStructure.tools.js'
 import { cleanConviction } from '../conviction.util.js'
 import { logger }        from '../logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection, LANGUAGE_RULE, TRADE_HORIZONS } from '../agentUtils.js'
-import { makeTradingContextHandlers } from '../tools/tradingContext.tools.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE, TRADE_HORIZONS } from '../agentUtils.js'
+import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { isToolError } from '../toolResult.util.js'
@@ -196,9 +196,13 @@ function _handoffContext(handoffTo) {
 
 async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, handoffTo = null, profile = 'trading', audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
+    _venueSection = buildVenueSection,
 }) {
     const prof = profile === 'investing' ? 'investing' : 'trading'
-    const normalized = _buildMessages(messages)
+    // The venue (mode / broker / accounts / free cash) rides the last USER message rather than the
+    // system tail: free cash moves whenever anything fills, so a volatile system block would sit
+    // ahead of the whole conversation in the cache prefix. See buildVenueSection.
+    const normalized = attachTurnContext(_buildMessages(messages), await _venueSection(userId))
 
     // Per-session grounding ledger — records which tickers a real, successful tool
     // engaged, so a fabricated candidate that no tool touched is dropped at normalize.
@@ -224,7 +228,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     // (_stampHistoryCache in the Anthropic provider), and this leaves the system prompt at one
     // normally, two in hand-off — the ceiling Atlas and Kairos already run at. Do not add a third.
     const systemPrompt = [
-        { type: 'text', text: promptLoader() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: promptLoader() + LANGUAGE_RULE + VENUE_RULE, cache_control: { type: 'ephemeral' } },
         ...(inHandoff ? [{ type: 'text', text: _handoffMode(), cache_control: { type: 'ephemeral' } }] : []),
         { type: 'text', text: dynamic.join('\n\n') },
     ]

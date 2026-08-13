@@ -12,8 +12,8 @@ import { dirname, join } from 'path'
 
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../../providers/fmp.provider.js'
 import { getSecFilings } from '../../providers/sec.provider.js'
-import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, COMMON_TOOL_HANDLERS } from '../agentUtils.js'
-import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
+import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE, COMMON_TOOL_HANDLERS } from '../agentUtils.js'
+import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from '../tools/valuation.tools.js'
@@ -70,9 +70,15 @@ async function chatStream({
     model: requestedModel, reasoningEffort, userId,
     onToken, onToolStart, onReasoning, onPhase, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
+    _venueSection = buildVenueSection,
 }) {
     const systemPrompt  = _buildSystemPrompt(chatState, seed, audience)
-    const builtMessages = attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState))
+    // The venue (mode / broker / accounts / free cash) rides the last USER message rather than
+    // the system prompt: free cash moves whenever anything fills, so a volatile system block
+    // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
+    const builtMessages = attachTurnContext(
+        attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState)),
+        await _venueSection(userId))
 
 
     const phase = makePhaseCapture(6, onPhase)
@@ -163,7 +169,7 @@ ${audienceBlock}
 
 ` : ''}Active name: ${active}${seedBlock}${existingBlock}`
     return [
-        { type: 'text', text: _systemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: _systemPrompt() + LANGUAGE_RULE + VENUE_RULE, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: dynamic },
     ]
 }

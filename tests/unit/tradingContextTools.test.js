@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatTradingContext, formatBrokerSymbol, makeTradingContextHandlers } from '../../services/tools/tradingContext.tools.js'
+import { formatTradingContext, formatBrokerSymbol, makeTradingContextHandlers, buildVenueSection, formatVenueSection, _accountHead, _WORKSPACE_LINE } from '../../services/tools/tradingContext.tools.js'
 
 // THE BUG THIS FILE EXISTS FOR
 // Both venue tools returned their service's OBJECT. The Anthropic provider's tool_result branch
@@ -138,7 +138,7 @@ const bothBooks = (workspace) => ({
 test('in paper, the context says so before it says anything else', () => {
     const out = formatTradingContext(bothBooks('paper'))
     assert.match(out, /CURRENT WORKSPACE: PAPER \(simulated money\)/)
-    assert.match(out, /"my account", "my positions" and "my P&L" mean the PAPER account/)
+    assert.match(out, /"My account", "my positions" and "my P&L" mean the PAPER account/)
 })
 
 test('each account is stamped with which side of the workspace line it sits on', () => {
@@ -163,7 +163,7 @@ test('P&L in paper does not quietly fold in the live book', () => {
 
 test('in live the framing flips, and the live book is the one totalled', () => {
     const out = formatTradingContext(bothBooks('live'))
-    assert.match(out, /CURRENT WORKSPACE: LIVE \(real money\)/)
+    assert.match(out, /CURRENT WORKSPACE: LIVE \(real money at a connected broker\)/)
     assert.match(out, /Total open P&L in the live workspace: \+900\.00 USD/)
     assert.match(out, /\[paper\] paper-1-abc.*NOT the current workspace \(user is in live\)/)
 })
@@ -194,4 +194,139 @@ test('no live venue is a different sentence from "not listed"', () => {
     const out = formatBrokerSymbol({ ticker: 'NVDA', venues: [] })
     assert.match(out, /no live trading venue is connected/)
     assert.doesNotMatch(out, /NOT LISTED/)
+})
+
+// ─── the venue block every desk carries, whether it asks or not ───────────────
+// THE BUG THIS SECTION EXISTS FOR: the tool above was wired into all seven agents in July and desks
+// STILL opened turns with "are we in paper or live?" — because a tool is an invitation, and a model
+// mid-thought about a chart declines it. Mode, broker, accounts and free cash are facts the app
+// holds, so they are now PUSHED into every turn instead of waited for.
+
+test('the block answers all four questions a desk kept asking', async () => {
+    const out = await buildVenueSection('u1', { read: () => ctx({ workspace: 'paper' }) })
+    assert.match(out, /CURRENT WORKSPACE: PAPER/,        '1. which mode')
+    assert.match(out, /live brokers connected: ctrader/, '2. which broker, when live')
+    assert.match(out, /Every account connected \(1\)/, '3. which accounts')
+    assert.match(out, /available to deploy/,             '4. how much free cash')
+})
+
+test('the block forbids asking for what it just handed over', async () => {
+    const out = await buildVenueSection('u1', { read: () => ctx({ workspace: 'paper' }) })
+    assert.match(out, /never ask the user which mode/)
+})
+
+test('free cash is stated as MISSING rather than silently dropped', () => {
+    // The dangerous silence: with no free-cash clause the line carries only `balance`, and balance
+    // is the number that already contains whatever the open positions tie up. A desk sizing against
+    // it spends the same money twice — so an absent figure has to be as loud as a present one.
+    const out = formatVenueSection(ctx({ workspace: 'paper', accounts: [account({ freeMargin: null })] }))
+    assert.match(out, /available to deploy NOT REPORTED/)
+    assert.match(out, /do not size against it/)
+})
+
+test('positions and P&L stay OUT of the block — that is what the tool is still for', async () => {
+    // Deliberate. They move every tick (so they would blow the turn cache for every desk) and they
+    // are the bulk of the tokens. The block carries the four facts; the tool carries the book.
+    const out = await buildVenueSection('u1', { read: () => ctx({ workspace: 'paper' }) })
+    assert.doesNotMatch(out, /NVDA/)
+    assert.match(out, /call get_trading_context/)
+})
+
+test('a failed venue read says so — it never renders as a flat, confident book', async () => {
+    const out = await buildVenueSection('u1', { read: () => { throw new Error('ctrader auth failed') } })
+    assert.match(out, /could not read/)
+    assert.match(out, /ctrader auth failed/)
+    assert.match(out, /Do NOT guess/)
+    // And it must not push the gap back onto the user — "which mode are you in?" is the exact
+    // question this whole mechanism exists to stop.
+    assert.match(out, /do not ask the user to tell you/)
+})
+
+test('a hung broker socket cannot hold a chat turn open', async () => {
+    // getTradingContext is best-effort and catches its own failures, but a cTrader WS that never
+    // answers hangs rather than throws — and this now runs on EVERY turn, so an unbounded await
+    // would stall the whole chat instead of just one tool call.
+    const out = await buildVenueSection('u1', { read: () => new Promise(() => {}), timeoutMs: 20 })
+    assert.match(out, /timed out/)
+})
+
+test('no user means no block at all, not an empty one', async () => {
+    // A headless run has no venue to report. An empty block would tell the model "you have no
+    // accounts", which is a different and worse statement than saying nothing.
+    assert.equal(await buildVenueSection(null), null)
+})
+
+test('the block and the tool answer render an account through the SAME line', () => {
+    // The whole reason _accountHead is shared: two renderers for one set of numbers is two chances
+    // for a desk to be told a different balance depending on which surface it read.
+    const a = account({ freeMargin: 4212.5, currency: 'USD' })
+    const head = _accountHead(a, 'paper')
+    assert.ok(formatVenueSection(ctx({ workspace: 'paper', accounts: [a] })).includes(head))
+    assert.ok(formatTradingContext(ctx({ workspace: 'paper', accounts: [a] })).includes(head))
+})
+
+// ─── the third workspace ──────────────────────────────────────────────────────
+// Manual is REAL money at an institution the app cannot reach. It is paper's TWIN in everything the
+// app actually does — same virtual account store, same marks off live prices, same condition
+// monitoring, same journal — and differs in exactly two ways: the money is real, and execution
+// happens at the user's bank. Describing it as either neighbour costs the user something concrete:
+// collapsed into live, a desk says the app placed an order nobody placed; collapsed into paper, it
+// discusses real money as practice.
+
+const manualCtx = (over = {}) => ({
+    modes: { paper: false, manual: true, live_brokers: ['ctrader'] },
+    workspace: 'manual',
+    accounts: [account({ id: 'ma_1', broker: 'manual', mode: 'manual', name: 'Bank', freeMargin: 4000 })],
+    unavailable: [],
+    ...over,
+})
+
+test('manual is named as its own workspace, not folded into live', async () => {
+    const out = await buildVenueSection('u1', { read: () => manualCtx() })
+    assert.match(out, /CURRENT WORKSPACE: MANUAL/)
+    assert.match(out, /REAL money/)
+})
+
+test('manual says it is built and monitored exactly like paper', () => {
+    // The correction that prompted this wording: manual is not a mode the app barely participates
+    // in. It inherits paper's whole Layer A — only the fill engine is swapped for a confirmation.
+    const out = formatVenueSection(manualCtx())
+    assert.match(out, /BUILT AND MONITORED EXACTLY LIKE PAPER/)
+    assert.match(out, /same condition monitoring/)
+})
+
+test('manual never promises an order the app cannot place', () => {
+    const out = formatVenueSection(manualCtx())
+    assert.match(out, /only EXECUTION differs/)
+    assert.match(out, /never say the app will place, fill or close an order/)
+})
+
+test("manual flags its numbers as the USER'S word, adopted book included", () => {
+    // A manual account can START from a book the user already held at their bank, and either way
+    // nothing has verified the holdings since they stated them — the same fact the review ritual
+    // re-confirms on every broker-less book (_buildUnreadableVenueSection).
+    const out = formatVenueSection(manualCtx())
+    assert.match(out, /adopted whole from their bank rather than built here/)
+    assert.match(out, /nothing has verified them since/)
+    // And NO invented "last confirmed" date: there is no verified-at stamp to read one from, so a
+    // date here would be a number the app made up about the user's own book.
+    assert.doesNotMatch(out, /last confirmed on/i)
+})
+
+test('the tool answer frames manual the same way the block does', () => {
+    // One line, both surfaces. The tool used to hold its own two-way paper-or-live ternary, which is
+    // exactly how manual came to render as live on that surface.
+    const out = formatTradingContext(manualCtx())
+    assert.ok(out.includes(_WORKSPACE_LINE.manual))
+})
+
+test('in manual, a live account is stamped as NOT the current workspace', () => {
+    const out = formatVenueSection(manualCtx({
+        accounts: [
+            account({ id: 'ma_1', broker: 'manual', mode: 'manual', freeMargin: 4000 }),
+            account({ id: '437', broker: 'ctrader', mode: 'live', selected: true, freeMargin: 900 }),
+        ],
+    }))
+    assert.match(out, /\[manual\] ma_1.*CURRENT WORKSPACE/)
+    assert.match(out, /\[live · ctrader\] 437.*NOT the current workspace \(user is in manual\)/)
 })
