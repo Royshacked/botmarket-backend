@@ -4,10 +4,16 @@ Behavioral contracts for the core domain. For the architecture overview + ASCII
 flow diagrams see [README.md](README.md); for file layout see [CODE_MAP.md](CODE_MAP.md).
 
 The app turns natural-language chat into **monitored trade ideas** that route to a
-broker. Seven desks produce work — Axl (reception) · Kairos (`call`) · Mentor (`setup`) ·
+broker. Six desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
 Atlas (portfolio) · Argus (scan) · Prometheus (`coverage`) · Pythia (`tilt`) — each kind is
 watched by its own background monitor, and one reconciler keeps entity state honest
-against the broker. Nothing reaches a broker while its venue is shut (§5).
+against the broker. Nothing reaches a broker while its venue is shut (§5). Every desk is
+handed the user's venue on every turn, and every account-bound artifact belongs to one
+workspace (§8).
+
+**Kairos (`call`) is asleep.** Mentor took the trading over; the autonomous call builder
+returns later as a premium Mentor mode. Calls in flight still run under Hermes and can
+still be edited, so the kind is live everywhere below — but nothing new is authored there.
 
 ---
 
@@ -264,8 +270,10 @@ Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/b
 The **Scanner Agent** ("Argus", `POST /api/scanner/stream`) emits a `<scan_list>` (normalized:
 uppercased tickers, guaranteed period/thesis/direction/signals). A scan is a watchlist of
 candidates (`{ ticker, direction, thesis, analysis, signals, conviction, sources }`), not ideas.
-CRUD at `/api/scanner/scans` (`PUT` to update). A user promotes a candidate into **Kairos**, where
-the same funnel converges to a single `<kairos_pick>` and becomes a monitored `call`.
+CRUD at `/api/scanner/scans` (`PUT` to update). A user promotes a candidate into **Mentor**, where
+the same funnel converges to a single pick and becomes a monitored `setup`. The hand-off tag is
+still literally `<kairos_pick>` — it was named for the desk that used to receive it, and renaming a
+tag both repos parse is a migration, not a docs fix. Read it as "the single-pick hand-off".
 
 Argus runs a **systematic-discovery funnel** — candidates come from grounded sources, never
 model memory. Phase 2 casts a wide net (`screen_candidates`, `get_market_movers`,
@@ -273,7 +281,7 @@ model memory. Phase 2 casts a wide net (`screen_candidates`, `get_market_movers`
 `get_price_action`; Phase 3 narrows survivors with a `get_candles`/`get_indicators` baseline plus
 angle-triggered tools (fundamentals, positioning, cycle, `get_orderblocks`/`get_false_breaks`) and
 `get_chart` (KLineChart image, model-only) reserved for the top shortlist; Phase 4 emits the ranked
-list. Via the Kairos hand-off the same funnel converges to a single `<kairos_pick>`.
+list. Via the single-pick hand-off (`<kairos_pick>`, see above) the same funnel converges to one name.
 
 ---
 
@@ -437,3 +445,79 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
 
 - JWT in an httpOnly cookie; `requireAuth` guards most routes. `req.user._id` is the custom string id.
 - **Authed (cost/abuse guard):** transcribe.
+
+---
+
+## 8. Workspaces & venue awareness
+
+### The three workspaces
+
+`live` · `paper` · `manual` are the **book the user is standing in**. Siblings, not a toggle plus a
+special case:
+
+| Workspace | Money | Who executes | How it is derived |
+|---|---|---|---|
+| `live` | real | the app, at a connected broker (cTrader; IBKR in progress) | the default |
+| `paper` | simulated | the app, against live prices | `listConnections().paper` — the paper `enabled` flag |
+| `manual` | **real**, at an institution the app cannot reach | **the user**, at their bank; they confirm the fill here | the user's stored choice |
+
+**Manual is paper's twin in everything the app does** — same virtual account store, same marks off
+live prices, same condition monitoring, same journal (it inherits paper's Layer A and swaps only the
+fill engine for a user-confirmation loop). Exactly two things separate it from paper: the money is
+real, and execution is external. One thing separates it from live: the numbers are the user's word,
+not a broker read — an adopted book's balances and cost basis are what they told us.
+
+**Resolution rule** (`api/workspace/workspace.model.js#resolveWorkspace`, mirrored verbatim in the
+frontend's `useWorkspaceMode`): the paper flag WINS over anything stored; otherwise a stored
+`manual` means manual; otherwise live.
+
+Manual is broker-less, so unlike paper it has **no connection flag to derive itself from**. The
+choice is persisted per user (`user_workspace`) and served by `GET`/`PUT /api/workspace` →
+`{ workspace, stored }`. Before that record existed the server read every manual user as live.
+
+### What is scoped, and what is shared
+
+An entity belongs to a workspace **if it binds to an account**:
+
+- **scoped** — `call`, `setup`, `portfolio`. Each is real money or simulated money and never both,
+  so mixing them into one list is not an answer. A book carries `modes[]` rather than one value: a
+  book appended to across a workspace switch is genuinely mixed and shows in **every** workspace it
+  holds something in, because listing it in only one makes the other half unreachable.
+- **shared** — scans, coverage, the house forecast, and the market brief. Research binds to no
+  account. There is nothing to scope them by and nothing gained by trying.
+
+Enforced in both places it is visible: `listWatchedItems({ workspace })` for what the desks report,
+and `inWorkspace()` over every list on the frontend.
+
+**The workspace is a UI/authoring scope and NEVER an engine filter.** The monitors and the
+reconciler process every mode regardless — a live stop must fire while the user is looking at paper.
+
+### The venue block — every desk, every turn
+
+`get_trading_context` was wired into every agent and desks still opened turns asking "are we in paper
+or live?". A tool is an invitation, and a model mid-thought declines it. So the four venue facts are
+**pushed** into every turn instead of waited for (`buildVenueSection`), and `VENUE_RULE` (authored
+once beside `LANGUAGE_RULE`) states that asking anyway is a failure:
+
+1. the current workspace, 2. the connected live broker, 3. every account, 4. **available to deploy**.
+
+It forbids asking for FACTS, never deciding with them — which account fits and whether the cash
+supports the trade remain the desk's own judgment.
+
+- **Placement is load-bearing.** The block rides the last user message (`attachTurnContext`), not the
+  system prompt: free cash moves whenever anything fills, and a volatile system block sits ahead of
+  the whole conversation in the cache prefix.
+- **Positions and P&L are deliberately excluded** — they move every tick and are the bulk of the
+  tokens. That is what `get_trading_context` is still for.
+- **Excluded desks:** Pythia and the market brief. Both write for every user at once, so neither has
+  a book to report; neither carries the venue tools either, for the same reason.
+- **A failed read says so.** Silence would let a desk invent a mode; the block reports the failure and
+  forbids both guessing and asking the user to fill the gap.
+
+### Available to deploy ≠ balance
+
+Sizing must use **free cash**: the balance minus what open positions already tie up. A virtual
+account's cash is never debited when a position opens, so only the adapter derives it — reading the
+account documents directly (which `getTradingContext` once did for paper/manual) yields no
+`freeMargin` at all, and every desk silently falls back to balance and spends the same money twice.
+Where a venue genuinely does not report it, that absence is stated rather than papered over.

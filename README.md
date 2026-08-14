@@ -2,23 +2,29 @@
 
 AI-powered trading assistant backend — Express + MongoDB + LLM agents (Anthropic / OpenAI).
 
-**Seven conversational desks** turn natural-language chat into monitored work, then route confirmed
+**Six conversational desks** turn natural-language chat into monitored work, then route confirmed
 entries and exits to a real broker (cTrader), a paper venue, or IBKR (data-only for now) through one
 unified adapter layer. Each desk owns a kind; each kind is watched by its own monitor.
 
 | Desk | Route | Produces | Watched by |
 |---|---|---|---|
 | **Axl** — reception / concierge / critic | `/api/axl` | nothing (read-only); hands over to a desk | — |
-| **Kairos** — discretionary trade calls | `/api/kairos` | `call` | Hermes |
-| **Mentor** — the teaching desk | `/api/mentor`, `/api/setups` | `setup` | Talos |
+| **Mentor** — the trading desk | `/api/mentor`, `/api/setups` | `setup` | Talos |
 | **Atlas** — portfolio construction + review | `/api/portfolio` | `portfolio_item` holdings | Themis |
 | **Argus** — the systematic scanner | `/api/scanner` | `scan` | — |
 | **Prometheus** — buy-side research | `/api/analyst` | `coverage` | coverage monitor |
 | **Pythia** — top-down strategy | `/api/strategy` | `tilt` (the house view — a **broadcast**, not per-user) | tilt monitor |
 
+**Kairos (`call`, watched by Hermes) is asleep** — `/api/kairos` is still mounted and calls in
+flight still run and still reopen for edit, but Mentor took the trading over and nothing new is
+authored there (`docs/desks/trade-pipeline.md`). It returns later as a premium Mentor mode.
+
 Their work lands on **one execution tier**: the `idea` kind served by `/api/trade-ideas`, which
 portfolio holdings ride, plus the per-desk kinds (`call`, `setup`) that their own monitors watch.
 One reconciler keeps every kind's state honest against the broker.
+
+Everything a desk builds belongs to one of **three workspaces** — `live` · `paper` · `manual` — and
+every desk is handed that venue on every turn (see *Workspaces* below).
 
 Behavioral contracts live in [APP_SPEC.md](APP_SPEC.md); file-by-file layout in
 [CODE_MAP.md](CODE_MAP.md).
@@ -101,7 +107,9 @@ api/                   HTTP surface — one folder per feature (routes + control
                        the desk's first message, `<suggest>` offers follow-up chips. Also delivers
                        the daily market brief (POST /api/axl/brief/stream — streamed into the Axl
                        chat panel, never posted into the social chat)
-  kairos/              Kairos chat + the `call` kind (monitored by Hermes)
+  kairos/              Kairos chat + the `call` kind (monitored by Hermes). ASLEEP for new work —
+                       serves calls in flight and their edits; Mentor is the trading desk
+  workspace/           which book the user is standing in — GET/PUT /api/workspace
   mentor/ setups/      Mentor chat + the `setup` kind (monitored by Talos)
   analyst/             Prometheus chat + the `coverage` research artifact (initiate/revise/retire)
   strategy/            Pythia chat + the `tilt` publication log. NOT owner-scoped — the house view
@@ -124,7 +132,9 @@ api/                   HTTP surface — one folder per feature (routes + control
   market/ calendar/ user/ authentication/ transcribe/
 services/              business logic + the desks. No Express here.
   agents/              the 7 LLM desks — analyst · axl · kairos · mentor · portfolio · scanner ·
-                       strategy. Their prompts live in `prompts/` (see below)
+                       strategy (kairos asleep). Their prompts live in `prompts/` (see below).
+                       Six append LANGUAGE_RULE + VENUE_RULE to their base prompt; `strategy` does
+                       not — a broadcast has no user whose venue could be read
   tools/               the 12 agent-facing tool modules (*.tools.js) — handlers + LLM-ready
                        formatters. Schemas stay in agentTools.registry
   entity/              the entity envelope + makeEntityCrud (ONE owner-scoped CRUD for every kind)
@@ -180,8 +190,9 @@ AXL  —  POST /api/axl/stream
                                because the door he just opened IS the next step
         │
         ▼
-  call → Kairos · setup → Mentor · coverage → Prometheus
+  setup → Mentor (the trading desk) · coverage → Prometheus
   scan → Argus · portfolio → Atlas (edit or review — the BOOK decides, never the caller)
+  call → Kairos, on an <edit> ONLY — asleep for new work
 ```
 
 Risk, horizon, constraints and benchmark are the **receiving desk's** first phase, not reception's —
@@ -193,7 +204,7 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│    AUTHORING  —  Kairos (call) · Mentor (setup) · Atlas (book)   │
+│    AUTHORING  —  Mentor (setup) · Atlas (book)                   │
 │  POST /api/kairos/stream · /api/mentor/stream · /api/portfolio/  │
 │                                                                  │
 │  The kinds differ; everything downstream of the save is shared,  │
@@ -576,6 +587,52 @@ DELETE /:type/positions/:positionId       close a position
 
 ---
 
+## Workspaces
+
+`live` · `paper` · `manual` are the **book the user is standing in** — three siblings, not a toggle
+plus a special case.
+
+| Workspace | Money | Who executes | Derived from |
+|---|---|---|---|
+| `live` | real | the app, at a connected broker | the default |
+| `paper` | simulated | the app, against live prices | the paper `enabled` flag |
+| `manual` | **real**, at an institution the app cannot reach | the **user**, at their bank | the user's stored choice |
+
+**Manual is paper's twin in everything the app does** — same virtual account store, same marks off
+live prices, same condition monitoring, same journal. Two things separate it from paper: the money is
+real, and execution is external (on a hit we alert; the user places it at their bank and confirms the
+actual fill here). One thing separates it from live: the numbers are the user's word, not a broker
+read.
+
+Because manual is broker-less it has **no connection flag to derive itself from**. The choice is
+persisted per user (`user_workspace`, served by `/api/workspace`) and joined with the paper flag by
+one rule — `resolveWorkspace`: the paper flag wins, else a stored `manual`, else live — held in
+`api/workspace/workspace.model.js` and mirrored verbatim in the frontend's `useWorkspaceMode`.
+
+**What belongs to a workspace is whatever binds to an ACCOUNT.** `call`, `setup` and `portfolio` are
+scoped to one book and filtered everywhere they are shown (`listWatchedItems({ workspace })` for the
+desks, `inWorkspace()` for every frontend list). Scans, coverage and the house forecast are research,
+bind to no account, and are **shared across all three**. A book carries `modes[]` rather than one
+value, so a mixed book shows in every workspace it holds something in.
+
+**It is a UI/authoring scope and NEVER an engine filter** — the monitors and the reconciler process
+every mode regardless, or a live stop stops firing while the user is looking at paper.
+
+### The venue block
+
+`get_trading_context` was wired into every desk and they still opened turns asking "are we in paper
+or live?" — a tool is an invitation, and a model mid-thought declines it. So the venue is now
+**pushed** into every turn (`buildVenueSection`) and `VENUE_RULE` says asking anyway is a failure:
+the workspace, the connected broker, every account, and **available to deploy** (the balance minus
+what open positions already tie up — sizing against balance spends the same money twice).
+
+It forbids asking for facts, never deciding with them. It rides the last user message rather than the
+system prompt, because free cash moves on every fill and a volatile system block would sit ahead of
+the whole conversation in the cache prefix. Positions and P&L stay in the tool — they move every tick.
+Pythia and the market brief are excluded: both are broadcasts with no user whose venue could be read.
+
+---
+
 ## Paper Trading
 
 Paper mode is a first-class **`'paper'` broker adapter**, so the same monitor + reconciler that
@@ -619,7 +676,11 @@ GET  /equity-curve   equity points (?fromMs=)
   JWT lives in an httpOnly cookie; `requireAuth` guards everything except broker OAuth callback
   and transcribe.
 - **Users** `/api/users` — CRUD + `GET /:id/usage` (token-usage stats).
-- **Kairos** `/api/kairos` — the `call` kind: list/get/delete, `POST /` (Generate → persist a draft),
+- **Workspace** `/api/workspace` — `GET` and `PUT { workspace }` → `{ workspace, stored }`. Which of
+  the three books the user is standing in. Its own surface rather than a field on `/api/paper/state`,
+  because a workspace is not a paper concept and `manual` is the one with no paper account behind it.
+- **Kairos** `/api/kairos` — ASLEEP for new work (Mentor is the trading desk); still serves calls in
+  flight. The `call` kind: list/get/delete, `POST /` (Generate → persist a draft),
   `POST /stream` (build conversation), `PUT /:id` (edit in place), `POST /:id/action`
   (confirm │ edit │ dismiss │ manage a card), `GET /performance` (closed-call track record).
 - **Mentor / setups** `/api/mentor/stream` + `/api/setups` — the `setup` kind (price zones are
@@ -649,26 +710,32 @@ GET  /equity-curve   equity points (?fromMs=)
 ```
                         Axl (reception — decides WHERE, executes nothing)
                                           │
-        ┌──────────────┬──────────────┬───┴────────┬──────────────┬─────────────┐
-        ▼              ▼              ▼            ▼              ▼             ▼
-      Argus         Kairos         Mentor        Atlas       Prometheus      Pythia
-      scan          call           setup       portfolio      coverage        tilt
-        │              │              │            │              │             │
-   candidates ────────►│◄─────────────┘        holdings          the artifacts other
-                       │                            │            desks read (no orders)
-                       ▼                            ▼
-                  Hermes / Talos               Themis (review cadence)
-                       │                            │
-                       └──────────┬─────────────────┘
-                                  ▼
-                       entry conditions met → order plan → USER CONFIRMS
-                                  │
-                       executionGate — venue open?  ──no──►  pending_actions
-                                  │ yes                          │ (drained at the open)
-                                  ▼                              ▼
-                       Broker orders (cTrader / paper / IBKR)  ◄──┘
-                                  │
-                       execution.reconciler (broker-authoritative)
-                                  │
-                       Positions ──► trades (append-only, paper + live)
+              ┌──────────────┬────────────┴──┬──────────────┬─────────────┐
+              ▼              ▼               ▼              ▼             ▼
+            Argus         Mentor           Atlas       Prometheus      Pythia
+            scan          setup          portfolio      coverage        tilt
+              │              │               │              │             │
+         candidates ────────►│           holdings          the artifacts other
+                             │               │             desks read (no orders)
+                             ▼               ▼
+                          Talos         Themis (review cadence)
+                             │               │
+                (Hermes still runs the calls Kairos built before it slept)
+                             │               │
+                             └──────┬────────┘
+                                    ▼
+                     entry conditions met → order plan → USER CONFIRMS
+                                    │
+                     executionGate — venue open?  ──no──►  pending_actions
+                                    │ yes                      │ (drained at the open)
+                                    ▼                          ▼
+                     Broker orders (cTrader / paper / manual / IBKR)  ◄──┘
+                                    │
+                     execution.reconciler (broker-authoritative)
+                                    │
+                     Positions ──► trades (append-only, paper + live + manual)
 ```
+
+Everything above happens inside ONE of three workspaces — `live`, `paper` or `manual` — and every
+desk is told which on every turn. The workspace scopes what is SHOWN and what a desk REPORTS; it
+never gates the monitors, which run every mode so a live stop fires while the user is in paper.

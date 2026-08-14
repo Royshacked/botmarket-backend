@@ -4,9 +4,31 @@ Status: **Phase 1 (backend) DONE** 2026-07-07 · **Phase 2 (frontend) DONE** 202
 (BE 150/150 green, FE build+lint green; NOT live-verified). Idea + portfolio flows both wired
 end-to-end. Next: live-verify the full stack (Phase 3). Design settled 2026-07-07.
 
+## Phase 3 (server-side workspace) — DONE 2026-08-14
+
+Manual was a **client-only** workspace: paper has an `enabled` flag the server can read, manual is
+broker-less and had none, so the choice lived in localStorage and every server-side read saw a manual
+user as a LIVE one. Harmless while it only scoped a UI list; not harmless once every desk started
+being handed the current workspace each turn, because a desk that believes manual is live will
+describe orders being placed that the app cannot place.
+
+- **Persisted** — `user_workspace`, served by `GET`/`PUT /api/workspace` → `{ workspace, stored }`.
+  `resolveWorkspace(paperConnected, stored)` in `api/workspace/workspace.model.js` is the whole rule
+  (paper flag wins, else stored `manual`, else live), mirrored verbatim in `useWorkspaceMode`.
+  localStorage stays the client's synchronous source of truth — the account/position hooks read it
+  without awaiting — and the server is written alongside the paper flag. Both writes are independent
+  and best-effort; a browser with no stored choice adopts the server's.
+- **The venue block names it.** Manual gets its own workspace line: real money, treated as seriously
+  as live, but the app places nothing — and the numbers are the user's word, since a manual book may
+  have been adopted whole from a bank. See APP_SPEC §8.
+- **Scoping is kind-wide.** `call`, `setup` and `portfolio` are filtered to the workspace both in the
+  UI lists (`inWorkspace`) and in what the desks report (`listWatchedItems({ workspace })`). Scans and
+  coverage bind to no account and stay shared.
+
 ## Phase 2 (frontend) — what's built
 - **Workspace toggle** (parallel agent): tri-state `ideaWorkspace`/`isManualIdea`/`useWorkspaceMode`;
-  header cycles Live→Paper→Manual; MainPage filters by `ideaWorkspace`.
+  header cycles Live→Paper→Manual; MainPage filters by `ideaWorkspace` (now `inWorkspace`, which
+  covers calls and setups too — see Phase 3).
 - **Account isolation:** `useBrokerAccounts` + `usePositions` now workspace-aware via a shared
   `resolveWorkspace(paperConnected)` (paper→paper, manual→manual, live→real brokers) — no cross-leak.
 - **Account picker:** `AccountSelector` treats manual like paper (single-select radio, one per idea).

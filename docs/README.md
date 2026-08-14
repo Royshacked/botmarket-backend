@@ -27,7 +27,7 @@ The mechanism docs. Read these to change the machinery.
 | [off-hours-queue.md](./architecture/off-hours-queue.md) | **Nothing executes off-hours.** The one hours gate; cancel propagation; the market-open drain |
 | [single-instance.md](./architecture/single-instance.md) | **The deployment constraint: ONE process.** What a second instance breaks, worst first |
 | [paper-trading-simulation.md](./architecture/paper-trading-simulation.md) | The virtual venue: fills, cost model, equity curve |
-| [manual-mode.md](./architecture/manual-mode.md) | Real money, no broker: user-confirmed fills, why it is never hours-gated |
+| [manual-mode.md](./architecture/manual-mode.md) | Real money, no broker: user-confirmed fills, why it is never hours-gated, and the server-side workspace record |
 | [ohlcv-price-data.md](./architecture/ohlcv-price-data.md) | The candle pipeline, providers, caching |
 | [trades-data.md](./architecture/trades-data.md) | The `trades` ledger — the canonical analytics record |
 
@@ -38,12 +38,18 @@ when to act on it only make sense together.
 
 | Doc | Desk → monitor |
 |---|---|
-| [kairos-hermes.md](./desks/kairos-hermes.md) | Kairos builds a `call`; Hermes watches it. The three modes, the assessment cascade, the no-conflict boundary |
+| [trade-pipeline.md](./desks/trade-pipeline.md) | **The path a new trade takes: Argus → Mentor → Talos.** Read this first — it is why kairos-hermes.md is a record and not a plan |
+| [kairos-hermes.md](./desks/kairos-hermes.md) | **SILENT.** Kairos builds a `call`; Hermes watches it. Still accurate, but describes a FROZEN path — calls in flight only |
 | [mentor-talos.md](./desks/mentor-talos.md) | Mentor builds a `setup`; Talos watches it. Scenarios as rivals, conditions, validity |
 
 Not yet written up: **Atlas/Themis** (portfolio — contract in APP_SPEC §3), **Argus** (scan —
 APP_SPEC §4), **Prometheus** (coverage) and **Pythia** (tilt). Their behaviour is specified in
 APP_SPEC; what is missing is the design reasoning behind it.
+
+**Workspaces and what every desk is told about the venue** are in
+[APP_SPEC §8](../APP_SPEC.md#8-workspaces--venue-awareness) — the three books, which kinds are scoped
+to one and which are shared across all of them, and why the venue is pushed into every turn rather
+than left to a tool.
 
 ## `design/` — proposed, not yet the architecture
 

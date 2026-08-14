@@ -1,7 +1,7 @@
 # Project Context
 AI-powered trading assistant backend (ar2trade / TRADVICE) — Express + MongoDB +
-multi-provider LLM agents (Anthropic / OpenAI). SEVEN conversational desks — Axl
-(reception) · Kairos (`call`) · Mentor (`setup`) · Atlas (portfolio) · Argus (scan) ·
+multi-provider LLM agents (Anthropic / OpenAI). SIX conversational desks — Axl
+(reception) · Mentor (`setup`, the trader) · Atlas (portfolio) · Argus (scan) ·
 Prometheus (`coverage`) · Pythia (`tilt`) — turn natural-language chat into monitored
 work, which each kind's own background monitor evaluates against condition trees before
 routing to a broker (cTrader live, a paper/simulation venue, manual, or IBKR in progress)
@@ -10,6 +10,23 @@ venue is shut — a confirmed decision is queued, never fired and never lost. Re
 SSE (agent streams) and WebSocket (social chat). Their work lands on one execution tier: the
 `idea` kind (`/api/trade-ideas`, which portfolio holdings ride) plus the per-desk kinds
 `call` and `setup`. See README.md for the full architecture and app-flow diagrams.
+
+**Kairos (`call`) is ASLEEP, not deleted.** Mentor took the trading over
+(`docs/desks/trade-pipeline.md`); the autonomous call builder returns later as a PREMIUM
+Mentor mode. Calls already in flight still run under Hermes and can still be reopened and
+edited, so the name appears in history, in lists and all over this codebase — but nothing
+new is built there. A new trade is always Mentor's.
+
+**THREE WORKSPACES — `live` · `paper` · `manual`** — are the book the user is standing in,
+and every one is real to them. Live is real money at a connected broker; paper is
+simulated; manual is real money at an institution the app cannot reach (built and monitored
+exactly like paper, but the user places the order at their bank and confirms the fill).
+Entities that bind to an ACCOUNT — `call`, `setup`, `portfolio` — belong to exactly one
+workspace and must be scoped to it everywhere they are shown or reported. Research binds to
+no account: scans, coverage and the house forecast are SHARED across all three. The
+workspace is a UI/authoring scope and NEVER an engine filter — the monitors and the
+reconciler must keep processing every mode, or a live stop stops firing while the user is
+looking at paper.
 
 # Rules
 - Always write tests after implementing a feature

@@ -51,6 +51,15 @@ api/
                               index futures only) + applyOffset + real/cash ticker maps
     paperBroker.service.js / paperExecution.service.js
   paper/                  paper mode toggle/settings/reset/trades/equity  /api/paper/*
+  workspace/              WHICH BOOK the user is standing in  /api/workspace (GET · PUT) →
+                          { workspace, stored }. Its own surface, not a field on /api/paper/state:
+                          a workspace is not a paper concept, and `manual` — the whole reason the
+                          record exists — is the one with no paper account behind it. `manual` is
+                          broker-less so it has NO connection flag to derive itself from; the choice
+                          lived only in the client's localStorage and every server-side read saw a
+                          manual user as a live one. workspace.model.js holds resolveWorkspace —
+                          the precedence rule (paper flag WINS, else stored manual, else live),
+                          mirrored verbatim in the frontend's useWorkspaceMode
   pendingAction/          the QUEUED list  /api/pending-actions (GET · POST /:id/execute ·
                           POST /:id/cancel). What is waiting on the user, from BOTH stores —
                           off-hours-queued intents AND entities the market-open sweep unparked.
@@ -84,7 +93,12 @@ api/
                               the legacy `{idea}/{ideas}` body shape, everything else answers bare
 services/
   agents/                 the 7 LLM desks (analyst · axl · kairos · mentor · portfolio · scanner ·
-                          strategy). Moved out of the flat services/ root 2026-08-07 — they are a
+                          strategy). KAIROS IS ASLEEP — Mentor took the trading over; the module
+                          stays because calls in flight still run and still reopen for edit, but
+                          nothing new is authored there (docs/desks/trade-pipeline.md).
+                          Six of the seven append LANGUAGE_RULE + VENUE_RULE to their base prompt;
+                          `strategy` (and marketBrief) do not — a broadcast has no user whose venue
+                          could be read. Moved out of the flat services/ root 2026-08-07 — they are a
                           distinct KIND of module (a desk, not a service), and they were the
                           largest single group making an 80-file directory hard to read. Their
                           prompts live in `prompts/` (`join(__dirname, '../../prompts/x.md')`)
@@ -111,14 +125,37 @@ services/
                           formatMoney is UNGROUPED on purpose: `$94,500` read the other way round is
                           `94.500`, and the desks came back with 94.5 — money an agent READS carries
                           no thousands separator (toFixed never groups; toLocaleString does)
-  tradingContext.service.js  ONE venue read for every desk: getTradingContext (mode paper/live/manual,
-                          connected brokers, each account's balance + capabilities + selected + open
-                          positions) and checkBrokerSymbol (is this tradable HERE, and what does the
-                          broker call it — 3-state: true / false / null=unreachable, never merged).
+  tradingContext.service.js  ONE venue read for every desk: getTradingContext (the WORKSPACE the user is
+                          standing in, connected brokers, each account's balance + free cash +
+                          capabilities + selected + open positions) and checkBrokerSymbol (is this
+                          tradable HERE, and what does the broker call it — 3-state: true / false /
+                          null=unreachable, never merged).
+                          EVERY venue goes through brokerService.getTradingAccounts, live and virtual
+                          alike. Reading paper/manual accounts straight from the store (which this
+                          once did) returns raw documents with NO freeMargin — virtual cash is never
+                          debited when a position opens, so only the adapter derives what is actually
+                          deployable, and every desk silently sized against balance instead.
                           withBrokerAvailability rides on get_quote so a live-book desk is TOLD
                           tradability rather than asked to remember to check (TTL-cached per user+ticker)
+  workspace.service.js    getStoredWorkspace / setStoredWorkspace (the user's own choice, 60s TTL —
+                          shorter than experience's 5min: a level changes twice in a life, a
+                          workspace several times an hour) + getActiveWorkspace, which joins it with
+                          the paper flag for callers that do NOT already hold the connections.
+                          getTradingContext deliberately does not use that join — it reads the
+                          connections anyway, so going through it would fetch them twice. Both
+                          funnel through venue.resolve.activeWorkspace, which is the part that must
+                          not drift; only the fetching differs
   tradingContext.tools.js  get_trading_context + check_broker_symbol handlers (userId-bound, built
-                          per request) + the shared tool descriptions. Wired into all 7 agents
+                          per request) + the shared tool descriptions. Wired into all 7 agents.
+                          ALSO buildVenueSection — the same read PUSHED into every turn, because a
+                          tool is an invitation and desks kept opening with "are we in paper or
+                          live?". Four facts only (workspace · broker · accounts · available to
+                          deploy); positions and P&L stay in the tool, since they move every tick.
+                          _WORKSPACE_LINE and _accountHead are SHARED by the block and the tool
+                          answer, so the two can never quote a different book or a different number.
+                          Rides attachTurnContext (the turn, never the system prompt — free cash
+                          moves on every fill). Excluded: Pythia + the market brief, which are
+                          broadcasts with no user to report on
   marketHours.tools.js   the AGENT-facing half of market.service: ONE formatMarketStatus renderer
                           serving BOTH surfaces — get_market_hours (the explicit ask) and
                           withMarketStatus, which rides on every get_quote so a desk is TOLD the
@@ -199,7 +236,10 @@ services/
   marketBrief.tools.js      get_market_brief — UNBOUND (no userId, so the brief cannot be made
                             personal). Axl RELAYS the brief; it does not write market commentary
   watchlist.service.js      listWatchedItems — "what am I watching?" across ALL kinds in ONE read
-                            (calls · setups · books · coverage · scans). COMPOSES the owning services
+                            (calls · setups · books · coverage · scans), SCOPED to the workspace the
+                            user is standing in: WORKSPACE_SCOPED_KINDS (call · setup · portfolio)
+                            bind to an account and belong to one book; scans + coverage are research,
+                            bind to none, and are shared across all three. COMPOSES the owning services
                             rather than querying Mongo, and settles them independently: one desk's
                             read failing is REPORTED in `unavailable`, never reported as zero.
                             Returns structured rows only — see entity/toWatchRow.js for the projectors

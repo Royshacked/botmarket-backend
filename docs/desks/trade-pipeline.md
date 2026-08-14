@@ -15,6 +15,7 @@ Design record, 2026-08-09. Nothing here is built yet except where marked **BUILT
 | Kairos + Hermes | **silent** — not deleted, not archived |
 | Argus → Mentor handoff | **BUILT 2026-08-10** — backend seed + lens recommendation, FE wired end to end |
 | Trading Desk steps | **REWIRED 2026-08-10** — build step is Mentor, not Kairos (`agentMeta.jsx`) |
+| Axl's prompt | **REWIRED 2026-08-13** — Kairos is no longer offered as a desk; a new trade routes to Mentor, and `<edit>call ID</edit>` is the only thing that still opens Kairos |
 | `call` kind | frozen. Calls in flight run to natural close under Hermes |
 
 **Silent, not gone.** Hermes must keep running until the last live `call` closes — the same strangler
