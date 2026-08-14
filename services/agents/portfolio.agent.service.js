@@ -758,6 +758,14 @@ export function _buildPortfolioStateSection(state, isReviewMode = false, reviewD
         return parts.length ? `\n           ↳ ${parts.join(' · ')}` : ''
     }
 
+    // The holding's id, rendered in REVIEW only. A review's whole output is a set of actions naming
+    // WHICH holding each one acts on, and `<portfolio_update>` carries that as `itemId` — so the ids
+    // have to be in the material the review is written from. They only ever appeared in the EDIT
+    // MODE block, which is built from a list the CLIENT sends; when that list arrived empty the
+    // review still read fine (this state block comes from Mongo) and Atlas invented the ids, so
+    // every accepted change came back not_found. These rows already carry the real id.
+    const idTag = (s) => (isReviewMode && s.ideaId ? `[${s.ideaId}] ` : '')
+
     const liveLines = live.map(s => {
         const target  = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
         const actual  = `actual ${Math.round(s.actualWeight * 100)}%`
@@ -765,13 +773,13 @@ export function _buildPortfolioStateSection(state, isReviewMode = false, reviewD
         const pnl     = `P&L ${fmtMoney(s.pnl)} (${fmtPct(s.pnlPct)})`
         const age     = s.thesisAgeDays != null ? `${s.thesisAgeDays}d` : ''
         const earn    = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
-        return `  ${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${fmtConviction(s)}${earn}${thesisLine(s)}`
+        return `  ${idTag(s)}${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${fmtConviction(s)}${earn}${thesisLine(s)}`
     })
 
     const pendingLines = pending.map(s => {
         const target = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
         const earn   = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
-        return `  ${s.asset.padEnd(6)} ${s.direction?.padEnd(6) ?? '      '} ${target}  [${s.status}]${earn}${thesisLine(s)}`
+        return `  ${idTag(s)}${s.asset.padEnd(6)} ${s.direction?.padEnd(6) ?? '      '} ${target}  [${s.status}]${earn}${thesisLine(s)}`
     })
 
     const sections = [header]
@@ -792,7 +800,7 @@ export function _buildPortfolioStateSection(state, isReviewMode = false, reviewD
     }
 
     sections.push(isReviewMode
-        ? 'Use this data as the starting point for the review. Do not call get_quotes for tickers already shown above — prices are current. Judge each holding intact / weakening / broken against the thesis + rationale shown beneath it. Propose specific actions (rebalance, trim, add, exit, swap) where the data warrants it.'
+        ? 'Use this data as the starting point for the review. The value in [brackets] before each ticker is that holding\'s itemId — it is the ONLY source of itemId for a <portfolio_update>, so copy it exactly and never compose one from the ticker or from earlier in this conversation. Do not call get_quotes for tickers already shown above — prices are current. Judge each holding intact / weakening / broken against the thesis + rationale shown beneath it. Propose specific actions (rebalance, trim, add, exit, swap) where the data warrants it.'
         : 'This is the live book you are helping with — the workspace, open positions, and per-position + total P&L are current. Do not call get_quotes for tickers already shown above. Ground any answer or proposed edit in these actual positions and P&L; do NOT run a full scheduled review unless the user asks for one.')
 
     return sections.join('\n\n')

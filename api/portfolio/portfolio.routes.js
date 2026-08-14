@@ -7,6 +7,8 @@ import {
     getPortfolioChatState,
     deletePortfolioChatState,
     getPendingReviews,
+    getPortfolios,
+    getPortfolioItems,
     completeReview,
     applyPortfolioRebalance,
     createAdoptionDraft,
@@ -23,10 +25,12 @@ const router = express.Router()
 router.use(requireAuth)
 
 router.post('/stream',                        log, streamPortfolio)
+router.get('/',                               log, getPortfolios)       // the user's books
 router.get('/pending-reviews',                log, getPendingReviews)
 router.post('/chat-state',                    log, savePortfolioChatState)
 router.get('/chat-state/:portfolioId',        log, getPortfolioChatState)
 router.delete('/chat-state/:portfolioId',     log, deletePortfolioChatState)
+router.get('/:portfolioId/items',             log, getPortfolioItems)   // the book's holdings — the portfolio's GET /:id
 router.post('/:portfolioId/complete-review',  log, completeReview)
 router.post('/:portfolioId/rebalance',        log, applyPortfolioRebalance)
 

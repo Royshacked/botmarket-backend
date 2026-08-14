@@ -67,17 +67,19 @@ export async function createScan(req, res) {
 }
 
 // A scan is an owner-scoped kind like any other (it moved onto makeEntityCrud in b863a03), so
-// list and delete are the shared HTTP tier. The `{scans}` / `{scan}` envelope is this route's own
-// body shape, configured rather than re-implemented.
+// list, get and delete are the shared HTTP tier. The `{scans}` / `{scan}` envelope is this route's
+// own body shape, configured rather than re-implemented.
 const crud = makeEntityController({
     log: LOG, noun: 'scan', envelope: { one: 'scan', many: 'scans' },
     service: {
         list:   (userId)     => scanService.getScans(userId),
+        get:    (id, userId) => scanService.getScanById(id, userId),
         remove: (id, userId) => scanService.deleteScan(id, userId),
     },
 })
 
 export const listScans  = crud.list
+export const getScan    = crud.get
 export const removeScan = crud.remove
 
 export async function updateScan(req, res) {

@@ -112,6 +112,27 @@ export async function listPortfolios(userId) {
     return [...books.values()].sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
 }
 
+// The one query that reads a book's holdings, and the one place ownership is enforced on them.
+// A portfolio is not a document — it exists as the items carrying its id — so "get the portfolio"
+// is this, and every caller that needs the book's rows comes through here rather than writing the
+// find() again with its own idea of what `{ portfolioId, userId }` means.
+//
+// The projection is the caller's business, not the query's: the state computation wants a narrow
+// slice it can afford to recompute per turn, while a client opening the book for review needs the
+// whole document (conditions, quantities, accounts). Same rows, same authorization, different cut.
+// `db` is injectable for the same reason _exitItem takes its gate: so the query's scoping can be
+// asserted without a live connection.
+export async function listPortfolioItems(portfolioId, userId, { projection = null, db = null } = {}) {
+    const conn = db ?? await getDb()
+    return conn.collection(ENTITIES)
+        .find({ portfolioId, userId })
+        .project(projection ?? { _id: 0 })
+        .toArray()
+}
+
+// What computePortfolioState reads. Narrow on purpose — see listPortfolioItems.
+const STATE_PROJECTION = { id: 1, asset: 1, direction: 1, allocationRatio: 1, conviction: 1, notes: 1, status: 1, type: 1, activatedAt: 1, brokerOrders: 1, portfolioName: 1, broker: 1, mainAccountId: 1, accounts: 1, research_basis: 1 }
+
 /**
  * Compute the live state of a portfolio: actual weights, drift vs target,
  * unrealized P&L, thesis age, and upcoming earnings per holding.
@@ -126,11 +147,7 @@ export async function listPortfolios(userId) {
  * @returns {Promise<object|null>}
  */
 export async function computePortfolioState(portfolioId, userId) {
-    const db    = await getDb()
-    const ideas = await db.collection(ENTITIES)
-        .find({ portfolioId, userId })
-        .project({ id: 1, asset: 1, direction: 1, allocationRatio: 1, conviction: 1, notes: 1, status: 1, type: 1, activatedAt: 1, brokerOrders: 1, portfolioName: 1, broker: 1, mainAccountId: 1, accounts: 1, research_basis: 1 })
-        .toArray()
+    const ideas = await listPortfolioItems(portfolioId, userId, { projection: STATE_PROJECTION })
 
     if (!ideas.length) return null
 

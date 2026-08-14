@@ -1,7 +1,7 @@
 import { portfolioAgentService } from '../../services/agents/portfolio.agent.service.js'
 import { portfolioChatService }  from './portfolioChat.service.js'
 import { applyRebalance, snapshotConvictions } from './portfolioRebalance.service.js'
-import { invalidatePortfolioState } from '../../services/portfolioState.service.js'
+import { invalidatePortfolioState, listPortfolioItems, listPortfolios } from '../../services/portfolioState.service.js'
 import { refreshCoverage }        from '../../services/coverageRefresh.service.js'
 import { logger }                from '../../services/logger.service.js'
 import { streamAgentResponse }   from '../_shared/sse.util.js'
@@ -36,6 +36,18 @@ const _adoptErr = {
     nothing_to_correct:  [400, 'Nothing to correct'],
     no_position:         [409, 'No position linked to this holding'],
     not_in_position:     [409, 'Holding is not in a position'],
+}
+
+// Applying an accepted review. Only the reasons the rebalance itself raises — the per-change
+// refusals (not_found, forbidden, no_position, trim_too_small…) are already the shared vocabulary
+// and ride back in `failed` so the client can name the ones that fell over.
+const _rebalanceErr = {
+    missing_portfolioId: [400, 'Missing portfolioId'],
+    no_changes:          [400, 'No changes to apply'],
+    // 409, not 400: the request is well formed and the book is real — every individual change was
+    // refused by the state of what it named. Changing that state (or re-running the review against
+    // the book as it now stands) makes the same request valid.
+    nothing_applied:     [409, 'None of the proposed changes could be applied'],
 }
 
 function _sendAdopt(res, result, onOk) {
@@ -313,6 +325,42 @@ export async function completeReview(req, res) {
 }
 
 // Apply an accepted portfolio_update (the confirmed review proposal) to the live book.
+// The user's books — id, name, holdings count, per-status tallies, symbols, venue modes. The
+// portfolio's `GET /` , completing the pair every other kind has had; the derivation already
+// existed for the watchlist and is simply reachable now instead of being re-derived client-side
+// from the ideas list.
+export async function getPortfolios(req, res) {
+    try {
+        res.json({ portfolios: await listPortfolios(req.user._id) })
+    } catch (err) {
+        logger.error(LOG, 'getPortfolios failed', err)
+        res.status(500).json({ error: 'Failed to load portfolios' })
+    }
+}
+
+// GET a book's holdings. The portfolio's answer to the `GET /:id` every other kind already has —
+// a book is not a document, so its "read one" is the rows carrying its id, owner-scoped in the
+// service exactly as makeEntityController's get is.
+//
+// This exists because opening a book for review used to be seeded from whatever the client's idea
+// list happened to hold. When that list was empty (a card click landing before it loaded), Atlas
+// was handed a book with no item ids, invented them, and every accepted change came back
+// not_found. A desk reads its subject from the database, like every other desk does.
+export async function getPortfolioItems(req, res) {
+    try {
+        const { portfolioId } = req.params
+        if (!portfolioId) return res.status(400).json({ error: 'Missing portfolioId' })
+        const items = await listPortfolioItems(portfolioId, req.user._id)
+        // An empty book is not an error — an adopted draft or a deleted book both read as zero rows,
+        // and the caller decides what that means. What must never happen is answering 200 with rows
+        // the caller can't tell apart from "we didn't look".
+        res.json({ items })
+    } catch (err) {
+        logger.error(LOG, 'getPortfolioItems failed', err)
+        res.status(500).json({ error: 'Failed to load portfolio holdings' })
+    }
+}
+
 export async function applyPortfolioRebalance(req, res) {
     try {
         const { portfolioId } = req.params
@@ -322,7 +370,18 @@ export async function applyPortfolioRebalance(req, res) {
             return res.status(400).json({ error: 'Missing update.changes' })
         }
         const result = await applyRebalance(portfolioId, req.user._id, update)
-        if (!result.ok) return res.status(400).json(result)
+        // Answer with the reason, on the shared vocabulary, like every other refusal in the app.
+        // This used to be a bare 400 carrying the result object, so a book whose ids didn't resolve,
+        // one whose holdings were already closed, and one the user doesn't own were the same red
+        // banner — and diagnosing which took reading the server log. `results`/`failed` ride along
+        // in `extra` so the client can still say WHICH changes fell over.
+        if (!result.ok) {
+            return sendReason(res, result.reason, {
+                overrides: _rebalanceErr,
+                fallbackMessage: 'Could not apply the changes',
+                extra: { results: result.results ?? null, failed: result.failed ?? null },
+            })
+        }
 
         // Flip the Atlas notification card to "Updated · next review <date>".
         await resolvePortfolioReviewCard(req.user._id, portfolioId, {
