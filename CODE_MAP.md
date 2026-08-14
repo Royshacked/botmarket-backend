@@ -30,7 +30,16 @@ api/
     ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now")
     exitOrders.service.js     in-position exit (re)arming (basisReferenceQuote now a neutralised no-op)
   portfolio/              Portfolio Agent + review    /api/portfolio/*
+                          A book is NOT a document — it exists as the items carrying its
+                          portfolioId — so its CRUD reads are shaped by hand rather than by
+                          makeEntityController: GET / = the user's books (listPortfolios),
+                          GET /:portfolioId/items = the book's holdings, its get-by-id.
+                          Both added 2026-08-14 so the client READS a book by id like every
+                          other kind instead of filtering it out of its own ideas list
   scanner/                Scanner Agent + saved scans /api/scanner/*
+                          GET /scans/:id is crud.get over scanService.getScanById — written
+                          long before, wired 2026-08-14 when the frontend needed to open a
+                          scan by id rather than find it in a list
   analyst/                Analyst coverage (research/valuation)  /api/analyst/*
     coverage.service.js       `coverage` collection = living per-name thesis (one doc per user+symbol):
                               variant-perception + our PT vs Street (the gap) + monitorable kill-criteria +
@@ -107,11 +116,22 @@ services/
   portfolio.agent.service.js  scanner.agent.service.js
                           Atlas tools: screen_candidates + get_macro_snapshot + enriched get_fundamentals
                           (FMP Starter); review-state block renders benchmark-relative perf + regime delta
-                          (_formatReviewDelta) from the fingerprint
+                          (_formatReviewDelta) from the fingerprint, and in REVIEW ONLY the holding's
+                          `[itemId]` before each ticker — a review's output names which holding each
+                          action acts on, and the ids used to appear only in the CLIENT-supplied EDIT
+                          MODE block, so an empty list left Atlas inventing them and every accepted
+                          change came back not_found
                           Argus (scanner) systematic-discovery funnel: Phase-2 grounded sources
                           screen_candidates + get_market_movers + get_sector_snapshot + get_analyst_actions
                           (no memory-recall); Phase-3 get_candles/get_indicators baseline + get_chart/
                           get_orderblocks/get_false_breaks vision (KLineCharts, onChart:null = model-only)
+  portfolioState.service.js listPortfolioItems = THE query for a book's rows and the one place
+                            ownership is enforced on them; every caller comes through it, with its
+                            own projection (computePortfolioState takes a narrow slice, a client
+                            opening the book takes whole documents). computePortfolioState = actual
+                            weights, drift, unrealized P&L, thesis age, earnings — 5-min TTL snapshot
+                            so review follow-ups reuse one prompt-cacheable block. listPortfolios =
+                            the cheap book enumeration (also the watchlist's)
   portfolioReview.util.js   PURE review-lifecycle helpers (no I/O): benchmarkTicker (mandate text→ETF proxy),
                             buildFingerprint (the "then" snapshot), computeReviewDelta (benchmark return +
                             regime then→now), computeReviewTriggers (the non-LLM pre-check signals)
@@ -433,6 +453,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | Follow-up chips on another desk | `makeSuggestionCapture()` (suggestions.service.js) → wire `suggest:` into that agent's `buildTagCaptures` + add `'suggest'` to its `stripEmitTags` list + return `suggestions`. The plumbing is done; write the desk's OWN "what is worth asking next" section in its prompt |
 | New off-hours-queueable action | ask `executionGate.deferIfClosed` before the order, and register the origin's `execute` + `cancel` in `originRegistry.ORIGINS` — the gate REFUSES to queue an unregistered origin. Cancel must reach back into the deciding desk |
 | New Axl `<edit>` kind | one row in `EDIT_KIND_DESKS` (axl.agent.service.js) + `EDIT_KINDS` (axl.controller.js) + a `case` in the FE `openForEdit` (MainPage.jsx) pointing at that kind's EXISTING pencil handler + the tag in the prompt. The prompt-vs-gate test fails if the prompt teaches a kind the gate drops |
+| New kind that can be REOPENED (card / pencil / Axl hand-off) | give it `GET /:id` (`makeEntityController.get` over `crud.getOwnedStripped`) + a getter on its FE service + one line in `GETTERS` (frontend `services/entityResolve.js`). Every doorway then READS it by id through the full pipe. NEVER resolve an entity out of a client list and never fall back to a stale row: a card can arrive before its list has loaded, and the empty list is indistinguishable from a failed read — that is how a portfolio review came to be authored against no holdings, invent its item ids, and fail on Accept with `not_found` |
 
 ## Deployment shape
 
