@@ -252,6 +252,23 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["kind"]
     },
+    // The reasoning sidecar (services/deepThink.service.js). Both fields are required on purpose:
+    // the consulted model has NO access to the conversation, so a question without its material is
+    // guaranteed to come back asking for what the desk already had in hand.
+    consult: {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "The single decision to make, stated as a question. One decision per call — not a list, and not 'what do you think'."
+            },
+            "context": {
+                "type": "string",
+                "description": "Everything needed to answer it: the levels, the account size and risk rule, the two readings that disagree. The consulted desk head cannot see your conversation and cannot fetch anything, so whatever you leave out simply is not considered."
+            }
+        },
+        "required": ["question", "context"]
+    },
     get_market_hours: {
         "type": "object",
         "properties": {

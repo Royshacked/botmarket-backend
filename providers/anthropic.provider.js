@@ -21,16 +21,23 @@ const DEFAULT_MAX_CONTINUATIONS = 10
 // supported path across both Opus 4.8 and Sonnet 4.6.
 const EFFORT_LEVELS = { low: 'low', high: 'high' }
 
-// Opus 5 thinks by default — omitting the thinking block does NOT mean "no
-// reasoning" the way it does on Sonnet 4.6 / Opus 4.8. It reasons anyway, those
-// tokens count against max_tokens, and DEFAULT_MAX_TOKENS would truncate the
-// reply mid-answer. Turning thinking explicitly off is the worse fix: with
-// thinking disabled, Opus 5 can emit a tool call as plain text instead of a
-// tool_use block — the call silently never runs, which breaks every agent here.
-// So on Opus 5 an 'off' effort floors to 'low' (and gets THINKING_MAX_TOKENS).
-// modelRouter applies the same floor so the reported route matches; this is the
-// backstop for callers that build a request without going through the router.
-const THINKS_BY_DEFAULT = new Set(['claude-opus-5'])
+// Models that reason whether or not we ask. Omitting the thinking block does NOT mean "no
+// reasoning" on these the way it does on Sonnet 4.6 / Opus 4.8 — they reason anyway, those
+// tokens count against max_tokens, and DEFAULT_MAX_TOKENS would truncate the reply mid-answer.
+// So an 'off' effort floors to 'low' here, which also buys THINKING_MAX_TOKENS.
+//
+// This matters far more now that reasoning is not user-selectable: EVERY request arrives with
+// no effort, so a model in this set that were missing from it would silently run at its own
+// default effort on the smaller token budget.
+//   • Opus 5    — reasons by default. Turning thinking explicitly off is the worse fix: with
+//                 thinking disabled it can emit a tool call as plain text instead of a tool_use
+//                 block, so the call silently never runs — fatal for tool-driven agents.
+//   • Sonnet 5  — REVERSED from Sonnet 4.6: omitting `thinking` runs adaptive at effort `high`,
+//                 where 4.6 ran thinking-off. Without this entry a Sonnet 5 turn would think at
+//                 high effort against DEFAULT_MAX_TOKENS.
+// Sonnet 4.6 and Opus 4.8 are deliberately absent — they genuinely run thinking-off when the
+// field is omitted, which is what we want when nothing asks for reasoning.
+const THINKS_BY_DEFAULT = new Set(['claude-opus-5', 'claude-sonnet-5'])
 const FLOOR_EFFORT = 'low'
 
 export function _thinkingConfig(reasoningEffort, model) {
@@ -61,6 +68,7 @@ export async function streamAnthropicWithTools({
     signal,
 }) {
     const messages   = _normalizeMessages(promptOrMessages)
+    const historyLen = messages.length
     const suppressor = createTagSuppressor({ onToken, captures: tagCaptures })
     const reasoning  = _thinkingConfig(reasoningEffort, model ?? DEFAULT_MODEL)
 
@@ -68,6 +76,10 @@ export async function streamAnthropicWithTools({
         // Client disconnected (user hit Stop) — end the loop instead of burning
         // another model call / tool round.
         if (signal?.aborted) { suppressor.flush(); return '' }
+
+        // Walk the breakpoint forward so this round reads the rounds before it instead of
+        // re-paying for them. mutableTail defaults to 1 — this loop compacts.
+        advanceToolLoopCache(messages, historyLen)
 
         const stream = client.messages.stream({
             model:      model ?? DEFAULT_MODEL,
@@ -178,6 +190,10 @@ export async function callAnthropic(model, promptOrMessages, systemPrompt, { onU
     return _extractText(response.content)
 }
 
+// The non-streaming twin of streamAnthropicWithTools. Currently has NO callers — every desk and
+// monitor streams — but it is kept in step with the streaming loop rather than left behind: the
+// two differ only in transport, and a copy that silently lacks the tool-loop cache handling is
+// how the next caller gets the expensive behaviour back without anyone noticing.
 export async function callAnthropicWithTools({
     model,
     promptOrMessages,
@@ -187,9 +203,12 @@ export async function callAnthropicWithTools({
     maxContinuations = DEFAULT_MAX_CONTINUATIONS,
     onUsage,
 }) {
-    const messages = _normalizeMessages(promptOrMessages)
+    const messages   = _normalizeMessages(promptOrMessages)
+    const historyLen = messages.length
 
     for (let i = 0; i < maxContinuations; i++) {
+        advanceToolLoopCache(messages, historyLen)
+
         const response = await client.messages.create({
             model: model ?? DEFAULT_MODEL,
             system: systemPrompt,
@@ -302,9 +321,9 @@ function _normalizeMessages(promptOrMessages) {
  * It lives HERE, at the provider boundary, because `cache_control` is Anthropic's — the agents are
  * multi-provider and must not learn about it. One stamp, every agent, no per-agent wiring.
  *
- * Deliberately once, on the way in: the tool loop appends to this array afterwards, and those blocks
- * land after the breakpoint where they belong. A second breakpoint per tool round would spend the
- * budget below for a within-turn prefix that is rarely read again.
+ * Placed once, on the way in. From there the tool loop MOVES it forward rather than adding a second
+ * one — see _frozenCacheTarget / _restampToolLoopCache below, which is what makes a deep tool loop
+ * read its own earlier rounds instead of re-paying for them.
  *
  * BUDGET: the API allows FOUR breakpoints per request and the agents already spend up to three (one
  * on the tool list, one or two on the system prompt — Atlas and Kairos use two). This is the fourth.
@@ -325,6 +344,84 @@ export function _stampHistoryCache(messages) {
             : null
     if (!stamped) return messages
     return [...messages.slice(0, -1), { ...last, content: stamped }]
+}
+
+/**
+ * Walk the ONE message-level cache breakpoint forward as a tool loop grows. THE entry point —
+ * every tool loop in the app calls this and nothing re-implements it.
+ *
+ * A tool loop appends an assistant `tool_use` turn and a user `tool_result` turn per round, all of
+ * it AFTER the history breakpoint, so round 9 re-reads rounds 1–8 at full price. That is the bulk
+ * of the uncached prompt spend on the tool-heavy desks — not prompt assembly.
+ *
+ * `mutableTail` is how many of the newest user turns may STILL CHANGE after being sent, and it is
+ * the only thing that differs between callers:
+ *
+ *   • 1 (default) — the desk loop below, which runs `_compactPriorToolResults`: it rewrites
+ *     already-sent results in place (images to a placeholder, long text truncated). A breakpoint
+ *     on the newest result is invalidated by that rewrite a round later, so we would pay a write
+ *     every round and never read it back. Compaction is idempotent, so the turn BEFORE the newest
+ *     is frozen — that is as far as the breakpoint can safely reach.
+ *   • 0 — the monitors (hermes/talos), which never rewrite a result. Nothing is mutable, so the
+ *     newest turn is already frozen and the breakpoint can sit on it: one extra round of coverage.
+ *
+ * Set it wrong and the failure is silent and expensive — a breakpoint on bytes that keep changing
+ * writes a cache entry per round that nothing ever reads.
+ *
+ * @returns {boolean} whether the breakpoint moved
+ */
+export function advanceToolLoopCache(messages, historyLen, { mutableTail = 1 } = {}) {
+    const target = _frozenCacheTarget(messages, historyLen, mutableTail)
+    if (target === -1) return false
+    return _restampToolLoopCache(messages, target)
+}
+
+/**
+ * The furthest frozen user turn the breakpoint can reach. Pure; exported for tests.
+ *
+ * Returns -1 until enough user turns exist to clear `mutableTail`, which is also what keeps the
+ * earliest rounds alone — at that depth there is nothing behind the frontier worth a write.
+ *
+ * Scans for the turn rather than computing an offset because a `pause_turn` round pushes ONE
+ * message instead of two, so index arithmetic drifts out of phase the moment a server tool pauses.
+ */
+export function _frozenCacheTarget(messages, historyLen, mutableTail = 1) {
+    let seen = 0
+    for (let i = messages.length - 1; i >= historyLen; i--) {
+        if (messages[i]?.role !== 'user') continue
+        if (++seen > mutableTail) return i
+    }
+    return -1
+}
+
+/**
+ * Move the ONE message-level breakpoint onto `targetIdx`. Mutates; exported for tests.
+ *
+ * Strips every existing message-level stamp before placing the new one, so the count is right by
+ * construction rather than by bookkeeping. That matters more than it looks: the budget is four
+ * breakpoints per request and the agents already spend up to three (tool list + one or two system
+ * blocks), so an accidental second message stamp is a production-only 400 on exactly the longest
+ * conversations — the ones this is meant to make cheaper.
+ *
+ * Returns whether it moved the breakpoint.
+ */
+export function _restampToolLoopCache(messages, targetIdx) {
+    const target = messages[targetIdx]
+    if (!Array.isArray(target?.content) || !target.content.length) return false
+
+    for (const msg of messages) {
+        if (!Array.isArray(msg?.content)) continue
+        msg.content = msg.content.map(b => {
+            if (!b?.cache_control) return b
+            const { cache_control, ...rest } = b
+            return rest
+        })
+    }
+
+    // Re-read after the strip: the loop above replaced the array on every message, target included.
+    const content = messages[targetIdx].content
+    content[content.length - 1] = { ...content[content.length - 1], cache_control: { type: 'ephemeral' } }
+    return true
 }
 
 function _extractText(content) {
@@ -367,7 +464,10 @@ function _compactServerResults(blocks) {
 // top of a tool_use/pause_turn branch — every result already in `messages` was
 // visible to the call that just returned, so none are awaiting a first read.
 // The fresh results are appended raw afterwards, so they reach the model in full.
-function _compactPriorToolResults(messages) {
+// Exported for tests: the tool-loop breakpoint above is placed entirely on the strength of this
+// function's two properties — that it rewrites a result exactly once, and that a block it rewrites
+// keeps its `cache_control`. Both are pinned in promptCacheHistory.test.js.
+export function _compactPriorToolResults(messages) {
     for (const msg of messages) {
         if (!msg || msg.role !== 'user' || !Array.isArray(msg.content)) continue
         msg.content = msg.content.map(_compactToolResultBlock)

@@ -7,7 +7,8 @@ import { logger }                from '../services/logger.service.js'
 import { extractFirstJSON }      from './parsers/llmReply.parser.js'
 import { assessRouting, candlesText as _candlesText,
     ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING, bookAssessUsage, lensLine } from './assess.shared.js'
-import { _thinkingConfig, _allText, _formatEventRisk } from './hermes.assess.js'
+import { _allText, _formatEventRisk } from './hermes.assess.js'
+import { _thinkingConfig, advanceToolLoopCache } from '../providers/anthropic.provider.js'
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
 import { declaredConditions, pickScenario, scenarioLabel } from '../services/setup.schema.js'
 import { config } from '../services/config.js'
@@ -238,7 +239,12 @@ export async function assessSetup(setup, hit, ctx = {}) {
 async function _runRead(setup, systemText, primary) {
     try {
         const { model, reasoningEffort } = await assessRouting(setup.userId)
-        const thinking  = _thinkingConfig(reasoningEffort)
+        // `model` is not optional here: _thinkingConfig floors the models that reason by
+        // default (Opus 5, Sonnet 5) to 'low' when no effort is set, and without it that floor
+        // is skipped — leaving Opus 5 with thinking OFF, where it can emit a tool call as plain
+        // text that silently never runs. A monitor is entirely tool-driven, so that reads as a
+        // wake that assessed nothing.
+        const thinking  = _thinkingConfig(reasoningEffort, model)
         const maxTokens = thinking ? MAX_TOKENS_THINKING : MAX_TOKENS
         const system    = [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
         const tools     = buildToolsFor(setup)
@@ -270,6 +276,12 @@ async function _runRead(setup, systemText, primary) {
         const RUNAWAY_ROUNDS = 25
         let msg
         for (let round = 0; ; round++) {
+            // Same breakpoint walk the desks use (anthropic.provider), so a 25-round read pays for
+            // its earlier rounds once instead of on every round. `mutableTail: 0` because this loop
+            // never rewrites a tool result — unlike the desk loop, nothing here is still in flux,
+            // so the breakpoint can sit on the newest turn rather than lagging one behind.
+            advanceToolLoopCache(messages, 1, { mutableTail: 0 })
+
             msg = await _client.messages.create({
                 model, max_tokens: maxTokens, system, messages, tools,
                 ...(thinking ?? {}),

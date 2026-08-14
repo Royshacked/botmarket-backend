@@ -4,6 +4,8 @@ import { dirname, join } from 'path'
 import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { KAIROS_TOOLS, buildKairosToolHandlers } from '../tools/kairos.tools.js'
+import { toolsFor } from '../agentTools.registry.js'
+import { makeConsultHandler } from '../deepThink.service.js'
 import { buildVenueSection } from '../tools/tradingContext.tools.js'
 import { normalizeSetup, setupReadiness, computeRR, validityProblems } from '../setup.schema.js'
 import { logger } from '../logger.service.js'
@@ -30,6 +32,36 @@ const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 /** The dimensions <coverage> may claim. Anything else is dropped. */
 export const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
 
+// Kairos's kit plus the reasoning sidecar, APPENDED so the shared array is the exact prefix of
+// this one — the tools cache breakpoint sits inside KAIROS_TOOLS, and inserting anywhere before it
+// would re-write that cache on every Mentor turn.
+//
+// Mentor-only on purpose, and only for now. The sidecar is not free: each call is a second model
+// request, so it is worth it exactly where the decisions are bounded, nameable, and cost real
+// money — which is this desk. The description below is Mentor's own judgment about WHEN to reach
+// for it; the transport it reaches through is shared (deepThink.service.js).
+//
+// TO EXTEND IT TO ANOTHER DESK: append the same `toolsFor({ consult: ... })` to that desk's array
+// and add `consult: makeConsultHandler({ userId })` to its handlers. Two lines — the hard part is
+// the third: that desk needs its OWN description naming the two or three decisions worth a full
+// model call, because "when is this worth it" is per-desk judgment and does not transfer. Atlas is
+// the obvious next one (allocation and correlation are the same shape as sizing).
+//
+// Gate the rollout on DATA, not on it feeling useful: `byAgent.consult` in token_usage carries the
+// reach rate and cost. If Mentor consults on most turns the description is too permissive and
+// wants tightening before any second desk inherits it; if it never consults, the feature is not
+// earning its keep and copying it around only multiplies that.
+export const MENTOR_TOOLS = [
+    ...KAIROS_TOOLS,
+    ...toolsFor({
+        consult: `Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.
+
+Reach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs the entry; and **placing a zone where the structure is ambiguous** — a level that is both a prior high and a supply shelf, say.
+
+Do NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most setups should be built without ever calling this.`,
+    }),
+]
+
 export function emptyMentorState() {
     return { active_asset: '', draft: null, coverage: [] }
 }
@@ -45,8 +77,12 @@ async function chatStream({
     _venueSection = buildVenueSection,
 }) {
 
-    const tools        = KAIROS_TOOLS
-    const toolHandlers = buildKairosToolHandlers(onChart, userId)
+    const tools        = MENTOR_TOOLS
+    const toolHandlers = {
+        ...buildKairosToolHandlers(onChart, userId),
+        // Fresh per turn — the cap it carries is per-turn (see makeConsultHandler).
+        consult: makeConsultHandler({ userId }),
+    }
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, audience, seed)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than

@@ -10,6 +10,7 @@ import { TOOLS as ANALYST_TOOLS }   from '../../services/agents/analyst.agent.se
 import { TOOLS as AXL_TOOLS }       from '../../services/agents/axl.agent.service.js'
 import { TOOLS as STRATEGY_TOOLS } from '../../services/agents/strategy.agent.service.js'
 import { KAIROS_TOOLS }             from '../../services/tools/kairos.tools.js'
+import { MENTOR_TOOLS }             from '../../services/agents/mentor.agent.service.js'
 import { SMC_TOOLS }                from '../../services/tools/smc.tools.js'
 import { VALUATION_TOOLS }          from '../../services/tools/valuation.tools.js'
 
@@ -39,12 +40,17 @@ const SNAPSHOT  = JSON.parse(fs.readFileSync(join(__dirname, '../fixtures/agentT
 // check_broker_symbol in c06842c while every other agent's tool list was change-detected and its
 // wasn't. Its tools are now covered like everyone else's, which is also what stops save_objective
 // reading as an orphan schema below.
+// Mentor had the same gap Axl did, for the same reason: it borrowed KAIROS_TOOLS wholesale, so it
+// was covered only transitively and its own list was never change-detected. It has its own array
+// now (Kairos's kit + the `consult` sidecar), which is also what stops `consult` reading as an
+// orphan schema below.
 const LIVE = {
     strategy:  STRATEGY_TOOLS,
     portfolio: PORTFOLIO_TOOLS,
     scanner:   SCANNER_TOOLS,
     analyst:   ANALYST_TOOLS,
     kairos:    KAIROS_TOOLS,
+    mentor:    MENTOR_TOOLS,
     axl:       AXL_TOOLS,
 }
 

@@ -15,6 +15,7 @@ import { smcReadText, smcBars, SMC_TOOL_NAMES } from '../services/tools/smc.tool
 import { newsService } from '../services/news.service.js'
 import { logger } from '../services/logger.service.js'
 import { extractFirstJSON } from './parsers/llmReply.parser.js'
+import { _thinkingConfig, advanceToolLoopCache } from '../providers/anthropic.provider.js'
 // Shared assessment mechanics — routing, token caps, the candle block, the index list. Hermes and
 // Talos had byte-identical copies; the JUDGMENT (prompts, gather strategy, verdicts) stays local.
 import { assessRouting as _hermesRouting, candlesText as _candlesText, BROAD_INDICES,
@@ -28,14 +29,15 @@ const _client = new Anthropic({ apiKey: config.anthropicApiKey })
 // terse first-pass reply to avoid truncating the trailing JSON object.
 const CONFIRM_MAX_TOKENS         = 2_000
 
-// Map the reasoning-effort knob onto Anthropic adaptive extended thinking — mirrors
-// anthropic.provider.js. 'off'/invalid → null (no thinking block, zero reasoning cost). Adaptive
-// (NOT budget_tokens, which 400s on Opus 4.8) + effort is supported across all allowed models. Pure.
-export function _thinkingConfig(effort) {
-    return (effort === 'low' || effort === 'high')
-        ? { thinking: { type: 'adaptive' }, output_config: { effort } }
-        : null
-}
+// _thinkingConfig is the PROVIDER's (re-exported here so the monitors' existing importers keep
+// working). It used to be a local copy that "mirrored anthropic.provider.js" — and then the two
+// drifted: the provider gained a floor for the models that reason whether or not you ask
+// (Opus 5, Sonnet 5), and this copy did not. So a monitor set to Opus 5 ran with thinking OFF,
+// where a tool call can come back as plain TEXT and silently never run. For a monitor, which is
+// nothing but tool calls, that is a wake that assessed nothing and said so confidently.
+//
+// One mechanism, one home. The second argument is not optional — pass the model.
+export { _thinkingConfig }
 
 // Pull the first text block from an assessment response. With extended thinking on, content[0] is a
 // thinking block, so a bare content[0].text would miss the JSON — find the text block explicitly. Pure.
@@ -306,7 +308,10 @@ async function _runAssessment(call, systemPrompt, buildUserText, label) {
             : userText
 
         const { model, reasoningEffort } = await _hermesRouting(call.userId)
-        const thinking  = _thinkingConfig(reasoningEffort)
+        // `model` is not optional — see the same call in talos.assess.js. Without it the
+        // reasons-by-default floor is skipped and Opus 5 runs with thinking off, where a tool
+        // call can arrive as plain text and silently never run.
+        const thinking  = _thinkingConfig(reasoningEffort, model)
         const maxTokens = thinking ? ASSESS_MAX_TOKENS_THINKING : ASSESS_MAX_TOKENS
         const system    = [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
         const tools     = [..._chartTool(ladder), ..._structureTools(ladder),
@@ -320,6 +325,14 @@ async function _runAssessment(call, systemPrompt, buildUserText, label) {
         // model is forced to return the JSON rather than request another read.
         let msg
         for (let round = 0; round <= MAX_ASSESS_TOOL_CALLS; round++) {
+            // Same breakpoint walk the desks use — see talos.assess for why mutableTail is 0.
+            //
+            // The FINAL round gets nothing from it: dropping `tools` to force the JSON changes the
+            // very front of the prefix (render order is tools → system → messages), so the whole
+            // request re-reads regardless of where the message breakpoint sits. That is inherent to
+            // the forced-answer round, not something this adds — the middle rounds still hit.
+            advanceToolLoopCache(messages, 1, { mutableTail: 0 })
+
             msg = await _client.messages.create({
                 model, max_tokens: maxTokens, system, messages,
                 ...(round < MAX_ASSESS_TOOL_CALLS ? { tools } : {}),
@@ -399,7 +412,7 @@ confirm=true → the entry still stands; confirm=false → stand aside for now.`
 async function _confirmEntryWithBrowse(call, zone, raw) {
     try {
         const { model, reasoningEffort } = await _hermesRouting(call.userId)
-        const thinking = _thinkingConfig(reasoningEffort)
+        const thinking = _thinkingConfig(reasoningEffort, model)
         const drivers  = (call.market_sensitivity?.drivers ?? []).join(', ') || 'the broad indices'
         const userText = [
             `You tentatively decided ENTER on ${String(call.asset).toUpperCase()} (${call.bias} ${call.trade_type}).`,

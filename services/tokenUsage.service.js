@@ -11,6 +11,10 @@ export const COLLECTION = 'token_usage'
 // overstated every Opus row by 3x while it was in here.
 const PRICING = {
     'claude-haiku-4-5-20251001': { input: 1.00,  output: 5.00,  cacheRead: 0.10,  cacheWrite: 1.25  },
+    // Sonnet 5 is $2/$10 introductory through 2026-08-31, then $3/$15. Priced at the STANDARD
+    // rate on purpose: over-reporting spend is the safe direction for a budget ceiling, and it
+    // needs no calendar reminder to stay correct.
+    'claude-sonnet-5':          { input: 3.00,  output: 15.00, cacheRead: 0.30,  cacheWrite: 3.75  },
     'claude-sonnet-4-6':        { input: 3.00,  output: 15.00, cacheRead: 0.30,  cacheWrite: 3.75  },
     'claude-opus-5':            { input: 5.00,  output: 25.00, cacheRead: 0.50,  cacheWrite: 6.25  },
     'claude-opus-4-8':          { input: 5.00,  output: 25.00, cacheRead: 0.50,  cacheWrite: 6.25  },

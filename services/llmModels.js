@@ -12,6 +12,7 @@ export const CHEAP_MODEL   = 'claude-haiku-4-5-20251001'
 const MODELS = {
     'claude-opus-5':            { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Opus 5' },
     'claude-opus-4-8':          { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Opus 4.8' },
+    'claude-sonnet-5':          { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Sonnet 5' },
     'claude-sonnet-4-6':        { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Sonnet 4.6' },
     'claude-haiku-4-5-20251001': { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Haiku 4.5' },
 }
