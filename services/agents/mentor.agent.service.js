@@ -13,8 +13,8 @@ import { logger } from '../logger.service.js'
 // Forked from the Kairos scaffold, which is the right shape for this: the emitted worksheet IS
 // the state (no separate <state> block to carry), the client owns chat history, and nothing
 // persists until the user presses Generate. What differs is the CONVERSATION contract — Mentor
-// has no phases, so there is no phase capture and no PHASE_TABLES entry; it routes through the
-// classifier (see modelRouter). The user always brings the ticker, so there is no scan hand-off.
+// has no phases, so there is no phase capture — its invariants are not steps
+// (docs/desks/mentor-talos.md). The user always brings the ticker, so there is no scan hand-off.
 //
 // Tools are borrowed WHOLE from Kairos (docs/desks/mentor-talos.md — share the pipe). Deliberately
 // un-subsetted: Kairos picks one lens per build, but Mentor's lens is per-SETUP and it must be

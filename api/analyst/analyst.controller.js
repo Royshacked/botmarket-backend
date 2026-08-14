@@ -17,7 +17,7 @@ export const _sanitizeAnalystSeed = sanitizeScanSeed
 
 // Streaming research chat → emits a <coverage> draft (returned for preview; POST /coverage initiates it).
 export async function streamAnalyst(req, res) {
-    const { messages, userPrompt, model, reasoningEffort, chatState } = req.body ?? {}
+    const { messages, userPrompt, model, chatState } = req.body ?? {}
     const seed = _sanitizeAnalystSeed(req.body?.seed)
     if (messages !== undefined && messages !== null) {
         const v = parseChatMessages(messages)
@@ -33,7 +33,6 @@ export async function streamAnalyst(req, res) {
                 chatState:     (chatState && typeof chatState === 'object') ? chatState : {},
                 seed,
                 model,
-                reasoningEffort,
                 userId: req.user._id,
                 signal,
                 onToken:     text  => sendEvent('token',     { text }),

@@ -2,7 +2,6 @@ import { logger }              from '../../services/logger.service.js'
 import { kairosAgentService, emptyKairosState, _finalizeCall } from '../../services/agents/kairos.agent.service.js'
 import { kairosService }       from './kairos.service.js'
 import { kairosHandoffService } from '../../services/kairos.handoff.service.js'
-import { resolveModel }        from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { sendReason }         from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
@@ -23,9 +22,7 @@ export async function streamKairos(req, res) {
     await streamAgentResponse(req, res, {
         log: LOG,
         handler: async ({ sendEvent, signal }) => {
-            const { routingMode, currentPhase, model, reasoningEffort } = req.body ?? {}
-            const lastMessage = parsed.messages?.at(-1)?.content ?? parsed.userPrompt ?? ''
-            const routing = await resolveModel({ routingMode, agent: 'kairos', phase: currentPhase, model, reasoningEffort, lastMessage })
+            const { model } = req.body ?? {}
 
             // The user's open positions + P&L across paper/live/manual, so Kairos sees the same live
             // book Idea/Atlas do (best-effort — a broker hiccup just drops the block).
@@ -38,8 +35,7 @@ export async function streamKairos(req, res) {
                 accounts:      parsed.accounts,
                 mainAccountId: parsed.mainAccountId,
                 seed,
-                model:         routing.model,
-                reasoningEffort: routing.reasoningEffort,
+                model,
                 userId:        req.user._id,
                 signal,
                 onToken:     (text)   => sendEvent('token',     { text }),

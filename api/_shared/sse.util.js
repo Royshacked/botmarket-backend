@@ -71,7 +71,7 @@ export function startSseStream(req, res, { turnId = null, userId = null } = {}) 
 // shares: open the stream, run the handler, and on success `finish()` + emit a `done`
 // (skipped if the client already aborted); on error, `finish()` + emit an `error`
 // (or stay silent if the client is gone). The controller supplies only `handler`,
-// which receives { sendEvent, signal } — it does its own resolveModel + chatStream
+// which receives { sendEvent, signal } — it reads the model off the body and calls chatStream
 // (wiring token/tool/reasoning events via sendEvent) and RETURNS the `done` payload.
 // Post-stream side effects belong inside the handler. Gate them on `!signal.aborted` — which now means
 // "the user did not stop this" and NOT "the client is still connected", so a turn the user walked away

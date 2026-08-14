@@ -143,9 +143,10 @@ test('the named-ticker branch forbids the angle question outright', () => {
 
 // ── the phase tag, per branch ────────────────────────────────────────────────
 // `<phase>` is not decoration: the client shows the Phase-1 angle chips off it (ScannerPanel's
-// showAngleStrip) and modelRouter routes phase 1 to HAIKU as "thesis extraction". A validate turn
-// tagged 1 therefore asked the screening question a SECOND time in the UI after the prose had been
-// told not to, and sent the next tool-heavy turn to the cheap model. The branch decides the floor.
+// showAngleStrip). A validate turn tagged 1 therefore asked the screening question a SECOND time
+// in the UI after the prose had been told not to. The branch decides the floor.
+// (It used to pick the model too — phase 1 routed to Haiku as "thesis extraction" — until the
+// routing layer was removed for invalidating the prompt cache on every switch.)
 test('the validate branch starts at phase 3 and forbids 1 and 2', () => {
     const validate = sectionWith(HANDOFF, 'VALIDATE-A-NAME — ')
     assert.match(validate, /never emit\s+`?<phase>1<\/phase>`?/)

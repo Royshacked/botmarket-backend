@@ -2,7 +2,6 @@ import { scannerAgentService } from '../../services/agents/scanner.agent.service
 import { scannerChatService }  from './scannerChat.service.js'
 import { scanService }         from './scan.service.js'
 import { logger }              from '../../services/logger.service.js'
-import { resolveModel }        from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages }   from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
@@ -13,7 +12,7 @@ import { getExperienceLevel } from '../../services/experience.service.js'
 const LOG = '[scanner:controller]'
 
 export async function streamScanner(req, res) {
-    const { messages, model, editList, handoff, handoffTo, profile, reasoningEffort, routingMode, currentPhase } = req.body ?? {}
+    const { messages, model, editList, handoff, handoffTo, profile } = req.body ?? {}
 
     const validatedMessages = parseChatMessages(messages)
     if (validatedMessages.error) {
@@ -23,13 +22,10 @@ export async function streamScanner(req, res) {
     await streamAgentResponse(req, res, {
         log: LOG,
         handler: async ({ sendEvent, signal }) => {
-            const lastMessage = messages.at(-1)?.content ?? ''
-            const routing = await resolveModel({ routingMode, agent: 'scanner', phase: currentPhase, model, reasoningEffort, lastMessage })
-
             const result = await scannerAgentService.chatStream({
                 audience:  await getExperienceLevel(req.user._id),
                 messages,
-                model:           routing.model,
+                model,
                 editList:        editList && typeof editList === 'object' ? editList : null,
                 handoff:         handoff === true,
                 // Which desk the pick goes back to — the CLIENT knows, because it is the pipeline's
@@ -38,7 +34,6 @@ export async function streamScanner(req, res) {
                 // the body carried in front of the user.
                 handoffTo:       handoffTo === 'mentor' || handoffTo === 'kairos' ? handoffTo : null,
                 profile:         profile === 'investing' ? 'investing' : 'trading',
-                reasoningEffort: routing.reasoningEffort,
                 userId:   req.user._id,
                 signal:   signal,
                 onToken:     (text)   => sendEvent('token',     { text }),

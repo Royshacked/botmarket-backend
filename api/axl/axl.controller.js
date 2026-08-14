@@ -1,5 +1,4 @@
 import { axlAgentService } from '../../services/agents/axl.agent.service.js'
-import { resolveModel }    from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseChatMessages } from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
@@ -55,10 +54,11 @@ export function _validateEdit(edit) {
 // the desk and the name it should open on). There is deliberately no
 // second endpoint: a separate one-shot `/route` doorman used to answer the landing box with no
 // history and no app knowledge, which meant confident wrong answers and follow-ups that couldn't
-// resolve. Model routing follows the user's shared AI-mode (agent 'axl' is phaseless → auto/
-// classifier fall back to the default route).
+// resolve. The model is the user's own pick, straight through — there is no per-turn routing layer
+// any more (see docs: a model or reasoning change mid-conversation invalidates the prompt cache,
+// which cost more than picking a cheaper model per turn ever saved).
 export async function streamAxl(req, res) {
-    const { messages, model, reasoningEffort, routingMode } = req.body ?? {}
+    const { messages, model } = req.body ?? {}
 
     const validated = parseChatMessages(messages)
     if (validated.error) return res.status(400).json({ error: validated.error })
@@ -66,14 +66,10 @@ export async function streamAxl(req, res) {
     await streamAgentResponse(req, res, {
         log: LOG,
         handler: async ({ sendEvent, signal }) => {
-            const lastMessage = messages.at(-1)?.content ?? ''
-            const routing = await resolveModel({ routingMode, agent: 'axl', phase: null, model, reasoningEffort, lastMessage })
-
             const result = await axlAgentService.chatStream({
                 messages,
                 audience: await getExperienceLevel(req.user._id),
-                model:           routing.model,
-                reasoningEffort: routing.reasoningEffort,
+                model,
                 userId:  req.user._id,
                 signal:  signal,
                 onToken:     (text)  => sendEvent('token',     { text }),

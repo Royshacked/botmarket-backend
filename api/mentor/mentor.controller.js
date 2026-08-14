@@ -1,5 +1,4 @@
 import { mentorAgentService, emptyMentorState } from '../../services/agents/mentor.agent.service.js'
-import { resolveModel }        from '../../services/modelRouter.service.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { parseStreamBody, parseClientTime } from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
@@ -11,9 +10,8 @@ const LOG = '[mentor:controller]'
  * Mentor's build conversation (Pipeline F). Streams tokens / chart / status / coverage; the
  * agent returns a DRAFT setup in `done`. Nothing persists until the user presses Generate.
  *
- * No `currentPhase` is threaded through: Mentor has no phases, so `resolveModel` gets no phase
- * and AUTO falls through to DEFAULT_ROUTE. The intended routing mode here is CLASSIFIER, which
- * picks from the last user message rather than a step number (docs/desks/mentor-talos.md).
+ * The model is the user's own pick, passed straight through. There is no routing layer: choosing
+ * a cheaper model per turn cost more in invalidated prompt cache than it ever saved.
  */
 export async function streamMentor(req, res) {
     const parsed = parseStreamBody(req.body)
@@ -28,9 +26,7 @@ export async function streamMentor(req, res) {
     await streamAgentResponse(req, res, {
         log: LOG,
         handler: async ({ sendEvent, signal }) => {
-            const { routingMode, model, reasoningEffort } = req.body ?? {}
-            const lastMessage = parsed.messages?.at(-1)?.content ?? parsed.userPrompt ?? ''
-            const routing = await resolveModel({ routingMode, agent: 'mentor', model, reasoningEffort, lastMessage })
+            const { model } = req.body ?? {}
 
             // The user's live book across paper/live/manual — so Mentor can say "this stacks the
             // same name" before it sizes. Best-effort: a broker hiccup just drops the block.
@@ -44,8 +40,7 @@ export async function streamMentor(req, res) {
                 mainAccountId: parsed.mainAccountId,
                 clientTime,
                 seed,
-                model:           routing.model,
-                reasoningEffort: routing.reasoningEffort,
+                model,
                 userId:          req.user._id,
                 signal,
                 onToken:     (text)     => sendEvent('token',     { text }),

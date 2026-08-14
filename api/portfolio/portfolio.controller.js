@@ -4,7 +4,6 @@ import { applyRebalance, snapshotConvictions } from './portfolioRebalance.servic
 import { invalidatePortfolioState } from '../../services/portfolioState.service.js'
 import { refreshCoverage }        from '../../services/coverageRefresh.service.js'
 import { logger }                from '../../services/logger.service.js'
-import { resolveModel }          from '../../services/modelRouter.service.js'
 import { streamAgentResponse }   from '../_shared/sse.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
@@ -141,7 +140,7 @@ export async function removeAdoptedHolding(req, res) {
 }
 
 export async function streamPortfolio(req, res) {
-    const { messages, ideaAccounts, mainAccountId, portfolioId, portfolioIdeas, threadId, model, reasoningEffort, routingMode, currentPhase, pipeline } = req.body ?? {}
+    const { messages, ideaAccounts, mainAccountId, portfolioId, portfolioIdeas, threadId, model, pipeline } = req.body ?? {}
 
     const validatedMessages = parseChatMessages(messages)
     if (validatedMessages.error) {
@@ -175,8 +174,6 @@ export async function streamPortfolio(req, res) {
                 }).then(r => r.draft ?? null).catch(() => null)
                 : null
 
-            const routing = await resolveModel({ routingMode, agent: 'portfolio', phase: currentPhase, model, reasoningEffort, lastMessage })
-
             const result = await portfolioAgentService.chatStream({
                 messages,
                 ideaAccounts: validatedAccounts,
@@ -191,8 +188,7 @@ export async function streamPortfolio(req, res) {
                 audience: await getExperienceLevel(req.user._id),
                 thesis: storedThesis,
                 adoptDraft,
-                model:           routing.model,
-                reasoningEffort: routing.reasoningEffort,
+                model,
                 userId:   req.user._id,
                 signal:   signal,
                 onToken:     (text)   => sendEvent('token',     { text }),

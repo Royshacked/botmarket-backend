@@ -18,7 +18,7 @@ const LOG = '[strategyCtrl]'
 
 // Streaming top-down chat → emits a <tilt> draft (returned for preview; POST /tilt publishes it).
 export async function streamStrategy(req, res) {
-    const { messages, userPrompt, model, reasoningEffort, chatState } = req.body ?? {}
+    const { messages, userPrompt, model, chatState } = req.body ?? {}
     if (messages !== undefined && messages !== null) {
         const v = parseChatMessages(messages)
         if (v.error) return res.status(400).json({ error: v.error })
@@ -31,7 +31,6 @@ export async function streamStrategy(req, res) {
                 userPrompt,
                 chatState: (chatState && typeof chatState === 'object') ? chatState : {},
                 model,
-                reasoningEffort,
                 userId: req.user._id,
                 signal,
                 onToken:     text  => sendEvent('token',     { text }),

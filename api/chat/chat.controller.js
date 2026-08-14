@@ -33,10 +33,10 @@ export async function listMessages(req, res, next) {
 export async function postMessage(req, res, next) {
     try {
         const { id: conversationId } = req.params
-        const { content, routingMode, model, reasoningEffort } = req.body ?? {}
+        const { content, model } = req.body ?? {}
         if (!content?.trim()) return res.status(400).json({ error: 'content required' })
 
-        const result = await postUserMessage(conversationId, req.user._id, content.trim(), { routingMode, model, reasoningEffort })
+        const result = await postUserMessage(conversationId, req.user._id, content.trim(), { model })
         if (!result.ok) return res.status(403).json({ error: 'Forbidden' })
         res.json({ message: result.message })
     } catch (err) {

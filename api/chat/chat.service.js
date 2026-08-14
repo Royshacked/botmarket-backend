@@ -1,7 +1,6 @@
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger } from '../../services/logger.service.js'
 import { axlAgentService } from '../../services/agents/axl.agent.service.js'
-import { resolveModel }    from '../../services/modelRouter.service.js'
 import { toAgentMessages } from './axlReply.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
 // The users collection is owned by user.model — chat only JOINS against it (sender name/avatar,
@@ -186,11 +185,9 @@ export async function sendBotMessage(userId, content, type = 'text', payload = n
  * for now Axl answers general / app-guide questions itself and, per its prompt,
  * routes any build/change request to the relevant specialist chat.
  *
- * `aiPref` ({ routingMode, model, reasoningEffort }) is the user's shared AI-mode
- * setting, forwarded by the social-chat client so Axl obeys the same model routing
- * as Idea/Atlas/Argus. Resolved via the shared modelRouter (agent 'axl' is
- * phaseless → auto/classifier fall back to the default route; manual honours the
- * picked model + reasoning).
+ * `aiPref` ({ model }) is the user's shared model choice, forwarded by the social-chat client so
+ * Axl runs on the same model here as it does in the hub. Passed straight through — there is no
+ * routing layer to resolve it against.
  */
 export async function triggerAxlReply(userId, conversationId, aiPref = {}) {
     try {
@@ -202,17 +199,12 @@ export async function triggerAxlReply(userId, conversationId, aiPref = {}) {
         // a race where the trigger fires but the newest message is Axl's own).
         if (agentMessages.at(-1)?.role !== 'user') return
 
-        const { routingMode, model, reasoningEffort } = aiPref
-        const lastMessage = agentMessages.at(-1)?.content ?? ''
-        const routing = await resolveModel({ routingMode, agent: 'axl', phase: null, model, reasoningEffort, lastMessage })
-
         const { reply } = await axlAgentService.chatStream({
             messages:        agentMessages,
             // The SAME Axl answers here and in the hub, so it has to read the room the same way in
             // both. Without this, someone gets plain language in one surface and jargon in the other.
             audience:        await getExperienceLevel(userId),
-            model:           routing.model,
-            reasoningEffort: routing.reasoningEffort,
+            model:           aiPref?.model,
             userId,
         })
         if (reply?.trim()) await sendBotMessage(userId, reply.trim())
