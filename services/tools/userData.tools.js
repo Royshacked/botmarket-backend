@@ -16,6 +16,7 @@ import { makeToolHandler } from '../agentUtils.js'
 import { listWatchedItems, DEFAULT_KINDS } from '../watchlist.service.js'
 import { getPerformance } from '../performance.service.js'
 import { getUpcomingEvents } from '../upcomingEvents.service.js'
+import { getActiveWorkspace } from '../workspace.service.js'
 
 const LOG = '[userData]'
 
@@ -88,15 +89,24 @@ function _watchLine(row) {
     }
 }
 
-export function formatWatchedItems({ items = [], counts = {}, unavailable = [] } = {}) {
+export function formatWatchedItems({ items = [], counts = {}, unavailable = [], workspace = null } = {}) {
+    // The workspace has to be SAID, and it matters most on the empty answer. "You have nothing" and
+    // "you have nothing in paper" are different sentences, and a user with three live setups who
+    // hears the first one has been told something false about their own book. Calls, setups and
+    // books are scoped; scans and coverage are research, bind to no account, and are shared across
+    // all three workspaces by decision — so the line says that rather than leaving it inferred.
+    const scope = workspace
+        ? ` in the ${workspace.toUpperCase()} workspace (calls, setups and books are scoped to it; scans and coverage are shared across all workspaces)`
+        : ''
+
     if (!items.length) {
         return unavailable.length
             ? `Could not read: ${unavailable.join(', ')}. Tell the user you couldn't check rather than saying they have nothing.`
-            : 'Nothing in the app yet — no calls, setups, books, coverage or scans.'
+            : `Nothing${scope || ' in the app yet'} — no calls, setups, books, coverage or scans.`
     }
     const summary = Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`).join(', ')
     return [
-        `In the app right now: ${summary}.`,
+        `In the app right now${scope}: ${summary}.`,
         ...items.map(_watchLine),
         _unavailableLine(unavailable),
     ].join('\n').trim()
@@ -174,14 +184,21 @@ export function makeUserDataHandlers(userId = null, deps = {}) {
         watched = listWatchedItems,
         performance = getPerformance,
         events = getUpcomingEvents,
+        workspace = getActiveWorkspace,
     } = deps
 
     return {
+        // Scoped to the workspace the user is standing in, and NOT an argument the model may set:
+        // "what am I watching" means the book in front of them, and every desk is already told which
+        // that is by the venue block. Left to the model it would be forgotten exactly as
+        // get_trading_context was — and the failure is quiet, because a list mixing paper calls with
+        // real-money ones looks like a complete answer.
         get_watched_items: makeToolHandler('get_watched_items',
             async ({ kinds, symbol, include_finished } = {}) => formatWatchedItems(await watched(userId, {
                 kinds: Array.isArray(kinds) && kinds.length ? kinds : DEFAULT_KINDS,
                 symbol: symbol ? String(symbol).toUpperCase() : null,
                 includeFinished: include_finished === true,
+                workspace: await workspace(userId),
             })),
             (err) => `Could not read what the user is watching: ${err.message}`, LOG),
 
@@ -213,7 +230,7 @@ export function makeUserDataHandlers(userId = null, deps = {}) {
  * here, on the newcomer.
  */
 export const USER_DATA_TOOL_SPEC = {
-    get_watched_items: `Everything the user keeps in the app: Kairos calls, Mentor setups, portfolios (as books), Prometheus coverage, and Argus scans — with status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Call it for "what am I watching / what have I got going / what's still open", and before saying the user has nothing. Finished items are excluded unless asked for.`,
+    get_watched_items: `Everything the user keeps in the app: Kairos calls, Mentor setups, portfolios (as books), Prometheus coverage, and Argus scans — with status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Calls, setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Scans and coverage are research, bind to no account, and are shared across every workspace. Call it for "what am I watching / what have I got going / what's still open", and before saying the user has nothing. Finished items are excluded unless asked for.`,
 
     get_performance: `The user's CLOSED-trade record: how many, win rate, net P&L, profit factor and expectancy, split by mode (paper/live/manual), by origin and by symbol — plus Kairos's own R-multiple record for closed calls. Optionally narrowed to a mode, a symbol or a date window. Win rates come back as PERCENTAGES already — never multiply them again. Use it for "how have I done", "is paper working", "what's my win rate". It reports history only; open positions and unrealized P&L are get_trading_context.`,
 

@@ -1794,7 +1794,7 @@
     },
     {
       "name": "get_watched_items",
-      "description": "Everything the user keeps in the app: Kairos calls, Mentor setups, portfolios (as books), Prometheus coverage, and Argus scans \u2014 with status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Call it for \"what am I watching / what have I got going / what's still open\", and before saying the user has nothing. Finished items are excluded unless asked for.",
+      "description": "Everything the user keeps in the app: Kairos calls, Mentor setups, portfolios (as books), Prometheus coverage, and Argus scans \u2014 with status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Calls, setups and books come back scoped to the workspace the user is standing in (paper / live / manual) \u2014 those bind to an account, and merging two books into one list is not an answer. Scans and coverage are research, bind to no account, and are shared across every workspace. Call it for \"what am I watching / what have I got going / what's still open\", and before saying the user has nothing. Finished items are excluded unless asked for.",
       "input_schema": {
         "type": "object",
         "properties": {

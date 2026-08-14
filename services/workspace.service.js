@@ -16,6 +16,8 @@ import { getDb } from '../providers/mongodb.provider.js'
 import { logger } from './logger.service.js'
 import { createTtlCache } from './ttlCache.util.js'
 import { COLLECTION, buildWorkspaceDoc, isValidWorkspace } from '../api/workspace/workspace.model.js'
+import { brokerService } from '../api/broker/broker.service.js'
+import { activeWorkspace } from './venue.resolve.service.js'
 
 const LOG = '[workspace]'
 
@@ -70,6 +72,33 @@ export async function setStoredWorkspace(userId, workspace, deps = {}) {
     } catch (err) {
         logger.warn(LOG, 'setStoredWorkspace failed', err.message)
         return { ok: false, workspace: null, reason: err.message }
+    }
+}
+
+/**
+ * The workspace the user is standing in, resolved — the paper flag joined with their stored choice.
+ *
+ * For callers that need the answer and do NOT already hold the broker connections. `getTradingContext`
+ * deliberately does not use this: it reads the connections anyway for the accounts, so going through
+ * here would fetch them twice. Both funnel through the same `activeWorkspace` rule, which is the part
+ * that must not drift; only the fetching differs.
+ *
+ * Best-effort in both legs — an unreadable connection list or choice degrades to 'live', never throws.
+ *
+ * @returns {Promise<'live'|'paper'|'manual'>}
+ */
+export async function getActiveWorkspace(userId, deps = {}) {
+    if (!userId) return 'live'
+    const { broker: svc = brokerService, stored = getStoredWorkspace } = deps
+    try {
+        const [connections, choice] = await Promise.all([
+            svc.listConnections(userId).catch(() => ({})),
+            stored(userId).catch(() => null),
+        ])
+        return activeWorkspace(connections, choice)
+    } catch (err) {
+        logger.warn(LOG, 'getActiveWorkspace failed', err.message)
+        return 'live'
     }
 }
 

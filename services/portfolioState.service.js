@@ -5,6 +5,7 @@ import { brokerService }                     from '../api/broker/broker.service.
 import { getEarningsCalendarRaw, getSectorRaw } from '../providers/fmp.provider.js'
 import { createTtlCache }                    from './ttlCache.util.js'
 import { logger }                            from './logger.service.js'
+import { resolveMode }                       from './venue.resolve.service.js'
 import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames, BROKER_LABELS } from '../api/portfolio/portfolioMode.util.js'
 
 const LOG = '[portfolioState]'
@@ -71,7 +72,10 @@ export async function listPortfolios(userId) {
     const rows = await db.collection(ENTITIES)
         .find(
             { userId, portfolioId: { $ne: null } },
-            { projection: { _id: 0, portfolioId: 1, portfolioName: 1, savedAt: 1, status: 1, asset: 1 } },
+            // The venue fields ride along so a book can be scoped to the workspace it belongs to.
+            // Free — same document, same query — and without them a book is the one watched kind
+            // with nothing to scope BY, so paper books listed alongside real-money ones.
+            { projection: { _id: 0, portfolioId: 1, portfolioName: 1, savedAt: 1, status: 1, asset: 1, mode: 1, broker: 1, mainAccountId: 1, accounts: 1 } },
         )
         .toArray()
 
@@ -82,7 +86,7 @@ export async function listPortfolios(userId) {
         if (!row.portfolioId) continue
         let book = books.get(row.portfolioId)
         if (!book) {
-            book = { portfolioId: row.portfolioId, name: row.portfolioName || 'Portfolio', holdings: 0, savedAt: row.savedAt ?? 0, statuses: {}, symbols: [] }
+            book = { portfolioId: row.portfolioId, name: row.portfolioName || 'Portfolio', holdings: 0, savedAt: row.savedAt ?? 0, statuses: {}, symbols: [], modes: [] }
             books.set(row.portfolioId, book)
         }
         book.holdings++
@@ -94,6 +98,15 @@ export async function listPortfolios(userId) {
         if (row.asset && !book.symbols.includes(row.asset)) book.symbols.push(row.asset)
         // Keep the newest savedAt in the book, so ordering matches the client's newest-first.
         if ((row.savedAt ?? 0) > book.savedAt) book.savedAt = row.savedAt ?? 0
+        // Which workspace(s) this book has holdings in. A SET rather than one value because a book
+        // is normally uniform — the venue is chosen once at save — but appending to the same
+        // portfolioId across a workspace switch produces a mixed one, and the frontend already
+        // shows such a book in each workspace it has holdings in (the ideas are filtered, so the
+        // groups rebuild per mode). Listing it in only one would make the other half unreachable.
+        // NOTE: `holdings` stays the TOTAL across modes, so a mixed book over-counts in each — the
+        // same approximation the client makes, and mixed books remain a deferred edge case.
+        const mode = resolveMode(row)
+        if (!book.modes.includes(mode)) book.modes.push(mode)
     }
 
     return [...books.values()].sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))

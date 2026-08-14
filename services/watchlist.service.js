@@ -23,6 +23,7 @@ import { setupService } from '../api/setups/setups.service.js'
 import { scanService } from '../api/scanner/scan.service.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
 import { listPortfolios } from './portfolioState.service.js'
+import { resolveMode } from './venue.resolve.service.js'
 
 const LOG = '[watchlist]'
 
@@ -36,14 +37,29 @@ const LOG = '[watchlist]'
 export const DEFAULT_KINDS = ['call', 'setup', 'portfolio', 'coverage', 'scan']
 
 /**
+ * The kinds that BELONG to a workspace, and therefore get scoped to it.
+ *
+ * A call, a setup and a book each bind to an account, so each is real money or simulated money and
+ * never both — listing them together is listing two different books as one. Scans, coverage and the
+ * house forecast are deliberately absent: they are research, they bind to no account, and they are
+ * SHARED across all three workspaces by decision. There is nothing to scope them by and nothing
+ * gained by trying.
+ */
+export const WORKSPACE_SCOPED_KINDS = ['call', 'setup', 'portfolio']
+
+/**
  * @param {string} userId
  * @param {object} [opts]
  * @param {string[]} [opts.kinds]   subset of DEFAULT_KINDS
  * @param {boolean}  [opts.includeFinished]  include terminal items (closed calls/setups)
  * @param {string}   [opts.symbol]  narrow to one name
+ * @param {string}   [opts.workspace]  'live'|'paper'|'manual' — scope the account-bound kinds to the
+ *                                     book the user is standing in. Omitted = every workspace, which
+ *                                     is what this did before and what a caller with no workspace to
+ *                                     report should still get.
  * @returns {Promise<{ asOf:number, items:object[], counts:object, unavailable:string[] }>}
  */
-export async function listWatchedItems(userId, { kinds = DEFAULT_KINDS, includeFinished = false, symbol = null } = {}, deps = {}) {
+export async function listWatchedItems(userId, { kinds = DEFAULT_KINDS, includeFinished = false, symbol = null, workspace = null } = {}, deps = {}) {
     const {
         calls = (uid) => kairosService.listKairosCalls(uid, { onError: 'throw' }),
         setups = (uid) => setupService.listSetups(uid, { onError: 'throw' }),
@@ -81,6 +97,12 @@ export async function listWatchedItems(userId, { kinds = DEFAULT_KINDS, includeF
         }
         const project = WATCH_ROW_PROJECTORS[kind]
         const rows = (Array.isArray(result.value) ? result.value : [])
+            // Scoped BEFORE projection, because the venue fields live on the source document and a
+            // watch row deliberately does not carry them (it is the shape a model reads, not the
+            // shape a venue is derived from). A book reports every workspace it holds something in;
+            // everything else resolves to exactly one.
+            .filter(d => !workspace || !WORKSPACE_SCOPED_KINDS.includes(kind)
+                || (Array.isArray(d?.modes) ? d.modes.includes(workspace) : resolveMode(d) === workspace))
             .map(project)
             .filter(Boolean)
             // A finished call is history, not something being watched. `isTerminal` is the shared
@@ -96,5 +118,7 @@ export async function listWatchedItems(userId, { kinds = DEFAULT_KINDS, includeF
     // Newest first across kinds — a mixed list is only useful in one order.
     items.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
 
-    return { asOf, items, counts, unavailable }
+    // `workspace` echoes back so the formatter can SAY which book this is — an empty list is a very
+    // different statement with and without it.
+    return { asOf, items, counts, unavailable, workspace }
 }
