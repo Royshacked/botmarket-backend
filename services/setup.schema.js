@@ -82,8 +82,60 @@ const LADDER_SPAN = 2
 export function buildLadder(timeframe) {
     const tf = normalizeTimeframe(timeframe)
     const i  = TF_RUNGS.indexOf(tf)
-    if (i === -1) return ['1hr', '30min', '15min']
-    return TF_RUNGS.slice(Math.max(0, i - LADDER_SPAN), Math.min(TF_RUNGS.length, i + LADDER_SPAN + 1))
+    if (i === -1) return ['1hr', '30min', '15min'].filter(isFetchableRung)
+    return TF_RUNGS
+        .slice(Math.max(0, i - LADDER_SPAN), Math.min(TF_RUNGS.length, i + LADDER_SPAN + 1))
+        .filter(isFetchableRung)
+}
+
+// The finest rung we can actually GET. `1min` is off-plan at FMP (402) — the rest of the intraday
+// tier is fine — so a ladder that offers it hands the monitor a rung whose fetch can only fail, and
+// the read silently degrades to "no candles" at the one end it looks at first.
+//
+// A DATA-AVAILABILITY floor, deliberately not a vocabulary change: `1min` stays in TF_RUNGS (the
+// legacy `idea` kind still speaks it, and it is what a 1-minute condition parses to), so lifting
+// this when the plan allows is one line here. It is also no real loss as a SETUP rung — a setup
+// judged off a 1-minute chart is reading noise, not structure.
+const FINEST_RUNG = '5min'
+
+/** Is this rung one the providers can actually serve? Pure. */
+export function isFetchableRung(tf) {
+    const i = TF_RUNGS.indexOf(normalizeTimeframe(tf))
+    return i !== -1 && i <= TF_RUNGS.indexOf(FINEST_RUNG)
+}
+
+/**
+ * A rung's length in minutes — how long the model is asking to wait when it asks to look at that
+ * rung next. Unknown/absent → null, so a caller can fall back rather than invent a cadence.
+ */
+export function rungMinutes(tf) {
+    return RUNG_MINUTES[normalizeTimeframe(tf)] ?? null
+}
+const RUNG_MINUTES = {
+    month: 30 * 1440, week: 7 * 1440, day: 1440,
+    '4hr': 240, '2hr': 120, '1hr': 60, '30min': 30, '15min': 15, '5min': 5, '1min': 1,
+}
+
+/**
+ * Hold a requested rung to the ones this setup was laddered onto. The model picks the view it wants
+ * next; WHICH views exist is not its call — LADDER_SPAN is what stops an intraday setup being judged
+ * on a monthly chart, and it only means something if something enforces it.
+ *
+ * Also floors a STORED ladder at `FINEST_RUNG`: a document written before that floor existed still
+ * carries `1min` in its own `ladder`, and rebuilding the ladder on read would be a lie about what the
+ * setup was authored as. Returns null when nothing usable is asked for, so the caller owns the
+ * fallback. Pure.
+ */
+export function clampRung(tf, ladder) {
+    const want  = normalizeTimeframe(tf)
+    const rungs = (Array.isArray(ladder) ? ladder : []).filter(isFetchableRung)
+    return want && rungs.includes(want) ? want : null
+}
+
+/** The rungs of a stored ladder that are actually fetchable, finest LAST. Never empty. Pure. */
+export function usableLadder(setup) {
+    const rungs = (setup?.ladder ?? []).filter(isFetchableRung)
+    return rungs.length ? rungs : ['15min']
 }
 
 /** Poll cadence bounds for a horizon. Unknown → swing. */

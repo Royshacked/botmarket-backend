@@ -174,10 +174,16 @@ async function _insert(bound, userId) {
         ...bound,
         // `scenarios` here is the monitor's per-premise invalidation ledger, NOT the authored plan
         // (that rides in `bound`). Declared at birth for the same reason the axis below is.
-        monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {}, scenarios: {} },
+        // `pulse_anchor_px` / `last_pulse_at` are the out-of-zone momentum pulse's state, and they
+        // live INSIDE monitor_state — which is where Talos and Hermes both read them from. They were
+        // declared at the top level here, one level up from anything that has ever read them: inert
+        // while nothing pulsed, and actively wrong the moment something did (see the re-draw below).
+        monitor_state: {
+            next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {}, scenarios: {},
+            pulse_anchor_px: null, last_pulse_at: null, timeframe: null,
+        },
         armed_zone_id:     null,
         armed_scenario_id: null,
-        pulse_anchor_px: null,
         // The invalidation axis, declared at birth so every consumer can read it without an
         // existence check — a setup is not invalidated, it simply hasn't been yet.
         invalidation_status: null,
@@ -263,7 +269,14 @@ async function _update(id, bound, userId) {
         $set.status = 'waiting'
         $set.armed_zone_id = null
         $set.armed_scenario_id = null
-        $set.pulse_anchor_px = null
+        // Re-seed the pulse: the anchor is "where price was when I last had eyes on this plan", and
+        // the plan just changed, so the old anchor measures a move against a map that no longer
+        // exists. Nulling the TOP-LEVEL copy (what this did before) left the real one under
+        // monitor_state untouched, so a re-drawn setup kept measuring from the dead plan's anchor.
+        // The stored rung goes with it — the new plan may not even be on the same ladder.
+        $set['monitor_state.pulse_anchor_px'] = null
+        $set['monitor_state.last_pulse_at']   = null
+        $set['monitor_state.timeframe']       = null
         $set['monitor_state.next_check_at'] = null
         // Per-premise invalidation latches die with the plan that earned them: a re-drawn scenario
         // keeps its id, so without this a fresh premise would inherit the dead one's verdict and

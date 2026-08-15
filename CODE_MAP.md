@@ -372,6 +372,27 @@ monitoring/
                             phase (market.service sessionPhase, asset-class-aware; crypto/FX=24h) weighted as a
                             lens. A tentative ENTER on a market-sensitive call gets a web_search browse-confirm
                             2nd pass (downgrades enter→wait, fail-open)
+  talos.monitor.service.js  Talos — the Mentor-setup loop (own tick, kind:'setup'). TWO BRAINS, ONE LOOP:
+                            pre-entry readiness, past-entry management (_managePosition). Pre-entry
+                            cascade, cheapest-first: (1) the arithmetic SCENARIO gate — which PREMISE
+                            price reached, not merely which zone; then out-of-zone, (1.5) the validity
+                            gate (close, not touch — it can only KILL: broke/drifting) and the
+                            MOMENTUM PULSE (shouldPulse: a material, throttled move away from every
+                            live zone — monitor_state.pulse_anchor_px/last_pulse_at, measured in
+                            nearestZoneWidth, throttled by the setup's OWN cadence.max); (3) the full
+                            read. A pulse may only `edit` (re-map) or wait — never enter, because
+                            outside every zone nothing is armed: no zone id, no leg size, no fill
+                            anchor. Every real look re-anchors. Talos NEVER executes — every verdict
+                            is a card the user confirms
+  talos.assess.js           the setup read (readiness + in-position). Conditions are PROSE with a
+                            weight/mode, graded one entry per declared id — the model goes and checks
+                            them with the shared assessTools kit rather than being pre-fetched at.
+                            TIMEFRAME IS THE MODEL'S CHOICE: it returns `next_timeframe` (clamped to
+                            the setup's ladder, stored on monitor_state.timeframe) and the next read
+                            OPENS there — openingRung. There is no next_check_min: the rung IS the
+                            pace (_nextCheckAt derives the gap from it, then clamps to cadence), so
+                            the two can never contradict each other. Ladder floors at 5min (1min is
+                            402 off-plan at FMP)
   positionMonitor.js  portfolio.monitor.js   (portfolio.monitor: due-review NOTIFY-only; runs the non-LLM
                             pre-check computeReviewSignals → enriches the bubble + payload with triggers[])
   marketBrief.notify.js     the daily market-brief OFFER: one card per user per weekday (12:00 UTC,

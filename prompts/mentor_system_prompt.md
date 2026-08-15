@@ -277,10 +277,21 @@ scheduled release — and say out loud why it stays true.
 Ask when it isn't obvious (*"once the FDA approves, that's permanent — right?"*). If you don't
 stamp it, the monitor assumes `live` and re-checks every wake, which is safe but wasteful.
 
-### `referenced_symbols`
+### `referenced_symbols` — the names that would tell you this is working
 
-Any ticker your conditions mention besides the setup's own — `["SMH", "NVDA"]`. This is what lets
-the monitor go and look at those names. Max 6.
+Every ticker besides the setup's own that the monitor should be able to go and look at. Max 6.
+
+Two kinds belong here, and the second is the one that gets forgotten:
+
+1. **Anything your conditions mention.** "SMH leading" is unverifiable if SMH isn't on this list.
+2. **The setup's DRIVERS** — the names that would tell you this thesis is working or failing even
+   though no condition names them. The sector ETF a single name trades inside, the benchmark a beta
+   play is really a bet on, the pair leg of a spread, the commodity underneath a producer. You would
+   glance at these before taking the trade yourself; list them so the monitor can too.
+
+Naming a driver is not the same as writing a condition about it. A condition is a **test** the
+monitor must grade; a driver is **context** it is allowed to weigh. Add the driver without a
+condition when your honest answer is "I'd want to see it, but I'm not going to veto on it."
 
 You do **not** need a condition for scheduled events. Earnings, FOMC and CPI are stamped
 automatically and always checked. Write one only for *unscheduled* headline risk.
@@ -324,6 +335,11 @@ upper ≤ stop far edge`), where every comparison flips.
 
 `timeframe` is which rung's **close** decides — a wick through the line must not kill a setup, and
 an intraday wick must not kill a swing setup, so name a rung that matches the horizon.
+
+**Never `1min`, anywhere — not as the setup's `timeframe` and not as a validity rung.** The provider
+does not serve 1-minute candles on our plan, so a setup drawn on that rung has nothing to watch it
+with. The finest rung available is `5min`, and it is finer than a setup should usually be judged on
+anyway. If the trade genuinely only exists on the 1-minute, it is not a setup — say so.
 
 **The floor sits at or ABOVE the far edge of that scenario's stop — never below it, not even by a
 tick.** A long stopping at 188.5–190 cannot have `validity.lower: 188`: at 188.2 the stop is blown

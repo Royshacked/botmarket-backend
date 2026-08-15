@@ -155,10 +155,18 @@ is a bigger prompt and a worse answer than a narrow one.
 4. **Journal on Tier 3 only.** Tiers 1 and 2 stay silent. A monitor that writes a line every wake
    turns the monologue into noise.
 5. **Latch per event, not per verdict type** — `partial` must be able to re-arm.
-6. **The model proposes `next_check_min`; the cadence clamps it.** Reuses `_nextCheckAt`. The
-   timeframe is the anchor: a 5-minute setup and a daily setup must not share a floor. Unclamped, a
-   model that says "1 minute" on a swing setup burns the budget, and one that says "3 days" goes
-   blind.
+6. **The model proposes `next_timeframe`; the cadence clamps it.** Reuses `_nextCheckAt`. ~~`next_check_min`~~
+   is gone: the rung the read asks to open on next IS the pace, because they are one decision and two
+   fields could contradict each other (a 15-minute chart re-read every 2 minutes is the same
+   unfinished candle). The clamp still does the same job — a rung finer than the setup's cadence floor
+   is the model reaching for a view this setup shouldn't be traded on, and one coarser than the
+   ceiling is simply checked a few times per candle.
+
+> **Naming collision, on purpose.** The tiers above describe the POSITION pipeline (exits, scaling,
+> re-map) and are still a design. Pre-entry, "Tier 2" now means something built and different: the
+> out-of-zone **momentum pulse** in `talos.monitor.service.js` — an arithmetic gate, no cheap model,
+> that escalates straight to a full read when price leaves the map. The cheap-Haiku triage below was
+> considered for the entry side and deliberately not taken.
 7. **Re-anchor on Tier 3 only.** Tier 2 sees numbers, not a chart — that is not a real look. If the
    anchor moved on every Tier 2 run, a slow grind would reset forever and never accumulate. Throttle
    Tier 2 by clock instead.

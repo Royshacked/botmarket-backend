@@ -310,7 +310,9 @@ async function persistRun(setup, { setupService, _checkSetup, _testDeps, paperBr
         isAssetOpen: () => true,
         nextOpenMs:  () => Date.now() + 3600_000,
         getPrice:    priceFn,
-        assess:      async () => ({ verdict, read: `(stubbed) ${verdict}`, warning: verdict === 'enter' ? null : 'Stubbed objection.', next_check_min: 30 }),
+        // `next_timeframe` is the only pacing field: the rung the read asks to open on next sets the
+        // gap, clamped to the setup's cadence. An off-ladder value falls back to the eager floor.
+        assess:      async () => ({ verdict, read: `(stubbed) ${verdict}`, warning: verdict === 'enter' ? null : 'Stubbed objection.', next_timeframe: setup.timeframe }),
         onCard:       async (_s, a) => { carded = a },
         onManualCard: async () => {},
         buildOrderPlan: buildOrderPlanForIdea,

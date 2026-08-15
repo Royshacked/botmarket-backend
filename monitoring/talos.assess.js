@@ -10,7 +10,7 @@ import { assessRouting, candlesText as _candlesText,
 import { _allText, _formatEventRisk } from './hermes.assess.js'
 import { _thinkingConfig, advanceToolLoopCache } from '../providers/anthropic.provider.js'
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
-import { declaredConditions, pickScenario, scenarioLabel } from '../services/setup.schema.js'
+import { declaredConditions, pickScenario, scenarioLabel, usableLadder, clampRung } from '../services/setup.schema.js'
 import { config } from '../services/config.js'
 
 // Talos's assessment — the condition-driven counterpart to Hermes's four-axis read.
@@ -57,6 +57,39 @@ export function symbolScope(setup) {
     ].filter(Boolean))]
 }
 
+/**
+ * The rung this wake OPENS on — the chart and candles that arrive before the model asks for
+ * anything. Whatever the last assessment said it wanted to look at next, else the finest rung.
+ *
+ * WHY THE MODEL PICKS IT. This used to be hardcoded to `ladder[ladder.length - 1]`, so every read
+ * began at the FINEST rung the setup had — a 15-minute setup opened on a 1-minute chart and had to
+ * climb, via a tool it was only ever *invited* to call ("pull another timeframe if the first look
+ * leaves you unsure"). A read that is confidently wrong never feels unsure, so it never climbed:
+ * the noisiest available view decided setups built on structure.
+ *
+ * A cheap wake never touches this, so the choice survives until the next assessment — unlike the
+ * old `next_check_min`, which `_reschedule` overwrote on the very next tick.
+ */
+export function openingRung(setup) {
+    const ladder = usableLadder(setup)
+    return clampRung(setup?.monitor_state?.timeframe, ladder) ?? ladder[ladder.length - 1]
+}
+
+/**
+ * The rungs this read may work on, and which of the two jobs each one is for.
+ *
+ * Stated rather than locked. The tool schemas deliberately do NOT enum the timeframe: assessTools.js
+ * exists because the hand-rolled, ladder-clamped tool copies one layer down were too narrow to check
+ * the conditions setups actually carry. So the ladder is guidance the model can read and act on, and
+ * the ONE place it is enforced is `next_timeframe` — the value we store and open on ourselves.
+ */
+function _ladderLine(setup, ladder, tf) {
+    const premise = setup?.timeframe && ladder.includes(setup.timeframe) ? setup.timeframe : ladder[0]
+    return `LADDER (coarse→fine, the rungs you may work on): ${ladder.join(', ')}`
+        + `\n  PREMISE rung (what this setup was drawn on): ${premise}`
+        + `\n  YOU ARE LOOKING AT: ${tf}`
+}
+
 // ─── Gather ───────────────────────────────────────────────────────────────────
 
 
@@ -96,7 +129,11 @@ export async function gatherFor(setup, tf, deps = {}) {
 
 // ─── Prompt assembly ──────────────────────────────────────────────────────────
 
-const _SYSTEM = `You are Talos, the guardian watching a trade SETUP the user built with Mentor. Price has reached one of the setup's zones (or the setup is near expiry) and you were woken to judge the moment.
+const _SYSTEM = `You are Talos, the guardian watching a trade SETUP the user built with Mentor. You were woken to judge the moment. REASON WOKEN tells you why, and it changes what you are being asked:
+
+- "zone_trip" — price reached one of the setup's zones. Judge whether this is the moment.
+- "expiry_review" — the setup is near its expiry. Judge whether it dies, or is still worth carrying.
+- "momentum_pulse" — price is NOWHERE NEAR a zone, and has moved a long way from where it was when you last looked. Nobody mapped this level. You are not being asked whether to enter — you cannot, nothing is armed. You are being asked ONE question: is the map still right? If price has simply gone somewhere the plan never described and the premise still makes sense at new levels, return "edit" with an edit_proposal that re-draws the zones onto what price is actually doing — the ordinary zone trip will take the entry later. If it is noise, or the thesis is done, return "wait" and say why in one line. "enter" is NOT available on a pulse and will be ignored.
 
 You are given the setup — its THESIS, the SCENARIO price actually reached, and that scenario's CONDITIONS — plus a chart, recent candles and the current price. Anything else you want, you go and get with your tools.
 
@@ -110,6 +147,8 @@ Each condition carries how it should be judged:
 
 Judge ONLY the declared conditions. If the setup says nothing about news or the broad market, that silence is deliberate — the user judged them immaterial. Don't grade them and don't go looking.
 
+THE REFERENCED NAMES ARE THE EXCEPTION, and they are not a condition. When the setup lists other tickers, those are the names its author would glance at before taking this trade — the sector it trades inside, the benchmark it is really a bet on, the leg on the other side of a spread. You are given their live prices. LOOK at them before you say "enter": a long into a sector that is being sold, or a breakout no peer is confirming, is a worse trade than the chart alone shows. This never becomes a veto on its own and it never becomes a graded condition — it is weight on the decision, and if it is what tips you, say so in your "read".
+
 If you genuinely cannot check a condition this wake — a tool failed, a search came back empty, a symbol won't quote — mark it "unchecked" and say so. NEVER mark a condition met because it is probably true or because you couldn't look. Unchecked is an honest answer; a guess dressed as a check is not.
 
 The one always-on exception is SCHEDULED EVENT RISK. A high-impact event landing before this trade's expected exit, when the thesis is not itself an event play, is a real reason to prefer "wait" — do not walk into an unresolved binary just because price tagged the zone.
@@ -122,8 +161,12 @@ Always include "read": ONE short, plain first-person sentence — what you see a
 
 Verdicts: "enter" (this is the moment), "wait" (not yet, keep watching), "stand_aside" (the premise is damaged — don't take it now), "edit" (the map is stale and needs re-drawing; provide edit_proposal), "let_expire" (expiry review only).
 
+TWO TIMEFRAMES, TWO JOBS. You are shown one view up front and your LADDER lists every rung you may work on. The setup's own timeframe is where the PREMISE lives — is the map still true, is the level still the level. A rung or two finer is where the MOMENT lives — is this the entry, now. Judging both from one chart is how a read goes wrong in one of two ways: too fine and ordinary noise reads as the premise breaking; too coarse and the trigger cannot confirm until a candle closes hours from now, so the honest answer is "wait" all day. Pull the rungs you need.
+
+"next_timeframe" is the rung you want to OPEN on next time, and it is also how you set the pace — asking for a coarser rung means you are content to look less often, a finer one means you want to watch closely. Pick it from your ladder; anything else is ignored.
+
 Output ONLY a JSON object, no prose. Return one entry per declared condition, keyed by its id:
-{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw, or why you couldn't look"}],"verdict":"enter|wait|stand_aside|edit|let_expire","warning":"<one line, ONLY when the verdict is not enter: what is missing or wrong, for the setup's record — the user is NOT asked to enter on a non-enter verdict, so this is not pre-confirmation copy>","next_check_min":15,"memo_update":"..."}
+{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw, or why you couldn't look"}],"verdict":"enter|wait|stand_aside|edit|let_expire","warning":"<one line, ONLY when the verdict is not enter: what is missing or wrong, for the setup's record — the user is NOT asked to enter on a non-enter verdict, so this is not pre-confirmation copy>","next_timeframe":"15min","memo_update":"..."}
 Include "edit_proposal":{"why":"...","changes":{}} only when the verdict is "edit".`
 
 /**
@@ -186,9 +229,9 @@ export async function assessSetup(setup, hit, ctx = {}) {
     try {
         const zone     = hit?.zone ?? null
         const scenario = hit?.scenario ?? pickScenario(setup)
-        const ladder = setup?.ladder?.length ? setup.ladder : ['15min']
-        const tf     = ladder[ladder.length - 1]   // primary view = the ladder's finest rung
-        const g      = await gatherFor(setup, tf)
+        const ladder   = usableLadder(setup)
+        const tf       = openingRung(setup)
+        const g        = await gatherFor(setup, tf)
 
         const userText = [
             `SETUP: ${JSON.stringify({
@@ -204,10 +247,14 @@ export async function assessSetup(setup, hit, ctx = {}) {
             })}`,
             _otherScenariosBlock(setup, scenario),
             _conditionsBlock(setup, scenario),
-            `ARMED ZONE: ${zone ? JSON.stringify(zone) : '(none — expiry review)'}`,
+            // No zone means nothing is armed — and WHY nothing is armed is the difference between
+            // "its clock ran out" and "price walked off the map". Saying "expiry review" on a pulse
+            // would describe the wrong situation to the one reader who has to get it right.
+            `ARMED ZONE: ${zone ? JSON.stringify(zone) : `(none — ${ctx.reason === 'momentum_pulse' ? 'price is outside every zone' : 'expiry review'})`}`,
             `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
             `SESSION NOW: ${sessionPhase(setup.asset, setup.asset_class)}`,
             `REASON WOKEN: ${ctx.reason ?? 'zone_trip'}`,
+            _ladderLine(setup, ladder, tf),
             `LENS: ${lensLine(setup.trade_mode)}`,
             `PRIOR MEMO: ${setup.monitor_state?.memo || '(none)'}`,
             ..._dataBlocks(setup, g, tf),
@@ -352,8 +399,10 @@ You never execute. Every verdict becomes a card the user confirms, so write for 
 
 Always include "read": ONE short first-person sentence — what you see and what you are doing about it.
 
+TWO TIMEFRAMES, TWO JOBS. Your LADDER lists the rungs you may work on. The setup's own timeframe is where the THESIS lives; a rung or two finer is where the management decision lives — where the stop is actually being pressed, where a target is actually being reached. "next_timeframe" is the rung you want to open on next time, and it sets the pace with it: a coarser rung means you are content to look less often, a finer one means you want to watch this closely. Pick it from your ladder; anything else is ignored.
+
 Output ONLY a JSON object, no prose:
-{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw"}],"verdict":"hold|let_run|take_partial|move_stop|exit_now","proposal":{"fraction":"third|half|two_thirds","stop":123.45,"why":"<what the level is anchored to>"},"next_check_min":15,"memo_update":"..."}
+{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw"}],"verdict":"hold|let_run|take_partial|move_stop|exit_now","proposal":{"fraction":"third|half|two_thirds","stop":123.45,"why":"<what the level is anchored to>"},"next_timeframe":"15min","memo_update":"..."}
 Include "proposal" ONLY for take_partial (fraction) or move_stop (stop + why). Omit it entirely otherwise.`
 
 /**
@@ -366,8 +415,8 @@ Include "proposal" ONLY for take_partial (fraction) or move_stop (stop + why). O
 export async function assessPosition(setup, ps, ctx = {}) {
     try {
         const scenario = _armedScenario(setup)
-        const ladder   = setup?.ladder?.length ? setup.ladder : ['15min']
-        const tf       = ladder[ladder.length - 1]
+        const ladder   = usableLadder(setup)
+        const tf       = openingRung(setup)
         const g        = await gatherFor(setup, tf)
 
         const m = ps?.metrics ?? {}
@@ -394,6 +443,7 @@ export async function assessPosition(setup, ps, ctx = {}) {
             // The arithmetic that earned this wake. Naming it stops the read starting from scratch —
             // "price is pressing the stop" is a different question from "a target came into reach".
             `WHY YOU WERE WOKEN: ${_wakeReason(ctx.reason)}`,
+            _ladderLine(setup, ladder, tf),
             `PRIOR MEMO: ${setup.monitor_state?.memo || '(none)'}`,
             ..._dataBlocks(setup, g, tf),
         ].filter(Boolean).join('\n\n')

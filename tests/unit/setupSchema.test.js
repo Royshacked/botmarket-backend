@@ -25,7 +25,11 @@ test('ladder is a contiguous coarse→fine window around the authored timeframe'
 test('ladder clamps at both ends rather than running off the rung list', () => {
     // Both ends yield a SHORTER ladder rather than wrapping or padding.
     assert.deepEqual(buildLadder('month'), ['month', 'week', 'day'])
-    assert.deepEqual(buildLadder('1min'), ['15min', '5min', '1min'])
+    // The fine end stops at 5min: 1min is off-plan at the provider (402), so offering it would hand
+    // the monitor a rung whose fetch can only fail. Note a 1min-authored setup therefore has NO rung
+    // at its own timeframe — which is why Mentor must not author one.
+    assert.deepEqual(buildLadder('1min'), ['15min', '5min'])
+    assert.deepEqual(buildLadder('5min'), ['30min', '15min', '5min'])
 })
 
 test('ladder falls back for an unknown timeframe instead of returning empty', () => {

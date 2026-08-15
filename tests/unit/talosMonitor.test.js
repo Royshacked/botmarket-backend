@@ -6,9 +6,10 @@ import {
     validityBreach, breachPatch, awayEdge, adverseEdge,
     scenarioGate, liveScenarios, liveEntryZones, rollUpBreaches, scenarioState,
     positionGate, reviewDue, computeMetrics, rMultiple,
+    zoneWidth, nearestZoneWidth, pulseGapMin, shouldPulse,
 } from '../../monitoring/talos.monitor.service.js'
-import { normalizeSetup } from '../../services/setup.schema.js'
-import { buildToolsFor, symbolScope } from '../../monitoring/talos.assess.js'
+import { normalizeSetup, buildLadder, isFetchableRung, usableLadder, rungMinutes } from '../../services/setup.schema.js'
+import { buildToolsFor, symbolScope, openingRung } from '../../monitoring/talos.assess.js'
 import { statusesFor, AWAITING_CONFIRM } from '../../services/entity/vocabulary.js'
 
 // Talos's gates. Everything here runs on EVERY wake for free — the expensive assessment only fires
@@ -114,18 +115,72 @@ test('a setup with no valid_until never expires', () => {
     assert.equal(_isExpiring({ valid_until: 'someday' }, T), false, 'an unparseable bound is not a live gate')
 })
 
-// ─── next_check_at clamping ───────────────────────────────────────────────────
+// ─── next_check_at: the RUNG is the pace ──────────────────────────────────────
+// There is no second cadence field. The model names the timeframe it wants to open on next, and the
+// gap follows from it — one decision instead of two that could contradict each other.
+// SETUP is a 1hr swing: ladder 4hr·2hr·1hr·30min·15min, cadence band 30–240.
 
-test("the model's self-chosen cadence is clamped into the setup's band", () => {
-    assert.equal(_nextCheckAt(SETUP, T, 1),    new Date(T + 30 * 60_000).toISOString(),  'too eager → floor')
-    assert.equal(_nextCheckAt(SETUP, T, 9999), new Date(T + 240 * 60_000).toISOString(), 'too lazy → ceiling')
-    assert.equal(_nextCheckAt(SETUP, T, 60),   new Date(T + 60 * 60_000).toISOString(),  'in band → honoured')
+test('the requested rung sets the pace, clamped into the setup\'s band', () => {
+    assert.equal(_nextCheckAt(SETUP, T, '1hr'),   new Date(T + 60 * 60_000).toISOString(),  'in band → the rung IS the gap')
+    assert.equal(_nextCheckAt(SETUP, T, '2hr'),   new Date(T + 120 * 60_000).toISOString())
+    assert.equal(_nextCheckAt(SETUP, T, '4hr'),   new Date(T + 240 * 60_000).toISOString(), 'at the ceiling')
+    // A rung finer than the band is the model reaching for a view this setup shouldn't be traded on.
+    assert.equal(_nextCheckAt(SETUP, T, '15min'), new Date(T + 30 * 60_000).toISOString(),  'finer than the floor → floor')
 })
 
-test('a missing or junk next_check_min falls back to the floor', () => {
-    for (const v of [undefined, null, 'soon', NaN]) {
+test('an off-ladder rung is ignored and falls back to the eager floor', () => {
+    // LADDER_SPAN is what stops a swing setup being judged on a monthly chart. It only means
+    // something if something enforces it — and the fallback must not be the LAZY end, or a model
+    // typo would quietly put the setup to sleep for four hours.
+    for (const v of [undefined, null, 'day', 'month', '1min', 'soon', 15, NaN]) {
         assert.equal(_nextCheckAt(SETUP, T, v), new Date(T + 30 * 60_000).toISOString(), String(v))
     }
+})
+
+// ─── The rung the model chooses ───────────────────────────────────────────────
+
+test('the opening view is the ladder\'s finest rung until a read asks for another', () => {
+    // The old behaviour, kept as the fallback: with nothing stored there is no reason to prefer
+    // any rung, and the finest is where a trigger would show up first.
+    assert.equal(openingRung(SETUP), '15min')
+    assert.equal(openingRung({ ...SETUP, monitor_state: { timeframe: '1hr' } }), '1hr', 'stored choice wins')
+    assert.equal(openingRung({ ...SETUP, monitor_state: { timeframe: 'month' } }), '15min', 'off-ladder is not a choice')
+    assert.equal(openingRung({}), '15min', 'a document with no ladder still opens somewhere')
+})
+
+test('a read that names a rung is opened there next time', async () => {
+    const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'Structure first.', next_timeframe: '2hr' }) })
+    await _checkSetup(LIVE, T, deps)
+    assert.equal(deps.writes[0]['monitor_state.timeframe'], '2hr')
+    assert.equal(deps.writes[0]['monitor_state.next_check_at'], new Date(T + 120 * 60_000).toISOString(), 'and the pace follows the rung')
+})
+
+test('an off-ladder ask leaves the stored rung ALONE rather than resetting it', async () => {
+    // Reverting to the finest rung on a typo would quietly undo a deliberate climb — the setup would
+    // be judged on structure one wake and on noise the next, with nothing in the record saying why.
+    const climbed = { ...LIVE, monitor_state: { ...LIVE.monitor_state, timeframe: '2hr' } }
+    const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'Still there.', next_timeframe: 'week' }) })
+    await _checkSetup(climbed, T, deps)
+    assert.equal(deps.writes[0]['monitor_state.timeframe'], undefined, 'not written, so the stored 2hr stands')
+})
+
+test('the ladder floors at 5min — 1min is off-plan at the provider', () => {
+    // Only 1min is 402 at FMP; the rest of the intraday tier is fine. A ladder offering it hands the
+    // read a rung whose fetch can only fail, and the opening view is the FIRST thing it degrades.
+    assert.deepEqual(buildLadder('15min'), ['1hr', '30min', '15min', '5min'])
+    assert.deepEqual(buildLadder('5min'), ['30min', '15min', '5min'])
+    assert.equal(isFetchableRung('1min'), false)
+    assert.equal(isFetchableRung('5min'), true)
+    // A document written before the floor existed still carries 1min in its stored ladder.
+    assert.deepEqual(usableLadder({ ladder: ['15min', '5min', '1min'] }), ['15min', '5min'])
+    assert.equal(openingRung({ ladder: ['15min', '5min', '1min'] }), '5min', 'never opens on a rung it cannot fetch')
+})
+
+test('rung lengths are what the pace is derived from', () => {
+    assert.equal(rungMinutes('5min'), 5)
+    assert.equal(rungMinutes('4hr'), 240)
+    assert.equal(rungMinutes('day'), 1440)
+    assert.equal(rungMinutes('nonsense'), null, 'unknown → the caller falls back, never invents a cadence')
 })
 
 // ─── Tool mounting ────────────────────────────────────────────────────────────
@@ -565,6 +620,143 @@ test('price outside every zone reschedules without ever calling the model', asyn
     }))
     assert.equal(res.reason, 'scheduled')
     assert.equal(assessed, false, 'the cheap gate is the whole point')
+})
+
+// ─── Tier 2: the out-of-zone momentum pulse ───────────────────────────────────
+//
+// Tier 1 only fires where Mentor drew a zone; the validity gate can only kill. Between them sits a
+// setup whose situation changed at a level nobody mapped — this is the gate that notices.
+// SETUP's zone is 237.8–238.6, so one width is 0.8 and a material move is 4 × 0.8 = 3.2.
+
+const ANCHORED = { ...LIVE, monitor_state: { ...LIVE.monitor_state, pulse_anchor_px: 238.2 } }
+
+test('the yardstick is the nearest LIVE zone width, and never zero', () => {
+    assert.equal(nearestZoneWidth(SETUP, 250).toFixed(2), '0.80')
+    assert.equal(nearestZoneWidth(SETUP, NaN), null, 'no price, no measurement')
+    assert.equal(nearestZoneWidth({ ...SETUP, scenarios: [] }, 250), null, 'nothing live to measure against')
+    // An exact level the user named normalises to lower === upper. Hermes REJECTS such a band; Talos
+    // supports it, so it must fall back to a usable width rather than gate itself off.
+    assert.equal(zoneWidth({ lower: 100, upper: 100 }), 0.1, '0.1% of price stands in for a zero band')
+    assert.ok(zoneWidth({ lower: 237.8, upper: 238.6 }) > 0)
+})
+
+test('the throttle floor is the setup OWN cadence ceiling, not a flat number', () => {
+    // A call throttles on a fixed 20 minutes. A setup's band is horizon-scaled, so an intraday setup
+    // and a long-term one must not wait the same amount of time to be looked at again.
+    assert.equal(pulseGapMin(mk({ type: 'intraday' })), 15)
+    assert.equal(pulseGapMin(mk({ type: 'swing' })), 240)
+    assert.equal(pulseGapMin(mk({ type: 'long term' })), 1440)
+    assert.equal(pulseGapMin({}), 30, 'a document with no cadence still has a floor')
+})
+
+test('a material move away from every zone earns a pulse', () => {
+    assert.equal(shouldPulse(ANCHORED, 242.0, T), true, '3.8 away = 4.75 widths')
+    assert.equal(shouldPulse(ANCHORED, 234.4, T), true, 'the move counts in both directions')
+})
+
+test('a move that has not gone far enough buys nothing', () => {
+    assert.equal(shouldPulse(ANCHORED, 241.0, T), false, '2.8 away = 3.5 widths, under the bar')
+    assert.equal(shouldPulse(ANCHORED, 238.9, T), false)
+})
+
+test('a pulse can never pre-empt a zone trip', () => {
+    // Price INSIDE a zone is Tier 1's, whatever the anchor says. An anchor far from the zone would
+    // otherwise let the cheap tier fire a re-map read at the exact moment an entry was printing.
+    const far = { ...LIVE, monitor_state: { ...LIVE.monitor_state, pulse_anchor_px: 200 } }
+    assert.equal(shouldPulse(far, 238.0, T), false)
+})
+
+test('a pulse is pre-entry only, and needs an anchor to measure from', () => {
+    for (const status of ['hit', 'long', 'short', 'closed', 'waiting']) {
+        assert.equal(shouldPulse({ ...ANCHORED, status }, 242.0, T), false, status)
+    }
+    assert.equal(shouldPulse(LIVE, 242.0, T), false, 'no anchor seeded → nothing to measure')
+    assert.equal(shouldPulse(ANCHORED, NaN, T), false, 'a failed quote is not a move')
+})
+
+test('the time floor stops a trending name buying a read on every bar', () => {
+    const justPulsed = { ...LIVE, monitor_state: { ...LIVE.monitor_state, pulse_anchor_px: 238.2, last_pulse_at: new Date(T - 60_000).toISOString() } }
+    assert.equal(shouldPulse(justPulsed, 242.0, T), false, 'a minute after the last one')
+    assert.equal(shouldPulse(justPulsed, 242.0, T + 240 * 60_000), true, 'once the swing floor passes')
+})
+
+test('the first out-of-zone wake seeds the anchor and pays for nothing', async () => {
+    let assessed = false
+    const deps = stubDeps({ getPrice: async () => 242, assess: async () => { assessed = true; return {} } })
+    const res  = await _checkSetup(LIVE, T, deps)
+
+    assert.equal(res.reason, 'scheduled')
+    assert.equal(assessed, false)
+    assert.equal(deps.writes[0]['monitor_state.pulse_anchor_px'], 242, 'eyes-on price recorded')
+})
+
+test('any real look re-anchors, so a trip cannot be chased by a pulse', async () => {
+    // The anchor means "where price was when I last had eyes on this". A zone trip IS that moment.
+    // Left un-re-anchored, price leaving the zone could buy a second full read minutes after the
+    // first — the pulse firing exactly when we are least ignorant.
+    const stale = { ...LIVE, monitor_state: { ...LIVE.monitor_state, pulse_anchor_px: 200 } }
+    const deps  = stubDeps({ getPrice: async () => 238.0, assess: async () => ({ verdict: 'wait', read: 'Not yet.' }) })
+    await _checkSetup(stale, T, deps)
+    assert.equal(deps.writes[0]['monitor_state.pulse_anchor_px'], 238.0)
+})
+
+test('a seeded anchor is not overwritten by the cheap wake', async () => {
+    // Re-seeding on every scheduled wake would walk the anchor along with price, and a move measured
+    // from a moving anchor is never material — the gate would be dead on arrival.
+    const deps = stubDeps({ getPrice: async () => 240 })
+    await _checkSetup(ANCHORED, T, deps)
+    assert.equal(deps.writes[0]['monitor_state.pulse_anchor_px'], undefined)
+})
+
+test('a material move fires ONE pulse, then re-anchors and stamps the floor', async () => {
+    let ctx = null
+    const deps = stubDeps({
+        getPrice: async () => 242,
+        assess:   async (_s, hit, c) => { ctx = { hit, ...c }; return { verdict: 'wait', read: 'It left the map.' } },
+    })
+    const res = await _checkSetup(ANCHORED, T, deps)
+
+    assert.equal(res.reason, 'momentum_pulse')
+    assert.equal(ctx.reason, 'momentum_pulse', 'the read is told WHY it was woken')
+    assert.equal(ctx.hit, null, 'nothing is armed on a pulse')
+    assert.equal(deps.writes[0]['monitor_state.pulse_anchor_px'], 242, 're-anchored to here')
+    assert.equal(deps.writes[0]['monitor_state.last_pulse_at'], new Date(T).toISOString())
+    assert.equal(deps.entries[0].reason, 'momentum_pulse', 'and it lands on the journal')
+})
+
+test('a pulse may NOT enter — there is no armed zone to enter through', async () => {
+    // The stub's default verdict is 'enter'. Outside every zone there is no armed_zone_id, no leg to
+    // size from and no fill anchor, so a confirm card here would have nothing behind it.
+    let carded = false
+    const deps = stubDeps({ getPrice: async () => 242, onCard: async () => { carded = true } })
+    const res  = await _checkSetup(ANCHORED, T, deps)
+
+    assert.equal(res.verdict, 'wait')
+    assert.equal(carded, false)
+    assert.equal(deps.writes[0].status, undefined, 'the lifecycle does not move')
+})
+
+test('a pulse CAN re-map, which is the whole point of paying for it', async () => {
+    let carded = false
+    const deps = stubDeps({
+        getPrice:   async () => 242,
+        assess:     async () => ({ verdict: 'edit', read: 'It based at 242.', edit_proposal: { why: 'the shelf moved up', changes: { entry_zones: [] } } }),
+        onEditCard: async () => { carded = true },
+    })
+    const res = await _checkSetup(ANCHORED, T, deps)
+
+    assert.equal(res.edited, true)
+    assert.equal(carded, true)
+    assert.equal(deps.writes[0]['monitor_state.last_pulse_at'], new Date(T).toISOString(), 'the throttle rides the edit branch too')
+})
+
+test('a FAILED pulse still re-anchors, or it re-fires on the very next wake', async () => {
+    const deps = stubDeps({ getPrice: async () => 242, assess: async () => ({ _failReason: 'io' }) })
+    const res  = await _checkSetup(ANCHORED, T, deps)
+
+    assert.equal(res.failed, true)
+    assert.equal(deps.writes[0]['monitor_state.pulse_anchor_px'], 242)
+    assert.equal(deps.writes[0]['monitor_state.last_pulse_at'], new Date(T).toISOString())
 })
 
 // THE GATE. A zone trip buys an assessment, nothing more — only a fulfilled setup asks the user
