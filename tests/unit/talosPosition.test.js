@@ -332,6 +332,15 @@ test('with NO resting tp at all the ladder is Talos\'s alone, so it re-arms', as
     assert.equal(deps.writes[0]['position_state.targets'][0].hit_at, null)
 })
 
+test('a LEGACY rung — seeded before the window — keeps the old rules and never re-arms', async () => {
+    // Its limit rested on the very edge `price` names, so its hit_at still means "the money was
+    // taken". Re-arming it would propose banking a partial that has already happened.
+    const legacy = PS({ targets: [{ price: 246, hit_at: '2026-08-15T10:00:00.000Z' }] })   // no `resting`
+    const deps = stubDeps({ getPrice: async () => 240 })
+    await _checkSetup(INPOS(legacy, { exitOrders: RESTING_TP }), T, deps)
+    assert.equal(deps.writes[0]['position_state.targets'], undefined, 'old docs keep old rules')
+})
+
 test('a zero-width target rests and never wakes anything', async () => {
     // The unconditional case from principle 1: an exact level the user named has no window to have a
     // conversation in, so it is simply an order.

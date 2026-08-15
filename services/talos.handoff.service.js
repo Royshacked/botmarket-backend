@@ -134,13 +134,13 @@ export async function manageSetup(id, userId, verb, deps = _deps) {
     if (knownVenue(setup.broker) === 'manual') {
         await deps.notifyManage(setup, { verdict: verb, proposal: pending?.proposal ?? null, manual: true })
         await db.collection(COLLECTION).updateOne({ id }, manage.manageAppliedUpdate(verb, proposal, ps, {}, now))
-        await _moveTargetWindow(db, id, ps, verb, proposal)
+        await _moveTargetWindow(db, setup, verb, proposal)
         logger.info(LOG, `setup ${id} manage ${verb} → manual instruction`)
         return { ok: true, manual: true, verb }
     }
 
     const res = await manage.applyManage({ entity: setup, holder: setup, verb, proposal, userId, nowMs: now, deps })
-    if (res.ok) await _moveTargetWindow(db, id, ps, verb, proposal)
+    if (res.ok) await _moveTargetWindow(db, setup, verb, proposal)
     return res
 }
 
@@ -154,27 +154,43 @@ export async function manageSetup(id, userId, verb, deps = _deps) {
  * The rung keeps its authored BREADTH and re-arms at the new level: "let it run to X" is an
  * instruction to have the conversation again at X, not to stop having it.
  */
-async function _moveTargetWindow(db, id, ps, verb, proposal) {
+async function _moveTargetWindow(db, setup, verb, proposal) {
     if (verb !== 'let_run' || !Number.isFinite(proposal?.new_tp)) return
-    const targets = movedLadder(ps, proposal.new_tp)
+    const targets = movedLadder(setup.position_state ?? {}, proposal.new_tp, amendedLevel(setup))
     if (!targets) return
-    await db.collection(COLLECTION).updateOne({ id }, { $set: { 'position_state.targets': targets } })
+    await db.collection(COLLECTION).updateOne({ id: setup.id }, { $set: { 'position_state.targets': targets } })
+}
+
+/**
+ * The level the executor will actually amend — read through the executor's OWN helpers rather than
+ * re-derived, so the two cannot drift into disagreeing about which rung a `let_run` was about.
+ * Null when there is nothing resting (then the ladder falls back to the nearest un-asked rung).
+ */
+export function amendedLevel(setup) {
+    const link = manage.resolveAllLinks(setup, setup)[0] ?? null
+    const ord  = link ? manage.workingExit(setup, link.accountId, 'tp') : null
+    const px   = Number(ord?.price)
+    return Number.isFinite(px) ? px : null
 }
 
 /**
  * The ladder with the rung under discussion moved to `newTp`, keeping its breadth. Null when there
  * is nothing to move. Pure.
  *
- * WHICH RUNG: the nearest un-asked one — the one a `let_run` is about, since Talos proposes it on
- * the wake that target earned. On a STAGED ladder this is an approximation, and knowingly so: the
- * executor amends whichever tp order `positionManage.workingExit` finds first, which is not
- * necessarily this rung. Single-target setups (all of them today) have exactly one of each.
+ * WHICH RUNG: the one whose limit is the order being amended (`restingAt`), because that is the rung
+ * the broker change lands on — matching by anything else would move a window away from the order it
+ * belongs to and leave a second rung pointing at a level nothing rests on. It falls back to the
+ * nearest un-asked rung when no order is resting: an alert-only setup has a ladder and no orders,
+ * and it is still the rung Talos proposed against.
  */
-export function movedLadder(ps, newTp) {
+export function movedLadder(ps, newTp, restingAt = null) {
     const list = ps?.targets ?? []
     if (!list.length || !Number.isFinite(newTp)) return null
 
-    const found = list.findIndex(t => t?.hit_at == null)
+    const matched = Number.isFinite(restingAt)
+        ? list.findIndex(t => Number.isFinite(Number(t?.resting)) && Math.abs(Number(t.resting) - restingAt) <= Math.max(Math.abs(restingAt), 1) * 1e-9)
+        : -1
+    const found = matched !== -1 ? matched : list.findIndex(t => t?.hit_at == null)
     const idx   = found === -1 ? list.length - 1 : found
     const rung  = list[idx]
 
@@ -203,4 +219,4 @@ export async function dismissSetupCard(id, userId, deps = _deps) {
     return { ok: true, dismissed: 'card' }
 }
 
-export const talosHandoffService = { manageSetup, dismissSetupCard, toExecutionProposal, movedLadder, SETUP_MANAGE_VERBS }
+export const talosHandoffService = { manageSetup, dismissSetupCard, toExecutionProposal, movedLadder, amendedLevel, SETUP_MANAGE_VERBS }

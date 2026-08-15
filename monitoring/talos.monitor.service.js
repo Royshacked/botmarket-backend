@@ -522,7 +522,6 @@ function _sameLevel(a, b) {
 function _tpStillResting(setup, level) {
     const tps = (setup?.exitOrders ?? []).filter(o => o?.leg === 'tp')
     if (!tps.length) return true
-    if (!Number.isFinite(Number(level))) return true
     return tps.some(o => o?.status === 'working' && _sameLevel(o.price, level))
 }
 
@@ -546,6 +545,11 @@ export function rearmTargets(setup, ps, price) {
     let changed = false
     const next = list.map(t => {
         if (t?.hit_at == null || !Number.isFinite(t?.price)) return t
+        // A LEGACY RUNG KEEPS LEGACY RULES. Seeded before the TP window, it has no `resting` and its
+        // limit rested on the very edge `price` names — so its `hit_at` still carries the old
+        // meaning, "the money was taken". Re-arming that would have Talos propose banking a partial
+        // that has already happened. Only a rung that knows where its limit is can be un-asked.
+        if (!Number.isFinite(Number(t?.resting))) return t
         const outside = isLong ? price < t.price : price > t.price
         if (!outside || !_tpStillResting(setup, t.resting)) return t
         changed = true

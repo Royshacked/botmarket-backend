@@ -590,8 +590,11 @@ export function setupReadiness(setup, hasAccount = false) {
 export function validityProblems(setup) {
     const list  = setup?.scenarios ?? []
     const multi = list.length > 1
-    return list.flatMap(sc => rangeProblems(scenarioView(setup, sc))
-        .map(p => (multi ? `${scenarioLabel(sc)}: ${p}` : p)))
+    return list.flatMap(sc => {
+        const view = scenarioView(setup, sc)
+        return [...rangeProblems(view), ...windowProblems(view)]
+            .map(p => (multi ? `${scenarioLabel(sc)}: ${p}` : p))
+    })
 }
 
 /**
@@ -647,6 +650,58 @@ export function rangeProblems(setup) {
         if (inside) out.push('away pivot sits inside the validity range')
         else if (long  && v.upper != null && v.approach < v.upper) out.push('away pivot is below the range on a long')
         else if (!long && v.lower != null && v.approach > v.lower) out.push('away pivot is above the range on a short')
+    }
+    return out
+}
+
+/** A window narrower than this much of the target price is not a window. See windowProblems. */
+const MIN_WINDOW_FRACTION = 0.001
+/** …and one wider than this share of the move to the target is asking too early. */
+const MAX_WINDOW_SHARE    = 1 / 3
+
+/**
+ * The TP window's breadth, checked per plan — the enforcement half of a rule that otherwise lives
+ * only in Mentor's prompt (docs/desks/mentor-talos.md §"Exits — the TP window"). Pure.
+ *
+ * A tp zone is the target plus the stretch beneath it in which Talos may offer to bank something
+ * early, so its breadth is not cosmetic — it is how much room that conversation gets, and both ends
+ * of the scale fail in their own way:
+ *
+ *   TOO THIN   price crosses the whole window between two checks, so the limit fills before the
+ *              user has read the card. That is worse than no window, because it advertises a
+ *              conversation that cannot happen. Zero is fine and means something else entirely —
+ *              an exact level, resting as a plain limit — so the floor only bites once a band
+ *              exists at all.
+ *   TOO WIDE   Talos opens the conversation at +0.4R on a trade planned to +3R, and the user is
+ *              asked to bank into a move that has barely started.
+ *
+ * Measured against the WORST entry edge, the same pessimistic fill computeRR prices from, so the
+ * ceiling is strictest exactly where the reward is thinnest.
+ */
+export function windowProblems(setup) {
+    const out    = []
+    const long   = setup?.direction === 'long'
+    const edges  = (setup?.entry_zones ?? []).map(z => (long ? z?.upper : z?.lower)).filter(Number.isFinite)
+    const entry  = edges.length ? (long ? Math.max(...edges) : Math.min(...edges)) : null
+
+    for (const z of setup?.tp_zones ?? []) {
+        const target = _edge(z, !long)
+        const wake   = _edge(z, long)
+        if (!Number.isFinite(target) || !Number.isFinite(wake)) continue
+
+        const breadth = Math.abs(target - wake)
+        if (breadth === 0) continue   // an exact level, deliberately
+
+        if (breadth < Math.abs(target) * MIN_WINDOW_FRACTION) {
+            out.push(`the target window at ${target} is too thin to act inside — widen it, or make it an exact level`)
+            continue
+        }
+        if (entry != null) {
+            const span = Math.abs(target - entry)
+            if (span > 0 && breadth > span * MAX_WINDOW_SHARE) {
+                out.push(`the target window at ${target} covers more than a third of the move to it — it would ask to bank far too early`)
+            }
+        }
     }
     return out
 }

@@ -158,6 +158,57 @@ test('a let_run carrying a level moves the target OUT, and the wake level travel
         'breadth of 2 carried to the new level, and re-armed so the conversation happens again there')
 })
 
+test('on a staged ladder the window moves on the rung whose order is actually amended', async () => {
+    // The executor amends whichever tp order positionManage.workingExit finds; if the ladder guessed
+    // "nearest un-asked" instead, the two would part company — one rung's window would move while a
+    // different rung's order did, leaving a target pointing at a level nothing rests on.
+    const setup = inPosSetup({
+        targets: [
+            { price: 126, resting: 128, hit_at: null },   // nearest un-asked — NOT the resting order
+            { price: 128, resting: 130, hit_at: null },   // the one at 130, which is what is working
+        ],
+        pending_action: { verdict: 'let_run', proposal: { tp: 140 } },
+    })
+    const db  = fakeDb(setup)
+    const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run', deps(db))
+
+    assert.equal(res.ok, true)
+    const ladder = db.updates.map(u => u.$set?.['position_state.targets']).filter(Boolean).at(-1)
+    assert.deepEqual(ladder, [
+        { price: 126, resting: 128, hit_at: null },
+        { price: 138, resting: 140, hit_at: null },
+    ], 'the 130 rung moved, breadth intact; the untouched rung is left exactly alone')
+})
+
+test('a failed amend moves no ladder — the window never drifts away from the order', async () => {
+    // With nothing resting there is nothing to amend, so the executor fails. The ladder must not
+    // move anyway: a window pointing at a level no order sits on is worse than an unmoved one.
+    const setup = inPosSetup({
+        targets: [{ price: 128, resting: 130, hit_at: null }],
+        pending_action: { verdict: 'let_run', proposal: { tp: 140 } },
+    }, { exitOrders: [] })
+    const db  = fakeDb(setup)
+    const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run', deps(db))
+
+    assert.equal(res.ok, false)
+    assert.equal(db.updates.some(u => u.$set?.['position_state.targets']), false)
+})
+
+test('a manual book has no orders to read, so the ladder moves on the rung under discussion', async () => {
+    // The fallback path: manual places nothing, so there is no amended level to match against — but
+    // the user is still being told to move their target, and the ladder has to follow.
+    const setup = inPosSetup({
+        targets: [{ price: 128, resting: 130, hit_at: null }],
+        pending_action: { verdict: 'let_run', proposal: { tp: 140 } },
+    }, { broker: 'manual', exitOrders: [] })
+    const db  = fakeDb(setup)
+    const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run', deps(db))
+
+    assert.equal(res.manual, true)
+    const ladder = db.updates.map(u => u.$set?.['position_state.targets']).filter(Boolean).at(-1)
+    assert.deepEqual(ladder, [{ price: 138, resting: 140, hit_at: null }])
+})
+
 test('a let_run that cancels the target outright is an action, not a missing level', async () => {
     let cancelled = false
     const ps = { pending_action: { verdict: 'let_run', proposal: { cancel_tp: true } } }

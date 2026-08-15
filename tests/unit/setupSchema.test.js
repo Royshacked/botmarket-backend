@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     buildLadder, buildCadence, normalizeZone, normalizeZones, scenarioQuantity,
-    normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
+    normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems, windowProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
     stopEdge, targetEdges, targetWindows, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, CONDITION_MODES, TRADE_MODES,
@@ -439,6 +439,39 @@ test('targetWindows agrees with targetEdges about where Talos wakes', () => {
     const s = normalizeSetup({ ...DRAFT, direction: 'long',
         tp_zones: [{ lower: 258, upper: 260 }, { lower: 244, upper: 245 }] })
     assert.deepEqual(targetWindows(s).map(w => w.wake), targetEdges(s))
+})
+
+test('windowProblems refuses a target window too thin to act inside', () => {
+    // Price crosses it between two checks, so the limit fills before the card is read — worse than
+    // no window, because it advertises a conversation that cannot happen.
+    const s = normalizeSetup({ ...DRAFT, direction: 'long',
+        entry_zones: [{ lower: 237.8, upper: 238.6 }], tp_zones: [{ lower: 259.98, upper: 260 }] })
+    assert.match(windowProblems(s).join(' '), /too thin/)
+})
+
+test('windowProblems refuses a window covering more than a third of the move', () => {
+    // Talos would open the conversation at a fraction of the planned R.
+    const s = normalizeSetup({ ...DRAFT, direction: 'long',
+        entry_zones: [{ lower: 237.8, upper: 238.6 }], tp_zones: [{ lower: 248, upper: 260 }] })
+    assert.match(windowProblems(s).join(' '), /more than a third/)
+})
+
+test('windowProblems leaves a sane window and an exact level alone', () => {
+    const ok = normalizeSetup({ ...DRAFT, direction: 'long',
+        entry_zones: [{ lower: 237.8, upper: 238.6 }], tp_zones: [{ lower: 258, upper: 260 }] })
+    assert.deepEqual(windowProblems(ok), [])
+
+    // Zero is not "too thin" — it is the unconditional case, a plain limit with nothing to discuss.
+    const exact = normalizeSetup({ ...DRAFT, direction: 'long',
+        entry_zones: [{ lower: 237.8, upper: 238.6 }], tp_zones: [{ lower: 260, upper: 260 }] })
+    assert.deepEqual(windowProblems(exact), [])
+})
+
+test('the window check reaches readiness, so a bad breadth cannot be generated', () => {
+    // Prompt-only rules are advice; this is the half that cannot be talked out of it.
+    const bad = normalizeSetup({ ...DRAFT, direction: 'long',
+        entry_zones: [{ lower: 237.8, upper: 238.6 }], tp_zones: [{ lower: 248, upper: 260 }] })
+    assert.match(validityProblems(bad).join(' '), /more than a third/)
 })
 
 test('a zero-width tp zone is a level, not a window', () => {
