@@ -138,6 +138,31 @@ is a formality — Talos asks and the limit fills before the card is read. Too w
 half?" at +0.4R on a trade planned to +3R. This wants a readiness check of the same family as
 `rangeProblems`: the wake level must sit far enough past entry to be a decision worth making.
 
+**MENTOR CHANGES TOO — IT IS THE HALF THAT DECIDES THE NUMBERS.** The prompt currently teaches the
+opposite: *"Entry, stop and target are bands, because a level is a decision area and price is noisy"*
+(`mentor_system_prompt.md:99`). Three edits:
+
+1. **The TP band gains a meaning the other two do not have.** Entry and stop bands stay decision
+   areas; only the TP becomes target-plus-breadth. State the asymmetry outright or the model
+   generalises it to all three. The prompt already teaches this exact shape at the other end of the
+   trade — *"a breakout zone is a window: near edge at the trigger, far edge ≈ trigger + 1 ATR"* —
+   so the TP rule should be written as its mirror.
+2. **The R:R section (lines ~156–174) describes something that stops existing.** It measures to "the
+   NEAREST target's near edge" and justifies it as the first target price reaches; that edge is now
+   where Talos ASKS, not where the trade exits. `computeRR` stays on it (never flatter), but the
+   REASONING has to be rewritten — otherwise Mentor draws the band tight to protect its R:R and
+   leaves no room to have the conversation in.
+3. **An authoring rule for the breadth**, ATR-derived like the other bands, respecting the floor and
+   ceiling above.
+
+**SHIP THE PROMPT AND `zoneExitLevel` IN ONE COMMIT.** If Mentor starts placing the target at the top
+while the limit still rests on the near edge, every trade exits at TP − breadth: a silent systematic
+haircut on every target, invisible because the numbers all still look plausible. The reverse order is
+harmless — the bands simply carry no window yet.
+
+**FE:** `ZoneEditor` renders tp zones as `lower`/`upper`; under this framing it should read as a
+target and its window ([[feedback_frontend_sync]]).
+
 **R:R KEEPS MEASURING TO THE BOTTOM.** `computeRR` uses `targetEdges()[0]`, which is now the wake
 level rather than the target. Keep it: it is the honest worst case if the user takes the first ask
 every time, and an R:R must never flatter. A deliberate choice, not an oversight.
