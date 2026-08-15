@@ -175,6 +175,42 @@ test('the model picks its own next check, clamped into the setup cadence', async
     assert.equal(gapMin, 30, 'clamped up to cadence.min, not honoured at 1')
 })
 
+// ─── Off-hours ────────────────────────────────────────────────────────────────
+// No monitoring while the venue is shut, in or out of position. Past-entry statuses are routed to
+// the position path BEFORE the pre-entry market gate, so this branch is the only thing standing
+// between a shut market and a full LLM read every cadence.min all night.
+
+test('a shut market buys nothing — no price, no read, no card, and it sleeps until the open', async () => {
+    // `fetchLastPrice` answers with the last CLOSE at 2am, so the gate would read a frozen number as
+    // live and re-trip on it every wake.
+    let priced = false, assessed = false, carded = false
+    const deps = stubDeps({
+        isAssetOpen: () => false,
+        getPrice:       async () => { priced = true; return 235.0 },   // inside the adverse band
+        assessPosition: async () => { assessed = true; return { verdict: 'exit_now' } },
+        onManageCard:   async () => { carded = true },
+    })
+    const res = await _checkSetup(INPOS(), T, deps)
+
+    assert.equal(res.reason, 'market_closed')
+    assert.equal(priced, false, 'a frozen price is not worth fetching')
+    assert.equal(assessed, false)
+    assert.equal(carded, false, 'an exit_now card at 3am is about a trade nobody can exit')
+    assert.equal(deps.entries[0], null, 'the market shutting on schedule is not news about the trade')
+    assert.equal(deps.writes[0]['monitor_state.next_check_at'], new Date(T + 3600_000).toISOString())
+})
+
+test('the fill stamp is bookkeeping, not monitoring, so a shut market does not defer it', async () => {
+    // A setup filled minutes before the close would otherwise carry no position_state until the next
+    // open — no frozen stop.initial, and a journal that skips its own entry line.
+    const deps = stubDeps({ isAssetOpen: () => false })
+    const res  = await _checkSetup(INPOS(PS({ entry: { intended: 238.6, direction: 'long' } })), T, deps)
+
+    assert.equal(res.reason, 'entry')
+    assert.equal(deps.writes[0]['position_state.stop.initial'], 234.8)
+    assert.equal(deps.entries[0].reason, 'entry')
+})
+
 test('a setup awaiting its fill is left alone entirely', async () => {
     // Nothing to manage, and nothing to say that the entry card did not already say.
     let assessed = false
@@ -309,10 +345,16 @@ test('add_leg places the LEG, at the leg size, and never touches status', async 
     assert.ok($set.pendingOrder?.plan?.length)
 })
 
-test('a shut venue parks the leg rather than dropping it', async () => {
+test('a venue that shuts DURING the wake parks the leg rather than dropping it', async () => {
+    // This used to be driven by a venue that was shut the whole way through. It cannot be any more:
+    // a shut market now returns before the read, so no verdict — add_leg included — can be reached
+    // off-hours at all. What survives is the narrower race the branch actually guards, and the
+    // reason it must stay: a check may span the close (the read is allowed 90s), so the market can
+    // be open when the wake starts and shut by the time the plan is built.
+    let looks = 0
     const deps = stubDeps({
         getPrice: async () => 236.2,
-        isAssetOpen: () => false,
+        isAssetOpen: () => ++looks === 1,          // open at the gate, shut at the order
         assessPosition: async () => ({ verdict: 'add_leg', next_check_min: 60 }),
         buildOrderPlan: async () => [{ accountId: 'a1', quantity: 40 }],
     })

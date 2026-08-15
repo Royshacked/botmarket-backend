@@ -252,10 +252,41 @@ async function _checkPosition(setup, nowMs, deps) {
 
     // Already stamped → the management path. This used to return here, which is what made the
     // journal go quiet for the whole life of a position.
-    if (ps.entry?.fill_at != null) return _managePosition(setup, ps, nowMs, deps)
+    if (ps.entry?.fill_at != null) {
+        // NO MONITORING OFF-HOURS, IN OR OUT OF POSITION. The pre-entry path has slept through a
+        // shut market since day one; this one did not, because past-entry statuses are routed here
+        // BEFORE that gate. The consequence was not merely wasted wakes:
+        //
+        //   • `fetchLastPrice` answers 200 with the last CLOSE at 2am, so the arithmetic gate reads
+        //     a frozen price as live. A position that closed pressing its stop is `adverse` on every
+        //     wake until the open — a full LLM read every `cadence.min`, all night, each one
+        //     re-reading the identical number.
+        //   • worse, it can post an `exit_now` card at 3am about a trade nobody can exit, on a price
+        //     that has not been real for hours.
+        //
+        // The position is not unwatched while we sleep: the stop and the targets are RESTING AT THE
+        // BROKER, which is what protects a position nobody is looking at. Waking at the open is when
+        // there is genuinely something new to read.
+        //
+        // No journal line. Pre-entry writes one, and can afford to — but a swing held three weeks
+        // would collect one "market closed" line per night, and the in-position journal is about the
+        // TRADE. The market shutting on schedule is not news about the trade.
+        if (!deps.isAssetOpen(setup.asset, setup.asset_class)) {
+            const openMs = deps.nextOpenMs(setup.asset, setup.asset_class)
+            const wakeAt = (Number.isFinite(openMs) && openMs > nowMs) ? new Date(openMs).toISOString() : nextAt
+            await deps.persist(setup.id, { ...base, 'monitor_state.next_check_at': wakeAt }, null)
+            return { reason: 'market_closed' }
+        }
+        return _managePosition(setup, ps, nowMs, deps)
+    }
 
     // First wake after the fill. `entryTriggeredAt` is when the zone tripped; the broker's own fill
     // price isn't on the setup, so the intended entry stands in until the ledger has it.
+    //
+    // DELIBERATELY AHEAD OF THE OFF-HOURS GATE ABOVE. This is bookkeeping, not monitoring: it fetches
+    // no price, calls no model and posts no card — it writes down a fill that has already happened.
+    // A setup filled minutes before the close would otherwise have no `position_state` until the next
+    // open, which means no frozen `stop.initial` and a journal that skips its own entry line.
     const fillPrice = toNum(ps.entry?.intended) ?? toNum(setup.armed_zone_id ? _zoneById(setup, setup.armed_zone_id)?.upper : null)
     const fillAtMs  = setup.ordersPlacedAt ?? setup.entryTriggeredAt ?? nowMs
     // The WORKING stop, chosen by price rather than by array position (setup.schema stopEdge). The

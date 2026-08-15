@@ -88,6 +88,65 @@ the same question in two places with two vocabularies.
 
 ---
 
+## Exits — the TP window (DESIGNED 2026-08-15, not built)
+
+Four principles, in the user's words:
+
+1. **An unconditional level is just an order.** A plain TP rests as a limit, a plain stop as a
+   stop-market, for the full size. No monitoring, no cards, no model call. Talos is only involved
+   where the plan actually asked for judgment.
+2. **A TP zone is a conversation, not an event.** Price entering the zone wakes Talos, which reads
+   the trade and PROPOSES a size — take half, take a third, take it all.
+3. **Talos may re-map the exit, not merely size it** — a different TP level, or a conditional exit
+   plan in place of the flat one.
+4. **Nothing reaches the broker without the user's confirm.** Talos proposes; the tap executes.
+   The stop is exempt from all of this: it always rests, full size, unless it carries conditions —
+   and conditional stops are deliberately out of scope for now.
+
+**THE WINDOW IS THE ZONE'S WIDTH, and today it does not exist.** `protectionPlan.zoneExitLevel`
+rests the TP limit on the zone's NEAR edge — the first edge price touches — and `setup.schema
+.targetEdges` wakes Talos on that same edge. So the limit fills at the exact instant the
+`scale_out` gate trips, and "sell only half" is a proposal about a position that is already flat.
+The two must separate:
+
+| | today | designed |
+|---|---|---|
+| resting limit | near edge | **far edge** (the authored target) |
+| Talos wakes | near edge | near edge (unchanged) |
+
+Price enters the zone → Talos reads and proposes → the user decides. If nobody acts, the limit
+takes the whole thing at the far edge anyway. A gap clean through the zone fills whole with no
+conversation, which is the correct outcome, not a miss.
+
+**THE COST, stated so it is a decision and not a surprise.** Today a TP zone GUARANTEES the near
+edge. With the limit at the far edge you guarantee only the far edge: price can push into the zone,
+turn, and give it all back with nothing filled. That is the price of being asked, and it is only
+worth paying because Talos wakes at the near edge and the user can take the money there.
+
+**WHAT MAKES A TP "CONDITIONAL" IS ITS WIDTH, for now.** A tp zone carries no conditions field of
+its own, so the discriminator that exists today is the band: a **zero-width** tp zone is an exact
+level the user named — it rests and never wakes anything (its near and far edges are the same
+price, so there is no window to have a conversation in). A zone with width is the conversation.
+Principle 3's "a setup for the TP" — a genuinely conditional exit, where nothing rests and Talos
+owns the leg — is a later schema addition, and it needs a per-leg owner (`broker` │ `talos`)
+because a position with no resting TP is a different risk profile and must be visible as one.
+
+**THE RE-ARM TRAP.** `position_state.targets[].hit_at` exists to stop a target re-tripping forever,
+and that is correct TODAY because reaching the near edge means the limit filled. Under this design
+reaching the near edge means only that we ASKED. A target touched, declined and abandoned by price
+must re-arm when price leaves the zone, or the setup's remaining upside is silently disarmed by a
+wick. The stamp becomes "we have already asked about this one on this visit", not "this one is
+done".
+
+**The accept path needs almost nothing.** "Take half" is `take_partial` — close half at market now
+(banking into strength at the current price is the whole point; waiting for the far edge is what
+they declined) and let the reconciler resize the resting limit to the remainder. That path already
+exists. A different TP level is `let_run` carrying `{ new_tp }`, which the shared executor already
+amends; Talos's `let_run` currently carries no proposal and is not in `SETUP_MANAGE_VERBS`, so
+principle 3's cheap half is opening exactly that door.
+
+---
+
 ## Talos
 
 A poll loop with a zone gate, drawing from the **shared monitor tool kit**
@@ -145,6 +204,24 @@ own.
   guarded `findOneAndUpdate` there is already the exactly-once property. Kind-blind, so calls got
   the same fix. The journal reason is `exit`; `closed` was renamed `market_closed`, because it
   meant the MARKET was shut and read as the POSITION closing.
+- ~~**Monitoring ran through a shut market once past entry.**~~ **CLOSED 2026-08-15.** The rule is
+  now **no monitoring off-hours, in or out of position**. Pre-entry had slept through a shut market
+  since day one; the position path did not, because past-entry statuses are routed to it BEFORE that
+  gate. `fetchLastPrice` answers with the last close at 2am, so a position that shut pressing its
+  stop read as `adverse` on every wake — a full LLM read every `cadence.min` all night on an
+  identical frozen number, and able to post an `exit_now` card about a trade nobody can exit. It
+  sleeps to the open instead; the stop and targets resting at the broker are what protect it
+  meanwhile. Two deliberate exemptions: the **fill stamp** (bookkeeping — no price, no model, no
+  card, and deferring it would leave a position with no frozen `stop.initial` overnight) and the
+  pre-entry **expiry review** (a setup may still need to roll or die at the close).
+  **HERMES HAS THE SAME HOLE, UNFIXED** (`_checkCall` routes `POSITION_STATUSES` at line 84, the
+  market gate is at 106) — it manages live calls, so it wants its own change, not a blind mirror.
+- **The manage-accept path is not hours-gated.** `positionManage.service` never asks
+  `executionGate.deferIfClosed`, so a card posted before the close can still be accepted at 02:00 and
+  go straight at the broker — on paper it fills at the stale day close, which is the exact failure
+  the off-hours queue exists to prevent. Closing the monitoring hole above means no NEW card can
+  appear off-hours, but it does not make a pending one safe to tap. Shared with Hermes, so it is one
+  fix for both desks: register a `manage` origin and gate the send.
 - **Scaling in** — several entries inside one scenario is modelled (`scenarioQuantity` sums them)
   but readiness blocks it until the flow is specified.
 - ~~**Stop/validity coherence is unchecked.**~~ **DONE** — `rangeProblems` (`setup.schema.js`)
