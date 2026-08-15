@@ -103,25 +103,44 @@ Four principles, in the user's words:
    The stop is exempt from all of this: it always rests, full size, unless it carries conditions —
    and conditional stops are deliberately out of scope for now.
 
-**THE WINDOW IS THE ZONE'S WIDTH, and today it does not exist.** `protectionPlan.zoneExitLevel`
-rests the TP limit on the zone's NEAR edge — the first edge price touches — and `setup.schema
-.targetEdges` wakes Talos on that same edge. So the limit fills at the exact instant the
-`scale_out` gate trips, and "sell only half" is a proposal about a position that is already flat.
-The two must separate:
+**THE TP PRICE IS THE TOP OF THE WINDOW; THE BREADTH HANGS BELOW IT** (user, 2026-08-15). This is
+the framing, and getting it backwards is what makes the feature look like a cost. A tp zone is NOT
+"the target is somewhere in this band". It is **the target the user named, plus a stretch of price
+beneath it in which Talos is allowed to talk.** For a long: the TP price is the top, the breadth
+runs back toward entry. Mirrored for a short — the TP is the bottom and the breadth sits above it.
+
+- **The resting limit is the authored TP price** — the far edge, in the direction of travel.
+- **Talos wakes at TP − breadth** (long) — the near edge.
+- **Do nothing and you get the TP you named.** That is the default outcome, not a degraded one.
+
+**TODAY THE WINDOW IS ZERO WIDE.** `protectionPlan.zoneExitLevel` rests the TP limit on the NEAR
+edge — the first edge price touches — and `setup.schema.targetEdges` wakes Talos on that SAME edge.
+So the limit fills at the exact instant the `scale_out` gate trips, and "sell only half" is a
+proposal about a position that is already flat. The two must separate:
 
 | | today | designed |
 |---|---|---|
-| resting limit | near edge | **far edge** (the authored target) |
-| Talos wakes | near edge | near edge (unchanged) |
+| resting limit | near edge | **the TP price** (far edge) |
+| Talos wakes | near edge | near edge = TP − breadth (unchanged) |
 
-Price enters the zone → Talos reads and proposes → the user decides. If nobody acts, the limit
-takes the whole thing at the far edge anyway. A gap clean through the zone fills whole with no
-conversation, which is the correct outcome, not a miss.
+Price enters the window → Talos reads and proposes → the user decides while the position is still
+on. Nobody answers and price keeps going → the limit takes the whole thing at the TP. A gap clean
+through the window fills whole with no conversation, which is the correct outcome, not a miss.
 
-**THE COST, stated so it is a decision and not a surprise.** Today a TP zone GUARANTEES the near
-edge. With the limit at the far edge you guarantee only the far edge: price can push into the zone,
-turn, and give it all back with nothing filled. That is the price of being asked, and it is only
-worth paying because Talos wakes at the near edge and the user can take the money there.
+**NO SCHEMA CHANGE.** `tp_zones[{lower, upper}]` already holds exactly this: for a long, `upper` IS
+the TP price and `lower` is TP − breadth. What changes is one function's choice of edge for the tp
+leg. An earlier draft of this section framed the band as "the target is in here somewhere" and so
+counted resting at the far edge as GIVING UP the near one; under the user's framing the near edge
+was never a target, and nothing is given up.
+
+**THE BREADTH NEEDS A FLOOR AND A CEILING, and it is Mentor's to author.** Too narrow and the window
+is a formality — Talos asks and the limit fills before the card is read. Too wide and it asks "take
+half?" at +0.4R on a trade planned to +3R. This wants a readiness check of the same family as
+`rangeProblems`: the wake level must sit far enough past entry to be a decision worth making.
+
+**R:R KEEPS MEASURING TO THE BOTTOM.** `computeRR` uses `targetEdges()[0]`, which is now the wake
+level rather than the target. Keep it: it is the honest worst case if the user takes the first ask
+every time, and an R:R must never flatter. A deliberate choice, not an oversight.
 
 **WHAT MAKES A TP "CONDITIONAL" IS ITS WIDTH, for now.** A tp zone carries no conditions field of
 its own, so the discriminator that exists today is the band: a **zero-width** tp zone is an exact
