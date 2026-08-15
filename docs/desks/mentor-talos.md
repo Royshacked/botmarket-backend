@@ -164,9 +164,14 @@ at TP − breadth, a silent systematic haircut, invisible because the numbers al
 for any premise without one — checked through `targetWindows`, so a band of nulls counts as no price
 rather than as a zone. The far edge is a limit order resting at the broker, not an annotation, and a
 plan that says where it dies but not where it pays leaves the user in a position only a stop can end.
-The breadth bounds are enforced too, by `windowProblems` under `problems`. Note both of these BLOCK,
-where the coverage desk's plausibility flags only record — deliberate: a missing exit and a window
-too thin to act in are defects in the plan, not observations about it.
+The breadth bounds are enforced too, by `windowProblems` under `problems`.
+
+**Both of these BLOCK, and that is settled** (user, 2026-08-15, asked and confirmed). It is the
+opposite of the coverage desk, whose plausibility flags record and never refuse, so the difference is
+worth naming rather than discovering: a missing exit and a window too thin to act inside are defects
+in the plan, not observations about it. A badly proportioned window is the debatable one — it would
+still work, it would just ask too early — and it blocks anyway. Do not downgrade either to a warning
+without asking.
 
 **STILL OPEN. FE:** `ZoneEditor` renders tp zones as `lower`/`upper`, which should now read as a target and its
 window; `position_state.targets[]` has gained `resting` and its `price` may be null
