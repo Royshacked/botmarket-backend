@@ -2,7 +2,7 @@ import { logger }              from '../../services/logger.service.js'
 import { kairosAgentService, emptyKairosState, _finalizeCall } from '../../services/agents/kairos.agent.service.js'
 import { kairosService }       from './kairos.service.js'
 import { kairosHandoffService } from '../../services/kairos.handoff.service.js'
-import { streamAgentResponse } from '../_shared/sse.util.js'
+import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
 import { sendReason }         from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { parseStreamBody }    from '../_shared/parse.util.js'
@@ -38,10 +38,7 @@ export async function streamKairos(req, res) {
                 model,
                 userId:        req.user._id,
                 signal,
-                onToken:     (text)   => sendEvent('token',     { text }),
-                onChart:     (chart)  => sendEvent('chart',     chart),
-                onToolStart: (tool)   => sendEvent('status',    { tool }),
-                onReasoning: (text)   => sendEvent('reasoning', { text }),
+                ...sseAgentCallbacks(sendEvent),
                 onPhase:     (phase)  => sendEvent('phase',     { phase }),
             })
 

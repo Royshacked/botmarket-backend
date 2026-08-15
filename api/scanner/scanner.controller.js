@@ -2,7 +2,7 @@ import { scannerAgentService } from '../../services/agents/scanner.agent.service
 import { scannerChatService }  from './scannerChat.service.js'
 import { scanService }         from './scan.service.js'
 import { logger }              from '../../services/logger.service.js'
-import { streamAgentResponse } from '../_shared/sse.util.js'
+import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
 import { parseChatMessages }   from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { sendReason }          from '../_shared/reason.util.js'
@@ -36,12 +36,9 @@ export async function streamScanner(req, res) {
                 profile:         profile === 'investing' ? 'investing' : 'trading',
                 userId:   req.user._id,
                 signal:   signal,
-                onToken:     (text)   => sendEvent('token',     { text }),
+                ...sseAgentCallbacks(sendEvent),
                 onTicker:    (symbol) => sendEvent('ticker',    { symbol }),
                 onPhase:     (phase)  => sendEvent('phase',     { phase }),
-                onToolStart: (tool)   => sendEvent('status',    { tool }),
-                onReasoning: (text)   => sendEvent('reasoning', { text }),
-                onChart:     (chart)  => sendEvent('chart',     chart),
             })
 
             // `kairos_pick` (hand-off mode) → the single ticker Argus recommends back to Kairos.

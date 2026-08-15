@@ -1,5 +1,5 @@
 import { mentorAgentService, emptyMentorState } from '../../services/agents/mentor.agent.service.js'
-import { streamAgentResponse } from '../_shared/sse.util.js'
+import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
 import { parseStreamBody, parseClientTime } from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
@@ -43,12 +43,9 @@ export async function streamMentor(req, res) {
                 model,
                 userId:          req.user._id,
                 signal,
-                onToken:     (text)     => sendEvent('token',     { text }),
+                ...sseAgentCallbacks(sendEvent),
                 onAsset:     (symbol)   => sendEvent('asset',     { symbol }),
                 onInterval:  (interval) => sendEvent('interval',  { interval }),
-                onChart:     (chart)    => sendEvent('chart',     chart),
-                onToolStart: (tool)     => sendEvent('status',    { tool }),
-                onReasoning: (text)     => sendEvent('reasoning', { text }),
                 onCoverage:  (coverage) => sendEvent('coverage',  { coverage }),
             })
 

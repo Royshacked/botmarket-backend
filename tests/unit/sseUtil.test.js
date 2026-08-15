@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { streamAgentResponse } from '../../api/_shared/sse.util.js'
+import { streamAgentResponse, sseAgentCallbacks } from '../../api/_shared/sse.util.js'
 
 // Minimal fake req/res that record the SSE frames streamAgentResponse writes, so we can
 // assert the done / error / abort control flow of the shared helper without a live server.
@@ -120,4 +120,36 @@ test('an explicit stop DOES silence the turn — no done, no end', async () => {
     const evs = events(res)
     assert.equal(evs.some(e => e.event === 'done'), false)
     assert.equal(res.ended, false)
+})
+
+// ─── the shared controller callback bag ───────────────────────────────────────
+//
+// These four lines were written out verbatim in all seven desk controllers. The risk a shared bag
+// removes is not typing: it is a payload gaining a field and six of seven desks getting it, which
+// fails SILENTLY because the odd desk just renders slightly wrong.
+
+test('the bag emits the events every desk shares', () => {
+    const sent = []
+    const cb = sseAgentCallbacks((event, data) => sent.push([event, data]))
+    cb.onToken('hi')
+    cb.onToolStart('get_candles')
+    cb.onChart({ symbol: 'SPY' })
+    assert.deepEqual(sent, [
+        ['token',  { text: 'hi' }],
+        ['status', { tool: 'get_candles' }],
+        ['chart',  { symbol: 'SPY' }],
+    ])
+})
+
+test('reasoning carries WHOSE thinking it is', () => {
+    // The desk's own model and the sidecar it consults share one event; `source` is what tells the
+    // client to render them apart. Losing it renders a second model as the desk contradicting itself.
+    const sent = []
+    const cb = sseAgentCallbacks((event, data) => sent.push([event, data]))
+    cb.onReasoning('weighing it', 'consult')
+    cb.onReasoning('resuming', 'desk')
+    assert.deepEqual(sent, [
+        ['reasoning', { text: 'weighing it', source: 'consult' }],
+        ['reasoning', { text: 'resuming',    source: 'desk' }],
+    ])
 })

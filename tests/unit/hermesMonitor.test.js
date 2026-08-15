@@ -743,8 +743,8 @@ test('thinkingConfig: off / undefined / invalid → null (no thinking, zero cost
     assert.equal(_thinkingConfig('bogus'), null)
 })
 test('thinkingConfig: low/high → adaptive thinking with matching effort (never budget_tokens)', () => {
-    assert.deepEqual(_thinkingConfig('low'),  { thinking: { type: 'adaptive' }, output_config: { effort: 'low' } })
-    assert.deepEqual(_thinkingConfig('high'), { thinking: { type: 'adaptive' }, output_config: { effort: 'high' } })
+    assert.deepEqual(_thinkingConfig('low'),  { thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: 'low' } })
+    assert.deepEqual(_thinkingConfig('high'), { thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: 'high' } })
     assert.ok(!('budget_tokens' in _thinkingConfig('high').thinking))
 })
 

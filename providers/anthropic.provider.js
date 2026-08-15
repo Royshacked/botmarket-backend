@@ -44,7 +44,7 @@ export function _thinkingConfig(reasoningEffort, model) {
     const effort = EFFORT_LEVELS[reasoningEffort]
         ?? (THINKS_BY_DEFAULT.has(model) ? FLOOR_EFFORT : null)
     return effort
-        ? { thinking: { type: 'adaptive' }, output_config: { effort } }
+        ? { thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort } }
         : null
 }
 

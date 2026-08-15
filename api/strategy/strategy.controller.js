@@ -10,7 +10,7 @@ import { tiltService }          from './tilt.service.js'
 import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
 import { diffStances }          from '../../monitoring/tilt.assess.js'
 import { notifyTiltChanged }    from '../../services/tiltNotify.service.js'
-import { streamAgentResponse }  from '../_shared/sse.util.js'
+import { streamAgentResponse, sseAgentCallbacks }  from '../_shared/sse.util.js'
 import { parseChatMessages }    from '../_shared/parse.util.js'
 import { logger }               from '../../services/logger.service.js'
 
@@ -33,10 +33,8 @@ export async function streamStrategy(req, res) {
                 model,
                 userId: req.user._id,
                 signal,
-                onToken:     text  => sendEvent('token',     { text }),
+                ...sseAgentCallbacks(sendEvent),
                 onPhase:     phase => sendEvent('phase',     { phase }),
-                onToolStart: tool  => sendEvent('status',    { tool }),
-                onReasoning: text  => sendEvent('reasoning', { text }),
             })
             return { reply: result.reply, phase: result.phase ?? null, ...(result.tilt ? { tilt: result.tilt } : {}) }
         },

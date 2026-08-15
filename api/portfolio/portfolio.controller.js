@@ -4,7 +4,7 @@ import { applyRebalance, snapshotConvictions } from './portfolioRebalance.servic
 import { invalidatePortfolioState, listPortfolioItems, listPortfolios } from '../../services/portfolioState.service.js'
 import { refreshCoverage }        from '../../services/coverageRefresh.service.js'
 import { logger }                from '../../services/logger.service.js'
-import { streamAgentResponse }   from '../_shared/sse.util.js'
+import { streamAgentResponse, sseAgentCallbacks }   from '../_shared/sse.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { threadService }          from '../../services/thread.service.js'
@@ -203,12 +203,9 @@ export async function streamPortfolio(req, res) {
                 model,
                 userId:   req.user._id,
                 signal:   signal,
-                onToken:     (text)   => sendEvent('token',     { text }),
+                ...sseAgentCallbacks(sendEvent),
                 onTicker:    (symbol) => sendEvent('ticker',    { symbol }),
                 onPhase:     (phase)  => sendEvent('phase',     { phase }),
-                onToolStart: (tool)   => sendEvent('status',    { tool }),
-                onReasoning: (text)   => sendEvent('reasoning', { text }),
-                onChart:     (chart)  => sendEvent('chart',     chart),
             })
 
             // Post-stream persistence (mandate/thesis/draft) → service. Only when the client is

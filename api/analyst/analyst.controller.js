@@ -1,7 +1,7 @@
 // HTTP handlers for the Analyst: the streaming research agent (P3) + coverage CRUD (P1).
 import { coverageService }    from './coverage.service.js'
 import { analystAgentService } from '../../services/agents/analyst.agent.service.js'
-import { streamAgentResponse } from '../_shared/sse.util.js'
+import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
 import { parseChatMessages }   from '../_shared/parse.util.js'
 import { sendReason }          from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
@@ -35,11 +35,8 @@ export async function streamAnalyst(req, res) {
                 model,
                 userId: req.user._id,
                 signal,
-                onToken:     text  => sendEvent('token',     { text }),
+                ...sseAgentCallbacks(sendEvent),
                 onPhase:     phase => sendEvent('phase',     { phase }),
-                onToolStart: tool  => sendEvent('status',    { tool }),
-                onReasoning: text  => sendEvent('reasoning', { text }),
-                onChart:     chart => sendEvent('chart',     chart),
             })
             return { reply: result.reply, phase: result.phase ?? null, ...(result.coverage ? { coverage: result.coverage } : {}) }
         },

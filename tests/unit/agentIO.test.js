@@ -154,3 +154,65 @@ test('passes the standard argument bag through to the provider', async () => {
     assert.equal(got.signal, 'SIG')
     assert.equal(got.tagCaptures, 'TAGS')
 })
+
+// ─── the reasoning sidecar, wired at the choke point ──────────────────────────
+//
+// The sidecar is auto-wired HERE rather than per desk, so these tests are what stop it silently
+// regressing to eight hand-wired copies — the exact shape the tools registry was built to end.
+
+const CONSULT_TOOL_DECL = { name: 'consult', description: 'x', input_schema: {} }
+
+// Run one turn and hand back everything the seams saw.
+async function runWith({ tools = [], toolHandlers = {}, onReasoning } = {}) {
+    let got = null
+    let consultOpts = null
+    await runAgentStream({
+        log: '[t]', requestedModel: 'm', userId: 'u1',
+        messages: [{ role: 'user', content: 'hi' }],
+        systemPrompt: 'sys', tools, toolHandlers, onReasoning,
+        _resolve: () => ({ model: 'resolved', streamFn: async (a) => { got = a; return 'raw' }, provider: 'p' }),
+        _makeConsult: (opts) => { consultOpts = opts; return async () => 'advice' },
+    })
+    return { got, consultOpts }
+}
+
+test('declaring the consult tool is the ONLY thing a desk does to get the sidecar', async () => {
+    // The point of the whole design: no handler, no callback, no controller line. If this ever
+    // needs a second edit at the desk, the per-desk plaster is back.
+    const { got, consultOpts } = await runWith({ tools: [CONSULT_TOOL_DECL] })
+    assert.equal(typeof got.toolHandlers.consult, 'function')
+    assert.equal(consultOpts.userId, 'u1', 'the handler must be built for THIS user')
+})
+
+test('a desk that never declared the tool gets no consult handler', async () => {
+    // Otherwise every desk silently carries a tool it never asked for, and the reach-rate ledger
+    // the rollout is gated on stops meaning anything.
+    const { got } = await runWith({ tools: [{ name: 'get_candles' }] })
+    assert.equal(got.toolHandlers.consult, undefined)
+})
+
+test('a desk that supplies its own consult handler keeps it', async () => {
+    const mine = async () => 'mine'
+    const { got } = await runWith({ tools: [CONSULT_TOOL_DECL], toolHandlers: { consult: mine } })
+    assert.equal(got.toolHandlers.consult, mine)
+})
+
+test('the two thinkers reach one callback under different labels', async () => {
+    // Same event, different source — a second event type would mean new wiring in all five layers
+    // it crosses. The desk's own thinking must keep the default label so nothing else has to change.
+    const seen = []
+    const { got, consultOpts } = await runWith({
+        tools: [CONSULT_TOOL_DECL],
+        onReasoning: (text, source) => seen.push([text, source]),
+    })
+    got.onReasoning('desk thought')
+    consultOpts.onReasoning('sidecar thought')
+    assert.deepEqual(seen, [['desk thought', 'desk'], ['sidecar thought', 'consult']])
+})
+
+test('no onReasoning stays undefined rather than becoming a no-op wrapper', async () => {
+    // The provider skips the thinking plumbing entirely on undefined; a wrapper would defeat that.
+    const { got, consultOpts } = await runWith({ tools: [CONSULT_TOOL_DECL] })
+    assert.equal(got.onReasoning, undefined)
+    assert.equal(consultOpts.onReasoning, undefined)
+})

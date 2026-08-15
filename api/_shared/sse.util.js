@@ -67,6 +67,33 @@ export function startSseStream(req, res, { turnId = null, userId = null } = {}) 
     }
 }
 
+/**
+ * The callback bag every streaming desk hands its `chatStream`, minus the per-desk extras.
+ *
+ * These four were written out verbatim in all seven controllers — `onReasoning` alone appeared
+ * character-for-character seven times. That is fine until a payload gains a field, at which point
+ * it is seven edits and six chances to forget one; the failure is silent, because a desk that
+ * still sends the old shape just renders slightly wrong. Adding a field is now one line, here.
+ *
+ * `source` on reasoning is WHOSE thinking it is — the desk's own model, or the reasoning sidecar it
+ * consulted (services/agentIO.js: REASONING_DESK / REASONING_CONSULT). Undefined for any caller
+ * that doesn't tag, and the client defaults it to the desk, so nothing has to change in step.
+ *
+ * Spread it, then add what only that desk has:
+ *   ...sseAgentCallbacks(sendEvent),
+ *   onCoverage: (coverage) => sendEvent('coverage', { coverage }),
+ *
+ * @param {function} sendEvent  from startSseStream / streamAgentResponse
+ */
+export function sseAgentCallbacks(sendEvent) {
+    return {
+        onToken:     (text)         => sendEvent('token',     { text }),
+        onToolStart: (tool)         => sendEvent('status',    { tool }),
+        onReasoning: (text, source) => sendEvent('reasoning', { text, source }),
+        onChart:     (chart)        => sendEvent('chart',     chart),
+    }
+}
+
 // Run a streaming agent turn with the standard SSE lifecycle every agent controller
 // shares: open the stream, run the handler, and on success `finish()` + emit a `done`
 // (skipped if the client already aborted); on error, `finish()` + emit an `error`

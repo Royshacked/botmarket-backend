@@ -1,5 +1,5 @@
 import { axlAgentService } from '../../services/agents/axl.agent.service.js'
-import { streamAgentResponse } from '../_shared/sse.util.js'
+import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
 import { parseChatMessages } from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
 import { getMarketBrief } from '../../services/marketBrief.service.js'
@@ -72,10 +72,7 @@ export async function streamAxl(req, res) {
                 model,
                 userId:  req.user._id,
                 signal:  signal,
-                onToken:     (text)  => sendEvent('token',     { text }),
-                onToolStart: (tool)  => sendEvent('status',    { tool }),
-                onReasoning: (text)  => sendEvent('reasoning', { text }),
-                onChart:     (chart) => sendEvent('chart',     chart),
+                ...sseAgentCallbacks(sendEvent),
             })
 
             const route = VALID_PIPELINES.has(result.route) ? result.route : null

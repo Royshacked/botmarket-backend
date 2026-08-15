@@ -1,5 +1,6 @@
 import { logger } from './logger.service.js'
 import { resolveAgentStream } from './agentUtils.js'
+import { makeConsultHandler, CONSULT_TOOL } from './deepThink.service.js'
 
 // The agent I/O protocol — the mechanics every streaming agent repeats verbatim.
 //
@@ -325,6 +326,17 @@ export function agentKeyFromLog(log) {
     return key || 'unknown'
 }
 
+/**
+ * WHOSE thinking a reasoning delta is. The desk's own model, or the reasoning sidecar it consulted
+ * (services/deepThink.service.js). Both ride the ONE `reasoning` event — a second event type would
+ * have meant new wiring in all five layers it crosses (provider → agent → controller → SSE map →
+ * chat hook) every time another sidecar appears, where a field costs nothing.
+ *
+ * `desk` is the default everywhere, so a caller that never heard of this keeps working unchanged.
+ */
+export const REASONING_DESK    = 'desk'
+export const REASONING_CONSULT = 'consult'
+
 // Every agent's `chatStream` takes `_run = runAgentStream` and calls `_run(...)` here. That one
 // seam is what lets the SHARED contract test (tests/unit/agentStreamContract.test.js) drive every
 // agent's real chatStream with no provider and no model id — the assertions live once, not per
@@ -338,6 +350,9 @@ export async function runAgentStream({
     meta = {},
     // Injectable so the argument-bag contract can be tested without a provider or a real model id.
     _resolve = resolveAgentStream,
+    // Same seam for the sidecar: lets a test see WHAT the handler was built with (the tagged
+    // `onReasoning`) without a second live model call behind it.
+    _makeConsult = makeConsultHandler,
 }) {
     // WHICH desk is spending. Derived from `log` rather than added as a new argument: every agent
     // already passes its own tag here and nothing else in the bag identifies the caller, so taking
@@ -347,15 +362,34 @@ export async function runAgentStream({
 
     const chart = onChart ? makeChartChatPipe(onChart, { log }) : null
 
-    logger.info(log, 'chatStream start', { messageCount: messages?.length ?? 0, model, provider, ...(degraded ? { degraded: true } : {}), ...meta })
+    // Two kinds of thinking reach the same callback, each labelled with whose it is. The provider
+    // calls `onReasoning(text)` with one argument, so the desk's own thinking is tagged here rather
+    // than there — nothing in the provider needs to know a sidecar exists.
+    const tagReasoning = (source) => (onReasoning ? (text) => onReasoning(text, source) : undefined)
+
+    // THE REASONING SIDECAR IS WIRED HERE, NOT PER DESK — the same call the model-spend attribution
+    // above makes: derive it from what the desk already passes instead of adding an argument eight
+    // callers have to remember. A desk opts in by DECLARING the tool (its own description — the
+    // judgment, which does not transfer); the handler behind it is mechanism and is identical
+    // everywhere, so it is built once, here, where `onReasoning` and `userId` are both already in
+    // hand. Extending it to Atlas is one line in that desk's tools array and nothing else.
+    //
+    // Built per call, which is per TURN — which is exactly the scope of the cap it carries.
+    // A desk that supplies its own `consult` handler keeps it; the injected one only fills a gap.
+    const wantsConsult   = Array.isArray(tools) && tools.some(t => t?.name === CONSULT_TOOL)
+    const resolvedHandlers = wantsConsult
+        ? { [CONSULT_TOOL]: _makeConsult({ userId, onReasoning: tagReasoning(REASONING_CONSULT) }), ...toolHandlers }
+        : toolHandlers
+
+    logger.info(log, 'chatStream start', { messageCount: messages?.length ?? 0, model, provider, ...(degraded ? { degraded: true } : {}), ...(wantsConsult ? { consult: true } : {}), ...meta })
 
     const raw = await streamFn({
         model, promptOrMessages: messages,
         systemPrompt: chart ? _appendSystemBlock(systemPrompt, CHART_INSTRUCTION) : systemPrompt,
-        tools, toolHandlers,
+        tools, toolHandlers: resolvedHandlers,
         reasoningEffort, signal, onToken,
         tagCaptures: chart ? _withChartCapture(tagCaptures, chart.capture) : tagCaptures,
-        onToolStart, onReasoning, onUsage,
+        onToolStart, onReasoning: tagReasoning(REASONING_DESK), onUsage,
     })
 
     return chart ? stripChartBlock(raw) : raw

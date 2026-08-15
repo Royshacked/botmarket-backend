@@ -19,6 +19,11 @@ import { logger } from './logger.service.js'
 // pipe, not the judgment).
 const LOG = '[deepThink]'
 
+// The tool name, exported so the one place that auto-wires the handler (runAgentStream) and the one
+// place that declares the schema (agentTools.registry) agree by reference rather than by two string
+// literals that can drift apart silently — a mismatch would simply mean the tool never runs.
+export const CONSULT_TOOL = 'consult'
+
 // Opus 5 reasons by default and is the strongest model we route to. `high` rather than `max`:
 // max shows diminishing returns and can overthink a bounded question, which is all this ever gets.
 const DEFAULT_MODEL  = 'claude-opus-5'
@@ -52,9 +57,16 @@ which way you lean.`
  * @param {string} [opts.model]    override; the caller almost never should
  * @param {string} [opts.effort]   'low' | 'high'
  * @param {string} [opts.userId]   for usage attribution
+ * @param {function} [opts.onReasoning]  the consulted model's thinking, streamed as it arrives
  * @returns {Promise<string>} the answer, or a readable failure the desk can carry on from
  */
-export async function deepThink({ question, context = '', model, effort, userId, onUsage } = {}) {
+export async function deepThink({
+    question, context = '', model, effort, userId, onUsage, onReasoning,
+    // Injectable so this function's OWN behaviour — the reasoning passthrough and the containment
+    // around it — is reachable without a live model call. Everything else here is exercised through
+    // makeConsultHandler's `_deepThink`.
+    _stream = streamAnthropicWithTools,
+} = {}) {
     const asked = String(question ?? '').trim()
     if (!asked) return 'No question was asked, so there is nothing to advise on.'
 
@@ -66,13 +78,22 @@ export async function deepThink({ question, context = '', model, effort, userId,
     try {
         // No `tools` and no history by design — that is what keeps the request small, and it is
         // also why the tool loop below never iterates: there is nothing for it to call.
-        const answer = await streamAnthropicWithTools({
+        //
+        // `onReasoning` costs NOTHING to pass. The thinking tokens are billed as output tokens
+        // whether or not anyone reads them, so the depth we pay for here was already being thrown
+        // away — surfacing it is free, and hiding it was the only thing that was expensive.
+        // Source-agnostic on purpose: this is the shared transport, and WHOSE thinking this is
+        // belongs to the caller that knows (runAgentStream tags it).
+        const answer = await _stream({
             model:            picked,
             systemPrompt:     SYSTEM,
             promptOrMessages: [{ role: 'user', content: body }],
             tools:            [],
             reasoningEffort:  effort ?? DEFAULT_EFFORT,
             onUsage:          usage => onUsage?.(usage, picked),
+            // A throwing consumer must not cost the desk the answer it already paid for — the same
+            // containment the usage write below gets, for the same reason.
+            onReasoning:      onReasoning ? (text) => { try { onReasoning(text) } catch { /* a viewer is not worth the turn */ } } : undefined,
         })
         logger.info(LOG, 'consulted', { userId, chars: answer?.length ?? 0 })
         return answer?.trim() || 'The consult returned nothing usable — decide on your own read.'
@@ -95,6 +116,7 @@ export async function deepThink({ question, context = '', model, effort, userId,
 export function makeConsultHandler({
     userId = null,
     maxPerTurn = 3,
+    onReasoning = null,
     _deepThink = deepThink,
     _record = recordUsage,
 } = {}) {
@@ -105,7 +127,7 @@ export function makeConsultHandler({
             return `You have already consulted ${maxPerTurn} times this turn, which is the limit. Decide on your own read and say that you did.`
         }
         return _deepThink({
-            question, context, userId,
+            question, context, userId, onReasoning,
             // Best-effort, like every other usage write: a ledger hiccup must not cost the desk an
             // answer it already paid for. try/catch AND .catch — recordUsage can fail either way
             // (a synchronous throw before it ever awaits, or a rejected promise), and catching only

@@ -52,11 +52,26 @@ test('the models that reason by default never run without a thinking block', () 
     // Both think whether or not we ask, so max_tokens must account for it (the caller picks
     // THINKING_MAX_TOKENS off a non-null return). Opus 5 additionally must not run with thinking
     // explicitly off, where it can emit a tool call as plain text that silently never runs.
-    const expected = { thinking: { type: 'adaptive' }, output_config: { effort: 'low' } }
+    const expected = { thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: 'low' } }
     for (const model of [OPUS, SONNET_5]) {
         assert.deepEqual(_thinkingConfig(undefined, model), expected, model)
         assert.deepEqual(_thinkingConfig('off', model), expected, model)
     }
+})
+
+test('thinking is asked for in a form that can actually be read', () => {
+    // The regression this guards is invisible in every other assertion here: `display` defaults to
+    // OMITTED on Opus 5 / Sonnet 5 / Opus 4.8 — the thinking blocks still arrive, but their text is
+    // empty. Everything downstream keeps working and shows nothing, so the failure looks like a
+    // model that didn't reason rather than a config that didn't ask to see it. It was a silent
+    // change from Opus 4.6 / Sonnet 4.6, where summarized was the default.
+    //
+    // Costs nothing: `display` is visibility only — the thinking happens and is billed as output
+    // tokens under every setting, so omitting it paid for reasoning and then discarded it.
+    for (const model of [OPUS, SONNET_5]) {
+        assert.equal(_thinkingConfig(undefined, model).thinking.display, 'summarized', model)
+    }
+    assert.equal(_thinkingConfig('high', SONNET).thinking.display, 'summarized')
 })
 
 test('sonnet 5 is floored even though sonnet 4.6 is not', () => {
@@ -83,7 +98,7 @@ test('the monitors use the provider’s thinking config, not a copy of it', () =
     assert.equal(hermesThinkingConfig, _thinkingConfig, 'hermes re-exported a different function')
     assert.deepEqual(
         hermesThinkingConfig(undefined, OPUS),
-        { thinking: { type: 'adaptive' }, output_config: { effort: 'low' } },
+        { thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: 'low' } },
         'the monitors are not getting the reasons-by-default floor',
     )
 })
@@ -92,11 +107,11 @@ test('the internal effort parameter still works when set in code', () => {
     // Removed from the UI, NOT from the plumbing: the monitors set it, and it is the seam a
     // future reasoning sidecar would use.
     assert.deepEqual(_thinkingConfig('high', OPUS), {
-        thinking: { type: 'adaptive' },
+        thinking: { type: 'adaptive', display: 'summarized' },
         output_config: { effort: 'high' },
     })
     assert.deepEqual(_thinkingConfig('low', SONNET), {
-        thinking: { type: 'adaptive' },
+        thinking: { type: 'adaptive', display: 'summarized' },
         output_config: { effort: 'low' },
     })
 })

@@ -5,7 +5,6 @@ import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, 
 import { buildTagCaptures } from '../llmStream.util.js'
 import { KAIROS_TOOLS, buildKairosToolHandlers } from '../tools/kairos.tools.js'
 import { toolsFor } from '../agentTools.registry.js'
-import { makeConsultHandler } from '../deepThink.service.js'
 import { buildVenueSection } from '../tools/tradingContext.tools.js'
 import { normalizeSetup, setupReadiness, computeRR, validityProblems } from '../setup.schema.js'
 import { logger } from '../logger.service.js'
@@ -41,11 +40,12 @@ export const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
 // money — which is this desk. The description below is Mentor's own judgment about WHEN to reach
 // for it; the transport it reaches through is shared (deepThink.service.js).
 //
-// TO EXTEND IT TO ANOTHER DESK: append the same `toolsFor({ consult: ... })` to that desk's array
-// and add `consult: makeConsultHandler({ userId })` to its handlers. Two lines — the hard part is
-// the third: that desk needs its OWN description naming the two or three decisions worth a full
-// model call, because "when is this worth it" is per-desk judgment and does not transfer. Atlas is
-// the obvious next one (allocation and correlation are the same shape as sizing).
+// TO EXTEND IT TO ANOTHER DESK: append `toolsFor({ consult: ... })` to that desk's array. That is
+// the whole edit — runAgentStream sees the tool and builds the handler, so there is no handler, no
+// callback and no controller line to remember. What is left is the part that cannot be shared:
+// that desk needs its OWN description naming the two or three decisions worth a full model call,
+// because "when is this worth it" is per-desk judgment and does not transfer. Atlas is the obvious
+// next one (allocation and correlation are the same shape as sizing).
 //
 // Gate the rollout on DATA, not on it feeling useful: `byAgent.consult` in token_usage carries the
 // reach rate and cost. If Mentor consults on most turns the description is too permissive and
@@ -78,11 +78,10 @@ async function chatStream({
 }) {
 
     const tools        = MENTOR_TOOLS
-    const toolHandlers = {
-        ...buildKairosToolHandlers(onChart, userId),
-        // Fresh per turn — the cap it carries is per-turn (see makeConsultHandler).
-        consult: makeConsultHandler({ userId }),
-    }
+    // `consult` is deliberately absent: runAgentStream builds it from the tool declaration, which is
+    // also the only place that holds `onReasoning` — wiring it here would swallow the sidecar's
+    // thinking silently. See the MENTOR_TOOLS note above.
+    const toolHandlers = buildKairosToolHandlers(onChart, userId)
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, audience, seed)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than

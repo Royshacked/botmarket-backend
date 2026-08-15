@@ -7,6 +7,7 @@ import { kairosAgentService }    from '../../services/agents/kairos.agent.servic
 import { mentorAgentService }    from '../../services/agents/mentor.agent.service.js'
 import { portfolioAgentService } from '../../services/agents/portfolio.agent.service.js'
 import { scannerAgentService }   from '../../services/agents/scanner.agent.service.js'
+import { CONSULT_TOOL }         from '../../services/deepThink.service.js'
 
 // The agent-stream contract — ONE assertion body for EVERY streaming agent.
 //
@@ -58,6 +59,12 @@ for (const { name, chatStream, args } of AGENTS) {
             assert.equal(typeof t.name, 'string', 'every tool is named')
             // Server-side tools (web_search) are run by the provider and carry no local handler.
             if (t.type) continue
+            // The reasoning sidecar is the other tool a desk deliberately does NOT handle: the
+            // handler is mechanism, identical everywhere, and is built inside runAgentStream — which
+            // this test replaces with `_run`, so it is below the seam by design. That a declared
+            // `consult` gets its handler there is asserted in agentIO.test.js; a desk wiring its own
+            // here would be the plaster this arrangement exists to prevent.
+            if (t.name === CONSULT_TOOL) continue
             assert.equal(typeof seen.toolHandlers[t.name], 'function', `${name}: handler for ${t.name}`)
         }
 

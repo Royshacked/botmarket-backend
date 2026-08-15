@@ -116,3 +116,39 @@ test('a ledger failure does not cost the desk the answer it already paid for', a
         assert.equal(await handler({ question: 'q', context: 'c' }), 'the answer')
     }
 })
+
+// ─── surfacing the thinking we already pay for ────────────────────────────────
+//
+// Thinking tokens are billed as OUTPUT tokens whether or not anyone reads them, so the sidecar was
+// paying Opus rates for reasoning it then threw away. Passing it through costs nothing; these
+// tests are what keep the pipe connected.
+
+test('the consulted model\'s thinking reaches the caller', async () => {
+    const seen = []
+    const handler = makeConsultHandler({
+        onReasoning: t => seen.push(t),
+        _record: () => {},
+        _deepThink: async ({ onReasoning }) => { onReasoning('weighing the stop distance'); return 'ok' },
+    })
+    await handler({ question: 'q', context: 'c' })
+    assert.deepEqual(seen, ['weighing the stop distance'])
+})
+
+test('a throwing reasoning consumer does not cost the desk its answer', async () => {
+    // The desk asked for a second opinion, not for permission to continue — the same containment
+    // the usage write gets. A closed socket mid-consult must not turn into a failed turn.
+    const provider = fakeProvider('size at 1.2%')
+    const answer = await deepThink({
+        question: 'Size this?', context: 'entry 100, stop 96',
+        onReasoning: () => { throw new Error('client went away') },
+        _stream: provider.fn,
+    })
+    assert.equal(answer, 'size at 1.2%')
+})
+
+test('no consumer means no reasoning plumbing is handed to the provider', async () => {
+    // undefined lets the provider skip thinking capture entirely; a wrapper would defeat that.
+    const provider = fakeProvider()
+    await deepThink({ question: 'q', context: 'c', _stream: provider.fn })
+    assert.equal(provider.calls[0].onReasoning, undefined)
+})
