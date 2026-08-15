@@ -5,7 +5,7 @@ import {
     normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
-    stopEdge, targetEdges, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, CONDITION_MODES, TRADE_MODES,
+    stopEdge, targetEdges, targetWindows, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, CONDITION_MODES, TRADE_MODES,
 } from '../../services/setup.schema.js'
 import { MODES } from '../../services/kairos.modes.js'
 
@@ -413,6 +413,37 @@ test('targetEdges come back NEAREST-FIRST — the order price reaches them', () 
         tp_zones:    [{ lower: 220, upper: 221, quantity: 50 }, { lower: 232, upper: 233, quantity: 50 }],
     })
     assert.deepEqual(targetEdges(short), [233, 221], 'a short reaches the HIGHEST target first')
+})
+
+test('targetWindows reads a tp zone as the target plus the breadth beneath it', () => {
+    // The framing that makes the whole exit design work: `target` is the price the user named and
+    // where the limit rests, `wake` is where Talos is allowed to start talking about it.
+    const long = normalizeSetup({ ...DRAFT, direction: 'long',
+        tp_zones: [{ lower: 258, upper: 260 }, { lower: 244, upper: 245 }] })
+    assert.deepEqual(targetWindows(long), [
+        { wake: 244, target: 245 },
+        { wake: 258, target: 260 },
+    ], 'nearest-first, and the target is always the far side')
+
+    const short = normalizeSetup({ ...DRAFT, direction: 'short',
+        tp_zones: [{ lower: 220, upper: 221 }, { lower: 232, upper: 233 }] })
+    assert.deepEqual(targetWindows(short), [
+        { wake: 233, target: 232 },
+        { wake: 221, target: 220 },
+    ], 'a short falls to its target, so the far side is the LOWER edge')
+})
+
+test('targetWindows agrees with targetEdges about where Talos wakes', () => {
+    // Two functions reading the same band must never disagree about which side is which — that
+    // divergence would put the limit and the wake on the same edge again, silently.
+    const s = normalizeSetup({ ...DRAFT, direction: 'long',
+        tp_zones: [{ lower: 258, upper: 260 }, { lower: 244, upper: 245 }] })
+    assert.deepEqual(targetWindows(s).map(w => w.wake), targetEdges(s))
+})
+
+test('a zero-width tp zone is a level, not a window', () => {
+    const s = normalizeSetup({ ...DRAFT, direction: 'long', tp_zones: [{ lower: 246, upper: 246 }] })
+    assert.deepEqual(targetWindows(s), [{ wake: 246, target: 246 }])
 })
 
 test('targetEdges is empty, never [null], when none is authored', () => {

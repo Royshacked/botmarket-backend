@@ -390,7 +390,7 @@ WHAT THE NUMBERS MEAN. R is measured from the risk originally taken, so it does 
 
 Verdicts, and be strict — "hold" is the right answer most of the time:
 - "hold" — the thesis is intact and the protection is right. Nothing to do. Say so plainly.
-- "let_run" — working, and working for the reason you expected. Explicitly declining to take profit here.
+- "let_run" — working, and working for the reason you expected. Bare, this is you explicitly declining to take profit here. If the move has genuinely more in it than the plan assumed, carry "new_tp" (and "why") to propose moving the target OUT to a level the chart justifies — a level, not a hope. Never move a target IN; that is take_partial, and dressing it as a target move hides a decision to reduce.
 - "take_partial" — bank part of it. Say WHICH fraction of the ORIGINAL position: "third", "half" or "two_thirds". Never a share of what is left, or the position never reaches flat.
 - "move_stop" — the protection is wrong for where the trade now is. Give the new level and say what it is anchored to (structure, breakeven, a level price has now defended). Never move a stop further from entry — protection only ever tightens.
 - "exit_now" — the reason for the trade has gone, and waiting for the stop would be paying for information you already have. This is the strongest thing you can say; the thesis must actually be broken, not merely uncomfortable.
@@ -401,9 +401,11 @@ Always include "read": ONE short first-person sentence — what you see and what
 
 TWO TIMEFRAMES, TWO JOBS. Your LADDER lists the rungs you may work on. The setup's own timeframe is where the THESIS lives; a rung or two finer is where the management decision lives — where the stop is actually being pressed, where a target is actually being reached. "next_timeframe" is the rung you want to open on next time, and it sets the pace with it: a coarser rung means you are content to look less often, a finer one means you want to watch this closely. Pick it from your ladder; anything else is ignored.
 
+A TARGET IS A WINDOW, NOT A LINE. Each target has a resting limit at the price the user named, and a wake level a little beneath it. You are woken when price enters that window, WITH THE LIMIT STILL RESTING ABOVE — so the question is never "shall we take the target", it is "shall we take something HERE, or let price carry on to the limit". Saying nothing is a real answer: the limit fills the whole position at the target on its own.
+
 Output ONLY a JSON object, no prose:
-{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw"}],"verdict":"hold|let_run|take_partial|move_stop|exit_now","proposal":{"fraction":"third|half|two_thirds","stop":123.45,"why":"<what the level is anchored to>"},"next_timeframe":"15min","memo_update":"..."}
-Include "proposal" ONLY for take_partial (fraction) or move_stop (stop + why). Omit it entirely otherwise.`
+{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw"}],"verdict":"hold|let_run|take_partial|move_stop|exit_now","proposal":{"fraction":"third|half|two_thirds","stop":123.45,"new_tp":123.45,"why":"<what the level is anchored to>"},"next_timeframe":"15min","memo_update":"..."}
+Include "proposal" ONLY for take_partial (fraction), move_stop (stop + why) or a let_run that moves the target (new_tp + why). Omit it entirely otherwise.`
 
 /**
  * Run one in-position management read.
@@ -432,7 +434,10 @@ export async function assessPosition(setup, ps, ctx = {}) {
                 direction: ps?.entry?.direction ?? setup.direction,
                 stop_initial: ps?.stop?.initial ?? null,
                 stop_current: ps?.stop?.current ?? null,
-                targets: (ps?.targets ?? []).map(t => ({ price: t.price, hit: t.hit_at != null })),
+                // Both ends of the window: `resting` is where the limit sits (the target the user
+                // named), `wake_at` is where this conversation is allowed to start. A model shown
+                // only one of them cannot tell "take it here" from "let the limit have it".
+                targets: (ps?.targets ?? []).map(t => ({ resting: t.resting ?? t.price, wake_at: t.price, asked: t.hit_at != null })),
             })}`,
             `WHERE IT STANDS: ${JSON.stringify({
                 r_now: m.r_multiple_now ?? null, worst_r: m.mae ?? null, best_r: m.mfe ?? null,
@@ -468,7 +473,7 @@ function _armedScenario(setup) {
 function _wakeReason(reason) {
     switch (reason) {
         case 'adverse':   return 'price is pressing the working stop — this is the look BEFORE it, while there is still a decision to make.'
-        case 'scale_out': return 'an un-hit target has been reached.'
+        case 'scale_out': return 'price has entered a target WINDOW — the limit is still resting above it, so this is the chance to take something here rather than wait for the whole position to go at the target.'
         case 'breakeven': return 'the trade is at or past +1R and the stop is not yet protected past entry.'
         default:          return 'a periodic thesis review is due — price has not done anything in particular, which is not the same as nothing having changed.'
     }

@@ -801,6 +801,30 @@ export function targetEdges(setup) {
     return edges.sort((a, b) => (isLong ? a - b : b - a))
 }
 
+/**
+ * A tp zone read as a WINDOW — see docs/desks/mentor-talos.md §"Exits — the TP window". Nearest-
+ * first, same ordering rule as targetEdges. Pure.
+ *
+ *   `target`  the TP price the user named, and where the limit rests. The far edge in the
+ *             direction of travel: `upper` for a long, `lower` for a short.
+ *   `wake`    where Talos is allowed to start talking — `target` minus the authored breadth, i.e.
+ *             the near edge. The SAME number targetEdges returns, which is why R:R still measures
+ *             there: it is the worst case if the user banks at the first ask every time.
+ *
+ * A zone is not a fuzzy area the target lives somewhere inside. It is the target, plus a stretch of
+ * price beneath it in which the exit is a conversation instead of an event. `wake === target` is a
+ * zero-width zone — an exact level, no window, nothing to discuss.
+ */
+export function targetWindows(setup) {
+    const isLong = setup?.direction === 'long'
+    return (setup?.tp_zones ?? [])
+        // `!isLong` picks the OTHER edge through the same one rule, so the two can never disagree
+        // about which side of a band they are on.
+        .map(z => ({ wake: _edge(z, isLong), target: _edge(z, !isLong) }))
+        .filter(w => Number.isFinite(w.wake) && Number.isFinite(w.target))
+        .sort((a, b) => (isLong ? a.wake - b.wake : b.wake - a.wake))
+}
+
 export function computeRR(setup, entryPrice = null) {
     const isLong = setup?.direction === 'long'
     const entryZone = setup?.entry_zones?.[0]

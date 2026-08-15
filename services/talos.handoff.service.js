@@ -29,15 +29,19 @@ import { logger } from './logger.service.js'
  *        leg and parks it as `pendingOrder` / `awaiting_confirm` — that leg is placed by CONFIRMING
  *        an order, the same path a first entry takes. Executing it here as well would place the
  *        size twice. It is refused with its own reason so the caller can route to the confirm.
- *      • `let_run` is a decision NOT to act. Talos sends it with no proposal and no card actions,
- *        so there is nothing to accept — the position is already doing what let_run describes.
+ *      • `let_run` is TWO things wearing one word, and only one of them is an action. Bare, it is a
+ *        decision not to act — the position is already doing what it describes, so there is nothing
+ *        to accept. Carrying `{ new_tp }` it is principle 3 of the TP window: Talos asking to move
+ *        the target further out because the move has more in it than the plan assumed. The shared
+ *        executor has always been able to amend a tp leg; what was missing was a desk willing to
+ *        propose it. A bare one is refused as `bad_proposal` — it has no level to place.
  */
 
 const LOG        = '[talos.handoff]'
 const COLLECTION = ENTITIES   // setups live in entities as kind:'setup'
 
 /** A setup's acceptable actions — see the verb note above. */
-export const SETUP_MANAGE_VERBS = new Set(['move_stop', 'take_partial', 'exit_now'])
+export const SETUP_MANAGE_VERBS = new Set(['move_stop', 'take_partial', 'exit_now', 'let_run'])
 
 /**
  * Talos's fraction words → a percentage of the ORIGINAL position. Words rather than numbers is a
@@ -63,6 +67,14 @@ export function toExecutionProposal(verb, raw) {
     if (verb === 'take_partial') {
         const pct = Number(p.size_pct ?? FRACTION_PCT[p.fraction])
         return { size_pct: Number.isFinite(pct) ? pct : null }
+    }
+    if (verb === 'let_run') {
+        // `tp` is Talos's field, `new_tp` the executor's — accepted both ways for the same reason
+        // move_stop takes `new_stop`. Cancelling the target outright is a separate intent the shared
+        // executor already understands, and it is NOT a missing level.
+        if (p.cancel_tp === true) return { cancel_tp: true }
+        const level = Number(p.new_tp ?? p.tp)
+        return { new_tp: Number.isFinite(level) ? level : null }
     }
     return {}
 }
@@ -111,17 +123,68 @@ export async function manageSetup(id, userId, verb, deps = _deps) {
     // proposal was simply unusable, and clearing it would hide that.
     if (verb === 'move_stop'    && !Number.isFinite(proposal.new_stop)) return { ok: false, reason: 'bad_proposal' }
     if (verb === 'take_partial' && !Number.isFinite(proposal.size_pct)) return { ok: false, reason: 'bad_proposal' }
+    // A BARE let_run is the decision not to act — real, and journalled by the monitor, but there is
+    // nothing here to execute. Only one carrying a level (or an outright cancel) is an action.
+    if (verb === 'let_run' && proposal.cancel_tp !== true && !Number.isFinite(proposal.new_tp)) {
+        return { ok: false, reason: 'bad_proposal' }
+    }
 
     // Manual (broker-less): tell the user what to do at their own broker and record the intent.
     // The card carries Talos's RAW proposal — its copy is written in its own vocabulary.
     if (knownVenue(setup.broker) === 'manual') {
         await deps.notifyManage(setup, { verdict: verb, proposal: pending?.proposal ?? null, manual: true })
         await db.collection(COLLECTION).updateOne({ id }, manage.manageAppliedUpdate(verb, proposal, ps, {}, now))
+        await _moveTargetWindow(db, id, ps, verb, proposal)
         logger.info(LOG, `setup ${id} manage ${verb} → manual instruction`)
         return { ok: true, manual: true, verb }
     }
 
-    return manage.applyManage({ entity: setup, holder: setup, verb, proposal, userId, nowMs: now, deps })
+    const res = await manage.applyManage({ entity: setup, holder: setup, verb, proposal, userId, nowMs: now, deps })
+    if (res.ok) await _moveTargetWindow(db, id, ps, verb, proposal)
+    return res
+}
+
+/**
+ * Carry the WAKE LEVEL with the target when a `let_run` moves it.
+ *
+ * The shared executor amends the resting limit; the ladder Talos wakes on is this desk's own, and
+ * nothing else would move it. Left behind, Talos would keep opening the conversation at the window
+ * of a target that is no longer there — asking to bank into a level the user just declined.
+ *
+ * The rung keeps its authored BREADTH and re-arms at the new level: "let it run to X" is an
+ * instruction to have the conversation again at X, not to stop having it.
+ */
+async function _moveTargetWindow(db, id, ps, verb, proposal) {
+    if (verb !== 'let_run' || !Number.isFinite(proposal?.new_tp)) return
+    const targets = movedLadder(ps, proposal.new_tp)
+    if (!targets) return
+    await db.collection(COLLECTION).updateOne({ id }, { $set: { 'position_state.targets': targets } })
+}
+
+/**
+ * The ladder with the rung under discussion moved to `newTp`, keeping its breadth. Null when there
+ * is nothing to move. Pure.
+ *
+ * WHICH RUNG: the nearest un-asked one — the one a `let_run` is about, since Talos proposes it on
+ * the wake that target earned. On a STAGED ladder this is an approximation, and knowingly so: the
+ * executor amends whichever tp order `positionManage.workingExit` finds first, which is not
+ * necessarily this rung. Single-target setups (all of them today) have exactly one of each.
+ */
+export function movedLadder(ps, newTp) {
+    const list = ps?.targets ?? []
+    if (!list.length || !Number.isFinite(newTp)) return null
+
+    const found = list.findIndex(t => t?.hit_at == null)
+    const idx   = found === -1 ? list.length - 1 : found
+    const rung  = list[idx]
+
+    const breadth = (Number.isFinite(rung?.price) && Number.isFinite(rung?.resting))
+        ? Math.abs(rung.resting - rung.price) : 0
+    const isLong = (ps?.entry?.direction ?? 'long') !== 'short'
+    // No breadth to carry → it was an exact level, and an exact level has no window to wake in.
+    const wake = breadth > 0 ? (isLong ? newTp - breadth : newTp + breadth) : null
+
+    return list.map((t, k) => (k === idx ? { ...t, price: wake, resting: newTp, hit_at: null } : t))
 }
 
 /**
@@ -140,4 +203,4 @@ export async function dismissSetupCard(id, userId, deps = _deps) {
     return { ok: true, dismissed: 'card' }
 }
 
-export const talosHandoffService = { manageSetup, dismissSetupCard, toExecutionProposal, SETUP_MANAGE_VERBS }
+export const talosHandoffService = { manageSetup, dismissSetupCard, toExecutionProposal, movedLadder, SETUP_MANAGE_VERBS }

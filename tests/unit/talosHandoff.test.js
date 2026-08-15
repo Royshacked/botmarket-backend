@@ -129,10 +129,43 @@ test('add_leg is refused with confirm_order — that leg is placed by confirming
     assert.equal(db.updates.length, 0, 'nothing was written — the pending ORDER is still the truth')
 })
 
-test('let_run is not an accept — there is nothing to execute', async () => {
-    const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run', deps(fakeDb(inPosSetup())))
+test('a BARE let_run is not an accept — it is a decision not to act', async () => {
+    // On the menu now, but only as the carrier for a new target. Without a level there is nothing
+    // to place: the position is already doing what a bare let_run describes.
+    const ps  = { pending_action: { verdict: 'let_run', proposal: null } }
+    const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run', deps(fakeDb(inPosSetup(ps))))
     assert.equal(res.ok, false)
-    assert.equal(res.reason, 'bad_action')
+    assert.equal(res.reason, 'bad_proposal')
+})
+
+test('a let_run carrying a level moves the target OUT, and the wake level travels with it', async () => {
+    // Principle 3 of the TP window: the move has more in it than the plan assumed. The executor
+    // amends the resting limit; the ladder Talos wakes on is this desk's, and nothing else moves it.
+    let amended = null
+    const db = fakeDb(inPosSetup({
+        // Asked once at 128 already, window 2 wide, limit resting at 130.
+        targets: [{ price: 128, resting: 130, hit_at: '2026-08-15T10:00:00.000Z' }],
+        pending_action: { verdict: 'let_run', proposal: { tp: 141, why: 'measured move' } },
+    }))
+    const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run',
+        deps(db, { amendOrder: async (_b, _u, _a, _o, fields) => { amended = fields } }))
+
+    assert.equal(res.ok, true)
+    assert.equal(amended.limitPrice, 141, 'the resting limit follows')
+
+    const ladder = db.updates.map(u => u.$set?.['position_state.targets']).filter(Boolean).at(-1)
+    assert.deepEqual(ladder, [{ price: 139, resting: 141, hit_at: null }],
+        'breadth of 2 carried to the new level, and re-armed so the conversation happens again there')
+})
+
+test('a let_run that cancels the target outright is an action, not a missing level', async () => {
+    let cancelled = false
+    const ps = { pending_action: { verdict: 'let_run', proposal: { cancel_tp: true } } }
+    const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run',
+        deps(fakeDb(inPosSetup(ps)), { cancelOrder: async () => { cancelled = true } }))
+
+    assert.equal(res.ok, true)
+    assert.equal(cancelled, true)
 })
 
 test('an off-menu verb is refused before anything is loaded', async () => {

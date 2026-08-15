@@ -13,7 +13,7 @@ import {
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, MANAGEMENT_VERDICTS } from './talos.assess.js'
-import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetEdges, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, clampRung, usableLadder, rungMinutes } from '../services/setup.schema.js'
+import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetWindows, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, clampRung, usableLadder, rungMinutes } from '../services/setup.schema.js'
 import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage } from '../services/tradeNotify.service.js'
 
 // Talos — the guardian of the `setup` kind (docs/desks/mentor-talos.md).
@@ -323,7 +323,17 @@ async function _checkPosition(setup, nowMs, deps) {
         'position_state.stop.initial':     stop,
         'position_state.stop.current':     stop,
         // Nearest-first — the order price reaches them, which is the order partials fire in.
-        'position_state.targets':          targetEdges(setup).map(price => ({ price, hit_at: null })),
+        //
+        // Each rung is a WINDOW, not a point (setup.schema.targetWindows): `resting` is the TP the
+        // user named and where the limit sits at the broker, `price` is where Talos is allowed to
+        // start proposing. A ZERO-WIDTH zone gets `price: null` — an exact level has no window to
+        // talk in, so it simply rests and never wakes anything, which is what makes an unconditional
+        // target just an order. The gate already skips a non-finite `price`.
+        'position_state.targets':          targetWindows(setup).map(w => ({
+            price:   w.wake !== w.target ? w.wake : null,
+            resting: w.target,
+            hit_at:  null,
+        })),
     }
     const note = `In on ${setup.asset}${fillPrice != null ? ` around ${fillPrice}` : ''}${stop != null ? `, stop resting at ${stop}` : ''}. The broker is holding the exits from here.`
     await deps.persist(setup.id, patch, { at: new Date(nowMs).toISOString(), reason: 'entry', price: fillPrice, verdict: null, note, next_check_at: nextAt })
@@ -350,8 +360,14 @@ const VERDICT_SEVERITY = { hold: 0, let_run: 1, add_leg: 2, take_partial: 3, mov
  * is the read itself: this one re-checks the setup's DECLARED conditions, where Hermes grades four
  * fixed axes.
  */
-async function _managePosition(setup, ps, nowMs, deps) {
-    const price   = await deps.getPrice(setup)
+async function _managePosition(setup, psIn, nowMs, deps) {
+    const price = await deps.getPrice(setup)
+
+    // Re-arm before anything reads the ladder. A target price has walked back out of is a target we
+    // may need to ask about again — see rearmTargets for why that is now true and did not use to be.
+    const rearmed = rearmTargets(setup, psIn, price)
+    const ps      = rearmed ? { ...psIn, targets: rearmed } : psIn
+
     const metrics = computeMetrics(ps, price, nowMs)
     const gate    = positionGate(ps, price)
 
@@ -372,6 +388,9 @@ async function _managePosition(setup, ps, nowMs, deps) {
 
     const bump = (nextAt) => ({
         ...metricsSet(metrics),
+        // Rides EVERY exit, the free hold included: price leaving a window is exactly the wake that
+        // has nothing else to say, so folding it into the expensive paths alone would never fire.
+        ...(rearmed ? { 'position_state.targets': rearmed } : {}),
         'monitor_state.next_check_at': nextAt,
         'monitor_state.check_count':   (setup.monitor_state?.check_count ?? 0) + 1,
     })
@@ -469,10 +488,70 @@ async function _managePosition(setup, ps, nowMs, deps) {
     return { reason, verdict, card: fires }
 }
 
-/** Stamp the tripped target as hit, leaving the rest of the ladder alone. Pure. */
+/**
+ * Stamp the tripped target as asked, leaving the rest of the ladder alone. Pure.
+ *
+ * `hit_at` USED TO MEAN "the limit filled", because the resting limit sat on the same edge that
+ * tripped this gate. Under the TP window it means "we have already asked about this one on this
+ * visit" — the limit is further out, at `resting`. What un-asks it is rearmTargets.
+ */
 function _markTargetHit(ps, target, nowMs) {
     return (ps?.targets ?? []).map(t =>
         (t.price === target.price && t.hit_at == null) ? { ...t, hit_at: new Date(nowMs).toISOString() } : t)
+}
+
+/** Two order prices are the same level. Prices round-trip through Mongo as doubles. Pure. */
+function _sameLevel(a, b) {
+    const x = Number(a), y = Number(b)
+    return Number.isFinite(x) && Number.isFinite(y) && Math.abs(x - y) <= Math.max(Math.abs(y), 1) * 1e-9
+}
+
+/**
+ * Is the limit for this rung STILL RESTING at the broker? Pure.
+ *
+ * The question separates the two ways a target stops being pending, which look identical from the
+ * ladder alone: price reached the window and we asked (the order is still out there), or price ran
+ * on to the TP and the limit FILLED. Re-arming the second kind would have Talos propose banking
+ * against an exit that already happened — only possible on a staged ladder, where leg 1 can fill
+ * while the position lives on.
+ *
+ * No tp orders at ALL means nothing rests: the ladder is Talos's alone (an alert-only setup, or no
+ * placeable account), so every rung re-arms. That is the opposite of the empty-array default, and
+ * getting it backwards would silently disarm exactly the setups with no broker safety net.
+ */
+function _tpStillResting(setup, level) {
+    const tps = (setup?.exitOrders ?? []).filter(o => o?.leg === 'tp')
+    if (!tps.length) return true
+    if (!Number.isFinite(Number(level))) return true
+    return tps.some(o => o?.status === 'working' && _sameLevel(o.price, level))
+}
+
+/**
+ * Un-ask the targets price has walked back out of. Returns the new ladder, or null when nothing
+ * changed — so a wake that re-arms nothing writes nothing. Pure apart from reading the setup.
+ *
+ * THE TRAP THIS CLOSES. `hit_at` exists to stop a target re-tripping on every wake, and stamping it
+ * forever was right while the limit rested on the trip level: reaching it meant the money was taken.
+ * With the limit moved out to `resting`, reaching the wake level means only that Talos ASKED. A
+ * target touched once, declined (or simply never answered), and then abandoned by price would stay
+ * disarmed for the life of the trade — one wick, and the rest of the plan's upside is silently
+ * unwatched. So a rung re-arms when price leaves its window, and only while its limit is still out
+ * there unfilled.
+ */
+export function rearmTargets(setup, ps, price) {
+    const list = ps?.targets ?? []
+    if (!Number.isFinite(price) || !list.length) return null
+    const isLong = (ps?.entry?.direction ?? 'long') !== 'short'
+
+    let changed = false
+    const next = list.map(t => {
+        if (t?.hit_at == null || !Number.isFinite(t?.price)) return t
+        const outside = isLong ? price < t.price : price > t.price
+        if (!outside || !_tpStillResting(setup, t.resting)) return t
+        changed = true
+        return { ...t, hit_at: null }
+    })
+    return changed ? next : null
 }
 
 /** A verdict with no sentence still has to read as a decision someone made. Pure. */

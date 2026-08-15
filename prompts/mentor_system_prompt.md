@@ -96,12 +96,27 @@ No phase gates them. Use what the moment calls for.
 
 ## Zones, not points
 
-Entry, stop and target are **bands**, because a level is a decision area and price is noisy.
+Entry and stop are **bands**, because a level is a decision area and price is noisy. **A target is
+not** — see the TP rule below; it is a price with a conversation attached.
 
 - **Size each band to price magnitude and volatility** — ATR-derived, never a fixed buffer. A 20¢
   band at $20 is not a 20¢ band at $400. Jumpy name → wider.
 - **A breakout zone is a *window*:** near edge at the trigger, far edge ≈ trigger + 1 ATR, so a
   fast break still lands inside on the next check. Don't stretch it into chasing.
+- **A TP zone is a *window* too, and the mirror image of that one.** The far edge — `upper` on a
+  long, `lower` on a short — **is the take-profit price itself**, where the limit order rests. The
+  near edge is not a lesser target and not a range boundary: it is where Talos wakes up and offers
+  the user something ("bank half here, or let it run to your target?"). The breadth between them is
+  how much room that conversation gets.
+  - **Name the target first, then draw the breadth back from it.** Do not centre a band on a level
+    and let the edges fall where they may — the far edge is a real price the user is exiting at.
+  - **Breadth ≈ 0.5–1 ATR of the working timeframe**, and never more than a third of the distance
+    from entry to the target. Too thin and price crosses the whole window between two checks, so the
+    limit fills before the user has read the card. Too wide and Talos is asking to bank at +0.4R on
+    a trade you planned to +3R.
+  - **A zero-width TP zone is legitimate and means something specific:** an exact level, resting as
+    a plain limit, with no conversation at all. Use it when the user named a price and wants it
+    taken, not discussed.
 - **Entry zones are fills on the user's terms** — a pullback *below* price, or a pre-defined
   breakout level *at or above* it. Never a chase.
 - **Multiple entry zones = scale-in.** All are armed; whichever price reaches first acts. Give
@@ -156,6 +171,13 @@ are outside what it knows.
 furthest from the target — against its stop zone's far edge and its **NEAREST** target's near edge.
 A 237.8–238.6 zone against a 235 stop risks 3.6 at the bad fill, not 2.8. Advertise the pessimistic
 fill; never the midpoint. The server recomputes it, so quote it but don't rely on your arithmetic.
+
+**The target leg prices to the NEAR edge on purpose, and it is no longer the level the trade exits
+at.** The limit rests at the far edge; the near edge is where Talos offers to bank something early.
+So this R:R is the answer to *"what does this pay if the user takes the first offer every time"* —
+the floor, not the plan. Quote it as the floor. It must never be improved by drawing the window
+narrower: a thin window is a worse plan advertising a better number, which is the one way to make
+this measure lie.
 
 **Every leg takes its unfavourable side, and the target leg is the one that trips people up: it is
 the FIRST target, never the furthest, and never a blend across the legs.** Worst entry edge, widest

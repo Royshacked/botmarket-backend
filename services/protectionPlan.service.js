@@ -115,19 +115,28 @@ export async function routeExits(idea) {
 }
 
 /**
- * WHICH EDGE of a zone becomes the order price. One rule for both legs, and it is the same edge
- * `computeRR` already prices risk from — so the R:R the user was shown at build is the R:R the
- * broker orders actually express, rather than a flattering version of it.
+ * WHICH EDGE of a zone becomes the order price: **the edge FURTHER FROM ENTRY**, on both legs.
  *
- *   long  → `lower`   stop: the FAR side (the zone gets room to be a zone, not a hair trigger)
- *                     tp:   the NEAR side (the first target edge price reaches — the one that fills)
- *   short → `upper`   mirrored.
+ *   long  → stop `lower`, tp `upper`     short → mirrored.
  *
- * Both legs landing on the same edge is not a coincidence: for a long, "the pessimistic stop" and
- * "the first-touched target" are both the low side of their band. Pure.
+ * The stop takes the far side so the zone has room to be a zone rather than a hair trigger. The tp
+ * takes the far side because THE FAR SIDE IS THE TARGET THE USER NAMED — a tp zone is not a fuzzy
+ * area the target lives somewhere inside, it is that target plus a stretch of price beneath it in
+ * which Talos may propose taking something off (docs/desks/mentor-talos.md §"Exits — the TP window",
+ * setup.schema.targetWindows).
+ *
+ * THIS USED TO REST THE TP ON THE NEAR EDGE, which is the same edge `setup.schema.targetEdges` wakes
+ * Talos on — so the limit filled at the exact instant the `scale_out` gate tripped, and "sell only
+ * half" was always a proposal about a position that was already flat. The window between the two is
+ * the whole feature.
+ *
+ * R:R is deliberately NOT re-based to match. `computeRR` still prices the reward to the near edge —
+ * now the level where Talos ASKS rather than where the trade exits — because that is the honest
+ * worst case if the user banks at the first ask every time, and an R:R must never flatter.
  */
-export function zoneExitLevel(zone, isLong) {
-    const level = isLong ? zone?.lower : zone?.upper
+export function zoneExitLevel(zone, isLong, which = 'stop') {
+    const takeLower = which === 'tp' ? !isLong : isLong
+    const level     = takeLower ? zone?.lower : zone?.upper
     return Number.isFinite(level) ? level : null
 }
 
@@ -147,19 +156,19 @@ export function routeSetupZones(setup) {
     const isLong   = setup?.direction === 'long'
     const totalQty = Number(setup?.quantity) || 0
 
-    const leg = (zones) => {
-        const list = (Array.isArray(zones) ? zones : []).filter(z => Number.isFinite(zoneExitLevel(z, isLong)))
+    const leg = (zones, which) => {
+        const list = (Array.isArray(zones) ? zones : []).filter(z => Number.isFinite(zoneExitLevel(z, isLong, which)))
         if (!list.length) return { single: null, nativeOrders: [], monitorTree: null, hasAny: false }
 
         const quantities = _assignSlotQuantities(list, totalQty)
         const nativeOrders = list
-            .map((z, i) => ({ level: zoneExitLevel(z, isLong), quantity: quantities[i] }))
+            .map((z, i) => ({ level: zoneExitLevel(z, isLong, which), quantity: quantities[i] }))
             // A zero-quantity leg would be sent to the broker as an order for nothing.
             .filter(o => o.quantity > 0)
         return { single: null, nativeOrders, monitorTree: null, hasAny: nativeOrders.length > 0 }
     }
 
-    return { stop: leg(setup?.stop_zones), tp: leg(setup?.tp_zones) }
+    return { stop: leg(setup?.stop_zones, 'stop'), tp: leg(setup?.tp_zones, 'tp') }
 }
 
 // ─── internals ──────────────────────────────────────────────────────────────

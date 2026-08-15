@@ -243,11 +243,20 @@ test('the card is Mentor speaking about a setup, never Kairos about a call', () 
     assert.doesNotMatch(c.content, /Kairos/)
 })
 
-test('let_run is stated but asks for nothing, so it carries no action', () => {
+test('a bare let_run is stated but asks for nothing, so it carries no action', () => {
     // A deliberate decision NOT to trim — worth telling the user, not worth a button.
     const c = buildSetupManage(INPOS(), { verdict: 'let_run', read: 'Trend is intact.' })
     assert.equal(c.actions, undefined)
     assert.match(c.content, /letting it run/i)
+})
+
+test('a let_run that moves the target IS a request, and says where to', () => {
+    // Same verb, two cards. This one amends a resting order, so it needs the confirm every other
+    // change needs.
+    const c = buildSetupManage(INPOS(), { verdict: 'let_run', proposal: { new_tp: 262, why: 'measured move' } })
+    assert.ok(c.actions?.primary, 'an amend must be confirmable')
+    assert.match(c.content, /262/)
+    assert.match(c.content, /measured move/)
 })
 
 test('an unknown verdict still produces a readable card rather than an empty bubble', () => {
@@ -276,6 +285,75 @@ test('every gate edge mirrors for a short', () => {
     assert.equal(positionGate(short, 88).flag,    'scale_out', 'a short falls into its target')
     assert.equal(positionGate(short, 96).flag,    'breakeven', '+1R down, stop still above entry')
     assert.equal(positionGate(short, 99).flag,    null,        'drifting, nothing earned')
+})
+
+// ─── The TP window ────────────────────────────────────────────────────────────
+// The limit rests at the target the user named; Talos wakes a little beneath it. `hit_at` therefore
+// stops meaning "the money was taken" and starts meaning "we already asked on this visit" — which
+// is only safe if something un-asks it.
+
+/** Asked once at the window's near edge, limit resting at 247.2. */
+const ASKED = (over = {}) => PS({
+    targets: [{ price: 246, resting: 247.2, hit_at: '2026-08-15T10:00:00.000Z' }],
+    ...over,
+})
+const RESTING_TP = [{ leg: 'tp', status: 'working', accountId: 'a1', orderId: 'to1', price: 247.2 }]
+
+test('a target price walked back out of re-arms, on the free wake, so one wick cannot disarm the plan', async () => {
+    // The trap this closes: stamped forever, a target touched once and abandoned would leave the
+    // rest of the trade's upside unwatched for its whole life.
+    const deps = stubDeps({ getPrice: async () => 240 })          // back below the window
+    const res  = await _checkSetup(INPOS(ASKED(), { exitOrders: RESTING_TP }), T, deps)
+
+    assert.equal(res.reason, 'in_position_idle', 'and it costs nothing — this is the quiet wake')
+    assert.equal(deps.writes[0]['position_state.targets'][0].hit_at, null)
+})
+
+test('price still inside the window stays asked — the user is not re-prompted every wake', async () => {
+    const deps = stubDeps({ getPrice: async () => 246.5 })
+    await _checkSetup(INPOS(ASKED(), { exitOrders: RESTING_TP }), T, deps)
+    assert.equal(deps.writes[0]['position_state.targets'], undefined, 'nothing to rewrite')
+})
+
+test('a target whose limit already FILLED never re-arms', async () => {
+    // Only reachable on a staged ladder, where leg 1 can fill while the position lives on. Re-arming
+    // it would have Talos propose banking against an exit that has already happened.
+    const filled = [{ leg: 'tp', status: 'filled', accountId: 'a1', orderId: 'to1', price: 247.2 }]
+    const deps = stubDeps({ getPrice: async () => 240 })
+    await _checkSetup(INPOS(ASKED(), { exitOrders: filled }), T, deps)
+    assert.equal(deps.writes[0]['position_state.targets'], undefined, 'it stays stamped')
+})
+
+test('with NO resting tp at all the ladder is Talos\'s alone, so it re-arms', async () => {
+    // An alert-only setup, or one with no placeable account. Getting this backwards would silently
+    // disarm exactly the setups that have no broker safety net.
+    const deps = stubDeps({ getPrice: async () => 240 })
+    await _checkSetup(INPOS(ASKED(), { exitOrders: [] }), T, deps)
+    assert.equal(deps.writes[0]['position_state.targets'][0].hit_at, null)
+})
+
+test('a zero-width target rests and never wakes anything', async () => {
+    // The unconditional case from principle 1: an exact level the user named has no window to have a
+    // conversation in, so it is simply an order.
+    const exact = { ...PLAN, tp_zones: [{ id: 'tz1', lower: 246, upper: 246, quantity: 100 }] }
+    const fresh = { ...INPOS(PS({ entry: { intended: 238.6, direction: 'long' } })), ...normalizeSetup(exact) }
+    const deps  = stubDeps()
+    await _checkSetup(fresh, T, deps)
+
+    const ladder = deps.writes[0]['position_state.targets']
+    assert.deepEqual(ladder, [{ price: null, resting: 246, hit_at: null }])
+    // Far past the level and still not a scale_out — there is no window, so there is nothing to ask
+    // about. (It reads `breakeven` at this price, which is a different rung of the gate entirely.)
+    assert.notEqual(positionGate({ ...PS(), targets: ladder }, 250).flag, 'scale_out')
+})
+
+test('the seeded ladder carries both ends of the window', () => {
+    // `price` is where Talos may start talking, `resting` is where the limit sits. A model shown only
+    // one of them cannot tell "take it here" from "let the limit have it".
+    const deps = stubDeps()
+    return _checkSetup(INPOS(PS({ entry: { intended: 238.6, direction: 'long' } })), T, deps)
+        .then(() => assert.deepEqual(deps.writes[0]['position_state.targets'],
+            [{ price: 246, resting: 247.2, hit_at: null }]))
 })
 
 // ─── Scaling in ───────────────────────────────────────────────────────────────

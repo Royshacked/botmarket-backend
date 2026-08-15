@@ -1122,10 +1122,13 @@ test('the fill freezes the working stop and the target ladder onto the position'
 
     assert.equal($set['position_state.stop.initial'], 234.8, 'the WIDEST stop edge, not stop_zones[0].upper')
     assert.equal($set['position_state.stop.current'], 234.8, 'current starts equal to initial')
+    // Each rung is a WINDOW: `resting` is the TP the user named and where the limit sits, `price` is
+    // where Talos wakes to offer something. Nearest-first — the order price reaches them, not the
+    // order they were typed.
     assert.deepEqual($set['position_state.targets'], [
-        { price: 244, hit_at: null },
-        { price: 260, hit_at: null },
-    ], 'nearest-first — the order price reaches them, not the order they were typed')
+        { price: 244, resting: 245, hit_at: null },
+        { price: 260, resting: 261, hit_at: null },
+    ])
 })
 
 test('a short seeds the opposite edges', async () => {

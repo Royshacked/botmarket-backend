@@ -36,7 +36,7 @@ test('the exits belong to the premise that armed, not to the first one authored'
     const armed = { ...RIVALS, ...projectScenario(RIVALS, 's2') }
     const { stop, tp } = routeSetupZones(armed)
     assert.equal(stop.nativeOrders[0].level, 241.0, "s2's stop, not s1's 234.8")
-    assert.equal(tp.nativeOrders[0].level, 252.0)
+    assert.equal(tp.nativeOrders[0].level, 253.5, "s2's target, at the level the user named")
     assert.equal(stop.nativeOrders[0].quantity, 60, 'and s2\'s size — never 160')
 })
 
@@ -49,26 +49,43 @@ test('a setup routes through zones, not through condition trees', async () => {
     assert.equal(route.stop.monitorTree, null, 'a zone IS a price — nothing is left to the software monitor')
 })
 
-test('the stop rests at the FAR edge, the target at the NEAR edge', () => {
+test('both legs rest at the edge FURTHER FROM ENTRY', () => {
+    // The stop takes the far side so the zone has room to be a zone. The target takes the far side
+    // because the far side IS the target the user named — the near edge is where Talos wakes to
+    // offer a partial, not where the trade exits (docs/desks/mentor-talos.md, the TP window).
     const { stop, tp } = routeSetupZones(SETUP)
-    assert.equal(stop.nativeOrders[0].level, 234.8, 'far side: the zone gets room to be a zone')
-    assert.equal(tp.nativeOrders[0].level, 246.0, 'near side: the first edge price reaches is the one that fills')
+    assert.equal(stop.nativeOrders[0].level, 234.8, 'the zone gets room to be a zone')
+    assert.equal(tp.nativeOrders[0].level, 247.2, 'the TP the user named, not the edge Talos wakes on')
 })
 
 test('the edges mirror for a short', () => {
     const { stop, tp } = routeSetupZones({ ...SETUP, direction: 'short' })
     assert.equal(stop.nativeOrders[0].level, 235.9)
-    assert.equal(tp.nativeOrders[0].level, 247.2)
-    assert.equal(zoneExitLevel({ lower: 1, upper: 2 }, false), 2)
+    assert.equal(tp.nativeOrders[0].level, 246.0, 'a short falls TO its target — the lower edge')
+    assert.equal(zoneExitLevel({ lower: 1, upper: 2 }, false), 2, 'the stop leg is the default')
 })
 
-test('the order prices express the SAME R:R the user was shown', () => {
-    // The whole point of picking these edges. If the orders used the flattering side, the plan the
-    // user approved and the plan resting at the broker would be different trades.
+test('a zero-width target rests at the level itself, whichever leg asks', () => {
+    // The unconditional case: an exact price the user named. Both edges agree, so there is no window
+    // and nothing to have a conversation in — it simply rests.
+    assert.equal(zoneExitLevel({ lower: 246, upper: 246 }, true,  'tp'), 246)
+    assert.equal(zoneExitLevel({ lower: 246, upper: 246 }, false, 'tp'), 246)
+})
+
+test('the resting orders can only ever BEAT the R:R the user was shown, never miss it', () => {
+    // This used to assert equality, because the tp order rested on the same edge computeRR prices.
+    // It cannot now — deliberately: R:R still measures to the near edge (what the trade pays if the
+    // user banks at Talos's first offer every time) while the limit rests at the target. The
+    // invariant that survives is the one that actually protects the user: the plan resting at the
+    // broker is never WORSE than the plan they approved.
     const { stop, tp } = routeSetupZones(SETUP)
-    const entry = SETUP.entry_zones[0].upper           // computeRR's pessimistic fill for a long
-    const rr    = (tp.nativeOrders[0].level - entry) / (entry - stop.nativeOrders[0].level)
-    assert.equal(Math.round(rr * 100) / 100, computeRR(SETUP))
+    const entry  = SETUP.entry_zones[0].upper          // computeRR's pessimistic fill for a long
+    const resting = (tp.nativeOrders[0].level - entry) / (entry - stop.nativeOrders[0].level)
+    assert.ok(resting >= computeRR(SETUP), `resting ${resting} must not undercut the advertised ${computeRR(SETUP)}`)
+
+    // And the advertised number is exactly the window's near edge, so the floor is a real price.
+    const floor = (SETUP.tp_zones[0].lower - entry) / (entry - stop.nativeOrders[0].level)
+    assert.equal(Math.round(floor * 100) / 100, computeRR(SETUP))
 })
 
 test('an unset target quantity takes an equal split of what is left', () => {

@@ -88,7 +88,7 @@ the same question in two places with two vocabularies.
 
 ---
 
-## Exits — the TP window (DESIGNED 2026-08-15, not built)
+## Exits — the TP window (BUILT 2026-08-15)
 
 Four principles, in the user's words:
 
@@ -113,15 +113,20 @@ runs back toward entry. Mirrored for a short — the TP is the bottom and the br
 - **Talos wakes at TP − breadth** (long) — the near edge.
 - **Do nothing and you get the TP you named.** That is the default outcome, not a degraded one.
 
-**TODAY THE WINDOW IS ZERO WIDE.** `protectionPlan.zoneExitLevel` rests the TP limit on the NEAR
-edge — the first edge price touches — and `setup.schema.targetEdges` wakes Talos on that SAME edge.
-So the limit fills at the exact instant the `scale_out` gate trips, and "sell only half" is a
-proposal about a position that is already flat. The two must separate:
+**THE WINDOW USED TO BE ZERO WIDE.** `protectionPlan.zoneExitLevel` rested the TP limit on the NEAR
+edge — the first edge price touches — and `setup.schema.targetEdges` woke Talos on that SAME edge.
+So the limit filled at the exact instant the `scale_out` gate tripped, and "sell only half" was a
+proposal about a position that was already flat. The two are now separate:
 
-| | today | designed |
+| | was | is |
 |---|---|---|
-| resting limit | near edge | **the TP price** (far edge) |
+| resting limit | near edge | **the TP price** (far edge) — `zoneExitLevel(zone, isLong, 'tp')` |
 | Talos wakes | near edge | near edge = TP − breadth (unchanged) |
+
+`setup.schema.targetWindows` reads a zone as `{ wake, target }` and seeds
+`position_state.targets[{ price, resting, hit_at }]` — `price` the wake level, `resting` the limit.
+A zero-width zone seeds `price: null`, and the gate skips a non-finite `price`, so an exact level
+rests and wakes nothing.
 
 Price enters the window → Talos reads and proposes → the user decides while the position is still
 on. Nobody answers and price keeps going → the limit takes the whole thing at the TP. A gap clean
@@ -133,35 +138,33 @@ leg. An earlier draft of this section framed the band as "the target is in here 
 counted resting at the far edge as GIVING UP the near one; under the user's framing the near edge
 was never a target, and nothing is given up.
 
-**THE BREADTH NEEDS A FLOOR AND A CEILING, and it is Mentor's to author.** Too narrow and the window
-is a formality — Talos asks and the limit fills before the card is read. Too wide and it asks "take
-half?" at +0.4R on a trade planned to +3R. This wants a readiness check of the same family as
-`rangeProblems`: the wake level must sit far enough past entry to be a decision worth making.
+**MENTOR AUTHORS IT — IT IS THE HALF THAT DECIDES THE NUMBERS.** The prompt used to teach the
+opposite (*"Entry, stop and target are bands, because a level is a decision area"*), so it drew a
+fuzzy area and the edges landed where ATR put them. It now teaches:
 
-**MENTOR CHANGES TOO — IT IS THE HALF THAT DECIDES THE NUMBERS.** The prompt currently teaches the
-opposite: *"Entry, stop and target are bands, because a level is a decision area and price is noisy"*
-(`mentor_system_prompt.md:99`). Three edits:
+1. **The TP band means something the other two do not.** Entry and stop stay decision areas; only
+   the TP is target-plus-breadth, and the asymmetry is stated outright so the model does not
+   generalise it. Written as the mirror of the rule already there for entries (*"a breakout zone is
+   a window: near edge at the trigger, far edge ≈ trigger + 1 ATR"*).
+2. **Name the target first, then draw the breadth back from it** — never centre a band on a level
+   and let the edges fall out, because the far edge is a real price the user exits at.
+3. **Breadth ≈ 0.5–1 ATR of the working timeframe, and at most a third of entry-to-target.** Too
+   narrow and price crosses the whole window between two checks, so the limit fills before the card
+   is read; too wide and Talos asks to bank at +0.4R on a trade planned to +3R.
+4. **The R:R paragraph is rewritten.** It still measures to the near edge, but that edge is now the
+   floor — what the trade pays if the user takes the first offer every time — and the prompt says so,
+   with the warning that it must never be improved by drawing the window narrower. A thin window is a
+   worse plan advertising a better number, which is the one way to make the measure lie.
 
-1. **The TP band gains a meaning the other two do not have.** Entry and stop bands stay decision
-   areas; only the TP becomes target-plus-breadth. State the asymmetry outright or the model
-   generalises it to all three. The prompt already teaches this exact shape at the other end of the
-   trade — *"a breakout zone is a window: near edge at the trigger, far edge ≈ trigger + 1 ATR"* —
-   so the TP rule should be written as its mirror.
-2. **The R:R section (lines ~156–174) describes something that stops existing.** It measures to "the
-   NEAREST target's near edge" and justifies it as the first target price reaches; that edge is now
-   where Talos ASKS, not where the trade exits. `computeRR` stays on it (never flatter), but the
-   REASONING has to be rewritten — otherwise Mentor draws the band tight to protect its R:R and
-   leaves no room to have the conversation in.
-3. **An authoring rule for the breadth**, ATR-derived like the other bands, respecting the floor and
-   ceiling above.
+**THE PROMPT AND `zoneExitLevel` SHIPPED IN ONE COMMIT, deliberately.** Prompt-first would have had
+Mentor place the target at the top while the limit still rested on the near edge: every trade exiting
+at TP − breadth, a silent systematic haircut, invisible because the numbers all still look plausible.
 
-**SHIP THE PROMPT AND `zoneExitLevel` IN ONE COMMIT.** If Mentor starts placing the target at the top
-while the limit still rests on the near edge, every trade exits at TP − breadth: a silent systematic
-haircut on every target, invisible because the numbers all still look plausible. The reverse order is
-harmless — the bands simply carry no window yet.
-
-**FE:** `ZoneEditor` renders tp zones as `lower`/`upper`; under this framing it should read as a
-target and its window ([[feedback_frontend_sync]]).
+**STILL OPEN.** The breadth bounds live only in the prompt — there is no `rangeProblems`-family
+readiness check enforcing them, so a model that ignores the rule ships a formality of a window. And
+**FE:** `ZoneEditor` renders tp zones as `lower`/`upper`, which should now read as a target and its
+window; `position_state.targets[]` has gained `resting` and its `price` may be null
+([[feedback_frontend_sync]]).
 
 **R:R KEEPS MEASURING TO THE BOTTOM.** `computeRR` uses `targetEdges()[0]`, which is now the wake
 level rather than the target. Keep it: it is the honest worst case if the user takes the first ask
@@ -175,9 +178,9 @@ Principle 3's "a setup for the TP" — a genuinely conditional exit, where nothi
 owns the leg — is a later schema addition, and it needs a per-leg owner (`broker` │ `talos`)
 because a position with no resting TP is a different risk profile and must be visible as one.
 
-**THE RE-ARM TRAP.** `position_state.targets[].hit_at` exists to stop a target re-tripping forever,
-and that is correct TODAY because reaching the near edge means the limit filled. Under this design
-reaching the near edge means only that we ASKED. A target touched, declined and abandoned by price
+**THE RE-ARM TRAP** (closed by `rearmTargets`). `position_state.targets[].hit_at` exists to stop a
+target re-tripping forever, and that was correct while reaching the near edge meant the limit
+filled. Now reaching it means only that we ASKED. A target touched, declined and abandoned by price
 must re-arm when price leaves the zone, or the setup's remaining upside is silently disarmed by a
 wick. The stamp becomes "we have already asked about this one on this visit", not "this one is
 done".
