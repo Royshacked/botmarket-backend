@@ -36,7 +36,24 @@ export function _socketCount(userId) {
     return socketMap.get(String(userId))?.size ?? 0
 }
 
+// The server's half of liveness. A client that vanishes WITHOUT a close frame (sleeping laptop,
+// dropped wifi, a proxy that kills the connection silently) leaves a socket that is OPEN as far as
+// we know: `emit` writes every notification into a corpse, and the registry keeps one ghost per
+// ghost tab. A protocol-level ping is answered by any live browser for free, so a socket that
+// misses a whole interval is dead — terminate it, which fires 'close' and unregisters it.
+const HEARTBEAT_MS = 30000
+
+/** One heartbeat pass over the live sockets. Exported for tests. */
+export function _sweep(clients) {
+    for (const ws of clients) {
+        if (ws.isAlive === false) { ws.terminate(); continue }
+        ws.isAlive = false
+        ws.ping()
+    }
+}
+
 let wss = null
+let heartbeat = null
 
 export function attach(httpServer) {
     wss = new WebSocketServer({ noServer: true })
@@ -73,6 +90,9 @@ export function attach(httpServer) {
         const open = _register(userId, ws)
         logger.info(LOG, 'connected', { userId, sockets: open })
 
+        ws.isAlive = true
+        ws.on('pong', () => { ws.isAlive = true })
+
         ws.send(JSON.stringify({ event: 'connected' }))
 
         ws.on('message', (raw) => {
@@ -91,6 +111,11 @@ export function attach(httpServer) {
             logger.warn(LOG, 'socket error', { userId, message: err.message })
         })
     })
+
+    clearInterval(heartbeat)
+    heartbeat = setInterval(() => _sweep(wss.clients), HEARTBEAT_MS)
+    heartbeat.unref?.()                       // never hold the process open on this alone
+    wss.on('close', () => clearInterval(heartbeat))
 
     logger.info(LOG, 'WS server attached to /ws/chat')
 }
