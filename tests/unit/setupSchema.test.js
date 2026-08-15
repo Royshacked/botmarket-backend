@@ -244,6 +244,7 @@ test('readiness reports coherence problems separately from missing fields', () =
         conditions:  [{ id: 'c1', text: 'CHoCH up on the 15m' }],
         entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
         stop_zones:  [{ lower: 234.8, upper: 235.9 }],
+        tp_zones:    [{ lower: 246, upper: 247.2 }],
         validity:    { lower: 230, upper: 244 },
     }), true)
     assert.equal(r.ready, false)
@@ -439,6 +440,40 @@ test('targetWindows agrees with targetEdges about where Talos wakes', () => {
     const s = normalizeSetup({ ...DRAFT, direction: 'long',
         tp_zones: [{ lower: 258, upper: 260 }, { lower: 244, upper: 245 }] })
     assert.deepEqual(targetWindows(s).map(w => w.wake), targetEdges(s))
+})
+
+test('a setup cannot be generated without a target PRICE', () => {
+    // The far edge of a tp band is the limit that rests at the broker. A premise without one is a
+    // position that can only be closed by its stop, by hand, or by Talos noticing — half a plan.
+    const base = {
+        asset: 'NVDA', direction: 'long', type: 'swing',
+        conditions:  [{ id: 'c1', text: 'CHoCH up on the 15m' }],
+        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
+        stop_zones:  [{ lower: 234.8, upper: 235.9 }],
+    }
+    assert.match(setupReadiness(normalizeSetup(base), true).missing.join(' '), /target price/)
+
+    // A band of nulls is a zone to the array and no price to the broker.
+    const blank = setupReadiness(normalizeSetup({ ...base, tp_zones: [{ lower: null, upper: null }] }), true)
+    assert.match(blank.missing.join(' '), /target price/)
+
+    const ok = setupReadiness(normalizeSetup({ ...base, tp_zones: [{ lower: 246, upper: 247.2 }] }), true)
+    assert.deepEqual(ok.missing, [])
+    assert.equal(ok.ready, true)
+})
+
+test('a missing target names WHICH premise is short of one', () => {
+    const two = normalizeSetup({
+        asset: 'NVDA', direction: 'long', type: 'swing',
+        conditions: [{ id: 'c1', text: 'SMH leading' }],
+        scenarios: [
+            { id: 's1', name: 'false break', entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
+              stop_zones: [{ lower: 234.8, upper: 235.9 }], tp_zones: [{ lower: 246, upper: 247.2 }] },
+            { id: 's2', name: 'break and go', entry_zones: [{ lower: 244, upper: 244.9, quantity: 60 }],
+              stop_zones: [{ lower: 241, upper: 241.8 }] },
+        ],
+    })
+    assert.deepEqual(setupReadiness(two, true).missing, ['target price on break and go'])
 })
 
 test('windowProblems refuses a target window too thin to act inside', () => {

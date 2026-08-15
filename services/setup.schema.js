@@ -557,6 +557,18 @@ export function setupReadiness(setup, hasAccount = false) {
         }
 
         if (!(sc.stop_zones?.length)) missing.push(at('stop zone'))
+
+        // A TARGET IS REQUIRED, and it is required as a PRICE. Under the TP window the far edge of a
+        // tp band is not a nice-to-have annotation — it is the limit order that rests at the broker,
+        // and a premise without one is a position that can only ever be closed by its stop, by hand,
+        // or by Talos noticing. "Where does this pay?" is half of the plan; a setup that cannot
+        // answer it is not finished being authored.
+        //
+        // Checked through targetWindows rather than on `tp_zones.length`, because a band of nulls is
+        // a zone by the array's reckoning and no price by the broker's — the whole point is that a
+        // real number reaches the order book.
+        if (!targetWindows(scenarioView(setup, sc)).length) missing.push(at('target price'))
+
         if (!Number.isFinite(sc.quantity) || sc.quantity <= 0) missing.push(at('quantity'))
 
         // PRESENCE only, counting the root tier. Whether a condition is *checkable* is Mentor's gate

@@ -160,9 +160,15 @@ fuzzy area and the edges landed where ATR put them. It now teaches:
 Mentor place the target at the top while the limit still rested on the near edge: every trade exiting
 at TP − breadth, a silent systematic haircut, invisible because the numbers all still look plausible.
 
-**STILL OPEN.** The breadth bounds live only in the prompt — there is no `rangeProblems`-family
-readiness check enforcing them, so a model that ignores the rule ships a formality of a window. And
-**FE:** `ZoneEditor` renders tp zones as `lower`/`upper`, which should now read as a target and its
+**A TARGET PRICE IS REQUIRED TO GENERATE.** `setupReadiness` lists `target price` under `missing`
+for any premise without one — checked through `targetWindows`, so a band of nulls counts as no price
+rather than as a zone. The far edge is a limit order resting at the broker, not an annotation, and a
+plan that says where it dies but not where it pays leaves the user in a position only a stop can end.
+The breadth bounds are enforced too, by `windowProblems` under `problems`. Note both of these BLOCK,
+where the coverage desk's plausibility flags only record — deliberate: a missing exit and a window
+too thin to act in are defects in the plan, not observations about it.
+
+**STILL OPEN. FE:** `ZoneEditor` renders tp zones as `lower`/`upper`, which should now read as a target and its
 window; `position_state.targets[]` has gained `resting` and its `price` may be null
 ([[feedback_frontend_sync]]).
 
