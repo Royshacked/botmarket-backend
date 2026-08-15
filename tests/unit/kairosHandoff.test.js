@@ -265,6 +265,10 @@ function mDeps(db, over = {}) {
     return {
         getDb: async () => db,
         getIdea: async () => ideaDoc(),
+        // The venue is OPEN unless a test says otherwise. Stated rather than inherited: the real
+        // gate reads the live clock, so a suite that let it through would pass by day and queue
+        // everything by night.
+        deferIfClosed: async () => ({ deferred: false }),
         findOpenPosition: async () => ({ volume: 100 }),
         closePosition: async () => {},
         amendOrder: async () => {},
@@ -402,6 +406,34 @@ test('manage: all accounts unreachable → broker_unreachable, no persist', asyn
     assert.equal(res.ok, false)
     assert.equal(res.reason, 'broker_unreachable')
     assert.equal(db.updates.length, 0)
+})
+
+test('manage: a shut venue QUEUES the accept instead of sending it — Hermes shares Talos\'s gate', async () => {
+    // The gate lives in the shared executor precisely so this is true of both desks at once: neither
+    // handoff asks, and neither can ship a verb that forgets to.
+    let touched = false
+    const db  = mgmtDb(inPosCall())
+    const res = await manageCall('call_TSLA_x', 'u1', 'move_stop', mDeps(db, {
+        deferIfClosed: async () => ({ deferred: true, ok: true, id: 'pa_1', nextOpenMs: 111 }),
+        amendOrder: async () => { touched = true },
+    }))
+
+    assert.equal(res.ok, true)
+    assert.equal(res.deferred, true)
+    assert.equal(touched, false)
+})
+
+test('manage: a queued call action carries the IDEA as its holder, so the replay can find the position', async () => {
+    // A call's position hangs off the idea it materialized; by the open the row is all there is.
+    let queued = null
+    const db = mgmtDb(inPosCall())
+    await manageCall('call_TSLA_x', 'u1', 'exit_now', mDeps(db, {
+        deferIfClosed: async (p) => { queued = p; return { deferred: true, ok: true, id: 'pa_1' } },
+    }))
+
+    assert.equal(queued.origin.entityId, 'call_TSLA_x')
+    assert.equal(queued.action.type, 'exit_now')
+    assert.equal(queued.action.holderId, ideaDoc().id, 'the doc holding brokerOrders, not the call')
 })
 
 test('manage: already flat → clears card, NO execution (Hermes reconciles the close)', async () => {

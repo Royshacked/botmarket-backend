@@ -109,14 +109,45 @@ test('the default decider is the USER — a row with no flag is a discretionary 
     assert.notEqual(res.reason, 'unknown_action')
 })
 
-test('the execution kinds only ever queue an exit', async () => {
+test('the execution kinds carry a monitor exit or a management action, and nothing else', async () => {
     const { executeOrigin } = await import('../../services/pendingAction/originRegistry.js')
     for (const kind of ['call', 'setup', 'idea']) {
         const res = await executeOrigin({
             id: 'q1', userId: 'u1', origin: { kind, entityId: 'e1' }, action: { type: 'trim' },
         })
-        assert.equal(res.reason, 'unknown_action', `${kind} has no discretionary verbs — only a monitor exit`)
+        assert.equal(res.reason, 'unknown_action', `${kind} has no portfolio verbs — a trim means nothing here`)
     }
+})
+
+// ── Accepted management, queued off-hours ────────────────────────────────────
+// The second thing that queues against a call / setup / idea: the user accepting a monitor's
+// proposal after the close. Unlike a monitor exit it IS theirs to drop, and unlike a portfolio row
+// the two never share a verb — which is why this dispatch reads the verb, not the decider.
+
+test('a management verb routes to the manage path, an exit to the monitor path', async () => {
+    const { executeOrigin } = await import('../../services/pendingAction/originRegistry.js')
+    const row = (action, over = {}) => ({ id: 'q1', userId: 'u1', origin: { kind: 'setup', entityId: 'e1' }, action, ...over })
+
+    // Both get PAST the verb check — proof each reached its own handler — and then fail on the
+    // database, which is as far as a unit test without one can follow them.
+    for (const type of ['move_stop', 'take_partial', 'exit_now', 'let_run']) {
+        const res = await executeOrigin(row({ type }))
+        assert.notEqual(res.reason, 'unknown_action', `${type} is a management verb`)
+    }
+    assert.notEqual((await executeOrigin(row({ type: 'exit' }))).reason, 'unknown_action')
+})
+
+test('the manage dispatch reads the VERB, not queuedBy — a legacy row must not misroute', async () => {
+    // Rows written before `queuedBy` existed read back as 'user'. If these three kinds dispatched by
+    // decider like portfolio_item does, every one of those legacy overnight stops would be handed to
+    // the manage executor. They can dispatch by verb precisely because they never collide: a monitor
+    // exit is `exit`, a management action is never called that.
+    const { executeOrigin } = await import('../../services/pendingAction/originRegistry.js')
+    const res = await executeOrigin({
+        id: 'q1', userId: 'u1', origin: { kind: 'call', entityId: 'e1' },
+        action: { type: 'exit', reason: 'stop' },      // no queuedBy at all
+    })
+    assert.notEqual(res.reason, 'unknown_action', 'still the monitor exit path')
 })
 
 test('every registered origin can run AND cancel — including the three added in phase 4', async () => {

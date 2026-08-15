@@ -67,6 +67,23 @@ so a producer cannot ship a queued item whose desk can never be told it was canc
   drops the row and tells the desk — an Atlas holding records the refusal in `rebalance_history` so
   the next review does not re-propose what you turned down. Lifecycle:
   `RELEASED --claim--> EXECUTING --> DONE`, unwinding to RELEASED on failure, every hop guarded.
+- **5 — done.** The gate reaches the **manage-accept path**, the last route to a broker that never
+  asked. A card posted before the close could be tapped at 02:00 and go straight out; on paper it
+  "filled" at the day close. The gate sits in `positionManage.applyManage` — the shared executor —
+  so Hermes and Talos are both covered by one call and neither desk can add a verb that forgets it.
+  **The verb IS the action type** (`move_stop` │ `take_partial` │ `exit_now` │ `let_run`), because
+  `enqueue` dedupes on `(user, entity, action.type)` and a single `manage` type would let a queued
+  stop-move swallow the `exit_now` that came after it. `action.holderId` rides along: a call's
+  position hangs off its idea, and by the open the row is all the replay has.
+  - `call`/`setup`/`idea` now dispatch by **verb** (`_byWork`), not by decider like `portfolio_item`.
+    The two kinds of work never share a spelling here — a monitor exit is `exit` — and rows written
+    before `queuedBy` existed read back as `user`, so dispatching those by decider would hand every
+    legacy overnight stop to the manage executor.
+  - Cancelling one clears `position_state.pending_action`: nothing executed, so what has to be undone
+    is the proposal still sitting on the position offering a decision the user has now taken twice.
+  - A defer LEAVES `pending_action` standing. It is cleared when the action actually happens
+    (`manageAppliedUpdate`); clearing it at accept time would take the proposal off the card while
+    nothing had been done to the position.
 - **4 — done.** The gate reaches `positionMonitor`: a stop or target that trips while the venue is
   shut parks the entity at `orderState: 'awaiting_market_close'` and queues the close, replayed at
   the open through the same `_closeAtBroker` the live path uses. `call`, `setup` and `idea` are

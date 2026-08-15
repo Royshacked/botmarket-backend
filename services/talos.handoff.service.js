@@ -81,6 +81,10 @@ export function toExecutionProposal(verb, raw) {
 
 const _deps = {
     getDb,
+    // The hours gate the shared executor asks before it touches a broker — see applyManage. Threaded
+    // through the desk's deps like everything else it needs, so a missing one fails loudly rather
+    // than quietly skipping the gate.
+    deferIfClosed:    manage._deps.deferIfClosed,
     findOpenPosition: manage._deps.findOpenPosition,
     closePosition:    manage._deps.closePosition,
     amendOrder:       manage._deps.amendOrder,

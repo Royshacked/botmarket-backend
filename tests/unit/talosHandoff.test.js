@@ -37,6 +37,10 @@ function fakeDb(setup) {
 function deps(db, over = {}) {
     return {
         getDb: async () => db,
+        // The venue is OPEN unless a test says otherwise. Stated rather than inherited: the real
+        // gate reads the live clock, so a suite that let it through would pass by day and queue
+        // everything by night.
+        deferIfClosed: async () => ({ deferred: false }),
         findOpenPosition: async () => ({ volume: 100 }),
         closePosition: async () => {},
         amendOrder: async () => {},
@@ -114,6 +118,70 @@ test('accepting a verb Talos did not propose is refused', async () => {
     const res = await manageSetup('setup_NVDA_1', 'u1', 'take_partial', deps(fakeDb(inPosSetup())))
     assert.equal(res.ok, false)
     assert.equal(res.reason, 'no_pending_action')
+})
+
+// ── The hours gate ────────────────────────────────────────────────────────────
+// Accepting a card is the LAST unguarded path to a broker. Closing the monitoring hole stopped new
+// cards appearing off-hours; it did nothing about one posted before the close and tapped at 02:00.
+
+test('an accept on a shut venue is QUEUED, never sent', async () => {
+    // On paper this is the one that bites: exitMarkPrice degrades to the day close on purpose, so a
+    // partial at 02:00 "fills" at a price nobody could have traded and lands on the ledger as real.
+    let touched = false
+    const db  = fakeDb(inPosSetup())
+    const res = await manageSetup('setup_NVDA_1', 'u1', 'move_stop', deps(db, {
+        deferIfClosed: async () => ({ deferred: true, ok: true, id: 'pa_1', nextOpenMs: 111 }),
+        amendOrder: async () => { touched = true },
+    }))
+
+    assert.equal(res.ok, true, 'the decision was taken — it is queued, not refused')
+    assert.equal(res.deferred, true)
+    assert.equal(res.queuedId, 'pa_1')
+    assert.equal(touched, false, 'nothing reached the broker')
+})
+
+test('the queued row carries the VERB as its type, so one accept cannot swallow another', async () => {
+    // enqueue dedupes on (user, entity, action.type). Folding every verb into one 'manage' type
+    // would let a queued move_stop absorb the exit_now that came after it.
+    let queued = null
+    const db = fakeDb(inPosSetup())
+    await manageSetup('setup_NVDA_1', 'u1', 'move_stop', deps(db, {
+        deferIfClosed: async (p) => { queued = p; return { deferred: true, ok: true, id: 'pa_1' } },
+    }))
+
+    assert.equal(queued.action.type, 'move_stop')
+    assert.equal(queued.action.proposal.new_stop, 118, 'and the translated proposal, ready to replay')
+    assert.equal(queued.origin.entityId, 'setup_NVDA_1')
+    assert.equal(queued.queuedBy, 'user', 'a discretionary decision — the list may offer to drop it')
+})
+
+test('a deferred accept leaves the proposal on the card', async () => {
+    // Clearing it would take the decision off the position while nothing had been done to it.
+    const db = fakeDb(inPosSetup())
+    await manageSetup('setup_NVDA_1', 'u1', 'move_stop', deps(db, {
+        deferIfClosed: async () => ({ deferred: true, ok: true, id: 'pa_1' }),
+    }))
+    assert.equal(db.updates.some(u => 'position_state.pending_action' in (u.$set ?? {})), false)
+})
+
+test('a queue write that FAILS refuses the accept rather than reporting success', async () => {
+    // The market is shut either way, so executing is wrong; losing the row silently is worse.
+    const db  = fakeDb(inPosSetup())
+    const res = await manageSetup('setup_NVDA_1', 'u1', 'move_stop', deps(db, {
+        deferIfClosed: async () => ({ deferred: true, ok: false, reason: 'enqueue_failed' }),
+    }))
+    assert.equal(res.ok, false)
+    assert.equal(res.reason, 'enqueue_failed')
+})
+
+test('a MANUAL book is never gated — it places no orders to gate', async () => {
+    let asked = false
+    const db  = fakeDb(inPosSetup({}, { broker: 'manual' }))
+    const res = await manageSetup('setup_NVDA_1', 'u1', 'move_stop', deps(db, {
+        deferIfClosed: async () => { asked = true; return { deferred: true, ok: true, id: 'x' } },
+    }))
+    assert.equal(res.manual, true)
+    assert.equal(asked, false, 'its card is an instruction, not an execution')
 })
 
 // ── The verbs that are NOT accepts ────────────────────────────────────────────

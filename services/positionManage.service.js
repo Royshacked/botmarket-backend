@@ -1,6 +1,8 @@
 import { getDb } from '../providers/mongodb.provider.js'
 import { ENTITIES } from './entity/entityCollection.js'
 import { brokerService } from '../api/broker/broker.service.js'
+import { deferIfClosed } from './pendingAction/executionGate.js'
+import { kindForDoc } from './entity/envelope.js'
 import { logger } from './logger.service.js'
 
 /**
@@ -41,6 +43,9 @@ export const MANAGE_VERBS = new Set(['move_stop', 'take_partial', 'exit_now', 'l
 
 export const _deps = {
     getDb,
+    // THE hours gate, asked here rather than in each desk's handoff so neither can forget it. See
+    // the note above applyManage.
+    deferIfClosed,
     findOpenPosition: (broker, userId, acct, positionId)      => brokerService.findOpenPosition(broker, userId, acct, positionId),
     closePosition:    (broker, userId, acct, positionId, opts)=> brokerService.closePosition(broker, userId, acct, positionId, opts),
     amendOrder:       (broker, userId, acct, orderId, fields) => brokerService.amendOrder(broker, userId, acct, orderId, fields),
@@ -170,11 +175,52 @@ export async function executeManage(verb, proposal, holder, link, open, userId, 
  *
  * Returns the same { ok, reason?, accounts? } shape the desk handoffs return to their controllers.
  */
-export async function applyManage({ entity, holder, verb, proposal, userId, nowMs = Date.now(), deps = _deps }) {
+export async function applyManage({ entity, holder, verb, proposal, userId, origin = null, nowMs = Date.now(), deps = _deps }) {
     const db    = await deps.getDb()
     const ps    = entity.position_state ?? {}
     const links = resolveAllLinks(holder, entity)
     if (!links.length) return { ok: false, reason: 'no_position_link' }
+
+    // THE HOURS GATE, and it lives here rather than in each desk's handoff for the reason the gate
+    // itself was built: five call sites deciding hours policy privately is how they came to disagree.
+    // Hermes and Talos both arrive at this function, so gating it once covers both and neither can
+    // ship a new verb that forgets to ask.
+    //
+    // The paper venue is NOT exempt. `exitMarkPrice` degrades to the day close on purpose, so a
+    // partial accepted at 02:00 would "fill" at a price nobody could have traded and stamp it on the
+    // ledger as real. A live venue is kinder about it — the broker simply rejects — but a rejection
+    // loses the decision, which is the other half of what the queue is for.
+    //
+    // `pending_action` is deliberately LEFT STANDING on a defer. It is cleared by
+    // manageAppliedUpdate, i.e. when the thing actually happens; clearing it here would take the
+    // proposal off the card while nothing had been done to the position. Queueing twice is not a
+    // risk either — enqueue dedupes on (user, entity, verb).
+    const gate = await deps.deferIfClosed({
+        userId,
+        asset:      entity.asset,
+        assetClass: entity.asset_class ?? null,
+        direction:  entity.direction ?? null,
+        origin: {
+            kind:     origin?.kind  ?? entity.kind ?? kindForDoc(entity),
+            entityId: entity.id,
+            // The desk's own words for the row, because by the open the card that said it is gone.
+            // Judgment, so the caller owns it; a generic fallback rather than a missing line.
+            label:    origin?.label ?? `${verb.replace(/_/g, ' ')} on ${entity.asset}`,
+        },
+        // THE VERB IS THE ACTION TYPE, not a generic 'manage'. enqueue dedupes on it, so folding
+        // every verb into one type would let a queued `move_stop` swallow the `exit_now` that came
+        // after it — the one substitution that must never happen. `holderId` rides along because a
+        // call's position hangs off its idea, and by the open the replay has only this row to work
+        // from.
+        action: { type: verb, proposal, holderId: holder?.id ?? entity.id },
+        queuedBy: 'user',
+    })
+    if (gate.deferred) {
+        logger.info(LOG, `${entity.id} ${verb} deferred — venue shut${gate.ok ? `, queued ${gate.id}` : ''}`)
+        return gate.ok === false
+            ? { ok: false, reason: gate.reason ?? 'queue_failed' }
+            : { ok: true, deferred: true, queuedId: gate.id, nextOpenMs: gate.nextOpenMs ?? null }
+    }
 
     const perAccount = []
     let anyReachable = false, anyOpen = false, anyApplied = false, totalQty = 0

@@ -309,6 +309,10 @@ const _mdeps = {
     amendOrder:       (broker, userId, acct, orderId, fields) => brokerService.amendOrder(broker, userId, acct, orderId, fields),
     cancelOrder:      (broker, userId, acct, orderId)         => brokerService.cancelOrder(broker, userId, acct, orderId),
     notifyManage:     (call, card)                            => notifyCallManage(call, card),
+    // The hours gate the shared executor asks before it touches a broker. Threaded through this
+    // desk's deps rather than reached for inside, so a test can say "the venue is open" the same way
+    // it says everything else here — and so a missing one fails loudly instead of skipping the gate.
+    deferIfClosed:    _sharedManage._deps.deferIfClosed,
     syncIdeaExit:     (ideaId, accountId, leg, patch)         => _sharedManage._deps.syncExit(ideaId, accountId, leg, patch),
 }
 

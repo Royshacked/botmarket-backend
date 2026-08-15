@@ -144,6 +144,79 @@ async function _cancelMonitorExit(record) {
     return { ok: true, noted: true }
 }
 
+// ── In-position management, accepted while the venue was shut ────────────────
+//
+// The OTHER thing that can queue against a call / setup / idea: the user accepting a monitor's
+// management proposal (tighten the stop, bank a third, get flat) after hours. Nothing about it is
+// discretionary once accepted — but nothing about it can reach a broker either, so it waits.
+
+/** The verbs positionManage executes. Their presence is what tells a manage row from a monitor exit. */
+const MANAGE_VERBS = new Set(['move_stop', 'take_partial', 'exit_now', 'let_run'])
+
+/**
+ * Replay an accepted management action at the open, through the SAME executor that would have run
+ * it there and then. Both documents are re-read first: hours have passed, and the position may have
+ * been closed, partly filled or reconciled since — `applyManage` is broker-authoritative about all
+ * three, so handing it fresh docs is the whole of the freshness requirement.
+ *
+ * Lazily imported, like the two above: positionManage now asks the gate, the gate imports this file.
+ */
+async function _executeManage(record) {
+    const a = record.action ?? {}
+    if (!MANAGE_VERBS.has(a.type)) return { ok: false, reason: 'unknown_action' }
+
+    const db     = await getDb()
+    const entity = await db.collection(ENTITIES).findOne({ id: record.origin.entityId, userId: record.userId })
+    if (!entity) return { ok: false, reason: 'not_found' }
+
+    // A setup holds its own broker linkage, so entity and holder are one document; a call's position
+    // hangs off the idea it materialized. The id was captured at accept time rather than re-derived,
+    // because which doc holds the linkage is the DESK's knowledge and this file has none.
+    const holderId = a.holderId ?? entity.id
+    const holder   = holderId === entity.id
+        ? entity
+        : await db.collection(ENTITIES).findOne({ id: holderId, userId: record.userId })
+    if (!holder) return { ok: false, reason: 'not_found' }
+
+    const { applyManage } = await import('../positionManage.service.js')
+    return applyManage({ entity, holder, verb: a.type, proposal: a.proposal ?? {}, userId: record.userId })
+}
+
+/**
+ * Dropping an accepted management action. Nothing executed, so there is nothing to reverse at the
+ * broker — what has to be undone is the PROPOSAL still sitting on the position, which is what the
+ * user was accepting. Left there it keeps its card up offering a decision they have now taken twice
+ * (yes, then no), and the next wake compares against a pending action that no longer means anything.
+ *
+ * Safe to call twice and silent about a missing target, per the contract on ORIGINS.
+ */
+async function _cancelManage(record) {
+    const db  = await getDb()
+    const res = await db.collection(ENTITIES).updateOne(
+        { id: record.origin.entityId, userId: record.userId },
+        { $set: { 'position_state.pending_action': null } },
+    )
+    if (res.matchedCount === 0) {
+        logger.info(LOG, `${record.origin.entityId} no longer exists — no proposal to clear`)
+        return { ok: true, noted: false }
+    }
+    return { ok: true, noted: true }
+}
+
+/**
+ * Which KIND OF WORK a row is, for the three execution kinds — a monitor's exit, or a user's
+ * accepted management action.
+ *
+ * Dispatched on the VERB, not on `queuedBy`, and the difference from `_byDecider` above is worth
+ * stating. A holding's two kinds both spell `exit`, so only the decider can separate them. Here they
+ * never collide: a monitor exit is `exit`, a management action is `move_stop` / `take_partial` /
+ * `exit_now` / `let_run`. The verb is therefore the more robust tell — rows written before
+ * `queuedBy` existed default to 'user', and dispatching those to the manage handler would send a
+ * legacy overnight stop through the wrong executor.
+ */
+const _byWork = (onManage, onExit) => (record) =>
+    (MANAGE_VERBS.has(record?.action?.type) ? onManage : onExit)(record)
+
 /**
  * One entry per origin kind.
  *
@@ -173,12 +246,13 @@ const ORIGINS = Object.freeze({
         cancel:  _byDecider(_cancelPortfolioItem, _cancelMonitorExit),
         execute: _byDecider(_executePortfolioItem, _executeMonitorExit),
     },
-    // The execution kinds. Only a monitor exit queues for these — nothing else in the app decides
-    // something for a call or a setup that a shut venue can block.
-    call:  { desk: 'kairos', cancel: _cancelMonitorExit, execute: _executeMonitorExit },
-    setup: { desk: 'mentor', cancel: _cancelMonitorExit, execute: _executeMonitorExit },
+    // The execution kinds. TWO things queue for these: a monitor's exit (a stop or target that
+    // tripped while the venue was shut) and a user's accepted management action. `_byWork` tells
+    // them apart by verb — see the note on it.
+    call:  { desk: 'kairos', cancel: _byWork(_cancelManage, _cancelMonitorExit), execute: _byWork(_executeManage, _executeMonitorExit) },
+    setup: { desk: 'mentor', cancel: _byWork(_cancelManage, _cancelMonitorExit), execute: _byWork(_executeManage, _executeMonitorExit) },
     // The Idea desk is archived, so its rows speak as Axl — the same fallback its cards take.
-    idea:  { desk: 'axl',    cancel: _cancelMonitorExit, execute: _executeMonitorExit },
+    idea:  { desk: 'axl',    cancel: _byWork(_cancelManage, _cancelMonitorExit), execute: _byWork(_executeManage, _executeMonitorExit) },
 })
 
 export const ORIGIN_KINDS = Object.keys(ORIGINS)

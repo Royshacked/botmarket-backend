@@ -274,12 +274,19 @@ own.
   pre-entry **expiry review** (a setup may still need to roll or die at the close).
   **HERMES HAS THE SAME HOLE, UNFIXED** (`_checkCall` routes `POSITION_STATUSES` at line 84, the
   market gate is at 106) — it manages live calls, so it wants its own change, not a blind mirror.
-- **The manage-accept path is not hours-gated.** `positionManage.service` never asks
-  `executionGate.deferIfClosed`, so a card posted before the close can still be accepted at 02:00 and
-  go straight at the broker — on paper it fills at the stale day close, which is the exact failure
-  the off-hours queue exists to prevent. Closing the monitoring hole above means no NEW card can
-  appear off-hours, but it does not make a pending one safe to tap. Shared with Hermes, so it is one
-  fix for both desks: register a `manage` origin and gate the send.
+- ~~**The manage-accept path is not hours-gated.**~~ **CLOSED 2026-08-15.** It was the last route to
+  a broker that never asked: closing the monitoring hole stopped NEW cards appearing off-hours, but
+  a card posted before the close could still be tapped at 02:00 and go straight out (on paper,
+  filling at the stale day close). The gate now sits in `positionManage.applyManage`, the shared
+  executor, so **Hermes and Talos are covered by one call** and neither desk can add a verb that
+  forgets it. The queued verb is the action TYPE, so one accept cannot dedupe away another; the
+  replay reloads both documents and runs the same executor. See
+  [off-hours-queue.md](../architecture/off-hours-queue.md) phase 5.
+  **JUDGMENT LEFT OPEN:** a queued row is RELEASED at the open, not auto-run — the user presses
+  Execute. For a protective `move_stop` that means the tightening they accepted overnight is not in
+  place when the bell rings. Defensible (price cannot move while the venue is shut, and both the
+  card and the queued row say it is pending) but it is the one verb where "queued" and "done" differ
+  in a way that could cost money.
 - **Scaling in** — several entries inside one scenario is modelled (`scenarioQuantity` sums them)
   but readiness blocks it until the flow is specified.
 - ~~**Stop/validity coherence is unchecked.**~~ **DONE** — `rangeProblems` (`setup.schema.js`)
