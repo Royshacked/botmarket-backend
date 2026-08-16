@@ -398,5 +398,34 @@ rather than a panel handed something it cannot read.
   `axl_system_prompt.md:220`, and `EDIT_KIND_DESKS` in `axl.controller.js:86`. Cross-repo, so a
   shared constant is a copy either way; at minimum a test asserting the three lists match.
 - **Auto-mode default** — per run only, or a remembered per-user preference? Per run to start.
-- **Resume** — a run is session-scoped. `ref`-carried artifacts survive as entities; an interrupted
-  auto run does not. Persisting runs is a later question, not a blocker.
+- **Resume — the DESK resumes, the RUN does not.** This bullet used to say a run is session-scoped,
+  full stop. Half of that is now wrong: desk resume was BUILT 2026-08-11 and survives a reload —
+  drafts persist server-side (`saveDraft` with `state`/`mandate`/`phase`), `chatRestore` rehydrates
+  the panel, `deskWork` reads `thread.pipeline` for the marker, and `_resumeThreadOn` opens the
+  thread's AGENT's tab rather than `entryTab`.
+
+  What is still browser-only is the run itself: `sleeveRunRef` (`MainPage.jsx:322` —
+  `{ active, queue, sectors, total, current }`), `scanInbox` / `analystInbox`, and the step position.
+  Note what does NOT lose it: `MainPage` toggles panels with `display:none` instead of unmounting, so
+  walking to Axl, switching tabs or changing workspace all keep the ref. Only a page teardown —
+  reload, crash, closing the tab, picking up the phone — drops it.
+
+  Then a 3-sleeve run dying on sleeve 2 loses the Semiconductors list already banked in
+  `run.sectors` (a full tool-heavy Argus scan), loses Healthcare unentered, and never fires
+  `_researchSurvivors`, so Prometheus is never briefed and Atlas never gets its `coverage_set` back.
+  Both desks resume from their drafts, correctly and separately — the run evaporates into two
+  standalone chats with no path between them. Not corruption; re-work, and it is the §5 shape again.
+
+  Exposure is uneven and that is the whole argument for leaving it: the trade desk is two steps
+  seconds apart, the portfolio desk is minutes of tool-heavy work per sleeve with nothing saved until
+  the last step. And the fix is smaller than "move the conveyor server-side" — `sleeveRunRef` is
+  already a plain serializable object, so persisting it beside the drafts is most of the distance.
+
+  One knock-on worth recording while it is fresh: **finishing DISCARDS the upstream provenance.**
+  `finishPipeline` fires `DELETE /api/threads/pipeline/:pipeline`, and the linked thread that
+  survives is the one that AUTHORED the artifact — so the screen that found the name and the research
+  that framed it are deleted at the moment the book is created. §8's "the run collects each step's
+  `threadId` and links them all" is therefore not merely unbuilt: the current finish path removes the
+  material it would have linked. Same missing noun, and it is also what the ML ledger is missing.
+
+  **DEFERRED 2026-08-16, deliberately.** Recorded, not scheduled.
