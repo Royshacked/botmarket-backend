@@ -173,6 +173,10 @@ export async function _checkCoverage(db, cov, nowMs, deps = _deps) {
             'monitor.last_checked':    new Date(nowMs).toISOString(),
             'monitor.edge_category':   remodel.edge_category,
             'monitor.next_remodel_at': remodel.next_remodel_at,
+            // What that date is waiting for ("Q3 earnings" / 'catalyst' / 'quarterly floor'). Stored
+            // beside the date rather than re-derived by every reader: the branch that produced it is
+            // known here and nowhere else, and a UI re-deriving it would be a second copy of the rule.
+            'monitor.next_remodel_reason': remodel.next_remodel_reason,
             // The early-hit ratchet (see `alreadyRecorded`). Written on the material path only —
             // stamping it on the quiet path would be a no-op, since the quiet path for this state is
             // reached only when the stamp already exists.

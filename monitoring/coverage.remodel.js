@@ -102,6 +102,25 @@ export function parseCatalystDates(catalysts) {
     return [...new Set(out)].sort()
 }
 
+/**
+ * The prose beside a dated catalyst — WHAT the schedule is waiting for, not just when. Pure.
+ *
+ * The date alone doesn't explain itself: "next revision Nov 3" and "next revision Nov 3 · Q3
+ * earnings" are the difference between a calendar entry and a reason. Returns null for a bare date
+ * string (there is no note to find) or a blank one, and caps the length — this is a label, and the
+ * model sometimes writes a paragraph where a phrase belongs.
+ */
+const NOTE_MAX = 60
+function _catalystNote(catalysts, date) {
+    for (const c of (Array.isArray(catalysts) ? catalysts : [])) {
+        if (!c || typeof c !== 'object') continue
+        if (typeof c.date !== 'string' || c.date.trim() !== date) continue
+        const note = typeof c.note === 'string' ? c.note.trim() : ''
+        if (note) return note.length > NOTE_MAX ? `${note.slice(0, NOTE_MAX - 1)}…` : note
+    }
+    return null
+}
+
 /** The instant this coverage's model was last built — the anchor every window measures from. */
 function _lastModelledMs(coverage) {
     const last = coverage?.monitor?.last_remodel_at ?? coverage?.created_at
@@ -112,8 +131,11 @@ function _lastModelledMs(coverage) {
 /**
  * Should this coverage be re-modelled now? Pure — the caller supplies fresh `street` and the clock.
  *
- * @returns {{ due:boolean, reason:string|null, edge_category:string|null, next_remodel_at:string|null }}
+ * @returns {{ due:boolean, reason:string|null, edge_category:string|null,
+ *             next_remodel_at:string|null, next_remodel_reason:string|null }}
  *   `edge_category` is always returned (persist it; the change detection reads it back next tick).
+ *   `next_remodel_reason` labels the SCHEDULED date — which of the two branches below produced it.
+ *   It is not `reason`: that one says why a re-model is due NOW, and is null on a quiet tick.
  */
 export function remodelDecision(coverage, { street = null, nowMs = 0, gapState = null } = {}) {
     const edge = classifyEdge(coverage, street)
@@ -127,7 +149,16 @@ export function remodelDecision(coverage, { street = null, nowMs = 0, gapState =
         ? new Date(Date.parse(`${nextFuture}T00:00:00.000Z`) + DAY_MS).toISOString()
         : (lastMs !== null ? new Date(lastMs + FLOOR_DAYS * DAY_MS).toISOString() : null)
 
-    const quiet = { due: false, reason: null, edge_category: edge, next_remodel_at: nextRemodelAt }
+    // What that date is FOR. A catalyst names itself where the thesis wrote a note; where it didn't,
+    // 'catalyst' still beats silence. No date at all → no label, matching `next_remodel_at: null`.
+    const nextRemodelReason = nextFuture
+        ? (_catalystNote(coverage?.catalysts, nextFuture) ?? 'catalyst')
+        : (nextRemodelAt !== null ? 'quarterly floor' : null)
+
+    const quiet = {
+        due: false, reason: null, edge_category: edge,
+        next_remodel_at: nextRemodelAt, next_remodel_reason: nextRemodelReason,
+    }
 
     // The cooldown outranks every trigger. A name in the news can trip several in the same week, and
     // three research runs on one ticker in three days buys nothing the first one didn't.

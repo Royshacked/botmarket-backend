@@ -98,10 +98,13 @@ test('target_hit already recorded → refreshed quietly, no second revision or c
 // ── the expensive tier: the re-model decision rides the same daily fetch ─────
 test('the edge category + next re-model date are persisted on every tick', async () => {
     const h = harness({ price: 190, consensusPt: { consensus: 181, low: 150, high: 250, median: 180 } })
-    await _checkCoverage(h.db, cov({ catalysts: [{ date: '2030-05-01' }] }), 0, h.deps)
+    await _checkCoverage(h.db, cov({ catalysts: [{ date: '2030-05-01', note: 'Q1 print' }] }), 0, h.deps)
     const set = h.writes[0].set
     assert.equal(set['monitor.edge_category'], 'contained')       // our 200 sits inside 150–250
     assert.equal(set['monitor.next_remodel_at'], '2030-05-02T00:00:00.000Z')
+    // The date's LABEL rides with it: the branch that produced it is known here and nowhere else,
+    // so a reader that had to re-derive it would be keeping a second copy of the rule.
+    assert.equal(set['monitor.next_remodel_reason'], 'Q1 print')
 })
 
 test('a quiet DAY still reports the re-model decision — a quarter is not a day', async () => {

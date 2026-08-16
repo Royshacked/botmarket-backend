@@ -173,5 +173,80 @@ test('the cooldown outranks every trigger', () => {
 
 test('an undated thesis with no history never crashes and never fires', () => {
     const d = remodelDecision({ symbol: 'X' }, { street: null, nowMs: T0 })
-    assert.deepEqual(d, { due: false, reason: null, edge_category: null, next_remodel_at: null })
+    assert.deepEqual(d, {
+        due: false, reason: null, edge_category: null,
+        next_remodel_at: null, next_remodel_reason: null,
+    })
+})
+
+// ── next_remodel_reason ──────────────────────────────────────────────────────
+// The LABEL on the scheduled date, so a reader sees what the wait is FOR. Distinct from `reason`,
+// which says why a re-model is due NOW and is null on every quiet tick.
+
+test('a catalyst names itself — the note is the label', () => {
+    const c = cov({ catalysts: [{ date: '2026-06-01', note: 'Q3 earnings' }] })
+    const d = remodelDecision(c, { street: street(), nowMs: SETTLED })
+    assert.equal(d.next_remodel_at, '2026-06-02T00:00:00.000Z')
+    assert.equal(d.next_remodel_reason, 'Q3 earnings')
+    assert.equal(d.reason, null, 'quiet tick — nothing is due')
+})
+
+test('a catalyst with no note still labels itself as one', () => {
+    const withoutNote = remodelDecision(cov({ catalysts: [{ date: '2026-06-01' }] }), { street: street(), nowMs: SETTLED })
+    assert.equal(withoutNote.next_remodel_reason, 'catalyst')
+    // A bare date STRING is a legal catalyst too, and carries no note by construction.
+    const bare = remodelDecision(cov({ catalysts: ['2026-06-01'] }), { street: street(), nowMs: SETTLED })
+    assert.equal(bare.next_remodel_reason, 'catalyst')
+})
+
+test('the label follows the NEXT catalyst, not the first one written', () => {
+    // Order in the array is the analyst's; order in time is ours. A passed catalyst must not label
+    // a date that a later one produced.
+    const c = cov({ catalysts: [
+        { date: '2026-09-01', note: 'analyst day' },
+        { date: '2026-06-01', note: 'Q3 earnings' },
+    ] })
+    const d = remodelDecision(c, { street: street(), nowMs: SETTLED })
+    assert.equal(d.next_remodel_reason, 'Q3 earnings')
+    // Past June, the schedule and its label both move on.
+    const later = remodelDecision(c, { street: street(), nowMs: Date.parse('2026-07-01T00:00:00Z') })
+    assert.equal(later.next_remodel_at, '2026-09-02T00:00:00.000Z')
+    assert.equal(later.next_remodel_reason, 'analyst day')
+})
+
+test('a FUZZY catalyst is not a schedule, so it cannot be a label either', () => {
+    // "2027-H1" is prose for the analyst to read; parseCatalystDates drops it, and the schedule
+    // falls back to the quarterly floor — which must say so rather than borrow the note.
+    const c = cov({ catalysts: [{ date: '2027-H1', note: 'the re-rating' }] })
+    const d = remodelDecision(c, { street: street(), nowMs: SETTLED })
+    assert.equal(d.next_remodel_reason, 'quarterly floor')
+    assert.equal(d.next_remodel_at, iso(T0 + FLOOR_DAYS * DAY))
+})
+
+test('no catalyst ahead → the quarterly floor, named', () => {
+    const d = remodelDecision(cov(), { street: street(), nowMs: SETTLED })
+    assert.equal(d.next_remodel_reason, 'quarterly floor')
+})
+
+test('a runaway note is capped — this is a label, not a paragraph', () => {
+    const long = 'earnings plus the guidance revision and the segment disclosure everyone has been waiting for'
+    const d = remodelDecision(cov({ catalysts: [{ date: '2026-06-01', note: long }] }), { street: street(), nowMs: SETTLED })
+    assert.ok(d.next_remodel_reason.length <= 60, `too long: ${d.next_remodel_reason.length}`)
+    assert.ok(d.next_remodel_reason.endsWith('…'))
+})
+
+test('a blank or non-string note falls back rather than labelling with whitespace', () => {
+    for (const note of ['   ', '', null, 42, { text: 'x' }]) {
+        const d = remodelDecision(cov({ catalysts: [{ date: '2026-06-01', note }] }), { street: street(), nowMs: SETTLED })
+        assert.equal(d.next_remodel_reason, 'catalyst')
+    }
+})
+
+test('the label is reported on a DUE tick too — the next date is already scheduled', () => {
+    // Due-ness returns `{...quiet}`, so the schedule and its label ride along. A UI reading the doc
+    // mid-re-model still has something coherent to show.
+    const c = cov({ monitor: { edge_category: 'variant_bull' }, catalysts: [{ date: '2026-06-01', note: 'Q3 earnings' }] })
+    const d = remodelDecision(c, { street: street(), nowMs: SETTLED })
+    assert.equal(d.due, true)
+    assert.equal(d.next_remodel_reason, 'Q3 earnings')
 })
