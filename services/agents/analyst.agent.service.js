@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url'
 import { makePhaseCapture, runAgentStream } from '../agentIO.js'
 import { parseEmitBlock } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
+import { consultDescription } from '../deepThink.service.js'
 import { dirname, join } from 'path'
 
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../../providers/fmp.provider.js'
@@ -46,6 +47,11 @@ export const TOOLS = [
         // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off
         // the array prefix.
         get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
+        // Appended too. The reasoning sidecar (services/deepThink.service.js): one bounded decision
+        // put to a stronger model and handed back as a tool result. The mechanism half of this
+        // description is shared with every other desk; the clause below is this desk's own judgment
+        // about WHEN, and is the only part that does not transfer.
+        consult: consultDescription(`Reach for it in exactly three situations: **the price target you are about to publish** — our number against the Street IS the edge, so the multiple and the arithmetic behind it have to hold up to someone attacking them; **a variant perception you cannot separate from consensus** — the bull and bear cases read as evenly weighted and you must say which way the evidence actually leans rather than splitting the difference; and **two valuation methods that disagree materially** (a DCF against comps, say) where you have to decide which one governs the target and defend that choice.`),
     }),
 ]
 

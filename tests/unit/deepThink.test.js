@@ -7,7 +7,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { deepThink, makeConsultHandler } from '../../services/deepThink.service.js'
+import { deepThink, makeConsultHandler, consultDescription } from '../../services/deepThink.service.js'
 
 // A stand-in for the provider that records exactly what the sidecar asked for.
 function fakeProvider(answer = 'Size at 1.2% — the stop is wide enough that 2% breaches the rule.') {
@@ -101,6 +101,21 @@ test('consults are booked under their own ledger tag, not the calling desk', asy
     assert.deepEqual(booked, [{ userId: 'u1', agent: 'consult' }])
 })
 
+test('the calling desk suffixes the tag, so per-desk reach is readable', async () => {
+    // With six desks sharing the sidecar, one bucket hides the only thing left to act on: a
+    // too-permissive when-clause at one desk and a never-used one at another sum to a healthy
+    // total. The `consult:` prefix is stable, so the old single number is still a prefix-sum away.
+    const booked = []
+    const handler = makeConsultHandler({
+        userId: 'u1', agent: 'scannerAgent',
+        _record: (userId, model, usage, agent) => { booked.push(agent) },
+        _deepThink: async ({ onUsage }) => { onUsage?.({ input_tokens: 10 }, 'claude-opus-5'); return 'ok' },
+    })
+
+    await handler({ question: 'q', context: 'c' })
+    assert.deepEqual(booked, ['consult:scannerAgent'])
+})
+
 test('a ledger failure does not cost the desk the answer it already paid for', async () => {
     // recordUsage can fail two ways — a synchronous throw before it ever awaits, or a rejected
     // promise. Catching only the async half lets the other escape into the desk's turn, which
@@ -151,4 +166,42 @@ test('no consumer means no reasoning plumbing is handed to the provider', async 
     const provider = fakeProvider()
     await deepThink({ question: 'q', context: 'c', _stream: provider.fn })
     assert.equal(provider.calls[0].onReasoning, undefined)
+})
+
+// ── the description: shared mechanism, per-desk judgment ──────────────────────
+//
+// The sidecar runs at every conversational desk, so its description is the thing most at risk of
+// the copy-paste drift CLAUDE.md's "shared mechanism → one service" rule exists to stop. The split
+// is the guarantee: mechanism written once, judgment passed in.
+
+test('a desk supplies only its WHEN — the mechanism halves are added around it', () => {
+    const when = 'Reach for it when the weights are final.'
+    const desc = consultDescription(when)
+
+    assert.ok(desc.includes(when), "the desk's own clause survives verbatim")
+    assert.ok(desc.startsWith('Put ONE decision'), 'the shared what-it-is leads')
+    assert.ok(desc.includes('cannot see this conversation'), 'the shared limits are stated')
+    assert.ok(desc.includes('costs a full model call'), 'the shared restraint closes')
+    // Order matters to the model: what it is → when to use it → when not to.
+    assert.ok(desc.indexOf('Put ONE decision') < desc.indexOf(when))
+    assert.ok(desc.indexOf(when) < desc.indexOf('Do NOT reach for it'))
+})
+
+test('two desks differ ONLY by their when-clause', () => {
+    // The property the whole split buys: tighten the restraint paragraph once and every desk gets
+    // it. If this ever fails, a desk has grown its own copy of the mechanism text.
+    const a = consultDescription('Reach for it on final sizing.')
+    const b = consultDescription('Reach for it on the regime call.')
+    assert.deepEqual(
+        a.split('\n\n').filter(p => !p.startsWith('Reach for it')),
+        b.split('\n\n').filter(p => !p.startsWith('Reach for it')),
+    )
+})
+
+test('a missing when-clause degrades to mechanism only, with no blank paragraph', () => {
+    // A desk that forgets its clause still ships a usable tool — an empty middle would read to the
+    // model as a formatting glitch, and a `\n\n\n\n` gap is exactly that.
+    const desc = consultDescription()
+    assert.ok(!desc.includes('\n\n\n'), 'no empty paragraph is left behind')
+    assert.equal(desc.split('\n\n').length, 2, 'just the two shared halves')
 })

@@ -19,6 +19,33 @@ import { logger } from './logger.service.js'
 // pipe, not the judgment).
 const LOG = '[deepThink]'
 
+// ── The tool description, in two halves ───────────────────────────────────────
+// The description a desk shows the model splits cleanly along the same line the code does.
+//
+// MECHANISM — what the sidecar is, what it cannot see, and what it costs — is identical at every
+// desk, so it is written ONCE here. It was duplicated the moment the second desk inherited the
+// tool, and a duplicated instruction is one that drifts: tighten the restraint paragraph at Atlas
+// and Argus keeps the loose one, with nothing failing to tell you.
+//
+// JUDGMENT — which of THIS desk's decisions are worth a full model call — does not transfer.
+// Sizing, allocation, a price target and a regime call are worth it for different reasons, and a
+// shared "reach for it when the decision is hard" would be worth nothing anywhere. Each desk
+// passes its own middle paragraph and nothing else.
+const CONSULT_WHAT = `Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.`
+
+const CONSULT_RESTRAINT = `Do NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.`
+
+/**
+ * Compose this desk's `consult` description: shared mechanism, the desk's own WHEN, shared restraint.
+ *
+ * @param {string} when  the two or three decisions at THIS desk worth a full model call — named
+ *                       concretely. A vague clause here is the whole failure mode: the desk either
+ *                       consults on everything or never reaches for it at all.
+ */
+export function consultDescription(when) {
+    return [CONSULT_WHAT, String(when ?? '').trim(), CONSULT_RESTRAINT].filter(Boolean).join('\n\n')
+}
+
 // The tool name, exported so the one place that auto-wires the handler (runAgentStream) and the one
 // place that declares the schema (agentTools.registry) agree by reference rather than by two string
 // literals that can drift apart silently — a mismatch would simply mean the tool never runs.
@@ -29,9 +56,17 @@ export const CONSULT_TOOL = 'consult'
 const DEFAULT_MODEL  = 'claude-opus-5'
 const DEFAULT_EFFORT = 'high'
 
-// Booked under its own agent tag rather than the calling desk's, so `byAgent.consult` answers the
-// question this feature lives or dies on: is the sidecar cheaper than the depth it replaced?
+// Booked under its own agent tag rather than the calling desk's, so the `byAgent.consult*` rows
+// answer the question this feature lives or dies on: is the sidecar cheaper than the depth it
+// replaced? Booking it as the desk would bury it inside that desk's ordinary chat spend.
+//
+// SUFFIXED WITH THE CALLING DESK once the sidecar spread past Mentor. One shared bucket answered
+// "does this pay" while one desk used it; with six it hides the only thing left to act on — WHICH
+// desk over-reaches. A too-permissive when-clause at Argus and a never-used one at Axl sum to a
+// perfectly healthy-looking total. The prefix is stable, so the old single number is still a
+// prefix-sum away.
 const LEDGER_TAG = 'consult'
+const ledgerTag = (agent) => (agent ? `${LEDGER_TAG}:${agent}` : LEDGER_TAG)
 
 const SYSTEM = `You are a senior trading desk head consulted mid-analysis on ONE decision.
 
@@ -115,11 +150,15 @@ export async function deepThink({
  */
 export function makeConsultHandler({
     userId = null,
+    // WHICH desk is consulting — for the ledger only. Optional: an untagged consult still books,
+    // under the bare `consult` row, because losing the attribution must never mean losing the spend.
+    agent = null,
     maxPerTurn = 3,
     onReasoning = null,
     _deepThink = deepThink,
     _record = recordUsage,
 } = {}) {
+    const tag = ledgerTag(agent)
     let used = 0
     return async ({ question, context }) => {
         if (++used > maxPerTurn) {
@@ -133,7 +172,7 @@ export function makeConsultHandler({
             // (a synchronous throw before it ever awaits, or a rejected promise), and catching only
             // the async half lets the other one escape into the desk's turn.
             onUsage: (usage, model) => {
-                try { Promise.resolve(_record(userId, model, usage, LEDGER_TAG)).catch(() => {}) }
+                try { Promise.resolve(_record(userId, model, usage, tag)).catch(() => {}) }
                 catch { /* ledger is not worth an answer */ }
             },
         })

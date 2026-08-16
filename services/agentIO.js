@@ -358,7 +358,8 @@ export async function runAgentStream({
     // already passes its own tag here and nothing else in the bag identifies the caller, so taking
     // it from the tag is what makes this zero edits at the eight call sites — a new agent is
     // attributed the moment it exists, with nothing to remember to wire.
-    const { model, streamFn, provider, onUsage, degraded } = await _resolve(requestedModel, userId, agentKeyFromLog(log))
+    const agentKey = agentKeyFromLog(log)
+    const { model, streamFn, provider, onUsage, degraded } = await _resolve(requestedModel, userId, agentKey)
 
     const chart = onChart ? makeChartChatPipe(onChart, { log }) : null
 
@@ -372,13 +373,18 @@ export async function runAgentStream({
     // callers have to remember. A desk opts in by DECLARING the tool (its own description — the
     // judgment, which does not transfer); the handler behind it is mechanism and is identical
     // everywhere, so it is built once, here, where `onReasoning` and `userId` are both already in
-    // hand. Extending it to Atlas is one line in that desk's tools array and nothing else.
+    // hand. Adding it to a desk is one line in that desk's tools array and nothing else — which is
+    // how it reached all six conversational desks without a handler, callback or controller edit.
+    //
+    // `agent` rides along for the LEDGER only: consults book to their own row, suffixed with the
+    // desk, so a too-permissive when-clause is visible as one desk's reach rate rather than hidden
+    // in a shared total (see deepThink.service.js).
     //
     // Built per call, which is per TURN — which is exactly the scope of the cap it carries.
     // A desk that supplies its own `consult` handler keeps it; the injected one only fills a gap.
     const wantsConsult   = Array.isArray(tools) && tools.some(t => t?.name === CONSULT_TOOL)
     const resolvedHandlers = wantsConsult
-        ? { [CONSULT_TOOL]: _makeConsult({ userId, onReasoning: tagReasoning(REASONING_CONSULT) }), ...toolHandlers }
+        ? { [CONSULT_TOOL]: _makeConsult({ userId, agent: agentKey, onReasoning: tagReasoning(REASONING_CONSULT) }), ...toolHandlers }
         : toolHandlers
 
     logger.info(log, 'chatStream start', { messageCount: messages?.length ?? 0, model, provider, ...(degraded ? { degraded: true } : {}), ...(wantsConsult ? { consult: true } : {}), ...meta })

@@ -1,6 +1,7 @@
 import { fileURLToPath }  from 'url'
 import { makePhaseCapture, runAgentStream } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
+import { consultDescription } from '../deepThink.service.js'
 import { dirname, join }  from 'path'
 import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMarketMovers, getAnalystActions, getSectorSnapshot } from '../../providers/fmp.provider.js'
@@ -77,6 +78,14 @@ export const TOOLS = toolsFor({
     // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
     // array prefix.
     get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
+    // Appended too. The reasoning sidecar (services/deepThink.service.js): one bounded decision put
+    // to a stronger model and handed back as a tool result. The mechanism half of this description
+    // is shared with every other desk; the clause below is Argus's own judgment about WHEN.
+    //
+    // Argus needs the TIGHTEST clause of any desk, and this one says so explicitly: a scan is
+    // dozens of names, and a desk that consults per candidate turns a cost saving into a per-scan
+    // multiplier. The two cases below are both once-per-scan by construction.
+    consult: consultDescription(`This desk screens in BULK, so the bar is higher here than anywhere else: a consult per candidate would cost more than the scan is worth. Reach for it in exactly two situations, both of which happen at most once per scan: **the final cut**, when two or three finalists are genuinely close and the ranking is the thing the user will act on; and **an angle that resists screening** — a thesis the tools cannot express, where you have to decide what to screen FOR before you can screen at all. Never per candidate, and never to qualify a name a tool call would qualify.`),
 })
 
 const TOOL_HANDLERS = {

@@ -14,6 +14,7 @@ import { dirname, join } from 'path'
 
 import { makePhaseCapture, runAgentStream, parseEmitBlock } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
+import { consultDescription } from '../deepThink.service.js'
 import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, attachTurnContext, LANGUAGE_RULE } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { getMacroSnapshot, getSectorSnapshot } from '../../providers/fmp.provider.js'
@@ -37,6 +38,15 @@ export const TOOLS = [
         get_sector_snapshot: `Today's sector rotation, every sector ranked leaders→laggards. Where money has actually been going — the tape against which your stance is a claim. No arguments.`,
         get_priced_in: `What the MARKET has already discounted: 5y and 10y breakeven inflation, the 5y5y forward, and the 10y TIPS real yield (FRED, daily). This is the benchmark your view has to beat — a regime call that merely restates what is priced is not a view. Breakevens carry an inflation risk premium, so they are not a pure forecast, and the market-implied POLICY PATH is not available to us. No arguments.`,
         get_coverage_by_sector: `OUR OWN analysts' book, aggregated by sector: how many active theses per sector, and which sectors we cover at all. The bottom-up cross-check for Phase 4 — where the book agrees with your top-down read that is your strongest basis, and where it disagrees you must say so rather than reconciling it away. No arguments.`,
+        // Appended, never inserted — prompt caching keys off the array prefix. The reasoning sidecar
+        // (services/deepThink.service.js): one bounded decision put to a stronger model and handed
+        // back as a tool result. The mechanism half of this description is shared with every other
+        // desk; the clause below is Pythia's own judgment about WHEN.
+        //
+        // A tilt is a BROADCAST every other desk reads, so the blast radius of getting the regime
+        // wrong is larger here than at a desk authoring one entity — which is what makes the once-
+        // per-tilt consult below cheap in relative terms, not what makes it unlimited.
+        consult: consultDescription(`A tilt is a broadcast the whole house reads, so it is worth thinking hard about ONCE. Reach for it in exactly two situations: **the regime call itself**, when the macro data, the tape and what is already priced do not point the same way and you have to name one regime anyway; and **a sector stance that contradicts our own coverage book** — your top-down read and the analysts' bottom-up theses disagree, and you must decide which one the stance follows and say why. Not per sector: the stances follow from the regime, and re-consulting each one is the same call answered eight times.`),
     }),
 ]
 

@@ -121,6 +121,51 @@ test('the registry has no orphans — every schema is used by some agent', () =>
     for (const name of TOOL_NAMES) assert.ok(used.has(name), `orphan schema: ${name}`)
 })
 
+// ─── The reasoning sidecar, across desks ──────────────────────────────────────
+
+// The five AUTHORING desks carry `consult` (services/deepThink.service.js). The two exclusions are
+// deliberate and each has its own reason, which is why they are listed rather than omitted:
+//   • kairos — the call builder is asleep (CLAUDE.md). In-flight calls still run there, but nothing
+//     new is built at that desk, so it does not gain a tool. If it wakes, this row is the reminder.
+//   • axl    — reception authors nothing, and its clause would have ruled out routing/explaining,
+//     i.e. nearly everything it does. A declaration read on every turn and reached for almost never
+//     loses money. See the note at the foot of axl.agent.service.js's TOOLS.
+const CONSULTS = new Set(['strategy', 'portfolio', 'scanner', 'analyst', 'mentor'])
+
+for (const [agent, live] of Object.entries(LIVE)) {
+    test(`${agent}: ${CONSULTS.has(agent) ? 'declares' : 'does not declare'} the reasoning sidecar`, () => {
+        const has = live.some(t => t.name === 'consult')
+        assert.equal(has, CONSULTS.has(agent))
+        // Declaring it is the WHOLE opt-in — runAgentStream builds the handler off the declaration
+        // (services/agentIO.js), so a desk that declares it has already wired it.
+        if (has) assert.equal(live[live.length - 1].name, 'consult',
+            'the sidecar is APPENDED last — anywhere earlier re-writes that desk\'s tool cache')
+    })
+}
+
+test('every desk names its OWN decisions — the sidecar description is not copy-pasted', () => {
+    // The failure this catches is a desk inheriting another's when-clause, which reads as plausible
+    // and is silently wrong: Argus told to consult on "final sizing" would consult on nothing it
+    // ever does. The shared mechanism paragraphs are IDENTICAL by construction (consultDescription);
+    // only the middle may differ, and it must.
+    const middles = [...CONSULTS].map(agent => {
+        const desc = LIVE[agent].find(t => t.name === 'consult').description
+        const parts = desc.split('\n\n')
+        // First paragraph is the shared what-it-is, last is the shared restraint.
+        assert.ok(parts.length >= 3, `${agent}: no when-clause between the shared halves`)
+        return parts.slice(1, -1).join('\n\n')
+    })
+    assert.equal(new Set(middles).size, middles.length, 'two desks share a when-clause')
+})
+
+test('the shared halves of the sidecar description are byte-identical across desks', () => {
+    const halves = [...CONSULTS].map(agent => {
+        const parts = LIVE[agent].find(t => t.name === 'consult').description.split('\n\n')
+        return JSON.stringify([parts[0], parts[parts.length - 1]])
+    })
+    assert.equal(new Set(halves).size, 1, 'a desk has grown its own copy of the mechanism text')
+})
+
 test('an unknown tool fails loudly rather than silently producing a broken definition', () => {
     // A typo'd name must not reach the model as `{ name, description, input_schema: undefined }`.
     assert.throws(() => toolsFor({ get_nonexistent: 'x' }), /unknown tool "get_nonexistent"/)

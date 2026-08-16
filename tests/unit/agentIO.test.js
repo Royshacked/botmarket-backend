@@ -182,6 +182,9 @@ test('declaring the consult tool is the ONLY thing a desk does to get the sideca
     const { got, consultOpts } = await runWith({ tools: [CONSULT_TOOL_DECL] })
     assert.equal(typeof got.toolHandlers.consult, 'function')
     assert.equal(consultOpts.userId, 'u1', 'the handler must be built for THIS user')
+    // Derived from the log tag, like the model-spend attribution beside it — so a desk is
+    // attributed the moment it declares the tool, with nothing extra to remember to pass.
+    assert.equal(consultOpts.agent, 't', 'the consult books to the calling desk\'s own row')
 })
 
 test('a desk that never declared the tool gets no consult handler', async () => {

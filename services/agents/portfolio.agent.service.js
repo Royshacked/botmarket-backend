@@ -1,6 +1,7 @@
 import { fileURLToPath }  from 'url'
 import { parseEmitBlock, parseEmitBlocks, makePhaseCapture, runAgentStream } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
+import { consultDescription } from '../deepThink.service.js'
 import { dirname, join }  from 'path'
 import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, getVolsAndCorrelationsRaw } from '../../providers/yahoofinance.provider.js'
 import { getFundamentals, getEarningsCalendar, getEarnings, getMacroSnapshot } from '../../providers/fmp.provider.js'
@@ -52,6 +53,11 @@ export const TOOLS = toolsFor({
     // broadcast has one text and two readers, not two texts. Advisory: it informs which sectors
     // Atlas sources, and the mandate still wins (see the prompt).
     get_sector_view: SECTOR_VIEW_TOOL_SPEC.get_sector_view,
+    // Appended last, per the rule above. The reasoning sidecar (services/deepThink.service.js):
+    // one bounded decision put to a stronger model and handed back as a tool result. The mechanism
+    // half of this description is shared with every other desk; the clause below is Atlas's own
+    // judgment about WHEN, and is the only part that does not transfer.
+    consult: consultDescription(`Reach for it in exactly three situations: **the final weights on a real-money book** (live or manual — the capital is at risk, and a weight is the one number here that cannot be walked back cheaply); **two names you cannot tell apart as ONE bet or two** — the correlation number is high but not decisive and the concentration call rests on your read of it; and **a rebalance where cutting the winner and adding to the laggard are both defensible** against the mandate, and you have to pick one.`),
 })
 
 const TOOL_HANDLERS = {

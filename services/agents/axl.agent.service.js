@@ -57,6 +57,18 @@ export const TOOLS = toolsFor({
     get_sector_view: SECTOR_VIEW_TOOL_SPEC.get_sector_view,
 })
 
+// NO `consult` HERE, deliberately — the reasoning sidecar reached the other five desks on
+// 2026-08-16 and was pulled back off this one the same day. Not because reception never faces a
+// hard call: the critic half of the job does. Because of what the tool costs when it is merely
+// DECLARED. Axl is the highest-traffic desk in the app and its tool block carries no cache
+// breakpoint, so the declaration rides uncached on every landing-box turn — while the clause that
+// would have governed it rules out routing, explaining, and app questions, which is nearly
+// everything Axl does. A tool that is read constantly and reached for almost never is the one
+// shape where the sidecar loses money.
+//
+// If it comes back, the argument to beat is that one: give Axl its own cache breakpoint first, or
+// wait until the critic role is doing enough volume to pay for the declaration.
+
 // ONE Axl. This turn both converses and routes, which used to be two agents: a `routeIntent` doorman
 // on its own tight prompt (no history, no app knowledge) answered the landing box, while the real
 // Axl — this one — lived behind a link. The doorman answered app questions anyway, inventing them,
