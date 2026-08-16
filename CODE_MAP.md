@@ -402,6 +402,15 @@ monitoring/
                             so a mid-fan-out restart resumes instead of double-posting. The confirm
                             takes the user to AXL and streams it there; the brief never lands in the
                             social chat (a page of prose in a one-line surface, with nobody to ask)
+  tilt.monitor.service.js   Pythia's slow loop. Cheap tier daily (re-price each open stance vs its
+                            FROZEN baseline, mature the ones whose window closed — tilt.assess, pure).
+                            Expensive tier is an OFFER, not a run: reviewDecision says due (stance
+                            matured / macro catalyst / 30-day floor, under a 7-day cooldown) →
+                            tiltNotify.notifyTiltReviewDue posts a `tilt_review` card to every user,
+                            and the confirm runs the review at PYTHIA'S DESK — a re-author supersedes
+                            the view everyone reads, so it takes a confirm. Both clocks anchor on
+                            reviewAnchorMs (last publish/reauthor off the revision trail), NEVER on
+                            updated_at — the loop's own maturity write moves that
   paperFill.service.js  paperEquity.service.js
   exitOrders.util.js        buildExitOrder (applies +basisOffset → broker price space) / exitOrderRecord / closeSide / orderSymbol
   monitorUtils.js           candleMs, parseYesNo, round, remainingForAccount, timeframe resolvers;

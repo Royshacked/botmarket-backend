@@ -136,6 +136,32 @@ export function diffStances(prev, next) {
 }
 
 /**
+ * Revision kinds that count as the desk actually RE-EXAMINING the view. Both the monthly floor and
+ * the cooldown are measured from the last one.
+ */
+export const REVIEW_KINDS = ['publish', 'reauthor']
+
+/**
+ * When the desk last looked, in ms → null when the doc carries no usable timestamp at all. Pure.
+ *
+ * DELIBERATELY NOT `updated_at`, and the distinction is load-bearing. `updated_at` moves on every
+ * write the service makes — including the maturity write this monitor performs itself. Anchoring on
+ * it meant a stance coming due pushed the monthly floor out a fresh 30 days and restarted the
+ * cooldown, suppressing for a week the very trigger maturity exists to pull IN. The trail records
+ * what actually happened, so the anchor reads from there.
+ *
+ * `created_at` is the fallback, and for any document `publishTilt` wrote it is the same instant as
+ * that doc's `publish` revision — so a doc whose trail was never written still anchors correctly.
+ */
+export function reviewAnchorMs(doc) {
+    // Newest first — see updateTilt, which prepends. `.find` is therefore the most recent review.
+    const revs = Array.isArray(doc?.revisions) ? doc.revisions : []
+    const last = revs.find(r => REVIEW_KINDS.includes(r?.kind))
+    const ms   = Date.parse(last?.at ?? doc?.created_at ?? '')
+    return Number.isFinite(ms) ? ms : null
+}
+
+/**
  * Should Pythia be woken to re-author the house view? Pure — the caller supplies the clock and the
  * macro calendar.
  *
@@ -151,8 +177,7 @@ export function diffStances(prev, next) {
  * @returns {{ due:boolean, reason:string|null, next_review_at:string|null }}
  */
 export function reviewDecision(doc, { nowMs = 0, catalystDates = [] } = {}) {
-    const lastMs = Date.parse(doc?.updated_at ?? doc?.created_at ?? '')
-    const anchor = Number.isFinite(lastMs) ? lastMs : null
+    const anchor = reviewAnchorMs(doc)
     const nextReviewAt = anchor !== null ? new Date(anchor + REVIEW_FLOOR_DAYS * DAY_MS).toISOString() : null
     const quiet = { due: false, reason: null, next_review_at: nextReviewAt }
 

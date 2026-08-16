@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
     relativeReturnPct, contributionBp, gradeRow, totalContributionBp, maturedRows, reviewDecision,
-    REVIEW_FLOOR_DAYS, COOLDOWN_DAYS,
+    reviewAnchorMs, REVIEW_FLOOR_DAYS, COOLDOWN_DAYS,
 } from '../../monitoring/tilt.assess.js'
 
 // Pythia's grading + wake logic (pure). Attribution is arithmetic, not judgment — these pin the
@@ -163,6 +163,39 @@ test("today's sector move is deliberately NOT a trigger", () => {
 test('a retired view is never re-authored', () => {
     const d = doc({ status: 'retired', tilts: [row({ review_date: '2026-01-02T00:00:00.000Z' })] })
     assert.equal(reviewDecision(d, { nowMs: at(400) }).due, false)
+})
+
+// ── the anchor ───────────────────────────────────────────────────────────────
+// What "when did the desk last look?" reads off. NOT `updated_at`: the monitor writes that itself on
+// the maturity path, so a stance coming due used to restart the cooldown and mute its own trigger.
+test('the review clock anchors on the last publish, not on any write', () => {
+    const published = doc({
+        updated_at: '2026-02-20T00:00:00.000Z',                          // a maturity write, days ago
+        revisions: [
+            { at: '2026-02-20T00:00:00.000Z', kind: 'stance_matured' },  // newest first
+            { at: '2026-01-01T00:00:00.000Z', kind: 'publish' },
+        ],
+    })
+    assert.equal(reviewAnchorMs(published), T0)
+    // ...so the monthly floor still counts from the publish, and the view is overdue rather than
+    // freshly reviewed.
+    const v = reviewDecision(published, { nowMs: at(REVIEW_FLOOR_DAYS + 1) })
+    assert.equal(v.due, true)
+    assert.match(v.reason, /no review in/)
+})
+
+test('a re-author counts as the desk looking; bookkeeping kinds do not', () => {
+    const kinds = k => doc({ revisions: [{ at: '2026-02-01T00:00:00.000Z', kind: k }, { at: '2026-01-01T00:00:00.000Z', kind: 'publish' }] })
+    assert.equal(reviewAnchorMs(kinds('reauthor')), Date.parse('2026-02-01T00:00:00.000Z'))
+    assert.equal(reviewAnchorMs(kinds('update')), T0, 'an edit is not a review')
+    assert.equal(reviewAnchorMs(kinds('retire')), T0)
+})
+
+test('a doc with no trail falls back to created_at — the instant it was published', () => {
+    assert.equal(reviewAnchorMs(doc({ revisions: [] })), T0)
+    assert.equal(reviewAnchorMs(doc({ revisions: undefined })), T0)
+    assert.equal(reviewAnchorMs({ created_at: null }), null)
+    assert.equal(reviewAnchorMs(null), null)
 })
 
 test('a doc with no usable timestamps degrades quietly instead of firing every tick', () => {

@@ -1,7 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildTiltEvent, audienceBySector, notifyTiltChanged } from '../../services/tiltNotify.service.js'
+import {
+    buildTiltEvent, audienceBySector, notifyTiltChanged,
+    buildTiltReviewOffer, notifyTiltReviewDue, REVIEW_CARD_TYPE,
+} from '../../services/tiltNotify.service.js'
 import { diffStances } from '../../monitoring/tilt.assess.js'
 
 // Pythia's cards. A pure builder + the audience join, mirroring coverageNotify. The desk posts
@@ -102,6 +105,110 @@ test('an audience lookup that fails degrades to "nobody told", never a throw', a
         listActiveBySector: async () => { throw new Error('mongo down') },
     })
     assert.equal(n, 0)   // the view is already published; delivery failing must not undo that
+})
+
+// ── the review OFFER ─────────────────────────────────────────────────────────
+// The other card: the monitor found the view past its clock and is ASKING for a re-author, because
+// running one unattended would supersede the house view everyone reads.
+
+const DAY = 24 * 60 * 60 * 1000
+const T0  = Date.parse('2026-01-01T00:00:00.000Z')
+const view = (over = {}) => tilt({
+    created_at: '2026-01-01T00:00:00.000Z',
+    revisions: [{ at: '2026-01-01T00:00:00.000Z', kind: 'publish' }],
+    tilts: [
+        { sector: 'Energy', stance: 'under', active_bp: -150, state: 'matured' },
+        { sector: 'Technology', stance: 'over', active_bp: 150, state: 'open' },
+    ],
+    ...over,
+})
+
+test('the offer names the trigger — a card that only says "review due" sends you looking', () => {
+    const c = buildTiltReviewOffer(view(), { reason: 'stance matured: Energy', userId: 'u1' })
+    assert.equal(c.type, REVIEW_CARD_TYPE)
+    assert.equal(c.botId, 'strategy')
+    assert.match(c.content, /stance matured: Energy/)
+    assert.match(c.content, /2 stances standing/)
+    assert.match(c.content, /late-cycle disinflation/, 'the regime is the reason the view exists')
+    assert.equal(c.actions.primary.label, 'Run the review')
+})
+
+test('the payload separates what is DUE from what is merely standing', () => {
+    const p = buildTiltReviewOffer(view(), { reason: 'x', userId: 'u1' }).payload
+    assert.deepEqual(p.sectors, ['Energy', 'Technology'])
+    assert.deepEqual(p.matured, ['Energy'], 'a closed call the review has to grade, not just restate')
+    assert.equal(p.stances, 2)
+    assert.equal(p.tiltId, 'tilt_SPX_1')
+})
+
+test('no user → no card, and a triggerless offer still reads as a sentence', () => {
+    assert.equal(buildTiltReviewOffer(view(), { userId: null }), null)
+    const c = buildTiltReviewOffer(view(), { userId: 'u1' })
+    assert.match(c.content, /^Sector view due for review\. /)
+})
+
+// The fan-out is a BROADCAST: a tilt has no owner, and re-examining the house view is not a fact
+// about anyone's book.
+function offerHarness({ users = ['u1', 'u2', 'u3'], already = new Set() } = {}) {
+    const posted = [], asked = []
+    return {
+        posted, asked,
+        deps: {
+            allUserIds:      async () => users,
+            recipientsSince: async (type, since) => { asked.push({ type, since }); return already },
+            post:            async (card) => { if (!card) return null; posted.push(card); return card },
+        },
+    }
+}
+
+test('everyone who has not been asked about THIS view gets the card', async () => {
+    const h = offerHarness()
+    const n = await notifyTiltReviewDue(view(), { reason: 'no review in 34 days', nowMs: T0 + 34 * DAY }, h.deps)
+    assert.equal(n, 3)
+    assert.deepEqual(h.posted.map(c => c.userId), ['u1', 'u2', 'u3'])
+})
+
+test('a user already asked about this view is not asked again', async () => {
+    const h = offerHarness({ already: new Set(['u2']) })
+    const n = await notifyTiltReviewDue(view(), { reason: 'x', nowMs: T0 + 34 * DAY }, h.deps)
+    assert.equal(n, 2)
+    assert.deepEqual(h.posted.map(c => c.userId), ['u1', 'u3'])
+})
+
+test('the dedupe window opens at the last PUBLISH — one ask per user per published view', async () => {
+    const h = offerHarness()
+    // A stance matured 10 days after the publish: inside the review cadence, so the publish is what
+    // bounds the window.
+    await notifyTiltReviewDue(view(), { reason: 'stance matured: Energy', nowMs: T0 + 10 * DAY }, h.deps)
+    assert.equal(h.asked[0].type, REVIEW_CARD_TYPE)
+    assert.equal(h.asked[0].since, T0, 'a card posted since the publish means this user was asked')
+})
+
+test('…but a view left stale for months is asked about again rather than forgotten', async () => {
+    const h = offerHarness()
+    const now = T0 + 200 * DAY
+    await notifyTiltReviewDue(view(), { reason: 'x', nowMs: now }, h.deps)
+    assert.equal(h.asked[0].since, now - 30 * DAY, 'the window is floored at the review cadence')
+})
+
+test('everyone already asked → no cards, and that is the steady state, not a failure', async () => {
+    const h = offerHarness({ already: new Set(['u1', 'u2', 'u3']) })
+    assert.equal(await notifyTiltReviewDue(view(), { reason: 'x', nowMs: T0 + 34 * DAY }, h.deps), 0)
+    assert.equal(h.posted.length, 0)
+})
+
+test('a roster or dedupe read that fails degrades to "nobody asked", never a throw', async () => {
+    const h = offerHarness()
+    h.deps.allUserIds = async () => { throw new Error('mongo down') }
+    assert.equal(await notifyTiltReviewDue(view(), { reason: 'x' }, h.deps), 0)
+    // The view is still due; the next tick asks again.
+    assert.equal(h.posted.length, 0)
+})
+
+test('a view with no id is not offered — there is nothing to review', async () => {
+    const h = offerHarness()
+    assert.equal(await notifyTiltReviewDue({ }, { reason: 'x' }, h.deps), 0)
+    assert.equal(h.asked.length, 0, 'and no read is made for it either')
 })
 
 // ── the diff is what separates news from noise ───────────────────────────────

@@ -22,11 +22,10 @@
  * Reversibility: remove `marketBriefNotifier.start()` from server.js. Nothing else references it.
  */
 
-import { getDb }        from '../providers/mongodb.provider.js'
 import { logger }       from '../services/logger.service.js'
 import { postCard }     from '../services/notifyCard.js'
 import { cardActions, listCardRecipientsSince } from '../api/chat/chat.service.js'
-import { COLLECTION as USERS } from '../api/user/user.model.js'
+import { listAllUserIds }      from '../api/user/user.model.js'
 import { createPollLoop } from './pollLoop.js'
 import { config } from '../services/config.js'
 
@@ -65,15 +64,11 @@ export function _isOfferTime(now, offerHourUtc = OFFER_HOUR_UTC) {
     return d.getUTCHours() >= offerHourUtc
 }
 
-async function _allUserIds() {
-    const db = await getDb()
-    const rows = await db.collection(USERS).find({}, { projection: { id: 1 } }).toArray()
-    return rows.map(r => r?.id).filter(Boolean).map(String)
-}
-
 async function _tick(deps = {}) {
     const {
-        userIds = _allUserIds,
+        // The broadcast roster now lives with the users collection — the strategy desk's review
+        // offer fans out over the same one (see tiltNotify.notifyTiltReviewDue).
+        userIds = listAllUserIds,
         recipients = listCardRecipientsSince,
         post = postCard,
         now = Date.now(),

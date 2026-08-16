@@ -6,17 +6,19 @@
 //     its contribution, mature the ones whose window closed. Pure arithmetic in tilt.assess.
 //   • RE-AUTHOR (rare, gated)     — wake Pythia for a full top-down run. Multi-minute and tool-heavy,
 //     so `reviewDecision` decides when it is earned: a stance came due, a dated macro catalyst
-//     landed, or the monthly floor expired — under a cooldown.
+//     landed, or the monthly floor expired — under a cooldown. The wake is an OFFER, not a run:
+//     re-authoring supersedes the view every user reads, so it takes a confirm (see tiltNotify).
 //
-// WHY IT DOES NOT NOTIFY ON MATURITY. A matured stance already wakes the desk, the re-author
-// publishes, and the publish diff sends the card. Adding a second card here would tell the user
-// twice about one event — and the running score is on the board regardless.
+// WHY IT DOES NOT NOTIFY ON MATURITY. A matured stance is itself a re-author trigger, so it already
+// produces the review offer below and that card names it. A second, maturity-specific card would
+// tell the user twice about one event — and the running score is on the board regardless.
 
 import { getDb }                from '../providers/mongodb.provider.js'
 import { tiltService, COLLECTION } from '../api/strategy/tilt.service.js'
 import { gradeRow, totalContributionBp, reviewDecision } from './tilt.assess.js'
 import { SECTOR_ETF, BENCHMARK_PROXY } from '../services/entity/vocabulary.js'
 import { fetchMacroCatalystDates } from '../providers/fred.provider.js'
+import { notifyTiltReviewDue } from '../services/tiltNotify.service.js'
 import { fetchLastPrice } from './monitorUtils.js'
 import { createPollLoop } from './pollLoop.js'
 import { logger }               from '../services/logger.service.js'
@@ -36,12 +38,11 @@ const _deps = {
     // but it used to skip the service entirely and write the collection here — this module knowing
     // both the collection name and the `monitor.*` shape it does not own.
     recordMonitorState: tiltService.recordMonitorState,
-    // The expensive tier. Unbuilt until Pythia's agent exists; until then a wake is LOGGED rather
-    // than silently swallowed, so the trigger is observable before the thing it triggers is written.
-    reauthor:  async (doc, reason) => {
-        logger.info(LOG, 'RE-AUTHOR DUE (agent not yet wired — no run started)', { id: doc.id, reason })
-        return false
-    },
+    // The expensive tier — and the monitor does not run it. A top-down re-author is a multi-minute,
+    // tool-heavy desk turn that ends in SUPERSEDING the house view every user reads, so waking the
+    // desk means ASKING: a card in the social chat, whose confirm takes the user to Pythia and runs
+    // the review in his thread. Same call the daily market brief makes. See tiltNotify.
+    requestReview: async (doc, reason) => notifyTiltReviewDue(doc, { reason }),
     // The dated macro calendar the catalyst trigger reads — the SAME FRED feed behind the Radar Fed
     // tab, narrowed to FOMC decisions and high-impact prints. A low-impact release is not a reason
     // to re-author a 3-12 month sector view, and a trigger that fires on everything is one nobody
@@ -143,6 +144,14 @@ export async function _checkTilt(db, doc, nowMs, deps = _deps) {
         await deps.recordMonitorState(doc.id, { set: bookkeeping, inc: { 'monitor.checks': 1 } })
     }
 
-    if (remodel.due) await deps.reauthor(doc, remodel.reason)
-    return { graded: true, matured: newlyMatured.map(r => r.sector), remodel, total_bp: bookkeeping['monitor.total_bp'] }
+    // GRADED rows, not the stored ones — the same view `reviewDecision` just judged. A stance that
+    // matured on THIS tick is only flagged in `graded`, and it is precisely the thing the card should
+    // lead with; built from the stored copy it would read as a generic "review due". The rest of the
+    // doc rides unchanged, so `revisions` still carries the publish the dedupe window opens at.
+    let offered = 0
+    if (remodel.due) {
+        offered = await deps.requestReview({ ...doc, tilts: graded }, remodel.reason)
+        logger.info(LOG, 'review due', { id: doc.id, reason: remodel.reason, offered })
+    }
+    return { graded: true, matured: newlyMatured.map(r => r.sector), remodel, offered, total_bp: bookkeeping['monitor.total_bp'] }
 }

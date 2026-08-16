@@ -26,15 +26,18 @@ function harness({ prices = { XLK: 110, XLE: 90, SPY: 104 }, catalystDates = [] 
     // real state change like a stance maturing); `recordMonitorState` is the quiet daily grade
     // refresh, which must NOT append a revision or eleven a day would bury the trail.
     const db = { collection: () => ({ find: () => ({ toArray: async () => [] }) }) }
-    const updates = [], reauthors = [], writes = []
+    const updates = [], reviews = [], writes = []
     const deps = {
         getPrice:      async (sym) => prices[sym] ?? null,
         updateTilt:    async (id, patch) => { updates.push({ id, patch }); return { ok: true } },
         recordMonitorState: async (id, { set = {}, inc = null } = {}) => { writes.push({ id, set, inc }); return { ok: true } },
-        reauthor:      async (d, reason) => { reauthors.push({ id: d.id, reason }); return true },
+        // The wake is an OFFER — a card asking the user to run the review — so the dep returns how
+        // many were posted, not whether a run started. The whole doc is kept: the card is built from
+        // it, and it must be the GRADED view, not the stored one.
+        requestReview: async (d, reason) => { reviews.push({ id: d.id, reason, doc: d }); return 1 },
         catalystDates: async () => catalystDates,
     }
-    return { db, deps, updates, reauthors, writes }
+    return { db, deps, updates, reviews, writes }
 }
 
 // ── price resolution ─────────────────────────────────────────────────────────
@@ -129,26 +132,61 @@ test('a baseline that still cannot be priced stays null rather than being guesse
 })
 
 // ── waking the desk ──────────────────────────────────────────────────────────
-test('a matured stance wakes the desk for a re-author', async () => {
+test('a matured stance wakes the desk — as an OFFER, not a run', async () => {
     const h = harness()
     const d = doc({ tilts: [row({ sector: 'Energy', review_date: '2026-02-01T00:00:00.000Z' })] })
-    await _checkTilt(h.db, d, at(45), h.deps)
-    assert.equal(h.reauthors.length, 1)
-    assert.match(h.reauthors[0].reason, /stance matured/)
+    const res = await _checkTilt(h.db, d, at(45), h.deps)
+    assert.equal(h.reviews.length, 1)
+    assert.match(h.reviews[0].reason, /stance matured/)
+    assert.equal(res.offered, 1, 'the tick reports how many were asked')
+    // The card is built from the GRADED view. Built from the stored copy the stance that just came
+    // due would still read `open`, and the card would lead with a generic "review due" — losing the
+    // one thing it was posted to say.
+    assert.equal(h.reviews[0].doc.tilts[0].state, 'matured')
+    assert.equal(h.reviews[0].doc.revisions !== undefined || h.reviews[0].doc.created_at !== undefined, true,
+        'and the rest of the doc rides along — the dedupe window anchors on its publish')
 })
 
 test('a quiet day inside the cooldown wakes nobody', async () => {
     const h = harness()
     const res = await _checkTilt(h.db, doc(), at(3), h.deps)
     assert.equal(res.remodel.due, false)
-    assert.equal(h.reauthors.length, 0)
+    assert.equal(h.reviews.length, 0)
+    assert.equal(res.offered, 0)
 })
 
 test('a dated macro catalyst wakes it', async () => {
     const h = harness({ catalystDates: ['2026-01-19'] })
     await _checkTilt(h.db, doc(), at(20), h.deps)
-    assert.equal(h.reauthors.length, 1)
-    assert.match(h.reauthors[0].reason, /macro catalyst/)
+    assert.equal(h.reviews.length, 1)
+    assert.match(h.reviews[0].reason, /macro catalyst/)
+})
+
+// The bug this fixed: the maturity write bumps `updated_at`, which used to be the anchor — so the
+// stance that came due restarted the cooldown and muted its own trigger on the very next tick.
+test('the maturity write does not mute the trigger it just fired', async () => {
+    const h = harness()
+    const matured = row({ sector: 'Energy', review_date: '2026-02-01T00:00:00.000Z' })
+    const d = doc({
+        tilts:      [matured],
+        revisions:  [{ at: '2026-01-01T00:00:00.000Z', kind: 'publish' }],
+    })
+    await _checkTilt(h.db, d, at(45), h.deps)
+    assert.equal(h.reviews.length, 1)
+
+    // The next tick sees what the maturity write left behind: updated_at is NOW, the trail carries a
+    // stance_matured entry on top of the publish, and the row is already flagged matured.
+    const after = {
+        ...d,
+        updated_at: new Date(at(45)).toISOString(),
+        tilts:      [{ ...matured, state: 'matured' }],
+        revisions:  [{ at: new Date(at(45)).toISOString(), kind: 'stance_matured' }, ...d.revisions],
+    }
+    const res = await _checkTilt(h.db, after, at(46), h.deps)
+    // Anchored on `updated_at` this was inside a fresh 7-day cooldown and read as quiet. Anchored on
+    // the publish it stays due, because the review has not happened — only the grading.
+    assert.equal(res.remodel.due, true)
+    assert.match(res.remodel.reason, /stance matured/)
 })
 
 test('a catalyst lookup that throws never breaks the daily grade', async () => {

@@ -144,11 +144,20 @@ Dismiss/handled state persists per-message.
 | `call_reentry` | A call **stopped out** with its thesis still intact (Hermes `_maybeOfferReentry`, one-shot) | Re-enter (`reviveCall` → `waiting`) · Close (`declineReentry`) |
 | `queue_ready` | The venue opened and something is waiting (`marketOpen.monitor`) | Open the queue → the Floor's **Queued** desk. ONE card per USER, from Axl (see §5) |
 | `market_brief_offer` | Daily broadcast offer, one per user per weekday (`marketBrief.notify.js`) | Get the brief → routes to **Axl**, who writes it in his thread · Dismiss |
+| `tilt_review` | The house view is past its clock — a stance matured, a macro catalyst landed, or the monthly floor expired (`tilt.monitor` → `reviewDecision`) | Run the review → routes to **Pythia**, who runs it in his thread · Dismiss |
 
-The market brief is the one card that is **not about the user**: the same text goes to everyone, is
-cached across users, and by construction mentions no position, account or holding. Its offer is
-posted with no tokens spent — the brief is only written when someone confirms, and Axl relays that
-same brief in chat via `get_market_brief`.
+Two cards are **not about the user** — `market_brief_offer` and `tilt_review`. Both announce a
+BROADCAST (the daily brief, the house sector view), so the same text goes to everyone and neither
+mentions a position, account or holding; both fan out over `listAllUserIds`, and both dedupe by
+reading the cards already posted rather than by a flag, so a restart mid-fan-out resumes instead of
+double-posting. Both are also **offers**: posted with no tokens spent, the work only runs when
+someone confirms. Axl relays that same brief in chat via `get_market_brief`.
+
+`tilt_review` is the strategy desk's wake, and the reason it asks rather than acts is that a
+re-author SUPERSEDES the view every user reads — see §monitors. Its dedupe window opens at the last
+publish/re-author (`reviewAnchorMs`, off the revision trail — deliberately **not** `updated_at`,
+which the monitor's own maturity write moves), floored at the 30-day review cadence so a view left
+stale is asked about again rather than forgotten.
 
 Confirming does not answer in the social chat: it resolves the card as read, routes to Axl, and
 streams the brief into his thread (`POST /api/axl/brief/stream`). A page of market prose does not

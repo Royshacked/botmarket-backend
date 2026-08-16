@@ -34,6 +34,20 @@ export async function ensureUserIndexes() {
     }
 }
 
+/**
+ * Every user id, as strings. The BROADCAST fan-out — the read a notifier makes when the thing it is
+ * announcing has no owner to key on (the daily market brief, the strategy desk's house view).
+ *
+ * It lives here rather than in either notifier because both need the same mechanism and this module
+ * owns the collection: the second copy would have been a second place that knows users are keyed by
+ * `id` and not by `_id`, which is exactly the confusion the id scheme already invites.
+ */
+export async function listAllUserIds() {
+    const db   = await getDb()
+    const rows = await db.collection(COLLECTION).find({}, { projection: { id: 1 } }).toArray()
+    return rows.map(r => r?.id).filter(Boolean).map(String)
+}
+
 export function stripUser(doc) {
     if (!doc) return doc
     const { _id, passwordHash, ...rest } = doc
