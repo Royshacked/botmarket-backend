@@ -68,6 +68,12 @@ to `architecture/` or `desks/`, or it is deleted.
 | [trust-gaps-todo.md](./trust-gaps-todo.md) | **The ranked open work.** Capture the thesis→result chain; make the money path testable without a broker |
 | [live-verify-checklist.md](./live-verify-checklist.md) | What only a running app can confirm — the queue, by feature |
 
+## Not about the system
+
+| Doc | Covers |
+|---|---|
+| [demo-script-10min.md](./demo-script-10min.md) | Shot-by-shot script + voiceover for the 10-minute investor demo. Describes what is *shown*, not what is built — it dates itself and will go stale |
+
 ---
 
 ## The rule for this directory
