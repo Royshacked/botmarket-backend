@@ -89,10 +89,11 @@ test('uppercases the symbol before fetching', async () => {
 })
 
 // ── buildFormingBar: the day the EOD feed has not published yet ────────────────
-// FMP publishes a daily row only once the day has CLOSED, so mid-session the newest daily bar is
-// the previous trading day's. The chart then paints the live price onto that bar — which is how a
-// Friday candle came to render with Monday's close. These pin the gate that decides when today's
-// bar is real, because every one of them is a way to invent a candle that never traded.
+// FMP publishes the running day's row LATE — measured absent 90 minutes into the session and
+// present some hours later — so early in a session the newest daily bar is the previous trading
+// day's. The chart then paints the live price onto that bar, which is how a Friday candle came to
+// render with Monday's close. These pin the gate that decides when today's bar is real, because
+// every one of them is a way to invent a candle that never traded.
 
 // Real numbers, taken off the wire on Mon 2026-08-17 with AVGO's daily series ending Friday.
 const FRI = fmpDateToEpochSec('2026-08-14') * 1000

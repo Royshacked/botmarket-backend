@@ -34,11 +34,13 @@ export function toMsCandles(candles) {
 /**
  * TODAY'S BAR, WHICH THE EOD FEED DOES NOT HAVE YET.
  *
- * `/historical-price-eod/full` publishes a day only once it has closed. So all session long the
- * daily series ends on the PREVIOUS trading day — on a Monday at 11:00 ET, AVGO's newest daily row
- * is still Friday's. Intraday endpoints carry their forming bar, which is why this is scoped to the
- * EOD-derived spans (day/week/month at multiplier 1; a higher multiplier is an aggregate whose
- * group alignment a lone extra bar would break).
+ * `/historical-price-eod/full` publishes the running day LATE. Measured on Mon 2026-08-17 (AVGO):
+ * at 14:59Z — ~90 minutes into the session — the newest row was still Friday's, while `/quote` was
+ * live and correct; by ~17:00Z today's row had appeared. So the gap is the EARLY session and it
+ * heals itself later in the day, which is exactly why the period gate below has to decide this per
+ * request rather than a flag being set once. Intraday endpoints carry their forming bar, which is
+ * why this is scoped to the EOD-derived spans (day/week/month at multiplier 1; a higher multiplier
+ * is an aggregate whose group alignment a lone extra bar would break).
  *
  * The damage was not the missing bar, it was what filled the gap: the chart patches the live price
  * onto its LAST bar, so Friday's candle was rendering with Monday's close — a closed candle

@@ -88,10 +88,10 @@ export async function _fetchCandleRows(ticker, timeframe) {
 /**
  * Today's bar, for the AGENT's read of the same series the chart draws.
  *
- * The EOD feed publishes a day only after it closes (candleFetch.buildFormingBar), so without this
- * an agent asking for daily candles mid-session gets a series ending yesterday — while the chart
- * IMAGE it is looking at, rendered through candleFetch, already shows today. One desk, two answers
- * about the same session, and the numbers were the stale half.
+ * The EOD feed publishes the running day late (candleFetch.buildFormingBar), so early in a session
+ * an agent asking for daily candles gets a series ending yesterday — while the chart IMAGE it is
+ * looking at, rendered through candleFetch, already shows today. One desk, two answers about the
+ * same session, and the numbers were the stale half.
  *
  * DELIBERATELY NOT IN `getTickerAggregates`, which would have been the shorter edit. That router is
  * also the monitors' candle source, and a condition tree must never see a bar that is still moving:

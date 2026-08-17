@@ -236,8 +236,9 @@ services/
                             only) → sec-to-ms pipeline. Massive defaults missing from/to to avoid a crash. One code path for the
                             /api/market/candles endpoint AND the chart renderer (same data the monitor sees).
                             (Named distinctly from monitorUtils.fetchCandles, the monitor's broker-candle router.)
-                            + buildFormingBar: TODAY's bar, which the EOD feed only publishes after the
-                            close — so mid-session day/week/month series ended on the PREVIOUS day and the
+                            + buildFormingBar: TODAY's bar, which the EOD feed publishes LATE (measured
+                            2026-08-17: absent 90min into the session, present ~3.5h in) — so early in a
+                            session day/week/month series still ended on the PREVIOUS day and the
                             chart painted the live price onto that CLOSED candle. Built from the quote
                             (open/dayHigh/dayLow/volume), stamped at today's ET midnight. Gated on the
                             quote's own TRADE TIME falling in a later period than the last bar, so a
