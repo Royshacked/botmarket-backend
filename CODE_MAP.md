@@ -113,6 +113,13 @@ services/
                           prompts live in `prompts/` (`join(__dirname, '../../prompts/x.md')`)
   tools/                  the 12 agent-facing tool modules (*.tools.js) — the handlers + LLM-ready
                           formatters an agent is wired with. Schemas stay in agentTools.registry
+                          marketData.tools._fetchCandleRows = the ONE candle read behind get_candles,
+                          get_indicators and the SMC tools. Appends candleFetch's forming bar
+                          (_withFormingBar, converting the one bar back to provider SECONDS) so an
+                          agent's NUMBERS cover the same session its chart IMAGE already showed.
+                          Deliberately NOT in candles.provider: that router also feeds the monitors,
+                          and a `structured` leaf resolves on a CLOSED candle — a forming bar there
+                          would fire close-confirmed breaks the close never confirms
   portfolio.agent.service.js  scanner.agent.service.js
                           Atlas tools: screen_candidates + get_macro_snapshot + enriched get_fundamentals
                           (FMP Starter); review-state block renders benchmark-relative perf + regime delta
@@ -229,6 +236,14 @@ services/
                             only) → sec-to-ms pipeline. Massive defaults missing from/to to avoid a crash. One code path for the
                             /api/market/candles endpoint AND the chart renderer (same data the monitor sees).
                             (Named distinctly from monitorUtils.fetchCandles, the monitor's broker-candle router.)
+                            + buildFormingBar: TODAY's bar, which the EOD feed only publishes after the
+                            close — so mid-session day/week/month series ended on the PREVIOUS day and the
+                            chart painted the live price onto that CLOSED candle. Built from the quote
+                            (open/dayHigh/dayLow/volume), stamped at today's ET midnight. Gated on the
+                            quote's own TRADE TIME falling in a later period than the last bar, so a
+                            weekend (quote still reads Friday) and a feed that already carries today both
+                            fabricate nothing. day/week/month at multiplier 1 only — intraday feeds carry
+                            their own forming bar, an aggregate's groups would be shifted by an extra one.
   chartImgCache.service.js  cachedChartImage(symbol,timeframe,studies) — 60s shared chart-PNG cache.
                             FALLBACK-FIRST: own KLineCharts render first (OWN_CHART_RENDER, default on),
                             chart-img (TradingView) on any error/timeout. base64-PNG contract unchanged.

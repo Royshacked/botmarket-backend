@@ -1,6 +1,8 @@
 import { getQuote }             from '../../providers/yahoofinance.provider.js'
 import { getTickerAggregates }  from '../../providers/candles.provider.js'
 import { getEarnings }          from '../../providers/fmp.provider.js'
+import { getFmpQuoteFull }      from '../../providers/fmp.price.provider.js'
+import { buildFormingBar, toMsCandles } from '../candleFetch.service.js'
 import { cachedChartImage } from '../chartImgCache.service.js'
 import { buildStudies } from '../../monitoring/evaluators/chart.evaluator.js'
 import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../../monitoring/evaluators/structured.evaluator.js'
@@ -10,6 +12,8 @@ import { makeToolHandler } from '../agentUtils.js'
 import { withBrokerAvailability } from './tradingContext.tools.js'
 import { withMarketStatus } from './marketHours.tools.js'
 import { logger } from '../logger.service.js'
+
+const LOG = '[marketData]'
 
 // Shared market-data toolset for the chart-reading agents (Idea, Kairos, and any
 // future market-data agent like Axl). The provider math is identical across agents;
@@ -68,15 +72,52 @@ export function aggregateCandles(rows, groupSize) {
 // Exported so other OHLCV-compute tools (the SMC engine's tools) reuse ONE candle-fetch path (DRY).
 export async function _fetchCandleRows(ticker, timeframe) {
     const cfg  = CANDLE_CFG[timeframe] ?? CANDLE_CFG['day']
+    const sym  = ticker.toUpperCase()
     const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
     // Pass an explicit `to` (now). The Massive provider builds `new Date(to)` and
     // throws "Invalid time value" on undefined; the FMP path only adds `to` when
     // present, so this is a no-op there but makes the Massive fallback (futures /
     // week+month bars / uncovered symbols) robust regardless of USE_FMP_CANDLES.
     const to   = Date.now()
-    const raw  = await getTickerAggregates(ticker.toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from, to })
+    const raw  = await _withFormingBar(sym, cfg, to,
+        await getTickerAggregates(sym, { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from, to }))
     const bars = cfg.aggregate ? aggregateCandles(raw, cfg.aggregate) : raw
     return { cfg, bars }
+}
+
+/**
+ * Today's bar, for the AGENT's read of the same series the chart draws.
+ *
+ * The EOD feed publishes a day only after it closes (candleFetch.buildFormingBar), so without this
+ * an agent asking for daily candles mid-session gets a series ending yesterday — while the chart
+ * IMAGE it is looking at, rendered through candleFetch, already shows today. One desk, two answers
+ * about the same session, and the numbers were the stale half.
+ *
+ * DELIBERATELY NOT IN `getTickerAggregates`, which would have been the shorter edit. That router is
+ * also the monitors' candle source, and a condition tree must never see a bar that is still moving:
+ * `structured` leaves resolve on a CLOSED candle, and a forming bar handed to them would fire a
+ * close-confirmed break that the close might not confirm. So the forming bar lives on the two READ
+ * paths that draw or describe a live chart, and nowhere near the evaluators.
+ *
+ * Provider rows are epoch SECONDS here (the chart surface converts to ms up front; this path does
+ * not), so the one ms-stamped bar is converted back at this boundary.
+ *
+ * `_deps` is a test seam (inject the quote), matching candleFetch's. Exported for the same reason.
+ */
+export async function _withFormingBar(symbol, cfg, toMs, raw, _deps = {}) {
+    const quote = _deps.getFmpQuoteFull || getFmpQuoteFull
+    const rows  = Array.isArray(raw) ? raw : []
+    if (rows.length === 0) return rows
+    try {
+        const lastMs = toMsCandles(rows.slice(-1))[0]
+        const bar = buildFormingBar(lastMs, cfg, await quote(symbol), { toMs })
+        return bar ? [...rows, { ...bar, timestamp: Math.round(bar.timestamp / 1000) }] : rows
+    } catch (err) {
+        // Same rule as the chart: a missing forming bar is a stale reading, a thrown one is no
+        // reading at all. The agent gets its history either way.
+        logger.warn(LOG, `forming bar skipped for ${symbol} (${cfg.timeSpan}) — history stands: ${err.message}`)
+        return rows
+    }
 }
 
 // The chart-image cache (cachedChartImage) moved to ./chartImgCache.service.js so the monitor's

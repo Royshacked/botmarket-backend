@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { fmpDateToEpochSec, aggregateOhlc, fmpCandleSpec, groupOhlcByPeriod } from '../../providers/fmp.price.provider.js'
+import { fmpDateToEpochSec, aggregateOhlc, fmpCandleSpec, groupOhlcByPeriod, etPeriodKey, etCalendarDate } from '../../providers/fmp.price.provider.js'
 
 // Stage 2 build-step 1 (reference_fmp_pricing): the pure pieces of the FMP candle provider.
 // The timezone conversion is the critical one — FMP intraday dates are ET wall-clock, but the
@@ -125,4 +125,30 @@ test('monthly: same calendar month collapses; new month splits', () => {
 test('groupOhlcByPeriod: empty / non-array → passthrough', () => {
     assert.deepEqual(groupOhlcByPeriod([], 'week'), [])
     assert.equal(groupOhlcByPeriod(null, 'month'), null)
+})
+
+// ── etPeriodKey / etCalendarDate: which market day an INSTANT belongs to ───────
+// The grouping above only ever asked this of a bar stamped at ET midnight, where UTC getters
+// happened to give the right answer. The forming-bar builder asks it of a live quote — an instant
+// anywhere in the session — and there the ET resolution is the whole thing.
+
+test('etPeriodKey: an after-hours print stays on ITS market day, not the UTC one', () => {
+    // 20:30 ET on Mon 2026-08-17 is 00:30Z Tuesday. UTC getters would file it under the 18th and
+    // open a day that has not traded; a weekly key would eventually jump the week the same way.
+    const afterHours = Date.parse('2026-08-18T00:30:00Z')
+    assert.equal(etCalendarDate(afterHours), '2026-08-17')
+    assert.equal(etPeriodKey(afterHours, 'day'), '2026-08-17')
+    assert.equal(etPeriodKey(afterHours, 'week'), '2026-08-17')   // Monday opens that week
+    assert.equal(etPeriodKey(afterHours, 'month'), '2026-08')
+})
+
+test('etPeriodKey: a bar stamped at ET midnight keys to its own trading date', () => {
+    // The equivalence that let the grouping share this definition rather than keep its own.
+    assert.equal(etPeriodKey(fmpDateToEpochSec('2026-08-14') * 1000, 'day'), '2026-08-14')
+    assert.equal(etPeriodKey(fmpDateToEpochSec('2026-08-14') * 1000, 'week'), '2026-08-10')
+})
+
+test('etPeriodKey: unusable input is null, never a plausible date', () => {
+    assert.equal(etCalendarDate(NaN), null)
+    assert.equal(etPeriodKey(undefined, 'day'), null)
 })

@@ -44,6 +44,9 @@ export function normalizeFmpQuote(row) {
         open:          num(row.open),
         previousClose: num(row.previousClose),
         changePercent: num(row.changePercentage),
+        // The session's cumulative volume. Only the forming-bar builder reads it today
+        // (candleFetch), but it is the same session the day high/low above describe.
+        volume:        num(row.volume),
         tsSec:         num(row.timestamp),   // epoch SECONDS
     }
 }
@@ -155,6 +158,21 @@ export function fmpDateToEpochSec(dateStr) {
 }
 
 /**
+ * The ET CALENDAR DATE ("YYYY-MM-DD") an instant falls on. The other half of the convention
+ * above: `fmpDateToEpochSec` turns a market day into an instant, this turns an instant back into
+ * the market day it belongs to. Together they let a caller ask "which daily bar would this trade
+ * be in?" and get an answer stamped exactly like the bars themselves.
+ *
+ * en-CA is ISO-formatted (YYYY-MM-DD) — the same shape FMP's EOD rows carry, so the round trip
+ * through fmpDateToEpochSec is literal rather than re-derived. Pure; exported for testing.
+ */
+export function etCalendarDate(ms) {
+    const n = Number(ms)
+    if (!Number.isFinite(n)) return null
+    return new Date(n).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+}
+
+/**
  * Aggregate ascending OHLCV rows into fixed-size groups (e.g. 1hr → 2hr). Groups align to
  * END on the newest bar; an oldest partial group is dropped. Pure — mirrors
  * marketData.tools.aggregateCandles (inlined to keep this provider dependency-free /
@@ -203,17 +221,34 @@ export function fmpCandleSpec(timeSpan, multiplier = 1) {
     return null   // odd multipliers / unsupported → fallback provider
 }
 
-// Calendar-period key for a daily bar's timestamp. Daily EOD bars are timestamped at ET
-// midnight (04:00/05:00Z), so their UTC calendar date equals the ET trading date — UTC getters
-// are safe here. Week → the Monday (ISO week start) date; month → YYYY-MM.
-function _periodKey(tsSec, unit) {
-    const dt = new Date(tsSec * 1000)
-    const y = dt.getUTCFullYear(), m = dt.getUTCMonth(), d = dt.getUTCDate()
-    if (unit === 'month') return `${y}-${String(m + 1).padStart(2, '0')}`
-    const dow = dt.getUTCDay()                    // 0=Sun … 6=Sat
-    const backToMon = dow === 0 ? 6 : dow - 1     // days back to Monday
-    return new Date(Date.UTC(y, m, d - backToMon)).toISOString().slice(0, 10)
+/**
+ * WHICH calendar period an instant belongs to, as a comparable key: day → "YYYY-MM-DD", week →
+ * its Monday's date (ISO week start), month → "YYYY-MM". Resolved in ET, because that is the
+ * calendar the bars are stamped against.
+ *
+ * The ET resolution is the load-bearing part, and the reason this doesn't use UTC getters the way
+ * the grouping below used to. For a BAR it made no difference — a bar stamped at ET midnight has a
+ * UTC calendar date equal to its trading date. For an arbitrary instant it is simply wrong: a trade
+ * at 21:00 ET is 01:00Z the NEXT day, so UTC getters would file Monday's after-hours print under
+ * Tuesday. Pure; exported for testing.
+ */
+export function etPeriodKey(ms, unit) {
+    const date = etCalendarDate(ms)
+    if (!date) return null
+    if (unit === 'month') return date.slice(0, 7)      // YYYY-MM
+    if (unit !== 'week')  return date                  // day — the ET trading date itself
+    // Calendar arithmetic on the ET date's own numbers: UTC getters are safe HERE because the
+    // components came out of the ET conversion already, so no zone semantics remain to get wrong.
+    const [y, m, d] = date.split('-').map(Number)
+    const dt  = new Date(Date.UTC(y, m - 1, d))
+    const dow = dt.getUTCDay()                         // 0=Sun … 6=Sat
+    dt.setUTCDate(d - (dow === 0 ? 6 : dow - 1))       // back to Monday
+    return dt.toISOString().slice(0, 10)
 }
+
+// Calendar-period key for a daily bar's timestamp (seconds) — the grouping's view of the one
+// definition above.
+const _periodKey = (tsSec, unit) => etPeriodKey(tsSec * 1000, unit)
 
 /**
  * Group ascending daily OHLCV rows into weekly / monthly bars by calendar boundary — FMP has

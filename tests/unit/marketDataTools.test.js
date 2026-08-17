@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { fmtVol, aggregateCandles, CANDLE_CFG } from '../../services/tools/marketData.tools.js'
+import { fmtVol, aggregateCandles, CANDLE_CFG, _withFormingBar } from '../../services/tools/marketData.tools.js'
+import { fmpDateToEpochSec } from '../../providers/fmp.price.provider.js'
 
 // ── fmtVol ───────────────────────────────────────────────────────────────
 test('fmtVol: millions get one decimal + M', () => {
@@ -51,5 +52,41 @@ test('CANDLE_CFG: only 2hr/4hr aggregate, from native 1hr bars', () => {
     assert.equal(CANDLE_CFG['2hr'].timeSpan, 'hour')
     for (const tf of ['1min', '5min', '1hr', 'day', 'week', 'month']) {
         assert.equal(CANDLE_CFG[tf].aggregate, undefined, `${tf} should not aggregate`)
+    }
+})
+
+// ── _withFormingBar: the agent reads the same session the chart draws ──────────
+// The EOD feed publishes a day only after it closes, so an agent asking for daily candles
+// mid-session used to get a series ending yesterday while the chart IMAGE beside it already showed
+// today. This path's own hazard is UNITS: it works in provider seconds, buildFormingBar in ms.
+
+const SEC = (dateStr) => fmpDateToEpochSec(dateStr)
+const FRI_ROW = { timestamp: SEC('2026-08-14'), open: 411.96, high: 412.5, low: 388.5, close: 392.99, volume: 29_513_597 }
+const MON_QUOTE = { price: 397.48, open: 397.08, dayHigh: 398.15, dayLow: 392.05, volume: 8_384_828, tsSec: 1_786_978_766 }
+
+test('_withFormingBar: appends today in SECONDS, the unit this path speaks', async () => {
+    const out = await _withFormingBar('AVGO', CANDLE_CFG['day'], Date.now(), [FRI_ROW],
+        { getFmpQuoteFull: async () => MON_QUOTE })
+    assert.equal(out.length, 2)
+    assert.equal(out[1].timestamp, SEC('2026-08-17'), 'seconds — an ms stamp here would sort to the year 58000')
+    assert.equal(out[1].close, 397.48)
+    assert.equal(out[0].close, 392.99, 'Friday keeps its real close')
+})
+
+test('_withFormingBar: an hourly timeframe is left alone (its feed carries the forming bar)', async () => {
+    const rows = [{ ...FRI_ROW, timestamp: SEC('2026-08-14') + 3600 }]
+    const out  = await _withFormingBar('AVGO', CANDLE_CFG['1hr'], Date.now(), rows,
+        { getFmpQuoteFull: async () => MON_QUOTE })
+    assert.equal(out.length, 1)
+})
+
+test('_withFormingBar: a quote failure or an empty series returns the rows untouched', async () => {
+    const thrown = await _withFormingBar('AVGO', CANDLE_CFG['day'], Date.now(), [FRI_ROW],
+        { getFmpQuoteFull: async () => { throw new Error('FMP 429') } })
+    assert.deepEqual(thrown, [FRI_ROW])
+
+    for (const empty of [[], null]) {
+        assert.deepEqual(await _withFormingBar('AVGO', CANDLE_CFG['day'], Date.now(), empty,
+            { getFmpQuoteFull: async () => MON_QUOTE }), [])
     }
 })

@@ -9,17 +9,17 @@ import { normalizeFmpQuote, toYfQuote } from '../../providers/fmp.price.provider
 test('full row → all fields mapped', () => {
     const q = normalizeFmpQuote({
         symbol: 'AAPL', name: 'Apple Inc.', price: 317.31, dayHigh: 323.45, dayLow: 315.78,
-        open: 317.015, previousClose: 315.32, changePercentage: 0.6311, timestamp: 1783972801,
+        open: 317.015, previousClose: 315.32, changePercentage: 0.6311, volume: 41_203_118, timestamp: 1783972801,
     })
     assert.deepEqual(q, {
         symbol: 'AAPL', name: 'Apple Inc.', price: 317.31, dayHigh: 323.45, dayLow: 315.78,
-        open: 317.015, previousClose: 315.32, changePercent: 0.6311, tsSec: 1783972801,
+        open: 317.015, previousClose: 315.32, changePercent: 0.6311, volume: 41_203_118, tsSec: 1783972801,
     })
 })
 
 test('missing fields → null (except h/l default to price)', () => {
     const q = normalizeFmpQuote({ price: 100 })
-    assert.deepEqual(q, { symbol: null, name: null, price: 100, dayHigh: 100, dayLow: 100, open: null, previousClose: null, changePercent: null, tsSec: null })
+    assert.deepEqual(q, { symbol: null, name: null, price: 100, dayHigh: 100, dayLow: 100, open: null, previousClose: null, changePercent: null, volume: null, tsSec: null })
     const q2 = normalizeFmpQuote({ price: 100, dayHigh: 0, dayLow: -5 })
     assert.equal(q2.dayHigh, 100)
     assert.equal(q2.dayLow, 100)
