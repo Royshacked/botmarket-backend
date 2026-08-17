@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildIdeaEntryConfirm, buildCallReady, buildCallExpiry, buildQueueReady } from '../../services/tradeNotify.service.js'
+import { cardSubject } from '../../api/chat/chat.service.js'
 
 // ── buildIdeaEntryConfirm ───────────────────────────────────────────────────
 test('idea entry-confirm: a lone idea has no living desk, so the card comes from Axl', () => {
@@ -104,6 +105,16 @@ test('queue ready: a count, the names, and a route to the list', () => {
     assert.equal(c.actions.primary.label, 'Open the list')
     assert.match(c.content, /The market is open — 3 items/)
     assert.match(c.content, /waiting on you/)
+})
+
+test('queue ready: opening the list COMPLETES the card — the pointer exception', () => {
+    // Every other card survives being opened, because its ask outlives the look. This one has no
+    // subject to be resolved BY (it is about a batch, not an entity), so on the 'work' default no
+    // write could ever close it and it would nag forever with a count that is stale the moment the
+    // first item is executed. Seeing the list — which is always current — is the whole ask.
+    const c = buildQueueReady({ userId: 'u1', count: 2, assets: ['MU', 'AAPL'] })
+    assert.equal(c.actions.primary.resolvesOn, 'open')
+    assert.equal(cardSubject(c.payload), null, 'a batch card has no entity, so resolveCardsFor can never reach it')
 })
 
 test('queue ready: it points, it does not describe', () => {

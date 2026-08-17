@@ -59,7 +59,9 @@ so a producer cannot ship a queued item whose desk can never be told it was canc
   posts ONE `queue_ready` card per user, from Axl, pointing at the list. The per-desk
   `orders_ready` batch card is retired (kept on the client only to render history). `listWaiting`
   is the shared read behind both the card's count and the list; `GET /api/pending-actions` exposes
-  it.
+  it. The card is stamped `resolvesOn: 'open'` — unlike every other card it is CLOSED by being
+  opened, because it is a pointer at a batch: it has no `subject` for `resolveCardsFor` to reach,
+  and its count is a snapshot the list supersedes the moment you are looking at it.
 - **3 — done.** The Floor's **Queued** desk (first, because it is the only desk that is a to-do
   list). Execute routes by type: an ENTRY goes to the OrderConfirmDialog it always used; a queued
   trim/exit/scale-in gets the queue's own confirm and `POST /:id/execute`, which replays it through

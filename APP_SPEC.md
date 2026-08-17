@@ -142,7 +142,7 @@ Dismiss/handled state persists per-message.
 | `entry_confirm` | Entry triggered, confirm needed (`kind: idea`\|`call`) | idea → workspace + `OrderConfirmDialog`; call → `/call/:id` pop-out |
 | `call_expiry` | Kairos thesis expiring/expired (`kind: edit`\|`expired`) | Edit → `/call/:id` pop-out · Delete · Dismiss |
 | `call_reentry` | A call **stopped out** with its thesis still intact (Hermes `_maybeOfferReentry`, one-shot) | Re-enter (`reviveCall` → `waiting`) · Close (`declineReentry`) |
-| `queue_ready` | The venue opened and something is waiting (`marketOpen.monitor`) | Open the queue → the Floor's **Queued** desk. ONE card per USER, from Axl (see §5) |
+| `queue_ready` | The venue opened and something is waiting (`marketOpen.monitor`) | Open the queue → the Floor's **Queued** desk. ONE card per USER, from Axl (see §5). The one card **completed by opening** (`resolvesOn: 'open'`): it points at a batch, so it carries no `subject` a write could resolve it through, and the list itself is the live record of what is still owed |
 | `market_brief_offer` | Daily broadcast offer, one per user per weekday (`marketBrief.notify.js`) | Get the brief → routes to **Axl**, who writes it in his thread · Dismiss |
 | `tilt_review` | The house view is past its clock — a stance matured, a macro catalyst landed, or the monthly floor expired (`tilt.monitor` → `reviewDecision`) | Run the review → routes to **Pythia**, who runs it in his thread · Dismiss |
 

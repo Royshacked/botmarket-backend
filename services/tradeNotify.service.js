@@ -190,6 +190,14 @@ export function buildSetupInvalidation(setup, info = null) {
  *
  * `staleHours` is the age of the OLDEST decision. Surfaced rather than acted on: these were priced
  * before the close, and whether that still stands is the user's call, not a monitor's.
+ *
+ * RESOLVES ON OPEN — the one card where opening IS the work, and the exception proves the rule.
+ * Every other card asks for something that outlives being looked at, so it stays pending until the
+ * user's write lands (resolveCardsFor). This one asks nothing except "go look", and it CANNOT be
+ * closed that way even in principle: it is about a batch, not an entity, so it carries no `subject`
+ * and no write can ever match it. Left on the default it would sit pending forever, restating a
+ * count that goes stale the moment the first item is executed — while the list itself, which is
+ * always current, is the real record of what is still owed.
  */
 export function buildQueueReady({ userId, count, assets = [], staleHours = null }) {
     const n     = Number(count) || 0
@@ -207,7 +215,7 @@ export function buildQueueReady({ userId, count, assets = [], staleHours = null 
             staleHours: Number.isFinite(staleHours) ? Math.round(staleHours) : null,
         },
         botId:   BOT_USER_ID,
-        actions: cardActions('Open the list'),
+        actions: cardActions('Open the list', { resolvesOn: 'open' }),
     }
 }
 
