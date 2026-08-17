@@ -94,7 +94,9 @@ async function _tick(deps = {}) {
                 content: CARD_TEXT,
                 type: CARD_TYPE,
                 payload: { day: new Date(_dayStart(now)).toISOString().slice(0, 10) },
-                actions: cardActions('Get the brief'),
+                // An OFFER of a read: accepting it streams the brief into Axl's thread, so opening
+                // it is the completion. Nothing is left outstanding afterwards to stay alive for.
+                actions: cardActions('Get the brief', { resolvesOn: 'open' }),
             },
             { tag: 'Brief offer', log: LOG },
         )

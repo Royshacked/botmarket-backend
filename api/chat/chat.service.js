@@ -109,18 +109,77 @@ export async function getOrCreateConversation(userIdA, userIdB) {
 // row and carries a resolution lifecycle IFF it has `actions`. Plain DMs and plain bot lines
 // pass actions=null and are inert. The two-button rule ("do something" + dismiss) is defined
 // once, here, so all producers stay uniform.
-export const cardActions = (label) => ({ primary: { label }, dismiss: true })
+// WHAT RESOLVES A CARD, declared here and nowhere else.
+//
+//   'work' (the default) — the card ASKS FOR WORK. Opening it is not doing it. Only an explicit
+//           dismiss, or the work actually landing, resolves it. Ignoring it, scrolling past it, or
+//           opening it and walking away leaves it pending and visible.
+//   'open'  — the card OFFERS A READ and opening it IS the completion. The market brief streams
+//           when you ask for it; the sector board has nothing to revise. These are the exception.
+//
+// This used to be decided nine times, in nine card components, each calling resolve('done') the
+// instant the user navigated — with outcomes named `opened`, `editing` and `resumed`, which are by
+// their own names not completions. A "revise this thesis" card vanished when you looked at it and
+// nothing brought it back. The policy is a property of the CARD, so it is authored where cards are
+// authored, and the one shell that renders them obeys it.
+export const RESOLVES_ON = ['work', 'open']
+
+export const cardActions = (label, { resolvesOn = 'work' } = {}) => ({
+    primary: { label, resolvesOn: RESOLVES_ON.includes(resolvesOn) ? resolvesOn : 'work' },
+    dismiss: true,
+})
+
+// payload key → what the card is ABOUT. First match wins, so the order is the judgment: a coverage
+// refresh raised mid-review carries BOTH a portfolioId and a coverageId, and its ask ("resume the
+// review") is satisfied by the review, not by the thesis — so portfolio outranks coverage.
+const SUBJECT_KEYS = [
+    ['portfolioId', 'portfolio'],
+    ['setupId',     'setup'],
+    ['callId',      'call'],
+    ['ideaId',      'idea'],
+    ['coverageId',  'coverage'],
+    ['tiltId',      'tilt'],
+]
+
+/**
+ * What entity is this card about? PURE → `{ kind, id }` or null.
+ *
+ * The key that makes both halves of the lifecycle possible: SUPERSEDING (one live ask per entity,
+ * so "stays alive" cannot become "accumulates duplicates") and COMPLETING (a user's write to that
+ * entity closes the ask). Derived from the payload the card already carries — no producer has to
+ * pass anything new.
+ */
+export function cardSubject(payload) {
+    if (!payload || typeof payload !== 'object') return null
+    for (const [key, kind] of SUBJECT_KEYS) {
+        const id = payload[key]
+        if (typeof id === 'string' && id.trim()) return { kind, id: id.trim() }
+    }
+    return null
+}
 
 // Pure: derive the lifecycle fields a message doc carries from its `actions`. Single source of
 // the rule, shared by the writer below (and unit-tested without a DB).
-export function cardLifecycle(actions) {
+export function cardLifecycle(actions, payload = null) {
     const hasActions = !!actions && typeof actions === 'object'
-    return { actions: hasActions ? actions : null, status: hasActions ? 'pending' : null }
+    return {
+        actions: hasActions ? actions : null,
+        status:  hasActions ? 'pending' : null,
+        subject: hasActions ? cardSubject(payload) : null,
+    }
 }
 
-// Pure: normalize a requested resolution to the two terminal states.
+// Pure: normalize a requested resolution. Two TERMINAL states, plus `pending` — which is not a
+// resolution at all but a touch: "the user opened this and it is still outstanding".
+//
+// `pending` has to be expressible here or the stays-alive rule cannot be written down. Without it
+// the client's only vocabulary for "I opened it" was `done`, which is precisely how nine cards came
+// to close themselves on navigation. Anything unrecognised still falls to `dismissed`, so a
+// malformed request can never invent a completion.
 export function normalizeResolveStatus(status) {
-    return status === 'done' ? 'done' : 'dismissed'
+    if (status === 'done')    return 'done'
+    if (status === 'pending') return 'pending'
+    return 'dismissed'
 }
 
 export async function sendMessage(conversationId, senderId, content, type = 'text', payload = null, actions = null) {
@@ -132,7 +191,7 @@ export async function sendMessage(conversationId, senderId, content, type = 'tex
         content,
         type,
         payload:        payload ?? null,
-        ...cardLifecycle(actions),   // { actions, status } — same rule for user DMs and agent cards
+        ...cardLifecycle(actions, payload),   // { actions, status, subject } — same rule for user DMs and agent cards
         resolvedAt:     null,
         resolveOutcome: null,
         createdAt:      Date.now(),
@@ -158,12 +217,69 @@ export async function postBotCard({ userId, content, type = 'text', payload = nu
     try {
         const bot = isBot(botId) ? String(botId) : BOT_USER_ID
         const { conv } = await getOrCreateConversation(userId, bot)
+        // ONE LIVE ASK PER ENTITY. Cards now survive being ignored, which is the point — but a
+        // thesis that oscillates (validating → diverging → validating) would otherwise leave three
+        // pending cards for one unfinished job, and "stays alive" would read as "nags". The newest
+        // card carries the current situation, so it replaces rather than joins.
+        await _supersedePending(conv.id, type, cardSubject(payload), actions)
         const msg = await sendMessage(conv.id, bot, content, type, payload, actions)
         await _tryEmit(String(userId), 'new_message', msg)
         return msg
     } catch (err) {
         logger.error(LOG, 'postBotCard failed', err)
         return null
+    }
+}
+
+/**
+ * Retire the pending card(s) this one replaces. Internal to the post path — nothing else may mark
+ * a card superseded, because "a fresher card exists" is only knowable here.
+ *
+ * Scoped to the same conversation AND the same type: two different asks about one setup (an
+ * invalidation and a manage nudge) are two jobs, not one restated.
+ */
+async function _supersedePending(conversationId, type, subject, actions) {
+    if (!actions || !subject) return 0
+    try {
+        const db  = await getDb()
+        const res = await db.collection(MSGS).updateMany(
+            { conversationId, type, status: 'pending', 'subject.kind': subject.kind, 'subject.id': subject.id },
+            { $set: { status: 'superseded', resolvedAt: Date.now(), resolveOutcome: 'superseded' } },
+        )
+        if (res.modifiedCount) logger.info(LOG, 'superseded stale card(s)', { type, subject, count: res.modifiedCount })
+        return res.modifiedCount
+    } catch (err) {
+        // A supersede that fails must never cost the user the NEW card — worst case they see two.
+        logger.warn(LOG, 'supersede failed (new card still posted)', err.message)
+        return 0
+    }
+}
+
+/**
+ * THE WORK LANDED — resolve every pending card about this entity. The other half of the
+ * stays-alive rule: a card is closed by the ask being satisfied, not by the user navigating.
+ *
+ * Called from the one place that can honestly claim a user did the work (makeEntityController's
+ * patch — a monitor writing the same document goes through the service directly and never through
+ * here). Never throws: a card left pending is a stale nag, an exception here would fail the write
+ * the user actually asked for.
+ *
+ * Subject ids are per-entity and entities are owner-scoped, so an id cannot address another user's
+ * card; no extra scoping is needed to keep this from reaching across users.
+ */
+export async function resolveCardsFor(subject, { outcome = 'completed' } = {}) {
+    if (!subject?.kind || !subject?.id) return 0
+    try {
+        const db  = await getDb()
+        const res = await db.collection(MSGS).updateMany(
+            { status: 'pending', 'subject.kind': subject.kind, 'subject.id': String(subject.id) },
+            { $set: { status: 'done', resolvedAt: Date.now(), resolveOutcome: String(outcome) } },
+        )
+        if (res.modifiedCount) logger.info(LOG, 'card(s) resolved by the work landing', { subject, count: res.modifiedCount })
+        return res.modifiedCount
+    } catch (err) {
+        logger.warn(LOG, 'resolveCardsFor failed (cards left pending)', err.message)
+        return 0
     }
 }
 
@@ -354,6 +470,18 @@ export async function resolveMessage(conversationId, messageId, userId, { status
     if (!conv || !conv.participants.includes(uid)) return { ok: false }
 
     const st = normalizeResolveStatus(status)
+    // A TOUCH, not a resolution: record that it was opened and leave everything else alone. Stamping
+    // `resolvedAt` or the legacy `dismissed` flag here would resolve the card through the back door —
+    // `readResolution` falls back to `dismissed` for pre-refactor history, so setting it on a still-
+    // pending card would collapse the very card this branch exists to keep alive.
+    if (st === 'pending') {
+        await db.collection(MSGS).updateOne(
+            { id: messageId, conversationId, status: 'pending' },   // never re-open a settled card
+            { $set: { resolveOutcome: outcome ? String(outcome) : null } },
+        )
+        return { ok: true, status: st }
+    }
+
     await db.collection(MSGS).updateOne(
         { id: messageId, conversationId },
         { $set: {
@@ -365,7 +493,7 @@ export async function resolveMessage(conversationId, messageId, userId, { status
             ...(outcome ? { dismissOutcome: String(outcome) } : {}),
         } }
     )
-    return { ok: true }
+    return { ok: true, status: st }
 }
 
 /**

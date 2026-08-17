@@ -2,6 +2,7 @@ import { logger }       from '../../services/logger.service.js'
 import { sendReason }   from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { setupService } from './setups.service.js'
+import { resolveCardsFor } from '../chat/chat.service.js'
 import { talosHandoffService } from '../../services/talos.handoff.service.js'
 
 const LOG = '[setups:controller]'
@@ -84,7 +85,18 @@ export const deleteSetup = crud.remove
 // It binds the venue, runs the readiness gate and can re-route to an in-place edit, so it stays
 // hand-written — a shared shell has no business knowing any of that.
 
-/** Generate: persist a drafted setup (or update one in place when `updateId` is present). */
+/**
+ * Generate: persist a drafted setup (or update one in place when `updateId` is present).
+ *
+ * THE RE-DRAW IS THE WORK LANDING. An in-place update is the one write that answers "your setup
+ * needs re-drawing" — and it does not come through the shared PATCH door, so the card lifecycle has
+ * to be closed from here or not at all. It used to be not at all: the plan rewrite resolved nothing
+ * while a mid-edit chat save resolved everything, so the card that asked for a re-draw outlived the
+ * re-draw and died to a question instead.
+ *
+ * Only on `updateId`. A NEW setup satisfies no outstanding ask — nothing was pending about a
+ * document that did not exist a moment ago.
+ */
 export async function generateSetup(req, res) {
     try {
         const { setup, accounts, mainAccountId, updateId, chat_state } = req.body ?? {}
@@ -100,6 +112,10 @@ export async function generateSetup(req, res) {
             chatState: chat_state,
         })
         if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallback: 500 })
+
+        // After the write, never before — a refused update has satisfied nothing. Non-fatal by
+        // contract (resolveCardsFor swallows its own failures).
+        if (updateId) await resolveCardsFor({ kind: 'setup', id: updateId }, { outcome: 'completed' })
 
         res.send(result.doc)
     } catch (err) {

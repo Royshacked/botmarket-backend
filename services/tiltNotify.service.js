@@ -82,7 +82,11 @@ export function buildTiltEvent(tilt, changes, userId) {
             balanced: tilt?.balanced !== false,
         },
         botId:   'strategy',
-        actions: cardActions('Open sector view'),
+        // A READ, not an ask: the house view is a STATE and there is nothing to revise from here,
+        // so putting the board in front of the reader IS the whole job. One of only two cards that
+        // opting out of the stays-alive default is honest for — its sibling below ("Run the review")
+        // asks for work and keeps the default.
+        actions: cardActions('Open sector view', { resolvesOn: 'open' }),
     }
 }
 
