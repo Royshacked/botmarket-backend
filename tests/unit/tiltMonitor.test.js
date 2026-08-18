@@ -22,10 +22,9 @@ const doc = (over = {}) => ({
 
 function harness({ prices = { XLK: 110, XLE: 90, SPY: 104 }, catalystDates = [] } = {}) {
     // Two write paths, both owned by tilt.service and both injected — the monitor no longer reaches
-    // into the collection itself. `updateTilt` is the PUBLICATION path (appends a revision, for a
+    // into the collection itself — nor does it take a db handle, now that due-selection lives in dueLoop. `updateTilt` is the PUBLICATION path (appends a revision, for a
     // real state change like a stance maturing); `recordMonitorState` is the quiet daily grade
     // refresh, which must NOT append a revision or eleven a day would bury the trail.
-    const db = { collection: () => ({ find: () => ({ toArray: async () => [] }) }) }
     const updates = [], reviews = [], writes = []
     const deps = {
         getPrice:      async (sym) => prices[sym] ?? null,
@@ -37,7 +36,7 @@ function harness({ prices = { XLK: 110, XLE: 90, SPY: 104 }, catalystDates = [] 
         requestReview: async (d, reason) => { reviews.push({ id: d.id, reason, doc: d }); return 1 },
         catalystDates: async () => catalystDates,
     }
-    return { db, deps, updates, reviews, writes }
+    return { deps, updates, reviews, writes }
 }
 
 // ── price resolution ─────────────────────────────────────────────────────────
@@ -58,7 +57,7 @@ test('an unknown benchmark or unpriceable sector degrades to null, not a throw',
 // ── the daily grade ──────────────────────────────────────────────────────────
 test('a quiet day writes the grade as BOOKKEEPING — no revision, no card', async () => {
     const h = harness()
-    const res = await _checkTilt(h.db, doc(), at(30), h.deps)
+    const res = await _checkTilt(doc(), at(30), h.deps)
     assert.equal(res.graded, true)
     assert.equal(h.updates.length, 0, 'a contribution ticking with the tape is not the desk changing its mind')
 
@@ -72,7 +71,7 @@ test('an underweight that beat its benchmark scores POSITIVE', async () => {
     // Energy proxy 100 → 90 (-10%) while SPY 100 → 104 (+4%): -14% relative, and we were -150bp.
     const h = harness()
     const d = doc({ tilts: [row({ sector: 'Energy', stance: 'under', active_bp: -150 })] })
-    await _checkTilt(h.db, d, at(30), h.deps)
+    await _checkTilt(d, at(30), h.deps)
     assert.equal(h.writes.at(-1).set.tilts[0].contribution_bp, 21)
 })
 
@@ -80,7 +79,7 @@ test('an underweight that beat its benchmark scores POSITIVE', async () => {
 test('a newly matured stance IS a state change — it gets a revision through the service', async () => {
     const h = harness()
     const d = doc({ tilts: [row({ sector: 'Energy', review_date: '2026-02-01T00:00:00.000Z' })] })
-    const res = await _checkTilt(h.db, d, at(45), h.deps)
+    const res = await _checkTilt(d, at(45), h.deps)
     assert.deepEqual(res.matured, ['Energy'])
     assert.equal(h.updates.length, 1)
     assert.equal(h.updates[0].patch.revision_kind, 'stance_matured')
@@ -90,7 +89,7 @@ test('a newly matured stance IS a state change — it gets a revision through th
 test('a stance already matured does not re-fire on the next tick', async () => {
     const h = harness()
     const d = doc({ tilts: [row({ state: 'matured', review_date: '2026-02-01T00:00:00.000Z' })] })
-    const res = await _checkTilt(h.db, d, at(60), h.deps)
+    const res = await _checkTilt(d, at(60), h.deps)
     assert.deepEqual(res.matured, [])
     assert.equal(h.updates.length, 0)
 })
@@ -99,7 +98,7 @@ test('a failed maturity write leaves the view DUE rather than swallowing the ver
     const h = harness()
     h.deps.updateTilt = async () => ({ ok: false, reason: 'mongo down' })
     const d = doc({ tilts: [row({ review_date: '2026-02-01T00:00:00.000Z' })] })
-    const res = await _checkTilt(h.db, d, at(45), h.deps)
+    const res = await _checkTilt(d, at(45), h.deps)
     assert.equal(res.graded, false)
     // No bookkeeping written → next_check_at unchanged → the next tick retries.
     assert.equal(h.writes.length, 0)
@@ -109,7 +108,7 @@ test('a failed maturity write leaves the view DUE rather than swallowing the ver
 test('a stance published without a baseline is backfilled, not left unscoreable', async () => {
     const h = harness()
     const d = doc({ tilts: [row({ base_px: null, base_bench_px: null })] })
-    await _checkTilt(h.db, d, at(30), h.deps)
+    await _checkTilt(d, at(30), h.deps)
     const stored = h.writes.at(-1).set.tilts[0]
     assert.equal(stored.base_px, 110)          // today's price, a tick late
     assert.equal(stored.base_bench_px, 104)
@@ -118,14 +117,14 @@ test('a stance published without a baseline is backfilled, not left unscoreable'
 
 test('an EXISTING baseline is never rewritten — it is what the call was made at', async () => {
     const h = harness()
-    await _checkTilt(h.db, doc(), at(30), h.deps)
+    await _checkTilt(doc(), at(30), h.deps)
     assert.equal(h.writes.at(-1).set.tilts[0].base_px, 100, 'immutable once stamped')
 })
 
 test('a baseline that still cannot be priced stays null rather than being guessed', async () => {
     const h = harness({ prices: { SPY: 104 } })   // no XLK
     const d = doc({ tilts: [row({ base_px: null, base_bench_px: null })] })
-    await _checkTilt(h.db, d, at(30), h.deps)
+    await _checkTilt(d, at(30), h.deps)
     const stored = h.writes.at(-1).set.tilts[0]
     assert.equal(stored.base_px, null)
     assert.equal(stored.contribution_bp, null, 'ungradeable is null, never 0')
@@ -135,7 +134,7 @@ test('a baseline that still cannot be priced stays null rather than being guesse
 test('a matured stance wakes the desk — as an OFFER, not a run', async () => {
     const h = harness()
     const d = doc({ tilts: [row({ sector: 'Energy', review_date: '2026-02-01T00:00:00.000Z' })] })
-    const res = await _checkTilt(h.db, d, at(45), h.deps)
+    const res = await _checkTilt(d, at(45), h.deps)
     assert.equal(h.reviews.length, 1)
     assert.match(h.reviews[0].reason, /stance matured/)
     assert.equal(res.offered, 1, 'the tick reports how many were asked')
@@ -149,7 +148,7 @@ test('a matured stance wakes the desk — as an OFFER, not a run', async () => {
 
 test('a quiet day inside the cooldown wakes nobody', async () => {
     const h = harness()
-    const res = await _checkTilt(h.db, doc(), at(3), h.deps)
+    const res = await _checkTilt(doc(), at(3), h.deps)
     assert.equal(res.remodel.due, false)
     assert.equal(h.reviews.length, 0)
     assert.equal(res.offered, 0)
@@ -157,7 +156,7 @@ test('a quiet day inside the cooldown wakes nobody', async () => {
 
 test('a dated macro catalyst wakes it', async () => {
     const h = harness({ catalystDates: ['2026-01-19'] })
-    await _checkTilt(h.db, doc(), at(20), h.deps)
+    await _checkTilt(doc(), at(20), h.deps)
     assert.equal(h.reviews.length, 1)
     assert.match(h.reviews[0].reason, /macro catalyst/)
 })
@@ -171,7 +170,7 @@ test('the maturity write does not mute the trigger it just fired', async () => {
         tilts:      [matured],
         revisions:  [{ at: '2026-01-01T00:00:00.000Z', kind: 'publish' }],
     })
-    await _checkTilt(h.db, d, at(45), h.deps)
+    await _checkTilt(d, at(45), h.deps)
     assert.equal(h.reviews.length, 1)
 
     // The next tick sees what the maturity write left behind: updated_at is NOW, the trail carries a
@@ -182,7 +181,7 @@ test('the maturity write does not mute the trigger it just fired', async () => {
         tilts:      [{ ...matured, state: 'matured' }],
         revisions:  [{ at: new Date(at(45)).toISOString(), kind: 'stance_matured' }, ...d.revisions],
     }
-    const res = await _checkTilt(h.db, after, at(46), h.deps)
+    const res = await _checkTilt(after, at(46), h.deps)
     // Anchored on `updated_at` this was inside a fresh 7-day cooldown and read as quiet. Anchored on
     // the publish it stays due, because the review has not happened — only the grading.
     assert.equal(res.remodel.due, true)
@@ -192,6 +191,6 @@ test('the maturity write does not mute the trigger it just fired', async () => {
 test('a catalyst lookup that throws never breaks the daily grade', async () => {
     const h = harness()
     h.deps.catalystDates = async () => { throw new Error('calendar down') }
-    const res = await _checkTilt(h.db, doc(), at(30), h.deps)
+    const res = await _checkTilt(doc(), at(30), h.deps)
     assert.equal(res.graded, true, 'grading is free and must not depend on the calendar')
 })

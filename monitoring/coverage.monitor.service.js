@@ -13,7 +13,6 @@
 //     per-name cooldown and a per-tick cap, held names first.
 // Judging the free-text kill_criteria is still the LLM tier's job and still unbuilt.
 
-import { getDb }                  from '../providers/mongodb.provider.js'
 import { getPriceTargetConsensus } from '../providers/fmp.provider.js'
 import { coverageService, COLLECTION } from '../api/analyst/coverage.service.js'
 import { classifyGapState, recomputeGap, statusForState, nextCheckAt } from './coverage.assess.js'
@@ -23,7 +22,7 @@ import { refreshCoverage }        from '../services/coverageRefresh.service.js'
 import { entityRepo }             from '../services/entity/entityRepo.service.js'
 import { LIVE_POSITION }          from '../services/entity/vocabulary.js'
 import { fetchLastPrice } from './monitorUtils.js'
-import { createPollLoop } from './pollLoop.js'
+import { createDueLoop }   from './dueLoop.js'
 import { logger }                 from '../services/logger.service.js'
 
 const LOG        = '[coverageMonitor]'
@@ -80,39 +79,42 @@ const _deps = {
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
-const _loop = createPollLoop({ intervalMs: POLL_INTERVAL_MS, tick: _tick, eager: false, log: LOG, name: 'coverage monitor' })
-export const coverageMonitorService = { start: _loop.start, stop: _loop.stop }
-
-async function _tick() {
-    const db  = await getDb()
-    const now = new Date().toISOString()
+// The wake-up chore lives in dueLoop.js — find what is due, CLAIM it against a lease, check it under
+// a timeout. This loop used to hand-roll all three, and had no lease at all: nothing but the poll
+// loop's own single-flight flag stopped a second reader picking up a coverage already being checked.
+// What stays here is only what makes this the coverage loop.
+const _loop = createDueLoop({
+    collection: COLLECTION,
+    // No `kind` — this collection holds coverage documents and nothing else, and they carry no such
+    // field. Passing one would select nothing, every tick, in silence.
+    //
     // Everything except a RETIRED name. A thesis keeps living — including one that already hit its
-    // target — until the user churns it out of the book; only that decision stops the loop.
-    const due = await db.collection(COLLECTION).find({
-        status: { $ne: 'retired' },
-        $or: [
-            { 'monitor.next_check_at': null },
-            { 'monitor.next_check_at': { $exists: false } },
-            { 'monitor.next_check_at': { $lte: now } },
-        ],
-    }).limit(MAX_PER_TICK).toArray()
-
-    const candidates = []
-    for (const cov of due) {
-        try {
-            const res = await _checkCoverage(db, cov, Date.now(), _deps)
-            if (res?.remodel?.due) candidates.push({ cov, reason: res.remodel.reason })
-        } catch (err) { logger.warn(LOG, `check ${cov.symbol} failed:`, err.message) }
-    }
-    if (candidates.length) await _runRemodels(db, candidates, _deps)
-}
+    // target — until the user churns it out of the book; only that decision stops the loop. The rule
+    // is NEGATIVE, so it rides `filter` rather than the `statuses` allow-list.
+    filter:     { status: { $ne: 'retired' } },
+    // Coverage keeps its schedule under `monitor.*`; the entity collection uses `monitor_state.*`.
+    statePath:  'monitor',
+    limit:      MAX_PER_TICK,
+    check:      (cov, nowMs) => _checkCoverage(cov, nowMs, _deps),
+    // The re-model budget is the one decision no single check can make — it is spent ACROSS the due
+    // set (held names first, then capped), so it belongs after all of them rather than inside any.
+    afterTick:  (results) => _runRemodels(
+        results.filter(r => r.result?.remodel?.due).map(r => ({ cov: r.entity, reason: r.result.remodel.reason })),
+        _deps,
+    ),
+    intervalMs: POLL_INTERVAL_MS,
+    // Not eager: an hourly research loop has no reason to fire on every deploy.
+    eager:      false,
+    log: LOG, name: 'coverage monitor',
+})
+export const coverageMonitorService = { start: _loop.start, stop: _loop.stop }
 
 /**
  * Fire the re-models this tick can afford. Held names first — they are the ones carrying risk — then
  * capped. Anything over the cap keeps its due state and is picked up on a later tick, and the drop is
  * LOGGED: a silent truncation would read as "everything was re-modelled" when it wasn't.
  */
-export async function _runRemodels(db, candidates, deps = _deps) {
+export async function _runRemodels(candidates, deps = _deps) {
     const held = new Set()
     for (const userId of new Set(candidates.map(c => c.cov.userId))) {
         for (const s of await deps.getHeldSymbols(userId)) held.add(`${userId}:${s}`)
@@ -153,7 +155,7 @@ export async function _runRemodels(db, candidates, deps = _deps) {
 }
 
 // Check one coverage: fetch fresh price + consensus → classify the gap → apply. Exported for tests.
-export async function _checkCoverage(db, cov, nowMs, deps = _deps) {
+export async function _checkCoverage(cov, nowMs, deps = _deps) {
     const [price, street] = await Promise.all([deps.getPrice(cov.symbol), deps.getConsensusPt(cov.symbol)])
     // The classifier compares point-to-point (our PT vs the Street's mean); the stored gap keeps the
     // whole distribution. A bare number is still accepted, so an injected test dep can stay simple.

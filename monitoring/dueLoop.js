@@ -12,7 +12,13 @@
 // so a fresher schedule is never clobbered, and the check's own write then overwrites the lease
 // with the real cadence. Getting that wrong duplicates orders; it should be written once.
 //
-// What each monitor still owns: which kind, which statuses, any extra filter, and the check itself.
+// What each monitor still owns: which documents are its own, and the check itself.
+//
+// IT IS NOT ONLY FOR THE ENTITY COLLECTION. Coverage (Prometheus) and tilt (Pythia) each carried the
+// same hand-rolled due-selection over their OWN collection, keyed on `monitor.next_check_at` rather
+// than `monitor_state.next_check_at`, with no lease at all. Three parameters — `statePath`, an
+// optional `kind`, and `limit` — were the whole distance between those copies and this one, so the
+// last two hand-rolled selections ride here now and inherit the claim for free.
 
 import { getDb } from '../providers/mongodb.provider.js'
 import { logger } from '../services/logger.service.js'
@@ -25,39 +31,71 @@ import { withJournal } from './monitorJournal.js'
  *
  * @param {object}   spec
  * @param {string}   spec.collection     physical collection name
- * @param {string}   spec.kind           the entity kind this monitor owns — the filter that keeps
- *                                       two monitors from ever contending for the same document
- * @param {string[]} spec.statuses       statuses to poll
+ * @param {string}   [spec.kind]         the entity kind this monitor owns — the filter that keeps
+ *                                       two monitors from ever contending for the same document.
+ *                                       OMIT IT for a collection that holds one thing (coverage,
+ *                                       tilt): those documents carry no `kind`, and querying for
+ *                                       one would select nothing — silently, and forever.
+ * @param {string[]} [spec.statuses]     statuses to poll, as an allow-list. Omit when the rule is
+ *                                       not a list — coverage's is "anything but retired" — and put
+ *                                       it in `filter` instead.
+ * @param {string}   [spec.statePath]    the subdocument holding `next_check_at`: 'monitor_state' on
+ *                                       entities, 'monitor' on coverage and tilt.
  * @param {object}   [spec.filter]       extra query clauses (e.g. Talos's `broker: {$ne: null}`)
- * @param {Function} spec.check          async (entity, nowMs) => void — the monitor's own brain
+ * @param {number}   [spec.limit]        cap the documents claimed per tick (0 = no cap). The
+ *                                       overflow stays due and lands on a later tick.
+ * @param {Function} spec.check          async (entity, nowMs) => any — the monitor's own brain. A
+ *                                       returned value is collected for `afterTick`.
+ * @param {Function} [spec.afterTick]    async (results) => void, once per tick after every check,
+ *                                       given `[{entity, result}]` for the checks that returned one.
+ *                                       For a decision no single check can make — coverage spends a
+ *                                       per-tick re-model budget across the whole due set.
  * @param {number}   spec.intervalMs     how often to look for due work
  * @param {number}   spec.checkTimeoutMs bound on ONE check, so a hung read can't wedge the loop
+ * @param {boolean}  [spec.eager]        run a tick at start(). False for the hourly research loops,
+ *                                       which have no reason to fire on every deploy.
  * @param {string}   spec.log            log prefix
  * @param {string}   spec.name           human name for the log lines
- * @returns {{ start: Function, stop: Function, _tick: Function }}
+ * @param {Function} [spec.getDbFn]      TEST SEAM. The claim is the subtle part and the one worth
+ *                                       asserting, and it is unreachable behind a module-level
+ *                                       `getDb()` — which in a test process opens a real pool.
+ * @returns {{ start: Function, stop: Function, _tick: Function, _claim: Function }}
  */
 export function createDueLoop({
-    collection, kind, statuses, filter = {}, check,
-    intervalMs = 60_000, checkTimeoutMs = 90_000, log = '[dueLoop]', name = 'monitor',
+    collection, kind = null, statuses = null, statePath = 'monitor_state',
+    filter = {}, limit = 0, check, afterTick = null,
+    intervalMs = 60_000, checkTimeoutMs = 90_000, eager = true, log = '[dueLoop]', name = 'monitor',
+    getDbFn = getDb,
 }) {
     // The lease horizon must be >= the check timeout, or an abandoned check could be re-selected
     // while it is still running — the exact double-fire this exists to prevent.
     const leaseMs = checkTimeoutMs
 
+    // The one field this whole module turns on, named once. `{field: null}` also matches a document
+    // where it is ABSENT — Mongo treats missing as null — so a never-checked document is due without
+    // needing an `$exists` clause of its own.
+    const NEXT  = `${statePath}.next_check_at`
+    const dueAt = (nowIso) => [{ [NEXT]: null }, { [NEXT]: { $lte: nowIso } }]
+    // Built once: the clauses that say "these documents are mine", whatever names them.
+    const scope = {
+        ...(kind     ? { kind }                      : {}),
+        ...(statuses ? { status: { $in: statuses } } : {}),
+        ...filter,
+    }
+
     async function _claim(entity, nowMs) {
-        const db = await getDb()
+        const db = await getDbFn()
         const res = await db.collection(collection).updateOne(
             {
                 id: entity.id,
                 // Pinning the status too: an entity whose lifecycle moved between the read and the
-                // claim is no longer the thing we decided to check.
-                status: entity.status,
-                $or: [
-                    { 'monitor_state.next_check_at': null },
-                    { 'monitor_state.next_check_at': { $lte: new Date(nowMs).toISOString() } },
-                ],
+                // claim is no longer the thing we decided to check. Conditional, because a document
+                // that has no status must not be matched on `undefined` — the driver sends that as
+                // null, which would claim a different document than the one we read.
+                ...(entity.status !== undefined ? { status: entity.status } : {}),
+                $or: dueAt(new Date(nowMs).toISOString()),
             },
-            { $set: { 'monitor_state.next_check_at': new Date(nowMs + leaseMs).toISOString() } },
+            { $set: { [NEXT]: new Date(nowMs + leaseMs).toISOString() } },
         )
         return res.modifiedCount === 1
     }
@@ -65,39 +103,45 @@ export function createDueLoop({
     async function _tick() {
         let due
         try {
-            const db  = await getDb()
+            const db  = await getDbFn()
             const now = new Date().toISOString()
-            // Due = a polled status AND (never checked OR next_check_at has passed). Same-format UTC
-            // ISO strings compare lexicographically, so $lte on the string is correct.
-            due = await db.collection(collection).find({
-                kind,
-                status: { $in: statuses },
-                ...filter,
-                $or: [
-                    { 'monitor_state.next_check_at': null },
-                    { 'monitor_state.next_check_at': { $lte: now } },
-                ],
-            }).toArray()
+            // Due = in scope AND (never checked OR next_check_at has passed). Same-format UTC ISO
+            // strings compare lexicographically, so $lte on the string is correct.
+            let cursor = db.collection(collection).find({ ...scope, $or: dueAt(now) })
+            if (limit > 0) cursor = cursor.limit(limit)
+            due = await cursor.toArray()
         } catch (err) {
             logger.error(log, 'DB read error in tick:', err.message)
             return
         }
 
         if (!due.length) return
-        logger.info(log, `checking ${due.length} due ${kind}(s)`)
+        logger.info(log, `checking ${due.length} due ${kind ?? 'document'}(s)`)
 
+        const results = []
         for (const entity of due) {
             if (!(await _claim(entity, Date.now()))) {
                 logger.info(log, `${entity.id} already claimed — skipping`)
                 continue
             }
             // One bad entity must never stop the others, and must never wedge the loop.
-            try { await withTimeout(check(entity, Date.now()), checkTimeoutMs) }
+            try {
+                const result = await withTimeout(check(entity, Date.now()), checkTimeoutMs)
+                if (result !== undefined) results.push({ entity, result })
+            }
             catch (err) { logger.error(log, `check failed for ${entity.id}:`, err.message) }
+        }
+
+        // After every check, never in place of one: a tick-wide budget can only be spent once the
+        // whole due set has said what it wants. Its failure is logged and dropped — every check has
+        // already persisted its own work, and losing that to a bad afterTick would be the worse bug.
+        if (afterTick && results.length) {
+            try { await afterTick(results) }
+            catch (err) { logger.error(log, 'afterTick failed:', err.message) }
         }
     }
 
-    const loop = createPollLoop({ intervalMs, tick: _tick, eager: true, log, name })
+    const loop = createPollLoop({ intervalMs, tick: _tick, eager, log, name })
     return { start: loop.start, stop: loop.stop, _tick, _claim }
 }
 

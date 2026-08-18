@@ -13,14 +13,13 @@
 // produces the review offer below and that card names it. A second, maturity-specific card would
 // tell the user twice about one event — and the running score is on the board regardless.
 
-import { getDb }                from '../providers/mongodb.provider.js'
 import { tiltService, COLLECTION } from '../api/strategy/tilt.service.js'
 import { gradeRow, totalContributionBp, reviewDecision } from './tilt.assess.js'
 import { SECTOR_ETF, BENCHMARK_PROXY } from '../services/entity/vocabulary.js'
 import { fetchMacroCatalystDates } from '../providers/fred.provider.js'
 import { notifyTiltReviewDue } from '../services/tiltNotify.service.js'
 import { fetchLastPrice } from './monitorUtils.js'
-import { createPollLoop } from './pollLoop.js'
+import { createDueLoop }   from './dueLoop.js'
 import { logger }               from '../services/logger.service.js'
 
 const LOG        = '[tiltMonitor]'
@@ -51,26 +50,23 @@ const _deps = {
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
-const _loop = createPollLoop({ intervalMs: POLL_INTERVAL_MS, tick: _tick, eager: false, log: LOG, name: 'tilt monitor' })
+// Same wake-up chore as every other monitor, and now the same implementation of it (dueLoop.js) —
+// find what is due, CLAIM it against a lease, check it under a timeout. The hand-rolled version this
+// replaces had no lease: a view whose check outran the tick could be picked up and graded twice.
+const _loop = createDueLoop({
+    collection: COLLECTION,
+    // No `kind` — the collection holds house views and nothing else. There is ONE broadcast tilt, so
+    // "due" is at most a single document a day.
+    statuses:   ['active'],
+    // Pythia keeps its schedule under `monitor.*`; the entity collection uses `monitor_state.*`.
+    statePath:  'monitor',
+    check:      (doc, nowMs) => _checkTilt(doc, nowMs, _deps),
+    intervalMs: POLL_INTERVAL_MS,
+    // Not eager: an hourly research loop has no reason to fire on every deploy.
+    eager:      false,
+    log: LOG, name: 'tilt monitor',
+})
 export const tiltMonitorService = { start: _loop.start, stop: _loop.stop }
-
-async function _tick() {
-    const db  = await getDb()
-    const now = new Date().toISOString()
-    const due = await db.collection(COLLECTION).find({
-        status: 'active',
-        $or: [
-            { 'monitor.next_check_at': null },
-            { 'monitor.next_check_at': { $exists: false } },
-            { 'monitor.next_check_at': { $lte: now } },
-        ],
-    }).toArray()
-
-    for (const doc of due) {
-        try { await _checkTilt(db, doc, Date.now(), _deps) }
-        catch (err) { logger.warn(LOG, `check ${doc.id} failed:`, err.message) }
-    }
-}
 
 /**
  * Today's prices for the sectors that actually carry an open stance, plus the benchmark.
@@ -96,7 +92,7 @@ export async function _resolvePrices(rows, benchmark, deps = _deps) {
  * stamps the baseline then — a day of imprecision, recorded in the log, instead of a call that can
  * never be judged. Only a MISSING baseline is ever written; an existing one is immutable.
  */
-export async function _checkTilt(db, doc, nowMs, deps = _deps) {
+export async function _checkTilt(doc, nowMs, deps = _deps) {
     const rows = Array.isArray(doc.tilts) ? doc.tilts : []
     const { bySector, bench } = await _resolvePrices(rows, doc.benchmark, deps)
 
