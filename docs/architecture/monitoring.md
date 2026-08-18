@@ -7,9 +7,9 @@ against live market data. It runs as a background service inside the Express pro
 
 > **Scope — READ THIS FIRST.** Everything below describes the `idea` kind's condition-tree loop.
 > **THAT LOOP NO LONGER EXISTS.** It was switched off in July 2026 and deleted outright on
-> 2026-08-18. Its EXIT half has since been taken over by a new loop; its ENTRY half has not. So
-> read what follows as a specification of the condition-tree SEMANTICS, and the two paragraphs
-> below for which half of it is actually running.
+> 2026-08-18 — and both halves of what it did have since been taken over, by two separate loops.
+> So read what follows as a specification of the condition-tree SEMANTICS, and the list below for
+> what actually runs them.
 >
 > What is still live from it: the evaluator stack (`monitor.orchestrator.evaluateTree`, the leaf
 > parsers, the condition taxonomy) — Talos and the exit tier both read trees through it — and
@@ -17,22 +17,33 @@ against live market data. It runs as a background service inside the Express pro
 > path in `tradeIdeas.service.js`. Its sibling `resetIdea` only cleared the deleted loop's private
 > in-memory Map and went with it.
 >
-> **The in-position EXIT poll came back on 2026-08-18** — `monitoring/exit.monitor.js`, which is
-> the caller `positionMonitor.checkPosition` had been missing. So the exit half of this document
-> describes a running service again: the residual leg that could not be left resting at the broker
-> is evaluated on a persisted per-position cadence. It is kind-BLIND and excludes `setup` (a setup
-> states its exits as zones, which rest at the broker and which `checkPosition` cannot read), and it
-> pre-gates on `hasMonitoredWork` so a position protected entirely by resting orders costs one Mongo
-> write rather than three candle fetches.
+> **BOTH POLLS CAME BACK ON 2026-08-18**, as two loops rather than one:
 >
-> What is STILL not live: the ENTRY poll for the `idea` kind, and the invalidation monitor
-> (deleted). Anything below about entry, phrased as "the monitor does X", describes what the loop
-> DID and what a replacement would have to do. `portfolioRebalance` arms a conditional add on the
-> promise of an entry card that nothing currently fires.
+> - `monitoring/exit.monitor.js` — the caller `positionMonitor.checkPosition` had been missing. The
+>   residual leg that could not be left resting at the broker is evaluated on a persisted
+>   per-position cadence. Pre-gates on `hasMonitoredWork`, so a position protected entirely by
+>   resting orders costs one Mongo write rather than three candle fetches.
+> - `monitoring/entry.monitor.js` — what an armed entity's `looking` status has always claimed.
+>   Flips to `hit`, builds the order plan, posts the confirm; parks at `awaiting_market` off-hours
+>   and lets the market-open sweep own that card. `portfolioRebalance`'s conditional add has a
+>   sender again.
+>
+> SPLIT DELIBERATELY. Minos owned the entry poll, the exit poll, the invalidation monitor and the
+> deferred-order sweep, so switching it off took four capabilities down at once. One loop, one
+> capability. They cannot contend either: entry polls `looking`, exits poll `long`/`short`, and a
+> document is never both. Both are kind-BLIND and both exclude `setup` — Talos owns setup readiness
+> and setup exits rest at the broker as zones, which `checkPosition` cannot read anyway.
+>
+> Arming CLEARS the persisted schedule (`entry.monitor.clearsEntrySchedule`, called from
+> `tradeIdeas.updateIdea`). Minos kept its cadence in an in-memory Map; a persisted one would
+> otherwise sleep through the arm that had just been made.
+>
+> What is STILL not live: the invalidation monitor (deleted, and its authoring path with it).
 >
 > The running loops are **Talos** (`setup`), **Themis** (portfolio), **marketOpen** (kind-blind
-> deferred-order sweep), **exits** (kind-blind software exit tier), the **coverage** monitor, the
-> **tilt** monitor, the execution reconciler and the paper-venue loops. Hermes (`call`) is archived.
+> deferred-order sweep), **entries** and **exits** (the two kind-blind condition-tree loops), the
+> **coverage** monitor, the **tilt** monitor, the execution reconciler and the paper-venue loops.
+> Hermes (`call`) is archived.
 >
 > The loop was switched off because its tick selected work by STATUS alone
 > (`looking`/`long`/`short`) — shared vocabulary across every kind — so it woke on `setup` entities

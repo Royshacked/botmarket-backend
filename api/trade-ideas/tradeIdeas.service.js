@@ -3,6 +3,7 @@ import { LIVE_POSITION, STATUS, statusesFor, isRestingEntry } from '../../servic
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { preflightEntry }   from '../../monitoring/preflightEntry.js'
+import { clearsEntrySchedule, ENTRY_SCHEDULE_FIELD } from '../../monitoring/entry.monitor.js'
 import { brokerService }   from '../broker/broker.service.js'
 import { buildOrderPlanForIdea, resolveUserAccounts } from '../../services/orderPlan.service.js'
 import { routeExits, detectNativeEntryLevel, touchLeaf } from '../../services/protectionPlan.service.js'
@@ -584,6 +585,12 @@ async function updateIdea(id, rawPatch, userId) {
                 patch.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
             }
         }
+
+        // ARM MEANS CHECK IT NOW — the entry monitor's cadence is persisted, so a stale wake-up
+        // time would have it sleep straight through the arm. Both the rule and the field it clears
+        // belong to that monitor (entry.monitor.clearsEntrySchedule), so this cannot drift if the
+        // loop ever moves where it keeps its schedule. Setups do the same on re-arm.
+        if (clearsEntrySchedule(patch)) patch[ENTRY_SCHEDULE_FIELD] = null
 
         // Ownership guard: you may only patch your own idea (legacy ownerless ideas pass an
         // empty guard). The write funnels through entityRepo (P1b).

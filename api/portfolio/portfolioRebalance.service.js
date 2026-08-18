@@ -399,11 +399,11 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
     // book is re-activated. Either way the user still confirms before anything is placed — the
     // OrderConfirmDialog now.
     //
-    // ⚠ BUT NOTHING FIRES THE CONDITIONAL PATH. The entry-condition evaluator for this kind was the
-    // `idea` monitor's, and that loop was deleted on 2026-08-18 with nothing taking it over. Arming
-    // to 'looking' therefore parks the add rather than monitoring it. Harmless today (no live
-    // holding carries entry conditions — verified), but this line promises a card that has no
-    // sender, and it comes good only when the kind-blind loop lands.
+    // The conditional path has a sender again as of 2026-08-18: monitoring/entry.monitor.js, the
+    // kind-blind entry loop. Between the deletion of the `idea` monitor that morning and that loop
+    // the same afternoon, arming to 'looking' PARKED the add rather than monitoring it — this line
+    // promised a card nothing could send. It is a holding, so the loop selects it: kind-blind means
+    // `portfolio_item` too, and only `setup` is left to Talos.
     const parked = items.filter(i => i.status === 'waiting')
     for (const i of parked) await updateItem(i.id, { status: 'looking' }, userId)
 

@@ -389,6 +389,17 @@ monitoring/
                             `monitor_state.*`) and `kind` is OPTIONAL because their collections hold one
                             thing and carry no such field — passing one selects nothing, forever,
                             silently. `afterTick` is for a budget spent ACROSS the due set
+  entry.monitor.js          the ENTRY loop — what an armed entity's `looking` status has always
+                            claimed ("a monitor is watching for entry") and, between Minos's deletion
+                            and this, nobody did. Evaluates on a RISING EDGE against `entryFloorAt`
+                            (requireHeld), so a level already true at arm time does not fire — which
+                            is what preflightEntry warns about instead. On trigger: `hit`, an order
+                            plan, a confirm card — or `awaiting_market` off-hours, silently, because
+                            the market-open sweep owns that card. Manual never gets a plan. A PURE
+                            SCHEDULED entry (every leaf a time leaf) is exempt from the market gate:
+                            the clock fires it, not the tape. `clearsEntrySchedule` is exported here
+                            and called by tradeIdeas.updateIdea — arming must clear the persisted
+                            cadence or the loop sleeps through the arm
   exit.monitor.js           the SOFTWARE exit tier's loop — the caller positionMonitor.checkPosition
                             lost when Minos was deleted (2026-08-18), and did not have again until
                             this. Kind-BLIND like marketOpen, because the work is written by more than

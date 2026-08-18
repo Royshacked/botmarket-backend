@@ -80,6 +80,10 @@ import { marketOpenMonitor } from './monitoring/marketOpen.monitor.js'
 // Minos was deleted. Until it started, a stop that was not a plain price level was accepted, stored
 // and shown as protection while nothing evaluated it. Tied to a CAPABILITY, not to a desk.
 import { exitMonitor } from './monitoring/exit.monitor.js'
+// The entry monitor — the other half of what died with Minos. An armed entity says "a monitor is
+// watching for entry" (vocabulary.LOOKING) and, until this, none was. A SIBLING of the exit loop
+// rather than a merge: one loop per capability is the whole lesson of Minos, which owned four.
+import { entryMonitor } from './monitoring/entry.monitor.js'
 import { logger, switchToSyncLogging } from './services/logger.service.js'
 import { closeRenderer }    from './services/chartRender/klineRender.provider.js'
 import { closeDb, getDb }   from './providers/mongodb.provider.js'
@@ -227,6 +231,7 @@ threadService.ensureThreadIndexes()
 function startBackgroundLoops() {
     startLoop('marketOpen',   marketOpenMonitor)
     startLoop('exits',        exitMonitor)
+    startLoop('entries',      entryMonitor)
     startLoop('talos',        talosService)
     startLoop('coverage',     coverageMonitorService)
     startLoop('tilt',         tiltMonitorService)
