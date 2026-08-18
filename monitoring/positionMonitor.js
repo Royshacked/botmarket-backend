@@ -202,32 +202,49 @@ async function _exitNow(idea, { leg, reason, quantity, tag }, onClose, exitCtx =
     // stays true every tick until the position is gone, so without them the monitor would re-fire
     // this on every poll. (The queue's enqueue dedupe would absorb it, but a guard here means we
     // don't ask.)
-    if (idea.orderState !== 'awaiting_market_close') {
-        const gate = await deps.deferIfClosed({
-            userId:     idea.userId,
-            asset:      idea.asset,
-            assetClass: idea.asset_class ?? null,
-            direction:  idea.direction ?? null,
-            origin: {
-                kind:     idea.kind ?? kindForDoc(idea),
-                entityId: idea.id,
-                ref:      idea.portfolioId ?? idea.callId ?? null,
-                label:    _exitLabel(reason),
-            },
-            // Everything needed to replay this exact close at the open — the leg it belongs to, the
-            // slice size (null = the whole position) and the fired-exit tag that stops it repeating.
-            action:   { type: 'exit', reason, quantity: quantity ?? null, leg: leg ?? null, tag: tag ?? null },
-            // A MONITOR's decision, not the user's: it is the mechanical consequence of a stop they
-            // already set, so the list does not offer to cancel it (you change it by moving the
-            // stop, not by dropping the row — dropping it would just re-queue on the next tick).
-            queuedBy: 'monitor',
-        })
-        if (gate.deferred) {
-            idea.orderState = 'awaiting_market_close'
-            await deps.patch(idea.id, { orderState: 'awaiting_market_close', pendingCloseReason: reason })
-            logger.info(LOG, `[${idea.id}] ${leg} close deferred — market shut, queued for the open`)
-            return
-        }
+    // ALREADY QUEUED — and this must RETURN, not fall through.
+    //
+    // THE LEAK THIS CLOSES. The check used to be an `if` wrapped AROUND the gate below, which reads
+    // as "don't queue it twice" but meant "skip the gate and go straight to the broker" — into the
+    // very venue the gate had just found shut. Cross-tick it was unreachable, because
+    // `checkPosition` returns early on this orderState; the way in was a SECOND RESIDUAL SLICE in
+    // the same tick. Slice 0 queued for the open, and slice 1 sent a live market order. A real
+    // broker rejects it, and the paper venue fills it at the last close — a price nobody traded,
+    // which is the whole reason nothing executes off-hours.
+    //
+    // The rest of the leg is not lost. At the open slice 0 executes, `orderState` clears, and the
+    // next wake re-evaluates what remains: a scale-out survives a closed market sequentially rather
+    // than all at once. Queuing every slice up front would need the queue to dedupe on `tag`
+    // instead of on the entity, which is a change to its contract and not this fix.
+    if (idea.orderState === 'awaiting_market_close') {
+        logger.info(LOG, `[${idea.id}] ${leg} close already queued for the open — the rest of the leg waits for the next wake`)
+        return
+    }
+
+    const gate = await deps.deferIfClosed({
+        userId:     idea.userId,
+        asset:      idea.asset,
+        assetClass: idea.asset_class ?? null,
+        direction:  idea.direction ?? null,
+        origin: {
+            kind:     idea.kind ?? kindForDoc(idea),
+            entityId: idea.id,
+            ref:      idea.portfolioId ?? idea.callId ?? null,
+            label:    _exitLabel(reason),
+        },
+        // Everything needed to replay this exact close at the open — the leg it belongs to, the
+        // slice size (null = the whole position) and the fired-exit tag that stops it repeating.
+        action:   { type: 'exit', reason, quantity: quantity ?? null, leg: leg ?? null, tag: tag ?? null },
+        // A MONITOR's decision, not the user's: it is the mechanical consequence of a stop they
+        // already set, so the list does not offer to cancel it (you change it by moving the
+        // stop, not by dropping the row — dropping it would just re-queue on the next tick).
+        queuedBy: 'monitor',
+    })
+    if (gate.deferred) {
+        idea.orderState = 'awaiting_market_close'
+        await deps.patch(idea.id, { orderState: 'awaiting_market_close', pendingCloseReason: reason })
+        logger.info(LOG, `[${idea.id}] ${leg} close deferred — market shut, queued for the open`)
+        return
     }
 
     await _closeAtBroker(idea, { leg, reason, quantity, tag }, links, deps)

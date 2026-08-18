@@ -139,6 +139,22 @@ test('the queued row carries everything needed to replay the exact close', async
     assert.equal(gate.origin.entityId, 'e1')
 })
 
+test('a shut venue queues ONE slice and sends NOTHING for the rest of the leg', async () => {
+    // THE LEAK. The already-queued check used to wrap the gate rather than return, so it read as
+    // "don't queue it twice" and meant "skip the gate and go straight to the broker" — into the
+    // venue the gate had just found shut. Cross-tick it was unreachable, because checkPosition
+    // returns early on that orderState; a SECOND RESIDUAL SLICE in the same tick was the way in.
+    const h = harness({ fires: [true, true], deferred: true })
+    await run(pos({
+        stopMonitorTree: residualOf({ condition: 'a', quantity: 4 }, { condition: 'b', quantity: 6 }),
+    }), h)
+
+    assert.deepEqual(h.calls.orders, [], 'nothing may reach a shut venue')
+    assert.deepEqual(h.calls.closes, [])
+    assert.equal(h.calls.gates.length, 1, 'slice 0 is queued for the open')
+    assert.equal(h.calls.patches.length, 1, 'and the park is written once, not once per slice')
+})
+
 test('an open venue passes the gate straight through to the broker', async () => {
     const h = harness({ fires: [true], deferred: false })
     await run(pos({ stop_condition_tree: TREE }), h)
