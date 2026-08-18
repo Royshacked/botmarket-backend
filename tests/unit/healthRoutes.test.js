@@ -17,13 +17,20 @@ const routesOf = router => router.stack
     .filter(l => l.route)
     .map(l => ({ path: l.route.path, methods: Object.keys(l.route.methods).filter(m => l.route.methods[m]) }))
 
-/** Minimal res double — records status + body the way the handlers actually write them. */
+/**
+ * Minimal res double, shaped like the chain the handlers actually use:
+ * status().set().type().end(). NOT .json() — see the 304 test at the bottom for why that matters.
+ */
 function mockRes() {
     const res = {
         statusCode: 200,
         body: null,
+        headers: {},
         status(code) { res.statusCode = code; return res },
-        json(payload) { res.body = payload; return res },
+        set(k, v) { res.headers[String(k).toLowerCase()] = v; return res },
+        type(t) { res.headers['content-type'] = t; return res },
+        end(raw) { res.body = raw ? JSON.parse(raw) : null; return res },
+        json(payload) { throw new Error('handlers must not use res.json() — it ETags and 304s') },
     }
     return res
 }
@@ -78,4 +85,23 @@ test('readiness answers 503 the moment shutdown begins, and asks the database no
     assert.equal(res.body.ready, false)
     assert.equal(res.body.draining, true)
     assert.equal(res.body.db, 'skipped')
+})
+
+// ── the 304 (found on the first real boot, 2026-08-18) ───────────────────────
+
+test('health responses are UNCACHEABLE — a readiness probe must never 304', async () => {
+    // The bug: res.json() makes Express compute an ETag. Liveness carries uptimeSec so its body
+    // changes every second and it rarely trips, but the readiness body is byte-identical call to
+    // call — so a browser sending If-None-Match got a 304 with NO BODY. A probe checking for
+    // exactly 200 reads that as an outage, and anything parsing the JSON gets nothing.
+    //
+    // Both halves are asserted: no-store (so nothing asks again conditionally) and the fact that
+    // the handlers write through .end() rather than .json() — the mock throws on .json(), so
+    // reaching this line at all is part of the test.
+    for (const path of ['/', '/ready']) {
+        const res = mockRes()
+        // /ready is async — awaiting matters, or the assert runs before the header is written.
+        await healthRoutes.stack.find(l => l.route?.path === path).route.stack[0].handle({}, res)
+        assert.equal(res.headers['cache-control'], 'no-store', path)
+    }
 })

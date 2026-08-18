@@ -16,6 +16,13 @@
  * COUNT rather than the roster outside development: an anonymous endpoint should not enumerate a
  * system's internals, and the count is what actually answers "did the fleet come up?".
  *
+ * NEVER CACHED, and not by choice of politeness. `res.json()` makes Express compute an ETag, and
+ * the readiness body is byte-identical call to call — so a client sending `If-None-Match` gets a
+ * 304 with NO BODY. A probe checking for exactly 200 reads that as an outage, and anything parsing
+ * the JSON gets nothing. Caching a readiness answer is backwards anyway: the whole value is that it
+ * answers NOW. Both handlers therefore write with `.end()` (which skips Express's fresh/ETag path)
+ * under `Cache-Control: no-store`.
+ *
  * Mounted BEFORE the rate limiters in server.js. A probe that runs every few seconds must never
  * consume the budget meant for users, and a limiter that 429s the health check reads to the
  * platform as an outage.
@@ -72,10 +79,18 @@ export function _resetHealthCache() {
 
 export const healthRoutes = Router()
 
+/** Write JSON without Express's ETag/304 path. See the no-cache note in the header. */
+function sendJson(res, status, payload) {
+    res.status(status)
+        .set('Cache-Control', 'no-store')
+        .type('application/json')
+        .end(JSON.stringify(payload))
+}
+
 // Liveness. No IO at all: the moment this needs a database to answer, it has stopped being a
 // liveness check and a slow dependency starts getting the process killed and restarted.
 healthRoutes.get('/', (req, res) => {
-    res.json({
+    sendJson(res, 200, {
         status:    'ok',
         uptimeSec: Math.round(process.uptime()),
         loops:     loopNames().length,
@@ -90,7 +105,7 @@ healthRoutes.get('/ready', async (req, res) => {
     const db    = draining ? 'skipped' : (await _dbOk()) ? 'up' : 'down'
     const ready = !draining && db === 'up'
 
-    res.status(ready ? 200 : 503).json({
+    sendJson(res, ready ? 200 : 503, {
         ready,
         db,
         draining,
