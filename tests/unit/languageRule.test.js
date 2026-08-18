@@ -29,7 +29,6 @@ const SERVICES = join(ROOT, 'services')
 const DESKS = [
     'analyst.agent.service.js',
     'axl.agent.service.js',
-    'kairos.agent.service.js',
     'marketBrief.service.js',
     'mentor.agent.service.js',
     'portfolio.agent.service.js',

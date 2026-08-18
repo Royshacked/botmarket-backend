@@ -11,11 +11,19 @@ SSE (agent streams) and WebSocket (social chat). Their work lands on one executi
 `idea` kind (`/api/trade-ideas`, which portfolio holdings ride) plus the per-desk kinds
 `call` and `setup`. See README.md for the full architecture and app-flow diagrams.
 
-**Kairos (`call`) is ASLEEP, not deleted.** Mentor took the trading over
-(`docs/desks/trade-pipeline.md`); the autonomous call builder returns later as a PREMIUM
-Mentor mode. Calls already in flight still run under Hermes and can still be reopened and
-edited, so the name appears in history, in lists and all over this codebase — but nothing
-new is built there. A new trade is always Mentor's.
+**Kairos (`call`) and its monitor Hermes are ARCHIVED (2026-08-18).** Mentor took the trading
+over (`docs/desks/trade-pipeline.md`); the autonomous call builder returns later as a PREMIUM
+Mentor mode. They live under `archive/` in both repos, imported by nothing and started by
+nothing — read `archive/README.md` before reviving either. A new trade is always Mentor's.
+
+The NAME still appears in three places on purpose, and none of them is drift: agent branding
+for a user's old threads and cards (`AGENTS.kairos`, the badges), the `kairos_pick` wire field
+and emit tag that Argus's hand-off still uses, and `KINDS.CALL` in the entity vocabulary —
+which describes the DATA, and a `call` document still exists in Mongo.
+
+**Minos (the legacy `idea` monitor) was DELETED**, not archived. The `idea` KIND stays and must:
+it is the execution tier every order goes through, and a portfolio holding IS an idea document
+carrying a `portfolioId` (`kindForDoc`). Deleting the kind deletes Atlas and all order placement.
 
 **THREE WORKSPACES — `live` · `paper` · `manual`** — are the book the user is standing in,
 and every one is real to them. Live is real money at a connected broker; paper is

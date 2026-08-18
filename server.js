@@ -41,14 +41,12 @@ import { attach as attachChatWs } from './api/chat/chatWs.js'
 import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
-import { ensureKairosIndexes } from './api/kairos/kairos.service.js'
 import { ensureTradeIndexes } from './services/tradeCapture.service.js'
 import { ensureExperienceIndexes } from './api/experience/experience.model.js'
 import { ensureWorkspaceIndexes } from './api/workspace/workspace.model.js'
 import { ensurePendingActionIndexes } from './services/pendingAction/pendingAction.repo.js'
 import { pendingActionRoutes } from './api/pendingAction/pendingAction.routes.js'
 import { threadService } from './services/thread.service.js'
-import { kairosRoutes } from './api/kairos/kairos.routes.js'
 import { mentorRoutes } from './api/mentor/mentor.routes.js'
 import { setupsRoutes } from './api/setups/setups.routes.js'
 import { tradeIdeasRoutes } from './api/trade-ideas/tradeIdeas.routes.js'
@@ -68,8 +66,6 @@ import { threadsRoutes }     from './api/threads/threads.routes.js'
 import { turnsRoutes }       from './api/turns/turns.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
-// import { minosService } from './monitoring/minos.monitor.service.js'   // ARCHIVED — see the start() below
-import { hermesService }    from './monitoring/hermes.monitor.service.js'
 import { talosService }     from './monitoring/talos.monitor.service.js'
 import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
 import { tiltMonitorService }     from './monitoring/tilt.monitor.service.js'
@@ -143,10 +139,13 @@ if (config.isProduction) {
     app.use(express.static(path.resolve('public')))
 }
 
-// The Idea agent (legacy `idea` kind) was archived 2026-07-29 — superseded by Kairos (`call`) and
-// Mentor (`setup`) — and DELETED 2026-08-07. It sat unmounted for ten days, so `git log` is the
-// only place it now lives; nothing here reads it. NB the `idea` KIND is not gone: /api/trade-ideas
-// still serves it, and portfolio holdings ride that plumbing.
+// ARCHIVED DESKS. The Idea agent (legacy `idea` kind) went on 2026-07-29 and was deleted
+// 2026-08-07; Kairos (`call`) and its monitor Hermes followed on 2026-08-18 and now live under
+// `archive/`, imported by nothing. Both return later — Kairos as a premium Mentor mode.
+//
+// NB the `idea` KIND is not gone and must not be: /api/trade-ideas still serves it, and every
+// portfolio holding IS one of those documents (kindForDoc — an idea WITH a portfolioId). It is
+// the execution tier, not a desk.
 // The two targeted limiters. Mounted here, ahead of the routers, because Express runs middleware
 // in mount order and a limiter registered after its route never sees the request.
 //
@@ -155,12 +154,11 @@ if (config.isProduction) {
 // endpoints that buy tokens. Limiting `/api/portfolio` wholesale would have counted its fifteen
 // ordinary reads against the same budget and throttled a user for browsing their own book.
 app.use('/api/auth', authLimiter)
-for (const desk of ['axl', 'mentor', 'kairos', 'portfolio', 'scanner', 'analyst', 'strategy']) {
+for (const desk of ['axl', 'mentor', 'portfolio', 'scanner', 'analyst', 'strategy']) {
     app.use(`/api/${desk}/stream`, agentLimiter)
 }
 app.use('/api/axl/brief/stream', agentLimiter)
 
-app.use('/api/kairos',      kairosRoutes)
 app.use('/api/mentor',      mentorRoutes)
 app.use('/api/setups',      setupsRoutes)
 app.use('/api/trade-ideas', tradeIdeasRoutes)
@@ -192,7 +190,6 @@ attachChatWs(server)
 ensureChatIndexes()
 ensureUserIndexes()
 ensureIdeaIndexes()
-ensureKairosIndexes()
 ensureTradeIndexes()
 ensureExperienceIndexes()
 ensureWorkspaceIndexes()
@@ -200,20 +197,17 @@ ensurePendingActionIndexes()
 threadService.ensureThreadIndexes()
 
 // ─── Background loops ─────────────────────────────────────────────────────────
-// SINGLE INSTANCE ONLY. These eleven loops start unconditionally, with no leader election, so a
+// SINGLE INSTANCE ONLY. These ten loops start unconditionally, with no leader election, so a
 // second process runs a second copy of every one of them. Some claim their work through Mongo and
 // are safe (Hermes/Talos via dueLoop's lease, marketOpen via claimIf, paperFill via claimOrder, the
 // brief notifier via its card dedupe); others rely on being the only process alive — above all
 // execution.reconciler's in-memory exit-order lock, which a second instance cannot even see.
 // Read docs/architecture/single-instance.md BEFORE raising an instance/replica count.
 
-// ARCHIVED 2026-07-29 — Minos watched the legacy `idea` kind, which nothing builds any more, and
-// its tick was also picking up `setup` entities that belong to Talos. Not started; re-add this
-// line to revive it (the kind filter it was missing is now in place).
-// minosService.start()
-// The deferred-order sweep used to ride inside Minos, so archiving Minos silently stranded every
-// order that parked at 'awaiting_market' overnight. It is its own loop now, kind-blind, and is not
-// tied to any agent's lifecycle. See monitoring/marketOpen.monitor.js.
+// Minos (the legacy `idea` monitor) was DELETED on 2026-08-18. The deferred-order sweep used to
+// ride inside its tick, so switching Minos off in July silently stranded every order parked at
+// 'awaiting_market' overnight; marketOpen is its own kind-blind loop now, tied to no agent's
+// lifecycle. Minos's other survivor is monitoring/preflightEntry.js.
 //
 // Each goes through `startLoop`, which starts it AND registers it for shutdown. Every one of these
 // already exported a `stop()` that nothing ever called: on SIGTERM the loops kept ticking while the
@@ -221,7 +215,6 @@ threadService.ensureThreadIndexes()
 // Registering here is what makes `stopLoops()` writable — and makes a twelfth loop one line that
 // cannot forget to be shut down. See services/lifecycle.service.js.
 startLoop('marketOpen',   marketOpenMonitor)
-startLoop('hermes',       hermesService)
 startLoop('talos',        talosService)
 startLoop('coverage',     coverageMonitorService)
 startLoop('tilt',         tiltMonitorService)

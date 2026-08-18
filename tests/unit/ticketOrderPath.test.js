@@ -4,7 +4,6 @@ import { touchLeaf, routeExits } from '../../services/protectionPlan.service.js'
 import { applyPriceLevels, ideaService } from '../../api/trade-ideas/tradeIdeas.service.js'
 import { updateTradeIdea } from '../../api/trade-ideas/tradeIdeas.controller.js'
 import { isRestingEntry, RESTING_ENTRY_TYPES } from '../../services/entity/vocabulary.js'
-import { buildIdeaFromCall } from '../../services/kairos.handoff.service.js'
 import { restingEntryPrice } from '../../api/trade-ideas/ideaExecution.service.js'
 
 // The immediate-trade ticket states its levels as PRICES — that is the whole gesture. These tests
@@ -33,17 +32,9 @@ test('the leaf is typed `touch` — the single source of truth for resting at th
     assert.equal(leaf.timeframe, null, 'a price level is intra-candle; a timeframe would imply a close')
 })
 
-test('Kairos and the ticket emit the SAME leaf — one builder, not two spellings', () => {
-    // buildIdeaFromCall used to carry its own private _touch. If that copy ever drifts back,
-    // confirmed calls and ticket trades would route differently for identical prices.
-    const idea = buildIdeaFromCall(
-        { asset: 'NQ', bias: 'long', accounts: ['a1'] },
-        { stop: 21000, take_profit: [{ price: 21800 }], size: 1 },
-        'long',
-    )
-    assert.deepEqual(idea.stop_conditions, [touchLeaf(21000)])
-    assert.deepEqual(idea.tp_conditions,   [touchLeaf(21800)])
-})
+// The Kairos half of this pairing — that buildIdeaFromCall emits the SAME leaf as the ticket,
+// rather than the private _touch copy it once carried — went to archive/tests with the desk on
+// 2026-08-18. `touchLeaf` below is still the one builder; there is simply one caller fewer.
 
 // ── applyPriceLevels: the numeric API the client actually uses ────────────────
 

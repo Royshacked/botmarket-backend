@@ -28,7 +28,9 @@ export function _sanitizeRouteSymbol(raw) {
 // `waiting` until the user re-activates it. That is the existing pencil's behaviour, not something
 // this hand-off invents — the same click, reached by sentence — but it is why the prompt has Axl
 // say so before it hands over, rather than letting a live book quietly go unmonitored.
-export const EDIT_KINDS = new Set(['call', 'setup', 'coverage', 'scan', 'portfolio'])
+// `call` left on 2026-08-18 with Kairos: an <edit> is a door into the desk that OWNS the item,
+// and that desk is archived. axlRoute.test.js fails if the prompt still teaches a kind this drops.
+export const EDIT_KINDS = new Set(['setup', 'coverage', 'scan', 'portfolio'])
 
 // The handle Axl quotes back from get_watched_items: an item id (a UUID), or — when it has none to
 // hand — a bare ticker the client can match on instead. Deliberately permissive about WHICH of the

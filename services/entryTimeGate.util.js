@@ -1,3 +1,7 @@
+// ⚠ NO LIVE CALLER as of 2026-08-18. Minos was the only consumer, and it has been deleted. The
+// header below describes the intent it was lifted out for; the off-hours path it was meant to
+// serve is handled by monitoring/marketOpen.monitor.js, which does not use this. Pure and
+// unit-tested, so it costs nothing to keep until someone decides which of the two should own it.
 /**
  * Is an entity's ENTRY gated on the clock, and if so how completely?
  *

@@ -42,7 +42,9 @@ test('every prompt path a service names resolves to a real file', () => {
 
     // If this drops to zero the regex has stopped matching and the guard is passing while blind —
     // the same "scans a directory and sees nothing" failure the desk guard was written against.
-    assert.ok(sites.length >= 14,
+    // 14 before Kairos was archived (2026-08-18); its base prompt and three mode fragments left
+    // services/ together. Lower the floor WITH a removal, never to make a red test green.
+    assert.ok(sites.length >= 10,
         `only ${sites.length} prompt call sites found — the scan stopped working`)
 
     const missing = sites

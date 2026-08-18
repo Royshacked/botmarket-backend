@@ -1,7 +1,7 @@
 import express from 'express'
 
-import { log }         from '../../middleware/logger.middleware.js'
-import { requireAuth } from '../../middleware/auth.middleware.js'
+import { log }         from '../../../middleware/logger.middleware.js'
+import { requireAuth } from '../../../middleware/auth.middleware.js'
 import { streamKairos, generateKairosCall, updateKairosCall, actOnKairosCall, listKairos, getKairos, getKairosPerformance, deleteKairos } from './kairos.controller.js'
 
 const router = express.Router()

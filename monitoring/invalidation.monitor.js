@@ -1,3 +1,11 @@
+// ⚠ NO LIVE CALLER as of 2026-08-18. `checkInvalidation` was invoked from exactly one place —
+// Minos's tick — so this has in fact been dormant since Minos was switched off on 2026-07-29;
+// deleting Minos only made that visible. It is NOT started as a loop of its own in server.js.
+//
+// Kept rather than deleted because it is a designed, tested feature (README documents it at
+// length) and reviving it is a wiring job, not a rewrite: it needs either its own entry in the
+// server.js loop roster or a call from whichever monitor should own the `idea` kind. Nothing
+// below is stale — it simply is not reached.
 /**
  * Invalidation monitor — deterministic entry-range watcher with an approach guard.
  *

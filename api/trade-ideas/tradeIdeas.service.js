@@ -2,7 +2,7 @@ import { randomUUID }       from 'crypto'
 import { LIVE_POSITION, STATUS, statusesFor, isRestingEntry } from '../../services/entity/vocabulary.js'
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
-import { minosService }     from '../../monitoring/minos.monitor.service.js'
+import { preflightEntry }   from '../../monitoring/preflightEntry.js'
 import { brokerService }   from '../broker/broker.service.js'
 import { buildOrderPlanForIdea, resolveUserAccounts } from '../../services/orderPlan.service.js'
 import { routeExits, detectNativeEntryLevel, touchLeaf } from '../../services/protectionPlan.service.js'
@@ -485,7 +485,6 @@ async function updateIdea(id, rawPatch, userId) {
         patch.monitorPhase     = 'entry'
         patch.entryTriggeredAt = null
         patch.activatedAt      = Date.now()
-        minosService.resetIdea(id)
     }
 
     if (patch.status === 'hit') {
@@ -537,7 +536,6 @@ async function updateIdea(id, rawPatch, userId) {
                 patch.stopMonitorTree = route.stop.monitorTree
                 patch.tpMonitorTree   = route.tp.monitorTree
                 patch.firedExits      = []
-                minosService.resetIdea(id)
             }
         }
 
@@ -546,7 +544,6 @@ async function updateIdea(id, rawPatch, userId) {
             patch.orderState      = null
             patch.brokerOrders    = null
             patch.restingPlacedAt = null
-            minosService.resetIdea(id)
         }
 
         if (existing.status === 'hit' && patch.status === 'waiting') {
@@ -558,7 +555,6 @@ async function updateIdea(id, rawPatch, userId) {
                 patch.triggeredWhileWaiting = false
                 patch.triggerEventAt        = null
             }
-            minosService.resetIdea(id)
         }
 
         // "Reset" from the arm-time pre-flight prompt: keep the idea 'looking' but
@@ -566,7 +562,6 @@ async function updateIdea(id, rawPatch, userId) {
         // ignored and only a fresh cross from here on fires.
         if (patch.resetPreEntry) {
             patch.entryFloorAt = Date.now()
-            minosService.resetIdea(id)
         }
         delete patch.resetPreEntry
 
@@ -586,7 +581,6 @@ async function updateIdea(id, rawPatch, userId) {
                 patch.pendingOrder = { plan, builtAt: Date.now() }
                 patch.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
             }
-            minosService.resetIdea(id)
         }
 
         // Ownership guard: you may only patch your own idea (legacy ownerless ideas pass an
@@ -603,7 +597,7 @@ async function updateIdea(id, rawPatch, userId) {
         // blocks or fails the update.
         let preEntry
         if (patch.status === 'looking') {
-            preEntry = await minosService.preflightEntry(result)
+            preEntry = await preflightEntry(result)
         }
 
         return { ok: true, idea: stripId(result), ...(preEntry && { preEntry }) }

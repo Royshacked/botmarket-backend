@@ -98,7 +98,7 @@ export function _splitRoute(raw) {
 // kind → desk lives here beside the parse because it IS part of the grammar: the client is told
 // which desk so the pipeline crumb reads the same as any other arrival. Note the trade desk ENTERS
 // at Argus but a call EDITS in Kairos — the client resolves that, since the item picks the tab.
-export const EDIT_KIND_DESKS = { call: 'trade', setup: 'assist', coverage: 'research', scan: 'scan', portfolio: 'portfolio' }
+export const EDIT_KIND_DESKS = { setup: 'assist', coverage: 'research', scan: 'scan', portfolio: 'portfolio' }
 
 // `<edit>coverage 3f9c…</edit>` → { kind, ref, desk }, or null when there is nothing openable.
 // BOTH halves or nothing: a kind with no handle names no item, a handle with no kind names no list

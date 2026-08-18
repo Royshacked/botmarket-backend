@@ -3,7 +3,7 @@ import { parseEmitBlock, mergeDraft, runAgentStream } from '../agentIO.js'
 import { dirname, join } from 'path'
 import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
-import { KAIROS_TOOLS, buildKairosToolHandlers } from '../tools/kairos.tools.js'
+import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
 import { buildVenueSection } from '../tools/tradingContext.tools.js'
@@ -18,9 +18,11 @@ import { logger } from '../logger.service.js'
 // has no phases, so there is no phase capture — its invariants are not steps
 // (docs/desks/mentor-talos.md). The user always brings the ticker, so there is no scan hand-off.
 //
-// Tools are borrowed WHOLE from Kairos (docs/desks/mentor-talos.md — share the pipe). Deliberately
-// un-subsetted: Kairos picks one lens per build, but Mentor's lens is per-SETUP and it must be
-// able to weigh a classical candidate against an SMC one inside a single conversation.
+// The tool kit is Mentor's own — services/tools/trading.tools.js, which carried Kairos's name until
+// that desk was archived (2026-08-18) and is now named for its only live consumer. Taken WHOLE and
+// deliberately un-subsetted: subsetting by lens suits a desk that picks one lens per build, but
+// Mentor's lens is per-SETUP and it must weigh a classical candidate against an SMC one in a
+// single conversation.
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const PROMPT_PATH = join(__dirname, '../../prompts/mentor_system_prompt.md')
@@ -33,7 +35,7 @@ const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 export const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
 
 // Kairos's kit plus the reasoning sidecar, APPENDED so the shared array is the exact prefix of
-// this one — the tools cache breakpoint sits inside KAIROS_TOOLS, and inserting anywhere before it
+// this one — the tools cache breakpoint sits inside TRADING_TOOLS, and inserting anywhere before it
 // would re-write that cache on every Mentor turn.
 //
 // The sidecar now runs at every conversational desk. Mentor was the trial, and the shape it proved
@@ -46,7 +48,7 @@ export const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
 // has a description too permissive and wants tightening; one that never consults is paying a tool
 // declaration for nothing.
 export const MENTOR_TOOLS = [
-    ...KAIROS_TOOLS,
+    ...TRADING_TOOLS,
     ...toolsFor({
         consult: consultDescription(`Reach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs the entry; and **placing a zone where the structure is ambiguous** — a level that is both a prior high and a supply shelf, say.`),
     }),
@@ -71,7 +73,7 @@ async function chatStream({
     // `consult` is deliberately absent: runAgentStream builds it from the tool declaration, which is
     // also the only place that holds `onReasoning` — wiring it here would swallow the sidecar's
     // thinking silently. See the MENTOR_TOOLS note above.
-    const toolHandlers = buildKairosToolHandlers(onChart, userId)
+    const toolHandlers = buildTradingToolHandlers(onChart, userId)
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, audience, seed)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than

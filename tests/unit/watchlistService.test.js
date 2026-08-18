@@ -2,23 +2,25 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { listWatchedItems, DEFAULT_KINDS } from '../../services/watchlist.service.js'
 
-// "What am I watching?" across five kinds in one read.
+// "What am I watching?" across four kinds in one read.
 //
-// The behaviours worth pinning are all about being HONEST at the edges: a finished call isn't
+// The behaviours worth pinning are all about being HONEST at the edges: a finished setup isn't
 // being watched, a retired agent's leftovers aren't either, one desk failing must not silently
 // shrink the answer, and enumerating books must not quietly fire a broker round-trip per book.
+//
+// `call` was the fifth and was the exemplar throughout this file; Kairos was archived on
+// 2026-08-18 and the kind went with it. The exemplar is now `setup`, which exercises exactly the
+// same paths — every behaviour above is kind-blind, which is the point of listWatchedItems.
 
 const NOW = 1_700_000_000_000
 
-const call = (over = {}) => ({ id: 'c1', asset: 'NVDA', bias: 'long', status: 'looking', savedAt: 5, ...over })
-const setup = (over = {}) => ({ id: 's1', asset: 'SPY', direction: 'long', status: 'waiting', savedAt: 4, ...over })
+const setup = (over = {}) => ({ id: 's1', asset: 'NVDA', direction: 'long', status: 'looking', savedAt: 4, ...over })
 const book = (over = {}) => ({ portfolioId: 'p1', name: 'Growth', holdings: 2, savedAt: 3, statuses: { long: 2 }, symbols: ['MSFT'], ...over })
 const cov = (over = {}) => ({ id: 'cov1', symbol: 'AVGO', status: 'active', updated_at: '2026-07-20T00:00:00Z', ...over })
 const scan = (over = {}) => ({ id: 'sc1', thesis: 'laggards', period: { label: 'Aug' }, savedAt: 1, candidates: [], ...over })
 
 const deps = (over = {}) => ({
     now: NOW,
-    calls: async () => [call()],
     setups: async () => [setup()],
     portfolios: async () => [book()],
     coverage: async () => [cov()],
@@ -26,10 +28,10 @@ const deps = (over = {}) => ({
     ...over,
 })
 
-test('one read answers across all five kinds', async () => {
+test('one read answers across all four kinds', async () => {
     const res = await listWatchedItems('u1', {}, deps())
-    assert.deepEqual(res.counts, { call: 1, setup: 1, portfolio: 1, coverage: 1, scan: 1 })
-    assert.equal(res.items.length, 5)
+    assert.deepEqual(res.counts, { setup: 1, portfolio: 1, coverage: 1, scan: 1 })
+    assert.equal(res.items.length, 4)
     assert.equal(res.asOf, NOW)
 })
 
@@ -37,19 +39,22 @@ test('the default kinds exclude the retired Idea agent’s leftovers', async () 
     // getIdeas returns holdings AND loose legacy ideas. Reporting one would have Axl offer to route
     // the user to a chat that no longer exists.
     assert.ok(!DEFAULT_KINDS.includes('idea'))
-    assert.deepEqual(DEFAULT_KINDS, ['call', 'setup', 'portfolio', 'coverage', 'scan'])
+    // And `call` left for the same reason on 2026-08-18: Kairos is archived, so a listed call
+    // would offer the user a door into a desk that is not there.
+    assert.ok(!DEFAULT_KINDS.includes('call'))
+    assert.deepEqual(DEFAULT_KINDS, ['setup', 'portfolio', 'coverage', 'scan'])
 })
 
 test('finished items are history, not something being watched', async () => {
-    const res = await listWatchedItems('u1', {}, deps({ calls: async () => [call(), call({ id: 'c2', status: 'closed' })] }))
-    assert.equal(res.counts.call, 1)
-    assert.ok(!res.items.some(i => i.id === 'c2'))
+    const res = await listWatchedItems('u1', {}, deps({ setups: async () => [setup(), setup({ id: 's2', status: 'closed' })] }))
+    assert.equal(res.counts.setup, 1)
+    assert.ok(!res.items.some(i => i.id === 's2'))
 })
 
 test('...unless the user actually asked for them', async () => {
     const res = await listWatchedItems('u1', { includeFinished: true },
-        deps({ calls: async () => [call(), call({ id: 'c2', status: 'closed' })] }))
-    assert.equal(res.counts.call, 2)
+        deps({ setups: async () => [setup(), setup({ id: 's2', status: 'closed' })] }))
+    assert.equal(res.counts.setup, 2)
 })
 
 test('kinds with no status of their own are never filtered out as terminal', async () => {
@@ -59,20 +64,20 @@ test('kinds with no status of their own are never filtered out as terminal', asy
 })
 
 test('a failed source is NAMED, never reported as nothing', async () => {
-    // The whole point of threading onError:'throw' down to the crud. "You have no calls" and
-    // "I couldn't read your calls" are different answers to the user.
-    const res = await listWatchedItems('u1', {}, deps({ calls: async () => { throw new Error('mongo down') } }))
-    assert.deepEqual(res.unavailable, ['call'])
-    assert.equal(res.counts.call, undefined)
-    assert.equal(res.items.length, 4, 'the other four desks still answer')
+    // The whole point of threading onError:'throw' down to the crud. "You have no setups" and
+    // "I couldn't read your setups" are different answers to the user.
+    const res = await listWatchedItems('u1', {}, deps({ setups: async () => { throw new Error('mongo down') } }))
+    assert.deepEqual(res.unavailable, ['setup'])
+    assert.equal(res.counts.setup, undefined)
+    assert.equal(res.items.length, 3, 'the other three desks still answer')
 })
 
 test('narrowing by kind reads only those sources', async () => {
     let touched = 0
-    const res = await listWatchedItems('u1', { kinds: ['call'] },
+    const res = await listWatchedItems('u1', { kinds: ['setup'] },
         deps({ scans: async () => { touched++; return [] } }))
     assert.equal(touched, 0)
-    assert.deepEqual(Object.keys(res.counts), ['call'])
+    assert.deepEqual(Object.keys(res.counts), ['setup'])
 })
 
 test('narrowing by symbol drops rows on other names', async () => {

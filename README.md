@@ -15,9 +15,11 @@ unified adapter layer. Each desk owns a kind; each kind is watched by its own mo
 | **Prometheus** — buy-side research | `/api/analyst` | `coverage` | coverage monitor |
 | **Pythia** — top-down strategy | `/api/strategy` | `tilt` (the house view — a **broadcast**, not per-user) | tilt monitor |
 
-**Kairos (`call`, watched by Hermes) is asleep** — `/api/kairos` is still mounted and calls in
-flight still run and still reopen for edit, but Mentor took the trading over and nothing new is
-authored there (`docs/desks/trade-pipeline.md`). It returns later as a premium Mentor mode.
+**Kairos (`call`) and Hermes are ARCHIVED** (2026-08-18) — `/api/kairos` is unmounted, Hermes is
+not started, and both live under [`archive/`](archive/README.md), imported by nothing. Mentor took
+the trading over (`docs/desks/trade-pipeline.md`); Kairos returns later as a premium Mentor mode.
+**Minos**, the legacy `idea` monitor, was deleted outright — but the `idea` KIND stays, because it
+is the execution tier every order rides.
 
 Their work lands on **one execution tier**: the `idea` kind served by `/api/trade-ideas`, which
 portfolio holdings ride, plus the per-desk kinds (`call`, `setup`) that their own monitors watch.
@@ -83,7 +85,7 @@ npm test             # node --test tests/unit/*.test.js
 ```
 
 On boot `server.js` ensures the Mongo indexes and starts **eleven background loops**: the
-market-open sweep, four assessment monitors (Hermes / Talos / coverage / tilt), Themis, the execution
+market-open sweep, three assessment monitors (Talos / coverage / tilt), Themis, the execution
 reconciler, the three paper engines (fill / mark / equity) and the market-brief notifier. Each goes
 through `startLoop` (`services/lifecycle.service.js`), which registers it so shutdown can stop it —
 a service without a `stop()` is refused and never runs.
@@ -97,7 +99,7 @@ Those eleven loops are stopped in order on SIGTERM (see *Shutdown* in CODE_MAP.m
 with **no leader election**, and a handful of module-level
 `Map`s are load-bearing rather than caches — above all the exit-order lock in `execution.reconciler`
 and the WebSocket registry in `chatWs`, which a second instance cannot even see. Some loops claim
-their work through Mongo and are safe (Hermes/Talos via dueLoop's lease, marketOpen via `claimIf`,
+their work through Mongo and are safe (Talos via dueLoop's lease, marketOpen via `claimIf`,
 paperFill via `claimOrder`, the brief notifier via its card dedupe); the rest rely on being the only
 process alive. **A second instance corrupts the first and breaks the second, mostly in silence.**
 Read [docs/architecture/single-instance.md](docs/architecture/single-instance.md) — what is already
@@ -118,8 +120,6 @@ api/                   HTTP surface — one folder per feature (routes + control
                        the desk's first message, `<suggest>` offers follow-up chips. Also delivers
                        the daily market brief (POST /api/axl/brief/stream — streamed into the Axl
                        chat panel, never posted into the social chat)
-  kairos/              Kairos chat + the `call` kind (monitored by Hermes). ASLEEP for new work —
-                       serves calls in flight and their edits; Mentor is the trading desk
   workspace/           which book the user is standing in — GET/PUT /api/workspace
   mentor/ setups/      Mentor chat + the `setup` kind (monitored by Talos)
   analyst/             Prometheus chat + the `coverage` research artifact (initiate/revise/retire)
@@ -144,8 +144,8 @@ api/                   HTTP surface — one folder per feature (routes + control
   chat/                user-to-user (social) messaging + bot notifications (WS)
   market/ calendar/ user/ authentication/ transcribe/
 services/              business logic + the desks. No Express here.
-  agents/              the 7 LLM desks — analyst · axl · kairos · mentor · portfolio · scanner ·
-                       strategy (kairos asleep). Their prompts live in `prompts/` (see below).
+  agents/              the 6 LLM desks — analyst · axl · mentor · portfolio · scanner · strategy
+                       (kairos archived). Their prompts live in `prompts/` (see below).
                        Six append LANGUAGE_RULE + VENUE_RULE to their base prompt; `strategy` does
                        not — a broadcast has no user whose venue could be read
   tools/               the 12 agent-facing tool modules (*.tools.js) — handlers + LLM-ready
@@ -156,8 +156,8 @@ services/              business logic + the desks. No Express here.
                        originRegistry (execute + cancel per origin) · pendingWork.listWaiting
   chartRender/         KLineCharts headless render (Playwright) — the own-chart vision path
   config.js            THE configuration surface (see above)
-prompts/               every prompt loaded at RUNTIME, in one place — the 7 desk prompts, Kairos's
-                       3 modes, Argus's investing profile + handoff mode, the market brief and
+prompts/               every prompt loaded at RUNTIME, in one place — the 6 desk prompts,
+                       Argus's investing profile + handoff mode, the market brief and
                        concepts.md. Hot-reloaded (mtime-gated) by `makePromptLoader`, so editing
                        one takes effect without a restart. Loading is LAZY: a wrong path is an
                        ENOENT on a live turn, not an import error — `tests/unit/promptPaths.test.js`
@@ -168,7 +168,7 @@ middleware/            requireAuth · request log · securityHeaders (hand-rolle
 providers/             external clients (LLMs, market data, brokers, Mongo) — the only layer that
                        talks to the outside world
 monitoring/            one monitor per kind + the shared execution layer
-                       hermes (call) · talos (setup) · themis (portfolio) · coverage (analyst) ·
+                       talos (setup) · themis (portfolio) · coverage (analyst) ·
                        tilt (strategy)
                        marketOpen — kind-blind: the ONE drain for everything parked while shut
                        execution.reconciler — broker-authoritative fill/close → entity status
@@ -208,7 +208,6 @@ AXL  —  POST /api/axl/stream
         ▼
   setup → Mentor (the trading desk) · coverage → Prometheus
   scan → Argus · portfolio → Atlas (edit or review — the BOOK decides, never the caller)
-  call → Kairos, on an <edit> ONLY — asleep for new work
 ```
 
 Risk, horizon, constraints and benchmark are the **receiving desk's** first phase, not reception's —
@@ -221,7 +220,7 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │    AUTHORING  —  Mentor (setup) · Atlas (book)                   │
-│  POST /api/kairos/stream · /api/mentor/stream · /api/portfolio/  │
+│  POST /api/mentor/stream · /api/portfolio/stream                 │
 │                                                                  │
 │  The kinds differ; everything downstream of the save is shared,  │
 │  which is why adding one needs a payload, an evaluator, a prompt │
@@ -695,10 +694,6 @@ GET  /equity-curve   equity points (?fromMs=)
 - **Workspace** `/api/workspace` — `GET` and `PUT { workspace }` → `{ workspace, stored }`. Which of
   the three books the user is standing in. Its own surface rather than a field on `/api/paper/state`,
   because a workspace is not a paper concept and `manual` is the one with no paper account behind it.
-- **Kairos** `/api/kairos` — ASLEEP for new work (Mentor is the trading desk); still serves calls in
-  flight. The `call` kind: list/get/delete, `POST /` (Generate → persist a draft),
-  `POST /stream` (build conversation), `PUT /:id` (edit in place), `POST /:id/action`
-  (confirm │ edit │ dismiss │ manage a card), `GET /performance` (closed-call track record).
 - **Mentor / setups** `/api/mentor/stream` + `/api/setups` — the `setup` kind (price zones are
   RIVAL scenarios, never legs; quantity is never summed across them).
 - **Analyst** `/api/analyst` — `POST /stream` + coverage CRUD; `POST /coverage/:id/retire` archives,
@@ -736,7 +731,6 @@ GET  /equity-curve   equity points (?fromMs=)
                              ▼               ▼
                           Talos         Themis (review cadence)
                              │               │
-                (Hermes still runs the calls Kairos built before it slept)
                              │               │
                              └──────┬────────┘
                                     ▼

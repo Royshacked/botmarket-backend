@@ -64,15 +64,17 @@ test('sanitize: junk the model may have attached → null (the desk opens empty)
 
 test('split edit: kind + handle, and the desk that owns the kind', () => {
     assert.deepEqual(_splitEdit('coverage 3f9c1a2b'), { kind: 'coverage', ref: '3f9c1a2b', desk: 'research' })
-    assert.deepEqual(_splitEdit('call c1'),  { kind: 'call',  ref: 'c1', desk: 'trade' })
     assert.deepEqual(_splitEdit('setup s1'), { kind: 'setup', ref: 's1', desk: 'assist' })
+    // `call` was here too until Kairos was archived (2026-08-18). A kind with no desk now
+    // splits to null, which is the same guard as any other unroutable kind two tests below.
+    assert.equal(_splitEdit('call c1'), null, 'an archived desk owns nothing')
     assert.deepEqual(_splitEdit('scan sc1'), { kind: 'scan',  ref: 'sc1', desk: 'scan' })
     assert.deepEqual(_splitEdit('portfolio p1'), { kind: 'portfolio', ref: 'p1', desk: 'portfolio' })
 })
 
 test('split edit: tolerant separators + a capitalized kind, and a UUID survives its dashes', () => {
     assert.deepEqual(_splitEdit('Coverage:3f9c'), { kind: 'coverage', ref: '3f9c', desk: 'research' })
-    assert.deepEqual(_splitEdit(' call , 1b4d-9f2c-aa01 '), { kind: 'call', ref: '1b4d-9f2c-aa01', desk: 'trade' })
+    assert.deepEqual(_splitEdit(' setup , 1b4d-9f2c-aa01 '), { kind: 'setup', ref: '1b4d-9f2c-aa01', desk: 'assist' })
 })
 
 test('split edit: half a tag opens nothing — better a plain reply than the wrong desk', () => {
@@ -146,19 +148,17 @@ test('every edit kind the prompt teaches is one the app can actually open', () =
     }
 })
 
-// Kairos is ASLEEP, not deleted (docs/desks/trade-pipeline.md): Mentor took the trading over, and
-// the autonomous call builder comes back later as a premium mode. The failure this catches is the
-// one the user actually hit — Axl still introducing Kairos as a desk you can go to, so someone asks
-// for a call and lands nowhere. The prompt has to say BOTH halves: no new work there, and the one
-// thing that still opens it (an edit on a call already in flight).
-test('the prompt puts Kairos to sleep and names Mentor as the trader', () => {
+// Kairos is ARCHIVED as of 2026-08-18 (archive/README.md) — it was asleep-but-editable before
+// that, and the edit door is now shut too. The failure this catches is the one the user actually
+// hit: Axl still introducing Kairos as a desk you can go to, so someone asks for a call and lands
+// nowhere. Now there is no landing at all, so the prompt must not offer the door either.
+test('the prompt archives Kairos outright and names Mentor as the trader', () => {
     const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md')
     const prompt = readFileSync(promptPath, 'utf8')
 
-    assert.match(prompt, /Kairos\*\*[^.]*is\s+\*\*asleep\*\*/, 'the state is stated outright')
-    assert.match(prompt, /premium/i, 'and why it is asleep rather than gone')
-    assert.match(prompt, /never\s+route\s+anyone\s+there\s+for\s+a\s+new\s+trade/,
-        'the rule, not just the fact')
+    assert.match(prompt, /Kairos\*\*[^.]*is\s+\*\*archived\*\*/, 'the state is stated outright')
+    assert.match(prompt, /premium/i, 'and why it is archived rather than deleted')
+    assert.match(prompt, /[Nn]ever\s+route\s+anyone\s+there/, 'the rule, not just the fact')
     assert.match(prompt, /A\s+new\s+trade\s+is\s+Mentor's,\s+always/, 'and who took it over')
 
     // The roster is what Axl describes when asked "who works here" — Kairos must not be a bullet in
@@ -167,8 +167,9 @@ test('the prompt puts Kairos to sleep and names Mentor as the trader', () => {
     assert.doesNotMatch(roster, /- \*\*Kairos\*\*/, 'a sleeping desk is not a bullet on the roster')
     assert.match(roster, /- \*\*Mentor\*\* — the trader/, 'Mentor leads it instead')
 
-    // ...but the edit door stays open: live calls are still Hermes's and still editable.
-    assert.match(prompt, /<edit>call ID<\/edit>/, 'an existing call can still be reopened')
+    // ...and the edit door is shut with it. Offering `<edit>call` now emits a tag the gate drops
+    // (EDIT_KINDS), so Axl would promise to open something and then silently do nothing.
+    assert.doesNotMatch(prompt, /<edit>call ID<\/edit>/, 'the edit door closed with the desk')
 })
 
 // Reception's whole job is WHERE, and the sentence that travels with them. The rules this replaces
@@ -295,12 +296,12 @@ test('turn: an opening with no route has nowhere to land', async () => {
 })
 
 test('turn: an EDIT never carries an opening — it resumes a conversation that exists', async () => {
-    // Reopening a call restores the chat that built it. An opening turn there talks over the page.
+    // Reopening a setup restores the chat that built it. An opening turn there talks over the page.
     const result = await axlAgentService.chatStream({
-        messages: [{ role: 'user', content: 'change the entry on my TSLA call' }],
-        _run: runWith('Opening it in Kairos. <edit>call c1</edit><open>I want to move the entry.</open>'),
+        messages: [{ role: 'user', content: 'change the entry on my TSLA setup' }],
+        _run: runWith('Opening it in Mentor. <edit>setup s1</edit><open>I want to move the entry.</open>'),
     })
-    assert.equal(result.edit?.kind, 'call')
+    assert.equal(result.edit?.kind, 'setup')
     assert.equal(result.opening, null)
 })
 

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import {
     isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap, gradedGap,
 } from '../../monitoring/readinessGates.js'
-import * as hermes from '../../monitoring/hermes.monitor.service.js'
 import * as talos from '../../monitoring/talos.monitor.service.js'
 
 // The chores both readiness monitors do before they can think. Each one used to exist twice, and
@@ -94,29 +93,27 @@ test('the gap is monotonic — approaching price never polls lazier', () => {
 // Where the two monitors genuinely disagree the difference is a PARAMETER, not a second copy.
 // These assert it stays a deliberate choice rather than being "tidied" into a single answer.
 
-test('the two monitors fall back to OPPOSITE ends when no next check is named', () => {
-    // A call goes lazy (don't burn quota re-reading a quiet name); a setup goes eager (its band is
-    // already horizon-scaled, so the floor is cheap).
-    const call  = { cadence: { min_gap_min: 1, max_gap_min: 60 } }
-    const lazy  = hermes._computeNextCheckAt(T, undefined, call.cadence)
-    assert.equal(lazy, new Date(T + 60 * 60_000).toISOString(), 'call → ceiling')
-
+// Each test below used to PAIR its assertion with Hermes's opposite one — that contrast was the
+// point of the section. Hermes was archived on 2026-08-18 and took its half with it (the paired
+// versions are in archive/tests/hermesMonitor.test.js). What is kept is the live monitor's
+// behaviour, which is what a regression would actually break.
+test('a setup with no next check named falls back to the EAGER end', () => {
+    // Its band is already horizon-scaled, so the floor is cheap. (Hermes went the other way, to
+    // the ceiling, so as not to burn quota re-reading a quiet name.)
     const setup = { cadence: { min: 30, max: 240 } }
     const eager = talos._nextCheckAt(setup, T, undefined)
     assert.equal(eager, new Date(T + 30 * 60_000).toISOString(), 'setup → floor')
 })
 
-test('only the call spares `edit` from the past-expiry cutoff', () => {
-    // A call's edit latches its invalidation axis and so cannot re-fire. Talos latches only on the
-    // branch that fires the card, so sparing edit there would reopen the forever-loop.
-    assert.equal(hermes._effectiveVerdict('edit', 'expiry_review', true), 'edit')
+test('Talos does NOT spare `edit` from the past-expiry cutoff', () => {
+    // Talos latches only on the branch that fires the card, so sparing edit here would reopen the
+    // forever-loop. (A call could be spared because its edit latches the invalidation axis.)
     assert.equal(talos._effectiveVerdict('edit', 'expiry_review', true), 'let_expire')
 })
 
-test('the two monitors disagree about whether a zero-width zone is a zone', () => {
+test('a zero-width zone IS a zone to Talos', () => {
     // A setup zone may legally be an exact level the user named, so Talos measures distance to it.
-    // A call with only a zero-width band reports no usable distance and falls to the lazy cadence.
+    // (Hermes read the same shape as no usable band and fell to its lazy cadence.)
     const zone = [{ id: 'z', lower: 100, upper: 100 }]
-    assert.equal(hermes._nearestZoneDistance({ entry_zones: zone }, 105), null, 'call: not a band')
     assert.ok(Number.isFinite(talos.zoneDistance(zone, 105)), 'setup: an exact level, measurable')
 })

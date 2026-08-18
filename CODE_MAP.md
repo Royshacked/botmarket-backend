@@ -101,11 +101,11 @@ api/
                               kind (the HTTP twin of services/entity/entityCrud); `envelope` carries
                               the legacy `{idea}/{ideas}` body shape, everything else answers bare
 services/
-  agents/                 the 7 LLM desks (analyst · axl · kairos · mentor · portfolio · scanner ·
-                          strategy). KAIROS IS ASLEEP — Mentor took the trading over; the module
-                          stays because calls in flight still run and still reopen for edit, but
-                          nothing new is authored there (docs/desks/trade-pipeline.md).
-                          Six of the seven append LANGUAGE_RULE + VENUE_RULE to their base prompt;
+  agents/                 the 6 LLM desks (analyst · axl · mentor · portfolio · scanner ·
+                          strategy). KAIROS IS ARCHIVED (2026-08-18) — Mentor took the trading
+                          over and the desk moved to archive/, imported by nothing
+                          (docs/desks/trade-pipeline.md, archive/README.md).
+                          Five of the six append LANGUAGE_RULE + VENUE_RULE to their base prompt;
                           `strategy` (and marketBrief) do not — a broadcast has no user whose venue
                           could be read. Moved out of the flat services/ root 2026-08-07 — they are a
                           distinct KIND of module (a desk, not a service), and they were the
@@ -348,46 +348,17 @@ providers/
   ibkr.provider.js (retired) / ibkr.gateway.provider.js
   mongodb.provider.js       getDb(), stripId/stripIds
 monitoring/
-  minos.monitor.service.js  the `idea` condition-tree loop. Its POLL is not started (see server.js)
-                            — but the module is NOT dead, and deleting it breaks the arm path:
-                            tradeIdeas.service calls resetIdea (6 sites — the arm/re-arm floor) and
-                            preflightEntry (the arm-time already-satisfied check behind the Buy now
-                            / Edit / Reset prompt). A helper with a dormant loop, not a tombstone
-  monitor.orchestrator.js   evaluateTree / evaluateConditions → _evalOne (opts: stateLevel, requireHeld)
-  evaluators/               touch · structured · indicator · time · volume · news · chart
-  execution.reconciler.js   broker-authoritative fill/close → idea status
-  invalidation.monitor.js   entry-range watcher (advisory, never executes)
-  marketOpen.monitor.js     the market-open sweep — the ONE drain for everything parked while a
-                            venue was shut. KIND-BLIND by design: three paths park orders at
-                            `awaiting_market` (_attachImmediatePlan for the ticket AND a portfolio
-                            add, triggerEntryNow, Talos on a setup), so a sweep that understands one
-                            kind is the bug. TWO SOURCES since 2026-08-07: entities at
-                            awaiting_market (claimIf → awaiting_confirm) AND queued actions
-                            (pending_actions, transition from QUEUED — both guards are what make it
-                            exactly-once). Then ONE `queue_ready` card per USER, from Axl, pointing
-                            at the queued list — replacing the per-desk per-kind fan-out, which
-                            posted two cards in the same second for one open. Places nothing.
-                            It is its OWN loop for a reason: it used to ride inside minos.monitor,
-                            so switching that loop off stranded every deferred order in the app.
-                            A sweep tied to one desk's lifecycle dies with that desk
-  hermes.monitor.service.js Hermes — the Kairos-call readiness loop (own tick, `kairos_calls`). THREE-TIER
-                            out-of-zone cascade (all cheapest-first): (1) arithmetic zone gate; (1.5) proximity
-                            polling (_proximityGapMin: poll faster the nearer price is to a zone) + a momentum-
-                            pulse filter (_shouldPulse: a material, throttled move AWAY from every zone —
-                            pulse_anchor_px/last_pulse_at) → (2) one full visual read that can RE-MAP via
-                            edit/edit_proposal (closes the "blind outside mapped zones" gap). In-zone/expiry →
-                            the LLM assessment → verdict. Runs under hermesModel + hermesReasoning prefs;
-                            card hook (_defaultOnCard) posts entry_confirm / call_expiry via tradeNotify
-                            (enter→ready, edit→expiring, let_expire→expired). At a STOP-out (_isStopOut, not
-                            tp/manual) _maybeOfferReentry runs a one-shot thesis check → intact fires a
-                            call_reentry card ([Re-enter]=reviveCall → waiting / [Close]=declineReentry)
-  hermes.assess.js          the four-axis assessment (readiness + position mgmt) + the momentum-pulse and
-                            re-entry reads. Fact-sources every axis: live chart+candles, company news
-                            (newsService 1h cache), frozen event_risk, a LIVE broad-market read gated by the
-                            call's market_sensitivity (getQuotes SPY/QQQ/VIX + drivers), and a SESSION-OF-DAY
-                            phase (market.service sessionPhase, asset-class-aware; crypto/FX=24h) weighted as a
-                            lens. A tentative ENTER on a market-sensitive call gets a web_search browse-confirm
-                            2nd pass (downgrades enter→wait, fail-open)
+  preflightEntry.js         the arm-time "is the entry level ALREADY held?" check. Two evaluations
+                            of the same tree — a STATE read and an EDGE read — because the monitor
+                            fires on a rising edge, so a breakout that happened before the arm can
+                            never fire and the entity sits at `looking` forever. Lifted out of
+                            minos.monitor.service.js when Minos was DELETED (2026-08-18); its other
+                            export, resetIdea, only cleared Minos's own Map and went with it.
+                            Best-effort: every failure path returns not-satisfied so the arm still
+                            proceeds. NB the `idea` KIND is untouched — it is the execution tier.
+  (hermes.monitor.service.js and hermes.assess.js moved to archive/monitoring/ on 2026-08-18
+   with the Kairos desk they served — see archive/README.md. Their two shared helpers,
+   _allText and _formatEventRisk, stayed behind in assess.shared.js because Talos imports them.)
   talos.monitor.service.js  Talos — the Mentor-setup loop (own tick, kind:'setup'). TWO BRAINS, ONE LOOP:
                             pre-entry readiness, past-entry management (_managePosition). Pre-entry
                             cascade, cheapest-first: (1) the arithmetic SCENARIO gate — which PREMISE
@@ -438,7 +409,7 @@ tests/
   unit/                     node:test unit tests — run by `npm test`
   test.*.js                 MANUAL harnesses (hit live broker/DB) — NOT run by npm test
 scripts/                    free-port, migrations, seeds
-prompts/                    every prompt loaded at RUNTIME (7 desks + Kairos's 3 modes + Argus's
+prompts/                    every prompt loaded at RUNTIME (6 desks + Argus's
                             profile/handoff + market brief + concepts). Hot-reloaded, lazily —
                             so a bad path is an ENOENT on a live turn, not an import error.
                             tests/unit/promptPaths.test.js guards both directions (a path that

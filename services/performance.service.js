@@ -1,17 +1,17 @@
 /**
- * "How have I actually done?" — the closed-trade record, from the two places that keep one.
+ * "How have I actually done?" — the closed-trade record.
  *
  *   • realized — the `trades` collection, the canonical analytics store (frozen at fill,
  *     pnl = exit.realizedPnl). Covers every mode and origin.
- *   • calls    — Kairos's own R-multiple record, which `trades` cannot reproduce because R is a
- *     property of the CALL's plan, not of the fill.
  *
- * Both are reported; neither is merged into the other. They answer different questions (money vs
- * how well the plan's own risk was paid) and averaging them would produce a number with no meaning.
+ * A second source used to sit beside it: Kairos's own R-multiple record, which `trades` cannot
+ * reproduce because R is a property of the CALL's plan rather than of the fill. Kairos was
+ * archived on 2026-08-18 and authors nothing, so that section is gone rather than permanently
+ * empty — an always-zero panel reads as "you have no record", which is a different and wronger
+ * statement than "that desk is asleep". It comes back with the desk.
  *
  * ── THE UNIT TRAP, killed here ────────────────────────────────────────────────
- * BOTH upstream sources return win rate as a FRACTION 0–1: computeTradeStats does `wins / count`,
- * and computeKairosPerformance's `win_rate` is commented "fraction 0–1". Handed to a model
+ * computeTradeStats returns win rate as a FRACTION 0–1 (`wins / count`). Handed to a model
  * unchanged, 0.62 is reported to the user as "0.62%". The conversion happens once, here at the
  * boundary, and the field is renamed `winRatePct` so a fraction can never silently be read as a
  * percentage again. Percent-suffixed names are the contract; anything without the suffix is raw.
@@ -24,7 +24,6 @@
  */
 
 import { tradeCaptureService } from './tradeCapture.service.js'
-import { kairosService } from '../api/kairos/kairos.service.js'
 
 /** A fraction 0–1 → a percentage, 2dp. Null stays null: "no trades yet" is not "0%". */
 export function toPct(fraction) {
@@ -51,16 +50,15 @@ function _mapValues(obj, fn) {
 /**
  * @param {string} userId
  * @param {object} [opts]  mode 'paper'|'live'|'manual', symbol, from/to (ms epoch)
- * @returns {Promise<{ asOf:number, realized:object|null, calls:object|null, unavailable:string[] }>}
+ * @returns {Promise<{ asOf:number, realized:object|null, unavailable:string[] }>}
  */
 export async function getPerformance(userId, { mode = null, symbol = null, from = null, to = null } = {}, deps = {}) {
     const {
         stats = (uid, f) => tradeCaptureService.tradeStats(uid, f),
-        callPerf = (uid) => kairosService.getKairosPerformance(uid),
         now = Date.now(),
     } = deps
 
-    if (!userId) return { asOf: now, realized: null, calls: null, unavailable: [] }
+    if (!userId) return { asOf: now, realized: null, unavailable: [] }
 
     const filter = {}
     if (mode) filter.mode = mode
@@ -68,10 +66,10 @@ export async function getPerformance(userId, { mode = null, symbol = null, from 
     if (from != null) filter.fromMs = from
     if (to != null) filter.toMs = to
 
-    // Settled independently — a Kairos read failing must not cost the user their trade record.
-    // A failed source is NAMED rather than reported as zero: "no trades" and "could not look" are
-    // different answers, and only one of them is safe to say out loud.
-    const [realizedRes, callsRes] = await Promise.allSettled([stats(userId, filter), callPerf(userId)])
+    // Settled rather than awaited: a failed source is NAMED in `unavailable` rather than reported
+    // as zero, because "no trades" and "could not look" are different answers and only one of
+    // them is safe to say out loud.
+    const [realizedRes] = await Promise.allSettled([stats(userId, filter)])
 
     const unavailable = []
     let realized = null
@@ -87,24 +85,12 @@ export async function getPerformance(userId, { mode = null, symbol = null, from 
         unavailable.push('realized')
     }
 
-    let calls = null
-    if (callsRes.status === 'fulfilled' && callsRes.value?.ok) {
-        const p = callsRes.value.performance ?? {}
-        calls = {
-            closed: p.closed ?? 0,
-            wins: p.wins ?? 0,
-            losses: p.losses ?? 0,
-            winRatePct: toPct(p.win_rate),
-            avgR: p.avg_r ?? null,
-            totalPnl: p.total_pnl ?? null,
-            bestR: p.best_r ?? null,
-            worstR: p.worst_r ?? null,
-        }
-    } else if (callsRes.status === 'rejected') {
-        unavailable.push('calls')
-    }
+    // The Kairos call record used to be reported alongside `realized` here. Kairos was archived
+    // on 2026-08-18 and the desk authors nothing, so the second source is gone — `trades` is now
+    // the whole answer. Revive it with the desk, not before: a section that is always empty
+    // reads as "you have no record" rather than "this desk is asleep".
 
     // `filter` rides along so a caller (and the model) can state what the numbers cover — a win
     // rate with an unstated window is a number nobody can check.
-    return { asOf: now, filter: { mode, symbol, from, to }, realized, calls, unavailable }
+    return { asOf: now, filter: { mode, symbol, from, to }, realized, unavailable }
 }

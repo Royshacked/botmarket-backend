@@ -5,22 +5,23 @@
 // with adaptive thinking, and parse the first JSON object out of the reply.
 
 import Anthropic from '@anthropic-ai/sdk'
-import { getQuotes, getCycleAnalysis, getShortInterest, getOptionsContext } from '../providers/yahoofinance.provider.js'
-import { getDerivativesContext }       from '../providers/binance.provider.js'
-import { buildStudies } from './evaluators/chart.evaluator.js'
-import { sessionPhase } from '../services/market.service.js'
-import { cachedChartImage } from '../services/chartImgCache.service.js'
-import { readStructure, STRUCTURE_VISIONS } from '../services/tools/priceStructure.tools.js'
-import { smcReadText, smcBars, SMC_TOOL_NAMES } from '../services/tools/smc.tools.js'
-import { newsService } from '../services/news.service.js'
-import { logger } from '../services/logger.service.js'
-import { extractFirstJSON } from './parsers/llmReply.parser.js'
-import { _thinkingConfig, advanceToolLoopCache } from '../providers/anthropic.provider.js'
+import { _allText, _formatEventRisk } from '../../monitoring/assess.shared.js'
+import { getQuotes, getCycleAnalysis, getShortInterest, getOptionsContext } from '../../providers/yahoofinance.provider.js'
+import { getDerivativesContext }       from '../../providers/binance.provider.js'
+import { buildStudies } from '../../monitoring/evaluators/chart.evaluator.js'
+import { sessionPhase } from '../../services/market.service.js'
+import { cachedChartImage } from '../../services/chartImgCache.service.js'
+import { readStructure, STRUCTURE_VISIONS } from '../../services/tools/priceStructure.tools.js'
+import { smcReadText, smcBars, SMC_TOOL_NAMES } from '../../services/tools/smc.tools.js'
+import { newsService } from '../../services/news.service.js'
+import { logger } from '../../services/logger.service.js'
+import { extractFirstJSON } from '../../monitoring/parsers/llmReply.parser.js'
+import { _thinkingConfig, advanceToolLoopCache } from '../../providers/anthropic.provider.js'
 // Shared assessment mechanics — routing, token caps, the candle block, the index list. Hermes and
 // Talos had byte-identical copies; the JUDGMENT (prompts, gather strategy, verdicts) stays local.
 import { assessRouting as _hermesRouting, candlesText as _candlesText, BROAD_INDICES,
-    ASSESS_MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING, bookAssessUsage } from './assess.shared.js'
-import { config } from '../services/config.js'
+    ASSESS_MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING, bookAssessUsage } from '../../monitoring/assess.shared.js'
+import { config } from '../../services/config.js'
 
 const LOG = '[hermes.assess]'
 
@@ -46,13 +47,6 @@ export function _assessText(msg) {
     return block?.text ?? ''
 }
 
-// The browse-confirm reply interleaves server_tool_use / web_search_tool_result blocks with the model's
-// own text (search narration, then the JSON). Join ALL text blocks so extractFirstJSON can find the
-// trailing object regardless of how many text turns the search produced. Pure.
-export function _allText(msg) {
-    return (msg?.content ?? []).filter(b => b?.type === 'text').map(b => b.text).join('\n')
-}
-
 // Format up to 12 newest-first, dated headlines into the block the prompt scores the news axis from.
 // Pure: drops articles with no headline, tolerates a NaN/missing datetime, and returns '' for none. Its
 // caller stamps the "unsourced" fallback line, so an empty return here just means "no headlines". Pure.
@@ -63,20 +57,6 @@ export function _formatHeadlines(articles) {
         .map(a => {
             const d = Number.isFinite(a.datetime) ? new Date(a.datetime * 1000).toISOString().slice(0, 10) : '????-??-??'
             return `[${d}] ${a.headline}`
-        })
-        .join('\n')
-}
-
-// Format the call's frozen scheduled catalysts (earnings / FOMC / macro, stamped at build time) into
-// the EVENT RISK block Hermes weighs before entering. Pure: '' when there are none, so the caller can
-// stamp an explicit "(none)" line. Each row carries the date + when (pre_market/after_hours/timed) so
-// the model can judge whether it lands inside this trade's expected hold.
-export function _formatEventRisk(events) {
-    return (Array.isArray(events) ? events : [])
-        .filter(e => e?.date && e?.label)
-        .map(e => {
-            const when = e.when && e.when !== 'timed' ? e.when : (e.time || 'timed')
-            return `${e.date} — ${e.label} (${when}, ${e.impact || 'medium'} impact)`
         })
         .join('\n')
 }

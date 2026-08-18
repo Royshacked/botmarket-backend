@@ -1,6 +1,9 @@
-// The single source of truth for Kairos's analytical MODES (docs/desks/kairos-hermes.md). ONE agent, three
-// profiles — the mode is a build-time lens (selects prompt profile + tool subset + pattern vocab);
-// it is lens-agnostic to the output schema and never touches the gate or Hermes.
+// The analytical LENSES a trade can be built through — the shared vocabulary, not one desk's.
+//
+// Renamed from kairos.modes.js on 2026-08-18. Kairos defined these and is now archived, but the
+// words outlived it: Argus stamps a `recommended_mode` on a hand-off (`isMode` guards it) and
+// Mentor's tool kit reads DEFAULT_MODE. A lens is a way of reading a chart, which was never
+// Kairos-specific — only the tool SUBSETTING was, and that stayed behind with the desk.
 //
 // discretionary : classical price action — structure, momentum, false-breaks. (default)
 // smc           : strict smart-money — order-blocks, FVG, liquidity, BOS/CHoCH, premium/discount.

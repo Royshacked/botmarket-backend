@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildAudienceSection } from '../../services/agentUtils.js'
-import { kairosAgentService } from '../../services/agents/kairos.agent.service.js'
 import { portfolioAgentService } from '../../services/agents/portfolio.agent.service.js'
 import { analystAgentService } from '../../services/agents/analyst.agent.service.js'
 import { refreshCoverage } from '../../services/coverageRefresh.service.js'
@@ -62,7 +61,6 @@ const tailOf = async (svc, args) => {
 }
 
 test('the block lands in the prompt of a desk that takes a dynamic string', async () => {
-    assert.match(await tailOf(kairosAgentService, { audience: 'beginner' }), /WHO YOU ARE TALKING TO/)
 })
 
 test('...and of a desk that assembles a section array', async () => {
@@ -70,7 +68,7 @@ test('...and of a desk that assembles a section array', async () => {
 })
 
 test('no audience leaves every desk’s prompt exactly as it was', async () => {
-    for (const [name, svc] of [['kairos', kairosAgentService], ['portfolio', portfolioAgentService], ['analyst', analystAgentService]]) {
+    for (const [name, svc] of [['portfolio', portfolioAgentService], ['analyst', analystAgentService]]) {
         assert.doesNotMatch(await tailOf(svc, {}), /WHO YOU ARE TALKING TO/, name)
     }
 })

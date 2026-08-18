@@ -15,7 +15,6 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { attachTurnContext } from '../../services/agentUtils.js'
-import { _buildTurnContext } from '../../services/agents/kairos.agent.service.js'
 import { _buildTurnContext as analystTurnContext } from '../../services/agents/analyst.agent.service.js'
 import { _buildTurnContext as mentorTurnContext } from '../../services/agents/mentor.agent.service.js'
 
@@ -81,28 +80,11 @@ test('block-array content gets a block, string content gets a string', () => {
     assert.deepEqual(asBlocks[0].content[1], { type: 'text', text: 'CTX' })
 })
 
-// ─── what Kairos routes through it ────────────────────────────────────────────
+// Kairos was the third desk checked here and was archived on 2026-08-18; its three cases went to
+// archive/tests. The placement RULE is what this file pins, and it is desk-agnostic — the two
+// desks below exercise every branch of it.
 
-test('Kairos sends its DRAFT down this path — the one thing that changes per turn', () => {
-    const ctx = _buildTurnContext({ draft: { asset: 'NVDA', direction: 'long' } })
-    assert.match(ctx, /Draft call so far/)
-    assert.match(ctx, /NVDA/)
-})
-
-test('no draft means no block at all, so a fresh conversation appends nothing', () => {
-    assert.equal(_buildTurnContext({}), '')
-    assert.equal(_buildTurnContext({ draft: null }), '')
-    assert.equal(_buildTurnContext(null), '')
-    assert.equal(_buildTurnContext(undefined), '')
-})
-
-test('the carry-forward instruction travels WITH the draft', () => {
-    // The draft is only useful if the model still knows to carry unset fields forward; the rule and
-    // the data moved together, so the instruction cannot be left behind in the system prompt.
-    assert.match(_buildTurnContext({ draft: { asset: 'NVDA' } }), /carry set fields forward/)
-})
-
-// ─── the other two live desks ─────────────────────────────────────────────────
+// ─── the two live desks ───────────────────────────────────────────────────────
 
 test('Prometheus moves its coverage draft and nothing else', () => {
     const ctx = analystTurnContext({ draft: { symbol: 'ZTS', rating: 'hold' } })
@@ -136,7 +118,6 @@ test('Talos still emits the coverage line with no draft and no coverage', () => 
 
 test('every desk survives a null chatState', () => {
     // These run on the first turn of a fresh conversation, before any state exists.
-    assert.doesNotThrow(() => _buildTurnContext(null))
     assert.doesNotThrow(() => analystTurnContext(null))
     assert.doesNotThrow(() => mentorTurnContext(null, null))
 })

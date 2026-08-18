@@ -7,7 +7,7 @@ import { getQuotes, getRiskMetrics, getPriceAction, getCycleAnalysis } from '../
 import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMarketMovers, getAnalystActions, getSectorSnapshot } from '../../providers/fmp.provider.js'
 import { getSecFilings } from '../../providers/sec.provider.js'
 import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from '../tools/marketData.tools.js'
-import { isMode } from '../kairos.modes.js'
+import { isMode } from '../analysisModes.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../tools/priceStructure.tools.js'
 import { cleanConviction } from '../conviction.util.js'
 import { logger }        from '../logger.service.js'

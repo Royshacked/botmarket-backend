@@ -7,7 +7,7 @@ import { logger }                from '../services/logger.service.js'
 import { extractFirstJSON }      from './parsers/llmReply.parser.js'
 import { assessRouting, candlesText as _candlesText,
     ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING, bookAssessUsage, lensLine } from './assess.shared.js'
-import { _allText, _formatEventRisk } from './hermes.assess.js'
+import { _allText, _formatEventRisk } from './assess.shared.js'
 import { _thinkingConfig, advanceToolLoopCache } from '../providers/anthropic.provider.js'
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
 import { declaredConditions, pickScenario, scenarioLabel, usableLadder, clampRung } from '../services/setup.schema.js'

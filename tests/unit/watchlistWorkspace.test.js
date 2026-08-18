@@ -10,19 +10,22 @@ import { formatWatchedItems } from '../../services/tools/userData.tools.js'
 // started telling every desk "CURRENT WORKSPACE: PAPER, my positions means the paper account", the
 // two surfaces actively contradicted each other.
 //
-// THE LINE: a call, a setup and a book bind to an ACCOUNT, so each is real money or simulated money
-// and never both. Scans and coverage are research — they bind to no account, there is nothing to
-// scope them by, and they are shared across all three workspaces by decision.
+// THE LINE: a setup and a book bind to an ACCOUNT, so each is real money or simulated money and
+// never both. Scans and coverage are research — they bind to no account, there is nothing to scope
+// them by, and they are shared across all three workspaces by decision.
+//
+// `call` was the third account-bound kind and the paper half of every contrast below. Kairos was
+// archived on 2026-08-18, so the contrast is now paper-setup vs live-setup — the scoping rule is
+// per-kind data, not per-kind code, so the same paths are exercised.
 
-const call    = (over = {}) => ({ id: 'c1', asset: 'NVDA', status: 'waiting', broker: 'paper', savedAt: 5, ...over })
 const setup   = (over = {}) => ({ id: 's1', asset: 'TSLA', status: 'waiting', mode: 'live', savedAt: 4, ...over })
+const paperSetup = (over = {}) => setup({ id: 's2', asset: 'NVDA', mode: 'paper', savedAt: 5, ...over })
 const book    = (over = {}) => ({ portfolioId: 'p1', name: 'Core', holdings: 3, savedAt: 3, statuses: {}, symbols: ['AAPL'], modes: ['paper'], ...over })
 const scanDoc = (over = {}) => ({ id: 'sc1', createdAt: 2, candidates: [], ...over })
 const covDoc  = (over = {}) => ({ id: 'cov1', symbol: 'MU', status: 'active', updated_at: '2026-08-01T00:00:00Z', ...over })
 
 const deps = (over = {}) => ({
-    calls:      async () => [call()],
-    setups:     async () => [setup()],
+    setups:     async () => [setup(), paperSetup()],
     portfolios: async () => [book()],
     scans:      async () => [scanDoc()],
     coverage:   async () => [covDoc()],
@@ -30,20 +33,18 @@ const deps = (over = {}) => ({
     ...over,
 })
 
-test('only the three account-bound kinds are scoped', () => {
-    assert.deepEqual(WORKSPACE_SCOPED_KINDS, ['call', 'setup', 'portfolio'])
+test('only the two account-bound kinds are scoped', () => {
+    assert.deepEqual(WORKSPACE_SCOPED_KINDS, ['setup', 'portfolio'])
 })
 
-test('in paper: the paper call and paper book stay, the live setup goes', async () => {
+test('in paper: the paper setup and paper book stay, the live setup goes', async () => {
     const { counts } = await listWatchedItems('u1', { workspace: 'paper' }, deps())
-    assert.equal(counts.call, 1)
-    assert.equal(counts.setup, 0, 'a live setup is not part of the paper book')
+    assert.equal(counts.setup, 1, 'a live setup is not part of the paper book')
     assert.equal(counts.portfolio, 1)
 })
 
-test('in live: the live setup stays, the paper call and paper book go', async () => {
+test('in live: the live setup stays, the paper setup and paper book go', async () => {
     const { counts } = await listWatchedItems('u1', { workspace: 'live' }, deps())
-    assert.equal(counts.call, 0)
     assert.equal(counts.setup, 1)
     assert.equal(counts.portfolio, 0)
 })
@@ -59,17 +60,16 @@ test('scans and coverage survive EVERY workspace — they are shared by decision
 test('no workspace asked for means no scoping — the old behaviour, untouched', async () => {
     // Every caller that has not been taught to pass one keeps getting the complete list.
     const { counts } = await listWatchedItems('u1', {}, deps())
-    assert.equal(counts.call, 1)
-    assert.equal(counts.setup, 1)
+    assert.equal(counts.setup, 2, 'both the live and the paper setup')
     assert.equal(counts.portfolio, 1)
 })
 
-test('a legacy call with no broker is scoped by its account id', async () => {
-    // The fallback ideas already had and calls never did: before this, a document with no `broker`
-    // was simply assumed paper by the list that showed it.
-    const d = deps({ calls: async () => [call({ broker: undefined, accountId: 'manual-u1-abc' })] })
-    assert.equal((await listWatchedItems('u1', { workspace: 'manual' }, d)).counts.call, 1)
-    assert.equal((await listWatchedItems('u1', { workspace: 'paper' }, d)).counts.call, 0)
+test('a legacy document with no mode is scoped by its account id', async () => {
+    // The fallback ideas already had and the other kinds never did: before this, a document with
+    // no venue field was simply assumed paper by the list that showed it.
+    const d = deps({ setups: async () => [setup({ mode: undefined, accountId: 'manual-u1-abc' })] })
+    assert.equal((await listWatchedItems('u1', { workspace: 'manual' }, d)).counts.setup, 1)
+    assert.equal((await listWatchedItems('u1', { workspace: 'paper' }, d)).counts.setup, 0)
 })
 
 test('a MIXED book shows in every workspace it holds something in', async () => {
@@ -93,7 +93,7 @@ test('the empty answer NAMES the workspace — "nothing" and "nothing in paper" 
 })
 
 test('a populated answer says which book it is counting', () => {
-    const out = formatWatchedItems({ items: [{ kind: 'call', symbol: 'NVDA' }], counts: { call: 1 }, workspace: 'manual' })
+    const out = formatWatchedItems({ items: [{ kind: 'setup', symbol: 'NVDA' }], counts: { setup: 1 }, workspace: 'manual' })
     assert.match(out, /In the app right now in the MANUAL workspace/)
 })
 

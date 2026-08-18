@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 
 import { analystAgentService }   from '../../services/agents/analyst.agent.service.js'
 import { axlAgentService }       from '../../services/agents/axl.agent.service.js'
-import { kairosAgentService }    from '../../services/agents/kairos.agent.service.js'
 import { mentorAgentService }    from '../../services/agents/mentor.agent.service.js'
 import { portfolioAgentService } from '../../services/agents/portfolio.agent.service.js'
 import { scannerAgentService }   from '../../services/agents/scanner.agent.service.js'
@@ -24,7 +23,6 @@ import { CONSULT_TOOL }         from '../../services/deepThink.service.js'
 const AGENTS = [
     { name: 'analyst  (Prometheus)', chatStream: analystAgentService.chatStream,   args: { userPrompt: 'pitch me NVDA' } },
     { name: 'axl',                   chatStream: axlAgentService.chatStream,       args: { messages: [{ role: 'user', content: 'what can you do' }] } },
-    { name: 'kairos',                chatStream: kairosAgentService.chatStream,    args: { userPrompt: 'build me a TSLA long' } },
     { name: 'mentor',                chatStream: mentorAgentService.chatStream,    args: { userPrompt: 'walk me through AAPL' } },
     { name: 'portfolio (Atlas)',     chatStream: portfolioAgentService.chatStream, args: { messages: [{ role: 'user', content: 'build me a portfolio' }] } },
     { name: 'scanner   (Argus)',     chatStream: scannerAgentService.chatStream,   args: { messages: [{ role: 'user', content: 'find me momentum names' }] } },

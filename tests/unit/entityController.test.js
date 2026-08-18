@@ -103,7 +103,6 @@ test('the request reaches the list service, so query filters survive', async () 
 test('every entity route still mounts — no handler binds undefined', async () => {
     for (const path of [
         '../../api/setups/setups.routes.js',
-        '../../api/kairos/kairos.routes.js',
         '../../api/trade-ideas/tradeIdeas.routes.js',
         '../../api/analyst/analyst.routes.js',
         '../../api/scanner/scanner.routes.js',

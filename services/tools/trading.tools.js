@@ -1,3 +1,15 @@
+// The trading desk's tool kit.
+//
+// RENAMED from kairos.tools.js on 2026-08-18, when Kairos was archived. The name was always
+// misleading and became actively wrong: this kit is MENTOR'S — Mentor imports it whole
+// (services/agents/mentor.agent.service.js) and is the only live consumer. It was named after the
+// desk that happened to define it first, so archiving that desk would have meant archiving the
+// live trading desk's tools along with it.
+//
+// `TRADING_TOOLS_FOR_MODE` has no live caller: subsetting by lens was Kairos's judgment, and
+// Mentor deliberately takes the kit un-subsetted because its lens is per-SETUP rather than
+// per-build. Kept because the archived desk imports it and reviving that desk should be a
+// decision, not a repair job.
 import { getPriceAction, getCycleAnalysis, getCorrelations } from '../../providers/yahoofinance.provider.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { getEarningsCalendar, getFundamentals, getStockPeers, getMacroSnapshot, getSectorSnapshot } from '../../providers/fmp.provider.js'
@@ -10,7 +22,7 @@ import {
 } from './marketData.tools.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
 import { SMC_TOOLS, SMC_TOOL_HANDLERS } from './smc.tools.js'
-import { DEFAULT_MODE } from '../kairos.modes.js'
+import { DEFAULT_MODE } from '../analysisModes.js'
 
 // Kairos's market-data toolset. Deliberately its OWN schemas (not imported from the
 // Idea agent) so Kairos is a self-contained trial — but the heavy lifting reuses the
@@ -20,7 +32,7 @@ import { DEFAULT_MODE } from '../kairos.modes.js'
 
 const LOG = '[kairosTools]'
 
-export const KAIROS_TOOLS = [
+export const TRADING_TOOLS = [
     ...toolsFor({
         web_search: '',
         get_quote: `Get the current real-time price quote for a ticker. Call this when you need the live price to place zones/levels accurately.`,
@@ -120,7 +132,7 @@ const UNIVERSAL = ['web_search', 'get_quote', 'get_candles', 'get_chart', 'get_t
 const SMC_ONLY = ['get_orderblocks', 'get_fvg', 'get_structure', 'get_liquidity']
 const MODE_TOOLS = {
     // classical PA + false-breaks + correlation/positioning + prior-day key levels; NOT the SMC-lens tools.
-    discretionary: KAIROS_TOOLS.map(t => t.name).filter(n => !SMC_ONLY.includes(n)),
+    discretionary: TRADING_TOOLS.map(t => t.name).filter(n => !SMC_ONLY.includes(n)),
     // strict smart-money, chart-core: vision OB/sweeps + K2 numeric FVG/structure/liquidity (exact levels).
     smc: [...UNIVERSAL, 'get_price_action', 'get_orderblocks', 'get_false_breaks', 'get_indicators',
         'get_fvg', 'get_structure', 'get_liquidity', 'get_key_levels'],
@@ -130,17 +142,17 @@ const MODE_TOOLS = {
         'get_sec_filings', 'get_earnings', 'get_earnings_calendar', 'get_cycle_analysis', 'get_price_action'],
 }
 
-/** The tool LIST for a mode (subset of KAIROS_TOOLS by name). Unknown mode → discretionary. */
-export function KAIROS_TOOLS_FOR_MODE(mode) {
+/** The tool LIST for a mode (subset of TRADING_TOOLS by name). Unknown mode → discretionary. */
+export function TRADING_TOOLS_FOR_MODE(mode) {
     const allowed = MODE_TOOLS[mode] ?? MODE_TOOLS[DEFAULT_MODE]
-    return KAIROS_TOOLS.filter(t => allowed.includes(t.name))
+    return TRADING_TOOLS.filter(t => allowed.includes(t.name))
 }
 
 // Build the per-request handler map. get_chart closes over onChart so it can surface the
 // rendered chart to the user's chat when the agent flags show_to_user; pass onChart = null
 // (non-Anthropic provider) to keep the image model-only. userId is closed over by the
 // account-aware tools (get_trading_context — the user's live venue/accounts).
-export function buildKairosToolHandlers(onChart, userId = null) {
+export function buildTradingToolHandlers(onChart, userId = null) {
     return {
         ..._STATIC_HANDLERS,
         // Bound to the user: the venue reads, and the quote (which carries broker availability).

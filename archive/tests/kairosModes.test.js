@@ -1,11 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { MODES, DEFAULT_MODE, normalizeMode, isMode } from '../../services/kairos.modes.js'
-import { KAIROS_TOOLS_FOR_MODE } from '../../services/tools/kairos.tools.js'
-import { normalizeCall, _buildEditSet } from '../../api/kairos/kairos.service.js'
-import { ACTIVE_STATUSES as HERMES_WATCHES } from '../../monitoring/hermes.monitor.service.js'
-import { _sanitizeSeed } from '../../api/kairos/kairos.controller.js'
+import { MODES, DEFAULT_MODE, normalizeMode, isMode } from '../../services/analysisModes.js'
+import { TRADING_TOOLS_FOR_MODE } from '../../services/tools/trading.tools.js'
+import { normalizeCall, _buildEditSet } from '../api/kairos/kairos.service.js'
+import { ACTIVE_STATUSES as HERMES_WATCHES } from '../monitoring/hermes.monitor.service.js'
+import { _sanitizeSeed } from '../api/kairos/kairos.controller.js'
 
 // K1: Kairos mode scaffolding (docs/desks/kairos-hermes.md) — mode field + per-mode tool subsets.
 
@@ -22,8 +22,8 @@ test('normalizeMode coerces to a known mode; unknown/absent → discretionary', 
     assert.equal(isMode('nope'), false)
 })
 
-// ── KAIROS_TOOLS_FOR_MODE (tool subsets) ─────────────────────────────────────
-const names = mode => KAIROS_TOOLS_FOR_MODE(mode).map(t => t.name)
+// ── TRADING_TOOLS_FOR_MODE (tool subsets) ─────────────────────────────────────
+const names = mode => TRADING_TOOLS_FOR_MODE(mode).map(t => t.name)
 
 test('every mode gets the UNIVERSAL tools (incl. get_trading_context)', () => {
     for (const m of MODES) {

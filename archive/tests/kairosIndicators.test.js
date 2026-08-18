@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _parseIndicatorSpecs, _formatIndicator } from '../../services/tools/kairos.tools.js'
+import { _parseIndicatorSpecs, _formatIndicator } from '../../services/tools/trading.tools.js'
 
 // ── _parseIndicatorSpecs ─────────────────────────────────────────────────
 test('parse: names + optional periods, case/space tolerant', () => {

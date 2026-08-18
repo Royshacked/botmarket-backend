@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateCall, normalizeCall, computeKairosPerformance, _buildEditSet, _normalizeSensitivity } from '../../api/kairos/kairos.service.js'
-import { ACTIVE_STATUSES as HERMES_WATCHES } from '../../monitoring/hermes.monitor.service.js'
+import { validateCall, normalizeCall, computeKairosPerformance, _buildEditSet, _normalizeSensitivity } from '../api/kairos/kairos.service.js'
+import { ACTIVE_STATUSES as HERMES_WATCHES } from '../monitoring/hermes.monitor.service.js'
 
 // A minimal well-formed call the build agent (Phase 1) would emit, with venue bound (Generate).
 function call(extra = {}) {

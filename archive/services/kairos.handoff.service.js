@@ -1,19 +1,19 @@
-import { getDb } from '../providers/mongodb.provider.js'
-import { ENTITIES } from './entity/entityCollection.js'
-import { ideaService } from '../api/trade-ideas/tradeIdeas.service.js'
-import { placeOrdersForIdea } from '../api/trade-ideas/ideaExecution.service.js'
-import { notifyManualEntry, entryLegFromIdea } from './manualNotify.service.js'
-import { notifyCallManage } from './tradeNotify.service.js'
-import { brokerService } from '../api/broker/broker.service.js'
+import { getDb } from '../../providers/mongodb.provider.js'
+import { ENTITIES } from '../../services/entity/entityCollection.js'
+import { ideaService } from '../../api/trade-ideas/tradeIdeas.service.js'
+import { placeOrdersForIdea } from '../../api/trade-ideas/ideaExecution.service.js'
+import { notifyManualEntry, entryLegFromIdea } from '../../services/manualNotify.service.js'
+import { notifyCallManage } from '../../services/tradeNotify.service.js'
+import { brokerService } from '../../api/broker/broker.service.js'
 import { normalizeZones, normalizeReferenceLevels } from '../api/kairos/kairos.service.js'
-import { knownVenue } from './venue.resolve.service.js'
-import { touchLeaf as _touch } from './protectionPlan.service.js'
-import { ownsEntity } from './entity/entityCrud.service.js'
+import { knownVenue } from '../../services/venue.resolve.service.js'
+import { touchLeaf as _touch } from '../../services/protectionPlan.service.js'
+import { ownsEntity } from '../../services/entity/entityCrud.service.js'
 // The shared in-position executor (the hands). Imported as a namespace so the two dozen references
 // below read as "the shared mechanism", not as a pile of loose helpers of unclear origin.
-import * as _sharedManage from './positionManage.service.js'
-import { isLivePosition, isAwaitingConfirm, isInvalidated } from './entity/vocabulary.js'
-import { logger } from './logger.service.js'
+import * as _sharedManage from '../../services/positionManage.service.js'
+import { isLivePosition, isAwaitingConfirm, isInvalidated } from '../../services/entity/vocabulary.js'
+import { logger } from '../../services/logger.service.js'
 
 // Kairos Phase 3 — the confirm / edit / dismiss handoff. When the user acts on a readiness card,
 // this materializes the call as a REAL idea (via saveIdea, immediate market entry) and places it,

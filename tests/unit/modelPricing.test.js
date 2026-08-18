@@ -2,7 +2,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { isAllowedModel } from '../../services/llmModels.js'
 import { _thinkingConfig } from '../../providers/anthropic.provider.js'
-import { _thinkingConfig as hermesThinkingConfig } from '../../monitoring/hermes.assess.js'
 import { calcCost } from '../../services/tokenUsage.service.js'
 
 // These lived in modelRouter.test.js. The router is gone — the model is the user's own pick now,
@@ -95,9 +94,13 @@ test('the model argument is load-bearing — omitting it skips the floor', () =>
 test('the monitors use the provider’s thinking config, not a copy of it', () => {
     // The duplicate is the actual bug here — two implementations of one mechanism drift, and this
     // one drifted silently in the direction that costs money and breaks tool calls.
-    assert.equal(hermesThinkingConfig, _thinkingConfig, 'hermes re-exported a different function')
+    //
+    // This used to assert the identity `hermesThinkingConfig === _thinkingConfig`, i.e. that the
+    // monitor re-exported the provider's function rather than growing its own. Hermes was archived
+    // on 2026-08-18 and talos.assess imports `_thinkingConfig` straight from the provider, so there
+    // is no re-export left to be wrong. What still matters is the VALUE the monitors get.
     assert.deepEqual(
-        hermesThinkingConfig(undefined, OPUS),
+        _thinkingConfig(undefined, OPUS),
         { thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: 'low' } },
         'the monitors are not getting the reasons-by-default floor',
     )

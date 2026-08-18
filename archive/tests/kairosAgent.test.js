@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _parseKairosResponse, _mergeCallDraft, _resolveVenue, _finalizeCall, _parseScanRequest } from '../../services/agents/kairos.agent.service.js'
+import { _parseKairosResponse, _mergeCallDraft, _resolveVenue, _finalizeCall, _parseScanRequest } from '../services/agents/kairos.agent.service.js'
 
 const CALL_JSON = `{
   "asset": "TSLA",

@@ -7,7 +7,7 @@ import {
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
     stopEdge, targetEdges, targetWindows, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, CONDITION_MODES, TRADE_MODES,
 } from '../../services/setup.schema.js'
-import { MODES } from '../../services/kairos.modes.js'
+import { MODES } from '../../services/analysisModes.js'
 
 // The `setup` entity contract (docs/desks/mentor-talos.md). Mentor authors loosely, Talos monitors
 // strictly — this module is the seam, so these tests pin the coercions the monitor depends on.

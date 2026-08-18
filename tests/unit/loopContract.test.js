@@ -44,7 +44,8 @@ test('server.js registers the full fleet', () => {
     // A loop dropped from the boot sequence is invisible at runtime — nothing fails, the work just
     // stops happening. Pinning the roster makes a removal a deliberate edit to this list.
     assert.deepEqual(registeredLoops().map(l => l.name).sort(), [
-        'coverage', 'hermes', 'marketBrief', 'marketOpen', 'paperEquity', 'paperFill',
+        // hermes left on 2026-08-18 with Kairos — see archive/README.md.
+        'coverage', 'marketBrief', 'marketOpen', 'paperEquity', 'paperFill',
         'paperMark', 'reconciler', 'talos', 'themis', 'tilt',
     ])
 })

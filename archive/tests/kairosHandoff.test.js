@@ -4,7 +4,7 @@ import {
     deriveMode, buildIdeaFromCall, buildPositionState, applyEditPatch, confirmCall, editCall, dismissCall,
     manageCall, _resolveMainLink, _resolveAllLinks, _workingExit, _partialQty,
     reviveCall, declineReentry, _reentryValidUntil,
-} from '../../services/kairos.handoff.service.js'
+} from '../services/kairos.handoff.service.js'
 
 function readyCall(extra = {}) {
     return {

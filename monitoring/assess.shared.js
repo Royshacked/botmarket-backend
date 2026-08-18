@@ -110,3 +110,31 @@ export async function candlesText(asset, tf) {
         return `${d} O:${c.open} H:${c.high} L:${c.low} C:${c.close} V:${c.volume}`
     }).join('\n')
 }
+
+// ─── Reply / block formatting ─────────────────────────────────────────────────
+//
+// Moved out of hermes.assess.js on 2026-08-18. Talos already imported both from there, so
+// archiving Hermes would have left the live monitor importing an archived file — the same trap
+// `kairos.tools.js` had. They were never Hermes-specific: one parses an Anthropic reply, the other
+// formats a calendar.
+
+// The browse-confirm reply interleaves server_tool_use / web_search_tool_result blocks with the model's
+// own text (search narration, then the JSON). Join ALL text blocks so extractFirstJSON can find the
+// trailing object regardless of how many text turns the search produced. Pure.
+export function _allText(msg) {
+    return (msg?.content ?? []).filter(b => b?.type === 'text').map(b => b.text).join('\n')
+}
+
+// Format the call's frozen scheduled catalysts (earnings / FOMC / macro, stamped at build time) into
+// the EVENT RISK block Hermes weighs before entering. Pure: '' when there are none, so the caller can
+// stamp an explicit "(none)" line. Each row carries the date + when (pre_market/after_hours/timed) so
+// the model can judge whether it lands inside this trade's expected hold.
+export function _formatEventRisk(events) {
+    return (Array.isArray(events) ? events : [])
+        .filter(e => e?.date && e?.label)
+        .map(e => {
+            const when = e.when && e.when !== 'timed' ? e.when : (e.time || 'timed')
+            return `${e.date} — ${e.label} (${when}, ${e.impact || 'medium'} impact)`
+        })
+        .join('\n')
+}

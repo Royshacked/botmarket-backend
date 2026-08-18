@@ -1,15 +1,15 @@
 import { fileURLToPath } from 'url'
-import { makePhaseCapture, runAgentStream } from '../agentIO.js'
-import { parseEmitBlock, mergeDraft } from '../agentIO.js'
+import { makePhaseCapture, runAgentStream } from '../../../services/agentIO.js'
+import { parseEmitBlock, mergeDraft } from '../../../services/agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, resolveMainAccountId, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE, TRADE_HORIZONS } from '../agentUtils.js'
-import { buildTagCaptures } from '../llmStream.util.js'
-import { KAIROS_TOOLS_FOR_MODE, buildKairosToolHandlers } from '../tools/kairos.tools.js'
-import { buildVenueSection } from '../tools/tradingContext.tools.js'
-import { normalizeMode } from '../kairos.modes.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, normalizeMessages, resolveMainAccountId, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE, TRADE_HORIZONS } from '../../../services/agentUtils.js'
+import { buildTagCaptures } from '../../../services/llmStream.util.js'
+import { TRADING_TOOLS_FOR_MODE, buildTradingToolHandlers } from '../../../services/tools/trading.tools.js'
+import { buildVenueSection } from '../../../services/tools/tradingContext.tools.js'
+import { normalizeMode } from '../../../services/analysisModes.js'
 import { kairosService } from '../../api/kairos/kairos.service.js'
-import { resolveVenue as _resolveVenue } from '../venue.resolve.service.js'
-import { logger } from '../logger.service.js'
+import { resolveVenue as _resolveVenue } from '../../../services/venue.resolve.service.js'
+import { logger } from '../../../services/logger.service.js'
 
 // Kairos build agent: a conversation → a DRAFT trading "call" (see docs/desks/kairos-hermes.md, Phase 1).
 // Forked from the Idea agent's streaming scaffold but self-contained. The agent emits a single
@@ -49,8 +49,8 @@ async function chatStream({
     _venueSection = buildVenueSection,
 }) {
     const mode         = normalizeMode(chatState?.mode)   // build-time lens (docs/desks/kairos-hermes.md)
-    const tools        = KAIROS_TOOLS_FOR_MODE(mode)
-    const toolHandlers = buildKairosToolHandlers(onChart, userId)
+    const tools        = TRADING_TOOLS_FOR_MODE(mode)
+    const toolHandlers = buildTradingToolHandlers(onChart, userId)
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, mode, seed, mainAccountId, audience)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than

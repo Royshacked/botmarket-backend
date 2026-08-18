@@ -13,9 +13,14 @@ import { ideaToEnvelope, callToEnvelope, toEnvelope } from '../../services/entit
 
 // ── owner is derived from kind, never stored ──────────────────────────────────────────────
 test('ownerForKind maps each execution-tier kind to its monitor', () => {
-    assert.equal(ownerForKind(KINDS.IDEA),           'minos')
-    assert.equal(ownerForKind(KINDS.CALL),           'hermes')
-    assert.equal(ownerForKind(KINDS.PORTFOLIO_ITEM), 'themis')
+    // NULL is a real answer, not a gap. Minos was deleted and Hermes archived (2026-08-18), so
+    // nothing watches a loose idea or a call — which is only safe because neither is authored any
+    // more. Naming a monitor that is not running is the worse failure: a caller asking "who is
+    // responsible for this going stale?" gets a confident pointer at a file that never ticks.
+    assert.equal(ownerForKind(KINDS.IDEA),           null)
+    assert.equal(ownerForKind(KINDS.CALL),           null)
+    assert.equal(ownerForKind(KINDS.PORTFOLIO_ITEM), 'themis',
+        'a HOLDING rides the idea kind but resolves as portfolio_item — the execution tier keeps its watcher')
     assert.equal(ownerForKind('nope'), null)
 })
 
@@ -51,7 +56,7 @@ test('ideaToEnvelope maps a standalone idea, kind=idea', () => {
     }
     const e = ideaToEnvelope(doc)
     assert.equal(e.kind, KINDS.IDEA)
-    assert.equal(e.owner, 'minos')
+    assert.equal(e.owner, null)   // Minos deleted 2026-08-18
     assert.equal(e.parentId, null)
     assert.equal(e.userId, 'u1')
     assert.equal(e.asset, 'AAPL')
@@ -96,7 +101,7 @@ test('callToEnvelope absorbs the snake_case field names', () => {
     }
     const e = callToEnvelope(doc)
     assert.equal(e.kind, KINDS.CALL)
-    assert.equal(e.owner, 'hermes')
+    assert.equal(e.owner, null)   // Hermes archived 2026-08-18
     assert.equal(e.userId, 'u9')                       // envelope field — one name for every kind
     assert.equal(e.direction, 'long')                  // ← bias
     assert.equal(e.execution.mainAccountId, 'pa1')     // ← main_account_id

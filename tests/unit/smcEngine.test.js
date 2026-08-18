@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 
 import { swings, detectFVG, detectLiquidity, detectStructure, premiumDiscount, detectOrderBlocks, priorLevels } from '../../services/smc.engine.js'
 import { smcReadText } from '../../services/tools/smc.tools.js'
-import { _smcTools, _handleAssessToolUses } from '../../monitoring/hermes.assess.js'
 
 // K2: the deterministic SMC engine (docs/desks/kairos-hermes.md). Pure OHLCV → exact monitorable levels.
 const mk = (o, h, l, c, t = 0) => ({ open: o, high: h, low: l, close: c, volume: 100, timestamp: t })
@@ -105,12 +104,9 @@ test('smcReadText: pure formatter renders each SMC read from bars (the wiring)',
     assert.match(smcReadText('get_key_levels', 'AAPL', '5min', UPTREND), /key levels:[\s\S]*prior-day:/)
 })
 
-test('Hermes shares the SMC engine: _smcTools + dispatch (smc calls, no network)', async () => {
-    assert.deepEqual(_smcTools(['5min']).map(t => t.name), ['get_structure', 'get_fvg', 'get_liquidity'])
-    const content = [{ type: 'tool_use', id: 'x', name: 'get_structure', input: { timeframe: '5min' } }]
-    const res = await _handleAssessToolUses({ asset: 'AAPL', mode: 'smc' }, content, ['5min'], { smcBars: async () => UPTREND })
-    assert.match(String(res[0].content), /AAPL 5min — structure:/)   // same engine the call was built on
-})
+// Hermes's dispatch OF this engine (_smcTools + _handleAssessToolUses) was covered here too; it
+// went to archive/tests with the monitor on 2026-08-18. The engine below is untouched and live —
+// Mentor's tool kit and Talos both still read it.
 
 test('detectLiquidity: two near-equal swing highs → a buy-side pool', () => {
     const bars = [mk(9, 10, 8, 9, 1), mk(9, 13, 9, 11, 2), mk(10, 9, 6, 7, 3), mk(10, 13, 7, 11, 4), mk(11, 8, 5, 6, 5)]

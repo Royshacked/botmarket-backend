@@ -1,20 +1,23 @@
-import { getDb } from '../providers/mongodb.provider.js'
-import { PAST_ENTRY_LEGACY, INVALIDATION } from '../services/entity/vocabulary.js'
-import { ENTITIES } from '../services/entity/entityCollection.js'
-import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
-import { logger } from '../services/logger.service.js'
-import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../services/tradeNotify.service.js'
-import { fetchLastPrice } from './monitorUtils.js'
-import { createDueLoop, makePersist } from './dueLoop.js'
-import { journalEntry, zonesLabel, failNote } from './monitorJournal.js'
+import { getDb } from '../../providers/mongodb.provider.js'
+import { PAST_ENTRY_LEGACY, INVALIDATION } from '../../services/entity/vocabulary.js'
+import { ENTITIES } from '../../services/entity/entityCollection.js'
+import { isAssetOpen, getMarketStatus } from '../../services/market.service.js'
+import { logger } from '../../services/logger.service.js'
+import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../../services/tradeNotify.service.js'
+import { fetchLastPrice } from '../../monitoring/monitorUtils.js'
+import { createDueLoop, makePersist } from '../../monitoring/dueLoop.js'
+import { journalEntry, zonesLabel, failNote } from '../../monitoring/monitorJournal.js'
 import {
     isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap, gradedGap,
     hasEditProposal,
-} from './readinessGates.js'
-import { withTimeout } from '../services/timeout.util.js'
-import { toNum } from '../services/format.util.js'
-import { COLLECTION as TRADES } from '../services/tradeCapture.service.js'
-import { _defaultAssess, _defaultAssessPosition, _defaultAssessReentry, _thinkingConfig, _assessText, _formatHeadlines, _formatEventRisk, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _allText, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses } from './hermes.assess.js'
+} from '../../monitoring/readinessGates.js'
+import { withTimeout } from '../../services/timeout.util.js'
+import { toNum } from '../../services/format.util.js'
+import { COLLECTION as TRADES } from '../../services/tradeCapture.service.js'
+import { _defaultAssess, _defaultAssessPosition, _defaultAssessReentry, _thinkingConfig, _assessText, _formatHeadlines, _marketBlock, _isMarketSensitive, _applyEntryConfirmation, _chartTool, _validChartTf, _structureTools, _institutionalTools, _modeLensBlock, _handleAssessToolUses } from './hermes.assess.js'
+// _allText / _formatEventRisk moved to assess.shared.js on 2026-08-18 — Talos imported them from
+// here, and archiving Hermes would have left the live monitor importing an archived file.
+import { _allText, _formatEventRisk } from '../../monitoring/assess.shared.js'
 
 // The LLM assessment IO lives in hermes.assess.js (wired into _deps below). Re-exported here
 // under their historical names so the existing unit tests import path is unchanged.

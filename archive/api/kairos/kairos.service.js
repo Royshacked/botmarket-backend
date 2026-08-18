@@ -1,13 +1,13 @@
 import { randomUUID }               from 'crypto'
-import { normalizeAssetClass } from '../../services/entity/vocabulary.js'
-import { PAST_ENTRY_LEGACY, CALL_HORIZONS, LIVE_POSITION } from '../../services/entity/vocabulary.js'
-import { getDb }                    from '../../providers/mongodb.provider.js'
-import { logger }                   from '../../services/logger.service.js'
-import { buildEventRisk }           from '../../services/eventRisk.service.js'
-import { cleanConviction }          from '../../services/conviction.util.js'
-import { ENTITIES }                 from '../../services/entity/entityCollection.js'
-import { makeEntityCrud }           from '../../services/entity/entityCrud.service.js'
-import { normalizeMode, isMode }    from '../../services/kairos.modes.js'
+import { normalizeAssetClass } from '../../../services/entity/vocabulary.js'
+import { PAST_ENTRY_LEGACY, CALL_HORIZONS, LIVE_POSITION } from '../../../services/entity/vocabulary.js'
+import { getDb }                    from '../../../providers/mongodb.provider.js'
+import { logger }                   from '../../../services/logger.service.js'
+import { buildEventRisk }           from '../../../services/eventRisk.service.js'
+import { cleanConviction }          from '../../../services/conviction.util.js'
+import { ENTITIES }                 from '../../../services/entity/entityCollection.js'
+import { makeEntityCrud }           from '../../../services/entity/entityCrud.service.js'
+import { normalizeMode, isMode }    from '../../../services/analysisModes.js'
 
 // Kairos = discretionary day/swing agent. Its artifact is a "call" (Idea produces ideas,
 // Kairos produces calls): one document in `kairos_calls` = identity + plan (authored at build,

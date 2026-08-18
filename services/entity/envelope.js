@@ -15,14 +15,25 @@ export const KINDS = Object.freeze({
 /**
  * Owner is DERIVED from kind, never stored (open-decision #5 in docs/architecture/entity-model.md).
  * portfolio_item → themis at the item tier; the book aggregate is assessed by themis too.
+ *
+ * `idea` and `call` map to NULL, and null is a real answer here rather than a gap. Minos was
+ * deleted and Hermes archived (2026-08-18), so no monitor watches either kind — which is only safe
+ * because neither is authored any more: a loose `idea` has no builder left, and `call` is
+ * Kairos's, asleep. Both entries used to name a monitor that was not running, which is worse than
+ * naming none: `ownerForKind` is what a caller asks when it wants to know who to blame for an
+ * entity going stale, and a confident wrong answer sends them to a file that never ticks.
+ *
+ * A holding still rides the `idea` kind (kindForDoc: it is an idea WITH a portfolioId), and that
+ * case answers 'themis' through PORTFOLIO_ITEM — so the execution tier keeps its watcher. It is
+ * only the loose, unparented idea that has none.
  */
 const OWNER_BY_KIND = Object.freeze({
-    [KINDS.IDEA]:           'minos',
-    [KINDS.CALL]:           'hermes',
+    [KINDS.IDEA]:           null,
+    [KINDS.CALL]:           null,
     [KINDS.PORTFOLIO_ITEM]: 'themis',
 })
 
-/** @returns {'minos'|'hermes'|'themis'|null} the monitor that owns this kind. */
+/** @returns {'themis'|null} the monitor that owns this kind, or null when nothing watches it. */
 export function ownerForKind(kind) {
     return OWNER_BY_KIND[kind] ?? null
 }

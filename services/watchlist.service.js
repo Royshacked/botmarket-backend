@@ -18,7 +18,6 @@
 import { logger } from './logger.service.js'
 import { isTerminal } from './entity/vocabulary.js'
 import { WATCH_ROW_PROJECTORS } from './entity/toWatchRow.js'
-import { kairosService } from '../api/kairos/kairos.service.js'
 import { setupService } from '../api/setups/setups.service.js'
 import { scanService } from '../api/scanner/scan.service.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
@@ -33,8 +32,12 @@ const LOG = '[watchlist]'
  * `idea` is absent on purpose. ideaService.getIdeas returns portfolio holdings AND loose legacy
  * ideas from the retired Idea agent — and its chat no longer exists, so reporting one invites an
  * offer to open a desk that isn't there. Holdings are reported as their BOOK instead.
+ *
+ * `call` left for the same reason on 2026-08-18: Kairos is archived, so a call has no desk to be
+ * opened in. Listing one would offer the user a door that is not there — the exact failure the
+ * paragraph above describes, which is why it goes rather than being quietly kept for old rows.
  */
-export const DEFAULT_KINDS = ['call', 'setup', 'portfolio', 'coverage', 'scan']
+export const DEFAULT_KINDS = ['setup', 'portfolio', 'coverage', 'scan']
 
 /**
  * The kinds that BELONG to a workspace, and therefore get scoped to it.
@@ -45,7 +48,7 @@ export const DEFAULT_KINDS = ['call', 'setup', 'portfolio', 'coverage', 'scan']
  * SHARED across all three workspaces by decision. There is nothing to scope them by and nothing
  * gained by trying.
  */
-export const WORKSPACE_SCOPED_KINDS = ['call', 'setup', 'portfolio']
+export const WORKSPACE_SCOPED_KINDS = ['setup', 'portfolio']
 
 /**
  * @param {string} userId
@@ -61,7 +64,6 @@ export const WORKSPACE_SCOPED_KINDS = ['call', 'setup', 'portfolio']
  */
 export async function listWatchedItems(userId, { kinds = DEFAULT_KINDS, includeFinished = false, symbol = null, workspace = null } = {}, deps = {}) {
     const {
-        calls = (uid) => kairosService.listKairosCalls(uid, { onError: 'throw' }),
         setups = (uid) => setupService.listSetups(uid, { onError: 'throw' }),
         scans = (uid) => scanService.getScans(uid, { onError: 'throw' }),
         coverage = (uid) => coverageService.getCoverage(uid, { onError: 'throw' }),
@@ -76,7 +78,7 @@ export async function listWatchedItems(userId, { kinds = DEFAULT_KINDS, includeF
     // silent miss here reads to the user as "you have nothing on NVDA".
     const wantSymbol = symbol ? String(symbol).toUpperCase() : null
     const sources = [
-        ['call', calls], ['setup', setups], ['portfolio', portfolios],
+        ['setup', setups], ['portfolio', portfolios],
         ['coverage', coverage], ['scan', scans],
     ].filter(([kind]) => want.has(kind))
 
