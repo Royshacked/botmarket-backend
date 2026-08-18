@@ -104,14 +104,14 @@ export async function routeExits(idea) {
     //
     // Dispatched HERE rather than at the call site so the execution path stays kind-blind — it asks
     // one function for a routing and gets the same shape back whatever authored the exits.
-    if (idea?.kind === 'setup') return routeSetupZones(idea)
+    if (idea?.kind === 'setup') return _warnUnmonitored(idea, routeSetupZones(idea))
 
     const totalQty = Number(idea.quantity) || 0
     const [stop, tp] = await Promise.all([
         _routeLeg(idea.stop_condition_tree, idea.stop_conditions, totalQty),
         _routeLeg(idea.tp_condition_tree,   idea.tp_conditions,   totalQty),
     ])
-    return { stop, tp }
+    return _warnUnmonitored(idea, { stop, tp })
 }
 
 /**
@@ -169,6 +169,64 @@ export function routeSetupZones(setup) {
     }
 
     return { stop: leg(setup?.stop_zones, 'stop'), tp: leg(setup?.tp_zones, 'tp') }
+}
+
+/**
+ * WHICH LEGS OF THIS ROUTING NOTHING WILL EVALUATE.
+ *
+ * Routing a leg to "the software monitor" is a promise, and right now the app cannot keep it:
+ * `positionMonitor.checkPosition` — the only code that evaluates a stop/TP condition tree for an
+ * entity already in a position — has NO CALLER. Minos was its only one, and Minos was deleted on
+ * 2026-08-18 (server.js). Nothing replaced it for the `idea` kind; Talos polls `setup` only, and a
+ * setup is protected by broker-resting orders built from its zones, not by a tree.
+ *
+ * So a user can author a stop that isn't a plain price level, have it accepted, stored, and shown
+ * as protection — and have it never once evaluated. THE AUTHORING PATH IS VERY MUCH ALIVE: every
+ * placement call site runs `routeExits`, and it will happily hand back a `monitorTree`.
+ *
+ * TWO WAYS A LEG ENDS UP HERE:
+ *   • `monitorTree` — the residual non-touch leaves (structured candle-close compares, indicator /
+ *     chart / news / time, cross-asset, nested groups). The broker cannot rest these; the monitor
+ *     was the only thing that could read them.
+ *   • MANUAL, non-portfolio — a manual position has no venue to rest ANYTHING at, so
+ *     `confirmManualEntry` puts the WHOLE leg on the monitor (`monitorStop = hasAny`) and writes no
+ *     residual tree. Touch or not, the monitor owns it. Portfolio legs are excluded because manual
+ *     mode §4b puts their exits in the user's hands deliberately, not by accident.
+ *
+ * This is a SIGNAL, not a refusal. Refusing the placement would leave a position open at the broker
+ * with its exits rejected, which is worse than the hole it reports. The fix is an owner for
+ * checkPosition — a kind-blind exit loop, the way `marketOpen` is kind-blind. Until that ships this
+ * turns a silent failure into a loud one. DELETE THIS GUARD WHEN THAT LOOP LANDS.
+ *
+ * Pure and exported so the condition can be asserted directly in tests.
+ *
+ * @param {object} idea
+ * @param {{stop: object, tp: object}} routing
+ * @returns {{leg: string, why: 'residual'|'manual'}[]}
+ */
+export function unmonitoredExitLegs(idea, routing) {
+    // A manual PORTFOLIO leg is monitor-less on purpose (manualIdea.service: `monitored`), so it is
+    // not a hole. Mirrored here rather than re-derived, or this warns on every portfolio add.
+    const manualOwned = idea?.broker === 'manual' && !idea?.portfolioId
+    const out = []
+    for (const leg of ['stop', 'tp']) {
+        const r = routing?.[leg]
+        if (!r) continue
+        if (r.monitorTree)                out.push({ leg, why: 'residual' })
+        else if (manualOwned && r.hasAny) out.push({ leg, why: 'manual' })
+    }
+    return out
+}
+
+/** Log the above and pass the routing straight through, so it can wrap a `return`. */
+function _warnUnmonitored(idea, routing) {
+    const orphaned = unmonitoredExitLegs(idea, routing)
+    if (orphaned.length) {
+        logger.error(LOG, 'UNWATCHED EXIT — nothing evaluates the software monitor (checkPosition has no caller). ' +
+            `entity=${idea?.id ?? '?'} kind=${idea?.kind ?? 'idea'} asset=${idea?.asset ?? '?'} ` +
+            `broker=${idea?.broker ?? 'none'} legs=${orphaned.map(o => o.leg + ':' + o.why).join(',')}`)
+    }
+    return routing
 }
 
 // ─── internals ──────────────────────────────────────────────────────────────
