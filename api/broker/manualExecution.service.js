@@ -13,7 +13,7 @@
 
 import { randomUUID }         from 'crypto'
 import { paperBrokerService } from './paperBroker.service.js'
-import { dirSign, round2 }    from './paperExecution.service.js'
+import { dirSign, round2, blendPosition } from './paperExecution.service.js'
 import { logger }             from '../../services/logger.service.js'
 
 const LOG = '[manualExecution]'
@@ -114,6 +114,11 @@ export async function reduceManualPosition({ userId, positionId, qty, price, rea
  * Record an ADD to an existing manual position (scale-in) at the user-reported price: grow the size
  * and blend the average entry (size-weighted). No balance change (manual has no cost model — P&L banks
  * on close against the blended avg). Same shared-store + no-emit contract as the others.
+ *
+ * The blend itself is `blendPosition`, shared with paper's `addToPaperPosition`: a scale-in's new cost
+ * basis is one piece of arithmetic, and two copies of it would eventually disagree about what the user
+ * paid. What stays different is the price fed in — manual reports a real fill, paper crosses a
+ * simulated spread first.
  * @returns {Promise<{ positionId, qty, avgPrice, addedQty }|null>} null if not open
  */
 export async function addToManualPosition({ userId, positionId, addQty, price }) {
@@ -126,8 +131,9 @@ export async function addToManualPosition({ userId, positionId, addQty, price })
     if (!(add > 0))   throw new Error(`manual addPosition: quantity must be > 0 (got ${addQty})`)
     if (!(price > 0)) throw new Error(`manual addPosition: price must be > 0 (got ${price})`)
 
-    const newQty = round2(pos.qty + add)
-    const newAvg = round2((pos.avgPrice * pos.qty + price * add) / newQty)   // size-weighted blend
+    const { qty: newQty, avgPrice: newAvg } = blendPosition({
+        qty: pos.qty, avgPrice: pos.avgPrice, addQty: add, addPrice: price,
+    })
     await paperBrokerService.updatePosition(userId, positionId, { qty: newQty, avgPrice: newAvg })
     logger.info(LOG, `Manual position ${positionId} added ${add} @ ${price} → ${newQty} @ ${newAvg}`)
     return { positionId, qty: newQty, avgPrice: newAvg, addedQty: add }

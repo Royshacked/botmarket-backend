@@ -97,6 +97,28 @@ export function makeEntityRepo({ coll = _defaultColl } = {}) {
             )
         },
 
+        /**
+         * Set ONE entry leg's recorded size, matched on accountId + positionId.
+         *
+         * The leg's `quantity` is not decoration — it is the base every later fraction is computed
+         * from (a review's trim/scale-in, `remainingForAccount`, the exit-order scaling). A partial
+         * close we couldn't attribute to a tracked exit order used to leave it at the pre-trim size
+         * forever, so the next "trim half" was computed against a size the broker no longer held.
+         * The writer is the reconciler, from the broker's own volume — the same authority it already
+         * trusts for whether the position survived.
+         *
+         * @returns {Promise<boolean>} true when a leg was actually resized
+         */
+        async setLegQuantity(id, { accountId, positionId, quantity }) {
+            const c   = await coll()
+            const res = await c.updateOne(
+                { id },
+                { $set: { 'brokerOrders.$[slot].quantity': quantity } },
+                { arrayFilters: [{ 'slot.accountId': String(accountId), 'slot.positionId': String(positionId) }] },
+            )
+            return res.modifiedCount === 1
+        },
+
         /** Active + resting entities carrying broker links — for resuming execution feeds after restart. */
         async activeWithBrokerLinks() {
             const c = await coll()

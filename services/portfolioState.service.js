@@ -180,6 +180,17 @@ export async function computePortfolioState(portfolioId, userId) {
     const liveStates = liveIdeas.map(idea => {
         let notional        = 0
         let pnlSum          = 0
+        // WEIGHTED sums, over the position's own size. A holding can span several positions — a
+        // multi-account book, or a scale-in on a hedging venue that opened a sibling — and a plain
+        // mean of their prices answers "what did I pay" wrong the moment the slices differ in size:
+        // 10 @ 987 plus 3 @ 1018 is 994.42, not 1002.82. It feeds pnlPct and the entry price the
+        // coverage gate holds its own revised target against, so the error is not cosmetic.
+        let entryValueSum   = 0
+        let currentValueSum = 0
+        let volumeSum       = 0
+        // Unweighted companions, kept ONLY for the degenerate case where a broker reports an open
+        // position with no size: the weighted sums are price×volume, so they collapse to 0 there and
+        // dividing them would report a cost of nothing rather than falling back.
         let entryPriceSum   = 0
         let currentPriceSum = 0
         let matched         = 0
@@ -196,13 +207,18 @@ export async function computePortfolioState(portfolioId, userId) {
             const cur = pos.currentPrice ?? pos.entryPrice ?? 0
             notional        += vol * cur
             pnlSum          += pos.pnl ?? 0
+            entryValueSum   += (pos.entryPrice ?? 0) * vol
+            currentValueSum += cur * vol
+            volumeSum       += vol
             entryPriceSum   += pos.entryPrice ?? 0
             currentPriceSum += cur
             matched++
         }
 
-        const avgEntry   = matched > 0 ? entryPriceSum   / matched : null
-        const avgCurrent = matched > 0 ? currentPriceSum / matched : null
+        const avgEntry = volumeSum > 0 ? entryValueSum   / volumeSum
+            : matched > 0 ? entryPriceSum   / matched : null
+        const avgCurrent = volumeSum > 0 ? currentValueSum / volumeSum
+            : matched > 0 ? currentPriceSum / matched : null
         const pnlPct = (avgEntry && avgCurrent)
             ? ((avgCurrent - avgEntry) / avgEntry * 100) * (idea.direction === 'short' ? -1 : 1)
             : null

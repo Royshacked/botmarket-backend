@@ -243,7 +243,8 @@ aliasing / basis shift). Capabilities: `trading`/`closePosition`/`cancelOrder`/`
 paper.adapter.js
   placeOrder:
     market → fills instantly at latestPrice
-        openPosition, or reducePosition if order.positionId set (closing order)
+        openPosition, or reducePosition if order.positionId set (closing order),
+        or addToPaperPosition if order.increasePositionId set (scale-in → NETS)
     limit/stop (resting entries + positionId exits)
         stored 'working' → filled by the global paper fill engine (paperFill.service)
         which fires when a candle high/low touches the level
@@ -252,8 +253,9 @@ paper.adapter.js
         │  delegates all position mutation to ↓
         ▼
 paperExecution.service.js   shared engine
-  openPosition / reducePosition / computeEquity / latestPrice / latestMarkPrice
-  applySpread (spread crossing), quote cache, banks realized P&L,
+  openPosition / reducePosition / addToPaperPosition / computeEquity / latestPrice / latestMarkPrice
+  applySpread (spread crossing), blendPosition (weighted avg, shared with manual),
+  quote cache, banks realized P&L,
   and EMITS THE SAME normalized execution events the reconciler consumes
         │  so paper drives the identical monitor + reconciler path as a live broker
         ▼
@@ -266,6 +268,50 @@ Because `paperExecution` emits the same `BrokerExecution` events as cTrader, the
 monitor, exit placement, and status lifecycle are **identical** for paper and live — paper
 is not a special case anywhere downstream. Paper has **no** `brokerConnections` document; its
 "connected" state is `paperBrokerService.isEnabled`.
+
+### Netting vs hedging — a scale-in is answered per venue
+
+`increasePositionId` on a same-direction market order means **grow this position**. It is a
+separate field from `positionId` because on a market order that one already means *reduce*, so
+overloading it would turn every scale-in into a trim. Venues answer it differently, and the **return
+value** is what says which happened:
+
+| Venue | Behaviour | Returns |
+|---|---|---|
+| paper | NETS — `addToPaperPosition` grows the position and blends the average (size-weighted, 8dp) | the **same** `positionId` |
+| manual | NETS — `addToManualPosition`, on the user's reported fill | the same `positionId` |
+| cTrader / MT5 | **HEDGING** — cannot add to a position; opens a sibling | a **new** `positionId` |
+| IBKR | netting at the broker | its own position id |
+
+Callers branch on the id they get back, never on the broker's name (`_addToItem` does exactly
+this: same id → raise the existing leg's `quantity`; new id → track a second leg). Two consequences
+worth knowing:
+
+- A paper scale-in emits `position.opened` **on the existing positionId** with the ADDED quantity.
+  That is a real netting broker's fill shape, and the reconciler already reads it as a scale-in
+  (already-linked → capture the open, then `_growStops` behind the bigger size).
+- On a hedging venue one holding legitimately stands behind several positions. Anything that reports
+  a holding's size must therefore SUM its legs (`remainingForAccount`) and anything that reports its
+  price must WEIGHT by size (`computePortfolioState`, and the frontend's `blendLegs`, which folds the
+  legs into one row). A plain mean of two legs' entry prices is not what the user paid.
+
+### The leg's recorded size is broker-authoritative
+
+`brokerOrders[].quantity` is not decoration — it is the base every later fraction is measured
+against (a review's trim/scale-in, `remainingForAccount`, exit-order scaling). Two writers keep it
+honest, and both defer to the broker:
+
+- `entityRepo.setLegQuantity`, called from the reconciler's `_onReduced` with the volume
+  `findOpenPosition` reports. This is the authority.
+- the review paths themselves (`_trimItem`, `_addToItem`), which write their own arithmetic under a
+  **compare-and-set** on the size they sized off — so if the reconciler already stamped the broker's
+  answer, the late writer matches nothing rather than overwriting it.
+
+The second exists because a review trim places **no tracked exit order**, and an untracked partial is
+the one case the reconciler documents that it cannot size from our records. Before this, such a
+reduce reached neither writer: a holding trimmed 126 → 63 still read 126, so the next "trim half"
+computed `floor(126 × 0.5)` = 63 and would have closed the whole remaining position.
+`scripts/repair-stale-leg-quantities.mjs` re-syncs rows that drifted before the fix.
 
 ---
 

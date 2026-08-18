@@ -221,10 +221,41 @@ async function _onReduced(exec) {
         // the source of truth (handles panel-managed fills our records never saw); fall
         // back to deriving it from tracked slices when the broker is unreachable.
         const remaining = position != null ? round(Number(position.volume)) : undefined
+        // Write that truth onto the LEG as well, not just into the exit resync. A reduction we can't
+        // match to a tracked exit order — an Atlas trim, a close from the broker's own panel — used
+        // to leave `brokerOrders[].quantity` at the pre-trim size forever, and that number is the
+        // base every later fraction is computed from: a 50% trim of a holding recorded as 126 but
+        // holding 63 closes the whole position. The broker is the authority here, exactly as it is
+        // for whether the position survived at all.
+        if (remaining != null && Number.isFinite(remaining)) {
+            await _syncLegQuantity(idea.id, exec.accountId, exec.positionId, remaining)
+        }
         if (position != null || matched) {
             await _resyncExits(db, { ...idea, exitOrders: orders }, exec.accountId, remaining)
         }
     })
+}
+
+/**
+ * Stamp the broker's live volume onto the leg that holds this position.
+ *
+ * Deliberately narrow: it touches ONE leg's quantity and nothing else. The entity's own `quantity`
+ * is left alone here because this runs for every kind — a legacy idea, a call, a setup, a holding —
+ * and on a multi-account entity `quantity` means idea units, not any single account's size. The
+ * portfolio paths that DO own that number keep it in step themselves (see `_syncItemQuantity`).
+ *
+ * Matched on accountId + positionId, the same identity the rest of this file uses: a positionId is
+ * only unique within its account.
+ */
+async function _syncLegQuantity(itemId, accountId, positionId, quantity) {
+    try {
+        const done = await _deps.entityRepo.setLegQuantity(itemId, { accountId, positionId, quantity })
+        if (done) logger.info(LOG, `Idea ${itemId}: leg ${accountId}/${positionId} resized to the broker's ${quantity}`)
+    } catch (err) {
+        // Never fatal: the exit resync below is the safety-critical half, and a leg whose recorded
+        // size is stale is the state we were already in.
+        logger.warn(LOG, `leg resize failed on ${itemId} (${accountId}/${positionId})`, err.message)
+    }
 }
 
 async function _onOpened(exec) {

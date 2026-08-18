@@ -22,6 +22,7 @@ import { BrokerAdapter, NO_PRICE } from './broker.interface.js'
 import { paperBrokerService } from '../paperBroker.service.js'
 import { openPosition,
          reducePosition,
+         addToPaperPosition,
          computeEquity,
          committedByAccount,
          deployable,
@@ -171,10 +172,14 @@ export class PaperAdapter extends BrokerAdapter {
     }
 
     /**
-     * Place an order. MARKET orders fill instantly at the live price (opening a new
-     * position, or reducing one when positionId is set). LIMIT/STOP orders — resting
-     * entries and positionId closing exits — are stored working and filled by the
-     * paper fill engine (paperFill.service).
+     * Place an order. MARKET orders fill instantly at the live price (opening a new position,
+     * reducing one when positionId is set, or GROWING one when increasePositionId is set).
+     * LIMIT/STOP orders — resting entries and positionId closing exits — are stored working and
+     * filled by the paper fill engine (paperFill.service).
+     *
+     * Paper NETS a scale-in (see addToPaperPosition): the echoed positionId is the one that was
+     * grown, never a new one. That is the simulation being faithful to a netting venue rather than
+     * to our own storage convenience — see the note on `increasePositionId` in broker.interface.
      * @returns {Promise<{ orderId: string, positionId?: string, accountId: string }>}
      */
     async placeOrder(userId, accountId, order) {
@@ -203,6 +208,34 @@ export class PaperAdapter extends BrokerAdapter {
                 }))
                 await reducePosition({ userId, positionId: order.positionId, qty: order.quantity, price, reason: 'manual', orderId })
                 return { orderId, accountId: acctId }
+            }
+
+            // Scale-in → grow the named position and blend its average, the way a netting venue
+            // reports it. Checked AFTER the reduce branch on purpose: an order carrying both fields
+            // is a caller bug, and reducing a position we were asked to grow is the recoverable
+            // mistake of the two. Priced with the strict entry rule below, not the exit rule above —
+            // it IS an entry, and a slice blended in at a stale close misstates the holding's cost
+            // basis for the rest of its life.
+            if (order.increasePositionId != null) {
+                const { price, source } = await entryMarkPrice(order.symbol)
+                if (price == null) throw noPriceError(order.symbol)
+                if (source === 'retry') logger.info(LOG, `scale-in on ${order.symbol}: first quote blinked, filled at ${price} on the retry`)
+
+                const grown = await addToPaperPosition({
+                    userId, positionId: order.increasePositionId, addQty: order.quantity, price, orderId,
+                })
+                // The position was gone (closed between the decision and the fill). Refuse rather
+                // than fall through to opening a new one: the caller asked to grow a holding, and
+                // silently opening a fresh position instead is how an exited name comes back to life.
+                if (!grown) throw new Error(`paper: position ${order.increasePositionId} is not open — nothing to scale into`)
+
+                await paperBrokerService.insertOrder(this._orderDoc({
+                    // The SLICE's price, not the position's blended average — this row is what this
+                    // order paid, and the blend lives on the position.
+                    userId, accountId: acctId, orderId, order, status: 'filled', fillPrice: grown.fillPrice,
+                    positionId: grown.positionId,
+                }))
+                return { orderId, positionId: grown.positionId, accountId: acctId }
             }
 
             // Opening market order → new position. This one KEEPS the strict live-price rule:

@@ -62,10 +62,14 @@ function makeMongoDouble(seed, opLog) {
             for (const d of store.values()) if (matches(d, filter)) { if (update.$set) applySet(d, update.$set, opts.arrayFilters); return clone(d) }
             return null
         },
-        async updateOne(filter, update) {
+        // `opts` is honoured here exactly as it is in findOneAndUpdate above. Without it a
+        // leg-targeted `$set` (`brokerOrders.$[slot].quantity`) fell through applySet with an EMPTY
+        // condition, which matches every leg — so a double meant to catch an over-broad write was
+        // the one performing it, and any assertion on a single leg passed for the wrong reason.
+        async updateOne(filter, update, opts = {}) {
             opLog.push('db:updateOne')
             for (const d of store.values()) if (matches(d, filter)) {
-                if (update.$set)      applySet(d, update.$set)
+                if (update.$set)      applySet(d, update.$set, opts.arrayFilters)
                 if (update.$addToSet) for (const [k, v] of Object.entries(update.$addToSet)) { d[k] ??= []; if (!d[k].includes(v)) d[k].push(v) }
                 if (update.$push)     for (const [k, v] of Object.entries(update.$push))     { d[k] ??= []; d[k].push(...(v.$each ?? [v])) }
                 return { modifiedCount: 1 }
@@ -222,12 +226,18 @@ test('partial reduce: matched slice filled, broker says still open → resync (n
         'db:updateOne',          // mark matched slice filled (markExitOrderFilled — arrayFilters, in place)
         'broker:findOpenPosition', // authoritative survival check
         'capture:capturePartial',// the slice reaches the ledger — it used to be dropped entirely
+        'db:updateOne',          // setLegQuantity: the LEG now records the broker's 60, not the old 100
         'broker:cancelOrder',    // resync: shrink the 100-lot stop to 60
         'broker:placeOrder',     // re-place at 60
         'db:updateOne',          // persist resized exitOrders
     ])
-    const stop = store.get('idea1').exitOrders.find(o => o.leg === 'stop')
+    const idea = store.get('idea1')
+    const stop = idea.exitOrders.find(o => o.leg === 'stop')
     assert.equal(stop.quantity, 60)   // shrunk to remaining — can't over-close the netting position
+    // And our OWN record of the leg followed the broker. This is the half that was missing: the leg
+    // stayed at its pre-reduce size forever, so every later fraction measured against a position
+    // that no longer existed at that size (the Atlas trim that closed a whole holding).
+    assert.equal(idea.brokerOrders[0].quantity, 60)
 })
 
 // ── Scenario E: idealess simulated-venue close → captureClose only, no idea, no broker ────────

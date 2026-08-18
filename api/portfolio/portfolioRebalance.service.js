@@ -242,7 +242,10 @@ export async function _exitItem(db, itemId, userId, reason, gate = _gate) {
 // Partially close a holding: close `reduceFraction` of each leg's volume. Records the
 // new intended weight (targetAllocationRatio) but leaves quantity to the broker truth
 // (the reconciler reconciles the reduce). targetAllocationRatio is advisory only.
-export async function _trimItem(db, itemId, userId, change, gate = _gate) {
+// `broker` is injectable for the same reason `_addToItem`'s is: without it a test can only assert
+// that the trim REFUSED, never what a successful one records. Appended rather than slotted in
+// beside the others so every existing caller (and the queue's replay) keeps its argument positions.
+export async function _trimItem(db, itemId, userId, change, gate = _gate, broker = brokerService) {
     const item = await db.collection(COLLECTION).findOne({ id: itemId })
     if (!item) return { ok: false, reason: 'not_found' }
     if (item.userId && item.userId !== userId) return { ok: false, reason: 'forbidden' }
@@ -279,12 +282,29 @@ export async function _trimItem(db, itemId, userId, change, gate = _gate) {
 
     let trimmed = 0, skipped = 0
     for (const leg of legs) {
-        if (!brokerService.capabilities(leg.broker)?.closePosition) { skipped++; continue }
+        if (!broker.capabilities(leg.broker)?.closePosition) { skipped++; continue }
         const qty = Math.floor((leg.quantity ?? 0) * f)
         if (qty <= 0) { skipped++; continue }
-        await brokerService.closePosition(leg.broker, userId, leg.accountId, leg.positionId, { quantity: qty })
+        await broker.closePosition(leg.broker, userId, leg.accountId, leg.positionId, { quantity: qty })
+        // Write the reduction down. Without this the leg keeps its pre-trim size forever: a review
+        // trim places no tracked exit order, and that is exactly the case the reconciler says it
+        // cannot size — so the number every later fraction is measured against reached NEITHER
+        // writer. A holding recorded as 126 while 63 was held made the next "trim half" close it all.
+        //
+        // COMPARE-AND-SET on the size we just sized off. The paper venue emits its reduce
+        // synchronously inside closePosition, so the reconciler may already have stamped this leg
+        // from the broker's own volume — which is the authoritative answer, and a plain write here
+        // would overwrite it with our arithmetic. Filtering on the old value means the late writer
+        // simply matches nothing.
+        const before = Number(leg.quantity) || 0
+        await db.collection(COLLECTION).updateOne(
+            { id: itemId },
+            { $set: { 'brokerOrders.$[leg].quantity': Math.max(0, before - qty) } },
+            { arrayFilters: [{ 'leg.positionId': leg.positionId, 'leg.quantity': before }] },
+        )
         trimmed++
     }
+    if (trimmed) await _syncItemQuantity(db, itemId)
 
     if (change.targetAllocationRatio != null && Number.isFinite(Number(change.targetAllocationRatio))) {
         await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { allocationRatio: Number(change.targetAllocationRatio) } })
@@ -417,6 +437,40 @@ function _sameHolding(held, spec) {
 }
 
 /**
+ * Re-derive a holding's own `quantity` from its legs, after a trim or a scale-in changed them.
+ *
+ * `quantity` is the holding's size in IDEA UNITS — the number a single account carries — not the sum
+ * across a multi-account book (saveIdea stamps the same figure on each account's leg). So it is read
+ * off the MAIN account, summing that account's legs because a hedging scale-in can leave two.
+ * Accounts other than the main one are left to their own leg quantities, which is where every
+ * per-account calculation already reads from.
+ *
+ * Called from the two review paths that move real size. The reconciler deliberately does NOT do
+ * this: it runs for every kind, and `quantity` on a call or a setup is the desk's number, not
+ * something a fill should quietly rewrite.
+ */
+async function _syncItemQuantity(db, itemId) {
+    try {
+        const item = await db.collection(COLLECTION).findOne(
+            { id: itemId },
+            { projection: { brokerOrders: 1, mainAccountId: 1 } },
+        )
+        const legs = (item?.brokerOrders ?? []).filter(b => b.positionId != null)
+        if (!legs.length) return
+        // No mainAccountId (a book saved before it existed) → the first linked leg's account speaks
+        // for the holding, which is the same fallback _deriveWorkspace makes.
+        const acct  = String(item.mainAccountId ?? legs[0].accountId)
+        const mine  = legs.filter(l => String(l.accountId) === acct)
+        const total = (mine.length ? mine : legs).reduce((s, l) => s + (Number(l.quantity) || 0), 0)
+        if (!(total > 0)) return
+        await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { quantity: total } })
+    } catch (err) {
+        // Advisory: the legs are the load-bearing record, and this is the holding's display size.
+        logger.warn(LOG, `quantity resync failed for ${itemId}`, err.message)
+    }
+}
+
+/**
  * The book's live market value — the capital base a new holding's weight is sized against.
  * Never throws: an unavailable book value just leaves the add unsized (recorded, not sized).
  */
@@ -458,13 +512,27 @@ async function _sizeNewItem(spec, bookValue, quote) {
     return raw > 0 ? raw : 1
 }
 
-// Scale INTO a live holding: place a same-direction market order per leg to increase exposure. A new
-// name uses add_item (a fresh 'waiting' holding); this grows an EXISTING live position. A same-direction
-// order with NO positionId OPENS/increases (a positionId would make it a CLOSING order); on a hedging
-// broker that adds a sibling position under the same item — fine, since trim/exit iterate ALL legs and
-// computePortfolioState sums them. Portfolio holdings are review-managed (no native stop/TP), so there
-// are no protective exits to grow. `broker` is injectable for tests. targetAllocationRatio is advisory.
-// LIMITATION: a holding that DOES carry native exits won't have them resized here.
+/**
+ * Scale INTO a live holding: a same-direction market order per leg, to increase exposure. A new name
+ * uses add_item (a fresh holding); this grows one that is already on.
+ *
+ * The order carries `increasePositionId` — "grow THIS position" — and what comes back says how the
+ * venue actually took it (see broker.interface):
+ *
+ *   • echoed the same positionId → the venue NETTED (paper, manual, a netting live broker). There is
+ *     no new leg; the existing one is now bigger, and its recorded quantity is raised to match.
+ *   • a NEW positionId → a hedging venue (cTrader/MT5) could not net, so it opened a sibling
+ *     position. That becomes a second leg on the same holding, which trim/exit already iterate and
+ *     computePortfolioState already sums.
+ *
+ * Branching on the returned id rather than the broker's name is what keeps both venues correct
+ * without this file knowing which is which. What it must NOT do either way is leave the leg's
+ * `quantity` at the pre-add size: that number is the base the NEXT fraction is measured against.
+ *
+ * Portfolio holdings are review-managed (no native stop/TP), so there are no protective exits to
+ * grow here. `broker` is injectable for tests. targetAllocationRatio is advisory.
+ * LIMITATION: a holding that DOES carry native exits won't have them resized here.
+ */
 export async function _addToItem(db, itemId, userId, change, broker = brokerService, gate = _gate) {
     const item = await db.collection(COLLECTION).findOne({ id: itemId })
     if (!item) return { ok: false, reason: 'not_found' }
@@ -504,7 +572,8 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
     const symbol    = orderSymbol(item)
 
     let added = 0, skipped = 0, failed = 0
-    const newLegs = []
+    const newLegs = []   // hedging venue: a sibling position to track as its own leg
+    const grown   = []   // netting venue: an existing leg whose size went up in place
     for (const leg of legs) {
         if (!broker.capabilities(leg.broker)?.trading) { skipped++; continue }
         const qty = Math.floor((leg.quantity ?? 0) * f)
@@ -512,14 +581,24 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
         // Per-leg guard (mirrors placeOrdersForIdea): a failure on one account must NOT abandon a
         // sibling leg whose order already went in unlinked — each success is collected independently.
         try {
-            const res = await broker.placeOrder(leg.broker, userId, leg.accountId, { symbol, direction, quantity: qty, type: 'market' })
-            newLegs.push({
-                broker:     leg.broker,
-                accountId:  res?.accountId  ?? leg.accountId,
-                orderId:    res?.orderId    ?? null,
-                positionId: res?.positionId ?? null,
-                quantity:   qty,
+            const res = await broker.placeOrder(leg.broker, userId, leg.accountId, {
+                symbol, direction, quantity: qty, type: 'market',
+                // "Grow this one." A netting venue obliges and blends the average; a hedging one
+                // ignores it and hands back a new position. Either answer is handled below.
+                increasePositionId: leg.positionId,
             })
+            const netted = res?.positionId != null && String(res.positionId) === String(leg.positionId)
+            if (netted) {
+                grown.push({ positionId: leg.positionId, before: Number(leg.quantity) || 0, quantity: (Number(leg.quantity) || 0) + qty })
+            } else {
+                newLegs.push({
+                    broker:     leg.broker,
+                    accountId:  res?.accountId  ?? leg.accountId,
+                    orderId:    res?.orderId    ?? null,
+                    positionId: res?.positionId ?? null,
+                    quantity:   qty,
+                })
+            }
             added++
         } catch (err) {
             logger.error(LOG, `add leg failed (${leg.broker}/${leg.accountId})`, err.message)
@@ -530,8 +609,22 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
     if (added) {
         // Link the new legs so the reconciler backfills their positionId on fill (matched by orderId),
         // and make sure we're listening for those fills.
-        await db.collection(COLLECTION).updateOne({ id: itemId }, { $push: { brokerOrders: { $each: newLegs } } })
-        for (const l of newLegs) broker.startExecutionFeed?.(l.broker, userId, l.accountId)?.catch?.(() => {})
+        if (newLegs.length) {
+            await db.collection(COLLECTION).updateOne({ id: itemId }, { $push: { brokerOrders: { $each: newLegs } } })
+            for (const l of newLegs) broker.startExecutionFeed?.(l.broker, userId, l.accountId)?.catch?.(() => {})
+        }
+        // A netted add created no leg — it made one bigger. Raise its recorded size, or every later
+        // fraction is measured against a position that no longer exists at that size. Guarded on the
+        // size we sized off, like the trim's write: whoever wrote in between (a reconciler stamping
+        // the broker's own volume) knows better than this arithmetic does.
+        for (const g of grown) {
+            await db.collection(COLLECTION).updateOne(
+                { id: itemId },
+                { $set: { 'brokerOrders.$[leg].quantity': g.quantity } },
+                { arrayFilters: [{ 'leg.positionId': g.positionId, 'leg.quantity': g.before }] },
+            )
+        }
+        await _syncItemQuantity(db, itemId)
         // Record the intended new weight (advisory) only when exposure actually changed.
         if (change.targetAllocationRatio != null && Number.isFinite(Number(change.targetAllocationRatio))) {
             await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { allocationRatio: Number(change.targetAllocationRatio) } })

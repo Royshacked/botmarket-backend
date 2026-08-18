@@ -96,6 +96,18 @@ import { logger }                  from '../../../services/logger.service.js'
  *                                      netting brokers may ignore it (an opposite order nets the
  *                                      position anyway). Used for every exit order (TP/stop
  *                                      levels, monitor closes).
+ * @property {string} [increasePositionId]  the mirror of `positionId`: a SAME-direction order that
+ *                                      grows that position rather than opening a new one. Its own
+ *                                      field because `positionId` on a market order already means
+ *                                      "reduce", so overloading it would turn every scale-in into a
+ *                                      trim. Adapters answer it in whichever way their venue really
+ *                                      behaves, and the RETURN VALUE says which happened: a netting
+ *                                      venue (paper, manual, IBKR) merges and echoes the SAME
+ *                                      positionId; a hedging one (cTrader/MT5) cannot, so it ignores
+ *                                      the field and returns a NEW positionId for the sibling
+ *                                      position. Callers must branch on the id they get back, not on
+ *                                      the broker's name — that is what keeps a holding's legs
+ *                                      correctly tracked on either kind of venue.
  *
  * @typedef {Object} BrokerProtection
  * @property {number} [stopLoss]    absolute stop-loss price   (omit to leave unchanged)

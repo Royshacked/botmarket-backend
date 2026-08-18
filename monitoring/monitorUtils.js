@@ -188,10 +188,29 @@ export function logCheck(id, asset, status, tf, candles) {
 
 export const round = n => Math.round((Number(n) || 0) * 10000) / 10000
 
+/**
+ * How much of an entity is still on at one account: everything its entry legs put on there, minus
+ * the exit slices already filled there. Used as the CAP on how much an exit may close.
+ *
+ * SUMS the account's IN-POSITION legs rather than taking the first one it finds. An account can
+ * hold more than one leg for the same entity — a scale-in on a hedging venue (cTrader/MT5) opens a
+ * sibling position under the same holding, which is exactly what `_addToItem` records. Reading only
+ * the first leg reported a holding that had grown 10 → 13 as still 10, so an exit sized off it
+ * could never close more than the original slice.
+ *
+ * "In-position" means `positionId != null`, and the distinction matters: legs without one are not
+ * on yet, and summing those WOULD over-report — a `setup`'s rival price zones are alternative ways
+ * in, never additive size (docs/desks/trade-pipeline.md), so counting two of them would let an exit
+ * try to close more than the winner actually put on. When no leg is linked yet, fall back to the
+ * first matching leg, which is the pre-fill size this function has always reported.
+ */
 export function remainingForAccount(idea, accountId) {
     const acct     = String(accountId)
-    const slot     = (idea.brokerOrders ?? []).find(b => String(b.accountId) === acct)
-    const entryQty = Number(slot?.quantity) || 0
+    const mine     = (idea.brokerOrders ?? []).filter(b => String(b.accountId) === acct)
+    const inPos    = mine.filter(b => b.positionId != null)
+    const entryQty = inPos.length
+        ? inPos.reduce((s, b) => s + (Number(b.quantity) || 0), 0)
+        : Number(mine[0]?.quantity) || 0
     const closed   = (idea.exitOrders ?? [])
         .filter(o => o.status === 'filled' && String(o.accountId) === acct)
         .reduce((s, o) => s + (Number(o.quantity) || 0), 0)

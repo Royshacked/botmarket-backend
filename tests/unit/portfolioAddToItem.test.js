@@ -13,7 +13,9 @@ function fakeDb(idea) {
         _updates: updates,
         collection: () => ({
             findOne: async () => idea,
-            updateOne: async (q, u) => { updates.push({ q, u }) },
+            // `opts` is recorded too: a leg-targeted $set is only correct together with its
+            // arrayFilters, so a test that ignored them could pass on an update that hit every leg.
+            updateOne: async (q, u, opts) => { updates.push({ q, u, opts }) },
         }),
     }
 }
@@ -58,16 +60,68 @@ test('happy path: adds floor(qty × fraction) per leg, same direction, no positi
     // 10×0.5=5, 4×0.5=2
     assert.deepEqual(broker._placed.map(p => p.order.quantity), [5, 2])
     assert.ok(broker._placed.every(p => p.order.direction === 'long' && p.order.type === 'market'))
-    assert.ok(broker._placed.every(p => !('positionId' in p.order)))   // no positionId → opens/increases
+    assert.ok(broker._placed.every(p => !('positionId' in p.order)))   // never a CLOSING order
+    // …but it does ask to grow the leg it is sizing off. A hedging venue ignores this and hands back
+    // a new position (as the fake broker does); a netting one echoes the same id — see below.
+    assert.deepEqual(broker._placed.map(p => p.order.increasePositionId), ['p1', 'p2'])
 
     // One $push linking the two new legs (orderId set, positionId null), plus one $set for the weight.
     const push = db._updates.find(u => u.u.$push)
     assert.equal(push.u.$push.brokerOrders.$each.length, 2)
     assert.equal(push.u.$push.brokerOrders.$each[0].orderId, 'ord-a1')
     assert.equal(push.u.$push.brokerOrders.$each[0].positionId, null)
-    const set = db._updates.find(u => u.u.$set)
+    // Found by FIELD, not by "the first $set": the add now also re-derives the holding's own
+    // quantity, so there is more than one $set in flight.
+    const set = db._updates.find(u => u.u.$set?.allocationRatio != null)
     assert.equal(set.u.$set.allocationRatio, 0.3)
     assert.equal(broker._feeds.length, 2)   // listening for the fills
+})
+
+// ── Netting venues: the add grows the position it names, and no leg is invented ──────────────────
+//
+// This is the MU bug. Paper opened a sibling position for every scale-in, so a book showed the same
+// ticker twice at two prices — and the leg's recorded size never moved, which is the number the NEXT
+// fraction is computed from.
+
+// A netting broker: echoes back the position it was asked to grow.
+function nettingBroker() {
+    const placed = []
+    return {
+        _placed: placed,
+        capabilities: () => ({ trading: true }),
+        placeOrder: async (broker, userId, accountId, order) => {
+            placed.push({ accountId, order })
+            return { orderId: `ord-${accountId}`, accountId, positionId: order.increasePositionId }
+        },
+        startExecutionFeed: () => Promise.resolve(),
+    }
+}
+
+test('a netted add raises the existing leg instead of pushing a second one', async () => {
+    const db = fakeDb(liveIdea({ brokerOrders: [{ broker: 'paper', accountId: 'a1', positionId: 'p1', quantity: 10 }] }))
+    const r  = await addTo(db, 'i1', 'u1', { addFraction: 0.3 }, nettingBroker())
+
+    assert.deepEqual(r, { ok: true, legsAdded: 1, legsSkipped: 0 })
+    // No new leg: the holding still has exactly one, and it is bigger.
+    assert.equal(db._updates.some(u => u.u.$push), false)
+    const resize = db._updates.find(u => u.u.$set?.['brokerOrders.$[leg].quantity'] != null)
+    assert.equal(resize.u.$set['brokerOrders.$[leg].quantity'], 13)   // 10 + floor(10 × 0.3)
+    // Guarded on the size it sized off, so a reconciler that stamped the broker's own volume in the
+    // meantime is not overwritten by this arithmetic — the late writer matches nothing.
+    assert.deepEqual(resize.opts.arrayFilters, [{ 'leg.positionId': 'p1', 'leg.quantity': 10 }])
+})
+
+test('a hedging add is still tracked as a second leg', async () => {
+    const db = fakeDb(liveIdea({ brokerOrders: [{ broker: 'ctrader', accountId: 'a1', positionId: 'p1', quantity: 10 }] }))
+    // The default fake returns positionId:null — an id that is NOT the one we asked to grow.
+    const r  = await addTo(db, 'i1', 'u1', { addFraction: 0.3 }, fakeBroker())
+
+    assert.equal(r.legsAdded, 1)
+    const push = db._updates.find(u => u.u.$push)
+    assert.equal(push.u.$push.brokerOrders.$each.length, 1)
+    assert.equal(push.u.$push.brokerOrders.$each[0].quantity, 3)
+    // And no leg was resized — the original leg still holds what it always held.
+    assert.equal(db._updates.some(u => u.u.$set?.['brokerOrders.$[leg].quantity'] != null), false)
 })
 
 test('fraction > 1 is allowed (double the position)', async () => {

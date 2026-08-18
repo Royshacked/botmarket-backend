@@ -29,6 +29,29 @@ export const round2  = n => Math.round(n * 100) / 100
 const round8 = n => Math.round(n * 1e8) / 1e8
 
 /**
+ * Blend a scale-in into an existing position: the new size, and the SIZE-WEIGHTED average entry.
+ *
+ * Pure, and shared by both virtual venues — paper (`addToPaperPosition`) and manual
+ * (`addToManualPosition`) — because "what did I pay for this position" must not have two answers
+ * that can drift. The unweighted mean is the specific wrong answer this replaces: 10 @ 987 plus
+ * 3 @ 1018 is 994.43, not 1002.82, and the difference lands straight in reported P&L.
+ *
+ * Rounded to 8dp, NOT to cents, and that is not fussiness: openPosition stores an entry price
+ * unrounded, so blending at 2dp would make a scale-in coarser than the entry it is blending into —
+ * and on a sub-cent instrument (a token quoted at 0.000012) 2dp is the difference between a cost
+ * basis and a zero. Presentation rounds; storage keeps the number.
+ *
+ * @returns {{ qty: number, avgPrice: number }}
+ */
+export function blendPosition({ qty, avgPrice, addQty, addPrice }) {
+    const newQty = round8(Number(qty) + Number(addQty))
+    return {
+        qty:      newQty,
+        avgPrice: round8((Number(avgPrice) * Number(qty) + Number(addPrice) * Number(addQty)) / newQty),
+    }
+}
+
+/**
  * Cross the spread: a BUY fills at the ask (mid + half-spread), a SELL at the bid
  * (mid − half-spread). `spreadBps` is basis points of price; the caller passes the
  * mid (or trigger) price and gets the effective fill. Spread cost is thus baked into
@@ -322,6 +345,80 @@ export async function openPosition({ userId, accountId, symbol, direction, qty, 
     }))
     logger.info(LOG, `Opened position ${positionId}: ${direction} ${qty} ${symbol} @ ${fillPrice} (mid ${price}, comm ${commissionPerTrade})`)
     return positionId
+}
+
+/**
+ * Scale INTO an open paper position: grow the size and blend the average entry, keeping ONE position.
+ *
+ * WHY THIS EXISTS. Every fill used to `insertPosition`, so adding to a holding minted a second
+ * positionId — the user's book showed "MU 10 @ 987" and "MU 3 @ 1018" as two separate positions of
+ * the same name. A netting venue (IBKR, a bank) reports one position at a blended price, and that is
+ * the honest picture of one holding, so the simulation imitates it. Manual already did
+ * (`addToManualPosition`) — paper was the outlier.
+ *
+ * NOT symbol-matched, deliberately: it grows the position the CALLER named. Merging "any open MU in
+ * this account" would silently fuse two different entities that happen to hold the same ticker (a
+ * portfolio holding and a Mentor setup), and each believes it owns its positionId.
+ *
+ * Emits `position.opened` on the EXISTING positionId with the ADDED quantity — a real netting
+ * broker's fill event has exactly this shape, and the reconciler already reads it as a scale-in
+ * (`_onOpened`: already-linked → capture the open, then grow the stops behind the bigger size).
+ *
+ * `fillPrice` in the result is the SLICE's own price (spread crossed), distinct from the blended
+ * `avgPrice` of the whole position — the caller records the order at what that order actually paid.
+ *
+ * `deps` is the injection seam the rest of this module uses (see entryMarkPrice) — the store and the
+ * bus, so the blend and the event can be asserted without a Mongo or a live emitter.
+ *
+ * @returns {Promise<{ positionId: string, qty: number, avgPrice: number, addedQty: number, fillPrice: number }|null>} null if not open
+ */
+export async function addToPaperPosition({ userId, positionId, addQty, price, orderId = null }, deps = {}) {
+    const { store = paperBrokerService, bus = executionBus } = deps
+
+    const pos = await store.getPosition(userId, positionId)
+    if (!pos || pos.status !== 'open') {
+        logger.warn(LOG, `addToPaperPosition: position ${positionId} not open — skipping`)
+        return null
+    }
+    const add = Number(addQty)
+    if (!(add > 0))          throw new Error(`paper addPosition: quantity must be > 0 (got ${addQty})`)
+    if (!(Number(price) > 0)) throw new Error(`paper addPosition: price must be > 0 (got ${price})`)
+
+    const acct = await store.getAccount(userId, pos.accountId)
+    if (!acct) throw new Error(`paper addToPosition: account ${pos.accountId} not found`)
+    const { spreadBps = 0, commissionPerTrade = 0 } = acct.settings ?? {}
+
+    // Same cost model as an opening fill: the added slice crosses the spread on the position's own
+    // side, and its commission is a realized cash cost. Blending an UNADJUSTED price here would let
+    // a scale-in quietly improve the book's cost basis relative to how it was first entered.
+    const fillPrice = applySpread(Number(price), pos.direction === 'long', spreadBps)
+    const blended   = blendPosition({ qty: pos.qty, avgPrice: pos.avgPrice, addQty: add, addPrice: fillPrice })
+
+    await store.updatePosition(userId, positionId, { qty: blended.qty, avgPrice: blended.avgPrice })
+    if (commissionPerTrade) {
+        await store.adjustBalance(userId, pos.accountId, { cash: -commissionPerTrade, realizedPnl: -commissionPerTrade })
+    }
+
+    setImmediate(() => bus.emit('execution', {
+        broker:    'paper',
+        simulated: true,
+        type:      'position.opened',
+        userId,
+        accountId: pos.accountId,
+        orderId,
+        positionId,
+        symbol:    pos.symbol,
+        direction: pos.direction,
+        // The SLICE, not the new total: this event describes the fill that just happened, and the
+        // ledger's captureOpen sizes the trade from it.
+        quantity:  add,
+        price:     fillPrice,
+        commission: commissionPerTrade,
+        spread:     round2(Math.abs(fillPrice - Number(price)) * add),
+        at:        Date.now(),
+    }))
+    logger.info(LOG, `Scaled into ${positionId}: +${add} ${pos.symbol} @ ${fillPrice} → ${blended.qty} @ ${blended.avgPrice}`)
+    return { positionId, ...blended, addedQty: add, fillPrice }
 }
 
 /**
