@@ -7,8 +7,9 @@ against live market data. It runs as a background service inside the Express pro
 
 > **Scope — READ THIS FIRST.** Everything below describes the `idea` kind's condition-tree loop.
 > **THAT LOOP NO LONGER EXISTS.** It was switched off in July 2026 and deleted outright on
-> 2026-08-18; nothing took it over. So this document is a specification of the condition-tree
-> SEMANTICS, not a description of a running service.
+> 2026-08-18. Its EXIT half has since been taken over by a new loop; its ENTRY half has not. So
+> read what follows as a specification of the condition-tree SEMANTICS, and the two paragraphs
+> below for which half of it is actually running.
 >
 > What is still live from it: the evaluator stack (`monitor.orchestrator.evaluateTree`, the leaf
 > parsers, the condition taxonomy) — Talos and the exit tier both read trees through it — and
@@ -16,13 +17,22 @@ against live market data. It runs as a background service inside the Express pro
 > path in `tradeIdeas.service.js`. Its sibling `resetIdea` only cleared the deleted loop's private
 > in-memory Map and went with it.
 >
-> What is NOT live: the entry poll, the in-position exit poll (`positionMonitor.checkPosition` has
-> no caller), and the invalidation monitor (deleted). Anything below phrased as "the monitor does X"
-> describes what the loop DID and what a replacement would have to do.
+> **The in-position EXIT poll came back on 2026-08-18** — `monitoring/exit.monitor.js`, which is
+> the caller `positionMonitor.checkPosition` had been missing. So the exit half of this document
+> describes a running service again: the residual leg that could not be left resting at the broker
+> is evaluated on a persisted per-position cadence. It is kind-BLIND and excludes `setup` (a setup
+> states its exits as zones, which rest at the broker and which `checkPosition` cannot read), and it
+> pre-gates on `hasMonitoredWork` so a position protected entirely by resting orders costs one Mongo
+> write rather than three candle fetches.
+>
+> What is STILL not live: the ENTRY poll for the `idea` kind, and the invalidation monitor
+> (deleted). Anything below about entry, phrased as "the monitor does X", describes what the loop
+> DID and what a replacement would have to do. `portfolioRebalance` arms a conditional add on the
+> promise of an entry card that nothing currently fires.
 >
 > The running loops are **Talos** (`setup`), **Themis** (portfolio), **marketOpen** (kind-blind
-> deferred-order sweep), the **coverage** monitor, the **tilt** monitor, the execution reconciler
-> and the paper-venue loops. Hermes (`call`) is archived.
+> deferred-order sweep), **exits** (kind-blind software exit tier), the **coverage** monitor, the
+> **tilt** monitor, the execution reconciler and the paper-venue loops. Hermes (`call`) is archived.
 >
 > The loop was switched off because its tick selected work by STATUS alone
 > (`looking`/`long`/`short`) — shared vocabulary across every kind — so it woke on `setup` entities

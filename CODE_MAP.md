@@ -380,8 +380,33 @@ monitoring/
                             pace (_nextCheckAt derives the gap from it, then clamps to cadence), so
                             the two can never contradict each other. Ladder floors at 5min (1min is
                             402 off-plan at FMP)
-  positionMonitor.js  portfolio.monitor.js   (portfolio.monitor: due-review NOTIFY-only; runs the non-LLM
-                            pre-check computeReviewSignals → enriches the bubble + payload with triggers[])
+  dueLoop.js                the wake-up chore every monitor is built on: find what is due, CLAIM it
+                            against a lease, check it under a timeout. THE LEASE IS THE SUBTLE PART —
+                            withTimeout ABANDONS a slow check but cannot cancel it, so without one the
+                            next tick re-selects an entity whose check is still in flight and fires it
+                            twice. Shared by Talos, exits, coverage and tilt. `statePath` is what lets
+                            the research loops ride it (they schedule under `monitor.*`, entities under
+                            `monitor_state.*`) and `kind` is OPTIONAL because their collections hold one
+                            thing and carry no such field — passing one selects nothing, forever,
+                            silently. `afterTick` is for a budget spent ACROSS the due set
+  exit.monitor.js           the SOFTWARE exit tier's loop — the caller positionMonitor.checkPosition
+                            lost when Minos was deleted (2026-08-18), and did not have again until
+                            this. Kind-BLIND like marketOpen, because the work is written by more than
+                            one kind (idea, portfolio_item, either of them manual) and a loop tied to
+                            one desk dies when that desk is archived. Excludes `setup`: its zone exits
+                            rest at the broker, checkPosition cannot read a zone, and Talos already
+                            claims the same schedule field — two claimants would push each other's
+                            wake-up forward until the loser stopped running. hasMonitoredWork
+                            pre-gates BEFORE any IO, because this loop sees every open position in the
+                            app and almost all of them are protected entirely by resting orders
+  positionMonitor.js        what exit.monitor drives, and the one place a monitor can send a closing
+                            order: evaluate the residual stop/tp legs and any additional entries for an
+                            open position, then close at the broker — or QUEUE for the open, or alert a
+                            manual holder to close it themselves. NOTHING EXECUTES OFF-HOURS, paper
+                            included. executeDeferredClose replays a queued close through the very same
+                            closer, so an overnight stop and an in-hours stop place identical orders
+  themis.monitor.service.js (was portfolio.monitor.js) due-review NOTIFY-only; runs the non-LLM
+                            pre-check computeReviewSignals → enriches the bubble + payload with triggers[]
   marketBrief.notify.js     the daily market-brief OFFER: one card per user per weekday (12:00 UTC,
                             MARKET_BRIEF_OFFER_HOUR_UTC; MARKET_BRIEF_OFFER=off disables). Posts the
                             OFFER, never the brief — the confirm builds it, so the fan-out costs no
