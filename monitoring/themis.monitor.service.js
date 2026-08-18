@@ -1,7 +1,8 @@
 /**
- * Themis — the portfolio (book-level) monitor. Atlas's own loop, the portfolio-side sibling of
- * Hermes (trades). Standalone: its OWN self-scheduling poll loop, sharing no state with Minos/Hermes
- * (the Minos tick that once carried the portfolio-review check is going away).
+ * Themis — the portfolio (book-level) monitor, Atlas's own loop. Standalone: its OWN
+ * self-scheduling poll loop, sharing no state with any other monitor. The portfolio-review check
+ * used to ride inside the `idea` monitor's tick; giving it its own loop is what kept it alive when
+ * that one was deleted.
  *
  * DOORBELL model (LLM-free by design): Themis decides WHEN and WHY to look; Atlas — opened in review
  * mode from the card — decides WHAT to do. It runs ONLY for in-position books (the due-selection

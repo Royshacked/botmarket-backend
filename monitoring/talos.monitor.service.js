@@ -24,8 +24,10 @@ import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage } f
 // expiry. Each assessment writes back a verdict, a self-chosen next_check_at clamped to the
 // setup's cadence, and a running memo carried across wakes.
 //
-// Shares NO mutable state with Minos (legacy tree-ideas) or Hermes (calls). It polls kind:'setup'
-// exclusively, so the three monitors can never contend for the same document.
+// It polls kind:'setup' exclusively and shares no mutable state with any other loop, so two
+// monitors can never contend for the same document. That kind filter is the whole guarantee —
+// status is SHARED vocabulary ('looking' is a setup's, a call's and an idea's alike), so a loop
+// that selects on status without a kind wakes on work that is not its own.
 //
 // SCOPE. Two brains, one loop. Pre-entry it is readiness (is this the moment). Past entry it is
 // management (_managePosition — does the reason for this trade still hold), on the same shape: a
@@ -821,7 +823,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps, stamp 
         await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
 
         // Only an order actually awaiting confirmation gets the confirm card. 'awaiting_market'
-        // defers silently until the market sweep surfaces it, matching Minos.
+        // defers silently until the market sweep surfaces it (marketOpen.monitor).
         if (patch.orderState !== 'awaiting_market') {
             try { await deps.onCard(executable, assessment) }
             catch (err) { logger.warn(LOG, `entry card failed for ${setup.id}:`, err.message) }

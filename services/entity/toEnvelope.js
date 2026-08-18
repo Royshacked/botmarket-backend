@@ -37,7 +37,8 @@ export function ideaToEnvelope(doc) {
         assetClass: doc.asset_class ?? null,
         direction:  doc.direction ?? null,
         createdAt:  doc.savedAt ?? null,
-        // Ideas have no persisted monitor_state today (Minos throttles in-memory) — empty is faithful.
+        // Ideas have no persisted monitor_state — no loop polls the kind, so there is no schedule
+        // to record. Empty is the faithful answer, not a gap.
         monitorState: blankMonitorState(),
         execution: {
             broker:        doc.broker ?? null,

@@ -10,8 +10,8 @@
  *     These own no entity; the record IS the intent. Added 2026-08-07 with the rule that nothing
  *     executes off-hours, paper included.
  *
- * WHY IT IS ITS OWN MONITOR. The sweep used to live inside Minos, the monitor for the `idea` kind.
- * When Minos was archived (superseded by Hermes/Talos) the sweep went with it, and every deferred
+ * WHY IT IS ITS OWN MONITOR. The sweep used to live inside the `idea` kind's monitor. When that
+ * monitor was switched off (and later deleted outright) the sweep went with it, and every deferred
  * order in the app silently stopped waking up — parked forever, invisible, because the frontend
  * deliberately hides `awaiting_market`. The state is written by three kinds but was drained by one
  * kind's monitor; that mismatch is the bug. So this loop owns exactly one thing, is kind-BLIND, and

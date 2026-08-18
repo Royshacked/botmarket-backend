@@ -16,9 +16,20 @@ const LOG = '[positionMonitor]'
 
 /**
  * Check both exit legs and any additional entries for an in-position idea.
- * @param {Function} onClose  callback(id, reason) — invoked for alert-only closes
- *                            (no live broker position); provided by minos.monitor.service.js
- *                            so it can clean up `_lastChecked`.
+ *
+ * This is the SOFTWARE exit tier: the residual leg that could not be left resting at the broker —
+ * a structured candle-close compare, an indicator/chart/news/time leaf, a cross-asset reference, a
+ * nested group. `protectionPlan.routeExits` decides which legs land here and which rest natively.
+ *
+ * It owns no schedule of its own: the loop that drives it decides when a position is due, fetches
+ * the candles for each leg's timeframe, and passes them in. (The original driver was the `idea`
+ * kind's monitor, deleted 2026-08-18.)
+ *
+ * @param {Function} onClose  callback(id, reason) — invoked for alert-only closes, meaning there is
+ *                            no live broker position to send anything to. Supplied by the caller so
+ *                            it can flip the entity closed and drop any per-entity scheduling state
+ *                            it keeps. Everything with a real position exits through the broker (or
+ *                            the off-hours queue) inside this function instead.
  */
 export async function checkPosition(db, idea, stopCandles, tpCandles, aeCandles, onClose) {
     const { id, asset } = idea

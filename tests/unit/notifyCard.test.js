@@ -51,13 +51,13 @@ test('REGRESSION: a manual EXIT notify never throws into positionMonitor', async
 })
 
 test('a manual ENTRY notify never throws into the monitor tick', async () => {
-    // Minos patches status→'hit' + orderState→'awaiting_manual_fill' BEFORE posting.
+    // The caller patches status→'hit' + orderState→'awaiting_manual_fill' BEFORE posting.
     await assert.doesNotReject(() => notifyManualEntry('u1', {
         legs: [{ ideaId: 'i1', asset: 'NVDA', direction: 'long' }],
     }))
 })
 
-test('an entry-confirm notify never throws into Minos or Talos', async () => {
+test('an entry-confirm notify never throws into the monitor that sent it', async () => {
     await assert.doesNotReject(() => notifyIdeaEntryConfirm({ id: 'i1', userId: 'u1', asset: 'NVDA', direction: 'long' }))
     await assert.doesNotReject(() => notifySetupEntryConfirm(
         { id: 's1', userId: 'u1', asset: 'NVDA', direction: 'long' },

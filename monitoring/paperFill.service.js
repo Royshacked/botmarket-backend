@@ -7,8 +7,8 @@
  * On a fill it delegates to paperExecution.service, which mutates the virtual position
  * and emits the normalized execution event the reconciler already consumes.
  *
- * Global (not per-account): one loop sweeps every user's working paper orders, like
- * minosService. Fills use the trigger price (slippage/gaps deferred to Phase 3).
+ * Global (not per-account): one loop sweeps every user's working paper orders, like the
+ * market-open sweep. Fills use the trigger price (slippage/gaps deferred to Phase 3).
  *
  * See docs/architecture/paper-trading-simulation.md (Phase 2).
  */

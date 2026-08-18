@@ -5,7 +5,7 @@
 //
 // This module owns persistence + the schema normalizer. It is NOT part of the execution-tier
 // `entities` collection (idea/call/portfolio_item) — coverage is a research artifact, monitored by
-// its own coverage-monitor (P5), not by Minos/Hermes/Themis. compute_valuation (P2) fills
+// its own coverage-monitor (P5), never by an execution-tier monitor. compute_valuation (P2) fills
 // estimates/price_target/gap; the Analyst agent (P3) authors the thesis.
 
 import { randomUUID }      from 'crypto'

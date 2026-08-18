@@ -396,8 +396,14 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
     // saveIdea already built the plan when the add is a straight market entry. If the spec carried
     // gating entry conditions, resolveImmediate refused the immediate path and saved it 'waiting'
     // instead — ARM it, so a conditional add is monitored from now rather than parked until the
-    // book is re-activated. Either way the user still confirms before anything is placed: the
-    // OrderConfirmDialog now, or Minos's entry_confirm card when the condition fires.
+    // book is re-activated. Either way the user still confirms before anything is placed — the
+    // OrderConfirmDialog now.
+    //
+    // ⚠ BUT NOTHING FIRES THE CONDITIONAL PATH. The entry-condition evaluator for this kind was the
+    // `idea` monitor's, and that loop was deleted on 2026-08-18 with nothing taking it over. Arming
+    // to 'looking' therefore parks the add rather than monitoring it. Harmless today (no live
+    // holding carries entry conditions — verified), but this line promises a card that has no
+    // sender, and it comes good only when the kind-blind loop lands.
     const parked = items.filter(i => i.status === 'waiting')
     for (const i of parked) await updateItem(i.id, { status: 'looking' }, userId)
 

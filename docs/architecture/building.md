@@ -201,11 +201,12 @@ prompt re-declares the leaf grammar to a model, so the two cannot drift.
 Arming is a **status PATCH**, not a new document:
 `PATCH /api/trade-ideas/:id` → `updateTradeIdea` → `ideaService.updateIdea`.
 
-On `status: 'looking'` the service sets `monitorPhase='entry'`, clears `entryTriggeredAt`,
-**stamps `activatedAt = Date.now()`**, and calls `minosService.resetIdea(id)`, which clears that
-module's in-memory check timer. `activatedAt` gates the "triggered while waiting" logic.
+On `status: 'looking'` the service sets `monitorPhase='entry'`, clears `entryTriggeredAt` and
+**stamps `activatedAt = Date.now()`**, which gates the "triggered while waiting" logic. (It used to
+also call `resetIdea` to clear the `idea` loop's in-memory check timer; that loop and its Map were
+deleted on 2026-08-18, so the call became a no-op and was dropped from all six call sites.)
 
-**Pre-flight entry check** — after a successful arm, `minosService.preflightEntry(idea)`
+**Pre-flight entry check** — after a successful arm, `monitoring/preflightEntry.js`
 runs on structured-only trees. It evaluates the entry tree two ways — will the monitor's
 rising edge fire (`requireHeld:true`) vs. is the level already held right now
 (`stateLevel:true`) — and returns `{ alreadySatisfied, close }` when the level is already
@@ -275,7 +276,7 @@ prompts        prompts/*.md  (hot-reloaded via makePromptLoader; guarded by prom
 emit/parse     services/llmStream.util.js (ALL_EMIT_TAGS)  +  services/agentIO.js
 trees          services/conditionTree.service.js
 persistence    api/trade-ideas/tradeIdeas.{routes,controller,service}.js
-arming         tradeIdeas.service.updateIdea  +  minos.monitor.service.preflightEntry
+arming         tradeIdeas.service.updateIdea  +  monitoring/preflightEntry.js
 models         services/llmModels.js  +  services/modelRouter.service.js
 frontend       src/pages/MainPage.jsx  +  src/cmps/{ChatPanel,PortfolioPanel,ScannerPanel,AnalystPanel,TradeIdeas}/*
 ```

@@ -5,19 +5,29 @@
 The monitoring system watches active trade ideas and automatically evaluates their conditions
 against live market data. It runs as a background service inside the Express process.
 
-> **Scope.** Everything below describes the `idea` kind's condition-tree loop
-> (`minos.monitor.service.js`). **That poll is not started** — its two lines in `server.js` are
-> commented out — but the module is not dead: `resetIdea` and `preflightEntry` are called from the
-> arm path in `tradeIdeas.service.js`, and the condition-tree semantics documented here are the
-> live ones, evaluated by `positionMonitor` and `invalidation.monitor` through the same
-> `monitor.orchestrator.evaluateTree`.
+> **Scope — READ THIS FIRST.** Everything below describes the `idea` kind's condition-tree loop.
+> **THAT LOOP NO LONGER EXISTS.** It was switched off in July 2026 and deleted outright on
+> 2026-08-18; nothing took it over. So this document is a specification of the condition-tree
+> SEMANTICS, not a description of a running service.
 >
-> The running per-kind monitors are **Hermes** (`call`), **Talos** (`setup`), **Themis**
-> (portfolio), the **coverage** monitor and the **tilt** monitor.
+> What is still live from it: the evaluator stack (`monitor.orchestrator.evaluateTree`, the leaf
+> parsers, the condition taxonomy) — Talos and the exit tier both read trees through it — and
+> `preflightEntry`, which moved to `monitoring/preflightEntry.js` and is still called from the arm
+> path in `tradeIdeas.service.js`. Its sibling `resetIdea` only cleared the deleted loop's private
+> in-memory Map and went with it.
 >
-> The poll was switched off because its tick selected work by STATUS alone
+> What is NOT live: the entry poll, the in-position exit poll (`positionMonitor.checkPosition` has
+> no caller), and the invalidation monitor (deleted). Anything below phrased as "the monitor does X"
+> describes what the loop DID and what a replacement would have to do.
+>
+> The running loops are **Talos** (`setup`), **Themis** (portfolio), **marketOpen** (kind-blind
+> deferred-order sweep), the **coverage** monitor, the **tilt** monitor, the execution reconciler
+> and the paper-venue loops. Hermes (`call`) is archived.
+>
+> The loop was switched off because its tick selected work by STATUS alone
 > (`looking`/`long`/`short`) — shared vocabulary across every kind — so it woke on `setup` entities
-> that belong to Talos. It now filters `kind: 'idea'` as well, so a revival can't reintroduce that.
+> that belong to Talos. Any replacement must filter by kind, or be deliberately kind-blind about a
+> concern no kind owns (as marketOpen is).
 
 ---
 
@@ -27,7 +37,7 @@ against live market data. It runs as a background service inside the Express pro
 server startup
     │
     ▼
-minosService.start()
+<the idea loop's start() — DELETED 2026-08-18, shown for the semantics only>
     │
     └── setInterval(_tick, 60s)  +  immediate first tick
               │
@@ -168,7 +178,7 @@ answers "is the level held right now?" — reused by both `requireHeld` and the 
 
 ### Arm-time pre-flight (already-satisfied entries)
 
-When an idea is armed (→ `looking`, `tradeIdeas.service.updateIdea`), `minos.monitor.service.preflightEntry(idea)`
+When an idea is armed (→ `looking`, `tradeIdeas.service.updateIdea`), `monitoring/preflightEntry.js`
 runs once (structured-only trees): it compares the **edge** eval (real floor) against the **state**
 eval (`stateLevel`). If the level is already held but the edge won't fire (breakout already past, so
 the idea would sit forever), the update returns `preEntry:{ alreadySatisfied, close }`. The frontend
@@ -590,9 +600,8 @@ Same condition string is only parsed once regardless of how many ideas use it.
 
 ```
 monitoring/
-  minos.monitor.service.js    the `idea` condition-tree loop (poll not started) + resetIdea /
-                              preflightEntry, both called from the arm path
-  hermes.monitor.service.js   Hermes — Kairos-call readiness monitor (own tick, kairos_calls)
+  preflightEntry.js           arm-time "is the entry level already held?" check — the one piece of
+                              the deleted `idea` loop that was real behaviour and had to survive
   monitor.orchestrator.js     AND/OR logic, condition routing, context injection, legacy normalisation
   monitor.claude.js           Claude Haiku client (claudeJSON, claudeText, claudeVision)
 

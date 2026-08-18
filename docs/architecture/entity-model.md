@@ -12,7 +12,7 @@ Envelope {
   userId
   parentId      : portfolio_item → book id; else null
   status        : common lifecycle enum + per-kind extensions
-  owner         : minos | hermes | themis             // derived from kind
+  owner         : talos | themis | null               // derived from kind; null = no loop watches it
   monitor_state : { next_check_at, check_count, memo, timeline[] }
   executionBinding : { broker, accounts[], mainAccountId,
                        brokerSymbol, basisOffset, orderState, brokerOrders[] }
@@ -46,9 +46,13 @@ portfolios (separate — the ONLY non-envelope, non-executed thing):
 ## 4. Ownership
 
 ```
-idea            → Minos   (condition-tree eval)
-call            → Hermes  (zone gate → LLM assess)
+idea            → null    (its condition-tree loop was DELETED 2026-08-18; nothing replaced it)
+call            → null    (Hermes archived 2026-08-18)
+setup           → Talos   (zone gate → LLM assess)
 portfolio_item  → Themis  (item drift gate)  ⟶  book → Themis (book assess)
+
+`null` is a real answer, not a gap — see `ownerForKind`. It is only safe because neither kind is
+authored any more; a holding rides the `idea` kind but is watched at the book tier by Themis.
 ```
 
 ## 5. Execution — blind (keys off envelope, never off kind)
