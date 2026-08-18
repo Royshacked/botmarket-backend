@@ -76,7 +76,7 @@ import { paperEquityService } from './monitoring/paperEquity.service.js'
 import { paperMarkService }   from './monitoring/paperMark.service.js'
 import { marketBriefNotifier } from './monitoring/marketBrief.notify.js'
 import { marketOpenMonitor } from './monitoring/marketOpen.monitor.js'
-import { logger }           from './services/logger.service.js'
+import { logger, switchToSyncLogging } from './services/logger.service.js'
 import { closeRenderer }    from './services/chartRender/klineRender.provider.js'
 import { closeDb, getDb }   from './providers/mongodb.provider.js'
 import { healthRoutes }     from './api/health/health.routes.js'
@@ -302,6 +302,9 @@ let shuttingDown = false
 async function shutdown(signal, code = 0) {
     if (shuttingDown) return
     shuttingDown = true
+    // From here every line is written synchronously. Async appends are dropped by
+    // process.exit(), which loses exactly the record that says how shutdown went.
+    switchToSyncLogging()
     logger.info('[server]', `${signal} — shutting down`)
 
     // Armed FIRST so it covers every step below, including a hang inside one of them. unref'd: a
