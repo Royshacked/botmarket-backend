@@ -292,7 +292,6 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 │  Monitor continues evaluating stop/TP condition trees            │
 │  Execution reconciler watches broker fill/close events           │
 │    (broker-authoritative — asks the broker if the position lives)│
-│  Invalidation monitor watches the entry-range band (advisory)    │
 │                                                                  │
 │  When stop or TP triggers:                                       │
 │    → status = "closed"  (closedReason: "stop" | "tp")            │
@@ -315,17 +314,19 @@ waiting ──► looking ──► hit ──► long / short ──► closed
                   └── resting ───┘  (broker-native stop entry)
 ```
 
-**Invalidation monitor** — a deterministic entry-range watcher (`monitoring/invalidation.monitor.js`).
-This is **not an agent and not a condition leaf.** The authoring desk sets the band once
-(`idea.invalidation.range = { lower, upper, *Anchor }`, derived from chart structure); from then
-on it's checked deterministically — no LLM in the hot path. The band is a separate field on the
-idea, *not* a leaf in the entry/stop/TP tree: on each pass the monitor synthesizes an ephemeral
-`structured` leaf per edge (`closes below <lower>` / `closes above <upper>`) and runs it through
-the same `evaluateTree()` evaluator the entry conditions use. The setup is alive only while price
-stays inside the band; a candle CLOSE outside either edge fires a one-shot advisory alert (bot
-message in social chat + a deep link into idea edit mode; latched by `invalidation_status` until
-the user acts). It runs pre-entry **and** in-position, but only INFORMS — exits are always
-stop-owned, invalidation never executes.
+**Invalidation is the SECOND AXIS, and it is Talos's.** A plan can go stale while it is still
+perfectly well `looking`, so it is tracked orthogonally to the lifecycle — `INVALIDATION.DRIFTING`
+(soft, running the wrong way) and `INVALIDATION.FIRED` (latched, awaiting the user). See
+`services/entity/vocabulary.js`. For a `setup` the trigger is Talos's validity gate, which fires a
+`setup_invalidation` card; it only INFORMS — exits are always stop-owned and invalidation never
+executes.
+
+A separate `monitoring/invalidation.monitor.js` used to watch a price ENVELOPE on the `idea` kind
+(`idea.invalidation.range`). It was deleted on 2026-08-18: the band was only ever authored by the
+Idea agent (deleted in July) and Kairos (archived), Atlas never stamps one on a holding, and the
+monitor's only caller was Minos's tick — so it had been watching a field nothing writes, for a
+kind nothing authors, since July. `services/entryTimeGate.util.js` went with it for the same
+reason. Reviving the envelope means first building something that authors the band.
 
 ---
 

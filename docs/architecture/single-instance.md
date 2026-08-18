@@ -14,8 +14,9 @@ This document says what is safe, what is not, and what it would take to lift the
 
 Two different things are per-process:
 
-1. **The loops.** `server.js` starts eleven background loops unconditionally. There is no leader
-   election, so a second instance runs a second copy of all eleven.
+1. **The loops.** `server.js` starts ten background loops (eleven until Hermes was archived on
+   2026-08-18). There is no leader election *wired up*, so a second instance runs a second copy
+   of all ten — but see "Enforcement" below: the mechanism now exists, unwired.
 2. **In-memory state that is load-bearing.** ~40 module-level `Map`s and TTL caches. Most are pure
    caches (a second copy costs money, not correctness). A few are not caches at all — they are the
    only thing making an operation exactly-once.
@@ -30,7 +31,7 @@ These claim through Mongo, so a second instance loses the race rather than dupli
 
 | Loop | Mechanism |
 |---|---|
-| Hermes (`call`), Talos (`setup`) | `dueLoop._claim` — conditional `updateOne` on the due-window, gated on `modifiedCount === 1`. Also carries a lease ≥ the check timeout, so an abandoned slow check cannot be re-selected while still running |
+| Talos (`setup`) | `dueLoop._claim` — conditional `updateOne` on the due-window, gated on `modifiedCount === 1`. Also carries a lease ≥ the check timeout, so an abandoned slow check cannot be re-selected while still running |
 | `marketOpen.monitor` | `entityRepo.claimIf` — guarded `findOneAndUpdate`, pre-image truthy iff this caller made the transition |
 | `marketBrief.notify` | dedupes against the posted cards themselves (`listCardRecipientsSince`), so it is idempotent by construction — this is also why a mid-fan-out restart resumes instead of double-posting |
 | `paperFill` | `paperBrokerService.claimOrder(userId, orderId, { status: 'working' }, …)` — added 2026-08-07 |
@@ -104,7 +105,17 @@ instances.
 Inserts a snapshot per active account per tick with no guard, so the curve gets two points per
 interval. Cosmetic until someone computes a return from it.
 
-### 5. Wasted money, no corruption
+### 5. Rate limits silently double
+
+`middleware/rateLimit.middleware.js` uses express-rate-limit's in-memory store (added
+2026-08-18). Each instance keeps its own counters, so every limit doubles — including
+`rateLimitAgentPer15m`, which is the ceiling on how many LLM turns a session can buy. Not
+corruption, but it is the one item here with a direct cost line attached.
+
+**To lift it:** a shared store (Redis) — or accept the multiple, since the limiter is a runaway
+backstop rather than a quota.
+
+### 6. Wasted money, no corruption
 
 - `priceFeed._marks` — the publisher/subscriber feed. "ONE loop fetches on ONE cadence and
   publishes; everyone else reads what it published" is true **per process**: instance B's
@@ -120,13 +131,33 @@ interval. Cosmetic until someone computes a return from it.
 Cheapest correct order:
 
 1. **Fix `_locks`** (item 1) — it is the only one that corrupts money-path data.
-2. **Leader-elect the loops.** Every loop except the paper mark/equity pair is idempotent-or-claimed
-   once item 1 and item 3 are done; a simple Mongo lease (`{ _id: 'leader', expiresAt }`, renewed)
-   is enough, and is strictly less work than making eleven loops individually safe.
+2. **Leader-elect the loops.** ~~a simple Mongo lease is enough~~ — **this is now written**:
+   `services/instanceLock.service.js`, the `dueLoop._claim` pattern one level up. See below.
 3. **Fan out the WebSocket** (item 2) — needed the moment two instances serve browsers.
 
 Steps 1 and 2 are independent; do 1 regardless, because it is a latent bug even at one instance if
 a future refactor ever moves those four call sites off the shared lock.
+
+## Enforcement — the guard, and why it is not the same as scaling out
+
+`services/instanceLock.service.js` (2026-08-18) implements leader election over the loop
+registry: a singleton lease in `system_locks`, renewed by the holder, takeable once expired. A
+follower starts **no loops at all** and says so; it still serves HTTP.
+
+**It is written and unit-tested but deliberately NOT WIRED into `server.js` yet** — the wiring is
+one line, and it was left out until the A1–A5 boot rewrite has been verified against a real boot,
+so that a startup failure can only have one cause. Wire it by having `onAcquired` start the loop
+roster and `onLost` call `stopLoops()`.
+
+Two things to hold onto once it is wired:
+
+- **It covers the reconciler**, which is the point. The reconciler is a bus LISTENER, not a poll
+  loop, so the fix for its in-memory `_locks` is not to make the lock distributed — it is for
+  there to be only ever one reconciler attached. Item 1 stops being reachable in practice.
+- **It buys safety, not scale.** Item 2 (`chatWs.socketMap`) is request-path state, not loop
+  state: a user connected to the follower still never receives a card the leader emitted. So a
+  second instance becomes *harmless* rather than *useful*. Do not read a green guard as
+  permission to raise the replica count.
 
 ## Verifying the constraint still holds
 

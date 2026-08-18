@@ -257,7 +257,9 @@ async function buildIdeaChildren(rawIdea, userId, { born = 'proposed' } = {}) {
         invalidation_status: null,
         invalidation_reason: null,
         invalidation_edge:   null,
-        invalidation_armed:  false,   // waiting→armed latch (see invalidation.monitor.js)
+        // Vestigial: the price-envelope watcher that read these was deleted 2026-08-18 (nothing
+        // authored the band). Still written so existing documents keep one shape.
+        invalidation_armed:  false,
 
         chat_state: _trimChatState(tradeIdea.chat_state),
         accounts:      Array.isArray(tradeIdea.accounts) ? tradeIdea.accounts : [],
@@ -787,7 +789,7 @@ function _normalizeInvalidation(raw) {
         upperAnchor: str(r.upperAnchor),
         // Away pivot for a distant entry: the structural level, on the side price
         // must travel FROM, past which the setup is drifting away (see the approach
-        // guard in invalidation.monitor.js). Optional — only when entry is far from spot.
+        // guard, deleted 2026-08-18). Optional — only when entry is far from spot.
         approach:       num(r.approach),
         approachAnchor: str(r.approachAnchor),
     } : null
