@@ -173,6 +173,64 @@ export const config = {
     /** Whether a gateway host was configured at all — the adapter's availability check. */
     get ibkrGwConfigured() { return Boolean(process.env.IBKR_GW_HOST) },
 
+    // ── process / networking ──
+    /**
+     * DNS resolvers to force, comma-separated. EMPTY means "leave Node's resolver alone", which is
+     * the only correct production answer.
+     *
+     * This used to be an unconditional `dns.setServers(['8.8.8.8','1.1.1.1'])` on line 5 of
+     * server.js, added because a developer's router blocks the SRV queries a `mongodb+srv://` URI
+     * needs. It is global — every lookup in the process — so it also overrides the resolver a
+     * container or VPC hands us. The day Mongo sits behind an Atlas private endpoint, or any
+     * internal hostname needs resolving, a public resolver cannot see it and the failure reads as
+     * a Mongo outage rather than a DNS override nobody remembers making.
+     *
+     * The default keeps the dev machine working unchanged and stops shipping the override to
+     * production. Set `DNS_SERVERS=` (explicitly empty) to opt a dev box out; set it to a list to
+     * opt a deployment in.
+     */
+    get dnsServers() {
+        const raw = process.env.DNS_SERVERS ?? (this.isProduction ? '' : '8.8.8.8,1.1.1.1')
+        return raw.split(',').map(s => s.trim()).filter(Boolean)
+    },
+    /**
+     * How long shutdown waits for in-flight work before forcing the process down. Sized against
+     * the platform's own SIGKILL delay (Render/Heroku give 30s) — it must be COMFORTABLY under it,
+     * or the backstop never runs and the platform kills us mid-write instead.
+     */
+    get shutdownGraceMs() { return _num('SHUTDOWN_GRACE_MS', 10_000) },
+    /**
+     * Whether an unhandled promise rejection takes the process down. Opt-IN, i.e. OFF by default,
+     * and the reasoning is specific to this deployment rather than general Node advice.
+     *
+     * One process runs all eleven background loops. A rejection escaping one provider call would,
+     * if fatal, stop Talos watching live stops, the reconciler watching fills, and the paper
+     * engines — for a fault that is already contained: `createPollLoop` and `createDueLoop` both
+     * catch per tick. Trading the whole fleet for one leaked promise is the worse failure.
+     *
+     * An uncaughtException is NOT covered by this and is always fatal: there the process state
+     * itself is unknown, which is a different question from one promise nobody awaited.
+     */
+    get unhandledRejectionFatal() { return _bool('UNHANDLED_REJECTION_FATAL', 'opt-in') },
+    /**
+     * How many reverse proxies sit in front of us, for Express's `trust proxy`. Behind Render's
+     * proxy every request otherwise reports the proxy's IP, which would make the IP-keyed rate
+     * limits below one shared bucket for the entire internet. A COUNT rather than `true`: the
+     * permissive form lets a caller forge `X-Forwarded-For` and mint themselves a fresh bucket
+     * per request, and express-rate-limit rejects it for exactly that reason.
+     */
+    get trustProxyHops() { return this.isProduction ? _num('TRUST_PROXY_HOPS', 1) : 0 },
+
+    // ── rate limiting ──
+    /** Blanket ceiling per IP across /api. Generous — this is a runaway backstop, not a quota. */
+    get rateLimitApiPerMin()   { return _num('RATE_LIMIT_API_PER_MIN', 300) },
+    /** Sign-in / sign-up attempts per IP per 15 min. The credential-stuffing gate. */
+    get rateLimitAuthPer15m()  { return _num('RATE_LIMIT_AUTH_PER_15M', 20) },
+    /** Agent turns per session per 15 min. This one is a COST ceiling: every turn buys tokens. */
+    get rateLimitAgentPer15m() { return _num('RATE_LIMIT_AGENT_PER_15M', 60) },
+    /** Escape hatch for load testing. Opt-IN, and logged loudly at boot when it is on. */
+    get rateLimitDisabled()    { return _bool('RATE_LIMIT_DISABLED', 'opt-in') },
+
     // ── misc ──
     /** How often the outbound-HTTP meter logs its rolling counts. */
     get httpMeterMs() { return _num('HTTP_METER_MS', 60_000) },
@@ -203,6 +261,9 @@ export const KNOWN_KEYS = new Set([
     'IBKR_CLIENT_ID', 'IBKR_CLIENT_SECRET', 'IBKR_REDIRECT_URI',
     'IBKR_GW_HOST', 'IBKR_GW_PORT', 'IBKR_GW_CLIENTID',
     'HTTP_METER_MS', 'HTTP_RETRIES', 'HTTP_RETRY_BASE_MS',
+    'DNS_SERVERS', 'SHUTDOWN_GRACE_MS', 'UNHANDLED_REJECTION_FATAL', 'TRUST_PROXY_HOPS',
+    'RATE_LIMIT_API_PER_MIN', 'RATE_LIMIT_AUTH_PER_15M', 'RATE_LIMIT_AGENT_PER_15M',
+    'RATE_LIMIT_DISABLED',
 ])
 
 /**

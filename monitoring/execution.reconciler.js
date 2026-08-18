@@ -62,7 +62,7 @@ export function _setDeps(overrides) {
 
 let _started = false
 
-export const executionReconciler = { start, handleExecution, placeExits }
+export const executionReconciler = { start, stop, handleExecution, placeExits }
 
 function start() {
     if (_started) return
@@ -71,6 +71,25 @@ function start() {
     logger.info(LOG, 'Execution reconciler listening on executionBus')
     // Resume feeds for positions opened in a previous run (best-effort, async).
     _resumeFeeds().catch(err => logger.error(LOG, 'resumeFeeds error:', err.message))
+}
+
+/**
+ * Stop reconciling. This is a LISTENER, not a poll loop, so stopping means detaching from the bus:
+ * a broker fill arriving mid-shutdown must not start a `read the idea → ask the broker → place
+ * exits` sequence that the process will not be alive to finish.
+ *
+ * It was the only one of the eleven background workers with no way to be stopped — which is
+ * pointed: it is also the one holding the in-memory exit-order lock that
+ * docs/architecture/single-instance.md ranks as the most dangerous piece of per-process state.
+ *
+ * Idempotent, and deliberately does NOT tear down broker feeds. Those belong to the session
+ * providers that opened them, and a half-owned teardown is how a socket gets closed twice.
+ */
+function stop() {
+    if (!_started) return
+    _started = false
+    executionBus.off('execution', handleExecution)
+    logger.info(LOG, 'Execution reconciler detached from executionBus')
 }
 
 // ─── Event handling ─────────────────────────────────────────────────────────────

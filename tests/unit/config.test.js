@@ -121,3 +121,71 @@ test('ctraderRedirectUri follows NODE_ENV rather than being set twice', () => {
         delete process.env.CTRADER_REDIRECT_URL_PROD
     }
 })
+
+// ── the DNS override (A3) ─────────────────────────────────────────────────────
+//
+// This was an unconditional `dns.setServers(['8.8.8.8','1.1.1.1'])` on line 5 of server.js, added
+// because a developer's router blocks the SRV queries a `mongodb+srv://` URI needs. Being global,
+// it also overrode whatever resolver a container or VPC supplies — so a private Mongo endpoint
+// would be unresolvable in production, presenting as a Mongo outage rather than as a DNS override
+// nobody remembered making. What matters is the DEFAULT on each side, because that is what ships.
+
+test('dnsServers defaults: the dev workaround stays, production gets the platform resolver', () => {
+    const savedEnv = process.env.NODE_ENV
+    const savedDns = process.env.DNS_SERVERS
+    delete process.env.DNS_SERVERS
+    try {
+        process.env.NODE_ENV = 'development'
+        assert.deepEqual(config.dnsServers, ['8.8.8.8', '1.1.1.1'],
+            'unchanged on the dev box — the router that prompted this still blocks SRV')
+
+        process.env.NODE_ENV = 'production'
+        assert.deepEqual(config.dnsServers, [],
+            'never ship a global resolver override; server.js skips setServers entirely on empty')
+    } finally {
+        if (savedEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedEnv
+        if (savedDns !== undefined) process.env.DNS_SERVERS = savedDns
+    }
+})
+
+test('dnsServers is overridable in BOTH directions', () => {
+    const savedEnv = process.env.NODE_ENV
+    const savedDns = process.env.DNS_SERVERS
+    try {
+        // Opt a deployment IN.
+        process.env.NODE_ENV = 'production'
+        process.env.DNS_SERVERS = '10.0.0.2, 10.0.0.3'
+        assert.deepEqual(config.dnsServers, ['10.0.0.2', '10.0.0.3'], 'trimmed, in order')
+
+        // Opt a dev box OUT. An explicitly empty value must CLEAR rather than fall back to the
+        // default — which is why this getter reads process.env directly instead of via _str.
+        process.env.NODE_ENV = 'development'
+        process.env.DNS_SERVERS = ''
+        assert.deepEqual(config.dnsServers, [])
+    } finally {
+        if (savedEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedEnv
+        if (savedDns === undefined) delete process.env.DNS_SERVERS; else process.env.DNS_SERVERS = savedDns
+    }
+})
+
+test('trustProxyHops is 0 outside production — a dev box has no proxy to trust', () => {
+    // Trusting a hop that does not exist lets any caller forge X-Forwarded-For and mint a fresh
+    // rate-limit bucket per request, which is the limiter quietly not existing.
+    const savedEnv = process.env.NODE_ENV
+    try {
+        process.env.NODE_ENV = 'development'
+        assert.equal(config.trustProxyHops, 0)
+        process.env.NODE_ENV = 'production'
+        assert.equal(config.trustProxyHops, 1)
+    } finally {
+        if (savedEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedEnv
+    }
+})
+
+test('the new hardening keys are all registered, so none reads as a typo at boot', () => {
+    for (const key of ['DNS_SERVERS', 'SHUTDOWN_GRACE_MS', 'UNHANDLED_REJECTION_FATAL',
+        'TRUST_PROXY_HOPS', 'RATE_LIMIT_API_PER_MIN', 'RATE_LIMIT_AUTH_PER_15M',
+        'RATE_LIMIT_AGENT_PER_15M', 'RATE_LIMIT_DISABLED']) {
+        assert.ok(KNOWN_KEYS.has(key), `${key} missing from KNOWN_KEYS`)
+    }
+})

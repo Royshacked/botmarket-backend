@@ -492,6 +492,8 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | New aliased index future (broker basis) | add to `brokerSymbol.service.ALIASES` + `brokerPrice.service` REAL_TICKER/CASH_INDEX maps; offset auto-measured at fork, candle-shifted in monitor |
 | New evaluator / leaf type | `evaluators/<type>.evaluator.js` + wire into `monitor.orchestrator._evalOne` + `condition.parser` |
 | New pure utility | add a `tests/unit/<name>.test.js` (that's the "write tests after a feature" rule in practice) |
+| New background loop | `startLoop('name', svc)` in `server.js` — and the service MUST export both `start` and `stop`. `startLoop` refuses one without a `stop()` with a log line and returns false, so a missing `stop` means the loop silently never runs (this happened to `execution.reconciler`). `tests/unit/loopContract.test.js` is the guard |
+| New env var | one getter in `services/config.js` AND its key in `KNOWN_KEYS` — an unregistered key is reported at boot as a typo |
 | New Axl tool | APPEND to `TOOLS` in `axl.agent.service.js` (never insert — the snapshot compares by index and the prompt cache keys off the array prefix) + append the built entry to the `axl` array in `tests/fixtures/agentTools.snapshot.json` in the same commit |
 | New agent tool that is a FACT about the venue/instrument | ride it on `get_quote` (`makeQuoteHandler`) as well as giving it a tool — a desk cannot then be unaware of it |
 | New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince` |
@@ -503,12 +505,22 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 
 ## Deployment shape
 
-ONE process. `server.js` starts eleven background loops unconditionally and there is no leader
-election, and a handful of module-level `Map`s are load-bearing rather than caches — the exit-order
+ONE process. `server.js` starts eleven background loops through `startLoop`
+(`services/lifecycle.service.js`) and there is no leader election, and a handful of module-level `Map`s are load-bearing rather than caches — the exit-order
 lock in `execution.reconciler` and the WebSocket registry in `chatWs` most of all. A second instance
 corrupts the first and breaks the second, mostly in silence. Before changing an instance count read
 [docs/architecture/single-instance.md](docs/architecture/single-instance.md), which lists what is
 already claimed through Mongo, what is not, and the order to fix it in.
+
+**Shutdown is ordered and bounded.** SIGTERM/SIGINT (and any uncaught exception) run one path:
+mark draining so readiness answers 503 → `stopLoops()` → `server.close()` + `closeIdleConnections()`
+→ force the SSE sockets that never close on their own → `closeRenderer()` → `closeDb()`. A `SHUTDOWN_GRACE_MS`
+backstop force-exits if any step hangs. `createPollLoop.stop()` awaits the tick already in flight,
+so nothing is cut mid-write.
+
+**Probes.** `GET /api/health` is liveness (200 even while draining — a 503 there gets the container
+restarted mid-shutdown); `GET /api/health/ready` is readiness (503 while draining or if Mongo is
+unreachable). Both unauthenticated and mounted ahead of the rate limiters.
 
 ## Testing
 

@@ -20,15 +20,22 @@ import { logger } from '../services/logger.service.js'
  * @returns {{ start: () => void, stop: () => void }}
  */
 export function createPollLoop({ intervalMs, tick, eager = false, log = '[pollLoop]', name = 'tick' }) {
-    let timer   = null
-    let running = false
+    let timer    = null
+    let running  = false
+    // The tick currently in flight, so `stop()` can WAIT for it. Clearing the interval only stops
+    // the next tick from being scheduled; it says nothing about the one already part-way through.
+    let inflight = null
 
     async function run() {
         if (running) { logger.warn(log, `previous ${name} still running — skipping`); return }
-        running = true
-        try { await tick() }
-        catch (err) { logger.error(log, `${name} failed:`, err.message) }
-        finally { running = false }
+        running  = true
+        inflight = (async () => {
+            try { await tick() }
+            catch (err) { logger.error(log, `${name} failed:`, err.message) }
+            finally { running = false }
+        })()
+        await inflight
+        inflight = null
     }
 
     return {
@@ -38,11 +45,26 @@ export function createPollLoop({ intervalMs, tick, eager = false, log = '[pollLo
             if (eager) run()
             timer = setInterval(run, intervalMs)
         },
-        stop() {
-            if (!timer) return
-            clearInterval(timer)
-            timer = null
-            logger.info(log, `${name} loop stopped`)
+        /**
+         * Halt the loop, and AWAIT the tick already running.
+         *
+         * The await is the part that matters at shutdown. Without it `stop()` returns while a tick
+         * is still mid-Mongo-write or mid-broker-call, and the shutdown sequence walks straight on
+         * to `closeDb()` and pulls the connection out from under it — which is the exact "killed
+         * part-way through placing an exit" this whole path exists to prevent.
+         *
+         * Returns a promise; awaiting it is optional, so the sync callers that predate this are
+         * unaffected.
+         */
+        async stop() {
+            if (timer) {
+                clearInterval(timer)
+                timer = null
+                logger.info(log, `${name} loop stopped`)
+            }
+            // Outside the guard on purpose: an eager loop can have a tick in flight before the
+            // interval is even set, and a second stop() must still wait rather than race ahead.
+            if (inflight) await inflight
         },
     }
 }

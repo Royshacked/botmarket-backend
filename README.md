@@ -68,6 +68,11 @@ only), market data (`FMP_API_KEY`, `MASSIVE_API_KEY`, `FINNHUB_API_KEY`, `FRED_A
 (`OWN_CHART_RENDER` — prod hosts must run `npx playwright install chromium` or renders fall back to
 chart-img) and the market brief.
 
+Operational knobs added with the hardening pass: `DNS_SERVERS` (empty in production — the old
+unconditional `dns.setServers` override now only applies on a dev box), `SHUTDOWN_GRACE_MS`,
+`UNHANDLED_REJECTION_FATAL`, `TRUST_PROXY_HOPS`, and `RATE_LIMIT_API_PER_MIN` /
+`RATE_LIMIT_AUTH_PER_15M` / `RATE_LIMIT_AGENT_PER_15M` / `RATE_LIMIT_DISABLED`.
+
 ### Run
 ```bash
 npm install
@@ -79,11 +84,17 @@ npm test             # node --test tests/unit/*.test.js
 
 On boot `server.js` ensures the Mongo indexes and starts **eleven background loops**: the
 market-open sweep, four assessment monitors (Hermes / Talos / coverage / tilt), Themis, the execution
-reconciler, the three paper engines (fill / mark / equity) and the market-brief notifier.
+reconciler, the three paper engines (fill / mark / equity) and the market-brief notifier. Each goes
+through `startLoop` (`services/lifecycle.service.js`), which registers it so shutdown can stop it —
+a service without a `stop()` is refused and never runs.
+
+`GET /api/health` (liveness) and `GET /api/health/ready` (readiness) are unauthenticated and sit
+ahead of the rate limiters, so a platform probe never spends a user's budget.
 
 ### Deployment shape — ONE process
 
-Those eleven loops start unconditionally with **no leader election**, and a handful of module-level
+Those eleven loops are stopped in order on SIGTERM (see *Shutdown* in CODE_MAP.md), but they start
+with **no leader election**, and a handful of module-level
 `Map`s are load-bearing rather than caches — above all the exit-order lock in `execution.reconciler`
 and the WebSocket registry in `chatWs`, which a second instance cannot even see. Some loops claim
 their work through Mongo and are safe (Hermes/Talos via dueLoop's lease, marketOpen via `claimIf`,
@@ -124,6 +135,8 @@ api/                   HTTP surface — one folder per feature (routes + control
                        both the off-hours queue and the entities the market-open sweep unparked
   experience/          per-user experience level, read by every desk's prompt (indexes only here;
                        no route of its own)
+  health/              liveness + readiness probes. UNAUTHENTICATED and mounted ahead of the rate
+                       limiters — a platform probe has no cookie and must not spend a user's budget
   threads/ trades/     build-conversation drafts · the frozen-at-fill trade ledger
   broker/              broker connections, orders, positions
     adapters/          BrokerAdapter interface + ctrader / ibkr / paper / manual adapters
@@ -149,6 +162,9 @@ prompts/               every prompt loaded at RUNTIME, in one place — the 7 de
                        one takes effect without a restart. Loading is LAZY: a wrong path is an
                        ENOENT on a live turn, not an import error — `tests/unit/promptPaths.test.js`
                        is the guard, and it also fails on a prompt nothing loads
+middleware/            requireAuth · request log · securityHeaders (hand-rolled, no helmet — see the
+                       file for why a CSP is deliberately absent) · rateLimit (three limiters:
+                       blanket /api, auth, and the desk streams, which are the ones that buy tokens)
 providers/             external clients (LLMs, market data, brokers, Mongo) — the only layer that
                        talks to the outside world
 monitoring/            one monitor per kind + the shared execution layer
