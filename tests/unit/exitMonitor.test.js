@@ -27,10 +27,9 @@ const RESIDUAL = { operator: 'OR', children: [{ condition: 'RSI(14) below 30', q
 function harness({ market = OPEN, candles = [{ o: 1, h: 2, l: 1, c: 2, t: NOW }] } = {}) {
     const patches = [], fetched = [], checks = []
     const deps = {
-        getDb:           async () => ({}),
         getMarketStatus: () => market,
         fetchCandles:    async (id, asset, tf) => { fetched.push(tf); return candles },
-        checkPosition:   async (db, idea, s, t, a, onClose) => { checks.push({ id: idea.id, onClose }) },
+        checkPosition:   async (idea, s, t, a, onClose) => { checks.push({ id: idea.id, onClose }) },
         patch:           async (id, fields) => { patches.push({ id, fields }) },
     }
     return { deps, patches, fetched, checks, nextAt: () => patches.at(-1)?.fields['monitor_state.next_check_at'] }

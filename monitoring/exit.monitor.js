@@ -38,7 +38,6 @@
 
 import { ENTITIES }            from '../services/entity/entityCollection.js'
 import { LIVE_POSITION }       from '../services/entity/vocabulary.js'
-import { getDb }               from '../providers/mongodb.provider.js'
 import { logger }              from '../services/logger.service.js'
 import { getMarketStatus }     from '../services/market.service.js'
 import { getCheckGap, isIntradayTimeframe } from '../services/timeframe.service.js'
@@ -67,7 +66,6 @@ const MIN_GAP_MS = 60_000
 const IDLE_GAP_MS = 60 * 60_000
 
 const _deps = {
-    getDb,
     getMarketStatus,
     fetchCandles,
     checkPosition,
@@ -208,8 +206,7 @@ export async function _checkExit(idea, nowMs, deps = _deps) {
 
     logCheck(id, asset, idea.status, `stop=${plan.stopTf}/tp=${plan.tpTf}`, stopCandles)
 
-    const db = await deps.getDb()
-    await deps.checkPosition(db, idea, stopCandles, tpCandles, aeCandles, (entityId, reason) => _close(entityId, reason, deps))
+    await deps.checkPosition(idea, stopCandles, tpCandles, aeCandles, (entityId, reason) => _close(entityId, reason, deps))
 
     // AFTER the check, not before: the check is what decides whether this position still exists, and
     // a schedule written first would be a schedule for a document that may now be closed. Harmless

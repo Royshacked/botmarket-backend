@@ -15,6 +15,38 @@ import { deferIfClosed }                    from '../services/pendingAction/exec
 const LOG = '[positionMonitor]'
 
 /**
+ * The collaborators, injectable — the same shape Talos, coverage and the market-open sweep use.
+ *
+ * This module SENDS ORDERS TO A BROKER, and every branch that decides whether to send one, how big
+ * it is, and whether to send it at all was unreachable from a test: the evaluators, the broker, the
+ * entity writes and the off-hours gate were all module imports. It sat dormant for weeks while its
+ * only caller was deleted, and went live again with no test covering a single one of those paths.
+ *
+ * ONLY THE IO BOUNDARY IS HERE. The pure helpers — `collectSymbols`, `buildExitOrder`,
+ * `exitOrderRecord`, `remainingForAccount`, `round`, `kindForDoc`, the timeframe resolvers — stay
+ * direct imports. Injecting them would let a test assert against its own arithmetic rather than the
+ * real thing, which is worse than not testing them.
+ */
+const _deps = {
+    evaluateTree,
+    evaluateConditions,
+    buildSymbolMap,
+    buildVolumeCtx,
+    // `persistConditionStates` still takes a leading `db` it does not use — the write funnels
+    // through entityRepo. Absorbed here rather than threaded through the call sites so no caller
+    // has to carry a handle for a parameter nobody reads.
+    persistStates:  (idea, phase, states) => persistConditionStates(null, idea, phase, states),
+    closePosition:  (broker, userId, accountId, positionId) => brokerService.closePosition(broker, userId, accountId, positionId),
+    placeOrder:     (broker, userId, accountId, order) => brokerService.placeOrder(broker, userId, accountId, order),
+    patch:          (id, fields) => entityRepo.patch(id, fields),
+    update:         (id, updateDoc) => entityRepo.update(id, updateDoc),
+    getById:        (id) => entityRepo.getById(id),
+    notifyManualExit,
+    deferIfClosed,
+}
+export function _setDeps(d) { Object.assign(_deps, d) }
+
+/**
  * Check both exit legs and any additional entries for an in-position idea.
  *
  * This is the SOFTWARE exit tier: the residual leg that could not be left resting at the broker —
@@ -31,7 +63,7 @@ const LOG = '[positionMonitor]'
  *                            it keeps. Everything with a real position exits through the broker (or
  *                            the off-hours queue) inside this function instead.
  */
-export async function checkPosition(db, idea, stopCandles, tpCandles, aeCandles, onClose) {
+export async function checkPosition(idea, stopCandles, tpCandles, aeCandles, onClose, deps = _deps) {
     const { id, asset } = idea
 
     // A close is ALREADY pending on this position — either the user has been asked to report a
@@ -52,24 +84,24 @@ export async function checkPosition(db, idea, stopCandles, tpCandles, aeCandles,
     // ref stops being shared in a future refactor. Cross-tick is the persisted orderState above.
     const exitCtx = { alerted: false }
 
-    const stopFired = await _evaluateExit(db, idea, {
+    const stopFired = await _evaluateExit(idea, {
         phase: 'stop', candles: stopCandles, timeframe: stopTf,
         reason: 'stop', label: 'Stop', emoji: '🛑', native: idea.monitorStop,
-    }, onClose, exitCtx)
+    }, onClose, exitCtx, deps)
     if (stopFired) return
 
-    const tpFired = await _evaluateExit(db, idea, {
+    const tpFired = await _evaluateExit(idea, {
         phase: 'tp', candles: tpCandles, timeframe: tpTf,
         reason: 'tp', label: 'TP', emoji: '🎯', native: idea.monitorTp,
-    }, onClose, exitCtx)
+    }, onClose, exitCtx, deps)
     if (tpFired) return
 
     logger.info(LOG, `💤 No exit triggered for idea ${id} (${asset}) — still in position`)
 
-    await _checkAdditionalEntries(db, idea, aeCandles, entryTf)
+    await _checkAdditionalEntries(idea, aeCandles, entryTf, deps)
 }
 
-async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, label, emoji, native }, onClose, exitCtx) {
+async function _evaluateExit(idea, { phase, candles, timeframe, reason, label, emoji, native }, onClose, exitCtx, deps) {
     const { id, asset } = idea
 
     if (native === false) {
@@ -81,12 +113,12 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
     const tree       = residual ?? idea[`${phase}_condition_tree`]
     const conditions = idea[`${phase}_conditions`]
     const crossSyms  = collectSymbols(tree, conditions)
-    const symbolMap  = await buildSymbolMap(id, asset, candles, timeframe, crossSyms)
+    const symbolMap  = await deps.buildSymbolMap(id, asset, candles, timeframe, crossSyms)
     const floorAt    = idea.activatedAt ?? null
-    const volCtx     = await buildVolumeCtx(id, asset, idea.asset_class, tree, conditions, brokerCandleCtx(idea))
+    const volCtx     = await deps.buildVolumeCtx(id, asset, idea.asset_class, tree, conditions, brokerCandleCtx(idea))
 
     if (residual) {
-        return _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji, volCtx }, onClose, exitCtx)
+        return _evaluateResidual(idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji, volCtx }, onClose, exitCtx, deps)
     }
 
     let triggered = false
@@ -94,26 +126,26 @@ async function _evaluateExit(db, idea, { phase, candles, timeframe, reason, labe
     const states = []
     if (tree) {
         logger.info(LOG, `[${id}] Evaluating ${reason} condition tree`)
-        ;({ triggered, which } = await evaluateTree(tree, symbolMap, asset, floorAt, [], states, volCtx))
+        ;({ triggered, which } = await deps.evaluateTree(tree, symbolMap, asset, floorAt, [], states, volCtx))
     } else if (Array.isArray(conditions) && conditions.length > 0) {
         const logic = idea[`${phase}_logic`] ?? 'OR'
-        ;({ triggered, which } = await evaluateConditions(conditions, logic, symbolMap, asset, floorAt, states))
+        ;({ triggered, which } = await deps.evaluateConditions(conditions, logic, symbolMap, asset, floorAt, states))
     } else {
         logger.info(LOG, `[${id}] No ${reason} conditions defined — skipping ${reason} check`)
         return false
     }
 
-    await persistConditionStates(db, idea, phase, states)
+    await deps.persistStates(idea, phase, states)
 
     if (triggered) {
         logger.info(LOG, `${emoji} ${label} triggered for idea ${id}: "${(which ?? '').slice(0, 60)}"`)
-        await _exitNow(db, idea, { leg: phase, reason, quantity: null }, onClose, exitCtx)
+        await _exitNow(idea, { leg: phase, reason, quantity: null }, onClose, exitCtx, deps)
         return true
     }
     return false
 }
 
-async function _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji, volCtx }, onClose, exitCtx) {
+async function _evaluateResidual(idea, { phase, residual, symbolMap, asset, floorAt, reason, label, emoji, volCtx }, onClose, exitCtx, deps) {
     const children = Array.isArray(residual.children) ? residual.children : []
     const fired    = new Set(idea.firedExits ?? [])
     let any = false
@@ -123,18 +155,18 @@ async function _evaluateResidual(db, idea, { phase, residual, symbolMap, asset, 
         if (fired.has(tag)) continue
 
         const child = children[i]
-        const { triggered, which } = await evaluateTree(child, symbolMap, asset, floorAt, [], null, volCtx)
+        const { triggered, which } = await deps.evaluateTree(child, symbolMap, asset, floorAt, [], null, volCtx)
         if (!triggered) continue
 
         const qty = Number(child.quantity) || null
         logger.info(LOG, `${emoji} ${label} slice ${i} triggered for idea ${idea.id}: "${(which ?? child.condition ?? '').slice(0, 60)}" (qty ${qty ?? 'full'})`)
-        await _exitNow(db, idea, { leg: phase, reason, quantity: qty, tag }, onClose, exitCtx)
+        await _exitNow(idea, { leg: phase, reason, quantity: qty, tag }, onClose, exitCtx, deps)
         any = true
     }
     return any
 }
 
-async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose, exitCtx = { alerted: false }) {
+async function _exitNow(idea, { leg, reason, quantity, tag }, onClose, exitCtx = { alerted: false }, deps = _deps) {
     // Manual (broker-less): don't close through a broker — alert the user to close at their
     // broker and report the exit price (confirmManualExit books it). Alert ONCE, not every poll /
     // every residual slice this tick: `exitCtx.alerted` is the same-tick guard (explicit, so it
@@ -143,12 +175,12 @@ async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose, exitC
         if (exitCtx.alerted || idea.orderState === 'awaiting_manual_close') return
         exitCtx.alerted     = true
         idea.orderState     = 'awaiting_manual_close'   // keep the in-memory doc consistent with the DB write
-        await entityRepo.patch(idea.id, { orderState: 'awaiting_manual_close', pendingCloseReason: reason })
+        await deps.patch(idea.id, { orderState: 'awaiting_manual_close', pendingCloseReason: reason })
         // Kind-blind loop, so the SENDER has to come from the entity: this same path closes a
         // setup, a call and a holding, and each one's exit card belongs to its own desk. `kind`
         // only picks the bot — `portfolioId` stays unset, since that field is the card's BASKET
         // (an N-leg portfolio exit), and this is always one leg.
-        await notifyManualExit(idea.userId, { legs: [exitLegFromIdea(idea)], reason, kind: idea.kind ?? kindForDoc(idea) })
+        await deps.notifyManualExit(idea.userId, { legs: [exitLegFromIdea(idea)], reason, kind: idea.kind ?? kindForDoc(idea) })
         logger.info(LOG, `[${idea.id}] Manual exit alert sent (${reason}) — awaiting user close`)
         return
     }
@@ -171,7 +203,7 @@ async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose, exitC
     // this on every poll. (The queue's enqueue dedupe would absorb it, but a guard here means we
     // don't ask.)
     if (idea.orderState !== 'awaiting_market_close') {
-        const gate = await deferIfClosed({
+        const gate = await deps.deferIfClosed({
             userId:     idea.userId,
             asset:      idea.asset,
             assetClass: idea.asset_class ?? null,
@@ -192,13 +224,13 @@ async function _exitNow(db, idea, { leg, reason, quantity, tag }, onClose, exitC
         })
         if (gate.deferred) {
             idea.orderState = 'awaiting_market_close'
-            await entityRepo.patch(idea.id, { orderState: 'awaiting_market_close', pendingCloseReason: reason })
+            await deps.patch(idea.id, { orderState: 'awaiting_market_close', pendingCloseReason: reason })
             logger.info(LOG, `[${idea.id}] ${leg} close deferred — market shut, queued for the open`)
             return
         }
     }
 
-    await _closeAtBroker(idea, { leg, reason, quantity, tag }, links)
+    await _closeAtBroker(idea, { leg, reason, quantity, tag }, links, deps)
 }
 
 /** How the row reads in the list. The REASON is the whole story for a monitor exit. */
@@ -210,11 +242,11 @@ function _exitLabel(reason) {
  * Send the close to the broker. Split out of `_exitNow` so the queue can replay exactly this at the
  * open — one implementation, whether the stop fires in hours or waits overnight.
  */
-async function _closeAtBroker(idea, { leg, reason, quantity, tag }, links) {
+async function _closeAtBroker(idea, { leg, reason, quantity, tag }, links, deps = _deps) {
     if (quantity == null) {
         for (const link of links) {
             try {
-                await brokerService.closePosition(link.broker, idea.userId, link.accountId, link.positionId)
+                await deps.closePosition(link.broker, idea.userId, link.accountId, link.positionId)
                 logger.info(LOG, `[${idea.id}] Monitor close sent — ${leg} full position (acct ${link.accountId})`)
             } catch (err) {
                 logger.error(LOG, `[${idea.id}] Monitor full close failed (acct ${link.accountId}): ${err.message}`)
@@ -222,7 +254,7 @@ async function _closeAtBroker(idea, { leg, reason, quantity, tag }, links) {
         }
         const update = { $set: { pendingCloseReason: reason } }
         if (tag) update.$addToSet = { firedExits: tag }
-        await entityRepo.update(idea.id, update)
+        await deps.update(idea.id, update)
         return
     }
 
@@ -236,7 +268,7 @@ async function _closeAtBroker(idea, { leg, reason, quantity, tag }, links) {
         if (qty > remaining) qty = remaining
         if (!(qty > 0)) continue
         try {
-            const res = await brokerService.placeOrder(link.broker, idea.userId, link.accountId, buildExitOrder(idea, {
+            const res = await deps.placeOrder(link.broker, idea.userId, link.accountId, buildExitOrder(idea, {
                 type:       'market',
                 qty,
                 positionId: link.positionId,
@@ -255,7 +287,7 @@ async function _closeAtBroker(idea, { leg, reason, quantity, tag }, links) {
     const update = {}
     if (newOrders.length) update.$push     = { exitOrders: { $each: newOrders } }
     if (tag)              update.$addToSet = { firedExits: tag }
-    if (Object.keys(update).length) await entityRepo.update(idea.id, update)
+    if (Object.keys(update).length) await deps.update(idea.id, update)
 }
 
 /**
@@ -267,24 +299,24 @@ async function _closeAtBroker(idea, { leg, reason, quantity, tag }, links) {
  *
  * @returns {Promise<{ ok: boolean, reason?: string }>}
  */
-export async function executeDeferredClose(entityId, userId, { leg = null, reason = 'manual', quantity = null, tag = null } = {}) {
-    const idea = await entityRepo.getById(entityId)
+export async function executeDeferredClose(entityId, userId, { leg = null, reason = 'manual', quantity = null, tag = null } = {}, deps = _deps) {
+    const idea = await deps.getById(entityId)
     if (!idea || (idea.userId && idea.userId !== userId)) return { ok: false, reason: 'not_found' }
 
     const links = (idea.brokerOrders ?? []).filter(b => b.positionId != null)
     // Closed in the meantime — by the user, by the reconciler, by the broker. Not a failure: the
     // thing the queued row asked for has already happened.
     if (links.length === 0) {
-        await entityRepo.patch(entityId, { orderState: null })
+        await deps.patch(entityId, { orderState: null })
         return { ok: true, reason: 'already_closed' }
     }
 
-    await _closeAtBroker(idea, { leg, reason, quantity, tag }, links)
-    await entityRepo.patch(entityId, { orderState: null })
+    await _closeAtBroker(idea, { leg, reason, quantity, tag }, links, deps)
+    await deps.patch(entityId, { orderState: null })
     return { ok: true }
 }
 
-async function _checkAdditionalEntries(db, idea, candles, entryTf) {
+async function _checkAdditionalEntries(idea, candles, entryTf, deps) {
     const entries = idea.additional_entries
     if (!Array.isArray(entries) || entries.length === 0) return
 
@@ -295,20 +327,20 @@ async function _checkAdditionalEntries(db, idea, candles, entryTf) {
         if (ae.triggeredAt) break
 
         const crossSyms = collectSymbols(ae.condition_tree, ae.conditions)
-        const symbolMap = await buildSymbolMap(idea.id, idea.asset, candles, entryTf, crossSyms)
+        const symbolMap = await deps.buildSymbolMap(idea.id, idea.asset, candles, entryTf, crossSyms)
 
         let triggered = false
         if (ae.condition_tree) {
-            ;({ triggered } = await evaluateTree(ae.condition_tree, symbolMap, idea.asset, idea.activatedAt ?? null))
+            ;({ triggered } = await deps.evaluateTree(ae.condition_tree, symbolMap, idea.asset, idea.activatedAt ?? null))
         } else if (Array.isArray(ae.conditions) && ae.conditions.length > 0) {
-            ;({ triggered } = await evaluateConditions(ae.conditions, ae.logic ?? 'AND', symbolMap, idea.asset, idea.activatedAt ?? null))
+            ;({ triggered } = await deps.evaluateConditions(ae.conditions, ae.logic ?? 'AND', symbolMap, idea.asset, idea.activatedAt ?? null))
         } else {
             break
         }
 
         if (triggered) {
             logger.info(LOG, `📈 Additional entry ${i + 1} triggered for idea ${idea.id} — qty: ${ae.quantity}`)
-            await entityRepo.patch(idea.id, { [`additional_entries.${i}.triggeredAt`]: Date.now() })
+            await deps.patch(idea.id, { [`additional_entries.${i}.triggeredAt`]: Date.now() })
         }
         break
     }
