@@ -300,13 +300,20 @@ async function shutdown(signal, code = 0) {
         logger.info('[server]', `stopped ${stopped.length} background loops`)
 
         // 3. Refuse new connections; let requests already running finish.
+        //
+        // The log line matters as much as the call. Between step 2 and step 4 there used to be a
+        // FIVE-SECOND SILENT WINDOW, and the first real Ctrl-C landed inside it: the log stopped
+        // dead after 'stopped N loops' with no way to tell whether we had reached this step, were
+        // waiting on a socket, or had been killed outright. Shutdown runs once per process life,
+        // so narrating each step costs nothing and is the only forensics there will ever be.
+        const socketGraceMs = Math.max(1_000, Math.floor(config.shutdownGraceMs / 2))
+        logger.info('[server]', `draining connections (up to ${socketGraceMs}ms)`)
         const closed = new Promise(resolve => server.close(resolve))
         server.closeIdleConnections()
 
         // 4. An SSE stream is never idle and never ends on its own, so `closed` would hang here
         //    forever. Give in-flight work half the budget, then take the sockets down — leaving
         //    the other half to close Mongo and Chromium, which is the part that must not be cut.
-        const socketGraceMs = Math.max(1_000, Math.floor(config.shutdownGraceMs / 2))
         let graceTimer = null
         const grace = new Promise(resolve => { graceTimer = setTimeout(() => resolve(true), socketGraceMs) })
         const forced = await Promise.race([closed.then(() => false), grace])
@@ -315,7 +322,10 @@ async function shutdown(signal, code = 0) {
             logger.warn('[server]', `connections still open after ${socketGraceMs}ms — closing them`)
             server.closeAllConnections()
             await closed
+        } else {
+            logger.info('[server]', 'connections drained on their own')
         }
+        logger.info('[server]', 'closing outbound resources (renderer, db)')
 
         // 5. Outbound resources. Each is guarded on its own: failing to shut Chromium down must
         //    not skip closing the database.
