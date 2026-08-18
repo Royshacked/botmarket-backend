@@ -37,9 +37,15 @@ export function ideaToEnvelope(doc) {
         assetClass: doc.asset_class ?? null,
         direction:  doc.direction ?? null,
         createdAt:  doc.savedAt ?? null,
-        // Ideas have no persisted monitor_state — no loop polls the kind, so there is no schedule
-        // to record. Empty is the faithful answer, not a gap.
-        monitorState: blankMonitorState(),
+        // Ideas DO have a persisted monitor_state as of 2026-08-18: the entry and exit loops both
+        // schedule on `monitor_state.next_check_at`. This used to hard-blank it and say "no loop
+        // polls the kind", which was true for exactly one day and is the shape of statement that
+        // caused a stop to go unwatched for weeks — so it reads the document, like the call branch
+        // below, rather than asserting an absence.
+        //
+        // `checkCount`, `memo` and `timeline` stay empty on purpose: those are a JOURNALLING
+        // monitor's, and neither of these two journals. Blank there is still the faithful answer.
+        monitorState: { ...blankMonitorState(), nextCheckAt: doc.monitor_state?.next_check_at ?? null },
         execution: {
             broker:        doc.broker ?? null,
             accounts:      Array.isArray(doc.accounts) ? doc.accounts : [],

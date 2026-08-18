@@ -84,7 +84,15 @@ test('ideaToEnvelope tolerates a sparse doc (missing execution/sizing fields)', 
     assert.deepEqual(e.execution.accounts, [])
     assert.deepEqual(e.execution.brokerOrders, [])
     assert.equal(e.sizing.requested, null)
-    assert.deepEqual(e.monitorState, blankMonitorState())
+    assert.deepEqual(e.monitorState, blankMonitorState(), 'an idea nothing has checked yet still reports a blank schedule')
+})
+
+test('an idea the entry or exit loop has scheduled reports ITS wake-up time', () => {
+    // It used to hard-blank this and say "no loop polls the kind". Two do.
+    const e = ideaToEnvelope({ id: 'i9', monitor_state: { next_check_at: '2026-08-18T20:00:00.000Z' } })
+    assert.equal(e.monitorState.nextCheckAt, '2026-08-18T20:00:00.000Z')
+    assert.deepEqual(e.monitorState.timeline, [], 'neither loop journals, so that stays honestly empty')
+    assert.equal(e.monitorState.checkCount, 0)
 })
 
 test('ideaToEnvelope(null) → null', () => {
