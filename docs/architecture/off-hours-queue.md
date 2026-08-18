@@ -135,3 +135,10 @@ in the registry is what keeps them apart.
 - **`awaiting_market_close` is not a variant of `awaiting_market`.** The sweep's entity drain
   matches the latter exactly, so a deferred CLOSE is never mistaken for a deferred ENTRY: the queue
   owns it, and nothing promotes it to `awaiting_confirm`.
+- **The list is FETCHED, never pushed to.** The Floor's Queued desk reads `GET /api/pending-actions`
+  on mount, on Axl's market-open card, and after the user executes or cancels a row — nothing on the
+  server tells an open page that a row was just added. So a surface that queues something must
+  re-read the list itself, or the toast says "waiting in your queued list" over a list fetched
+  before the rows existed (fixed 2026-08-18 for the review accept, which is the only producer a user
+  can reach without leaving the page — the setup manage-accept lives on its own route, so returning
+  from it remounts the Floor and refetches).
