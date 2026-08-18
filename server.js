@@ -76,6 +76,10 @@ import { paperEquityService } from './monitoring/paperEquity.service.js'
 import { paperMarkService }   from './monitoring/paperMark.service.js'
 import { marketBriefNotifier } from './monitoring/marketBrief.notify.js'
 import { marketOpenMonitor } from './monitoring/marketOpen.monitor.js'
+// The software exit monitor — kind-blind, and the caller positionMonitor.checkPosition lost when
+// Minos was deleted. Until it started, a stop that was not a plain price level was accepted, stored
+// and shown as protection while nothing evaluated it. Tied to a CAPABILITY, not to a desk.
+import { exitMonitor } from './monitoring/exit.monitor.js'
 import { logger, switchToSyncLogging } from './services/logger.service.js'
 import { closeRenderer }    from './services/chartRender/klineRender.provider.js'
 import { closeDb, getDb }   from './providers/mongodb.provider.js'
@@ -222,6 +226,7 @@ threadService.ensureThreadIndexes()
 // cannot forget to be shut down. See services/lifecycle.service.js.
 function startBackgroundLoops() {
     startLoop('marketOpen',   marketOpenMonitor)
+    startLoop('exits',        exitMonitor)
     startLoop('talos',        talosService)
     startLoop('coverage',     coverageMonitorService)
     startLoop('tilt',         tiltMonitorService)
