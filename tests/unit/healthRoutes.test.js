@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import { healthRoutes, _resetHealthCache } from '../../api/health/health.routes.js'
 import { markDraining, startLoop, _reset } from '../../services/lifecycle.service.js'
+import { setLoopLeader } from '../../services/loopLeader.js'
 
 // Liveness and readiness are different questions and the failure mode of conflating them is
 // specific: a liveness probe that reports "not ok" during a graceful shutdown gets the container
@@ -104,4 +105,28 @@ test('health responses are UNCACHEABLE — a readiness probe must never 304', as
         await healthRoutes.stack.find(l => l.route?.path === path).route.stack[0].handle({}, res)
         assert.equal(res.headers['cache-control'], 'no-store', path)
     }
+})
+
+// ── follower vs fault ─────────────────────────────────────────────────────────
+
+test('a FOLLOWER is ready, and says so — zero loops there is correct, not broken', async () => {
+    // The distinction this field exists for: zero loops on a FOLLOWER is the lease working, and
+    // zero loops on a LEADER is an incident. Same number, opposite meanings, and nothing outside
+    // the process can tell them apart without this flag. A follower also stays READY — it serves
+    // HTTP perfectly well, so failing it would pull a healthy process out of rotation for doing
+    // exactly the right thing.
+    setLoopLeader(false)
+    const live = mockRes()
+    healthRoutes.stack.find(l => l.route?.path === '/').route.stack[0].handle({}, live)
+    assert.equal(live.body.leader, false)
+    assert.equal(live.body.loops, 0)
+    assert.equal(live.statusCode, 200)
+
+    setLoopLeader(true)
+    startLoop('a', { start() {}, stop() {} })
+    const led = mockRes()
+    healthRoutes.stack.find(l => l.route?.path === '/').route.stack[0].handle({}, led)
+    assert.equal(led.body.leader, true)
+    assert.equal(led.body.loops, 1)
+    setLoopLeader(false)
 })

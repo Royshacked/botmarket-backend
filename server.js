@@ -78,11 +78,14 @@ import { marketBriefNotifier } from './monitoring/marketBrief.notify.js'
 import { marketOpenMonitor } from './monitoring/marketOpen.monitor.js'
 import { logger }           from './services/logger.service.js'
 import { closeRenderer }    from './services/chartRender/klineRender.provider.js'
-import { closeDb }          from './providers/mongodb.provider.js'
+import { closeDb, getDb }   from './providers/mongodb.provider.js'
 import { healthRoutes }     from './api/health/health.routes.js'
 import { securityHeaders }  from './middleware/securityHeaders.middleware.js'
 import { apiLimiter, authLimiter, agentLimiter } from './middleware/rateLimit.middleware.js'
 import { startLoop, stopLoops, markDraining } from './services/lifecycle.service.js'
+import { createInstanceLock, LOCK_COLLECTION } from './services/instanceLock.service.js'
+import { setLoopLeader } from './services/loopLeader.js'
+import os from 'os'
 
 const app = express()
 const server = http.createServer(app)
@@ -197,12 +200,15 @@ ensurePendingActionIndexes()
 threadService.ensureThreadIndexes()
 
 // ─── Background loops ─────────────────────────────────────────────────────────
-// SINGLE INSTANCE ONLY. These ten loops start unconditionally, with no leader election, so a
-// second process runs a second copy of every one of them. Some claim their work through Mongo and
-// are safe (Hermes/Talos via dueLoop's lease, marketOpen via claimIf, paperFill via claimOrder, the
-// brief notifier via its card dedupe); others rely on being the only process alive — above all
-// execution.reconciler's in-memory exit-order lock, which a second instance cannot even see.
-// Read docs/architecture/single-instance.md BEFORE raising an instance/replica count.
+// ONE INSTANCE RUNS THESE, and that is now enforced rather than merely documented. They start
+// behind a Mongo lease (services/instanceLock.service.js): a second process wins nothing, starts
+// no loops, and says so — it still serves HTTP. Before this, `replicas: 2` in a file that is not
+// in this repo silently gave you two of every loop, including two reconcilers cancelling each
+// other's exit orders.
+//
+// It buys SAFETY, NOT SCALE. `chatWs.socketMap` is per-process request-path state, so a user on
+// the follower still misses cards the leader emits. Read docs/architecture/single-instance.md
+// before raising a replica count — a green lease is not permission.
 
 // Minos (the legacy `idea` monitor) was DELETED on 2026-08-18. The deferred-order sweep used to
 // ride inside its tick, so switching Minos off in July silently stranded every order parked at
@@ -214,16 +220,34 @@ threadService.ensureThreadIndexes()
 // HTTP server drained, so a deploy could kill the reconciler part-way through placing an exit.
 // Registering here is what makes `stopLoops()` writable — and makes a twelfth loop one line that
 // cannot forget to be shut down. See services/lifecycle.service.js.
-startLoop('marketOpen',   marketOpenMonitor)
-startLoop('talos',        talosService)
-startLoop('coverage',     coverageMonitorService)
-startLoop('tilt',         tiltMonitorService)
-startLoop('themis',       themisService)
-startLoop('reconciler',   executionReconciler)
-startLoop('paperFill',    paperFillService)
-startLoop('paperEquity',  paperEquityService)
-startLoop('paperMark',    paperMarkService)
-startLoop('marketBrief',  marketBriefNotifier)
+function startBackgroundLoops() {
+    startLoop('marketOpen',   marketOpenMonitor)
+    startLoop('talos',        talosService)
+    startLoop('coverage',     coverageMonitorService)
+    startLoop('tilt',         tiltMonitorService)
+    startLoop('themis',       themisService)
+    startLoop('reconciler',   executionReconciler)
+    startLoop('paperFill',    paperFillService)
+    startLoop('paperEquity',  paperEquityService)
+    startLoop('paperMark',    paperMarkService)
+    startLoop('marketBrief',  marketBriefNotifier)
+}
+
+const loopsLock = createInstanceLock({
+    getCollection: async () => (await getDb()).collection(LOCK_COLLECTION),
+    instanceId: `${os.hostname()}:${process.pid}`,
+    ttlMs:   config.instanceLeaseTtlMs,
+    renewMs: config.instanceLeaseRenewMs,
+    onAcquired: () => { setLoopLeader(true);  startBackgroundLoops() },
+    // Losing the lease mid-flight is not hypothetical — a Mongo blip or a long GC pause is
+    // enough, and by then another process may legitimately hold it. Standing the loops down is
+    // what stops there being two reconcilers for the length of the outage.
+    onLost:     async () => { setLoopLeader(false); await stopLoops() },
+})
+
+// Not awaited: a database that is slow or down must not hold up the HTTP listener. The lock
+// retries on its own interval, so the loops start whenever the lease becomes winnable.
+loopsLock.start().catch(err => logger.error('[server]', 'loop lease failed to start', err))
 
 // SPA fallback: only in production when static assets live in public/
 if (config.isProduction) {
@@ -298,6 +322,10 @@ async function shutdown(signal, code = 0) {
         //    broker round trip after this point has nowhere left to write the answer.
         const stopped = await stopLoops()
         logger.info('[server]', `stopped ${stopped.length} background loops`)
+
+        // Release AFTER the loops are down, never before: handing the lease over while ours are
+        // still winding up would put a replacement's reconciler alongside our own.
+        await loopsLock.stop()
 
         // 3. Refuse new connections; let requests already running finish.
         //

@@ -194,6 +194,15 @@ export const config = {
         return raw.split(',').map(s => s.trim()).filter(Boolean)
     },
     /**
+     * The background-loop lease (services/instanceLock.service.js). A second instance that
+     * cannot win this starts NO loops. The TTL is how long the fleet stays stopped if the
+     * leader dies without releasing — so it trades failover speed against how tolerant the
+     * lease is of a slow renewal. 30s/10s means a crashed leader is replaced inside ~30s and a
+     * renewal has three attempts to land before leadership moves.
+     */
+    get instanceLeaseTtlMs()   { return _num('INSTANCE_LEASE_TTL_MS', 30_000) },
+    get instanceLeaseRenewMs() { return _num('INSTANCE_LEASE_RENEW_MS', 10_000) },
+    /**
      * How long shutdown waits for in-flight work before forcing the process down. Sized against
      * the platform's own SIGKILL delay (Render/Heroku give 30s) — it must be COMFORTABLY under it,
      * or the backstop never runs and the platform kills us mid-write instead.
@@ -262,6 +271,7 @@ export const KNOWN_KEYS = new Set([
     'IBKR_GW_HOST', 'IBKR_GW_PORT', 'IBKR_GW_CLIENTID',
     'HTTP_METER_MS', 'HTTP_RETRIES', 'HTTP_RETRY_BASE_MS',
     'DNS_SERVERS', 'SHUTDOWN_GRACE_MS', 'UNHANDLED_REJECTION_FATAL', 'TRUST_PROXY_HOPS',
+    'INSTANCE_LEASE_TTL_MS', 'INSTANCE_LEASE_RENEW_MS',
     'RATE_LIMIT_API_PER_MIN', 'RATE_LIMIT_AUTH_PER_15M', 'RATE_LIMIT_AGENT_PER_15M',
     'RATE_LIMIT_DISABLED',
 ])

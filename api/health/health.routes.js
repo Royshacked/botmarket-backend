@@ -32,6 +32,7 @@ import { Router } from 'express'
 import { getDb } from '../../providers/mongodb.provider.js'
 import { withTimeout } from '../../services/timeout.util.js'
 import { loopNames, isDraining } from '../../services/lifecycle.service.js'
+import { isLoopLeader } from '../../services/loopLeader.js'
 import { config } from '../../services/config.js'
 import { logger } from '../../services/logger.service.js'
 
@@ -93,6 +94,10 @@ healthRoutes.get('/', (req, res) => {
     sendJson(res, 200, {
         status:    'ok',
         uptimeSec: Math.round(process.uptime()),
+        // `leader: false` with `loops: 0` is a FOLLOWER, not a fault — it means another
+        // instance holds the lease and this one is deliberately idle. Distinguishing the two
+        // from outside is the whole reason this field is here.
+        leader:    isLoopLeader(),
         loops:     loopNames().length,
         ...(config.isProduction ? {} : { loopNames: loopNames() }),
     })
@@ -105,10 +110,13 @@ healthRoutes.get('/ready', async (req, res) => {
     const db    = draining ? 'skipped' : (await _dbOk()) ? 'up' : 'down'
     const ready = !draining && db === 'up'
 
+    // A follower is READY: it serves HTTP correctly, it simply runs no loops. Failing readiness
+    // here would take a perfectly good process out of rotation for doing the right thing.
     sendJson(res, ready ? 200 : 503, {
         ready,
         db,
         draining,
+        leader: isLoopLeader(),
         loops: loopNames().length,
     })
 })

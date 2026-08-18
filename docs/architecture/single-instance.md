@@ -144,10 +144,19 @@ a future refactor ever moves those four call sites off the shared lock.
 registry: a singleton lease in `system_locks`, renewed by the holder, takeable once expired. A
 follower starts **no loops at all** and says so; it still serves HTTP.
 
-**It is written and unit-tested but deliberately NOT WIRED into `server.js` yet** — the wiring is
-one line, and it was left out until the A1–A5 boot rewrite has been verified against a real boot,
-so that a startup failure can only have one cause. Wire it by having `onAcquired` start the loop
-roster and `onLost` call `stopLoops()`.
+**WIRED 2026-08-18**, once the A1–A5 boot rewrite had been verified against a real boot.
+`onAcquired` starts the loop roster, `onLost` calls `stopLoops()`, and shutdown releases the lease
+AFTER the loops are down — handing it over while ours are still winding up would put a
+replacement's reconciler alongside our own. `loopsLock.start()` is deliberately not awaited: a slow
+or unreachable database must not hold up the HTTP listener, and the lock retries on its own
+interval, so the loops start whenever the lease becomes winnable.
+
+Tuned by `INSTANCE_LEASE_TTL_MS` / `INSTANCE_LEASE_RENEW_MS` (30s / 10s). The TTL is how long the
+fleet stays stopped if a leader dies without releasing.
+
+**Reading it from outside:** `GET /api/health` reports `leader`. Zero loops on a follower is the
+lease working; zero loops on a leader is an incident — the same number with opposite meanings, and
+that flag is the only thing that separates them.
 
 Two things to hold onto once it is wired:
 
