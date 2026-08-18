@@ -63,6 +63,10 @@ const IDLE_GAP_MS = 60 * 60_000
 
 const _deps = {
     getMarketStatus,
+    // Reads the WALL CLOCK internally (evaluateTime defaults to Date.now), which makes it exactly
+    // the kind of collaborator this object exists for — without it the clock gates cannot be
+    // exercised at a fixed instant, only at whatever time the suite happens to run.
+    isTimeBlocked,
     fetchCandles,
     buildSymbolMap,
     buildVolumeCtx,
@@ -155,9 +159,20 @@ export async function _checkArmed(idea, nowMs, deps = _deps) {
     const gate = entryTimeGate(idea)
 
     // The clock alone makes this impossible right now — no candle can change that, so don't buy one.
+    //
+    // SLEEP TO THE CLOCK, NOT TO THE PRICE CADENCE. The cadence answers "how often is this chart
+    // worth re-reading", which is the wrong question for a trigger that is waiting on a timestamp:
+    // a scheduled entry ninety seconds away would wait FOUR HOURS because its timeframe happens to
+    // be daily. Minos never hit this — it re-checked a time-blocked idea every tick, because the
+    // blocked path returned before it stamped its in-memory throttle. A persisted schedule has to
+    // say so explicitly.
+    //
+    // Capped at the cadence so a bound years out still gets looked at on the normal rhythm, and
+    // floored at MIN_GAP_MS by `_reschedule` so a bound one second away cannot spin.
     const root = resolveConditionTree(idea.entry_condition_tree, idea.entry_conditions, idea.entry_logic ?? 'AND')
-    if (isTimeBlocked(root)) {
-        await _reschedule(idea, nowMs, plan.gap, deps)
+    if (deps.isTimeBlocked(root)) {
+        const untilAfter = gate.after != null && gate.after > nowMs ? gate.after - nowMs : plan.gap
+        await _reschedule(idea, nowMs, Math.min(untilAfter, plan.gap), deps)
         return 'time_blocked'
     }
 

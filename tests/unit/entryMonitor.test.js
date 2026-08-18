@@ -24,10 +24,11 @@ const armed = (over = {}) => ({
     entry_condition_tree: TREE, ...over,
 })
 
-function harness({ market = OPEN, candles = [{ o: 1, h: 2, l: 1, c: 2, t: NOW }], fire = false, triggerAt = null, plan = [{ broker: 'ctrader', accountId: 'A1', quantity: 10 }] } = {}) {
+function harness({ timeBlocked = false, market = OPEN, candles = [{ o: 1, h: 2, l: 1, c: 2, t: NOW }], fire = false, triggerAt = null, plan = [{ broker: 'ctrader', accountId: 'A1', quantity: 10 }] } = {}) {
     const calls = { fetched: [], patches: [], manual: [], confirms: [], plans: 0, states: [] }
     const deps = {
         getMarketStatus:  () => market,
+        isTimeBlocked:    () => timeBlocked,
         fetchCandles:     async (id, asset, tf) => { calls.fetched.push(tf); return candles },
         buildSymbolMap:   async () => ({}),
         buildVolumeCtx:   async () => ({}),
@@ -71,10 +72,28 @@ test('no venue → parked, because a trigger could never become an order', async
 
 test('a future time leaf blocks the check without buying a candle', async () => {
     // No candle can make a not-yet-due time leaf true, so fetching one is pure waste.
-    const h = harness()
+    const h = harness({ timeBlocked: true })
     const future = { operator: 'AND', children: [{ condition: 'after 2030-01-01', type: 'time', after: '2030-01-01T00:00:00Z' }] }
     assert.equal(await _checkArmed(armed({ entry_condition_tree: future }), NOW, h.deps), 'time_blocked')
     assert.deepEqual(h.calls.fetched, [])
+})
+
+test('a time-blocked entry sleeps to the CLOCK, not to the price cadence', async () => {
+    // The bug this pins: a scheduled entry ninety seconds away would wait four hours because its
+    // timeframe is daily. The cadence answers 'how often is this chart worth re-reading', which is
+    // the wrong question entirely for a trigger waiting on a timestamp.
+    const h = harness({ timeBlocked: true })
+    const soon = new Date(NOW + 90_000).toISOString()
+    const tree = { operator: 'AND', children: [{ condition: 'after ' + soon, type: 'time', after: soon }] }
+    assert.equal(await _checkArmed(armed({ entry_condition_tree: tree }), NOW, h.deps), 'time_blocked')
+    assert.equal(gapMs(h), 90_000, 'wakes when the clock could unblock it')
+})
+
+test('a bound far in the future is capped at the normal cadence', async () => {
+    const h = harness({ timeBlocked: true })
+    const tree = { operator: 'AND', children: [{ condition: 'after 2030', type: 'time', after: '2030-01-01T00:00:00Z' }] }
+    await _checkArmed(armed({ entry_condition_tree: tree }), NOW, h.deps)
+    assert.equal(gapMs(h), 4 * 3_600_000, 'still looked at on the normal rhythm, not in four years')
 })
 
 test('an intraday entry on a shut venue sleeps until the open', async () => {
