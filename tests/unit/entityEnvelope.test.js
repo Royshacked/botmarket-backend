@@ -138,3 +138,39 @@ test('toEnvelope dispatches by source tag', () => {
     assert.equal(toEnvelope({ id: 'i', userId: 'u' }, 'idea').kind, KINDS.IDEA)
     assert.equal(toEnvelope({ id: 'x', userId: 'u' }).kind, KINDS.IDEA)   // default
 })
+
+// ── the kind enum answers about the kinds that exist ─────────────────────────
+//
+// `setup` was missing from KINDS while living in `entities`, carrying brokerOrders and going
+// through positionManage like the other three. So isKind('setup') answered false about a kind that
+// plainly exists, and ownerForKind('setup') answered null — "no monitor" — about the one kind with
+// a single, named, actually-running owner.
+
+test('setup is an execution-tier kind, like the others in `entities`', () => {
+    assert.equal(isKind('setup'), true)
+    assert.equal(isKind('idea'), true)
+    assert.equal(isKind('portfolio_item'), true)
+})
+
+test('a book is NOT a kind — it is the set of items carrying its id', () => {
+    // Guards against "unifying" the watchlist/chat vocabulary into this enum. `portfolio` there
+    // names the BOOK; `portfolio_item` here names one holding. Different things, not two spellings.
+    assert.equal(isKind('portfolio'), false)
+    // Research artifacts live in their own collections with no execution tier.
+    assert.equal(isKind('coverage'), false)
+    assert.equal(isKind('scan'), false)
+})
+
+test('the kind with one named monitor says so', () => {
+    // Talos polls kind:'setup' exclusively, and the entry/exit loops both exclude it.
+    assert.equal(ownerForKind('setup'), 'talos')
+    assert.equal(ownerForKind('portfolio_item'), 'themis')
+})
+
+test('null means no SINGLE owner, not unwatched', () => {
+    // The distinction that grew teeth when the entry and exit loops became kind-blind: an idea IS
+    // watched by both, but by loops this map cannot name. Reading null as "nothing is looking at
+    // this" is wrong in the dangerous direction.
+    assert.equal(ownerForKind('idea'), null)
+    assert.equal(ownerForKind('nonsense'), null)
+})
