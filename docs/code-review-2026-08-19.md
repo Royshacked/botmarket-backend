@@ -192,7 +192,7 @@ desk and watching it fail. The original text follows.
 token spend. `loopContract.test.js` and `botRegistry.test.js` prove the guard-test pattern
 already exists here; this one is a one-liner to add.
 
-**2.5 — `pages/MainPage.jsx`.** ⬜ **NOT STARTED — the largest open item in this document.**
+**2.5 — `pages/MainPage.jsx`.** 🟨 **STEPS 1-2 OF 4 DONE — still the largest open item.**
 Re-measured 2026-08-19: **3,066 lines, 48 `useState`, 20 `useEffect`, 10 `useRef`** (the original
 "50 / ~25" was close enough). Per-desk state comes as a quadruplet (`<desk>Seed` / `<desk>Inbox` /
 `<desk>ChatRestore` / `<desk>ResetKey`) around lines 259-309, so adding a desk means ~44 edits in
@@ -376,8 +376,7 @@ should stay.
 their field and the FE fallback keeps reading them; what stopped is stamping a dead field onto new
 writes.
 
-**5.2 — Empty directories.** ✅ Frontend done (`cce5f44`). ⬜ **`api/kairos/` on the backend is
-still there.**
+**5.2 — Empty directories.** ✅ DONE — frontend (`cce5f44`) and `api/kairos/` (`047a6bc`).
 
 **5.3 — Dead frontend files.** ✅ DONE (`cce5f44`) — those four plus `MonitorDashboard/`
 (three files), ~1,700 lines in total.
