@@ -168,6 +168,13 @@ export async function streamPortfolio(req, res) {
         handler: async ({ sendEvent, signal }) => {
             const isReviewMode = req.body?.reviewMode === true
             const bodyMandate  = (req.body?.mandate && typeof req.body.mandate === 'object') ? req.body.mandate : null
+            // Which desk this conversation belongs to, so the badge and the lock can tell an
+            // unfinished BUILD from a standalone chat at the same agent. Validated as a string,
+            // never trusted as a key — and read by BOTH endings of the turn, so it is resolved once.
+            const cleanPipeline = typeof pipeline === 'string' && pipeline.trim() ? pipeline.trim() : null
+            // The last phase this turn actually emitted. A stopped turn has no result to read one
+            // off, and the substantive floor reads it — so it is tracked as it streams.
+            let lastPhase = null
 
             // Pre-stream context load + mandate carry-forward (business logic → service).
             const { portfolioState, lifecycle, mandate, statedMandate, storedThesis, reviewDelta } = await portfolioChatService.loadStreamContext({
@@ -205,19 +212,31 @@ export async function streamPortfolio(req, res) {
                 signal:   signal,
                 ...sseAgentCallbacks(sendEvent),
                 onTicker:    (symbol) => sendEvent('ticker',    { symbol }),
-                onPhase:     (phase)  => sendEvent('phase',     { phase }),
+                onPhase:     (phase)  => { lastPhase = phase; sendEvent('phase', { phase }) },
             })
 
             // Post-stream persistence (mandate/thesis/draft) → service. Only when the client is
-            // still listening, matching the previous "after finish, if not aborted" gate.
-            if (signal.aborted) return undefined
+            // still listening: what the turn PRODUCED (a mandate, a thesis) is the answer to a turn
+            // nobody received, and writing it back would move the build on behalf of a user who
+            // stopped it.
+            //
+            // The CONVERSATION is the exception, and it is the whole of this branch: it is the
+            // user's message and the turns before it, not the model's answer, and walking out of a
+            // turn is the commonest way to leave a desk unfinished. Dropping it here is what left
+            // Atlas with no marker at the hub and no chat after a reload — the same gap the five
+            // client-persisted desks had (useChatStream's `onStopped`), one layer down.
+            if (signal.aborted) {
+                portfolioChatService.persistStoppedTurn({
+                    userId: req.user._id, threadId, portfolioId, messages,
+                    mandate: statedMandate, phase: lastPhase, pipeline: cleanPipeline,
+                })
+                return undefined
+            }
             portfolioChatService.persistStreamOutcome({
                 // statedMandate, not mandate: only what the user established WITH ATLAS is written back.
                 userId: req.user._id, portfolioId, threadId, isReviewMode, messages,
                 mandate: statedMandate, storedThesis, result,
-                // Which desk this conversation belongs to, so the badge and the lock can tell an
-                // unfinished BUILD from a standalone chat at the same agent.
-                pipeline: typeof pipeline === 'string' && pipeline.trim() ? pipeline.trim() : null,
+                pipeline: cleanPipeline,
             })
 
             // G1: Atlas asked Prometheus to re-research a held name. Fire the async refresh-by-hop

@@ -43,6 +43,7 @@ export const portfolioChatService = {
     getPendingThemisChecks,
     loadStreamContext,
     persistStreamOutcome,
+    persistStoppedTurn,
 }
 
 /**
@@ -179,6 +180,35 @@ function persistStreamOutcome({ userId, portfolioId, threadId, isReviewMode, mes
             pipeline,
         }).catch(err => logger.warn(LOG, 'construction saveDraft failed', err))
     }
+}
+
+/**
+ * THE TURN ANSWERED NOTHING — the user stopped it, or walked out mid-stream — and the conversation
+ * they are looking at still exists. Persist it anyway.
+ *
+ * Atlas is the one desk whose draft is written HERE rather than by its panel, so it needs the rule
+ * stated on this side too (the other five get it from useChatStream's `onStopped`). Without it the
+ * abort gate above dropped the build outright: the hub's badge had nothing to read, the lock had
+ * nothing to close, and the chat the user came back to was React state behind a hidden tab.
+ *
+ * What is saved is the messages AS SENT — the user's turn and the completed ones before it. No
+ * assistant turn is appended, because none arrived, and an empty one would come back on resume as a
+ * reply Atlas never gave.
+ *
+ * `phase` is the last one this turn actually emitted, not a guess at where it was heading: the
+ * substantive floor reads it. Below the floor this writes nothing, exactly as a completed turn below
+ * it writes nothing.
+ */
+function persistStoppedTurn({ userId, threadId, portfolioId, messages, mandate, phase = null, pipeline = null }) {
+    // Same gate as the construction branch of persistStreamOutcome: an EDIT writes its conversation
+    // back onto the book it is editing, so a draft of it would be a second copy.
+    if (portfolioId || !threadId) return
+    if (!isSubstantive({ agent: 'portfolio', phase, mandateReady: !!mandate })) return
+    threadService.saveDraft({
+        threadId, userId, agent: 'portfolio',
+        messages: Array.isArray(messages) ? messages : [],
+        phase: phase ?? null, subjectType: 'portfolio', mandate: mandate ?? null, pipeline,
+    }).catch(err => logger.warn(LOG, 'stopped-turn saveDraft failed', err))
 }
 
 async function saveChatState(portfolioId, messages, userId, mandate = null) {
