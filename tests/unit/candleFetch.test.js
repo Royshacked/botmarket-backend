@@ -35,44 +35,39 @@ test('the 1e12 boundary treats a large second value as seconds', () => {
     assert.equal(toMsCandles([{ timestamp: 1e12 }])[0].timestamp, 1e12)
 })
 
-// ── fetchMarketCandles: FMP-first → router fallback (the module's actual value) ──
+// ── fetchMarketCandles: ONE source call, then ms + the forming bar ──────────────
+//
+// WHICH provider serves a spec is candles.provider's decision, not this module's — see
+// candlesProvider.test.js. This module used to make the same decision a second time on top of the
+// router, which cost a duplicate FMP request on every fallback; what is asserted here now is that
+// it asks the router ONCE and adds only what it owns.
 const SPEC = { timeSpan: 'day', multiplier: 1, from: 1, to: 2 }
 const CANDLE = { timestamp: 1_700_000_000, open: 1, high: 2, low: 0.5, close: 1.5, volume: 3 }
 
-test('uses FMP result when FMP returns candles (router not called)', async () => {
-    let routerCalled = false
+test('asks the source router exactly once, and converts sec→ms', async () => {
+    let calls = 0
     const out = await fetchMarketCandles('aapl', SPEC, {
-        getFmpCandles:       async () => [CANDLE],
-        getTickerAggregates: async () => { routerCalled = true; return [] },
+        getTickerAggregates: async () => { calls++; return [CANDLE] },
     })
-    assert.equal(routerCalled, false)
+    assert.equal(calls, 1, 'the router owns the FMP-vs-Massive choice — asking twice is the bug this closes')
     assert.equal(out.length, 1)
-    assert.equal(out[0].timestamp, 1_700_000_000_000)   // sec→ms applied
+    assert.equal(out[0].timestamp, 1_700_000_000_000)
 })
 
-test('falls back to the router when FMP THROWS', async () => {
-    const out = await fetchMarketCandles('aapl', SPEC, {
-        getFmpCandles:       async () => { throw new Error('FMP 500') },
-        getTickerAggregates: async () => [CANDLE],
-    })
-    assert.equal(out.length, 1)
-    assert.equal(out[0].close, 1.5)
-})
-
-test('falls back to the router when FMP returns null or []', async () => {
-    for (const empty of [null, []]) {
+test('an empty answer from the router is an empty chart, not a second attempt', async () => {
+    for (const empty of [null, [], undefined]) {
+        let calls = 0
         const out = await fetchMarketCandles('aapl', SPEC, {
-            getFmpCandles:       async () => empty,
-            getTickerAggregates: async () => [CANDLE],
+            getTickerAggregates: async () => { calls++; return empty },
         })
-        assert.equal(out.length, 1, `empty=${JSON.stringify(empty)}`)
+        assert.deepEqual(out, [], `empty=${JSON.stringify(empty)}`)
+        assert.equal(calls, 1)
     }
 })
 
-test('returns [] for an empty symbol without calling providers', async () => {
+test('returns [] for an empty symbol without calling the router', async () => {
     let called = false
     const out = await fetchMarketCandles('   ', SPEC, {
-        getFmpCandles:       async () => { called = true; return [CANDLE] },
         getTickerAggregates: async () => { called = true; return [CANDLE] },
     })
     assert.deepEqual(out, [])
@@ -81,10 +76,7 @@ test('returns [] for an empty symbol without calling providers', async () => {
 
 test('uppercases the symbol before fetching', async () => {
     let seen = null
-    await fetchMarketCandles('aapl', SPEC, {
-        getFmpCandles:       async (sym) => { seen = sym; return [CANDLE] },
-        getTickerAggregates: async () => [],
-    })
+    await fetchMarketCandles('aapl', SPEC, { getTickerAggregates: async (sym) => { seen = sym; return [CANDLE] } })
     assert.equal(seen, 'AAPL')
 })
 
@@ -181,8 +173,7 @@ test('forming bar: a historical window must not gain a bar dated today', () => {
 
 test('fetchMarketCandles: appends the forming bar, and a quote failure keeps the history', async () => {
     const deps = {
-        getFmpCandles:       async () => [{ ...FRI_BAR, timestamp: FRI / 1000 }],   // provider emits seconds
-        getTickerAggregates: async () => [],
+        getTickerAggregates: async () => [{ ...FRI_BAR, timestamp: FRI / 1000 }],   // provider emits seconds
     }
     const withBar = await fetchMarketCandles('avgo', { timeSpan: 'day', multiplier: 1 }, {
         ...deps, getFmpQuoteFull: async () => MON_QUOTE,

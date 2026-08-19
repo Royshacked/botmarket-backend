@@ -1,16 +1,16 @@
 /**
- * Shared OHLCV candle fetch — the FMP-first → Massive/Yahoo fallback → seconds→ms pipeline that
- * used to live inline in market.controller.js. Extracted so BOTH the HTTP /api/market/candles
- * endpoint and the headless chart renderer draw from ONE code path (same data the monitor
- * evaluates against).
+ * Shared OHLCV candle fetch — the seconds→ms + forming-bar pipeline that used to live inline in
+ * market.controller.js. Extracted so BOTH the HTTP /api/market/candles endpoint and the headless
+ * chart renderer draw from ONE code path (same data the monitor evaluates against).
  *
- * FMP serves real-time intraday on this key; it returns null for specs it can't serve
- * (week/month/odd multiplier) and [] for symbols it doesn't cover (futures/index/broker) — either
- * way we fall back to the unified router (Massive → Yahoo). Providers emit epoch SECONDS; callers
- * (KLineCharts + the renderer) want milliseconds.
+ * WHICH PROVIDER serves a spec is NOT decided here — `providers/candles.provider.js` owns that
+ * (FMP-first under USE_FMP_CANDLES, else Massive → Yahoo). This module used to make the same
+ * decision a second time on top of it, which cost a duplicate FMP request on every fallback and
+ * quietly took the flag out of the loop. Providers emit epoch SECONDS; callers (KLineCharts + the
+ * renderer) want milliseconds, and that conversion plus today's forming bar is what this adds.
  */
 
-import { getFmpCandles, getFmpQuoteFull, etPeriodKey, etCalendarDate, fmpDateToEpochSec } from '../providers/fmp.price.provider.js'
+import { getFmpQuoteFull, etPeriodKey, etCalendarDate, fmpDateToEpochSec } from '../providers/fmp.price.provider.js'
 import { getTickerAggregates } from '../providers/candles.provider.js'
 import { logger } from './logger.service.js'
 
@@ -107,8 +107,9 @@ export function buildFormingBar(last, { timeSpan, multiplier } = {}, quote, { to
 }
 
 /**
- * Fetch OHLCV candles as the canonical millisecond-timestamped list. FMP-first with the unified
- * router as fallback. Never throws for a normal miss — returns [] when nothing is available.
+ * Fetch OHLCV candles as the canonical millisecond-timestamped list, plus today's forming bar.
+ * The SOURCE is the router's decision (providers/candles.provider.js); this adds the unit
+ * conversion and the bar. Never throws for a normal miss — returns [] when nothing is available.
  *
  * Named fetchMarketCandles (not fetchCandles) to stay distinct from monitorUtils.fetchCandles, the
  * monitor's broker-candle router. `_deps` is a test seam (inject fake providers); production callers
@@ -119,22 +120,22 @@ export function buildFormingBar(last, { timeSpan, multiplier } = {}, quote, { to
  * @returns {Promise<Array<{timestamp,open,high,low,close,volume}>>}
  */
 export async function fetchMarketCandles(symbol, { timeSpan, multiplier, from, to } = {}, _deps = {}) {
-    const fmp    = _deps.getFmpCandles || getFmpCandles
     const router = _deps.getTickerAggregates || getTickerAggregates
     const quote  = _deps.getFmpQuoteFull || getFmpQuoteFull
 
     const sym = String(symbol || '').toUpperCase().trim()
     if (!sym) return []
 
-    let raw = null
-    try {
-        raw = await fmp(sym, { timeSpan, multiplier, from, to })
-    } catch (err) {
-        logger.warn(LOG, `FMP candles failed for ${sym} (${timeSpan}x${multiplier}) — falling back: ${err.message}`)
-    }
-    if (!Array.isArray(raw) || raw.length === 0) {
-        raw = await router(sym, { timeSpan, multiplier, from, to })
-    }
+    // ONE source decision, and it is not made here. This used to call FMP itself and then fall back
+    // to `getTickerAggregates` — which IS the FMP-first router, so on every fallback path FMP was
+    // asked the same question TWICE before Massive was reached. That path is precisely the
+    // instruments this app trades most (futures, index CFDs, broker symbols, week/month), and the
+    // 429s that once killed the agents were our own polling.
+    //
+    // It also meant USE_FMP_CANDLES did not reach the chart. The flag exists so the cutover is
+    // reversible; turning it off left this path going to FMP first anyway, because the call above
+    // never asked. Going through the router alone is what makes the flag mean what it says.
+    const raw = await router(sym, { timeSpan, multiplier, from, to })
     const candles = toMsCandles(raw)
 
     // The forming bar (see buildFormingBar). Bought on the ~3s quote cache the chart's own 5s poll

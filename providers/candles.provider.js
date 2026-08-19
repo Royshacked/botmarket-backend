@@ -14,10 +14,21 @@ import { getTickerAggregates as getMassiveAggregates } from './massive.provider.
 import { logger }                                     from '../services/logger.service.js'
 import { config } from '../services/config.js'
 
-const LOG     = '[candles.provider]'
-const USE_FMP = config.useFmpCandles
+const LOG = '[candles.provider]'
 
-if (USE_FMP) logger.info(LOG, 'USE_FMP_CANDLES on — FMP-first candle sourcing (Massive/Yahoo fallback)')
+if (config.useFmpCandles) logger.info(LOG, 'USE_FMP_CANDLES on — FMP-first candle sourcing (Massive/Yahoo fallback)')
+
+/**
+ * Test seam. The flag is read PER CALL rather than captured at module load: config.js is built on
+ * live getters precisely so a test can override process.env, and freezing one here defeats that for
+ * the only module the flag exists to control. The boot log above still reads it once, which is the
+ * one place a snapshot is what you want.
+ */
+export const _deps = {
+    getFmpCandles,
+    getMassiveAggregates,
+    get useFmp() { return config.useFmpCandles },
+}
 
 /**
  * OHLCV candles for the price service. FMP-first when USE_FMP_CANDLES is on, else the current
@@ -27,16 +38,16 @@ if (USE_FMP) logger.info(LOG, 'USE_FMP_CANDLES on — FMP-first candle sourcing 
  * @param {{ timeSpan?: string, multiplier?: number, from?: number, to?: number }} options
  * @returns {Promise<Array<{timestamp,open,high,low,close,volume}>>}
  */
-export async function getTickerAggregates(ticker, options = {}) {
-    if (!USE_FMP) return getMassiveAggregates(ticker, options)
+export async function getTickerAggregates(ticker, options = {}, deps = _deps) {
+    if (!deps.useFmp) return deps.getMassiveAggregates(ticker, options)
 
     try {
-        const fmp = await getFmpCandles(ticker, options)
+        const fmp = await deps.getFmpCandles(ticker, options)
         // Non-empty → FMP serves it. null (week/month/odd multiplier) or [] (uncovered symbol /
         // no bars in window) → fall through to the existing provider.
         if (Array.isArray(fmp) && fmp.length > 0) return fmp
     } catch (err) {
         logger.warn(LOG, `FMP candles failed for ${ticker} (${options.timeSpan}x${options.multiplier}) — falling back: ${err.message}`)
     }
-    return getMassiveAggregates(ticker, options)
+    return deps.getMassiveAggregates(ticker, options)
 }
