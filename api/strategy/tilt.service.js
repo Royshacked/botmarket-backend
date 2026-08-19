@@ -160,6 +160,23 @@ function _regime(r) {
  * contradiction worth destroying the work over. A contradictory row IS worth refusing, and that gate
  * lives in `publishTilt` where the author can still fix it.
  */
+/**
+ * DOES THE TABLE NET OUT — the verdict, not the tolerance. Pure.
+ *
+ * Its own function because two places need the ANSWER and only one of them stores a document: the
+ * normalizer records it on publish, and the desk's draft response carries it so the panel can show
+ * the verdict while the view is still being written. The frontend used to reach that verdict itself,
+ * with `BALANCE_TOLERANCE_BP` copied into a component — a number that decides a verdict, living in a
+ * second repo, where nothing would ever tell you the two had drifted.
+ *
+ * @param {Array<{active_bp?: number}>} tilts
+ * @returns {{ net_bp: number, balanced: boolean }}
+ */
+export function balanceOf(tilts = []) {
+    const sum = (Array.isArray(tilts) ? tilts : []).reduce((acc, t) => acc + (Number(t?.active_bp) || 0), 0)
+    return { net_bp: Math.round(sum), balanced: Math.abs(sum) <= BALANCE_TOLERANCE_BP }
+}
+
 export function normalizeTilt(raw, now = new Date().toISOString()) {
     const r = (raw && typeof raw === 'object') ? raw : {}
     const benchmark = _str(r.benchmark) ?? 'SPX'
@@ -171,16 +188,13 @@ export function normalizeTilt(raw, now = new Date().toISOString()) {
         .map(t => _row(t, now))
         .filter(t => t && !seen.has(t.sector) && seen.add(t.sector))
 
-    const sum = tilts.reduce((acc, t) => acc + (t.active_bp ?? 0), 0)
-
     return {
         id:        _str(r.id) ?? `tilt_${benchmark}_${randomUUID().slice(0, 8)}`,
         benchmark,
         // NO userId — a house view is a broadcast (see the header).
         regime:    _regime(r.regime),
         tilts,
-        net_bp:    Math.round(sum),
-        balanced:  Math.abs(sum) <= BALANCE_TOLERANCE_BP,
+        ...balanceOf(tilts),
         status:    TILT_STATUSES.includes(r.status) ? r.status : DEFAULT_STATUS,
         evidence:  _arr(r.evidence),
         revisions: _arr(r.revisions),

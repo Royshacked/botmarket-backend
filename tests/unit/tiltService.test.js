@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-    normalizeTilt, stanceCoherence, incoherentRows,
+    normalizeTilt, stanceCoherence, incoherentRows, balanceOf,
     STANCES, TILT_BASES, TILT_STATUSES, BALANCE_TOLERANCE_BP,
 } from '../../api/strategy/tilt.service.js'
 
@@ -163,4 +163,44 @@ test('regime keeps name + thesis + falsifiers; an empty one is null, not a husk'
 test('status is validated; unknown falls back to active', () => {
     for (const s of TILT_STATUSES) assert.equal(normalizeTilt({ status: s, tilts: [row()] }, NOW).status, s)
     assert.equal(normalizeTilt({ status: 'published', tilts: [row()] }, NOW).status, 'active')
+})
+
+// ── the balance verdict, which is the SERVER's answer ────────────────────────
+//
+// It moved out of the frontend, where the panel re-derived it against a hardcoded 50 — a copy of
+// BALANCE_TOLERANCE_BP living in a second repo, with nothing to say when the two drifted. The desk's
+// draft response carries balanceOf() now, so the preview and the publish cannot disagree about
+// whether a table nets out. These are the cases the panel's own test can no longer assert.
+
+test('a table that cancels is balanced', () => {
+    assert.deepEqual(balanceOf([{ active_bp: 150 }, { active_bp: -150 }]), { net_bp: 0, balanced: true })
+})
+
+test('rounding slack inside the tolerance is not a warning', () => {
+    // The tolerance exists because a hand-written table rarely nets to exactly zero, and flagging
+    // ±10bp of rounding would make the warning meaningless by firing constantly.
+    assert.equal(balanceOf([{ active_bp: 50 }]).balanced, true)
+    assert.equal(balanceOf([{ active_bp: -50 }]).balanced, true)
+})
+
+test('past the tolerance is flagged, in both directions', () => {
+    assert.equal(balanceOf([{ active_bp: 51 }]).balanced, false)
+    assert.equal(balanceOf([{ active_bp: -51 }]).balanced, false)
+    assert.deepEqual(balanceOf([{ active_bp: 300 }, { active_bp: 200 }]), { net_bp: 500, balanced: false })
+})
+
+test('missing and junk weights count as zero rather than poisoning the sum', () => {
+    // A row can legitimately arrive without a weight (the panel renders a dash for it). NaN
+    // propagating through the sum would make `balanced` false for every table containing one.
+    assert.deepEqual(balanceOf([{ active_bp: null }, { active_bp: 'x' }, {}]), { net_bp: 0, balanced: true })
+    assert.deepEqual(balanceOf(), { net_bp: 0, balanced: true })
+    assert.deepEqual(balanceOf(null), { net_bp: 0, balanced: true })
+})
+
+test('the stored document and the draft answer alike', () => {
+    // Same function on both sides of the publish, which is the whole point of extracting it.
+    const rows = [{ sector: 'Energy', stance: 'over', active_bp: 400 }]
+    const doc  = normalizeTilt({ benchmark: 'SPX', tilts: rows })
+    assert.equal(doc.balanced, balanceOf(rows).balanced)
+    assert.equal(doc.net_bp,   balanceOf(rows).net_bp)
 })

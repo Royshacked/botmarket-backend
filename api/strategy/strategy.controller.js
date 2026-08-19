@@ -6,7 +6,7 @@
 // or publish the view), but nothing here filters by `req.user._id`, and that asymmetry is the point:
 // scoping a house view per user would quietly turn it into eleven private opinions.
 
-import { tiltService }          from './tilt.service.js'
+import { tiltService, balanceOf } from './tilt.service.js'
 import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
 import { diffStances }          from '../../monitoring/tilt.assess.js'
 import { notifyTiltChanged }    from '../../services/tiltNotify.service.js'
@@ -36,7 +36,12 @@ export async function streamStrategy(req, res) {
                 ...sseAgentCallbacks(sendEvent),
                 onPhase:     phase => sendEvent('phase',     { phase }),
             })
-            return { reply: result.reply, phase: result.phase ?? null, ...(result.tilt ? { tilt: result.tilt } : {}) }
+            // The draft carries its own balance verdict. It is the SERVER's answer to "does this
+            // table net out" — the same one normalizeTilt records at publish — so the panel can show
+            // it without owning the tolerance, which is a number that decides a verdict and has no
+            // business living in a component in another repo.
+            const tilt = result.tilt ? { ...result.tilt, ...balanceOf(result.tilt.tilts) } : null
+            return { reply: result.reply, phase: result.phase ?? null, ...(tilt ? { tilt } : {}) }
         },
     })
 }
