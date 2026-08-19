@@ -126,8 +126,19 @@ into one entry point is the cross-desk unifier the house rule forbids (the same 
 `_run = runAgentStream` / `_venueSection` seams and the `_run({...})` argument list — is a shared
 CALL rather than shared logic, and wrapping it would buy indirection, not safety.
 
-**2.2 — Frontend: `_saveThread`, `_send`, `_continue` and the `onLoadingChange` effect are
-near-identical across five panels.** Compare `StrategyPanel.jsx:100-140` with
+**2.2 — Frontend send lifecycle.** ✅ FIXED (frontend `0cc4dfc`). `useChatStream.run()` now owns
+the turn — the re-entrancy guard, the abort wiring, and the `finally { endStream() }` whose absence
+is invisible (Stop stays lit, the input dies, nothing logs). All six chats went through it;
+`begin`/`beginContinue` remain for the four `_continue` resume paths, which start from a stopped
+bubble rather than a fresh user turn. `MentorPanel.jsx` is converted in the working tree but left
+uncommitted — it also carries in-progress worksheet-fold work.
+
+`_saveThread` was NOT extracted and should not be: it is already one call into one shared service
+(`threadsService.saveDraft`), and each panel's six-line wrapper names its own agent, subjectType and
+state shape — that is the desk's judgment, not scaffolding. Original text follows.
+
+**Original finding:** `_saveThread`, `_send`, `_continue` and the `onLoadingChange` effect are
+near-identical across five panels. Compare `StrategyPanel.jsx:100-140` with
 `AnalystPanel.jsx:107-140` — the only per-desk parts are the agent name, the `subjectType`,
 the `chatState` builder and the draft setter. A `useDeskChat({ agent, subjectType, service,
 buildChatState, onDraft })` hook collapses ~120 lines × 5.
