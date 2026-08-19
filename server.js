@@ -164,6 +164,12 @@ if (config.isProduction) {
 // desk exposes exactly one `POST /stream` (Axl also has `/brief/stream`), and those are the only
 // endpoints that buy tokens. Limiting `/api/portfolio` wholesale would have counted its fifteen
 // ordinary reads against the same budget and throttled a user for browsing their own book.
+//
+// A NEW DESK MUST BE ADDED TO THE LIST BELOW. Forgetting it does not fail, and does not look
+// broken: the endpoint still works, on the general API limiter, which exists to stop scraping
+// rather than to bound spend — so a loop against it buys model turns until somebody reads a bill.
+// tests/unit/agentLimiterCoverage.test.js walks every mounted `/stream` route and fails when one
+// of them is not here, so the omission is caught at the point it is made.
 app.use('/api/auth', authLimiter)
 for (const desk of ['axl', 'mentor', 'portfolio', 'scanner', 'analyst', 'strategy']) {
     app.use(`/api/${desk}/stream`, agentLimiter)
