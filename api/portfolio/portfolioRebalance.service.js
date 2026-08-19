@@ -6,8 +6,7 @@
  * orders. Nothing here runs autonomously — the user confirms the whole block first.
  *
  * Action vocabulary (see portfolio_system_prompt.md "Portfolio Edit Output"). A holding is a
- * `portfolio_item` entity, so the actions are `_item` (the legacy `_idea` names remain accepted as
- * aliases — see ACTION_ALIAS — so an in-flight review block can't break on the rename):
+ * `portfolio_item` entity, so the actions are `_item`:
  *   update_item  — patch a holding's fields in place (no broker touch)
  *   remove_item  — delete a NON-live holding doc (pending/waiting only)
  *   exit_item    — fully close a LIVE position across all its accounts
@@ -87,7 +86,7 @@ export async function applyRebalance(portfolioId, userId, update) {
     // same block must not shrink the base its own adds are sized against — and a leg closed a
     // moment ago still shows in the broker's position list, so reading it per-change would make the
     // size depend on change order and fill latency. Skipped entirely when nothing is being added.
-    const adds = update.changes.some(c => (ACTION_ALIAS[c.action] ?? c.action) === 'add_item')
+    const adds = update.changes.some(c => c.action === 'add_item')
     const bookValue = adds ? await _bookValue(portfolioId, userId) : null
 
     const results = []
@@ -98,10 +97,10 @@ export async function applyRebalance(portfolioId, userId, update) {
             const r = await _applyOne(portfolioId, userId, change, bookValue)
             if (r?.manualExitLeg)  manualExitLegs.push(r.manualExitLeg)
             if (r?.manualEntryLeg) manualEntryLegs.push(r.manualEntryLeg)
-            results.push({ action: change.action, itemId: change.itemId ?? change.ideaId ?? null, ...r })
+            results.push({ action: change.action, itemId: change.itemId ?? null, ...r })
         } catch (err) {
             logger.error(LOG, `change failed (${change.action})`, err.message)
-            results.push({ action: change.action, itemId: change.itemId ?? change.ideaId ?? null, ok: false, error: err.message })
+            results.push({ action: change.action, itemId: change.itemId ?? null, ok: false, error: err.message })
         }
     }
 
@@ -166,19 +165,17 @@ export async function applyRebalance(portfolioId, userId, update) {
     }
 }
 
-// A holding is a `portfolio_item`, so the vocabulary is `_item`. The legacy `_idea` verbs are still
-// accepted (a review block built before the rename, or an FE not yet updated) — normalized here.
-const ACTION_ALIAS = {
-    update_idea: 'update_item', remove_idea: 'remove_item', exit_idea: 'exit_item',
-    trim_idea:   'trim_item',   add_idea:    'add_item',    add_to_idea: 'add_to_item',
-}
-
+// The `_idea` verbs and the `ideaId`/`idea` field names were accepted here as aliases through the
+// portfolio_item rename, so an in-flight review block could not break on it. Removed 2026-08-19
+// after checking the data rather than assuming: a raw scan of all 508 documents across
+// chat_messages, threads, portfolio_chats, pending_actions, entities, ideas and objectives found
+// ZERO carrying a legacy verb or field, and portfolio_system_prompt.md teaches only `_item` (14
+// uses, none of the old spelling). Nothing produces them and nothing stored holds one.
 async function _applyOne(portfolioId, userId, change, bookValue = null) {
     const db     = await getDb()
-    const action = ACTION_ALIAS[change.action] ?? change.action
-    // Back-compat: the id/spec fields were `ideaId`/`idea` before the portfolio_item rename.
-    const itemId = change.itemId ?? change.ideaId
-    const spec   = change.item   ?? change.idea
+    const action = change.action
+    const itemId = change.itemId
+    const spec   = change.item
     switch (action) {
         case 'update_item':
             return ideaService.updateIdea(itemId, change.patch ?? {}, userId)
