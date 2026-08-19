@@ -23,7 +23,7 @@ Suites at hand-off: backend **2494 pass / 0 fail**, frontend **639 pass / 0 fail
 |---|---|---|
 | 1 | Broker interface sealing | ✅ done (§1.3 and §1.6 open by choice) |
 | 2 | New agent is not plug-in | ✅ done, §2.1 partly withdrawn |
-| 3 | New entity / kind — two vocabularies | ⬜ **NOT STARTED — the next one** |
+| 3 | New entity / kind — two vocabularies | ⚠️ **WITHDRAWN** — premise wrong; two real bugs under it, fixed |
 | 4a | `candleFetch` calls FMP twice | ✅ done |
 | 4b | The two candle stacks | ✅ done — found a live defect underneath |
 | 4c | Hand-mirrored BE→FE logic | ✅ partly; the rest qualified and deliberately kept |
@@ -200,21 +200,37 @@ a per-kind registry embedded in a page component; it belongs beside
 
 ---
 
-## 3. New entity / kind — two competing vocabularies
+## 3. New entity / kind — ⚠️ THE PREMISE WAS WRONG
 
-`KINDS` in `services/entity/envelope.js:9` holds only `idea` / `call` / `portfolio_item`.
-But `watchlist.DEFAULT_KINDS` (`services/watchlist.service.js:40`),
-`axl.controller.EDIT_KINDS` (`api/axl/axl.controller.js:33`) and `EDIT_KIND_DESKS` speak
-`setup` / `coverage` / `scan` / **`portfolio`** — and `api/chat/chat.service.js:49` hand-maps
-`portfolio_item` to `portfolio` between the two.
+**Claimed:** `KINDS` holds only `idea`/`call`/`portfolio_item` while the watchlist, Axl and chat
+speak `setup`/`coverage`/`scan`/`portfolio`, with a hand-written map between them — so build one
+registry with a per-kind row.
 
-So: `setup`, `coverage` and `scan` are real kinds that are absent from the kind enum, and the
-same concept has two spellings across registries.
+**On inspection there is no vocabulary to unify** (fixed differently in `f6fd787`):
 
-Fix direction: ONE registry with a per-kind row (collection · statuses · owner bot · watch
-projector · edit desk · origin handlers) replaces six lists. CODE_MAP's "Where to add things"
-table already documents the six touch points — that documentation is the evidence the
-registry is missing.
+- `portfolio` and `portfolio_item` are **not two spellings of one thing.** A book is the SET of
+  items carrying its portfolioId and is never a document; `portfolio_item` is one holding.
+  `chat.service`'s `portfolio_item → portfolio` map routes an item's notification to the book's
+  bot — a real mapping between two real concepts, not drift.
+- `coverage` and `scan` are research artifacts in their own collections with no execution tier.
+  `KINDS` is the ENVELOPE's enum, scoped to the execution tier on purpose.
+- The registry would have been speculative work built on a misread.
+
+**Two real bugs were underneath it, and they were the whole finding:**
+
+1. **`setup` was missing from `KINDS`** despite living in `entities`, carrying brokerOrders and
+   going through positionManage like the other three. `isKind('setup')` answered false about a kind
+   that plainly exists, and `ownerForKind('setup')` answered null — "no monitor" — about the one
+   kind with a single named owner that actually runs (Talos).
+2. **`null` had drifted from "unwatched" to "no SINGLE owner"** with nothing saying so. When the map
+   was written a kind had one monitor or none; since 2026-08-18 the entry and exit loops are
+   kind-blind (`{ kind: { $ne: 'setup' } }`), so an idea IS watched, by loops the map cannot name.
+   Its comment still read "no monitor watches either kind" — wrong in the dangerous direction for
+   anyone asking who to blame for a stale entity.
+
+**Cost of adding a kind, actually measured:** the touch points CODE_MAP's "Where to add things"
+table already lists are per-kind DECISIONS (which statuses, which bot, which desk reopens it), not
+mechanism. That is the judgment-stays-with-the-kind rule working, not duplication.
 
 ---
 
