@@ -28,8 +28,8 @@ Suites at hand-off: backend **2494 pass / 0 fail**, frontend **639 pass / 0 fail
 | 4b | The two candle stacks | ✅ done — found a live defect underneath |
 | 4c | Hand-mirrored BE→FE logic | ✅ partly; the rest qualified and deliberately kept |
 | 5 | Plasters to remove | ✅ done except §5.5 (`_idea` legacy verbs — needs a Mongo check) |
-| 6 | Convention drift | ⬜ **NOT STARTED** (§6.2 withdrawn as wrong) |
-| 7 | `mode` means two things | ⬜ **NOT STARTED** — one cheap test |
+| 6 | Convention drift | 🟨 §6.1 done; §6.2 withdrawn; §6.3 (shared desk SCSS) open |
+| 7 | `mode` means two things | ✅ guarded (`0998a02`) — the rename is still the thorough fix |
 
 **Read this before trusting anything below.** Four of this document's own claims did not survive
 being acted on, and each is marked in place: §1.5 (a bug in a component nothing renders), §2.1
@@ -316,6 +316,8 @@ guards the real set.
 
 ## 6. Convention drift
 
+**6.1 — the hand-rolled reason ladder.** ✅ FIXED (`0998a02`). Original text follows.
+
 **6.1 — `api/strategy/strategy.controller.js:46-56` hand-rolls a reason ladder.**
 `PUBLISH_REASONS` + `_fail` instead of `sendReason` from `api/_shared/reason.util.js`. It
 redefines the SHARED reason `not_found` (same status today, so no live bug) and its response
@@ -358,12 +360,14 @@ Cheapest fix: a test asserting the two value sets never intersect.
    **§5.5 only**: the `_idea` legacy rebalance verbs, accepted in both repos but taught by no
    prompt. Needs a Mongo check for pending rebalance rows before deleting — that is why it was not
    swept up with the rest.
-2. **§7, the `mode` collision** — one test asserting the Kairos lens values never intersect the
-   workspace names. Cheapest real risk reduction left in the document.
-3. **§6.1, the reason ladder** — `strategy.controller` and `paper.controller` hand-roll a
-   `[status, message]` table, and `reasonStatus.test.js` cannot see it: the guard matches
-   `reason === 'x'` branches, not the table form the earlier offenders were converted INTO.
-   Widening that regex is two lines and closes the hole the guard was written for.
+2. ~~§7, the `mode` collision~~ ✅ GUARDED (`0998a02`). The word lists are asserted disjoint and
+   resolveMode's handling of a lens is pinned. The thorough fix — renaming the call's field so the
+   overload is gone rather than watched — touches stored documents and is still open.
+3. ~~§6.1, the reason ladder~~ ✅ DONE (`0998a02`). `strategy.controller` answers through
+   `sendReason`; the guard now catches the TABLE shape it was blind to. `paper.controller` was named
+   alongside it and is **not** an offender — its `_fail` reads `err.status` from a thrown typed
+   error, the other style CODE_MAP blesses. §6.3 (three panels importing PortfolioPanel.scss) is
+   what remains of §6.
 4. **§3, the two kind vocabularies** — the largest remaining, and the one to scope carefully.
    `KINDS` holds `idea`/`call`/`portfolio_item` while the watchlist, Axl and chat speak
    `setup`/`coverage`/`scan`/`portfolio`, with a hand-written map between them. Worth confirming the
