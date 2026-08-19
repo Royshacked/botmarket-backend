@@ -92,12 +92,27 @@ test('no controller hard-codes a status for a reason the shared table owns', () 
 
     for (const file of controllerFiles(join(ROOT, 'api'))) {
         const src = readFileSync(file, 'utf8')
+        const rel = relative(ROOT, file)
+        // Strip line comments before matching: a comment that MENTIONS a reason is documentation,
+        // and flagging it would push people to stop writing the comments.
+        const code = src.replace(/^\s*\/\/.*$/gm, '')
+
         for (const reason of shared) {
-            // The shape every hand-rolled ladder had: `if (result.reason === 'in_position') return
-            // res.status(...)`. Mentioning a reason in an override table is fine — that re-words
-            // it; deciding its STATUS in a branch is what put the three routes out of step.
-            if (new RegExp(`reason\\s*===\\s*'${reason}'`).test(src)) {
-                offenders.push(`${relative(ROOT, file)} branches on '${reason}'`)
+            // Shape 1 — the branch: `if (result.reason === 'in_position') return res.status(...)`.
+            if (new RegExp(`reason\\s*===\\s*'${reason}'`).test(code)) {
+                offenders.push(`${rel} branches on '${reason}'`)
+            }
+            // Shape 2 — THE TABLE, and the reason this guard was widened. The three original
+            // offenders were converted INTO exactly this: a controller-local
+            // `{ not_found: [404, 'No such view'] }` looked up by a local `_fail`. It decides the
+            // status just as firmly as the branch did, and the first version of this test could not
+            // see it — so `strategy.controller` sat here redefining a shared reason, and answering
+            // WITHOUT the `reason` slug every other route sends, from the day it was written.
+            //
+            // Passing a table to sendReason as `overrides` is still fine: that re-words a reason and
+            // keeps its status. What this catches is a table the controller reads ITSELF.
+            if (new RegExp(`\\b${reason}\\s*:\\s*\\[\\s*\\d{3}`).test(code) && !/sendReason/.test(code)) {
+                offenders.push(`${rel} keeps its own status table for '${reason}'`)
             }
         }
     }

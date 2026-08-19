@@ -12,6 +12,7 @@ import { diffStances }          from '../../monitoring/tilt.assess.js'
 import { notifyTiltChanged }    from '../../services/tiltNotify.service.js'
 import { streamAgentResponse, sseAgentCallbacks }  from '../_shared/sse.util.js'
 import { parseChatMessages }    from '../_shared/parse.util.js'
+import { sendReason }           from '../_shared/reason.util.js'
 import { logger }               from '../../services/logger.service.js'
 
 const LOG = '[strategyCtrl]'
@@ -48,15 +49,28 @@ export async function streamStrategy(req, res) {
 
 // ─── The tilt publication log ─────────────────────────────────────────────────
 
+/**
+ * The refusals THIS desk owns, in the shape reason.util takes as `overrides`.
+ *
+ * `not_found` is deliberately absent: it is a shared reason and the shared table already answers it
+ * 404. This module used to redefine it here, in a private lookup that `_fail` read directly — which
+ * is the same drift the reason table exists to prevent, wearing a different shape. It also answered
+ * without the `reason` slug every other route sends, so a client had to read the prose to tell one
+ * refusal from another. reasonStatus.test.js now fails on a controller-owned table like that.
+ */
 const PUBLISH_REASONS = {
     no_usable_rows:            [400, 'No usable sector stances — every row was missing a recognised sector'],
     stance_contradicts_weight: [422, 'A stance contradicts its active weight'],
-    not_found:                 [404, 'No such view'],
 }
 
+/** `detail` is this desk's own: which rows contradicted themselves, so the author can fix them. */
 function _fail(res, result, fallback = 'Request failed') {
-    const [status, message] = PUBLISH_REASONS[result?.reason] ?? [500, fallback]
-    return res.status(status).json({ error: message, ...(result?.detail ? { detail: result.detail } : {}) })
+    return sendReason(res, result?.reason, {
+        overrides: PUBLISH_REASONS,
+        fallback: 500,
+        fallbackMessage: fallback,
+        ...(result?.detail ? { extra: { detail: result.detail } } : {}),
+    })
 }
 
 /** The house view in force. Null is a legitimate answer — the desk may simply not have published yet. */

@@ -12,6 +12,7 @@ import { normalizeTimeframe, VALID_TIMEFRAMES } from './timeframe.service.js'
 import { normalizeAssetClass } from './entity/vocabulary.js'
 import { cleanConviction } from './conviction.util.js'
 import { TRADE_HORIZONS } from './entity/vocabulary.js'
+import { MODES } from './analysisModes.js'
 
 // Coarse → fine. The ladder is a contiguous slice of this, centred on the authored timeframe.
 export const TF_RUNGS = ['month', 'week', 'day', '4hr', '2hr', '1hr', '30min', '15min', '5min', '1min']
@@ -24,7 +25,12 @@ export const TF_RUNGS = ['month', 'week', 'day', '4hr', '2hr', '1hr', '30min', '
 // Migration is free for the same reason the condition rename was: a stored `classical` is no
 // longer in the set, so it falls to the default below — which IS `discretionary`. Same lens, new
 // name, no rewrite.
-export const TRADE_MODES  = ['discretionary', 'smc', 'institutional']
+// The words themselves are analysisModes' — "the shared vocabulary, not one desk's", as that file
+// puts it. This was a second copy of the identical three, which is the arrangement where one side
+// gains a lens and the other silently rejects it as unknown. The NAME stays: a setup's field is
+// `trade_mode`, and reading `TRADE_MODES.includes(raw.trade_mode)` at the call site says what is
+// being checked. (tests/unit/modeCollision.test.js holds the two in step.)
+export const TRADE_MODES  = MODES
 
 // ─── Conditions ───────────────────────────────────────────────────────────────
 //
