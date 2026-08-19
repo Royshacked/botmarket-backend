@@ -42,6 +42,31 @@ export const priceService = {
 export const CANDLE_ROW_SCHEMA = CANDLE_SCHEMA
 export { OHLCV }
 
+/**
+ * WHERE A FETCH STARTS — the tail, or the whole requested window. Pure; exported for tests.
+ *
+ * FETCH ONLY THE TAIL when the cache already reaches back as far as the caller asked. The
+ * incremental start (newest bar + one step) is what keeps a monitor tick cheap: intraday callers
+ * pass `refresh`, so this runs on EVERY wake, and re-pulling the whole window each time is exactly
+ * the self-inflicted quota burn that once had FMP answering 429.
+ *
+ * BACKFILL ONCE when they asked for more history than the cache holds. Without that clause a
+ * widened window would be requested forever and never arrive, because an incremental fetch only
+ * ever adds to the NEWEST end — the older bars it needs are behind it and nothing would go and get
+ * them. After one full pass the cache covers the range and this goes back to tails.
+ *
+ * @param {{requestedFromMs?: number, toMs: number, earliestTs: number|null, latestTs: number|null, stepSec: number}} spec
+ *   `earliestTs` / `latestTs` are the cache's bounds in SECONDS (the stored candle unit).
+ * @returns {number} epoch ms
+ */
+export function fetchStartMs({ requestedFromMs, toMs, earliestTs, latestTs, stepSec }) {
+    const asked = Number.isFinite(requestedFromMs) ? requestedFromMs : null
+    const coversStart = asked == null || (earliestTs != null && earliestTs * 1000 <= asked)
+    if (latestTs != null && coversStart) return (latestTs + stepSec) * 1000
+    if (asked != null) return asked
+    return toMs - DEFAULT_RANGE_DAYS * 24 * 60 * 60 * 1000
+}
+
 async function syncCandles(ticker, options = {}) {
     const symbol = _normalizeTicker(ticker)
     const barOpts = _normalizeOptions(options)
@@ -49,16 +74,13 @@ async function syncCandles(ticker, options = {}) {
     const existingCandles = cache.candles
 
     const toMs = barOpts.to ?? Date.now()
-    let fromMs = barOpts.from
-
-    const latestTs = _maxCandleTimestamp(existingCandles)
-    if (latestTs != null && fromMs == null) {
-        const stepSec = barDurationSeconds(barOpts.timeSpan, barOpts.multiplier)
-        fromMs = (latestTs + stepSec) * 1000
-    }
-    if (fromMs == null) {
-        fromMs = toMs - DEFAULT_RANGE_DAYS * 24 * 60 * 60 * 1000
-    }
+    const fromMs = fetchStartMs({
+        requestedFromMs: barOpts.from,
+        toMs,
+        earliestTs: _minCandleTimestamp(existingCandles),
+        latestTs:   _maxCandleTimestamp(existingCandles),
+        stepSec:    barDurationSeconds(barOpts.timeSpan, barOpts.multiplier),
+    })
 
     const fetchOptions = { ...barOpts, from: fromMs, to: toMs }
     let incomingList = []
@@ -263,6 +285,15 @@ function _maxCandleTimestamp(candles) {
     return Number.isFinite(max) ? max : null
 }
 
+function _minCandleTimestamp(candles) {
+    let min = Infinity
+    for (const c of candles) {
+        const t = candleTimestamp(c)
+        if (Number.isFinite(t) && t < min) min = t
+    }
+    return Number.isFinite(min) ? min : null
+}
+
 function _filterBySecRange(candles, fromSec, toSec) {
     return candles.filter((c) => {
         const t = candleTimestamp(c)
@@ -270,12 +301,24 @@ function _filterBySecRange(candles, fromSec, toSec) {
     })
 }
 
-function _resolveSecRange({ fromSec, toSec } = {}) {
+/**
+ * The window a READ returns, in seconds.
+ *
+ * ONE window, shared with the fetch. It used to accept only `fromSec`/`toSec` while the FETCH
+ * (_resolveFetchWindow) accepted `from`/`to` in milliseconds as well — so a caller asking for a
+ * year in ms widened what was fetched and stored, and still got back thirty days. The extra bars
+ * were written to the cache and could never be read out of it, which is a hard thing to notice:
+ * nothing errors, the series is simply short, and a long-lookback indicator quietly reads n/a
+ * (indicator.evaluator warns about exactly this for SMA-200).
+ *
+ * DEFAULT_RANGE_DAYS survives as the FLOOR for a caller that names no window at all.
+ */
+export function _resolveSecRange(options = {}) {
     const nowSec = Math.floor(Date.now() / 1000)
-    const defaultFromSec = nowSec - DEFAULT_RANGE_DAYS * 86400
+    const { from, to } = _resolveFetchWindow(options)
     return {
-        fromSec: Number.isFinite(fromSec) ? fromSec : defaultFromSec,
-        toSec: Number.isFinite(toSec) ? toSec : nowSec,
+        fromSec: Number.isFinite(from) ? Math.floor(from / 1000) : nowSec - DEFAULT_RANGE_DAYS * 86400,
+        toSec:   Number.isFinite(to)   ? Math.floor(to / 1000)   : nowSec,
     }
 }
 
