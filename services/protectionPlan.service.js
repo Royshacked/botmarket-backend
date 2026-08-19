@@ -33,11 +33,19 @@ const LOG = '[protectionPlan]'
  * rolling the sentence, which is how a leaf came to be typed `structured` by accident and
  * silently routed to the software monitor rather than resting at the broker.
  *
+ * A LADDER states how much comes off at each rung; a single level does not have to, and an
+ * absent `quantity` is the claim "this rung is the whole position" — which is what
+ * _assignSlotQuantities then splits across the rungs that didn't say. Writing a 0 or a null
+ * would be a different claim entirely, so only a real slice is stamped.
+ *
  * @param {number} level
- * @returns {{ condition: string, type: 'touch', timeframe: null }}
+ * @param {number} [quantity]  the slice this rung closes; omitted = share of the remainder
+ * @returns {{ condition: string, type: 'touch', timeframe: null, quantity?: number }}
  */
-export function touchLeaf(level) {
-    return { condition: `price touches ${level}`, type: 'touch', timeframe: null }
+export function touchLeaf(level, quantity) {
+    const leaf = { condition: `price touches ${level}`, type: 'touch', timeframe: null }
+    if (Number(quantity) > 0) leaf.quantity = Number(quantity)
+    return leaf
 }
 
 /**
@@ -281,22 +289,46 @@ async function _routeLeg(tree, flat, totalQty) {
  * "divide total equally, residue to the first leaf" rule.
  */
 function _assignSlotQuantities(children, totalQty) {
-    const explicit    = children.map(c => Number(c?.quantity) || null)
-    const assignedSum = explicit.reduce((s, q) => s + (q ?? 0), 0)
-    const defaultIdx  = explicit.map((q, i) => (q == null ? i : -1)).filter(i => i >= 0)
-    const out         = explicit.slice()
+    const out  = children.map(c => Number(c?.quantity) || null)
+    const cap  = Math.max(0, Number(totalQty) || 0)
+    let   left = cap
 
+    // THE LEG CAN NEVER ASK FOR MORE THAN THE POSITION. Its slots are alternatives that each close
+    // part of ONE position, so they sum to it at most: three 50-lot stops behind a 100-lot position
+    // would close 150, and on a hedging account the excess does not bounce off — it OPENS a
+    // position the other way, which is the opposite of what a stop is for.
+    //
+    // It has to be caught here, at allocation. The reconciler's _resyncExits asks whether ONE order
+    // is bigger than what remains, and every one of those three is comfortably under; a ladder that
+    // over-sums is invisible to it. Slots claim in the order they were authored and each takes what
+    // is left, so a rung that would overrun is trimmed to the rest of the position (or to nothing,
+    // and placeExits drops a zero) rather than the whole leg being refused — a stop is more useful
+    // partially sized than not placed.
+    for (let i = 0; i < out.length; i++) {
+        if (out[i] == null) continue
+        const take = _round4(Math.min(out[i], left))
+        if (take < out[i]) {
+            logger.warn(LOG, `exit leg over-allocated — slot ${i} asked ${out[i]} of a ${cap} position, ${left} left; trimmed to ${take}`)
+        }
+        out[i] = take
+        left   = _round4(left - take)
+    }
+
+    // Whatever the explicit rungs left over is shared equally by the rungs that didn't say, with
+    // the residue going to the first — the assistant's own "divide equally, residue first" rule.
+    const defaultIdx = out.map((q, i) => (q == null ? i : -1)).filter(i => i >= 0)
     if (defaultIdx.length > 0) {
-        const remaining = Math.max(0, totalQty - assignedSum)
-        const base      = Math.floor((remaining / defaultIdx.length) * 10000) / 10000
-        let residue     = Math.round((remaining - base * defaultIdx.length) * 10000) / 10000
+        const base  = Math.floor((left / defaultIdx.length) * 10000) / 10000
+        let residue = _round4(left - base * defaultIdx.length)
         for (const i of defaultIdx) {
-            out[i] = Math.round((base + residue) * 10000) / 10000
+            out[i]  = _round4(base + residue)
             residue = 0
         }
     }
     return out.map(q => q ?? 0)
 }
+
+const _round4 = (n) => Math.round(n * 10000) / 10000
 
 /**
  * Return the price level of an offloadable single-leaf exit (a lone `touch` leg),

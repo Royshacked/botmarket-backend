@@ -156,10 +156,21 @@ const PRICE_LEVEL_LEGS = [
 ]
 
 /**
- * Accept a bare NUMBER for any exit/entry leg and expand it into the `touch` leaf the rest of
- * the system already speaks. The order ticket states its levels as prices — that is the whole
- * gesture — and a client should not have to know the sentence the condition parser expects, nor
- * which leaf `type` makes a level rest at the broker rather than sit on the monitor.
+ * Accept a bare NUMBER — or a LADDER of them — for any exit/entry leg and expand it into the
+ * `touch` leaves the rest of the system already speaks. The order ticket states its levels as
+ * prices; that is the whole gesture, and a client should not have to know the sentence the
+ * condition parser expects, nor which leaf `type` makes a level rest at the broker rather than
+ * sit on the monitor.
+ *
+ * A leg accepts, in one field, every shape the same statement comes in:
+ *   `185.5`                              one level, the whole position
+ *   `[185.5, 182]`                       two rungs, the position split evenly between them
+ *   `[{price:185.5, quantity:60}, 182]`  a rung that names its slice, and one that takes the rest
+ *   `null` or `[]`                       no leg — clears whatever was there
+ *
+ * ONE field per leg rather than a second `*_levels` array: a ladder and a single level are the
+ * same claim ("where this leg comes off"), and two ways to say it is two things to keep agreeing.
+ * The per-rung quantities are an ASK, not a grant — routeExits caps the leg at the position size.
  *
  * An explicit `*_conditions` always WINS: a caller that authored real conditions (the agents, the
  * chat build path) is saying something a price can't, so a stray price field must not overwrite it.
@@ -175,10 +186,27 @@ export function applyPriceLevels(input = {}) {
         const level = out[priceKey]
         delete out[priceKey]
         if (out[condKey] !== undefined) continue          // authored conditions win
-        // null clears the leg (remove a stop); a number sets it. Anything else is ignored
-        // rather than persisted as a leg nothing can evaluate.
-        if (level === null)              out[condKey] = []
-        else if (Number.isFinite(Number(level))) out[condKey] = [touchLeaf(Number(level))]
+
+        // An EMPTY statement clears the leg (remove a stop) — null and [] are the same sentence.
+        if (level === null || (Array.isArray(level) && level.length === 0)) { out[condKey] = []; continue }
+
+        // Anything unreadable is ignored rather than persisted as a leg nothing can evaluate — and
+        // that is per rung, so one bad row can't take a ladder's good rows down with it.
+        const leaves = _levelLeaves(level)
+        if (leaves.length) out[condKey] = leaves
+    }
+    return out
+}
+
+/** One `touch` leaf per readable rung. A rung is a bare price, or `{ price, quantity }`. */
+function _levelLeaves(level) {
+    const rungs = Array.isArray(level) ? level : [level]
+    const out   = []
+    for (const rung of rungs) {
+        const isObj = rung != null && typeof rung === 'object'
+        const price = Number(isObj ? (rung.price ?? rung.level) : rung)
+        if (!Number.isFinite(price)) continue
+        out.push(touchLeaf(price, isObj ? rung.quantity : undefined))
     }
     return out
 }
@@ -473,12 +501,21 @@ async function updateIdea(id, rawPatch, userId) {
     }
 
     if (patch.entry_conditions !== undefined || patch.stop_conditions !== undefined || patch.tp_conditions !== undefined) {
-        const entryTree = resolveConditionTree(patch.entry_condition_tree, patch.entry_conditions, patch.entry_logic ?? 'AND')
-        const stopTree  = resolveConditionTree(patch.stop_condition_tree,  patch.stop_conditions,  patch.stop_logic  ?? 'OR')
-        const tpTree    = resolveConditionTree(patch.tp_condition_tree,    patch.tp_conditions,    patch.tp_logic    ?? 'OR')
-        if (entryTree) { patch.entry_condition_tree = entryTree; patch.entry_conditions = extractLeaves(entryTree) }
-        if (stopTree)  { patch.stop_condition_tree  = stopTree;  patch.stop_conditions  = extractLeaves(stopTree)  }
-        if (tpTree)    { patch.tp_condition_tree    = tpTree;    patch.tp_conditions    = extractLeaves(tpTree)    }
+        for (const [leg, defaultLogic] of [['entry', 'AND'], ['stop', 'OR'], ['tp', 'OR']]) {
+            const condKey = `${leg}_conditions`
+            const treeKey = `${leg}_condition_tree`
+            const tree    = resolveConditionTree(patch[treeKey], patch[condKey], patch[`${leg}_logic`] ?? defaultLogic)
+            if (tree) {
+                patch[treeKey] = tree
+                patch[condKey] = extractLeaves(tree)
+            } else if (Array.isArray(patch[condKey]) && patch[condKey].length === 0) {
+                // CLEARING A LEG HAS TO CLEAR ITS TREE TOO. The TREE is what routeExits reads;
+                // emptying only the flat list left the old one standing, so "remove my stop"
+                // wrote a document that showed no stop while handing the broker back the very
+                // order the user had just taken off — and the two disagreed from then on.
+                patch[treeKey] = null
+            }
+        }
     }
 
     if (patch.status === 'closed') patch.chat_state = null
