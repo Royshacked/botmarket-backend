@@ -61,6 +61,24 @@ test('an unknown broker is no venue', () => {
     }
 })
 
+test('a venue is bindable when SOMETHING there will fill the trade — the app, or the user', () => {
+    // Derived from the venue's own capabilities, not from a list kept in setups.service. That list
+    // said ['ctrader','paper','manual'] — right today, and wrong the moment IBKR's trading flips on,
+    // at which point a user with only IBKR connected is told `no_venue` on every Generate with
+    // nothing in the message pointing at a file they have never opened.
+    assert.equal(validateSetup(normalizeSetup(DRAFT), 'ctrader', ACCTS).ok, true, 'the app places it')
+    assert.equal(validateSetup(normalizeSetup(DRAFT), 'paper', ACCTS).ok, true, 'the app places it')
+    assert.equal(validateSetup(normalizeSetup(DRAFT), 'manual', ACCTS).ok, true, 'the user places it')
+})
+
+test('IBKR is refused today, and the refusal will lift itself', () => {
+    // Not because it is named anywhere, but because it can do NEITHER yet: trading is false and it
+    // is not self-executed (it is unwired, not hand-traded). Flipping its trading capability on is
+    // the whole change needed here — this line then fails, and that failure is the reminder to
+    // delete it rather than to go hunting for the list that refused it.
+    assert.equal(validateSetup(normalizeSetup(DRAFT), 'ibkr', [{ id: 'a1', broker: 'ibkr' }]).reason, 'no_venue')
+})
+
 test('live and manual need a marked account; paper derives its own', () => {
     assert.equal(validateSetup(normalizeSetup(DRAFT), 'ctrader', []).reason, 'no_venue')
     assert.equal(validateSetup(normalizeSetup(DRAFT), 'manual', []).reason, 'no_venue')

@@ -193,3 +193,27 @@ export function isSelfExecuted(broker) {
     try { return !!brokerService.capabilities(broker)?.selfExecuted }
     catch { return false }
 }
+
+/**
+ * Can a trade be BOUND to this venue — is there anything here that will ever fill it?
+ *
+ * Two ways to answer yes and they are genuinely different: the app can place the order
+ * (`trading`), or the account holder will (`selfExecuted`). Either one means the entity has a
+ * future; neither means it would be persisted to be watched by a monitor that can never act.
+ *
+ * Derived rather than listed, because a hard list is a second broker registry and it goes stale
+ * silently in the ONE direction nobody notices — outwards. `setups.service` held
+ * `['ctrader','paper','manual']`, which is right today and becomes wrong the moment IBKR's trading
+ * flips on: a user with only IBKR connected would be told `no_venue` on every Generate, with
+ * nothing in the message pointing at a list in a file they never edited. This yields exactly those
+ * three today (IBKR is excluded because it can do neither — see the flag note in broker.interface)
+ * and admits it automatically when it can.
+ *
+ * Never throws, for the same reason isSelfExecuted doesn't.
+ */
+export function isBindableVenue(broker) {
+    try {
+        const caps = brokerService.capabilities(broker)
+        return !!(caps?.trading || caps?.selfExecuted)
+    } catch { return false }
+}

@@ -3,7 +3,7 @@ import { statusesFor, PAST_ENTRY, LIVE_POSITION } from '../../services/entity/vo
 import { logger }            from '../../services/logger.service.js'
 import { buildEventRisk }    from '../../services/eventRisk.service.js'
 import { makeEntityCrud }    from '../../services/entity/entityCrud.service.js'
-import { resolveVenue, resolveMode } from '../../services/venue.resolve.service.js'
+import { resolveVenue, resolveMode, isBindableVenue } from '../../services/venue.resolve.service.js'
 import { normalizeSetup, setupReadiness, projectScenario } from '../../services/setup.schema.js'
 import { resolveMainAccountId } from '../../services/agentUtils.js'
 
@@ -27,8 +27,6 @@ const KIND = 'setup'
 // broker first. Everything below this line is setup JUDGMENT: the Generate gate, the server-owned
 // binding, and which fields an edit may rewrite.
 const crud = makeEntityCrud({ kind: KIND, deleteLock: LIVE_POSITION, log: LOG })
-
-const BROKERS = new Set(['ctrader', 'paper', 'manual'])
 
 // Statuses this kind moves through: unarmed → waiting → watching → ready → long/short → closed.
 // A setup runs the ONE shared ladder: waiting (generated, unmonitored) → looking (armed) → hit
@@ -89,7 +87,10 @@ export function validateSetup(setup, broker, accounts) {
     // source as the FE's readiness, so the button and this refusal cannot disagree.
     if (problems.length) return { ok: false, reason: `invalid_${problems[0].replace(/\s+/g, '_')}` }
 
-    if (!BROKERS.has(broker)) return { ok: false, reason: 'no_venue' }
+    // Is there anything at this venue that will ever fill the trade — the app placing it, or the
+    // user? Asked of the venue rather than of a list kept here: a second broker registry in this
+    // file would answer for a broker it had never heard of, and it would answer no.
+    if (!isBindableVenue(broker)) return { ok: false, reason: 'no_venue' }
     // Paper derives its own account (paper-<userId>); live and manual must be marked explicitly.
     if (broker !== 'paper' && !(accounts?.length)) return { ok: false, reason: 'no_venue' }
 
