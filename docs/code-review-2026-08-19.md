@@ -205,10 +205,62 @@ that owns the app's routing, desk switching, order confirmation and queue handli
 net is 639 tests that mostly do not cover this file. It wants its own session, a plan, and probably
 the app running in front of you.
 
-**Where to start, if it gets picked up:** `openForEdit` → an `OPENERS` table is the one piece that
-is genuinely mechanical and testable in isolation. The state quadruplets are the real prize and the
-real risk: collapsing them into one `deskState` reducer keyed by desk would make a new desk one row
-instead of four scattered declarations, but it touches every hand-off path in the app.
+**Half done.** The `openForEdit` half shipped (frontend `4d24bbd`): finding an entity by id-or-name
+moved to `entityResolve.resolveForEdit` with nine tests, including the exactly-one-match rule that
+decides whether the user edits the trade they meant. The OPENING stayed — each desk's opener is a
+closure over MainPage's state, so the `OPENERS` table this review asked for was never possible.
+3,066 → 3,035 lines: a dent, not a fix.
+
+---
+
+### §2.5 PLAN — the per-desk state (not started; written 2026-08-19)
+
+**The evidence, measured rather than assumed.** The state is NOT a clean quadruplet per desk — it is
+ragged, which is the first thing any plan has to survive:
+
+| | Seed | Inbox | ChatRestore | ResetKey | bespoke |
+|---|---|---|---|---|---|
+| mentor | `mentorSeed` | `mentorInbox` | `mentorChatRestore` | shared `chatResetKey` | |
+| analyst | `analystSeed` | `analystInbox` | — | — | `analystEditCoverage` |
+| scanner | `scannerSeed` | `scanInbox` | `scannerChatRestore` | `scannerResetKey` | |
+| portfolio | `portfolioSeed` | — | `portfolioChatRestore` | shared | |
+| strategy | — | — | — | — | |
+
+29 setter call sites across the four slot types. Note `scannerSeed` vs `scan`Inbox — the naming is
+already inconsistent, which is evidence the group was never designed as a group.
+
+**What is already shared, and is NOT the problem.** `useSeedTurn` (customHooks) owns the seed
+MECHANISM — keyed one-shot, sent not staged — and four panels use it. The mechanism is fine. What is
+scattered is the STORAGE and the wiring: one `useState` per desk per slot, in MainPage.
+
+**The proposal:** one `useDeskHandoff()` hook owning a reducer keyed by desk, replacing the ~11
+`useState` declarations with one, and exposing `handoff(desk, slot, value)` + `deskProps(desk)`.
+A new desk becomes one row rather than four scattered declarations plus their setters.
+
+**Do it in this order, and stop if a step feels unsafe:**
+
+1. **Name the slots first, change nothing else.** Rename `scanInbox` → `scannerInbox` so every
+   key is `<desk><Slot>`. Pure rename, compiler-checked, no behaviour. If this is awkward, the
+   reducer will be worse.
+2. **Reducer behind the same names.** Introduce the reducer and derive the existing variables from
+   it (`const mentorSeed = desks.mentor.seed`). Every call site and prop keeps working; the 11
+   `useState` calls collapse to one `useReducer`. This is the step that must be provably inert.
+3. **Collapse the props.** `deskProps('mentor')` spreading `{ seed, inbox, chatRestore }` at the
+   JSX, replacing the hand-written prop lists around lines 2690-2790.
+4. **Then, and only then,** consider whether a new desk is genuinely one row.
+
+**THE RISK, named precisely.** `key={`scanner-${chatResetKey}-${scannerResetKey}`}` (line 2690) —
+reset keys drive REMOUNTS. Get this wrong and a desk either silently keeps a conversation it should
+have dropped, or drops one mid-turn. Treat the reset keys as a separate, later step; do not fold
+them into the reducer in the same pass as the seeds.
+
+**Why it cannot be verified the way everything else this session was:** MainPage has no test file.
+The 648 frontend tests cover panels and services, not this component's wiring. Steps 1-2 are
+compiler- and lint-checked; step 3 is not, and wants the app running with a click through every
+hand-off: Axl route → each desk, a calendar row → Mentor, Argus → Mentor and → Prometheus, a
+coverage pencil, a review card, and Clear on each desk.
+
+
 
 ---
 
