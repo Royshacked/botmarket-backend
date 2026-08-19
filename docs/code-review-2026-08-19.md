@@ -196,15 +196,22 @@ registry is missing.
 
 ## 4. Duplications worth money
 
-**4.a — `candleFetch` calls FMP twice on every fallback.**
-`services/candleFetch.service.js:130-136` calls `getFmpCandles` directly, then on empty falls
-back to `getTickerAggregates` — which, with `USE_FMP_CANDLES` on
-(`providers/candles.provider.js:33`), calls `getFmpCandles` **again** before reaching Massive.
-The fallback path is exactly futures / index CFDs / broker symbols / week+month — the
-instruments this app trades most. Given the FMP-429 history (own-polling quota bug), this is
-a real cost. The doc comment at `candleFetch.service.js:8-10` is also wrong: it calls the
-router "Massive → Yahoo"; it is "FMP → Massive → Yahoo".
-Fix: call `getTickerAggregates` only, or call the Massive provider directly on fallback.
+**4.a — `candleFetch` called FMP twice on every fallback.** ✅ FIXED (`c2006b5`).
+`fetchMarketCandles` now goes through `getTickerAggregates` only, so the FMP-vs-Massive decision is
+made once, in `candles.provider`. Two further things came out of it:
+
+- **`USE_FMP_CANDLES` never reached the chart.** The direct call did not consult it, so turning the
+  flag off left this path going to FMP first anyway. It also sat in a module-level `const` captured
+  at import, freezing it against config.js's live-getter design. Read per call now.
+- **`candles.provider` had no test of its own.** Its policy was asserted in `candleFetch`'s tests,
+  against `candleFetch`'s copy of it — which is how testing the copy made the copy look tested.
+  `tests/unit/candlesProvider.test.js` covers it directly, including the flag-off branch.
+
+**Residual, deliberately left:** `yahoofinance.provider._candles` is a *third* FMP-first
+implementation, serving the analytics functions (risk / correlation / cycle). It cannot simply route
+through `candles.provider` — that would close a cycle (`candles.provider → massive → yahoo →
+candles.provider`). It is off the chart path, so it costs no duplicate request there; if it is ever
+unified, the import direction is the problem to solve first.
 
 **4.b — Two candle stacks, different caches, different vendors.**
 
