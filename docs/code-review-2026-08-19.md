@@ -22,7 +22,7 @@ Suites at hand-off: backend **2494 pass / 0 fail**, frontend **639 pass / 0 fail
 | § | | |
 |---|---|---|
 | 1 | Broker interface sealing | ✅ done (§1.3 and §1.6 open by choice) |
-| 2 | New agent is not plug-in | ✅ done, §2.1 partly withdrawn |
+| 2 | New agent is not plug-in | 🟨 §2.2/§2.4 done · §2.1 partly withdrawn · **§2.5 (MainPage) NOT STARTED** |
 | 3 | New entity / kind — two vocabularies | ⚠️ **WITHDRAWN** — premise wrong; two real bugs under it, fixed |
 | 4a | `candleFetch` calls FMP twice | ✅ done |
 | 4b | The two candle stacks | ✅ done — found a live defect underneath |
@@ -192,11 +192,23 @@ desk and watching it fail. The original text follows.
 token spend. `loopContract.test.js` and `botRegistry.test.js` prove the guard-test pattern
 already exists here; this one is a one-liner to add.
 
-**2.5 — `pages/MainPage.jsx`: 3064 lines, 50 `useState`, ~25 `useEffect`.** Per-desk state
-comes as a quadruplet (`<desk>Seed` / `<desk>Inbox` / `<desk>ChatRestore` / `<desk>ResetKey`) —
-see lines 259-309. Adding a desk means 44 edits in this one file. `openForEdit` (line 1857) is
-a per-kind registry embedded in a page component; it belongs beside
-`services/entityResolve.js`'s `GETTERS` as a module-level `OPENERS` table.
+**2.5 — `pages/MainPage.jsx`.** ⬜ **NOT STARTED — the largest open item in this document.**
+Re-measured 2026-08-19: **3,066 lines, 48 `useState`, 20 `useEffect`, 10 `useRef`** (the original
+"50 / ~25" was close enough). Per-desk state comes as a quadruplet (`<desk>Seed` / `<desk>Inbox` /
+`<desk>ChatRestore` / `<desk>ResetKey`) around lines 259-309, so adding a desk means ~44 edits in
+this one file. `openForEdit` (line 1857) is a per-kind registry embedded in a page component; it
+belongs beside `services/entityResolve.js`'s `GETTERS` as a module-level `OPENERS` table.
+
+**Why it was not done, honestly:** every other item this session was verifiable — a test went red
+or green, a scan of stored documents said yes or no. This one is a decomposition of the component
+that owns the app's routing, desk switching, order confirmation and queue handling, and its safety
+net is 639 tests that mostly do not cover this file. It wants its own session, a plan, and probably
+the app running in front of you.
+
+**Where to start, if it gets picked up:** `openForEdit` → an `OPENERS` table is the one piece that
+is genuinely mechanical and testable in isolation. The state quadruplets are the real prize and the
+real risk: collapsing them into one `deskState` reducer keyed by desk would make a new desk one row
+instead of four scattered declarations, but it touches every hand-off path in the app.
 
 ---
 
