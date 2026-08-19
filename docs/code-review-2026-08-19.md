@@ -14,12 +14,34 @@ runs — worth a second look if it recurs, not treated as a finding here.
 unusual and valuable). The gap is that the **desks** and the **venues** — the two things asked
 to be plug-in — are the two layers that never got the same treatment.
 
-**Top three if only three get done:**
+## Status — last worked 2026-08-19
 
-1. `selfExecuted` capability + capability gates in `positionManage.service.js` (§1)
-2. ~~`createDesk()`~~ + `useDeskChat()` + a guard test on `server.js:168` (§2) — the guard and the
-   two genuinely-shared helpers shipped; `createDesk()` was withdrawn on reading the code (§2.1)
-3. The double-FMP call in `candleFetch.service.js` (§4a)
+Backend `e95edeb`..`b140dfb` (16 commits) · frontend `0cc4dfc`, `cce5f44` (2 commits).
+Suites at hand-off: backend **2494 pass / 0 fail**, frontend **639 pass / 0 fail**.
+
+| § | | |
+|---|---|---|
+| 1 | Broker interface sealing | ✅ done (§1.3 and §1.6 open by choice) |
+| 2 | New agent is not plug-in | ✅ done, §2.1 partly withdrawn |
+| 3 | New entity / kind — two vocabularies | ⬜ **NOT STARTED — the next one** |
+| 4a | `candleFetch` calls FMP twice | ✅ done |
+| 4b | The two candle stacks | ✅ done — found a live defect underneath |
+| 4c | Hand-mirrored BE→FE logic | ✅ partly; the rest qualified and deliberately kept |
+| 5 | Plasters to remove | 🟨 deletions done; four small items left |
+| 6 | Convention drift | ⬜ **NOT STARTED** (§6.2 withdrawn as wrong) |
+| 7 | `mode` means two things | ⬜ **NOT STARTED** — one cheap test |
+
+**Read this before trusting anything below.** Four of this document's own claims did not survive
+being acted on, and each is marked in place: §1.5 (a bug in a component nothing renders), §2.1
+(asked for a factory the code argues against), §4b ("different vendors" — they share one router),
+§6.2 (three different values, not one constant twice). The pattern is that findings written from
+reading a file were weaker than findings found by trying to change it. Verify before building on any
+remaining item.
+
+**Where the value actually was**, for calibrating the rest: the two biggest defects fixed this pass
+were **not** in the review. A `/stream` endpoint with no spend limit was §2.4's side-note; a request
+for 300 candles silently returning 30 days' worth — which made every long-lookback indicator read
+n/a forever — was found while fixing a §4b claim that was itself wrong.
 
 ---
 
@@ -269,15 +291,11 @@ should stay.
 `dismissed` for pre-refactor history. The dual-write on *new* writes is dead weight.
 Drop the two fields from the `$set`; keep the FE fallback for old documents.
 
-**5.2 — Empty directories:** `api/kairos/` (backend), `src/cmps/KairosPanel/` and
-`src/services/kairos/` (frontend).
+**5.2 — Empty directories.** ✅ Frontend done (`cce5f44`). ⬜ **`api/kairos/` on the backend is
+still there.**
 
-**5.3 — Dead frontend files** (nothing imports them, extension-agnostic check):
-
-- `src/cmps/HeaderBackground.jsx` (391 lines)
-- `src/cmps/PreferencesModal.jsx` (249 lines)
-- `src/customHooks/useEffectUpdate.js`
-- `src/services/upload.service.js`
+**5.3 — Dead frontend files.** ✅ DONE (`cce5f44`) — those four plus `MonitorDashboard/`
+(three files), ~1,700 lines in total.
 
 **5.4 — `cmps/TradeIdeas/tradeIdea.utils.js`: four exports that reduce to one.**
 `ideaWorkspace` / `entityWorkspace` / `isPaperIdea` / `isManualIdea` all reduce to
@@ -333,6 +351,32 @@ changes workspace.
 Cheapest fix: a test asserting the two value sets never intersect.
 
 ---
+
+## Open work, in the order I would take it
+
+1. **§5's four leftovers** — half an hour, no risk, all verified:
+   `chat.service.js:492` still dual-writes `dismissed`/`dismissOutcome` (the FE shipped —
+   `cardResolution.js` reads top-level `status` first and only falls back for pre-refactor history);
+   `api/kairos/` is still an empty directory; `sse.util.js:2` still lists kairos among the streaming
+   endpoints; `tradeIdea.utils` still exports four names that all reduce to `ideaWorkspaceMode`.
+2. **§7, the `mode` collision** — one test asserting the Kairos lens values never intersect the
+   workspace names. Cheapest real risk reduction left in the document.
+3. **§6.1, the reason ladder** — `strategy.controller` and `paper.controller` hand-roll a
+   `[status, message]` table, and `reasonStatus.test.js` cannot see it: the guard matches
+   `reason === 'x'` branches, not the table form the earlier offenders were converted INTO.
+   Widening that regex is two lines and closes the hole the guard was written for.
+4. **§3, the two kind vocabularies** — the largest remaining, and the one to scope carefully.
+   `KINDS` holds `idea`/`call`/`portfolio_item` while the watchlist, Axl and chat speak
+   `setup`/`coverage`/`scan`/`portfolio`, with a hand-written map between them. Worth confirming the
+   cost is real before building a registry: this document has been wrong about "obvious" duplication
+   three times.
+
+Two live-verification queues stand open and neither is unit-testable: section H of
+`live-verify-checklist.md` (the self-executed venue — that the card ARRIVES, that notify-then-write
+survives a chat failure, that an off-hours manual manage still posts immediately), and the candle
+window change, which alters what long-lookback conditions can see. **A daily SMA-200 condition on an
+armed entity that has never fired may start evaluating properly now** — the intended repair, but a
+behaviour change on live entities rather than a refactor.
 
 ## What is genuinely good (do not "fix")
 
