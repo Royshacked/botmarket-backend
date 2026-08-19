@@ -36,6 +36,7 @@ import { notifyManualExit, notifyManualEntry, exitLegFromIdea, entryLegFromIdea 
 import { ENTITIES }               from '../../services/entity/entityCollection.js'
 import { orderSymbol }            from '../../monitoring/exitOrders.util.js'
 import { deferIfClosed }          from '../../services/pendingAction/executionGate.js'
+import { isSelfExecuted }         from '../../services/venue.resolve.service.js'
 
 const LOG        = '[portfolio:rebalance]'
 const COLLECTION = ENTITIES
@@ -220,7 +221,7 @@ export async function _exitItem(db, itemId, userId, reason, gate = _gate) {
 
     // Manual: can't place a broker close — hand the exit leg back so applyRebalance posts
     // ONE Fill card; the user confirms the real exit price (confirmManualExit finalizes it).
-    if (legs.some(l => l.broker === 'manual')) {
+    if (legs.some(l => isSelfExecuted(l.broker))) {
         await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingCloseReason: reason } })
         return { ok: true, manual: true, manualExitLeg: exitLegFromIdea(item) }
     }
@@ -260,8 +261,8 @@ export async function _trimItem(db, itemId, userId, change, gate = _gate, broker
     // Fill card. confirmManualExit reduces the position (not full close) using the reported size, or the
     // pendingTrimQty stamped here if the FE doesn't forward a quantity. Stamp both so the confirm is
     // robust. (A manual holding is a single manual leg.)
-    if (legs.some(l => l.broker === 'manual')) {
-        const leg     = legs.find(l => l.broker === 'manual')
+    if (legs.some(l => isSelfExecuted(l.broker))) {
+        const leg     = legs.find(l => isSelfExecuted(l.broker))
         const openQty = leg.quantity ?? item.quantity ?? 0
         const trimQty = Math.floor(openQty * f)
         if (trimQty <= 0) return { ok: false, reason: 'trim_too_small' }
@@ -356,7 +357,7 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
         .find({ portfolioId, userId }, { projection: { asset: 1, direction: 1, status: 1, portfolioName: 1, accounts: 1, mainAccountId: 1, broker: 1 } })
         .toArray()
     const base     = siblings[0] ?? null
-    const isManual = siblings.some(s => s.broker === 'manual')
+    const isManual = siblings.some(s => isSelfExecuted(s.broker))
 
     // add_item on a name the book already holds would open a SECOND position in it — which now
     // means a real duplicate order, not just a stray doc. add_to_item is how you grow a holding.
@@ -555,8 +556,8 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
     // confirmManualAdd grows the live position using the reported size, or the pendingAddQty stamped
     // here. (Unlike trim, an add can't reuse the entry-confirm endpoint — the FE must route add legs to
     // /:id/manual-add; the stamp still records intent. A manual holding is a single manual leg.)
-    if (legs.some(l => l.broker === 'manual')) {
-        const leg    = legs.find(l => l.broker === 'manual')
+    if (legs.some(l => isSelfExecuted(l.broker))) {
+        const leg    = legs.find(l => isSelfExecuted(l.broker))
         const addQty = Math.floor((leg.quantity ?? item.quantity ?? 0) * f)
         if (addQty <= 0) return { ok: false, reason: 'add_too_small' }
         await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingAddQty: addQty } })

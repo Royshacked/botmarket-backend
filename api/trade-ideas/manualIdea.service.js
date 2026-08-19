@@ -21,6 +21,7 @@ import { notifyManualEntry, notifyManualExit, entryLegFromIdea, exitLegFromIdea 
 import { tradeCaptureService } from '../../services/tradeCapture.service.js'
 import { entityRepo }          from '../../services/entity/entityRepo.service.js'
 import { ownsEntity }          from '../../services/entity/entityCrud.service.js'
+import { isSelfExecuted }      from '../../services/venue.resolve.service.js'
 
 const LOG = '[manualIdea]'
 
@@ -247,7 +248,10 @@ export async function activateManualPortfolio(portfolioId, userId) {
         const legs = await entityRepo.listByPortfolio(portfolioId, userId)
         if (!legs.length) return { ok: false, reason: 'not_found' }
 
-        const pending = legs.filter(l => l.broker === 'manual' && !l.ordersPlacedAt && ACTIVATABLE.has(l.status))
+        // Selected by CAPABILITY, not by name: a book can be forked across venues, and a leg at a
+        // second self-executed venue belongs in the same Fill card as a manual one. Asking for the
+        // literal would have silently skipped it and left that leg unactivated.
+        const pending = legs.filter(l => isSelfExecuted(l.broker) && !l.ordersPlacedAt && ACTIVATABLE.has(l.status))
         if (!pending.length) return { ok: false, reason: 'nothing_to_activate' }
 
         const now = Date.now()
@@ -281,7 +285,7 @@ export async function requestManualPortfolioExit(portfolioId, userId) {
         const legs = await entityRepo.listByPortfolio(portfolioId, userId)
         if (!legs.length) return { ok: false, reason: 'not_found' }
 
-        const open = legs.filter(l => l.broker === 'manual' && (l.status === 'long' || l.status === 'short'))
+        const open = legs.filter(l => isSelfExecuted(l.broker) && (l.status === 'long' || l.status === 'short'))
         if (!open.length) return { ok: false, reason: 'nothing_open' }
 
         await notifyManualExit(open[0].userId, {

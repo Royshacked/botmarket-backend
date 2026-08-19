@@ -21,6 +21,7 @@ import { extractLeaves, resolveConditionTree }   from './conditionTree.service.j
 import { getCandles }                            from './ohlcv.service.js'
 import { toNum }                                 from './format.util.js'
 import { logger }                                from './logger.service.js'
+import { isSelfExecuted }                        from './venue.resolve.service.js'
 
 const LOG = '[protectionPlan]'
 
@@ -198,16 +199,17 @@ export function routeSetupZones(setup) {
  * checkPosition — a kind-blind exit loop, the way `marketOpen` is kind-blind. Until that ships this
  * turns a silent failure into a loud one. DELETE THIS GUARD WHEN THAT LOOP LANDS.
  *
- * Pure and exported so the condition can be asserted directly in tests.
+ * Exported so the condition can be asserted directly in tests. No I/O — the one thing it reads
+ * beyond its arguments is the venue's capability table, which is a static registry lookup.
  *
  * @param {object} idea
  * @param {{stop: object, tp: object}} routing
  * @returns {{leg: string, why: 'residual'|'manual'}[]}
  */
 export function unmonitoredExitLegs(idea, routing) {
-    // A manual PORTFOLIO leg is monitor-less on purpose (manualIdea.service: `monitored`), so it is
-    // not a hole. Mirrored here rather than re-derived, or this warns on every portfolio add.
-    const manualOwned = idea?.broker === 'manual' && !idea?.portfolioId
+    // A self-executed PORTFOLIO leg is monitor-less on purpose (manualIdea.service: `monitored`), so
+    // it is not a hole. Mirrored here rather than re-derived, or this warns on every portfolio add.
+    const manualOwned = isSelfExecuted(idea?.broker) && !idea?.portfolioId
     const out = []
     for (const leg of ['stop', 'tp']) {
         const r = routing?.[leg]

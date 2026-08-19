@@ -228,6 +228,7 @@ export class CTraderAdapter extends BrokerAdapter {
             listOrders:       true,
             amendOrder:       true,
             ohlcv:            true,
+            selfExecuted:     false,
         }
     }
 

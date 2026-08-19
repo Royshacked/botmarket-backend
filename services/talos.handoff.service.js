@@ -3,7 +3,7 @@ import { ENTITIES } from './entity/entityCollection.js'
 import { notifySetupManage } from './tradeNotify.service.js'
 import { ownsEntity } from './entity/entityCrud.service.js'
 import { isLivePosition } from './entity/vocabulary.js'
-import { knownVenue } from './venue.resolve.service.js'
+import { isSelfExecuted } from './venue.resolve.service.js'
 import * as manage from './positionManage.service.js'
 import { logger } from './logger.service.js'
 
@@ -133,9 +133,9 @@ export async function manageSetup(id, userId, verb, deps = _deps) {
         return { ok: false, reason: 'bad_proposal' }
     }
 
-    // Manual (broker-less): tell the user what to do at their own broker and record the intent.
+    // Self-executed venue: tell the user what to do at their own institution and record the intent.
     // The card carries Talos's RAW proposal — its copy is written in its own vocabulary.
-    if (knownVenue(setup.broker) === 'manual') {
+    if (isSelfExecuted(setup.broker)) {
         await deps.notifyManage(setup, { verdict: verb, proposal: pending?.proposal ?? null, manual: true })
         await db.collection(COLLECTION).updateOne({ id }, manage.manageAppliedUpdate(verb, proposal, ps, {}, now))
         await _moveTargetWindow(db, setup, verb, proposal)

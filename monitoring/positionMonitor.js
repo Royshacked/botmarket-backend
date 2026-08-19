@@ -11,6 +11,7 @@ import { notifyManualExit, exitLegFromIdea } from '../services/manualNotify.serv
 import { entityRepo }                       from '../services/entity/entityRepo.service.js'
 import { kindForDoc }                       from '../services/entity/envelope.js'
 import { deferIfClosed }                    from '../services/pendingAction/executionGate.js'
+import { isSelfExecuted }                   from '../services/venue.resolve.service.js'
 
 const LOG = '[positionMonitor]'
 
@@ -167,11 +168,11 @@ async function _evaluateResidual(idea, { phase, residual, symbolMap, asset, floo
 }
 
 async function _exitNow(idea, { leg, reason, quantity, tag }, onClose, exitCtx = { alerted: false }, deps = _deps) {
-    // Manual (broker-less): don't close through a broker — alert the user to close at their
-    // broker and report the exit price (confirmManualExit books it). Alert ONCE, not every poll /
-    // every residual slice this tick: `exitCtx.alerted` is the same-tick guard (explicit, so it
-    // holds even if the idea ref stops being shared); the persisted orderState guards later ticks.
-    if (idea.broker === 'manual') {
+    // SELF-EXECUTED venue: don't close through a broker — alert the user to close at their own
+    // institution and report the exit price (confirmManualExit books it). Alert ONCE, not every
+    // poll / every residual slice this tick: `exitCtx.alerted` is the same-tick guard (explicit, so
+    // it holds even if the idea ref stops being shared); the persisted orderState guards later ticks.
+    if (isSelfExecuted(idea.broker)) {
         if (exitCtx.alerted || idea.orderState === 'awaiting_manual_close') return
         exitCtx.alerted     = true
         idea.orderState     = 'awaiting_manual_close'   // keep the in-memory doc consistent with the DB write

@@ -66,6 +66,16 @@ import { logger }                  from '../../../services/logger.service.js'
  * @property {boolean} listOrders        can list working (pending) orders
  * @property {boolean} amendOrder        can change a working order's price
  * @property {boolean} ohlcv             can serve candles via getCandles()
+ * @property {boolean} selfExecuted      the ACCOUNT HOLDER is the execution engine: the app
+ *                                       monitors, decides and asks, and the user places and closes
+ *                                       at their own institution. A consumer that sees this true
+ *                                       must post its card and record the intent instead of
+ *                                       calling ANY trading method here — every one of them throws.
+ *                                       ORTHOGONAL to `trading:false`, which it is easy to mistake
+ *                                       it for: IBKR is also `trading:false` today, but it is not
+ *                                       self-executed — it is simply not wired yet, and the right
+ *                                       answer there is to wait, not to ask the user to trade by
+ *                                       hand. The two say different things and must stay separate.
  *
  * @typedef {Object} BrokerOrder
  * @property {string}                   symbol
@@ -327,6 +337,7 @@ export class BrokerAdapter {
             listOrders:       false,
             amendOrder:       false,
             ohlcv:            false,
+            selfExecuted:     false,
         }
     }
 

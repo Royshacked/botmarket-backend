@@ -30,6 +30,11 @@ export class ManualAdapter extends PaperAdapter {
     }
 
     // Data-only: nothing is placed, reconciled or protected through this adapter.
+    //
+    // `selfExecuted` is the one that says WHY, and it is what every consumer branches on: the
+    // account holder places and closes, so a caller must post its card and record the intent
+    // rather than reach for a trading method (all of which throw, below). The other eight flags
+    // only say what is missing; this one says who does it instead.
     capabilities() {
         return {
             trading:          false,
@@ -40,6 +45,7 @@ export class ManualAdapter extends PaperAdapter {
             listOrders:       false,
             amendOrder:       false,
             ohlcv:            false,
+            selfExecuted:     true,
         }
     }
 

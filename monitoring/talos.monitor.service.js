@@ -15,6 +15,7 @@ import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.se
 import { assessSetup, assessPosition, READINESS_VERDICTS, MANAGEMENT_VERDICTS } from './talos.assess.js'
 import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetWindows, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, clampRung, usableLadder, rungMinutes } from '../services/setup.schema.js'
 import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage } from '../services/tradeNotify.service.js'
+import { isSelfExecuted } from '../services/venue.resolve.service.js'
 
 // Talos — the guardian of the `setup` kind (docs/desks/mentor-talos.md).
 //
@@ -795,9 +796,9 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps, stamp 
             entryTriggeredAt: nowMs,
         }
 
-        // Manual (broker-less real money): no order plan — the user places it themselves and
-        // reports the fill. Its own card, not the confirm dialog.
-        if (setup.broker === 'manual') {
+        // SELF-EXECUTED venue (broker-less real money): no order plan — the user places it
+        // themselves and reports the fill. Its own card, not the confirm dialog.
+        if (isSelfExecuted(setup.broker)) {
             patch.orderState = 'awaiting_manual_fill'
             await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
             // The PROJECTED setup, not the document as it was read: the leg the user is told to place

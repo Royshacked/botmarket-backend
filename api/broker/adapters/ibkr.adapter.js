@@ -245,6 +245,10 @@ export class IBKRAdapter extends BrokerAdapter {
             listOrders:       false,
             amendOrder:       false,
             ohlcv:            true,
+            // NOT self-executed, despite `trading:false`. This venue is unwired, not hand-traded —
+            // the right answer for an IBKR position is to wait for Phase 4, never to ask the user
+            // to place it at their broker. See the flag's note in broker.interface.js.
+            selfExecuted:     false,
         }
     }
 }

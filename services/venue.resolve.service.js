@@ -93,6 +93,9 @@ export function resolveMode(source = {}) {
     if (WORKSPACE_MODES.includes(source?.mode)) return source.mode
 
     const broker = source?.broker ?? null
+    // As in knownVenue: these literals DEFINE the workspace names, they do not dispatch on them.
+    // isSelfExecuted is not the question here — a workspace is where a trade lives, which is a fact
+    // about the document, not about what the venue can do.
     if (broker === 'paper' || broker === 'manual') return broker
 
     for (const id of resolveAccountIds(source)) {
@@ -159,7 +162,34 @@ export function resolveBroker(source = {}) {
  * resolveMode always commits to a workspace; this refuses to guess.
  */
 export function knownVenue(broker) {
+    // The two literals here are the DEFINITION of the workspace vocabulary, not a dispatch on it —
+    // this is the function everything else asks. Do not route them through isSelfExecuted below:
+    // that predicate answers a different question (who executes) and asking it here would make the
+    // vocabulary depend on the capability table it is supposed to be independent of.
     if (broker === 'paper')  return 'paper'
     if (broker === 'manual') return 'manual'
     return LIVE_BROKERS.includes(broker) ? 'live' : null
+}
+
+/**
+ * Is this venue one the USER executes at, rather than the app?
+ *
+ * THE ONE QUESTION every "post a card instead of placing an order" branch should ask. It used to be
+ * asked as `broker === 'manual'` in eleven modules — entry, exit, the setup monitor, exit routing,
+ * the manage hand-off, four rebalance paths and the manual-portfolio reads — which meant the venue's
+ * defining behaviour was a string literal scattered across the app rather than a property of the
+ * venue. A second broker-less venue would have had to be added to all eleven, and the one that got
+ * missed would have silently placed a real order.
+ *
+ * Read off the adapter's own `capabilities().selfExecuted`, so the answer lives with the venue.
+ *
+ * NEVER THROWS, and that is load-bearing rather than defensive habit: `getBrokerAdapter` answers an
+ * unregistered type with a 400, and the callers are monitors iterating live documents — a legacy doc
+ * with `broker: null`, or one naming a venue since removed, must resolve to "the app executes here"
+ * (which then fails visibly at the broker call) rather than take down the tick for every other
+ * entity in the batch. Same posture as tradingContext.service._caps.
+ */
+export function isSelfExecuted(broker) {
+    try { return !!brokerService.capabilities(broker)?.selfExecuted }
+    catch { return false }
 }

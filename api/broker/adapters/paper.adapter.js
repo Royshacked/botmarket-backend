@@ -160,6 +160,7 @@ export class PaperAdapter extends BrokerAdapter {
             listOrders:       true,
             amendOrder:       true,
             ohlcv:            false,
+            selfExecuted:     false,
         }
     }
 

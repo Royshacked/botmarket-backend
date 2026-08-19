@@ -90,8 +90,25 @@ export function _accountHead(a, workspace = null) {
         + free
 }
 
+/**
+ * The capability flags the `can:` line may name — the EXECUTION ones, and an allowlist rather than
+ * "everything truthy" on purpose.
+ *
+ * The line reads "can: …", so every entry has to complete that sentence. `selfExecuted` does not: it
+ * is true precisely when the app can do NOTHING here, and rendering "can: selfExecuted" on a manual
+ * account would tell seven desks the opposite of what it means. The `[manual]` mode tag on the head
+ * line already says who executes.
+ *
+ * An allowlist rather than a denylist because the failure is silent and one-directional: a future
+ * flag that is not about execution leaks into every desk's prompt the moment it is added, and
+ * nothing would fail. Adding a genuinely new EXECUTION capability is the one case that needs an
+ * edit here, and that is a deliberate act.
+ */
+const EXEC_CAPABILITIES = ['trading', 'nativeProtection', 'modifyProtection', 'closePosition',
+    'cancelOrder', 'listOrders', 'amendOrder', 'ohlcv']
+
 function _accountBlock(a, workspace = null) {
-    const caps = Object.entries(a.capabilities ?? {}).filter(([, on]) => on).map(([k]) => k)
+    const caps = EXEC_CAPABILITIES.filter(k => a.capabilities?.[k])
     const head = _accountHead(a, workspace)
 
     const positions = Array.isArray(a.positions) ? a.positions : []

@@ -40,6 +40,7 @@ import { entryTimeGate }       from '../services/entryTimeGate.util.js'
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { notifyIdeaEntryConfirm } from '../services/tradeNotify.service.js'
+import { isSelfExecuted }        from '../services/venue.resolve.service.js'
 import { createDueLoop }       from './dueLoop.js'
 import { evaluateTree, evaluateConditions, isTimeBlocked } from './monitor.orchestrator.js'
 import {
@@ -259,9 +260,9 @@ export async function _checkEntry(idea, candles, entryTf, nowMs, deps = _deps) {
         logger.info(LOG, `[${id}] entry event predates activation (${triggerAt} < ${idea.activatedAt})`)
     }
 
-    // MANUAL (broker-less): no order plan and no confirm dialog — the user places it at their own
-    // institution and reports the fill, which `confirmManualEntry` books.
-    if (idea.broker === 'manual') {
+    // SELF-EXECUTED venue (manual today): no order plan and no confirm dialog — the user places it
+    // at their own institution and reports the fill, which `confirmManualEntry` books.
+    if (isSelfExecuted(idea.broker)) {
         patch.orderState = 'awaiting_manual_fill'
         await deps.patch(id, patch)
         await deps.notifyManualEntry(idea.userId, { legs: [entryLegFromIdea(idea)] })
