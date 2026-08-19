@@ -213,21 +213,28 @@ through `candles.provider` — that would close a cycle (`candles.provider → m
 candles.provider`). It is off the chart path, so it costs no duplicate request there; if it is ever
 unified, the import direction is the problem to solve first.
 
-**4.b — Two candle stacks, different caches, different vendors.**
+**4.b — The two candle stacks.** ✅ FIXED (`5e7a386`, `602c16e`) — **and the finding as written
+was wrong.** They do NOT use different vendors: both go through `candles.provider.getTickerAggregates`.
+What actually differed was the cache, and underneath it something worse than either:
 
-- Stack A: `services/price.service.js` → `services/ohlcv.service.js` → monitors,
-  paper fills, `protectionPlan`. Backed by a **JSON file cache on local disk**
-  (`services/util.service.js` `saveCandlesToFile` / `loadCandlesFromFile`, writing
-  `data/candles/<SYMBOL>/`, 1h TTL, `CANDLE_SCHEMA = 'ohlcv6'`). No locking —
-  concurrent loops on the same symbol+timeframe can interleave read-modify-write and lose
-  bars. It is a second persistence tier alongside Mongo.
-- Stack B: `services/candleFetch.service.js` (FMP-first + forming bar, in-memory) →
-  `/api/market/candles`, the chart renderer, and the agent tools' `_fetchCandleRows`.
+- **A request for 300 bars returned thirty days' worth.** `_resolveFetchWindow` accepted `from`/`to`
+  in ms; `_resolveSecRange`, which decides what a read RETURNS, accepted only `fromSec`/`toSec`. So
+  the monitor's `CANDLE_COUNT = 300` daily ask got the ~22 trading days that fit in a month, and
+  **every indicator with a longer lookback read n/a permanently** — a condition written on SMA-200
+  could never come true, with no error anywhere. `indicator.evaluator`'s SMA-200 warmup warning is
+  that same bug seen from the far end. Both windows normalise through one resolver now, and `ohlcv`
+  sizes its request from the count with per-span calendar slack (floored at the old 30 days).
+- **The disk cache is gone.** It sat on the monitor's hot path (blocking `existsSync` + read + parse
+  before every evaluation, pretty-printed write after) and bought nothing for intraday, which passes
+  `refresh` and fetches regardless. Unlocked read-modify-write could drop a concurrent loop's bars;
+  the non-atomic write could leave truncated JSON. In memory now — `data/` was gitignored and
+  machine-local, and the app is deliberately one process.
+- **Caught while making it:** naming a window would have defeated `syncCandles`' incremental fetch,
+  so every intraday tick would have re-pulled the whole window — the §4a quota burn re-entering
+  through the back door. `fetchStartMs` keeps tail-only fetches and backfills once.
 
-CODE_MAP justifies the *forming-bar* difference between them (a `structured` leaf must resolve
-on a CLOSED candle) — that reasoning is sound. It does **not** justify the vendor and cache
-difference. As it stands, the monitor and the agent can evaluate the same setup against
-different vendors' bars.
+Neither module had a single test, which is how a flat 30-day window survived in the path the
+monitors evaluate on. `tests/unit/candleWindow.test.js` covers all three decisions.
 
 **4.c — Nine hand-mirrored backend→frontend modules, none guarded across repos:**
 
