@@ -3,7 +3,6 @@ import { ENTITIES } from './entity/entityCollection.js'
 import { notifySetupManage } from './tradeNotify.service.js'
 import { ownsEntity } from './entity/entityCrud.service.js'
 import { isLivePosition } from './entity/vocabulary.js'
-import { isSelfExecuted } from './venue.resolve.service.js'
 import * as manage from './positionManage.service.js'
 import { logger } from './logger.service.js'
 
@@ -133,9 +132,18 @@ export async function manageSetup(id, userId, verb, deps = _deps) {
         return { ok: false, reason: 'bad_proposal' }
     }
 
-    // Self-executed venue: tell the user what to do at their own institution and record the intent.
-    // The card carries Talos's RAW proposal — its copy is written in its own vocabulary.
-    if (isSelfExecuted(setup.broker)) {
+    // The executor decides WHETHER it can act; this desk supplies only what the user reads.
+    //
+    // Talos used to ask the venue itself (`knownVenue(setup.broker) === 'manual'`) and branch before
+    // calling in, which made this desk the only thing standing between a broker-less account and the
+    // three broker calls inside executeManage. A second desk would not have known to do the same.
+    const res = await manage.applyManage({ entity: setup, holder: setup, verb, proposal, userId, nowMs: now, deps })
+
+    // Self-executed venue: tell the user what to do at their own institution, then record the
+    // intent. NOTIFY FIRST and un-guarded, deliberately — an instruction only a human can carry out
+    // must not be written down as applied if the human was never told. The card carries Talos's RAW
+    // proposal: its copy is written in its own vocabulary, which is why this stayed at the desk.
+    if (res.selfExecuted) {
         await deps.notifyManage(setup, { verdict: verb, proposal: pending?.proposal ?? null, manual: true })
         await db.collection(COLLECTION).updateOne({ id }, manage.manageAppliedUpdate(verb, proposal, ps, {}, now))
         await _moveTargetWindow(db, setup, verb, proposal)
@@ -143,7 +151,6 @@ export async function manageSetup(id, userId, verb, deps = _deps) {
         return { ok: true, manual: true, verb }
     }
 
-    const res = await manage.applyManage({ entity: setup, holder: setup, verb, proposal, userId, nowMs: now, deps })
     if (res.ok) await _moveTargetWindow(db, setup, verb, proposal)
     return res
 }

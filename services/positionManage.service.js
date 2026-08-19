@@ -3,6 +3,7 @@ import { ENTITIES } from './entity/entityCollection.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { deferIfClosed } from './pendingAction/executionGate.js'
 import { kindForDoc } from './entity/envelope.js'
+import { isSelfExecuted } from './venue.resolve.service.js'
 import { logger } from './logger.service.js'
 
 /**
@@ -22,7 +23,9 @@ import { logger } from './logger.service.js'
  *     `{ new_stop }`, Talos says `{ stop, why }` — each desk translates its own into the execution
  *     contract below before calling in. Translating them HERE would make this the place that knows
  *     every desk's dialect, which is precisely what it must not know.
- *   • ownership, status guards, manual-mode notification, and what the card says.
+ *   • ownership, status guards, the instruction card a self-executed venue gets, and what it says.
+ *     WHETHER the venue is self-executed is NOT the desk's call any more — applyManage answers it
+ *     from the venue's own capability and returns `selfExecuted`, so a desk supplies only the copy.
  *
  * THE EXECUTION CONTRACT (what a caller must normalize its proposal into):
  *   move_stop     { new_stop:number, ref?:string }
@@ -176,6 +179,37 @@ export async function executeManage(verb, proposal, holder, link, open, userId, 
  * Returns the same { ok, reason?, accounts? } shape the desk handoffs return to their controllers.
  */
 export async function applyManage({ entity, holder, verb, proposal, userId, origin = null, nowMs = Date.now(), deps = _deps }) {
+    // SELF-EXECUTED VENUE — the app is not the one with hands here, so this function has nothing to
+    // do and says so. The desk posts its instruction card and records the intent.
+    //
+    // This moved out of the desk (talos.handoff asked `knownVenue(...) === 'manual'` before calling
+    // in) because the desk was the ONLY thing standing between a manual link and the three broker
+    // calls below. Reached without it, `executeManage` calls closePosition, the adapter throws its
+    // guard message, and the user is told `execution_failed` — a broker failure that never happened.
+    // A second desk wiring into the shared executor inherited that silently. Now it cannot.
+    //
+    // THE ENTITY's venue, not the LINKS'. An entity is bound to one venue at Generate — a book that
+    // spans brokers is forked into a document per partition — so `entity.broker` is the unambiguous
+    // answer, and it is the exact question the desk used to ask before calling in. Asking the links
+    // instead would be a different question: `brokerOrders[].broker` is what a placement recorded,
+    // and a venue that places nothing may have recorded nothing at all.
+    //
+    // THREE ORDERINGS, all deliberate:
+    //
+    //   • BEFORE the links guard, for that same reason. A self-executed venue can hold a real
+    //     position with no broker linkage behind it, and answering `no_position_link` there would
+    //     refuse the one venue whose positions never produce a link.
+    //
+    //   • BEFORE the hours gate. A card telling a human what to do at their own institution is not
+    //     an order reaching a shut venue, and today's behaviour is that it goes out immediately.
+    //     Gating it here would queue it to the open instead — a real change, and not this commit's.
+    //
+    //   • It WRITES NOTHING. manageAppliedUpdate stays the caller's, because the caller's order is
+    //     notify-then-write: a delivery failure aborts before recording an intent the user was never
+    //     told about. Writing here would invert that into "recorded, never delivered", which is the
+    //     worse of the two failures for an instruction only a human can carry out.
+    if (isSelfExecuted(entity?.broker)) return { ok: true, selfExecuted: true, verb }
+
     const db    = await deps.getDb()
     const ps    = entity.position_state ?? {}
     const links = resolveAllLinks(holder, entity)
