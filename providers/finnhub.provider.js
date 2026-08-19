@@ -109,3 +109,36 @@ export async function fetchCompanyProfile(symbol) {
 }
 
 
+
+// ── News ──────────────────────────────────────────────────────────────────────
+// Two feeds, both free on the key this file already uses for the calendars.
+//
+// WHY THESE AND NOT A TEXT SEARCH: company news here is keyed by SYMBOL, so a read for NVDA returns
+// Nvidia's own coverage. The general-text alternative (GNews) matches words, and a search for
+// "Nvidia" comes back full of competitor stories that merely mention it. GNews still owns the
+// free-text half — a theme like "OPEC" has no ticker to key on — so the two sources split by the
+// question, not by preference. news.service is where that split is decided.
+//
+// Both return rows already shaped like our internal article ({ datetime unix-sec, headline, summary,
+// url, image, source }) — mapFinnhubArticle in newsArticle.service does the last mile.
+
+/** Article rows for ONE symbol over a date window. Finnhub requires both dates. */
+export async function fetchCompanyNews({ symbol, from, to } = {}) {
+    if (!symbol) throw new Error('symbol is required')
+    const f = toFinnhubDate(from || new Date(Date.now() - 30 * 86_400_000))
+    const t = toFinnhubDate(to   || new Date())
+    const url = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(symbol)}`
+        + `&from=${f}&to=${t}&token=${FINNHUB_API_KEY}`
+    const res = await axios.get(url)
+    return Array.isArray(res.data) ? res.data : []
+}
+
+/**
+ * The market-wide top-stories feed. No subject and no window — it is whatever is on the front page
+ * right now, newest first, which is exactly what "what's the news today" asks for.
+ */
+export async function fetchGeneralNews({ category = 'general' } = {}) {
+    const url = `https://finnhub.io/api/v1/news?category=${encodeURIComponent(category)}&token=${FINNHUB_API_KEY}`
+    const res = await axios.get(url)
+    return Array.isArray(res.data) ? res.data : []
+}

@@ -1,7 +1,12 @@
 /**
- * Shared GNews article handling: map raw GNews payloads into the internal
- * article shape, validate, and dedupe. Used by services/news.service.js (the
- * Hermes news evaluator's source).
+ * Shared article handling: map raw provider payloads into ONE internal article shape, validate,
+ * and dedupe. Used by services/news.service.js — the source behind the news condition evaluator and
+ * Axl's `get_news`.
+ *
+ * TWO providers map in here, and that is the point: Finnhub (symbol-keyed company news and the
+ * general top-stories feed) and GNews (free-text themes). Downstream — the cache envelope, the
+ * dedupe, the digest the model reads — never learns which one an article came from, so the source
+ * split stays a fetching decision instead of leaking into every consumer.
  *
  * Internal article shape:
  *   { datetime: number (unix sec), headline, summary, url, image, source, id }
@@ -26,7 +31,41 @@ export function mapGNewsArticle(item) {
         image: item?.image ?? '',
         source: item?.source?.name ?? '',
         id: item?.id ?? null,
+        // Always present, always empty here: a text index tags no tickers. Keeping the field means
+        // every consumer reads ONE article shape and no one has to know which provider it came from.
+        related: [],
     }
+}
+
+/**
+ * Map one raw Finnhub article (company-news or the general feed) into the internal shape.
+ * Finnhub already dates in unix SECONDS — no division here, unlike the GNews mapper above, and
+ * dividing it again is the bug this comment exists to prevent (every article would land in 1970).
+ * @param {object} item raw Finnhub article
+ */
+export function mapFinnhubArticle(item) {
+    const dt = Number(item?.datetime)
+    return {
+        datetime: Number.isFinite(dt) && dt > 0 ? Math.floor(dt) : NaN,
+        headline: typeof item?.headline === 'string' ? item.headline.trim() : '',
+        summary: typeof item?.summary === 'string' ? item.summary : '',
+        url: item?.url ?? '',
+        image: item?.image ?? '',
+        source: item?.source ?? '',
+        id: item?.id ?? null,
+        // Every ticker the publisher tagged, e.g. "AMD,NVDA". Carried because a symbol-keyed feed
+        // still returns PEER coverage — an AMD piece tagged NVDA — and a reader told only the
+        // headline would hear it as Nvidia news. Whether that matters is the model's call; the tags
+        // are the data it needs to make it.
+        related: _relatedTickers(item?.related),
+    }
+}
+
+/** "AMD,NVDA" → ['AMD','NVDA']. Absent or unparseable → []. */
+function _relatedTickers(raw) {
+    if (Array.isArray(raw)) return raw.map(t => String(t).trim().toUpperCase()).filter(Boolean)
+    if (typeof raw !== 'string') return []
+    return raw.split(/[,;|]/).map(t => t.trim().toUpperCase()).filter(Boolean)
 }
 
 /** @param {unknown} item */

@@ -284,6 +284,21 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["ticker"]
     },
+    get_news: {
+        "type": "object",
+        "properties": {
+            "category": {
+                "type": "string",
+                "enum": ["companies", "headlines", "topic"],
+                "description": "which kind of news read this is. `companies` — one listed company, `subject` is its TICKER. `headlines` — the market's front page, no subject needed. `topic` — free-text search for a theme, an institution or an asset with no ticker."
+            },
+            "subject": {
+                "type": "string",
+                "description": "for `companies`, the TICKER (NVDA, BA, AAPL). For `topic`, the theme in the words a paper would print (\"Federal Reserve\", \"OPEC\", \"semiconductors\", \"gold\"). Omit for `headlines`. It is both the search and the cache key, so ask for the same subject the same way each time."
+            }
+        },
+        "required": ["category"]
+    },
     get_options_context: {
         "type": "object",
         "properties": {

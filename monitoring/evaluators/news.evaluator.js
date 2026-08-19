@@ -1,7 +1,8 @@
 /**
  * News condition evaluator.
  *
- * Uses the existing newsService (GNews + file cache) — no new news source.
+ * Uses the existing newsService (fetch + file cache) — no news source of its own. The `companies`
+ * category is symbol-keyed, so the headlines it grades are the asset's own coverage.
  * Asks Claude (Haiku) YES/NO whether the condition is reflected in recent headlines.
  */
 

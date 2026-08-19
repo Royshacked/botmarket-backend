@@ -2660,6 +2660,31 @@
         "type": "object",
         "properties": {}
       }
+    },
+    {
+      "name": "get_news",
+      "description": "Recent NEWS HEADLINES, in three kinds. `companies` takes a TICKER (NVDA, BA) and returns that company's own coverage. `headlines` takes no subject and returns the market's front page — call it for \"what's the news today\", \"anything big happening\". `topic` takes free text and searches a general news index — for a theme, an institution or an asset with no ticker (\"Federal Reserve\", \"OPEC\", \"semiconductors\", \"gold\"). Every kind returns real articles: date, age, source, headline and the publisher's own summary, newest first. This is what was WRITTEN about a subject — it is NOT today's market brief (the tape, rates, macro), NOT a price or a chart, and NOT our view. Summarise what the headlines say and attribute them; never turn them into a trade view, a price target or advice, and never connect them to what this user holds.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "companies",
+              "headlines",
+              "topic"
+            ],
+            "description": "which kind of news read this is. `companies` — one listed company, `subject` is its TICKER. `headlines` — the market's front page, no subject needed. `topic` — free-text search for a theme, an institution or an asset with no ticker."
+          },
+          "subject": {
+            "type": "string",
+            "description": "for `companies`, the TICKER (NVDA, BA, AAPL). For `topic`, the theme in the words a paper would print (\"Federal Reserve\", \"OPEC\", \"semiconductors\", \"gold\"). Omit for `headlines`. It is both the search and the cache key, so ask for the same subject the same way each time."
+          }
+        },
+        "required": [
+          "category"
+        ]
+      }
     }
   ],
   "strategy": [

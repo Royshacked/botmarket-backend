@@ -61,6 +61,16 @@ export function sanitizeGNewsQuery(query) {
 }
 
 /**
+ * GNews rate-limits per SECOND, not only per day. Two reads in one agent turn — "what's the news on
+ * the Fed, and anything on Nvidia" — is enough to earn a 429 on the second, which reached the model
+ * as "could not fetch the news" while the quota was fine. One retry after a pause clears that; a
+ * quota that is genuinely spent still fails on the second try, which is the answer we want to give.
+ */
+const RETRY_STATUS = new Set([429])
+const RETRY_DELAY_MS = 1_400
+const _sleep = (ms) => new Promise(r => setTimeout(r, ms))
+
+/**
  * @param {{ query: string, from?: string, to?: string, max?: number }} opts
  * @param {string} opts.query - Search query
  * @param {string} [opts.from] - ISO 8601 UTC; articles published on or after this time
@@ -85,20 +95,33 @@ export async function fetchGNews({ query, from, to, max = 20, lang = 'en' } = {}
     const url = `${GNEWS_API_URL}/search?${params.toString()}`
 
     try {
-        const response = await fetch(url)
-        const data = await response.json()
-
-        if (!response.ok) {
-            const detail =
-                typeof data?.errors === 'string'
-                    ? data.errors
-                    : JSON.stringify(data?.errors ?? data)
-            throw new Error(`GNews API error ${response.status}: ${detail}`)
+        let data = await _get(url)
+        if (data.status !== null && RETRY_STATUS.has(data.status)) {
+            logger.warn('GNews rate-limited — one retry', { status: data.status })
+            await _sleep(RETRY_DELAY_MS)
+            data = await _get(url)
         }
-
-        return data
+        if (data.status !== null) {
+            throw new Error(`GNews API error ${data.status}: ${data.detail}`)
+        }
+        return data.body
     } catch (error) {
         logger.error('Error getting GNews', error)
         throw error
     }
+}
+
+/**
+ * One request. Returns `{ status: null, body }` on success and `{ status, detail }` on an HTTP
+ * error, so the retry decision is made on a status rather than by re-parsing a thrown message.
+ */
+async function _get(url) {
+    const response = await fetch(url)
+    const body = await response.json()
+    if (response.ok) return { status: null, body }
+
+    const detail = typeof body?.errors === 'string'
+        ? body.errors
+        : JSON.stringify(body?.errors ?? body)
+    return { status: response.status, detail }
 }

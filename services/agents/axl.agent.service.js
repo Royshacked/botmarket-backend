@@ -13,6 +13,7 @@ import { makeConceptHandlers, CONCEPT_TOOL_SPEC } from '../tools/concepts.tools.
 import { makeExperienceHandlers, EXPERIENCE_TOOL_SPEC } from '../tools/experience.tools.js'
 import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from '../tools/marketBrief.tools.js'
 import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorView.tools.js'
+import { makeNewsHandlers, NEWS_TOOL_SPEC } from '../tools/news.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -55,6 +56,12 @@ export const TOOLS = toolsFor({
     // Appended last, per the rule above. The SHOW half of the strategy desk: Axl reports the
     // published view, Pythia is the one who writes or changes it.
     get_sector_view: SECTOR_VIEW_TOOL_SPEC.get_sector_view,
+    // Appended last, per the rule above. The brief's sibling, not its overlap: the brief is what the
+    // tape DID today, written once for everyone; this is what was WRITTEN about a subject the user
+    // named. "How are markets" is the first, "any news on Nvidia" is the second, and a reception desk
+    // that can answer only the broadcast half has to send a headline question to a desk that would
+    // then have to form a view to answer it.
+    get_news: NEWS_TOOL_SPEC.get_news,
 })
 
 // NO `consult` HERE, deliberately — the reasoning sidecar reached the other five desks on
@@ -148,6 +155,7 @@ async function chatStream({ messages = [], audience = null, model: requestedMode
     _marketBriefHandlers = makeMarketBriefHandlers,
     _marketHoursHandlers = makeMarketHoursHandlers,
     _sectorViewHandlers = makeSectorViewHandlers,
+    _newsHandlers = makeNewsHandlers,
     _venueSection = buildVenueSection,
 } = {}) {
     // The venue rides the last USER message, not the system prompt: free cash moves whenever
@@ -198,6 +206,9 @@ ${audienceBlock}` : ''}` },
         // Unbound for the brief's reason exactly: the house sector view is a BROADCAST, so a handler
         // that cannot see a user cannot leak one into it.
         ..._sectorViewHandlers(),
+        // Unbound as well, and here it is the load-bearing kind: the tool that fetches headlines about
+        // a name the user very likely holds is the one that must not be able to see that they hold it.
+        ..._newsHandlers(),
         ..._experienceHandlers(userId),
     }
 
