@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'url'
 import { parseEmitBlock, mergeDraft, runAgentStream } from '../agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE, cachedBlock, buildDeskMessages } from '../agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock, buildDeskMessages } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
 import { toolsFor } from '../agentTools.registry.js'
@@ -252,7 +252,7 @@ CONVERSATION CONTEXT:
 Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}${_buildSeedSection(seed)}`
 
     return [
-        cachedBlock(_baseSystemPrompt() + LANGUAGE_RULE + VENUE_RULE),
+        cachedBlock(_baseSystemPrompt() + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
         { type: 'text', text: dynamicContext },
     ]
 }

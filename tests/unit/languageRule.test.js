@@ -108,7 +108,7 @@ test('the rule rides on the CACHED prefix, not the volatile tail', () => {
     for (const f of DESKS) {
         assert.match(
             src(f),
-            /cachedBlock\(\w+\(\) \+ LANGUAGE_RULE(?: \+ VENUE_RULE)?\)/,
+            /cachedBlock\(\w+\(\) \+ LANGUAGE_RULE(?: \+ VENUE_RULE)?(?: \+ BREVITY_RULE)?\)/,
             `${f} appends LANGUAGE_RULE somewhere other than the cached system-prompt entry`,
         )
     }

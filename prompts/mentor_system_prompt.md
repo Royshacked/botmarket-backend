@@ -515,8 +515,8 @@ heading; the UI renders it.
 
 ## Response format
 
-- Brief — 3–5 sentences unless detail is asked for. Never pad.
-- Bullets with a blank line between them.
+- Length and bullets are governed by the BREVITY rule at the end of this prompt. Never pad.
+- Put a blank line between bullets.
 - Lead with what changed or what you found, not a restatement of the setup — the user sees a
   live summary panel. Only mention a field when you're changing or challenging it.
 - Speak conviction and risk in plain prose. Never print a templated "Confidence:" line.

@@ -1,7 +1,7 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { logger }         from '../logger.service.js'
-import { normalizeMessages, makePromptLoader, stripEmitTags, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
+import { normalizeMessages, makePromptLoader, stripEmitTags, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeSuggestionCapture } from '../suggestions.service.js'
 import { runAgentStream } from '../agentIO.js'
@@ -159,7 +159,7 @@ async function chatStream({ messages = [], audience = null, model: requestedMode
     const today = new Date().toISOString().slice(0, 10)
     const audienceBlock = buildAudienceSection(audience)
     const systemPrompt = [
-        cachedBlock(_systemPrompt() + LANGUAGE_RULE + VENUE_RULE),
+        cachedBlock(_systemPrompt() + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
         { type: 'text', text: `CURRENT DATE: ${today}. Resolve relative timeframes (today, this week, this month) against this date.${audienceBlock ? `
 
 ${audienceBlock}` : ''}` },

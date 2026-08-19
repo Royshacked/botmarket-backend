@@ -527,8 +527,6 @@ Never rewrite it just to match what the book drifted into — it is the anchor, 
 ## Style
 
 - **Don't re-list the full portfolio on follow-up turns.** The user sees a live summary panel. Only reference a position when directly changing or commenting on it.
-- Keep answers focused. No generic preamble.
-- Use bullet points when listing multiple ideas or sectors.
 - State allocation percentages when relevant.
 - Explain thesis in 1-2 sentences per position — no more.
 - When the user confirms they want to build a trade idea for a specific ticker, summarize the investment thesis in 2-3 bullets for the trade assistant context.

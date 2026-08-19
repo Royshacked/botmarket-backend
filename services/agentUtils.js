@@ -440,6 +440,45 @@ Call \`get_trading_context\` when you need what the block deliberately leaves ou
 
 What you DECIDE with those facts is still yours. Which of two eligible accounts fits, whether the free cash supports the trade, whether to take it at all — that is your judgment, and asking the user about THAT is fine. The rule is about facts the app already holds, not about choices.`
 
+// ─── Brevity ──────────────────────────────────────────────────────────────────
+// The third voice rule on the same seam as LANGUAGE_RULE and VENUE_RULE above, authored once for
+// the same reason: six copies of a paragraph about length is six chances for one to drift, and they
+// HAD drifted. Before this existed the six desks said, variously, "3–5 sentences" (mentor),
+// "keep answers focused" (portfolio), "one tight paragraph or a few bullets" (scanner), "a few
+// sentences" (axl) — and analyst and strategy said nothing at all, so their replies ran as long as
+// the model felt like.
+//
+// WHY THE CAPS ARE NUMBERS. "Be concise" is a preference and the model reads it as one; it holds for
+// two turns and dissolves into the register of everything around it. A cap it can COUNT survives —
+// four sentences is checkable in a way that "focused" is not. The numbers are defaults with a named
+// escape hatch, not a hard ceiling: a capped answer that dropped the risk is a worse answer, which
+// is why the substance clause sits right under them and is the longest line in the rule.
+//
+// THE EXCLUSION MATTERS AS MUCH AS THE CAP. This governs the spoken REPLY only. A `thesis`, a
+// `rationale`, `kill_criteria`, `analysis`, card copy — those are written to their own schema's
+// spec and get clipped into uselessness by a four-sentence rule. Same boundary LANGUAGE_RULE draws
+// (it deliberately reaches saved prose; this one deliberately does not).
+//
+// Appended to the BASE prompt only, never to a mode/profile fragment — those are concatenated onto
+// the base and would repeat it. The market brief is the one desk WITHOUT it: it is an authored
+// broadcast with its own 250–350 word spec, and a four-sentence cap would fight that spec directly.
+export const BREVITY_RULE = `
+
+BREVITY — short by default, and short means SENTENCES too.
+
+- Four sentences or fewer, unless the user asks for depth or the answer genuinely needs more.
+- One idea per sentence. Under about 25 words. Split it rather than subordinating another clause onto it.
+- Three or more items, the answer is BULLETS — one line each, not a paragraph strung together with commas and semicolons.
+- Lead with the answer. No preamble, no restating the question back, no closing summary of what you just said.
+- Never re-describe what the user is already looking at in a panel, a card or a table.
+- Cut the throat-clearing: "it's worth noting", "as you may know", "I want to make sure that", "great question".
+
+LENGTH IS THE ONLY THING BEING CUT — NEVER THE SUBSTANCE. Say the risk, the number, the objection, the thing they did not want to hear. Say it in fewer words. An answer that came in under four sentences by dropping the warning is a worse answer, not a shorter one, and this rule never asks you for it.
+
+Depth on request is not a violation. When the user asks you to explain, teach, compare or go deeper, take the room it needs — then go back to short on the next turn.
+
+This governs the reply you SPEAK. Prose you emit into something that gets saved — a thesis, kill-criteria, a rationale, an \`analysis\` field, card copy — follows its own schema's spec and is not capped here.`
+
 // ─── Emit-tag cleanup ─────────────────────────────────────────────────────────
 // Strip the given emit blocks (<name>…</name>) from a raw model reply. Each name
 // is removed globally, matching the per-agent hand-written `.replace(...)` chains.
