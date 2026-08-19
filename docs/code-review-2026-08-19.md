@@ -22,7 +22,7 @@ Suites at hand-off: backend **2494 pass / 0 fail**, frontend **639 pass / 0 fail
 | § | | |
 |---|---|---|
 | 1 | Broker interface sealing | ✅ done (§1.3 and §1.6 open by choice) |
-| 2 | New agent is not plug-in | 🟨 §2.2/§2.4 done · §2.1 partly withdrawn · **§2.5 (MainPage) NOT STARTED** |
+| 2 | New agent is not plug-in | 🟨 §2.2/§2.4 done · §2.1 partly withdrawn · §2.5 steps 1-2 of 4 done |
 | 3 | New entity / kind — two vocabularies | ⚠️ **WITHDRAWN** — premise wrong; two real bugs under it, fixed |
 | 4a | `candleFetch` calls FMP twice | ✅ done |
 | 4b | The two candle stacks | ✅ done — found a live defect underneath |
@@ -239,14 +239,21 @@ A new desk becomes one row rather than four scattered declarations plus their se
 
 **Do it in this order, and stop if a step feels unsafe:**
 
-1. **Name the slots first, change nothing else.** Rename `scanInbox` → `scannerInbox` so every
-   key is `<desk><Slot>`. Pure rename, compiler-checked, no behaviour. If this is awkward, the
-   reducer will be worse.
-2. **Reducer behind the same names.** Introduce the reducer and derive the existing variables from
-   it (`const mentorSeed = desks.mentor.seed`). Every call site and prop keeps working; the 11
-   `useState` calls collapse to one `useReducer`. This is the step that must be provably inert.
-3. **Collapse the props.** `deskProps('mentor')` spreading `{ seed, inbox, chatRestore }` at the
-   JSX, replacing the hand-written prop lists around lines 2690-2790.
+1. ✅ **DONE** (`f4ec5a0`) — **name the slots first.** `scanInbox` → `scannerInbox`, nothing else.
+   **And it still broke something**, which is the finding: `doors.js` reads these setters BY NAME off
+   a bag, so the scanner's inbox door silently became `undefined` while all 648 tests passed
+   (doors.test.js supplies its own fixture). A rename is the safest change available and it still
+   reached across a dynamic boundary nothing was watching.
+2. ✅ **DONE** (`8a18dc2`) — **reducer behind the same names.** `useDeskHandoff` + its own test file
+   (7 cases); every variable and setter keeps its name, so all 25 call sites, props and doors are
+   untouched. A test now asserts every door `doors.js` asks for is a name the table generates —
+   the guard for the break step 1 caused. **3,066 → 3,049 lines, 48 → 38 `useState`.**
+3. ⬜ **NOT DONE — needs the app running.** `deskProps('mentor')` spreading `{ seed, inbox,
+   chatRestore }` at the JSX (lines 2718-2792). Surface is smaller than it looked: **8 prop lines
+   across 4 panels**, and the panels do not agree on which slots they take (scanner has no `seed`
+   prop, portfolio no `inbox`, analyst no `chatRestore`). Spreading would pass slots a panel never
+   declared — harmless in React, but "harmless" is a claim, and nothing here can check it.
+   **Payoff is 8 lines. Do it when you can click through the hand-offs, or not at all.**
 4. **Then, and only then,** consider whether a new desk is genuinely one row.
 
 **THE RISK, named precisely.** `key={`scanner-${chatResetKey}-${scannerResetKey}`}` (line 2690) —
