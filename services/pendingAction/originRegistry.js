@@ -179,7 +179,19 @@ async function _executeManage(record) {
     if (!holder) return { ok: false, reason: 'not_found' }
 
     const { applyManage } = await import('../positionManage.service.js')
-    return applyManage({ entity, holder, verb: a.type, proposal: a.proposal ?? {}, userId: record.userId })
+    const res = await applyManage({ entity, holder, verb: a.type, proposal: a.proposal ?? {}, userId: record.userId })
+
+    // `selfExecuted` means the executor did nothing, on purpose — the venue has no broker and the
+    // action was always an instruction to the user. Passing it through as `ok` would close this row
+    // as executed having done nothing and told nobody, which is the one outcome the queue exists to
+    // prevent.
+    //
+    // It should be unreachable: applyManage answers self-executed ABOVE the hours gate, so such an
+    // action never queues in the first place. That is exactly why it is checked rather than assumed
+    // — a row here is evidence the ordering upstream changed, and it should surface as a stuck row
+    // the user can see and cancel, not as a silent success.
+    if (res?.selfExecuted) return { ok: false, reason: 'self_executed' }
+    return res
 }
 
 /**
