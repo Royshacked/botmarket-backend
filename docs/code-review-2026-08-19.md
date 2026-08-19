@@ -17,7 +17,8 @@ to be plug-in — are the two layers that never got the same treatment.
 **Top three if only three get done:**
 
 1. `selfExecuted` capability + capability gates in `positionManage.service.js` (§1)
-2. `createDesk()` + `useDeskChat()` + a guard test on `server.js:168` (§2)
+2. ~~`createDesk()`~~ + `useDeskChat()` + a guard test on `server.js:168` (§2) — the guard and the
+   two genuinely-shared helpers shipped; `createDesk()` was withdrawn on reading the code (§2.1)
 3. The double-FMP call in `candleFetch.service.js` (§4a)
 
 ---
@@ -108,15 +109,22 @@ broker-reality reconciliation design memo.
 cost a prompt, a schema, its judgment and its card copy — never new plumbing."* The tool
 registry honours it. The desks do not.
 
-**2.1 — Backend: ~150 lines of identical scaffold in all 6 agent services.** Repeated in
-`analyst` / `axl` / `mentor` / `portfolio` / `scanner` / `strategy`:
+**2.1 — Backend scaffold.** ⚠️ **PARTLY DONE, AND THE CLAIM WAS OVERSTATED** (2026-08-19,
+`4fa3fcf`). Reading the six desks side by side does not support a `createDesk()` factory. Two
+things were genuine copied MECHANISM and are now shared in `agentUtils`:
 
-- the `_run = runAgentStream` and `_venueSection = buildVenueSection` test seams
-- `attachTurnContext(..., await _venueSection(userId))`
-- the system-prompt block `{ type:'text', text: prompt + LANGUAGE_RULE + VENUE_RULE, cache_control }`
-- `buildTagCaptures({...})` / `stripEmitTags(text, [...])` / `normalizeMessages(messages, MAX)`
+- `cachedBlock(text)` — the `cache_control: { type: 'ephemeral' }` literal, hand-copied at **seven**
+  sites. The worst kind to copy: losing it is invisible, because the request still succeeds and
+  merely re-sends the whole prompt uncached forever. Only the bill says so.
+- `buildDeskMessages({messages, userPrompt, max})` — the "opening turn or trimmed history" branch,
+  hand-copied at three. Each copy carried the same warning comment, which was the tell.
 
-There is no `createDesk({ prompt, tools, tags, buildTurnContext })` factory.
+What is left after those is **not** scaffolding: the tag set, the parsing, the return shape, the
+turn context and the per-desk cache strategy are each the desk's own judgment, and folding them
+into one entry point is the cross-desk unifier the house rule forbids (the same reasoning
+`suggestions.service.js` already records for itself). The remaining repetition — the
+`_run = runAgentStream` / `_venueSection` seams and the `_run({...})` argument list — is a shared
+CALL rather than shared logic, and wrapping it would buy indirection, not safety.
 
 **2.2 — Frontend: `_saveThread`, `_send`, `_continue` and the `onLoadingChange` effect are
 near-identical across five panels.** Compare `StrategyPanel.jsx:100-140` with
@@ -138,7 +146,13 @@ buildChatState, onDraft })` hook collapses ~120 lines × 5.
 Frontend adds `AGENTS` + `DESKS` (`cmps/AxlHub/agentMeta.jsx`), `services/pipeline/contracts.js`,
 `services/pipeline/doors.js`, `services/aiPrefKeys.js:29`.
 
-**2.4 — `server.js:168` is the dangerous one.** Forget that line for a new desk and its
+**2.4 — `server.js:168` is the dangerous one.** ✅ FIXED (`ae9feaf`) —
+`tests/unit/agentLimiterCoverage.test.js` walks every mounted `/stream` route, resolves it through
+server.js's own `app.use` mounts, and fails when one is not behind `agentLimiter`. It also checks
+the reverse (a limited path nothing serves) and the mount ORDER. Verified by simulating a seventh
+desk and watching it fail. The original text follows.
+
+ Forget that line for a new desk and its
 `/stream` endpoint gets no `agentLimiter` — only the general API limiter. Silent, unbounded
 token spend. `loopContract.test.js` and `botRegistry.test.js` prove the guard-test pattern
 already exists here; this one is a one-liner to add.
@@ -265,9 +279,11 @@ earlier offenders were converted to. Widening the regex to also flag a shared re
 as a key in a controller-local `[status, message]` table is a two-line fix.
 `api/paper/paper.controller.js:69` `_fail` is the same shape.
 
-**6.2 — `MAX_RECENT_MESSAGES` vs `MAX_MESSAGES`** — the same constant under two names across
-the agent services (`mentor`/`analyst`/`strategy` use the first, `axl`/`portfolio`/`scanner`
-the second).
+**6.2 — `MAX_RECENT_MESSAGES` vs `MAX_MESSAGES`** — ❌ **WRONG, WITHDRAWN.** They are not the same
+constant under two names: the values differ on purpose — 8 (analyst/mentor/strategy), 10
+(portfolio/scanner), 12 (axl). How much history a desk needs is judgment, and the desks legitimately
+disagree. Only the NAME is inconsistent, which is cosmetic and not worth the churn of touching six
+files. `buildDeskMessages` now takes `max` from the caller precisely so this stays per-desk.
 
 **6.3 — Mentor / Analyst / Scanner panels each `import '../PortfolioPanel/PortfolioPanel.scss'`.**
 The shared desk styling lives inside one desk's stylesheet. Should be a `_desk-panel.scss`
