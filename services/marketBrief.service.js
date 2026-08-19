@@ -31,7 +31,7 @@ import { getNumericQuoteWithTime } from '../providers/yahoofinance.provider.js'
 import { getUpcomingEvents }       from './upcomingEvents.service.js'
 import { runAgentStream }          from './agentIO.js'
 import { toolsFor }                from './agentTools.registry.js'
-import { makePromptLoader, LANGUAGE_RULE } from './agentUtils.js'
+import { makePromptLoader, LANGUAGE_RULE, cachedBlock } from './agentUtils.js'
 import { createTtlCache }          from './ttlCache.util.js'
 import { config } from './config.js'
 
@@ -263,7 +263,7 @@ async function _buildBrief(deps = {}) {
     if (calRes.status === 'rejected')   logger.warn(LOG, 'calendar read failed', calRes.reason?.message)
 
     const systemPrompt = [
-        { type: 'text', text: _systemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
+        cachedBlock(_systemPrompt() + LANGUAGE_RULE),
     ]
     const input = buildBriefInput({ date: from, tape: tapeText, macro: macroText, calendar: calText })
 

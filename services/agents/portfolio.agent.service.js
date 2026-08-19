@@ -9,7 +9,7 @@ import { getSecFilings } from '../../providers/sec.provider.js'
 import { cleanConviction } from '../conviction.util.js'
 import { formatWorkspaceLine } from '../../api/portfolio/portfolioMode.util.js'
 import { logger }         from '../logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE } from '../agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorView.tools.js'
@@ -226,9 +226,9 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // session, so caching it lets turns 2+ read it at ~0.1× instead of re-paying
     // full price every turn. A turn where it does change just re-writes it once.
     const systemPrompt = [
-        { type: 'text', text: _systemPrompt() + LANGUAGE_RULE + VENUE_RULE, cache_control: { type: 'ephemeral' } },
+        cachedBlock(_systemPrompt() + LANGUAGE_RULE + VENUE_RULE),
         ...(dynamicSections.length
-            ? [{ type: 'text', text: dynamicSections.join('\n\n'), cache_control: { type: 'ephemeral' } }]
+            ? [cachedBlock(dynamicSections.join('\n\n'))]
             : []),
     ]
 

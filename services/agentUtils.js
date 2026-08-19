@@ -141,6 +141,49 @@ export function normalizeMessages(messages, maxCount) {
     return trimHistory(opened, maxCount)
 }
 
+/**
+ * A desk's conversation for this turn: the trimmed history, or the opening prompt when there is
+ * none yet.
+ *
+ * THE TRAP THIS EXISTS TO CLOSE, and it is the reason the three copies each carried the same
+ * warning comment: `normalizeMessages` does NOT append `userPrompt`. Handing it one produces an
+ * empty array — every filter drops it — and the provider then rejects the request with "at least
+ * one message is required", which reads as an API problem rather than as a caller mistake. The two
+ * cases genuinely are different code paths, and this is the one place that knows it.
+ *
+ * `max` is the CALLER's, deliberately. How much history a desk needs is judgment and the desks do
+ * not agree — a build conversation carries 8 turns, a scan 10, Axl's reception 12 — so the depth
+ * stays with the desk and only the mechanism is shared.
+ *
+ * A whitespace-only prompt is no prompt. Two of the three copies used `String(userPrompt)` and
+ * would have opened a conversation on `'   '`; normalizeMessages drops such a message anyway on
+ * every subsequent turn, so trimming here makes the first turn agree with all the others.
+ *
+ * @param {{ messages?: unknown, userPrompt?: unknown, max: number }} spec
+ * @returns {{role: 'user'|'assistant', content: string}[]}
+ */
+export function buildDeskMessages({ messages, userPrompt, max }) {
+    if (Array.isArray(messages) && messages.length) return normalizeMessages(messages, max)
+    const opening = typeof userPrompt === 'string' ? userPrompt.trim() : ''
+    return opening ? [{ role: 'user', content: opening }] : []
+}
+
+/**
+ * A system-prompt block WITH the cache breakpoint on it.
+ *
+ * The literal `cache_control: { type: 'ephemeral' }` was written out at seven sites, and it is the
+ * worst possible thing to hand-copy: caching is a prefix match, so a block that loses its
+ * breakpoint — a typo in the key, a spread that drops it, a new desk that forgets it — still works
+ * perfectly. It just re-sends the whole prompt uncached on every turn, forever, and the only signal
+ * is the bill. Nothing throws and no test fails.
+ *
+ * WHAT MAY CARRY ONE is still each desk's own call: portfolio and scanner put a second breakpoint
+ * on their dynamic sections because those are stable across a review, and strategy deliberately
+ * does not because its date block turns over daily. That is cache JUDGMENT and it stays with them —
+ * only the spelling is shared.
+ */
+export const cachedBlock = (text) => ({ type: 'text', text, cache_control: { type: 'ephemeral' } })
+
 // ─── Per-turn context placement ───────────────────────────────────────────────
 /**
  * Attach this turn's VOLATILE context to the end of the conversation instead of to the system

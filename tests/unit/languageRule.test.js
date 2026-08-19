@@ -98,10 +98,17 @@ test('every desk appends the rule to its base prompt, exactly once', () => {
 test('the rule rides on the CACHED prefix, not the volatile tail', () => {
     // It is byte-identical on every request, so it belongs behind the cache_control breakpoint with
     // the static prompt. In the dynamic block it would be re-sent uncached on every turn, forever.
+    //
+    // Matched through `cachedBlock()` — agentUtils' one spelling of that breakpoint. This guard used
+    // to match the raw `cache_control: { type: 'ephemeral' }` object literal at each desk, which is
+    // what the literal being written out seven times looked like from here; when the seven were
+    // folded into the helper, this test failed on all of them at once while the behaviour was
+    // identical. That is the guard working — it just has one form to recognise now instead of seven
+    // hand-copies, which is the same reason the helper exists.
     for (const f of DESKS) {
         assert.match(
             src(f),
-            /\{ type: 'text', text: \w+\(\) \+ LANGUAGE_RULE(?: \+ VENUE_RULE)?, cache_control: \{ type: 'ephemeral' \} \}/,
+            /cachedBlock\(\w+\(\) \+ LANGUAGE_RULE(?: \+ VENUE_RULE)?\)/,
             `${f} appends LANGUAGE_RULE somewhere other than the cached system-prompt entry`,
         )
     }

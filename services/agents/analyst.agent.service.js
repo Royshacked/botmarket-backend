@@ -13,7 +13,7 @@ import { dirname, join } from 'path'
 
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../../providers/fmp.provider.js'
 import { getSecFilings } from '../../providers/sec.provider.js'
-import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE, COMMON_TOOL_HANDLERS } from '../agentUtils.js'
+import { makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VENUE_RULE, COMMON_TOOL_HANDLERS, cachedBlock, buildDeskMessages } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
@@ -175,7 +175,7 @@ ${audienceBlock}
 
 ` : ''}Active name: ${active}${seedBlock}${existingBlock}`
     return [
-        { type: 'text', text: _systemPrompt() + LANGUAGE_RULE + VENUE_RULE, cache_control: { type: 'ephemeral' } },
+        cachedBlock(_systemPrompt() + LANGUAGE_RULE + VENUE_RULE),
         { type: 'text', text: dynamic },
     ]
 }
@@ -191,6 +191,5 @@ export function _buildTurnContext(chatState) {
 }
 
 function _buildMessages({ messages, userPrompt }) {
-    if (Array.isArray(messages) && messages.length) return normalizeMessages(messages, MAX_RECENT_MESSAGES)
-    return userPrompt ? [{ role: 'user', content: String(userPrompt) }] : []
+    return buildDeskMessages({ messages, userPrompt, max: MAX_RECENT_MESSAGES })
 }

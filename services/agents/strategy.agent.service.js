@@ -15,7 +15,7 @@ import { dirname, join } from 'path'
 import { makePhaseCapture, runAgentStream, parseEmitBlock } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
-import { makePromptLoader, stripEmitTags, normalizeMessages, makeToolHandler, attachTurnContext, LANGUAGE_RULE } from '../agentUtils.js'
+import { makePromptLoader, stripEmitTags, makeToolHandler, attachTurnContext, LANGUAGE_RULE, cachedBlock, buildDeskMessages } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { getMacroSnapshot, getSectorSnapshot } from '../../providers/fmp.provider.js'
 import { getPricedIn } from '../../providers/fred.provider.js'
@@ -142,7 +142,7 @@ function _buildSystemPrompt() {
     // hit.
     const today = new Date().toISOString().slice(0, 10)
     return [
-        { type: 'text', text: _systemPrompt() + LANGUAGE_RULE, cache_control: { type: 'ephemeral' } },
+        cachedBlock(_systemPrompt() + LANGUAGE_RULE),
         { type: 'text', text: `---\nCURRENT DATE: ${today}. Resolve relative dates (this quarter, the next FOMC) against it.` },
     ]
 }
@@ -163,6 +163,5 @@ export function _buildTurnContext(chatState) {
 // takes (messages, maxCount) and does NOT append userPrompt — passing it there silently yields an
 // empty array and the API rejects the request with "at least one message is required".
 export function _buildMessages({ messages, userPrompt }) {
-    if (Array.isArray(messages) && messages.length) return normalizeMessages(messages, MAX_RECENT_MESSAGES)
-    return userPrompt ? [{ role: 'user', content: String(userPrompt) }] : []
+    return buildDeskMessages({ messages, userPrompt, max: MAX_RECENT_MESSAGES })
 }
