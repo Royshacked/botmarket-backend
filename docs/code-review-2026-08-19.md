@@ -22,7 +22,7 @@ Suites at hand-off: backend **2494 pass / 0 fail**, frontend **639 pass / 0 fail
 | § | | |
 |---|---|---|
 | 1 | Broker interface sealing | ✅ done (§1.3 and §1.6 open by choice) |
-| 2 | New agent is not plug-in | 🟨 §2.2/§2.4 done · §2.1 partly withdrawn · §2.5 steps 1-2 of 4 done |
+| 2 | New agent is not plug-in | ✅ done · §2.1 partly withdrawn |
 | 3 | New entity / kind — two vocabularies | ⚠️ **WITHDRAWN** — premise wrong; two real bugs under it, fixed |
 | 4a | `candleFetch` calls FMP twice | ✅ done |
 | 4b | The two candle stacks | ✅ done — found a live defect underneath |
@@ -192,7 +192,7 @@ desk and watching it fail. The original text follows.
 token spend. `loopContract.test.js` and `botRegistry.test.js` prove the guard-test pattern
 already exists here; this one is a one-liner to add.
 
-**2.5 — `pages/MainPage.jsx`.** 🟨 **STEPS 1-2 OF 4 DONE — still the largest open item.**
+**2.5 — `pages/MainPage.jsx`.** ✅ **DONE** — all four steps.
 Re-measured 2026-08-19: **3,066 lines, 48 `useState`, 20 `useEffect`, 10 `useRef`** (the original
 "50 / ~25" was close enough). Per-desk state comes as a quadruplet (`<desk>Seed` / `<desk>Inbox` /
 `<desk>ChatRestore` / `<desk>ResetKey`) around lines 259-309, so adding a desk means ~44 edits in
@@ -248,13 +248,20 @@ A new desk becomes one row rather than four scattered declarations plus their se
    (7 cases); every variable and setter keeps its name, so all 25 call sites, props and doors are
    untouched. A test now asserts every door `doors.js` asks for is a name the table generates —
    the guard for the break step 1 caused. **3,066 → 3,049 lines, 48 → 38 `useState`.**
-3. ⬜ **NOT DONE — needs the app running.** `deskProps('mentor')` spreading `{ seed, inbox,
-   chatRestore }` at the JSX (lines 2718-2792). Surface is smaller than it looked: **8 prop lines
-   across 4 panels**, and the panels do not agree on which slots they take (scanner has no `seed`
-   prop, portfolio no `inbox`, analyst no `chatRestore`). Spreading would pass slots a panel never
-   declared — harmless in React, but "harmless" is a claim, and nothing here can check it.
-   **Payoff is 8 lines. Do it when you can click through the hand-offs, or not at all.**
-4. **Then, and only then,** consider whether a new desk is genuinely one row.
+3. ✅ **DONE** (`13bafdb`) — and **the plan was wrong about why it was risky.** The danger was not
+   passing extra slots (inert: an undeclared prop is never destructured, and none of the four
+   panels spreads its props onto a DOM node). It was that **ScannerPanel took its seed as
+   `scanSeed`** — so the spread would have handed it a `seed` it never reads and dropped every
+   Argus hand-off in silence, the same failure step 1 caused, by a different route. Renaming the
+   prop first made the spread safe, and ScannerPanel's own tests verify it. Also checked: no
+   explicit prop after a spread shares a slot name, so nothing silently overrides what was handed
+   over. `scannerInbox` stays destructured — MainPage reads it to shape the desk header.
+4. ✅ **Judged.** A new desk is now: a row in `HANDOFF_DESKS`, and `{...deskProps('x')}` on its
+   panel. The setters, the clearing and the routing doors all come from that one row.
+
+**Result across steps 1-3: 3,066 → 3,043 lines, 48 → 38 `useState`.** The remaining bulk is
+handlers, not state — which is a different (and much less mechanical) problem than the one this
+section described.
 
 **THE RISK, named precisely.** `key={`scanner-${chatResetKey}-${scannerResetKey}`}` (line 2690) —
 reset keys drive REMOUNTS. Get this wrong and a desk either silently keeps a conversation it should
