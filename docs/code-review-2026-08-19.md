@@ -27,8 +27,8 @@ Suites at hand-off: backend **2494 pass / 0 fail**, frontend **639 pass / 0 fail
 | 4a | `candleFetch` calls FMP twice | ✅ done |
 | 4b | The two candle stacks | ✅ done — found a live defect underneath |
 | 4c | Hand-mirrored BE→FE logic | ✅ partly; the rest qualified and deliberately kept |
-| 5 | Plasters to remove | ✅ done except §5.5 (`_idea` legacy verbs — needs a Mongo check) |
-| 6 | Convention drift | 🟨 §6.1 done; §6.2 withdrawn; §6.3 (shared desk SCSS) open |
+| 5 | Plasters to remove | ✅ **done** |
+| 6 | Convention drift | ✅ §6.1 done; §6.2 and §6.3 both **withdrawn** |
 | 7 | `mode` means two things | ✅ guarded (`0998a02`) — the rename is still the thorough fix |
 
 **Read this before trusting anything below.** Four of this document's own claims did not survive
@@ -352,9 +352,14 @@ constant under two names: the values differ on purpose — 8 (analyst/mentor/str
 disagree. Only the NAME is inconsistent, which is cosmetic and not worth the churn of touching six
 files. `buildDeskMessages` now takes `max` from the caller precisely so this stays per-desk.
 
-**6.3 — Mentor / Analyst / Scanner panels each `import '../PortfolioPanel/PortfolioPanel.scss'`.**
-The shared desk styling lives inside one desk's stylesheet. Should be a `_desk-panel.scss`
-partial.
+**6.3 — the shared desk stylesheet.** ⚠️ **WITHDRAWN — already a decision, not drift.** The file's
+own header names the honest fix (`_chatShell.scss`) and defers it with a better reason than this
+review had for doing it: a visually-unverifiable change that belongs in a pass where the panels can
+be eyeballed side by side, not smuggled into a refactor. Nothing here can verify it visually, so it
+stays. What WAS wrong was the header's roster — it claimed nine importers including Kairos
+(archived) and AxlHub (which only mentions the file) — corrected to the real five importers and
+twelve class-name consumers (frontend `3cc955c`). The second figure is the true size of the rename
+and the note had never carried it.
 
 ---
 
@@ -372,10 +377,10 @@ Cheapest fix: a test asserting the two value sets never intersect.
 
 ## Open work, in the order I would take it
 
-1. ~~§5's four leftovers~~ ✅ DONE (backend `047a6bc`, frontend `1df27bd`). What remains of §5 is
-   **§5.5 only**: the `_idea` legacy rebalance verbs, accepted in both repos but taught by no
-   prompt. Needs a Mongo check for pending rebalance rows before deleting — that is why it was not
-   swept up with the rest.
+1. ~~§5~~ ✅ **DONE in full** (backend `047a6bc` `df84511`, frontend `1df27bd` `74016e8`). §5.5's
+   `_idea` aliases went last, on evidence: a raw scan of all **508 stored documents** across seven
+   collections found zero carrying a legacy verb or field. 28 review cards exist, 16 still pending,
+   and none carries `update.changes` at all.
 2. ~~§7, the `mode` collision~~ ✅ GUARDED (`0998a02`). The word lists are asserted disjoint and
    resolveMode's handling of a lens is pinned. The thorough fix — renaming the call's field so the
    overload is gone rather than watched — touches stored documents and is still open.
