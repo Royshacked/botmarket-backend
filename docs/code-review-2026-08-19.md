@@ -88,9 +88,11 @@ resolve, and `computeBasisOffset` answers 0 for non-index instruments.
 and admits IBKR the day its trading flips on. The test pinning IBKR's refusal is written to fail at
 that moment.
 
-**1.5 — Frontend `cmps/MonitorDashboard/MonitorDashboard.jsx:99`** derives the supported-broker
-list from `Object.keys(BROKER_LABELS)`. A broker added to the factory with no label entry is
-invisible in the UI.
+**1.5 — Frontend `MonitorDashboard`** derived the supported-broker list from
+`Object.keys(BROKER_LABELS)`, so a broker added to the factory without a label entry would be
+invisible. ⚠️ **MOOT — the component was never mounted.** Nothing imported it, so the bug was not
+reachable from the running app. Deleted rather than fixed (frontend `cce5f44`). The lesson is worth
+keeping: the finding was written from reading the file, not from asking whether anything renders it.
 
 **1.6 — Capability set is missing flags the app actually needs:** `selfExecuted` (§1.1),
 hedging-vs-netting (currently inferred from the returned positionId — documented and correct,
@@ -236,24 +238,28 @@ What actually differed was the cache, and underneath it something worse than eit
 Neither module had a single test, which is how a flat 30-day window survived in the path the
 monitors evaluate on. `tests/unit/candleWindow.test.js` covers all three decisions.
 
-**4.c — Nine hand-mirrored backend→frontend modules, none guarded across repos:**
+**4.c — Hand-mirrored backend→frontend logic.** ⚠️ **PARTLY DONE, and the inventory needs
+qualifying.** Two of the nine are now gone, and the rest divide into kinds that want different
+answers — "serve the constants" was too glib for most of them.
 
-| Backend | Frontend |
-|---|---|
-| `setup.schema.computeRR` | `cmps/TradeIdeas/orderRisk.util.js` |
-| `chart.evaluator._buildStudies` + `studyTranslate` | `cmps/TradeIdeas/chartOverlay.js` |
-| `chartRender/klineRender.provider.js` | `cmps/PriceChart/PriceChart.jsx` |
-| `market.service` sessions | `cmps/MarketClocks.jsx` |
-| `workspace.model.resolveWorkspace` | `customHooks/useWorkspaceMode.js` |
-| `venue.resolve.resolveMode` | `cmps/TradeIdeas/tradeIdea.utils.ideaWorkspaceMode` |
-| `BALANCE_TOLERANCE_BP` | `cmps/StrategyPanel/StrategyPanel.jsx:43` |
-| adopt commit gate | `cmps/AdoptBook/adopt.utils.js:86` |
-| `portfolioMode.util.BROKER_LABELS` | `cmps/MonitorDashboard/MonitorDashboard.jsx:99` |
+| Backend | Frontend | Verdict |
+|---|---|---|
+| `BALANCE_TOLERANCE_BP` | `StrategyPanel` | ✅ **FIXED** — the server sends `balanceOf()` on the draft; the panel reads the verdict |
+| `portfolioMode.BROKER_LABELS` | `MonitorDashboard` | ✅ **GONE** — the component was dead (§1.5) |
+| `chart.evaluator._buildStudies` | `chartOverlay.js` | **Unavoidable.** A render port; the FE must draw without a round trip |
+| `klineRender.provider` | `PriceChart.jsx` | **Unavoidable**, same reason |
+| `market.service` sessions | `MarketClocks.jsx` | Display-only, ticks every 30s — a round trip would be worse |
+| `setup.schema.computeRR` | `orderRisk.util.js` | **Do NOT "fix" by serving it.** The server's `rr` is per SCENARIO at authoring time; the dialog's is for the PLAN about to be placed, over levels the chart overlay derived, at the quantity actually chosen. Different inputs by design — only the *pessimistic convention* is shared |
+| `workspace.model.resolveWorkspace` | `useWorkspaceMode` | A 3-line precedence rule |
+| `venue.resolve.resolveMode` | `ideaWorkspaceMode` | Already guarded by a shared case table asserted in both repos; collapses to `idea?.mode ?? 'live'` once a backfill lands |
+| adopt commit gate | `adopt.utils.js` | Previews a server gate so the button does not lie |
 
-The render ports are unavoidable. The pure constants (tolerance, broker list, session
-calendars, workspace precedence) could be served from one `/api/meta` read instead.
-
----
+**The honest constraint:** there is no sound cross-repo guard without shared packaging (a published
+package or a submodule). The duplicated case table used for `resolveMode` is the best available
+pattern and only helps if both copies are updated. Where a value is a pure server VERDICT, serving
+it — as the tilt balance now is — removes the mirror outright, and that is the move to reach for
+first. Where the two sides compute different things from different inputs, the mirror is real and
+should stay.
 
 ## 5. Plasters to remove
 
