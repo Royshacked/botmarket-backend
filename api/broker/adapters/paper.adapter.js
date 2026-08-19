@@ -129,9 +129,9 @@ export class PaperAdapter extends BrokerAdapter {
     async _getPositionsForMode(userId, accountId, mode) {
         const all        = await paperBrokerService.listPositions(userId, { status: 'open', accountId })
         const positions  = accountId ? all : all.filter(p => paperBrokerService.accountMode(p.accountId) === mode)
-        const priceBy    = await this._priceMap(positions.map(p => p.symbol))
-        const currencyBy = await this._currencyMap(userId, positions.map(p => p.accountId))
-        return positions.map(p => this._toBrokerPosition(p, priceBy.get(p.symbol), currencyBy.get(p.accountId)))
+        const priceBy   = await this._priceMap(positions.map(p => p.symbol))
+        const acctBy    = await this._accountMap(userId, positions.map(p => p.accountId))
+        return positions.map(p => this._toBrokerPosition(p, priceBy.get(p.symbol), acctBy.get(p.accountId)))
     }
 
     /**
@@ -141,9 +141,9 @@ export class PaperAdapter extends BrokerAdapter {
     async findOpenPosition(userId, accountId, positionId) {
         const pos = await paperBrokerService.getPosition(userId, positionId)
         if (!pos || pos.status !== 'open') return null
-        const price    = await latestMarkPrice(pos.symbol)
-        const currency = (await paperBrokerService.getAccount(userId, pos.accountId))?.currency ?? 'USD'
-        return this._toBrokerPosition(pos, price, currency)
+        const price = await latestMarkPrice(pos.symbol)
+        const acct  = await paperBrokerService.getAccount(userId, pos.accountId)
+        return this._toBrokerPosition(pos, price, acct)
     }
 
     // ── Trading ──────────────────────────────────────────────────────────────────
@@ -342,7 +342,7 @@ export class PaperAdapter extends BrokerAdapter {
         }
     }
 
-    _toBrokerPosition(p, currentPrice = null, currency = 'USD') {
+    _toBrokerPosition(p, currentPrice = null, account = null) {
         // Prefer this call's live price; when the fetch missed, fall back to the last
         // mark stamped by the paperMark loop so P&L doesn't blank out between ticks.
         const markPrice = currentPrice ?? p.currentPrice ?? null
@@ -362,7 +362,14 @@ export class PaperAdapter extends BrokerAdapter {
             openedAt:     p.openedAt,
             accountId:    p.accountId,
             accountNo:    p.accountId,
-            currency,
+            // A VIRTUAL account is one the user NAMED ("Momentum", "RAZ TEST"), so the name is what
+            // it should be called wherever it is shown — `accountNo` carries the long generated id,
+            // which is a key, not a label. Reported from the desk: the positions view identified a
+            // paper account by 40 characters of uuid. Free to send: the account doc is already read
+            // here for its currency. Live brokers have no equivalent (their accounts carry a login
+            // NUMBER and nothing else), so this field is absent there and the readers fall back.
+            accountName:  account?.name ?? null,
+            currency:     account?.currency ?? 'USD',
         }
     }
 
@@ -374,11 +381,12 @@ export class PaperAdapter extends BrokerAdapter {
         return new Map(entries)
     }
 
-    /** Map of accountId → account currency for the distinct accounts given, so a position
-     *  reports its OWN account's currency (a user may hold non-USD virtual accounts). */
-    async _currencyMap(userId, accountIds) {
+    /** Map of accountId → its account doc for the distinct accounts given, so a position reports
+     *  its OWN account's currency (a user may hold non-USD virtual accounts) and its OWN name. One
+     *  read serves both — it was a currency-only map until the name was needed beside it. */
+    async _accountMap(userId, accountIds) {
         const distinct = [...new Set(accountIds)]
-        const entries  = await Promise.all(distinct.map(async id => [id, (await paperBrokerService.getAccount(userId, id))?.currency ?? 'USD']))
+        const entries  = await Promise.all(distinct.map(async id => [id, await paperBrokerService.getAccount(userId, id)]))
         return new Map(entries)
     }
 }
