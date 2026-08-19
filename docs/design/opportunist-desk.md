@@ -106,6 +106,12 @@ Four different lag sources. They do not have equal edge, and they are not varian
 
 ### 3.1 Money flows — **strongest**
 
+> **Chosen as the first ground. The concrete flow is `docs/design/opportunist-money-flow.md`** —
+> sources, the six-stage funnel, schemas and build order. The headline finding there: the
+> significance gate (§15 Q2, the hardest open item in this document) is **free** on this ground,
+> because every event arrives with a dollar amount and materiality is arithmetic — award value,
+> annualised over its period of performance, against the recipient's revenue.
+
 Appropriations, defence contract awards, infrastructure bills, EU budget lines, state programmes. Public,
 structured, free APIs. The lag is **administrative, not informational** — money voted today is spent over
 three to five years — so it cannot be arbitraged away by someone reading faster. Ignored for the best
