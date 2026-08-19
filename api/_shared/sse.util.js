@@ -1,6 +1,10 @@
-// Shared Server-Sent-Events boilerplate for the streaming endpoints
-// (orchestrator / portfolio / scanner / analyst / kairos / axl). Sets the SSE headers,
-// disables proxy buffering, and starts a keep-alive heartbeat.
+// Shared Server-Sent-Events boilerplate for every streaming endpoint — the six desks
+// (axl / mentor / portfolio / scanner / analyst / strategy) plus Axl's market brief. Sets the SSE
+// headers, disables proxy buffering, and starts a keep-alive heartbeat.
+//
+// Named generically on purpose: agentLimiterCoverage guards that every mounted `/stream` route is
+// rate-limited, and nothing here needs to know which desks exist. The old list named `kairos` and
+// an `orchestrator` that predates the desks, which is what a hand-kept roster does.
 //
 // STOP AND WALKING AWAY ARE DIFFERENT THINGS, and this file used to treat them as one: it aborted the
 // model call on `res.close`, which both gestures cause. So leaving a desk mid-answer killed the turn and

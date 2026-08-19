@@ -457,10 +457,14 @@ export async function markRead(conversationId, userId) {
  * Resolve a card's lifecycle — the ONE function every card type routes through (replaces the old
  * per-type split). `status` is 'done' (the user acted) or 'dismissed' (acknowledged, no action);
  * `outcome` records WHICH action so the collapsed card reads accurately (confirmed | editing |
- * closing | deleted…). Writes the uniform top-level status/resolvedAt/resolveOutcome AND, during
- * the FE transition, the legacy `dismissed`/`dismissOutcome` so a not-yet-updated client still
- * collapses the card. Message-level only — it never touches the idea/call latch, so a re-armed
- * idea still emits a fresh alert.
+ * closing | deleted…). Writes the uniform top-level status/resolvedAt/resolveOutcome.
+ * Message-level only — it never touches the idea/call latch, so a re-armed idea still emits a
+ * fresh alert.
+ *
+ * It also wrote the legacy `dismissed`/`dismissOutcome` pair while the client caught up. That
+ * transition is over: cardResolution.js reads the top-level `status` first and only falls back to
+ * `dismissed` for documents written before the refactor. Those documents keep their field and that
+ * fallback keeps reading them — what stopped is stamping a dead field onto NEW writes.
  */
 export async function resolveMessage(conversationId, messageId, userId, { status = 'dismissed', outcome = null } = {}) {
     const db  = await getDb()
@@ -471,9 +475,10 @@ export async function resolveMessage(conversationId, messageId, userId, { status
 
     const st = normalizeResolveStatus(status)
     // A TOUCH, not a resolution: record that it was opened and leave everything else alone. Stamping
-    // `resolvedAt` or the legacy `dismissed` flag here would resolve the card through the back door —
-    // `readResolution` falls back to `dismissed` for pre-refactor history, so setting it on a still-
-    // pending card would collapse the very card this branch exists to keep alive.
+    // `resolvedAt` here would resolve the card through the back door and collapse the very card this
+    // branch exists to keep alive. (The legacy `dismissed` flag was the sharper version of that trap
+    // while it was still written — the client falls back to it for pre-refactor history, so setting
+    // it on a pending card resolved one. Nothing writes it now.)
     if (st === 'pending') {
         await db.collection(MSGS).updateOne(
             { id: messageId, conversationId, status: 'pending' },   // never re-open a settled card
@@ -488,9 +493,6 @@ export async function resolveMessage(conversationId, messageId, userId, { status
             status:         st,
             resolvedAt:     Date.now(),
             resolveOutcome: outcome ? String(outcome) : null,
-            // transitional dual-write: legacy fields the pre-refactor client reads (drop once FE ships)
-            dismissed:      true,
-            ...(outcome ? { dismissOutcome: String(outcome) } : {}),
         } }
     )
     return { ok: true, status: st }
