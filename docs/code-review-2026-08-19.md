@@ -27,7 +27,7 @@ Suites at hand-off: backend **2494 pass / 0 fail**, frontend **639 pass / 0 fail
 | 4a | `candleFetch` calls FMP twice | ✅ done |
 | 4b | The two candle stacks | ✅ done — found a live defect underneath |
 | 4c | Hand-mirrored BE→FE logic | ✅ partly; the rest qualified and deliberately kept |
-| 5 | Plasters to remove | 🟨 deletions done; four small items left |
+| 5 | Plasters to remove | ✅ done except §5.5 (`_idea` legacy verbs — needs a Mongo check) |
 | 6 | Convention drift | ⬜ **NOT STARTED** (§6.2 withdrawn as wrong) |
 | 7 | `mode` means two things | ⬜ **NOT STARTED** — one cheap test |
 
@@ -285,11 +285,9 @@ should stay.
 
 ## 5. Plasters to remove
 
-**5.1 — `api/chat/chat.service.js:491`** — the transitional dual-write of
-`dismissed` / `dismissOutcome`, commented "drop once FE ships". **The FE has shipped:**
-`cmps/SocialChat/cardResolution.js:10` reads top-level `status` first and only falls back to
-`dismissed` for pre-refactor history. The dual-write on *new* writes is dead weight.
-Drop the two fields from the `$set`; keep the FE fallback for old documents.
+**5.1 — the `dismissed` / `dismissOutcome` dual-write.** ✅ DONE (`047a6bc`). Old documents keep
+their field and the FE fallback keeps reading them; what stopped is stamping a dead field onto new
+writes.
 
 **5.2 — Empty directories.** ✅ Frontend done (`cce5f44`). ⬜ **`api/kairos/` on the backend is
 still there.**
@@ -309,8 +307,10 @@ inputs.
 (14 uses, zero `_idea`). No current model emits them — only queued/stored docs written before
 the rename could. Check Mongo for pending rebalance docs, then delete both sides.
 
-**5.6 — `api/_shared/sse.util.js:2`** header comment still lists `kairos` among the streaming
-endpoints (archived 2026-08-18).
+**5.6 — `sse.util.js` header.** ✅ DONE (`047a6bc`), along with the empty `api/kairos/` directory
+(§5.2's backend half). The header named the desks by hand and still listed `kairos` and an
+`orchestrator` that predates them; it now says why it does not need a roster — `agentLimiterCoverage`
+guards the real set.
 
 ---
 
@@ -354,11 +354,10 @@ Cheapest fix: a test asserting the two value sets never intersect.
 
 ## Open work, in the order I would take it
 
-1. **§5's four leftovers** — half an hour, no risk, all verified:
-   `chat.service.js:492` still dual-writes `dismissed`/`dismissOutcome` (the FE shipped —
-   `cardResolution.js` reads top-level `status` first and only falls back for pre-refactor history);
-   `api/kairos/` is still an empty directory; `sse.util.js:2` still lists kairos among the streaming
-   endpoints; `tradeIdea.utils` still exports four names that all reduce to `ideaWorkspaceMode`.
+1. ~~§5's four leftovers~~ ✅ DONE (backend `047a6bc`, frontend `1df27bd`). What remains of §5 is
+   **§5.5 only**: the `_idea` legacy rebalance verbs, accepted in both repos but taught by no
+   prompt. Needs a Mongo check for pending rebalance rows before deleting — that is why it was not
+   swept up with the rest.
 2. **§7, the `mode` collision** — one test asserting the Kairos lens values never intersect the
    workspace names. Cheapest real risk reduction left in the document.
 3. **§6.1, the reason ladder** — `strategy.controller` and `paper.controller` hand-roll a
