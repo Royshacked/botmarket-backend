@@ -23,7 +23,7 @@ Census (2026-08-06): `thesis` on **0/67** trades, **51/67 idealess**, journal on
 - [ ] **Freeze the thesis at fill.** `tradeCapture.captureOpen` already freezes price/qty — add the
       authoring rationale, the entry premise, and the invalidation criteria as they stood at entry.
       Not a pointer: coverage/setup prose gets rewritten, so a reference resolves to the wrong text.
-- [ ] **Capture the DECISION INPUTS, not just the verdict.** Hermes/Talos write `verdict` + `note`;
+- [ ] **Capture the DECISION INPUTS, not just the verdict.** Talos writes `verdict` + `note`;
       persist the snapshot they judged from (price, the axes, the fetched facts, the model + effort).
       This is the difference between a journal and a dataset.
 - [ ] **Record management events as first-class rows** — stop moves, partials, re-entries, expiries.

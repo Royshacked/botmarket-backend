@@ -20,7 +20,8 @@ Design record, 2026-08-09. Nothing here is built yet except where marked **BUILT
 
 **Silent, not gone.** Hermes must keep running until the last live `call` closes — the same strangler
 used for legacy tree-`idea`s. Nothing in flight migrates. See
-[kairos-hermes.md](./kairos-hermes.md) for what stays alive meanwhile.
+[kairos-hermes.md](../../archive/docs/kairos-hermes.md), which moved to `archive/` with the desk on
+2026-08-18, for what that path was.
 
 **One capability was dropped, deliberately.** Kairos emitted `<scan_request>` — "let's look for
 another name" — which walked the desk BACKWARDS to Argus. Mentor emits nothing, so on the trading

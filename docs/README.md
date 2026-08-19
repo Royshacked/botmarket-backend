@@ -38,8 +38,7 @@ when to act on it only make sense together.
 
 | Doc | Desk → monitor |
 |---|---|
-| [trade-pipeline.md](./desks/trade-pipeline.md) | **The path a new trade takes: Argus → Mentor → Talos.** Read this first — it is why kairos-hermes.md is a record and not a plan |
-| [kairos-hermes.md](./desks/kairos-hermes.md) | **SILENT.** Kairos builds a `call`; Hermes watches it. Still accurate, but describes a FROZEN path — calls in flight only |
+| [trade-pipeline.md](./desks/trade-pipeline.md) | **The path a new trade takes: Argus → Mentor → Talos.** Read this first — it is the record of why the trading desk is the one it is |
 | [mentor-talos.md](./desks/mentor-talos.md) | Mentor builds a `setup`; Talos watches it. Scenarios as rivals, conditions, validity |
 
 Not yet written up: **Atlas/Themis** (portfolio — contract in APP_SPEC §3), **Argus** (scan —
@@ -81,8 +80,8 @@ to `architecture/` or `desks/`, or it is deleted.
 
 **A doc that describes something that shipped is a record, not a plan — and it must say which.**
 The failure mode here is not a missing doc, it is a confident stale one: three separate docs
-described the scenario model and the Kairos in-position path as "designed, not built" for weeks
-after both went live, and a reader had no way to tell without going to the code.
+described the scenario model and the in-position path as "designed, not built" for weeks after
+both went live, and a reader had no way to tell without going to the code.
 
 So: when a design ships, either fold it into the doc that describes the built system and delete the
 design note, or rewrite the note as a record of what was decided and why. Do not leave a status line

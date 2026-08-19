@@ -16,7 +16,6 @@ client POST → SSE chat stream → Claude with tools → agent writes XML "emit
 | Agent | Persona | Produces | Emit tag |
 |---|---|---|---|
 | **Axl** | "Axl" | nothing — routes, and hands over a sentence | `<route>` / `<edit>` / `<open>` / `<suggest>` |
-| **Kairos** | "Kairos" | one discretionary call (single asset) | `<call>` / `<kairos_pick>` |
 | **Mentor** | "Mentor" | one teaching setup (rival price-zone scenarios) | `<setup>` / `<setups>` |
 | **Portfolio** | "Atlas" | a multi-holding allocation plan (sized server-side) | `<portfolio_plan>` / `<portfolio_update>` |
 | **Scanner** | "Argus" | candidate list for one period × thesis | `<scan_list>` |
@@ -38,7 +37,6 @@ Every desk streams over Server-Sent Events; every router applies `requireAuth` +
 | Agent | Route file | Endpoint | Controller |
 |---|---|---|---|
 | Axl | `api/axl/axl.routes.js` | `POST /api/axl/stream` | `streamAxl` |
-| Kairos | `api/kairos/kairos.routes.js` | `POST /api/kairos/stream` | `streamKairos` |
 | Mentor | `api/mentor/mentor.routes.js` | `POST /api/mentor/stream` | `streamMentor` |
 | Portfolio | `api/portfolio/portfolio.routes.js` | `POST /api/portfolio/stream` | `streamPortfolio` |
 | Scanner | `api/scanner/scanner.routes.js` | `POST /api/scanner/stream` | `streamScanner` |
@@ -56,7 +54,6 @@ writes `event: <name>\ndata: <json>\n\n`.
 - **Shared:** `token`, `chart` (open the workspace chart), `status` (tool-status chip),
   `reasoning`, then a terminal `done`
 - **Axl:** `done` → `{ reply, route, opening, edit, suggestions }`
-- **Kairos:** `done` → `{ reply, call, phase }`
 - **Mentor:** `done` → `{ reply, setups, phase }`
 - **Portfolio:** `done` → `{ reply, plan, update, mandate, thesis, phase }`
 - **Scanner:** `done` → `{ reply, scan, phase }`
@@ -94,15 +91,10 @@ position + rel volume), `get_cycle_analysis` (price-cycle / seasonal modes), `ge
 `get_risk_metrics`, `get_fundamentals`, `get_earnings` (single-ticker + history),
 `get_earnings_calendar` (plus shared sentiment tools).
 
-### Kairos agent — `services/agents/kairos.agent.service.js` (tools in `services/tools/kairos.tools.js`)
-Prompt `kairos_system_prompt.md`. Discretionary day/swing **call** builder (single asset),
-self-contained — it carries a **14-tool analysis kit** built from the pure providers + the shared
-`marketData.tools.js` factories (incl. `makeIndicatorsHandler`).
-Five phases: classify → **analyse & map entry zones** → frame risk → patterns → **validate, size &
-emit**. Emits a `<call>` (entry zones as bands + reference levels + patterns + sizing + `timeframe_ladder`
-+ **`rr`/`conviction`**), parsed wholesale then persisted via `normalizeCall` to `kairos_calls`
-(watched by Hermes — see `monitoring.md`). Fundamentals are weighted by horizon (light intraday/day,
-heavy swing); the `timeframe_ladder` is authored deliberately for Hermes to pick a rung from.
+> An eighth desk is **archived** and intentionally absent from this document. Its build — prompt,
+> tools, phases, emit tag — is described in `archive/README.md`. The 14-tool analysis kit it carried
+> was not archived with it: it lives on in `services/tools/trading.tools.js` (renamed from
+> `kairos.tools.js`) and is what Mentor uses.
 
 ---
 
@@ -116,7 +108,6 @@ still stream to the user, e.g. `<ticker>`.) Each agent registers its own capture
 
 - **Axl:** `<route>` → `onRoute`, `<edit>` → `onEdit`, `<open>` → `onOpen`,
   `<suggest>` → the shared suggestion capture
-- **Kairos:** `<call>` → `onCall`, `<kairos_pick>` → `onPick`
 - **Mentor:** `<setup>` / `<setups>` → `onSetups`
 - **Portfolio:** `<portfolio_plan>` → `onPlan`, `<portfolio_update>` → `onUpdate`,
   `<portfolio_mandate>` → `onMandate`, `<portfolio_thesis>` (post-hoc from raw)
@@ -240,9 +231,10 @@ ideas: `POST /api/trade-ideas/batch` → `saveBatchIdeas`, one `saveIdea` per id
 `{ period:{label,start,end}, thesis, direction, candidates:[{ ticker, name, direction,
 thesis, analysis, signals, conviction, sources }] }`. Edit mode can pass untouched
 candidates as bare `{ ticker, keep:true }` references, rehydrated from the prior list. Scans
-are saved via their own CRUD (`POST /api/scanner/scans`) and later **hand off to Kairos** when a
-user selects a candidate — the same funnel converges to a single `<kairos_pick>` and becomes a
-monitored `call`. Both Portfolio and Scanner are single-shot generators with server-side
+are saved via their own CRUD (`POST /api/scanner/scans`) and later **hand off to Mentor** when a
+user selects a candidate — the same funnel converges to a single pick (the wire tag is still
+literally `<kairos_pick>`, named for the desk that first received it) and becomes a monitored
+`setup`. Both Portfolio and Scanner are single-shot generators with server-side
 finalization: the model proposes, the server computes the numbers that matter.
 
 ---
@@ -253,7 +245,6 @@ Orchestrated by `pages/MainPage.jsx`.
 
 | Agent | Panel | Generate handler |
 |---|---|---|
-| Kairos | `cmps/ChatPanel/ChatPanel.jsx` (button gated by `generateReady`) | `POST /api/kairos` → persists the drafted call |
 | Portfolio | `cmps/PortfolioPanel/PortfolioPanel.jsx` | `handleGeneratePlan` → `POST /api/trade-ideas/batch` |
 | Scanner | `cmps/ScannerPanel/ScannerPanel.jsx` → `cmps/Radar/*` | `handleGenerateList` → scan CRUD |
 | Analyst | `cmps/AnalystPanel/*` | coverage CRUD (`POST /api/analyst/coverage`) |
@@ -270,7 +261,7 @@ AND/OR tree). Dialogs: **OrderConfirmDialog** (idea hit → order plan), **PreEn
 
 ```
 SSE            api/_shared/sse.util.js
-routes         api/{axl,kairos,mentor,portfolio,scanner,analyst,strategy}/*.routes.js + *.controller.js
+routes         api/{axl,mentor,portfolio,scanner,analyst,strategy}/*.routes.js + *.controller.js
 agents         services/agents/*.agent.service.js       (tools in services/tools/*.tools.js)
 prompts        prompts/*.md  (hot-reloaded via makePromptLoader; guarded by promptPaths.test.js)
 emit/parse     services/llmStream.util.js (ALL_EMIT_TAGS)  +  services/agentIO.js

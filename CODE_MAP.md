@@ -89,8 +89,9 @@ api/
                           sockets: every tab is a reader of the same inbox, and one socket per user
                           meant a second tab displaced the first WITHOUT closing it — that browser
                           never reconnected and its unread badge silently froze); sendBotMessage funnel,
-                          BOT_IDS = axl·portfolio·scanner·kairos·mentor·analyst·strategy (one notify
-                          bot per agent) + botForKind (kind → sender) and RETIRED_BOT_IDS (`idea`:
+                          BOT_IDS (one notify bot per agent — it also keeps an ARCHIVED desk's id,
+                          so the cards already in a user's thread still render with the brand that
+                          sent them) + botForKind (kind → sender) and RETIRED_BOT_IDS (`idea`:
                           feed gone, thread hidden, its orphan cards fall back to Axl).
                           listCardRecipientsSince(type, since) = the shared dedupe read for any
                           fan-out notifier ("who already got today's?"), conversation→user join
@@ -106,12 +107,11 @@ api/
                               the legacy `{idea}/{ideas}` body shape, everything else answers bare
 services/
   agents/                 the 6 LLM desks (analyst · axl · mentor · portfolio · scanner ·
-                          strategy). KAIROS IS ARCHIVED (2026-08-18) — Mentor took the trading
-                          over and the desk moved to archive/, imported by nothing
-                          (docs/desks/trade-pipeline.md, archive/README.md).
-                          Five of the six append LANGUAGE_RULE + VENUE_RULE to their base prompt;
-                          `strategy` (and marketBrief) do not — a broadcast has no user whose venue
-                          could be read. Moved out of the flat services/ root 2026-08-07 — they are a
+                          strategy). A seventh is archived and lives under archive/, imported by
+                          nothing — see archive/README.md.
+                          Five of the six append LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE to their
+                          base prompt; `strategy` takes LANGUAGE + BREVITY only and marketBrief
+                          LANGUAGE only — a broadcast has no user whose venue could be read. Moved out of the flat services/ root 2026-08-07 — they are a
                           distinct KIND of module (a desk, not a service), and they were the
                           largest single group making an 80-file directory hard to read. Their
                           prompts live in `prompts/` (`join(__dirname, '../../prompts/x.md')`)
@@ -288,16 +288,17 @@ services/
                             is load-bearing: it is the handle Axl quotes back in `<edit>` to reopen
                             that exact item. Formatting is judgment, the read is a pipe, and the pipe
                             is shared — a future card or route renders the same fields
-  eventRisk.service.js      buildEventRisk({asset,assetClass}) — scheduled catalysts FROZEN onto a Kairos
-                            call at build: earnings (Finnhub, equities) + Fed/macro (FRED), low-impact
-                            dropped, 10d horizon. Never throws. Hermes reads it to hold off pre-event entry
+  eventRisk.service.js      buildEventRisk({asset,assetClass}) — scheduled catalysts FROZEN onto an
+                            entity at build: earnings (Finnhub, equities) + Fed/macro (FRED),
+                            low-impact dropped, 10d horizon. Never throws. A monitor reads it to hold
+                            off entering into an unresolved binary
   tradeCapture.service.js   append-only `trades` history (captureOpen / captureOpenBare / captureClose)
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
-  tradeNotify.service.js    notify+route cards → social chat: entry_confirm (paper/live idea + Kairos
-                            ready call) + call_expiry (Kairos thesis edit/expired) + queue_ready (the
-                            market-open nudge, from Axl) + setup_invalidation / setup_manage (Talos,
-                            from Mentor). Pure builders + thin sendBotMessage wrappers;
-                            card is the alert, existing UI is the destination.
+  tradeNotify.service.js    notify+route cards → social chat: entry_confirm (paper/live idea entry)
+                            + queue_ready (the market-open nudge, from Axl) + setup_invalidation /
+                            setup_manage (Talos, from Mentor). Pure builders + thin sendBotMessage
+                            wrappers; card is the alert, existing UI is the destination. A few
+                            builders here have callers only under archive/ and emit nothing.
                             entry_confirm carries a `note` (passed_earlier | off_hours | null) for scheduled entries
                             A card WITHOUT `actions` is a statement, not a request (ran_away /
                             invalidated_fyi / let_run) — no buttons, no pending lifecycle
@@ -305,7 +306,8 @@ services/
                             broker links, fan the accepted action across ALL accounts (amend stop/TP,
                             partial/full close), write position_state once. Kind-BLIND — the caller
                             passes `entity` (owns position_state) + `holder` (owns brokerOrders); for a
-                            setup they are the same doc, for a call the holder is its materialized idea.
+                            setup they are the same doc, and the split exists for kinds where they
+                            are not.
                             Execution contract: move_stop{new_stop} take_partial{size_pct}
                             let_run{new_tp|cancel_tp} exit_now{}. Each desk translates its own dialect in
   talos.handoff.service.js  Mentor's half: POST /api/setups/:id/action → accept (move_stop|take_partial|
@@ -360,9 +362,9 @@ monitoring/
                             export, resetIdea, only cleared Minos's own Map and went with it.
                             Best-effort: every failure path returns not-satisfied so the arm still
                             proceeds. NB the `idea` KIND is untouched — it is the execution tier.
-  (hermes.monitor.service.js and hermes.assess.js moved to archive/monitoring/ on 2026-08-18
-   with the Kairos desk they served — see archive/README.md. Their two shared helpers,
-   _allText and _formatEventRisk, stayed behind in assess.shared.js because Talos imports them.)
+  (One monitor moved to archive/monitoring/ on 2026-08-18 with the desk it served — see
+   archive/README.md. Its two shared helpers, _allText and _formatEventRisk, stayed behind in
+   assess.shared.js because Talos imports them.)
   talos.monitor.service.js  Talos — the Mentor-setup loop (own tick, kind:'setup'). TWO BRAINS, ONE LOOP:
                             pre-entry readiness, past-entry management (_managePosition). Pre-entry
                             cascade, cheapest-first: (1) the arithmetic SCENARIO gate — which PREMISE
@@ -525,12 +527,17 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 
 ## Deployment shape
 
-ONE process. `server.js` starts eleven background loops through `startLoop`
-(`services/lifecycle.service.js`) and there is no leader election, and a handful of module-level `Map`s are load-bearing rather than caches — the exit-order
-lock in `execution.reconciler` and the WebSocket registry in `chatWs` most of all. A second instance
-corrupts the first and breaks the second, mostly in silence. Before changing an instance count read
+ONE process, and ENFORCED since 2026-08-18. `server.js` starts twelve background loops through
+`startLoop` (`services/lifecycle.service.js`), behind a Mongo lease
+(`services/instanceLock.service.js`): the process that wins it starts them, a second process starts
+none and says so while still serving HTTP, and losing the lease mid-flight stands them back down.
+It buys SAFETY, NOT SCALE — a handful of module-level `Map`s are load-bearing rather than caches,
+the exit-order lock in `execution.reconciler` and the WebSocket registry in `chatWs` most of all,
+and the latter is per-process request-path state, so a user on the follower still misses the cards
+the leader emits. Before changing an instance count read
 [docs/architecture/single-instance.md](docs/architecture/single-instance.md), which lists what is
-already claimed through Mongo, what is not, and the order to fix it in.
+already claimed through Mongo, what is not, and the order to fix it in. A green lease is not
+permission.
 
 **Shutdown is ordered and bounded.** SIGTERM/SIGINT (and any uncaught exception) run one path:
 mark draining so readiness answers 503 → `stopLoops()` → `server.close()` + `closeIdleConnections()`

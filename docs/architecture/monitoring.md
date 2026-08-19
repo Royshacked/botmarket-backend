@@ -43,7 +43,7 @@ against live market data. It runs as a background service inside the Express pro
 > The running loops are **Talos** (`setup`), **Themis** (portfolio), **marketOpen** (kind-blind
 > deferred-order sweep), **entries** and **exits** (the two kind-blind condition-tree loops), the
 > **coverage** monitor, the **tilt** monitor, the execution reconciler and the paper-venue loops.
-> Hermes (`call`) is archived.
+> One further monitor is archived with the desk it served (`archive/README.md`).
 >
 > The loop was switched off because its tick selected work by STATUS alone
 > (`looking`/`long`/`short`) — shared vocabulary across every kind — so it woke on `setup` entities

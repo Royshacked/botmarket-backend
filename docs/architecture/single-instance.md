@@ -14,9 +14,9 @@ This document says what is safe, what is not, and what it would take to lift the
 
 Two different things are per-process:
 
-1. **The loops.** `server.js` starts ten background loops (eleven until Hermes was archived on
-   2026-08-18). There is no leader election *wired up*, so a second instance runs a second copy
-   of all ten — but see "Enforcement" below: the mechanism now exists, unwired.
+1. **The loops.** `server.js` starts twelve background loops. They now run behind a Mongo lease
+   (see "Enforcement" below), so a second instance starts none of them — but the lease bounds the
+   damage rather than making the loops safe to duplicate.
 2. **In-memory state that is load-bearing.** ~40 module-level `Map`s and TTL caches. Most are pure
    caches (a second copy costs money, not correctness). A few are not caches at all — they are the
    only thing making an operation exactly-once.

@@ -5,15 +5,22 @@ flow diagrams see [README.md](README.md); for file layout see [CODE_MAP.md](CODE
 
 The app turns natural-language chat into **monitored trade ideas** that route to a
 broker. Six desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
-Atlas (portfolio) · Argus (scan) · Prometheus (`coverage`) · Pythia (`tilt`) — each kind is
-watched by its own background monitor, and one reconciler keeps entity state honest
-against the broker. Nothing reaches a broker while its venue is shut (§5). Every desk is
-handed the user's venue on every turn, and every account-bound artifact belongs to one
-workspace (§8).
+Atlas (portfolio) · Argus (scan) · Prometheus (`coverage`) · Pythia (`tilt`) — and each
+authored kind is watched by its desk's own background monitor. The `idea` execution tier
+has no desk, so it is watched by two kind-blind loops instead (§2). One reconciler keeps
+entity state honest against the broker. Nothing reaches a broker while its venue is shut
+(§5). Every desk is handed the user's venue on every turn, and every account-bound
+artifact belongs to one workspace (§8); three shared rules govern how they all speak
+(§9), and all of it runs on exactly one instance (§10).
 
-**Kairos (`call`) is asleep.** Mentor took the trading over; the autonomous call builder
-returns later as a premium Mentor mode. Calls in flight still run under Hermes and can
-still be edited, so the kind is live everywhere below — but nothing new is authored there.
+**Archived work is out of this spec.** One desk and its kind are frozen whole under
+[`archive/`](archive/README.md), authored by nothing and watched by nothing, and are not described
+here — that README is their spec. Some of their names survive in live code (a bot id, a hand-off
+tag, a kind constant, a few dormant card builders); those are noted where they are load-bearing and
+nowhere else. If the desk comes back, it comes back to this document with it.
+
+**Minos, the legacy `idea` monitor, was DELETED** — not archived. The `idea` KIND stays, because it
+is the execution tier every order rides. Its four capabilities were re-homed; see §2.
 
 ---
 
@@ -21,9 +28,10 @@ still be edited, so the kind is live everywhere below — but nothing new is aut
 
 `idea` is the execution-tier kind served by `/api/trade-ideas`. **Portfolio holdings ride it**, so
 everything below — the statuses, the condition tree, the execution path — is live, and is the
-contract those callers hold. Nothing authors an `idea` conversationally: the authoring kinds are
-Kairos's `call` (watched by Hermes) and Mentor's `setup` (watched by Talos), and Atlas writes
-holdings straight to this kind through `POST /api/trade-ideas/batch`.
+contract those callers hold. Nothing authors an `idea` conversationally: the authoring kind is
+Mentor's `setup` (watched by Talos), and Atlas writes holdings straight to this kind through
+`POST /api/trade-ideas/batch`. The tier has no desk of its own, so it is watched by two kind-blind
+loops rather than by any agent's monitor — `entry.monitor` and `exit.monitor` (§2).
 
 ### Statuses
 
@@ -36,7 +44,7 @@ waiting ──► looking ──► hit ──► long / short ──► closed
 | Status | Meaning |
 |--------|---------|
 | `waiting` | saved, entry conditions not yet actively watched (also the resting floor state) |
-| `looking` | actively watched by the monitor; entry detection running |
+| `looking` | actively watched by `entry.monitor`; entry detection running on a rising edge |
 | `resting` | a STOP working order is live at the broker; reconciler flips it to long/short on fill |
 | `hit` | entry conditions met (or `immediate`); an order plan is built, awaiting user confirmation |
 | `long` / `short` | position open; stop/TP condition trees + reconciler now govern it |
@@ -54,7 +62,27 @@ waiting ──► looking ──► hit ──► long / short ──► closed
   `resetPreEntry` PATCH flag) so only a fresh cross fires; *Edit* reopens the idea in chat.
 - **Exits are always broker/stop-owned.** `touch` exit levels rest as broker closing orders
   (`positionId` reduce-only on hedging brokers); non-`touch` exits are watched by the software
-  monitor and closed via a market order when they fire.
+  monitor (`exit.monitor` → `positionMonitor.checkPosition`) and closed via a market order when
+  they fire. `protectionPlan.routeExits` makes that split, and the leaf TYPE is the only input.
+- **A leg may be a bare price or a LADDER of them.** `applyPriceLevels` takes every shape of the
+  same claim in ONE field per leg (`entry_price` / `stop_price` / `tp_price`): `185.5`,
+  `[185.5, 182]`, `[{price:185.5, quantity:60}, 182]`, and `null`/`[]` to CLEAR the leg. Each
+  readable rung expands to a `touch` leaf via `touchLeaf`; an unreadable rung is dropped alone
+  rather than taking the good rungs with it. Authored conditions win — a stray price field never
+  overwrites a condition someone wrote.
+  - **Omitted `quantity` means "share the remainder", which `0` does not** — only a real slice is
+    stamped. `_assignSlotQuantities` then splits the rest equally, residue to the first defaulted
+    slot. Setups share the allocator, so a target ladder authored as zones sizes identically.
+  - **A leg can never ask for more than the position.** Its rungs are alternatives that each close
+    part of ONE position, so together they sum to it at most: three 50-lot stops behind a 100-lot
+    position would close 150, and on a hedging account the excess does not bounce off the broker —
+    it OPENS a position the other way, a protective order that puts on risk. It must be caught at
+    ALLOCATION, because the reconciler's `_resyncExits` asks whether ONE order exceeds what remains
+    and each of those three is comfortably under. Over-asking is **trimmed, never refused**: a
+    partially sized stop beats no stop.
+  - **Clearing a leg clears its TREE, not just the flat list.** `stop_conditions: []` used to empty
+    only the array while `routeExits` read the tree, so "remove my stop" wrote a document showing no
+    stop while handing the broker back the order the user had just taken off.
 - **The reconciler is broker-authoritative.** On a reduce/close it asks the broker whether the
   position survived (`findOpenPosition`) before mutating idea state — it never closes an idea on a
   transient/unknown result.
@@ -80,9 +108,10 @@ waiting ──► looking ──► hit ──► long / short ──► closed
 ## 2. Condition trees & evaluators
 
 Entry / stop / TP are **condition trees**: AND/OR group nodes over typed leaves, evaluated by the
-one shared `monitor.orchestrator.evaluateTree` — called by `positionMonitor` (stop/TP on an open
-position) and by `invalidation.monitor` (which synthesizes its own leaves and runs them through the
-same evaluator rather than growing a second one).
+one shared `monitor.orchestrator.evaluateTree` — called by `entry.monitor` (entry, on an armed
+entity), by `positionMonitor` under `exit.monitor` (stop/TP on an open position), and by Talos
+(setup readiness). One evaluator, three callers: a second one is how two answers to the same
+question start disagreeing.
 
 **7 leaf types** (`monitoring/evaluators/*`):
 
@@ -107,41 +136,79 @@ same evaluator rather than growing a second one).
   evaluator's `stateLevel` snapshot mode (crossAbove→"is above now") backs both this and the
   arm-time pre-flight.
 
+### Who watches the execution tier — the four capabilities Minos held
+
+Minos owned the entry poll, the exit poll, the invalidation monitor and the deferred-order sweep in
+ONE tick, so switching it off in July took four capabilities down at once and nobody noticed for
+weeks. They are now separate loops, each stoppable without the others — **one loop, one
+capability**, and none of them tied to a desk's lifecycle:
+
+| Capability | Owner | Contract |
+|---|---|---|
+| entry poll | `monitoring/entry.monitor.js` | selects `looking`, evaluates the entry tree, flips to `hit`, builds the order plan, posts the confirm card. Off-hours it parks at `awaiting_market` and lets the market-open sweep own the card (§5) |
+| exit poll | `monitoring/exit.monitor.js` | selects `long`/`short` and calls `positionMonitor.checkPosition` on the residual leg — everything `routeExits` could NOT rest at the broker |
+| deferred-order sweep | `monitoring/marketOpen.monitor.js` | kind-blind; the ONE drain for everything parked while the venue was shut |
+| the invalidation ENVELOPE | **nobody — deleted** | see below |
+
+- **Both polls exclude `setup`.** Talos owns setup readiness — the same question asked about zones —
+  and already claims `monitor_state.next_check_at` on those documents. Two loops claiming one
+  document would each push the other's schedule forward until the loser silently stopped running.
+- **The two polls cannot contend with each other** either: entry selects `looking`, exits select
+  `long`/`short`, and a document is never both.
+- **The rising edge is the point.** Entry evaluates with `requireHeld` against a floor
+  (`entryFloorAt`), so a level already true when the user armed does not fire — otherwise every
+  armed idea would trigger on its first wake. The corollary is that a breakout that happened BEFORE
+  the arm can never fire at all, which is exactly what `preflightEntry` warns about at arm time.
+  Arming therefore also NULLS `monitor_state.next_check_at`, or a re-armed idea would sleep up to
+  four hours before its first look.
+- **The exit pre-gate is load-bearing, not an optimisation.** Almost every live position is
+  protected entirely by resting broker orders and has no monitored leg at all. `hasMonitoredWork`
+  answers that BEFORE any IO, so those positions cost one Mongo write instead of three candle
+  fetches — this loop sees every open position in the app, and we have throttled ourselves off our
+  own price provider by polling once already.
+
 ### Invalidation (advisory, never executes)
 
-`idea.invalidation.range = { lower, upper, *Anchor }` is the actionable entry band the agent
-derives from chart structure. `invalidation.monitor.js` watches it deterministically (synthesizes
-a `structured` leaf per edge — **no LLM in the hot path**). A candle **close** outside either edge
-fires a one-shot advisory alert (bot message + edit deep-link), latched by `invalidation_status`.
-It runs pre-entry AND in-position but only INFORMS; exits stay stop-owned.
+**Invalidation is the SECOND AXIS, not a status.** A plan can go stale while it is still perfectly
+well `looking`, so it is tracked orthogonally to the lifecycle: `INVALIDATION.DRIFTING` (soft,
+running the wrong way, still alive) and `INVALIDATION.FIRED` (latched, awaiting the user), over
+edges `lower | upper | time` (`services/entity/vocabulary.js`). It only INFORMS — **exits are always
+stop-owned and invalidation never executes.**
 
-- **Pre-entry watches both edges** (above = "don't enter, too high"); **in-position watches only the
-  adverse edge** — long → `lower`, short → `upper` (a favorable-side cross is fine; the TP owns it).
-- The chat alert bubble offers **Update** (edit) / **Close** (in-position → resolves the open
-  position by symbol → `closePosition`) / **Dismiss**. Dismiss is persisted per-message
-  (`chat_messages.dismissed`) and never touches the `invalidation_status` latch, so a re-armed idea
-  still produces a fresh new alert.
+- **On a `setup` it is Talos's validity gate**, and it is the live path. Talos fires a
+  `setup_invalidation` card in four flavours: `ran_away` (price ran past the level unfilled),
+  `invalidated` (a close past the edge where the trade works — offers *Re-draw it*),
+  `invalidated_fyi` (same event, but other scenarios survive, so there is nothing to decide) and
+  `stale_map` (the levels have drifted from where structure now sits). Scenarios are RIVALS, so the
+  card says how many are still armed.
+- **The `idea` price ENVELOPE is gone.** `monitoring/invalidation.monitor.js` watched
+  `idea.invalidation.range` and was deleted on 2026-08-18: the band was only ever authored by the
+  Idea agent (deleted in July) and by an archived desk, Atlas never stamps one on a holding, and
+  its only caller was Minos's tick. It had been watching a field nothing writes, for a kind nothing
+  authors, since July. The `invalidation_alert` card can no longer fire. Reviving the envelope means
+  first building something that authors the band.
 
 ### Social-chat notification cards (notify + route)
 
 Major events are surfaced as typed cards in social chat via one funnel — `sendBotMessage(userId,
 content, type, payload, botId)` (`api/chat/chat.service.js`) → `chat_messages` → WebSocket →
 `SocialChat/ChatWindow.jsx` dispatches by `type` to a card component. Each `botId` is the authoring
-agent (`BOT_IDS = axl · portfolio · scanner · kairos · mentor · analyst · strategy`; only Axl is
-conversational, the rest are notify-only feeds), so a card reads "from Atlas / Kairos / Mentor". A
-kind picks its sender through the one `botForKind` map, and a kind with no desk of its own (`idea` —
-see `RETIRED_BOT_IDS`) falls back to Axl rather than posting into a feed nobody reads. The card is the alert + a
+agent (`BOT_IDS` in `chat.service.js`; only Axl is conversational, the rest are notify-only feeds),
+so a card reads "from Atlas" or "from Mentor". A kind picks its sender through the one `botForKind`
+map, and a kind with no desk of its own (`idea` — see `RETIRED_BOT_IDS`) falls back to Axl rather
+than posting into a feed nobody reads. An ARCHIVED desk keeps its id in `BOT_IDS` rather than
+joining `RETIRED_BOT_IDS`: the cards already in a user's thread are real history and must keep
+rendering with the brand that sent them. The card is the alert + a
 clickable preview; the **existing action UI stays the destination** (deep-link, not embedded action).
 Dismiss/handled state persists per-message.
 
 | `type` | Event | Card actions → destination |
 |---|---|---|
-| `invalidation_alert` | Entry envelope broken (above) | Update / Close / Dismiss |
+| `setup_invalidation` | Talos's validity gate on a `setup` — `ran_away` · `invalidated` · `invalidated_fyi` · `stale_map` | Re-draw it → Mentor; the two FYI flavours carry NO action, because nothing is being asked |
+| `setup_manage` | Talos wants to change a position it is already in — `move_stop` · `add_leg` · `take_partial` · `exit_now` · `let_run` | Review → Mentor. `let_run` is TWO cards under one verb: bare (a deliberate decision not to trim — nothing to do, no button) vs with a `new_tp` (an amend of a resting order, so it needs the same confirm as any other change) |
 | `portfolio_review` | Scheduled review due | Review → Atlas review mode |
 | `manual_entry` / `manual_exit` | Broker-less fill needed | Inline FillCard (price/qty) — the one embedded-action card |
-| `entry_confirm` | Entry triggered, confirm needed (`kind: idea`\|`call`) | idea → workspace + `OrderConfirmDialog`; call → `/call/:id` pop-out |
-| `call_expiry` | Kairos thesis expiring/expired (`kind: edit`\|`expired`) | Edit → `/call/:id` pop-out · Delete · Dismiss |
-| `call_reentry` | A call **stopped out** with its thesis still intact (Hermes `_maybeOfferReentry`, one-shot) | Re-enter (`reviveCall` → `waiting`) · Close (`declineReentry`) |
+| `entry_confirm` | Entry triggered, confirm needed | → workspace + `OrderConfirmDialog`. The payload carries a `kind`; only `idea` is emitted today |
 | `queue_ready` | The venue opened and something is waiting (`marketOpen.monitor`) | Open the queue → the Floor's **Queued** desk. ONE card per USER, from Axl (see §5). The one card **completed by opening** (`resolvesOn: 'open'`): it points at a batch, so it carries no `subject` a write could resolve it through, and the list itself is the live record of what is still owed |
 | `market_brief_offer` | Daily broadcast offer, one per user per weekday (`marketBrief.notify.js`) | Get the brief → routes to **Axl**, who writes it in his thread · Dismiss |
 | `tilt_review` | The house view is past its clock — a stance matured, a macro catalyst landed, or the monthly floor expired (`tilt.monitor` → `reviewDecision`) | Run the review → routes to **Pythia**, who runs it in his thread · Dismiss |
@@ -168,11 +235,15 @@ The endpoint is a delivery dressed as a turn: no model runs on it, the brief goe
 event, and the pacing the reader sees is the client's typewriter. The thread is per-mount, so the
 brief is transient — it is re-askable, never re-read.
 
-`entry_confirm` fires for paper/live idea entries (on `awaiting_confirm`) and
-Kairos-ready calls; **manual** entries keep their own FillCard. `entry_confirm`/`call_expiry` for
-calls come from Hermes (the Kairos monitor)'s card hook (`enter`→ready, `edit`→expiring, `let_expire`→expired
-— the last previously expired silently). Once a call's card fires it leaves the monitor's active
-statuses, so no re-fire.
+`entry_confirm` fires for paper/live idea entries (on `awaiting_confirm`), posted by
+`entry.monitor`. **Manual** entries keep their own FillCard instead. When the trigger lands while
+the venue is shut, `entry.monitor` parks the entity at `awaiting_market` and posts NOTHING — the
+market-open sweep flips it to `awaiting_confirm` at the open and announces the whole batch with one
+`queue_ready` card per user (§5), which is what replaced a per-desk per-kind fan-out that put two
+cards in the same second.
+
+`services/tradeNotify.service.js` also holds a few card builders whose only callers are under
+`archive/`. They emit nothing and are documented in `archive/README.md`, not here.
 
 ### Axl reception hand-off: `<route>` vs `<edit>`
 
@@ -204,7 +275,6 @@ them over with one of two tags, and they are different acts: a route names a **d
 
 | kind | desk | reopens in |
 |---|---|---|
-| `call` | trade | Kairos — chat + draft restored (note the trade desk *enters* at Argus; the item picks the tab) |
 | `setup` | assist | Mentor — chat + worksheet restored |
 | `coverage` | research | Prometheus, in revise mode |
 | `scan` | scan | Argus, list primed for refining |
@@ -270,7 +340,10 @@ Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/b
   the N-leg entry card is posted instead, because with no broker to tell, moving a status would claim
   a position nobody opened. Offered only while EVERY leg is still waiting — a half-working book is
   managed leg by leg.
-- Portfolio holdings are governed by the scheduled review, **not** the intrabar invalidation watcher.
+- Portfolio holdings are governed by the scheduled review, **not** by an intrabar invalidation
+  watcher — which no longer exists for any kind (§2). A holding is an `idea` document, so it is
+  still swept by `entry.monitor` (if it was armed with entry conditions) and by `exit.monitor` (if
+  it carries a stop/TP leg the broker could not hold).
 
 ---
 
@@ -280,9 +353,10 @@ The **Scanner Agent** ("Argus", `POST /api/scanner/stream`) emits a `<scan_list>
 uppercased tickers, guaranteed period/thesis/direction/signals). A scan is a watchlist of
 candidates (`{ ticker, direction, thesis, analysis, signals, conviction, sources }`), not ideas.
 CRUD at `/api/scanner/scans` (`PUT` to update). A user promotes a candidate into **Mentor**, where
-the same funnel converges to a single pick and becomes a monitored `setup`. The hand-off tag is
-still literally `<kairos_pick>` — it was named for the desk that used to receive it, and renaming a
-tag both repos parse is a migration, not a docs fix. Read it as "the single-pick hand-off".
+the same funnel converges to a single pick and becomes a monitored `setup`. The wire tag for that
+hand-off is literally `<kairos_pick>` — it carries the name of the desk that first received it, and
+renaming a tag both repos parse is a migration, not a docs fix. Read it as "the single-pick
+hand-off"; it goes to Mentor.
 
 Argus runs a **systematic-discovery funnel** — candidates come from grounded sources, never
 model memory. Phase 2 casts a wide net (`screen_candidates`, `get_market_movers`,
@@ -290,7 +364,7 @@ model memory. Phase 2 casts a wide net (`screen_candidates`, `get_market_movers`
 `get_price_action`; Phase 3 narrows survivors with a `get_candles`/`get_indicators` baseline plus
 angle-triggered tools (fundamentals, positioning, cycle, `get_orderblocks`/`get_false_breaks`) and
 `get_chart` (KLineChart image, model-only) reserved for the top shortlist; Phase 4 emits the ranked
-list. Via the single-pick hand-off (`<kairos_pick>`, see above) the same funnel converges to one name.
+list. Via the single-pick hand-off (see above) the same funnel converges to one name.
 
 ---
 
@@ -303,7 +377,24 @@ the `BrokerAdapter` contract. **Consumers branch on `capabilities()` flags, neve
 |--------|--------|---------|
 | `ctrader` | live | full — OAuth+REST for accounts, ProtoOA WebSocket for orders/positions/exec (`nativeProtection` true); serves candles via trendbars (`ohlcv` true) |
 | `paper` | live | full — virtual venue, fills against the live price feed (`nativeProtection` false → exits rest as `positionId` closing orders) |
+| `manual` | live | none by the app — `trading` false, **`selfExecuted` true**: real money at an institution we cannot reach, so the USER places the order and confirms the fill. Reuses paper's virtual store (`mode:'manual'`) for reads and marks |
 | `ibkr` | in progress | data-only over IB Gateway / TWS socket (`@stoqey/ib`; `ohlcv` true, trading false) — **paused; do not extend without asking** |
+
+**`selfExecuted` is how a venue says who trades at it**, and it is what keeps `manual` from needing
+a special case anywhere. Two derived questions live in `services/venue.resolve.service.js`, so the
+answer arrives with the adapter rather than from a list beside the caller:
+
+- `isSelfExecuted(broker)` — post a fill card instead of sending an order.
+- `isBindableVenue(broker)` — may an entity bind here at all? `trading || selfExecuted`: either the
+  app can place the order or the account holder will, and either one means the entity has a future.
+  This replaced a hard-coded `['ctrader','paper','manual']` in `setups.service` — correct today and
+  wrong in the direction nobody notices, since the day IBKR's trading flips on that list would have
+  answered `no_venue` to every Generate. IBKR is refused today because it can do NEITHER (unwired,
+  not hand-traded), and the test pinning that refusal is written to fail when its trading capability
+  is turned on, so the reminder lands on the line to delete.
+
+`capabilities()` is an **exhaustive literal** per adapter, never a spread of the base — an omitted
+flag reads `undefined`, which is not `false` at every call site.
 
 ### Off-hours: nothing executes while the venue is shut
 
@@ -410,22 +501,23 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
 
 ## 6. Key collections
 
-- `ideas` — the central document (status, direction, condition trees, timeframes, invalidation,
-  brokerOrders, exitOrders, allocationRatio, portfolioId, broker, accounts, `brokerSymbol` (getTicker-resolved),
-  `basisOffset` (fork-measured price shift, 0 unless aliased index future), `groupId` (multi-broker fork display)…).
+- **`entities`** — the central document, ONE collection with a `kind` discriminator (`idea` ·
+  `portfolio_item` · `setup`; the enum also carries an archived kind). The name is written down once, in
+  `services/entity/entityCollection.js#ENTITIES`, and every reader imports it — the P2b cutover
+  from `ideas` was a one-line change because of that, and `tests/unit/collectionNames.test.js`
+  fails the build on any collection name typed inline at a call site. Fields: status, direction,
+  condition trees, timeframes, invalidation, brokerOrders, exitOrders, allocationRatio, portfolioId,
+  broker, accounts, `brokerSymbol` (getTicker-resolved), `basisOffset` (fork-measured price shift,
+  0 unless aliased index future), `groupId` (multi-broker fork display)…
+  - The legacy `ideas` collection still exists in Mongo holding abandoned pre-cutover documents.
+    Nothing reads it. It is queued to be archived and dropped.
 - `trades` — append-only point-in-time capture of each opened/closed idea (paper + live).
-- `kairos_calls` — the Kairos discretionary "call" (identity + plan + monitor_state), watched by Hermes.
-  Two context fields are **frozen at build** for the monitor to weigh: `event_risk` (upcoming earnings +
-  Fed/macro within ~10d, `buildEventRisk`) so Hermes holds off entering into an unresolved binary; and
-  `market_sensitivity {level, drivers, note}` — how much the asset tracks the broad market. Hermes reads
-  the tape **live** at assessment (gated by `level`; `drivers` are the correlated proxies it pulls), and
-  a tentative entry on a market-sensitive call is web_search-confirmed before it fires.
 - `coverage` — the Analyst's living per-name research thesis (one doc per user+symbol): the variant
   perception (`thesis`), `rating`, OUR `price_target` + `estimates` vs consensus, the `gap` (our PT vs
   the Street — the edge), monitorable `kill_criteria`, `status` (active│thesis_broken│target_hit│retired│
   watchlist), and an append-only `revisions[]` history. `compute_valuation` (deterministic, `services/
   valuation.engine.js`) fills the PT/gap; the Analyst agent + coverage-monitor are in progress. Buy-side
-  research — NOT an execution-tier entity, watched by its own monitor, not Hermes/Talos/Themis.
+  research — NOT an execution-tier entity, watched by its own monitor rather than Talos or Themis.
 - `pending_actions` — the OFF-HOURS QUEUE (§5): one row per decision confirmed while the venue was
   shut. An intent, not an entity — `{ userId, origin{kind,id,label}, action{verb,…}, queuedBy,
   cancellable, state }`, idempotent per `(user, entity, verb)`. Lifecycle `QUEUED → RELEASED
@@ -433,9 +525,10 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   acts on; unioned with parked entities only by the `listWaiting` READ.
 - `paperAccounts` / `paperPositions` / `paperOrders` — the virtual broker store.
 - `chat_conversations` / `chat_messages` — social DM + bot notifications; one notify bot per agent
-  (`BOT_IDS`, incl. `kairos`). A RETIRED bot's thread is kept but hidden from `getConversations`
-  (`RETIRED_BOT_IDS` — `idea`). `chat_messages.type`/`payload` drive the typed notification cards
-  (invalidation_alert, portfolio_review, manual_entry/exit, entry_confirm, call_expiry — see §2);
+  (`BOT_IDS`, which also keeps the id of an archived desk so its old cards still render). A RETIRED
+  bot's thread is kept but hidden from `getConversations` (`RETIRED_BOT_IDS` — `idea`).
+  `chat_messages.type`/`payload` drive the typed notification cards (setup_invalidation,
+  setup_manage, portfolio_review, manual_entry/exit, entry_confirm, queue_ready — see §2);
   `chat_messages.dismissed`/`dismissOutcome` persist the handled state of an actionable card.
 - `threads` — unified agent conversation threads (idea / portfolio / scanner). A conversation gets a
   subject-independent `threadId` at the start and moves through three tiers: **trivial** (below the
@@ -454,6 +547,28 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
 
 - JWT in an httpOnly cookie; `requireAuth` guards most routes. `req.user._id` is the custom string id.
 - **Authed (cost/abuse guard):** transcribe.
+- **Unauthenticated, deliberately:** the broker OAuth callback (identity comes from the signed
+  state) and `GET /api/health` + `GET /api/health/ready`. The probes are therefore thin: outside
+  development they report a loop COUNT rather than the roster, because an anonymous endpoint should
+  not enumerate a system's internals and the count is what actually answers "did the fleet come
+  up?".
+- **Liveness and readiness are not the same question and must not share an answer.** Liveness stays
+  `200` while the process drains — a failing liveness probe means "restart this container", which
+  turns an orderly deploy into a hard kill. Readiness goes `503` the moment shutdown begins, so the
+  load balancer stops routing BEFORE `server.close()` starts refusing sockets. Both write with
+  `.end()` under `Cache-Control: no-store`: `res.json()` computes an ETag, the readiness body is
+  byte-identical call to call, and a probe sending `If-None-Match` would get a `304` with no body —
+  which reads as an outage.
+- **Three rate limiters** (`middleware/rateLimit.middleware.js`), each answering a different threat:
+  a blanket per-IP ceiling on `/api` (a runaway backstop, not a quota), a tight per-IP limit on
+  auth (the credential-stuffing gate), and one on the desk STREAMS — the only one that is a COST
+  ceiling, because every agent turn buys tokens. `tests/unit/agentLimiterCoverage.test.js` fails
+  the build when a streaming endpoint is added without one. `RATE_LIMIT_DISABLED` is opt-in and
+  logged loudly at boot. **The health probes mount ahead of all three** — a probe running every few
+  seconds must never spend a user's budget, and a limiter that `429`s the health check reads to the
+  platform as an outage.
+- **Security headers are hand-rolled** (`middleware/securityHeaders.middleware.js`), not helmet —
+  read the file for why a CSP is deliberately absent.
 
 ---
 
@@ -488,7 +603,7 @@ choice is persisted per user (`user_workspace`) and served by `GET`/`PUT /api/wo
 
 An entity belongs to a workspace **if it binds to an account**:
 
-- **scoped** — `call`, `setup`, `portfolio`. Each is real money or simulated money and never both,
+- **scoped** — `setup` and `portfolio`. Each is real money or simulated money and never both,
   so mixing them into one list is not an answer. A book carries `modes[]` rather than one value: a
   book appended to across a workspace switch is genuinely mixed and shows in **every** workspace it
   holds something in, because listing it in only one makes the other half unreachable.
@@ -505,8 +620,9 @@ reconciler process every mode regardless — a live stop must fire while the use
 
 `get_trading_context` was wired into every agent and desks still opened turns asking "are we in paper
 or live?". A tool is an invitation, and a model mid-thought declines it. So the four venue facts are
-**pushed** into every turn instead of waited for (`buildVenueSection`), and `VENUE_RULE` (authored
-once beside `LANGUAGE_RULE`) states that asking anyway is a failure:
+**pushed** into every turn instead of waited for (`buildVenueSection`), and `VENUE_RULE` — one of
+the three shared voice rules authored together in `services/agentUtils.js` (`LANGUAGE_RULE` ·
+`VENUE_RULE` · `BREVITY_RULE`) — states that asking anyway is a failure:
 
 1. the current workspace, 2. the connected live broker, 3. every account, 4. **available to deploy**.
 
@@ -530,3 +646,62 @@ account's cash is never debited when a position opens, so only the adapter deriv
 account documents directly (which `getTradingContext` once did for paper/manual) yields no
 `freeMargin` at all, and every desk silently falls back to balance and spends the same money twice.
 Where a venue genuinely does not report it, that absence is stated rather than papered over.
+
+---
+
+## 9. Agent voice — the three shared rules
+
+Three rules are authored ONCE in `services/agentUtils.js` and appended to a desk's **base** prompt
+(never to a mode/profile fragment — those are concatenated onto the base and would repeat it). They
+are single-sourced for the same reason each time: seven copies of a sentence about tone is seven
+chances for one to drift, and a rule a user meets differently at two desks is worse than no rule.
+
+| Rule | Says | Reaches |
+|---|---|---|
+| `LANGUAGE_RULE` | English by DEFAULT, switched only by an explicit request | replies **AND** saved prose — a thesis, a rationale, kill-criteria, card copy |
+| `VENUE_RULE` | the venue is GIVEN; asking for it is a failure (§8) | every desk that has a user |
+| `BREVITY_RULE` | ≤4 sentences, one idea each, bullets at 3+ items, lead with the answer | the spoken REPLY **only** |
+
+- **The caps must stay NUMBERS.** "Be concise" is a preference and the model reads it as one: it
+  holds for two turns and dissolves into the register around it. Four sentences is checkable in a
+  way that "focused" is not.
+- **Length is the only thing being cut, never the substance.** An answer that came in under four
+  sentences by dropping the risk, the number or the objection is a WORSE answer, not a shorter one.
+  That clause is deliberately the longest line in the rule. Depth on request is not a violation.
+- **The two exclusion boundaries are opposite, and that is the point.** `LANGUAGE_RULE`
+  deliberately REACHES saved prose (a headless coverage re-model once rewrote an English thesis in
+  Portuguese with nobody asking — a run with no conversation to read a language off cannot bind to
+  "the language of the conversation"). `BREVITY_RULE` deliberately does NOT: a `thesis`,
+  `kill_criteria` or `analysis` is written to its own schema's spec and a four-sentence cap clips
+  it into uselessness.
+- **Who gets what.** Five desks take all three. `strategy` (Pythia) takes LANGUAGE + BREVITY but
+  **not** VENUE — a broadcast has no user whose venue could be read, and it carries no venue tools
+  either. The market brief takes LANGUAGE alone: it is an authored 250–350 word broadcast, and a
+  four-sentence cap would fight its spec directly.
+
+---
+
+## 10. Operations — one instance runs the loops
+
+**The background loops run on exactly one process, and since 2026-08-18 that is enforced rather
+than documented.** Before it, a `replicas: 2` in a file that is not in this repo silently gave you
+two of every loop, including two reconcilers cancelling each other's exit orders.
+
+- **A Mongo lease decides** (`services/instanceLock.service.js`). The winner calls
+  `startBackgroundLoops()`; a second process wins nothing, starts no loops, says so, and still
+  serves HTTP. Tuned by `INSTANCE_LEASE_TTL_MS` / `INSTANCE_LEASE_RENEW_MS`.
+- **Losing the lease stands the loops back down.** A Mongo blip or a long GC pause is enough, and by
+  then another process may legitimately hold it — standing down is what stops there being two
+  reconcilers for the length of the outage.
+- **The lock is not awaited at boot.** A database that is slow or down must not hold up the HTTP
+  listener; the lock retries on its own interval and the loops start whenever the lease becomes
+  winnable.
+- **It buys SAFETY, NOT SCALE.** `chatWs`'s socket registry is per-process request-path state, so a
+  user served by the follower still misses the cards the leader emits. **A green lease is not
+  permission to raise a replica count** — read `docs/architecture/single-instance.md` first.
+- **Every loop is registered, or it does not run.** `startLoop` (`services/lifecycle.service.js`)
+  starts a service AND registers it for shutdown, and **refuses a service with no `stop()`**. Each
+  of the twelve already exported one that nothing ever called: on SIGTERM the loops kept ticking
+  while the HTTP server drained, so a deploy could kill the reconciler part-way through placing an
+  exit. Registration is what makes `stopLoops()` writable — and makes a thirteenth loop one line
+  that cannot forget to be shut down.

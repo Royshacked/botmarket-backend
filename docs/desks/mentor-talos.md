@@ -208,8 +208,8 @@ principle 3's cheap half is opening exactly that door.
 ## Talos
 
 A poll loop with a zone gate, drawing from the **shared monitor tool kit**
-(`monitoring/assessTools.js`) rather than a private copy — the same registry Hermes draws from, with
-symbol scope and per-wake cost accounting.
+(`monitoring/assessTools.js`) rather than a private copy, with symbol scope and per-wake cost
+accounting.
 
 - **The card fires ONLY on `enter`.** Every other verdict is journalled, not notified. A monitor
   that announces every look trains the user to stop reading it.
@@ -217,9 +217,9 @@ symbol scope and per-wake cost accounting.
 - **`edit` fires a card too**, which it did not originally: a setup Mentor wanted to revise used to
   change silently.
 
-**Talos is Hermes with pieces missing, and that is a known state, not an accident.** The two
-monitors share a shape and a tool kit but not a brain; where Talos is thinner the gap is listed
-below rather than hidden behind a claim of parity.
+**Talos was built against an older monitor and is thinner than it in places — a known state, not
+an accident.** That monitor is now archived, so the gaps below are Talos's own to close; they are
+listed rather than hidden behind a claim of parity.
 
 ---
 
@@ -243,14 +243,14 @@ own.
   sizes are `third` │ `half` │ `two_thirds` **of the original position**, so they terminate. The
   read re-checks the setup's own declared conditions rather than a fixed axis set — the conditions
   were the reason for the trade, so they are the reason to stay in it.
-  See [trade-pipeline.md](./trade-pipeline.md) for the cascade and the Hermes-duplication expiry.
+  See [trade-pipeline.md](./trade-pipeline.md) for the cascade.
 - ~~**Nowhere to say yes.**~~ **BUILT 2026-08-13.** The proposal was written and the card was posted,
   but no endpoint accepted it — the verdict died on the card. Now `POST /api/setups/:id/action`
   (`talos.handoff.service`) accepts `move_stop` │ `take_partial` │ `exit_now`, or `dismiss` to clear
   the card and keep the position.
-  - **The hands are shared.** Execution runs through `positionManage.service` — the amend / partial /
-    close fan-out lifted out of `kairos.handoff`, so a setup and a call reach the broker through ONE
-    mechanism. What stays with the desk is its DIALECT: Talos proposes `{stop, why}` / `{fraction}`
+  - **The hands are shared.** Execution runs through `positionManage.service` — an amend / partial /
+    close fan-out that every kind reaches the broker through, so there is ONE mechanism rather than
+    one per desk. What stays with the desk is its DIALECT: Talos proposes `{stop, why}` / `{fraction}`
     and translates to the executor's `{new_stop}` / `{size_pct}` on the way in. The manual-mode card
     still carries the RAW proposal — the copy is written in Talos's words.
   - **`add_leg` is not an accept.** Talos already builds the order plan for a printing second leg and
@@ -272,14 +272,11 @@ own.
   meanwhile. Two deliberate exemptions: the **fill stamp** (bookkeeping — no price, no model, no
   card, and deferring it would leave a position with no frozen `stop.initial` overnight) and the
   pre-entry **expiry review** (a setup may still need to roll or die at the close).
-  **HERMES HAS THE SAME HOLE, UNFIXED** (`_checkCall` routes `POSITION_STATUSES` at line 84, the
-  market gate is at 106) — it manages live calls, so it wants its own change, not a blind mirror.
 - ~~**The manage-accept path is not hours-gated.**~~ **CLOSED 2026-08-15.** It was the last route to
   a broker that never asked: closing the monitoring hole stopped NEW cards appearing off-hours, but
   a card posted before the close could still be tapped at 02:00 and go straight out (on paper,
   filling at the stale day close). The gate now sits in `positionManage.applyManage`, the shared
-  executor, so **Hermes and Talos are covered by one call** and neither desk can add a verb that
-  forgets it. The queued verb is the action TYPE, so one accept cannot dedupe away another; the
+  executor, so **every desk is covered by one call** and none can add a verb that forgets it. The queued verb is the action TYPE, so one accept cannot dedupe away another; the
   replay reloads both documents and runs the same executor. See
   [off-hours-queue.md](../architecture/off-hours-queue.md) phase 5.
   **JUDGMENT LEFT OPEN:** a queued row is RELEASED at the open, not auto-run — the user presses

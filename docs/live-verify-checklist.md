@@ -152,8 +152,8 @@ The behavioural half. The injected live-book block is **gone**, so the risk is n
 number — it is an agent that never looks and reasons as if the book were empty.
 
 - [ ] **Desks actually call `get_trading_context`** `[ANY]` — **the most important item here.** Drive
-  a sizing turn on each desk (Kairos Phase 7, Idea's risk-budget step, Atlas Phase 5, Mentor's
-  sizing) and confirm the tool is called before the size is stated. Prompts are the only thing
+  a sizing turn on each desk (Atlas Phase 5, Mentor's sizing) and confirm the tool is called
+  before the size is stated. Prompts are the only thing
   carrying this now and prompts are what tests cannot verify. If a desk skips it, the fix is the
   lever already used for tradability: enforce it in code rather than ask.
 - [ ] **Balances cover EVERY account** `[ANY]` — with ≥2 accounts on a broker, all of them report a
@@ -316,8 +316,8 @@ before it is verified is an unrecoverable row in a frozen ledger.
 ### G4 — the exit journal line `[BLOCKED — needs a real close]`
 
 - [ ] **A broker close writes one `exit` line**, with price, reason and realized P&L, and no
-  `next_check_at` (there is no next check). It is written in `entityRepo.finalizeClose`, so verify it
-  on a CALL too — the fix is kind-blind and Hermes gets it for free, which is untested.
+  `next_check_at` (there is no next check). It is written in `entityRepo.finalizeClose`, which is
+  kind-blind, so verify it on more than one kind — every kind gets it for free, untested.
 - [ ] **The FE renders it as "closed out"**, and a pre-rename journal still renders "market closed"
   rather than the raw `closed` slug.
 

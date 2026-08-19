@@ -28,7 +28,7 @@ Real-time channels
   WebSocket           social chat; cTrader ProtoOA transport; execution feed → executionBus
 
 Storage
-  MongoDB             users, ideas, kairos_calls, coverage, tilt, pending_actions, threads,
+  MongoDB             users, entities, coverage, tilt, pending_actions, threads,
                       brokerConnections, paperAccounts/Positions/Orders/Equity, trades
   File cache (.cache) news articles, OHLCV candles
 ```

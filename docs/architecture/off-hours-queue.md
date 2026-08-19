@@ -72,12 +72,12 @@ so a producer cannot ship a queued item whose desk can never be told it was canc
 - **5 — done.** The gate reaches the **manage-accept path**, the last route to a broker that never
   asked. A card posted before the close could be tapped at 02:00 and go straight out; on paper it
   "filled" at the day close. The gate sits in `positionManage.applyManage` — the shared executor —
-  so Hermes and Talos are both covered by one call and neither desk can add a verb that forgets it.
+  so every desk is covered by one call and none can add a verb that forgets it.
   **The verb IS the action type** (`move_stop` │ `take_partial` │ `exit_now` │ `let_run`), because
   `enqueue` dedupes on `(user, entity, action.type)` and a single `manage` type would let a queued
-  stop-move swallow the `exit_now` that came after it. `action.holderId` rides along: a call's
-  position hangs off its idea, and by the open the row is all the replay has.
-  - `call`/`setup`/`idea` now dispatch by **verb** (`_byWork`), not by decider like `portfolio_item`.
+  stop-move swallow the `exit_now` that came after it. `action.holderId` rides along, for the kinds
+  whose position hangs off a separate holder document: by the open the row is all the replay has.
+  - `setup`/`idea` now dispatch by **verb** (`_byWork`), not by decider like `portfolio_item`.
     The two kinds of work never share a spelling here — a monitor exit is `exit` — and rows written
     before `queuedBy` existed read back as `user`, so dispatching those by decider would hand every
     legacy overnight stop to the manage executor.

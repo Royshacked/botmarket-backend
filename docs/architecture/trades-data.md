@@ -7,7 +7,7 @@ layer, which reads it over MCP.
 
 Design rule: a trade is **self-contained and frozen at fill**. Everything needed to
 analyse it later lives on the trade document itself — never joined at read time from
-`ideas`, `kairos_calls`, or `portfolio_chats`, because those records get edited or
+`entities` or `portfolio_chats`, because those records get edited or
 deleted and would make historical reports drift. Volatile context is *copied in* at
 open time and never mutated afterwards (except the `exit` patch on close).
 
@@ -40,7 +40,7 @@ Written by `services/tradeCapture.service.js` (the only writer). One document pe
   "origin": {                         // ✅ (gap 1 — replaces the loose top-level ids)
     "type":        "idea|call|portfolio|null", // ✅  null = idealess/manual
     "ideaId":      "idea_…|null",     // ✅  execution vehicle (null only if idealess)
-    "callId":      "call_…|null",     // ✅  set ⟺ Kairos call. This IS the "is-a-call" flag
+    "callId":      "call_…|null",     // ✅  set ⟺ an ARCHIVED-kind origin (see below)
     "groupId":     "…|null",          // ✅  fork group
     "portfolioId": "…|null",          // ✅
     "portfolioName":  "…|null",       // ✅
@@ -73,7 +73,7 @@ Written by `services/tradeCapture.service.js` (the only writer). One document pe
     "notes": "…",
     "conviction": {…},
 
-    // call-originated reasoning — frozen from the Kairos call ✅ (gap 2; null for idea/portfolio)
+    // call-originated reasoning — frozen at open ✅ (gap 2; null for idea/portfolio)
     "thesis":      "full call thesis text",
     "bias":        "long|short|both",
     "entry_zones": [{…}],
@@ -100,24 +100,22 @@ A trade always records **what spawned it** via `origin`. The three cases:
 | Origin        | `type`        | `ideaId` | `callId` | frozen reasoning in `snapshot`     |
 |---------------|---------------|----------|----------|------------------------------------|
 | Idea chat     | `'idea'`      | set      | `null`   | condition trees + conviction       |
-| Kairos call   | `'call'`      | set      | **set**  | condition trees **+ call thesis/bias/zones/patterns** |
+| Archived kind | `'call'`      | set      | **set**  | condition trees **+ thesis/bias/zones/patterns** |
 | Portfolio     | `'portfolio'` | set      | `null`   | condition trees **+ portfolioThesis** |
 | Idealess/manual | `null`      | `null`   | `null`   | none                               |
 
 Key facts:
 
 - **`ideaId` is the execution vehicle and is almost always set.** Every trade rides
-  the idea → monitor → reconciler → broker pipeline, so an idea exists even for
-  Kairos calls. `ideaId` is `null` only for idealess capture (a broker fill with no
-  matching idea).
-- **A Kairos call is an idea *plus* a `callId`.** The confirm handoff materializes a
-  real idea from the call; `callId` is the extra pointer recording that a call gave
-  birth to it. `callId != null` is therefore the canonical "count this as a call"
-  flag — used for filtering, grouping stats, and tracing back to the call's thesis.
-  The call itself survives only as a lightweight shadow (`kairos_calls.linked_idea_id`,
-  `position_state`); the authoritative lifecycle runs through the idea and lands here.
+  the idea → monitor → reconciler → broker pipeline, so an idea exists whatever authored
+  it. `ideaId` is `null` only for idealess capture (a broker fill with no matching idea).
 - The `origin.type` values (`portfolio` vs `idea`) are distinguished by whether a
   `portfolioId` is present; `call` by whether a `callId` is present.
+- **`callId` is a frozen historical marker, not a live path.** The kind that stamped it is
+  archived, so nothing writes a new one — but the field, its index (`origin.callId`), its
+  `listTrades` filter and the frozen reasoning in `snapshot` all stay, because the trades
+  already carrying it are real closed history and must keep reading back correctly. Do not
+  remove the field to tidy up; see `archive/README.md` for what wrote it.
 
 ---
 
@@ -199,18 +197,19 @@ analytics asset: captures paper + live + manual, with origin context, frozen cal
 reasoning, round-trip costs, and indexes. History below for provenance.
 
 1. ~~**`origin` block + `callId`**~~ — **DONE.** `callId` stamped on the idea at the
-   Kairos handoff (`buildIdeaFromCall`) + whitelisted in `saveIdea`; `captureOpen` /
+   authoring desk's confirm handoff + whitelisted in `saveIdea`; `captureOpen` /
    `captureOpenBare` build the `origin` block via the pure `buildOrigin(idea)` helper
    (`tradeCapture.service.js`); `listTrades` filters `origin.portfolioId` / `origin.callId`.
    Loose top-level ids (`ideaId`/`groupId`/`portfolioId`/…) are gone — replaced by `origin`.
    *Migration note:* trade docs written before this change keep the old flat shape (no
    `origin`); readers of historical docs must tolerate a missing `origin`, or run a
    one-time backfill.
-2. ~~**Freeze call reasoning**~~ — **DONE.** `captureOpen` best-effort reads the
-   `kairos_calls` doc when `idea.callId` is set (direct collection read, no service import)
-   and freezes `thesis`/`bias`/`entry_zones`/`patterns` into `snapshot` via the pure
+2. ~~**Freeze call reasoning**~~ — **DONE.** `captureOpen` best-effort reads the authoring
+   doc when `idea.callId` is set (direct collection read, no service import) and freezes
+   `thesis`/`bias`/`entry_zones`/`patterns` into `snapshot` via the pure
    `pickCallReasoning(call)` helper (null for idea/portfolio trades). The idea schema
-   stays clean — call concepts never leak into `ideas`. Live-verified end-to-end.
+   stays clean — those concepts never leaked into the entity. Live-verified end-to-end.
+   Dormant since the authoring kind was archived; the frozen data on existing trades stands.
 3. ~~**Freeze portfolio thesis**~~ — **DONE.** `captureOpen` best-effort reads
    `portfolio_chats.thesis` (by `{portfolioId, userId}`, direct collection read) for
    portfolio-linked ideas and freezes `{strategy, targetExposures}` into

@@ -15,15 +15,18 @@ unified adapter layer. Each desk owns a kind; each kind is watched by its own mo
 | **Prometheus** — buy-side research | `/api/analyst` | `coverage` | coverage monitor |
 | **Pythia** — top-down strategy | `/api/strategy` | `tilt` (the house view — a **broadcast**, not per-user) | tilt monitor |
 
-**Kairos (`call`) and Hermes are ARCHIVED** (2026-08-18) — `/api/kairos` is unmounted, Hermes is
-not started, and both live under [`archive/`](archive/README.md), imported by nothing. Mentor took
-the trading over (`docs/desks/trade-pipeline.md`); Kairos returns later as a premium Mentor mode.
-**Minos**, the legacy `idea` monitor, was deleted outright — but the `idea` KIND stays, because it
-is the execution tier every order rides.
+One desk and its kind are **archived**: frozen whole under [`archive/`](archive/README.md),
+imported by nothing, started by nothing, and deliberately not described here or in APP_SPEC — that
+README is their documentation. A few of their names survive in live code (a bot id, a hand-off tag,
+a kind constant); those are noted where they matter and nowhere else. **Minos**, the legacy `idea`
+monitor, was deleted outright — but the `idea` KIND stays, because it is the execution tier every
+order rides.
 
 Their work lands on **one execution tier**: the `idea` kind served by `/api/trade-ideas`, which
-portfolio holdings ride, plus the per-desk kinds (`call`, `setup`) that their own monitors watch.
-One reconciler keeps every kind's state honest against the broker.
+portfolio holdings ride, alongside the per-desk `setup` that Talos watches. The execution tier has
+no desk of its own, so it is watched by two kind-blind loops rather than one agent's monitor —
+`entry.monitor` (armed → hit → confirm) and `exit.monitor` (the stop/TP legs that could not rest at
+the broker). One reconciler keeps every kind's state honest against the broker.
 
 Everything a desk builds belongs to one of **three workspaces** — `live` · `paper` · `manual` — and
 every desk is handed that venue on every turn (see *Workspaces* below).
@@ -48,8 +51,8 @@ FMP candles), with chart-img (TradingView) as the fallback.
 
 ### Configuration
 
-**`services/config.js` is the single home for every environment variable** — all ~43 of them named
-once, each with its type, default and purpose. Read the file rather than a list here; it is the
+**`services/config.js` is the single home for every environment variable** — all 56 of them named
+once (`KNOWN_KEYS`), each with its type, default and purpose. Read the file rather than a list here; it is the
 answer to "what configures this system?". Three properties of it are load-bearing:
 
 - **It owns dotenv.** Importing config loads `.env`, so no module depends on having been imported
@@ -72,8 +75,12 @@ chart-img) and the market brief.
 
 Operational knobs added with the hardening pass: `DNS_SERVERS` (empty in production — the old
 unconditional `dns.setServers` override now only applies on a dev box), `SHUTDOWN_GRACE_MS`,
-`UNHANDLED_REJECTION_FATAL`, `TRUST_PROXY_HOPS`, and `RATE_LIMIT_API_PER_MIN` /
-`RATE_LIMIT_AUTH_PER_15M` / `RATE_LIMIT_AGENT_PER_15M` / `RATE_LIMIT_DISABLED`.
+`UNHANDLED_REJECTION_FATAL`, `TRUST_PROXY_HOPS`, `RATE_LIMIT_API_PER_MIN` /
+`RATE_LIMIT_AUTH_PER_15M` / `RATE_LIMIT_AGENT_PER_15M` / `RATE_LIMIT_DISABLED`, the loop-lease pair
+`INSTANCE_LEASE_TTL_MS` / `INSTANCE_LEASE_RENEW_MS` (see *Deployment shape*), and the per-user
+monthly spend pair `TOKEN_BUDGET_USD` (the percentage shown in the profile) / `TOKEN_DEGRADE_USD`
+(the spend at which chat drops to the cheap model — unset by default, so enforcing it stays a
+decision rather than a side effect of the display number).
 
 ### Run
 ```bash
@@ -84,26 +91,31 @@ npm run server:prod  # NODE_ENV=production (serves built frontend from public/)
 npm test             # node --test tests/unit/*.test.js
 ```
 
-On boot `server.js` ensures the Mongo indexes and starts **eleven background loops**: the
-market-open sweep, three assessment monitors (Talos / coverage / tilt), Themis, the execution
-reconciler, the three paper engines (fill / mark / equity) and the market-brief notifier. Each goes
-through `startLoop` (`services/lifecycle.service.js`), which registers it so shutdown can stop it —
-a service without a `stop()` is refused and never runs.
+On boot `server.js` ensures the Mongo indexes and starts **twelve background loops**: the
+market-open sweep, the **entry** and **exit** monitors, three assessment monitors (Talos /
+coverage / tilt), Themis, the execution reconciler, the three paper engines (fill / mark / equity)
+and the market-brief notifier. Each goes through `startLoop` (`services/lifecycle.service.js`),
+which registers it so shutdown can stop it — a service without a `stop()` is refused and never
+runs. They do not start at import: they start when this process wins the loop lease (below).
 
 `GET /api/health` (liveness) and `GET /api/health/ready` (readiness) are unauthenticated and sit
 ahead of the rate limiters, so a platform probe never spends a user's budget.
 
 ### Deployment shape — ONE process
 
-Those eleven loops are stopped in order on SIGTERM (see *Shutdown* in CODE_MAP.md), but they start
-with **no leader election**, and a handful of module-level
-`Map`s are load-bearing rather than caches — above all the exit-order lock in `execution.reconciler`
-and the WebSocket registry in `chatWs`, which a second instance cannot even see. Some loops claim
-their work through Mongo and are safe (Talos via dueLoop's lease, marketOpen via `claimIf`,
-paperFill via `claimOrder`, the brief notifier via its card dedupe); the rest rely on being the only
-process alive. **A second instance corrupts the first and breaks the second, mostly in silence.**
-Read [docs/architecture/single-instance.md](docs/architecture/single-instance.md) — what is already
-claimed, what is not, and the order to fix it in — before raising any replica count.
+ONE INSTANCE RUNS THE LOOPS, and since 2026-08-18 that is **enforced rather than documented**.
+They start behind a Mongo lease (`services/instanceLock.service.js`): the process that wins it
+calls `startBackgroundLoops()`, a second process wins nothing, starts no loops, and says so — it
+still serves HTTP. Losing the lease mid-flight (a Mongo blip, a long GC pause) stands the loops
+back down, because by then another process may legitimately hold it. All twelve are then stopped
+in order on SIGTERM (see *Shutdown* in CODE_MAP.md).
+
+**It buys SAFETY, NOT SCALE.** A handful of module-level `Map`s are load-bearing rather than
+caches — above all the exit-order lock in `execution.reconciler` and the WebSocket registry in
+`chatWs`, which is per-process request-path state: a user served by the follower still misses the
+cards the leader emits. Read
+[docs/architecture/single-instance.md](docs/architecture/single-instance.md) before raising any
+replica count — **a green lease is not permission**.
 
 ---
 
@@ -144,10 +156,12 @@ api/                   HTTP surface — one folder per feature (routes + control
   chat/                user-to-user (social) messaging + bot notifications (WS)
   market/ calendar/ user/ authentication/ transcribe/
 services/              business logic + the desks. No Express here.
-  agents/              the 6 LLM desks — analyst · axl · mentor · portfolio · scanner · strategy
-                       (kairos archived). Their prompts live in `prompts/` (see below).
-                       Six append LANGUAGE_RULE + VENUE_RULE to their base prompt; `strategy` does
-                       not — a broadcast has no user whose venue could be read
+  agents/              the 6 LLM desks — analyst · axl · mentor · portfolio · scanner · strategy.
+                       Their prompts live in `prompts/` (see below).
+                       Five append LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE to their base
+                       prompt; `strategy` takes LANGUAGE + BREVITY only — a broadcast has no user
+                       whose venue could be read. The market brief takes LANGUAGE alone: it is an
+                       authored 250–350 word piece and a four-sentence cap would fight its spec
   tools/               the 12 agent-facing tool modules (*.tools.js) — handlers + LLM-ready
                        formatters. Schemas stay in agentTools.registry
   entity/              the entity envelope + makeEntityCrud (ONE owner-scoped CRUD for every kind)
@@ -170,9 +184,14 @@ providers/             external clients (LLMs, market data, brokers, Mongo) — 
 monitoring/            one monitor per kind + the shared execution layer
                        talos (setup) · themis (portfolio) · coverage (analyst) ·
                        tilt (strategy)
+                       entry.monitor — armed entities: `looking` → `hit` → order plan → confirm
+                       exit.monitor — the residual stop/TP leg that could NOT rest at the broker
+                         (both kind-blind, both split out of the deleted Minos: ONE loop, ONE
+                          capability, so stopping either leaves the other running)
                        marketOpen — kind-blind: the ONE drain for everything parked while shut
                        execution.reconciler — broker-authoritative fill/close → entity status
-                       invalidation — advisory entry-range watcher, never executes
+                       dueLoop — the shared "select what is due, lease it, reschedule it" driver
+                       preflightEntry — pure, called at ARM time: is the level already held?
                        paperFill / paperMark / paperEquity — the paper venue's engines
                        marketBrief.notify — not a monitor: the weekday market-brief offer card
   evaluators/          touch, structured, indicator, time, volume, news, chart
@@ -239,7 +258,7 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 │    • if multi-broker → forks into per-broker child ideas         │
 │    • if paper mode ON → forks onto broker:'paper'                │
 │    • status = "waiting"  (or "hit" if idea.immediate = true)     │
-│    • persisted to MongoDB  ideas collection                      │
+│    • persisted to MongoDB  entities collection                   │
 └──────────────────────────────┬───────────────────────────────────┘
                                │
                ┌───────────────┴──────────────────┐
@@ -247,11 +266,11 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
                │                                   │
                ▼                                   ▼
 ┌──────────────────────────┐         ┌─────────────────────────────┐
-│  MONITOR SERVICE (poll)  │         │   ORDER PLAN built at save  │
+│  ENTRY MONITOR (poll)    │         │   ORDER PLAN built at save  │
 │  every 60 s              │         │   orderState=awaiting_confirm│
 │                          │         └──────────────┬──────────────┘
-│  ideas in "looking" /    │                        │
-│  "waiting" status        │                        │
+│  entities at "looking"   │                        │
+│  rising edge, requireHeld│                        │
 │                          │         ┌──────────────┘
 │  evaluateTree()          │         │
 │    Evaluators (AND/OR):  │         │
@@ -278,7 +297,7 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 │  placeOrdersForIdea()                                            │
 │    • user confirms plan in dialog                                │
 │    • places MARKET/LIMIT/STOP orders at the broker adapter       │
-│      (cTrader / paper / IBKR)                                    │
+│      (cTrader / paper / manual / IBKR)                           │
 │    • routes exits:  touch levels → broker closing orders         │
 │                     non-touch leaves → software monitor          │
 │    • status = "long" | "short"                                   │
@@ -289,7 +308,7 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 ┌──────────────────────────────────────────────────────────────────┐
 │                  POSITION MONITORING                             │
 │                                                                  │
-│  Monitor continues evaluating stop/TP condition trees            │
+│  exit.monitor evaluates the stop/TP legs left on software        │
 │  Execution reconciler watches broker fill/close events           │
 │    (broker-authoritative — asks the broker if the position lives)│
 │                                                                  │
@@ -323,10 +342,27 @@ executes.
 
 A separate `monitoring/invalidation.monitor.js` used to watch a price ENVELOPE on the `idea` kind
 (`idea.invalidation.range`). It was deleted on 2026-08-18: the band was only ever authored by the
-Idea agent (deleted in July) and Kairos (archived), Atlas never stamps one on a holding, and the
+Idea agent (deleted in July) and by an archived desk, Atlas never stamps one on a holding, and the
 monitor's only caller was Minos's tick — so it had been watching a field nothing writes, for a
-kind nothing authors, since July. `services/entryTimeGate.util.js` went with it for the same
-reason. Reviving the envelope means first building something that authors the band.
+kind nothing authors, since July. Reviving the envelope means first building something that
+authors the band. (`services/entryTimeGate.util.js` was deleted with it and RESTORED hours later:
+`entry.monitor` is the caller it had lost. Pure and unit-tested is what made the round trip free.)
+
+**Who watches the `idea` kind, after Minos.** Minos owned four capabilities in one tick — the entry
+poll, the exit poll, the invalidation monitor and the deferred-order sweep — so switching it off
+took all four down and nobody noticed for weeks. They are now four things, each stoppable alone:
+
+| Capability | Owner | Note |
+|---|---|---|
+| entry poll | `monitoring/entry.monitor.js` | `looking` → `hit` → order plan → confirm card; parks at `awaiting_market` off-hours |
+| exit poll | `monitoring/exit.monitor.js` | calls `positionMonitor.checkPosition` on the residual leg; pre-gates on `hasMonitoredWork`, so a position protected entirely by resting broker orders costs one Mongo write, not three candle fetches |
+| deferred-order sweep | `monitoring/marketOpen.monitor.js` | kind-blind, tied to a capability rather than to any desk's lifecycle |
+| the invalidation envelope | *nobody* | deleted; nothing authored the band |
+
+Both polls are kind-blind and both EXCLUDE `setup`: Talos owns setup readiness and already claims
+`monitor_state.next_check_at` on those documents, and two loops claiming one document would each
+push the other's schedule forward until the loser silently stopped running. Entry polls `looking`
+and exits poll `long`/`short`, so a document is never eligible for both.
 
 ---
 
@@ -567,9 +603,19 @@ lifecycle is driven by the user's own two confirmations (entry fill, exit fill) 
 never by an order. That is also why manual books are never hours-gated — a Fill card is an
 instruction, not an execution. See `docs/architecture/manual-mode.md`.
 
-- **Capabilities:** `trading`, `nativeProtection`, `modifyProtection`, `closePosition`,
-  `cancelOrder`, `listOrders`, `amendOrder`, `ohlcv`. The base class defaults every flag to
-  `false` and every method to a throwing stub, so a new adapter degrades safely until wired.
+- **Capabilities:** `trading`, `selfExecuted`, `nativeProtection`, `modifyProtection`,
+  `closePosition`, `cancelOrder`, `listOrders`, `amendOrder`, `ohlcv`. The base class defaults
+  every flag to `false` and every method to a throwing stub, so a new adapter degrades safely
+  until wired. `capabilities()` is an exhaustive literal per adapter, never a spread of the base —
+  an omitted flag reads `undefined`.
+- **`selfExecuted` is how a venue says who trades at it**, and it is why `manual` needs no
+  special-casing anywhere: the app cannot place the order, but the ACCOUNT HOLDER can, so the
+  entity still has a future. `services/venue.resolve.service.js` owns the two derived questions —
+  `isSelfExecuted(broker)` (post a card instead of an order) and `isBindableVenue(broker)` (may a
+  setup bind here at all — `trading || selfExecuted`). That replaced a hard-coded
+  `['ctrader','paper','manual']` list in `setups.service`, which was correct today and wrong in the
+  direction nobody notices: the day IBKR's trading flips on, that list would have refused every
+  Generate with `no_venue`.
 - **Reconciler is broker-authoritative.** Every adapter translates native fills into one
   normalized `BrokerExecution` shape (`order.*`, `position.opened/reduced/closed`) on a shared
   `executionBus`, so all brokers look identical downstream. On a reduce/close the reconciler asks
@@ -583,7 +629,8 @@ instruction, not an execution. See `docs/architecture/manual-mode.md`.
   case/separator-insensitive identity fallback. IBKR maps to real futures contracts via its own
   `IBKR_CONTRACTS` table.
 
-**Broker HTTP surface** (`/api/broker`, `:type` = `ctrader | paper | ibkr`):
+**Broker HTTP surface** (`/api/broker`, `:type` = `ctrader | paper | manual | ibkr` — the four
+adapters registered in `broker.factory.js`):
 ```
 GET    /connect/:type                     start OAuth (redirect to consent)
 GET    /callback                          OAuth callback (identity from signed state)
@@ -625,7 +672,7 @@ persisted per user (`user_workspace`, served by `/api/workspace`) and joined wit
 one rule — `resolveWorkspace`: the paper flag wins, else a stored `manual`, else live — held in
 `api/workspace/workspace.model.js` and mirrored verbatim in the frontend's `useWorkspaceMode`.
 
-**What belongs to a workspace is whatever binds to an ACCOUNT.** `call`, `setup` and `portfolio` are
+**What belongs to a workspace is whatever binds to an ACCOUNT.** `setup` and `portfolio` are
 scoped to one book and filtered everywhere they are shown (`listWatchedItems({ workspace })` for the
 desks, `inWorkspace()` for every frontend list). Scans, coverage and the house forecast are research,
 bind to no account, and are **shared across all three**. A book carries `modes[]` rather than one
@@ -653,10 +700,19 @@ Pythia and the market brief are excluded: both are broadcasts with no user whose
 
 Paper mode is a first-class **`'paper'` broker adapter**, so the same monitor + reconciler that
 drive live cTrader also drive paper — no parallel engine. Toggling paper mode ON forks new ideas
-onto `broker:'paper'` / `accountId='paper-<userId>'`.
+onto `broker:'paper'` and the account the user picked in the selector.
 
-- **Virtual account per user**, persisted in Mongo (`paperAccounts` / `paperPositions` /
+- **Several virtual accounts per user**, persisted in Mongo (`paperAccounts` / `paperPositions` /
   `paperOrders`). Cash-only margin: `equity = cashBalance + Σ unrealized`, `freeMargin = equity`.
+- **The account id carries its mode**: `makeAccountId` mints `<mode>-<userId>-<short>`, and that
+  `<mode>-` prefix is what `isPaperIdea` / `accountMode` derive a workspace from — which is also
+  why `manual` reuses this store rather than getting one of its own. Pre-migration docs with no
+  `mode` were invisible to `listAccounts({ mode })` while still reachable BY ID, so orders,
+  positions and equity points accumulated on accounts their owner could not see or close from;
+  `scripts/drop-ghost-paper-accounts.mjs` archived and removed them (2026-08-19) and is kept
+  because it is idempotent and finds any that turn up later.
+- **A position reports the account it sits on** (`accountName`), not just its id — a user holding
+  three paper books needs to read which one a row belongs to.
 - **Simulated fills against the live feed.** Market orders fill instantly *while the venue is open*
   — off-hours they queue like any other order, because FMP answers `200` with the last close at 2am
   and a stale print passing as live was the bug that produced the queue. Resting stop/limit orders
@@ -674,8 +730,23 @@ onto `broker:'paper'` / `accountId='paper-<userId>'`.
   for **both** paper and live (both flow through the same reconciler). Each record freezes a
   point-in-time snapshot of the idea as authored and is tagged `mode: 'paper' | 'live'`.
 
+The paper BROKER (orders / positions / account) is served generically under `/api/broker/paper/*`
+like any other adapter. These routes own the paper-SPECIFIC surface — the accounts themselves, the
+global mode toggle, cost settings, the equity curve and trade history.
+
 **Paper HTTP surface** (`/api/paper`, all auth):
 ```
+per-account
+GET    /accounts                          list all paper accounts (+ live equity)
+POST   /accounts                          { name?, startingBalance?, currency? } → create
+PATCH  /accounts/:accountId               { name?, spreadBps?, commissionPerTrade? }
+DELETE /accounts/:accountId               delete (409 if it holds an open position)
+POST   /accounts/:accountId/reset         { startingBalance? } → wipe + restore
+POST   /accounts/:accountId/cash          { amount, reason? } → dividend / deposit / fee
+GET    /accounts/:accountId/equity-curve  ?fromMs=
+GET    /accounts/:accountId/trades        ?status=&limit=
+
+legacy single-account (TRANSITIONAL — these operate on the DEFAULT paper account)
 GET  /state          paper flag + account config + live equity
 PUT  /mode           turn paper mode on/off
 PUT  /settings       spreadBps, commissionPerTrade
@@ -712,6 +783,14 @@ GET  /equity-curve   equity points (?fromMs=)
   sockets: every tab reads the same inbox). This is **not** the agent chat — those are the per-desk
   SSE streams. Agent notifications (entry confirm, invalidation alert, queue ready) arrive here as
   typed bot cards, one notify bot per desk.
+- **Health** `/api/health` (liveness) and `/api/health/ready` (readiness) — the only
+  UNAUTHENTICATED surface besides broker OAuth callback and transcribe, and mounted ahead of the
+  rate limiters so a probe never spends a user's budget. They are two different questions: liveness
+  stays 200 while the process drains (failing it means "restart this container", which turns an
+  orderly deploy into a hard kill), readiness goes 503 the moment shutdown begins so the load
+  balancer stops routing BEFORE `server.close()` starts refusing sockets. Both answer with
+  `.end()` under `Cache-Control: no-store` — `res.json()` computes an ETag, and a byte-identical
+  readiness body would come back as a 304 with no body, which a probe reads as an outage.
 - **Market** `/api/market/status` · **Calendar** `/api/calendar/earnings` (Finnhub, +company logo/name), `/api/calendar/fed` (macro/FOMC via FRED), `/api/calendar/ipo` (Finnhub).
 - **Transcribe** `/api/transcribe` — raw audio → text (registered before `express.json`).
 
