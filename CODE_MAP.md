@@ -49,6 +49,10 @@ api/
     adapters/
       broker.interface.js     BrokerAdapter base class — THE contract every broker fulfils
                               (incl. getCandles + capabilities().ohlcv, resolveSymbol "getTicker", getSpot)
+                              capabilities().selfExecuted = the ACCOUNT HOLDER executes (manual): post
+                              the card and record the intent, never call a trading method. NOT the same
+                              question as trading:false — IBKR is that too, but it is unwired rather
+                              than hand-traded. Asked through venue.resolve.isSelfExecuted, never by name
       ctrader.adapter.js      + ctrader.execution.js (ProtoOA→BrokerExecution translator).
                               getCandles now serves trendbars (ohlcv:true); resolveSymbol via symbol list
       paper.adapter.js        virtual venue (resolveSymbol = identity; ohlcv:false → app feed)
@@ -467,8 +471,17 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 - **Private helpers:** `_camelCase`. **Log tags:** `const LOG = '[feature]'`, used as `logger.x(LOG, …)`.
 - **User id:** `req.user._id` (and `user._id`) is the custom string id equal to `idea.userId` —
   NOT the Mongo `_id`. Strip Mongo `_id` from responses via `stripId` (providers/mongodb.provider.js).
-- **Consumers branch on capabilities/flags, never on broker name** (only exception: the paper/live
-  `mode` tag in tradeCapture).
+- **Consumers branch on capabilities/flags, never on broker name.** The predicates live in
+  `services/venue.resolve.service.js` and none of them throws (an unregistered or absent broker
+  answers false, because the callers are monitors iterating live documents):
+  `isSelfExecuted(broker)` — does the USER execute here? the one question behind every "post a card
+  instead of placing an order" branch, and the eleven sites that used to spell it `broker ===
+  'manual'`. `isBindableVenue(broker)` — will anything here ever fill the trade (`trading` OR
+  `selfExecuted`)? the setup Generate gate, which used to keep its own broker list.
+  Two exceptions, both deliberate: the paper/live `mode` tag in tradeCapture, and the literals in
+  `resolveMode` / `knownVenue` / `workspace.model` — those DEFINE the workspace vocabulary rather
+  than dispatch on it, and routing them through a capability would make the vocabulary depend on
+  the table it is supposed to be independent of. They carry a comment saying so.
 - **Error handling:** the global handler in `server.js` formats every error as
   `res.status(err.status || 500).json({ error: err.message })`. Two controller styles exist and are
   both fine because they yield the *same* `{ error }` shape:
@@ -495,7 +508,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | New HTTP endpoint | `<feature>.routes.js` + handler in controller + logic in service |
 | New SSE stream | `startSseStream()` from `api/_shared/sse.util.js` |
 | New agent tool | schema + handler; put shared ones in `agentUtils` (`COMMON_TOOL_HANDLERS`, `makeToolHandler`) |
-| New broker | `providers/<b>.provider.js` + `adapters/<b>.adapter.js` (extend `BrokerAdapter`) + one line in `broker.factory.js`; add aliases in `brokerSymbol.service.js` only if it renames instruments |
+| New broker | `providers/<b>.provider.js` + `adapters/<b>.adapter.js` (extend `BrokerAdapter`) + one line in `broker.factory.js`; add aliases in `brokerSymbol.service.js` only if it renames instruments. `capabilities()` is an exhaustive literal, not a spread of the base — state EVERY flag, including `selfExecuted`, or it reads `undefined`. A broker-less venue (the user places the orders) sets `selfExecuted:true` and needs no other change: the eleven card-instead-of-order branches already ask the capability. `tests/unit/selfExecutedVenue.test.js` pins the inventory and fails when a second one arrives |
 | New aliased index future (broker basis) | add to `brokerSymbol.service.ALIASES` + `brokerPrice.service` REAL_TICKER/CASH_INDEX maps; offset auto-measured at fork, candle-shifted in monitor |
 | New evaluator / leaf type | `evaluators/<type>.evaluator.js` + wire into `monitor.orchestrator._evalOne` + `condition.parser` |
 | New pure utility | add a `tests/unit/<name>.test.js` (that's the "write tests after a feature" rule in practice) |

@@ -67,6 +67,7 @@ to `architecture/` or `desks/`, or it is deleted.
 |---|---|
 | [trust-gaps-todo.md](./trust-gaps-todo.md) | **The ranked open work.** Capture the thesis→result chain; make the money path testable without a broker |
 | [live-verify-checklist.md](./live-verify-checklist.md) | What only a running app can confirm — the queue, by feature |
+| [code-review-2026-08-19.md](./code-review-2026-08-19.md) | Structural review of both repos: broker sealing, desk/kind plug-in-ability, duplications, plasters to remove |
 
 ## Not about the system
 

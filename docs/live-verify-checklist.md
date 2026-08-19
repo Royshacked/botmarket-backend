@@ -320,3 +320,30 @@ before it is verified is an unrecoverable row in a frozen ledger.
   on a CALL too — the fix is kind-blind and Hermes gets it for free, which is untested.
 - [ ] **The FE renders it as "closed out"**, and a pre-rename journal still renders "market closed"
   rather than the raw `closed` slug.
+
+## H. The self-executed venue answers for itself (2026-08-19)
+
+`selfExecuted` replaced eleven `broker === 'manual'` checks, and the in-position manage decision
+moved from Talos's hand-off into the shared executor (`positionManage.applyManage`). Unit tests
+cover the decision; what they cannot cover is that the CARD still arrives and the intent is still
+recorded, because both go through Mongo and the social chat.
+
+- [ ] **A manage accept on a MANUAL setup still instructs** `[MAN]` — take a manual setup into a
+  position, let Talos propose a stop move, accept it. The `setup_manage` card must arrive in the
+  social chat in Talos's own words, `position_state.stop.current` must move, and **no broker call
+  is made**. This is the path that changed hands: the desk no longer decides, `applyManage` does.
+- [ ] **The notify-then-write order survives** `[MAN]` — the write must not land if the card fails
+  to send. Hard to force by hand; if the chat is ever down during a manage accept, check that the
+  setup was NOT left recording an instruction the user never received.
+- [ ] **Off-hours is still immediate** `[MAN]` — accept a manual manage while the market is shut.
+  It must post the card straight away, NOT queue to the open. The `selfExecuted` check deliberately
+  sits above the hours gate; this is the assertion that it still does in the running app.
+- [ ] **A manual ENTRY and EXIT still card** `[MAN]` — the two monitor paths that also swapped
+  (`entry.monitor`, `positionMonitor`): arm a manual idea, let entry trigger, confirm the fill card
+  arrives; then let an exit condition trip and confirm the close card arrives once, not per poll.
+- [ ] **A manual PORTFOLIO activates and exits whole** `[MAN]` — the two `manualIdea` reads now
+  select legs by capability. Activate a manual book and confirm every leg lands in the ONE N-leg
+  Fill card, none skipped.
+- [ ] **A setup still binds at all three venues** `[ANY]` — Generate a setup on cTrader, paper and
+  manual. The venue allowlist is derived from capabilities now rather than listed; this confirms
+  the derivation matches what the list used to permit.
