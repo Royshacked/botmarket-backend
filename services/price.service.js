@@ -1,5 +1,5 @@
 import { getTickerAggregates } from '../providers/candles.provider.js'
-import { isCacheFresh, loadCandlesFromFile, saveCandlesToFile } from './util.service.js'
+import { isCacheFresh } from './util.service.js'
 import { barDurationSeconds } from './timeframe.service.js'
 
 const DEFAULT_RANGE_DAYS = 30
@@ -41,6 +41,12 @@ export const priceService = {
 
 export const CANDLE_ROW_SCHEMA = CANDLE_SCHEMA
 export { OHLCV }
+
+/**
+ * Test seam for the one external call this module makes. Same shape the other services use — the
+ * source decision itself lives in candles.provider, this only names it so a test can stand in for it.
+ */
+export const _deps = { getTickerAggregates }
 
 /**
  * WHERE A FETCH STARTS — the tail, or the whole requested window. Pure; exported for tests.
@@ -85,7 +91,7 @@ async function syncCandles(ticker, options = {}) {
     const fetchOptions = { ...barOpts, from: fromMs, to: toMs }
     let incomingList = []
     try {
-        const incoming = await getTickerAggregates(symbol, fetchOptions)
+        const incoming = await _deps.getTickerAggregates(symbol, fetchOptions)
         incomingList = Array.isArray(incoming) ? incoming : []
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
@@ -170,9 +176,39 @@ function _queryFromEnvelope(symbol, barOpts, cache, options = {}) {
     })
 }
 
+/**
+ * THE CANDLE CACHE — in this process, not on the disk.
+ *
+ * It used to be a JSON file per ticker/timeframe under `data/candles`, and it sat on the monitor's
+ * hot path: a blocking existsSync + a read + a JSON.parse before every evaluation, then a
+ * pretty-printed write after it. For INTRADAY that bought nothing at all — those callers pass
+ * `refresh`, so the fetch happened regardless and the file was pure overhead on both ends.
+ *
+ * It was also unsafe in two ways that cost real bars. The read-modify-write had no lock, so two
+ * loops waking on the same symbol could interleave and the later write would drop what the earlier
+ * one had just fetched. And the write was not atomic — no temp-and-rename — so an unlucky restart
+ * left truncated JSON, which parses as nothing and silently re-fetches the whole window.
+ *
+ * Memory is the honest tier for it. `data/` is gitignored and machine-local, so it was never shared
+ * or deployed, and the app is deliberately ONE process (docs/architecture/single-instance.md) with
+ * other load-bearing module-level Maps already. The whole cost of the change is that a restart
+ * re-fetches, once, per symbol and timeframe in use.
+ *
+ * NOT createTtlCache, though the shape looks identical: that one DELETES a value once it is stale,
+ * and a stale envelope is exactly what this needs to keep — it is what `fetchStartMs` reads to fetch
+ * only the tail, and what the merge appends onto. Staleness here decides whether to REFRESH, never
+ * whether the data is usable. `lastFetchedAt` on the envelope already carries it.
+ */
+const MAX_CACHED_SERIES = 500
+const _envelopes = new Map()   // `${ticker}|${timeSpan}|${multiplier}` → envelope
+
+const _envelopeKey = (ticker, { timeSpan, multiplier }) => `${ticker}|${timeSpan}|${multiplier}`
+
+/** Drop every cached series. Exported for tests — nothing in production clears this. */
+export function _resetCandleCache() { _envelopes.clear() }
+
 async function _loadEnvelope(ticker, barOpts) {
-    const loaded = await loadCandlesFromFile(ticker, barOpts)
-    return _normalizeEnvelope(loaded.ok ? loaded.data : null)
+    return _normalizeEnvelope(_envelopes.get(_envelopeKey(ticker, barOpts)) ?? null)
 }
 
 async function _saveEnvelope(ticker, barOpts, candles) {
@@ -185,11 +221,13 @@ async function _saveEnvelope(ticker, barOpts, candles) {
         schema: CANDLE_SCHEMA,
         candles: rows,
     }
-    const saved = await saveCandlesToFile(ticker, barOpts, envelope)
-    if (!saved.ok) {
-        throw new Error(
-            `Failed to save candles for ${ticker}/${barOpts.timeSpan}: ${saved.error?.message}`
-        )
+    const key = _envelopeKey(ticker, barOpts)
+    // Re-insert so the key moves to the end: Map keeps insertion order, which makes the eviction
+    // below drop the least recently WRITTEN series rather than an arbitrary one.
+    _envelopes.delete(key)
+    _envelopes.set(key, envelope)
+    while (_envelopes.size > MAX_CACHED_SERIES) {
+        _envelopes.delete(_envelopes.keys().next().value)
     }
     return envelope
 }

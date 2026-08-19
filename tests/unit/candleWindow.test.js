@@ -1,7 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { windowStartSec } from '../../services/ohlcv.service.js'
-import { _resolveSecRange, fetchStartMs } from '../../services/price.service.js'
+import { _resolveSecRange, fetchStartMs, _resetCandleCache, priceService, _deps } from '../../services/price.service.js'
+
+/** Stand in for the source router; returns a restore function. */
+function mockAggregates(fn) {
+    const real = _deps.getTickerAggregates
+    _deps.getTickerAggregates = fn
+    return () => { _deps.getTickerAggregates = real }
+}
 
 // THE WINDOW A MONITOR SEES.
 //
@@ -120,4 +127,58 @@ test('no window named and nothing cached → the 30-day default, as before', () 
 test('no window named but a cache present → still the tail', () => {
     const start = fetchStartMs({ toMs: Date.now(), earliestTs: SEC.now - 30 * DAY, latestTs: SEC.now - DAY, stepSec: SEC.step })
     assert.equal(start, (SEC.now - DAY + SEC.step) * 1000)
+})
+
+// ── the cache lives in the process, not on the disk ──────────────────────────
+//
+// It was a JSON file per ticker/timeframe under data/, read and written on the monitor's hot path.
+// For intraday it bought nothing — those callers pass `refresh`, so the fetch happened anyway and
+// the file was overhead at both ends — and it was unsafe twice over: an unlocked read-modify-write
+// (two loops on one symbol, later write drops the earlier one's bars) and a non-atomic write (a
+// restart mid-write leaves truncated JSON that parses as nothing).
+
+test('a synced series is served from memory on the next read, with no disk anywhere', async () => {
+    _resetCandleCache()
+    const bars = [
+        { timestamp: SEC.now - 3 * DAY, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 },
+        { timestamp: SEC.now - 2 * DAY, open: 1.5, high: 2.5, low: 1, close: 2, volume: 20 },
+    ]
+    let fetches = 0
+    const restore = mockAggregates(async () => { fetches++; return bars })
+    try {
+        const first = await priceService.getCandles('AAPL', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        assert.equal(first.candles.length, 2)
+        assert.equal(fetches, 1)
+
+        // Fresh (1h TTL) and not `refresh` → answered from the cache without touching the provider.
+        const second = await priceService.getCandles('AAPL', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        assert.equal(second.candles.length, 2)
+        assert.equal(second.meta.cached, true)
+        assert.equal(fetches, 1, 'a fresh series must not re-fetch')
+    } finally { restore() }
+})
+
+test('clearing the cache is a re-fetch, not a loss — a restart costs one pull per series', async () => {
+    _resetCandleCache()
+    let fetches = 0
+    const restore = mockAggregates(async () => { fetches++; return [{ timestamp: SEC.now - DAY, open: 1, high: 1, low: 1, close: 1, volume: 1 }] })
+    try {
+        await priceService.getCandles('MSFT', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        _resetCandleCache()
+        const after = await priceService.getCandles('MSFT', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        assert.equal(after.candles.length, 1, 'the series comes back')
+        assert.equal(fetches, 2, 'exactly one extra pull, which is the whole cost of dropping the disk tier')
+    } finally { restore() }
+})
+
+test('series are kept apart by ticker AND timeframe', async () => {
+    _resetCandleCache()
+    const restore = mockAggregates(async (sym, opts) =>
+        [{ timestamp: SEC.now - DAY, open: 1, high: 1, low: 1, close: opts.timeSpan === 'day' ? 100 : 200, volume: 1 }])
+    try {
+        const day  = await priceService.getCandles('NVDA', { timeSpan: 'day',  multiplier: 1, format: 'object' })
+        const week = await priceService.getCandles('NVDA', { timeSpan: 'week', multiplier: 1, format: 'object' })
+        assert.equal(day.candles.at(-1).close, 100)
+        assert.equal(week.candles.at(-1).close, 200, 'the week series must not read the day series')
+    } finally { restore() }
 })

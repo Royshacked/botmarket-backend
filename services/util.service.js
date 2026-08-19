@@ -48,47 +48,6 @@ export function isCacheFresh(lastFetchedAt, cacheTimeMs = 5 * 60 * 1000) {
 }
 
 
-export async function saveCandlesToFile(ticker, options, data) {
-    const filePath = candlesFilePath(ticker, options)
-    try {
-        fs.mkdirSync(path.dirname(filePath), { recursive: true })
-        await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8')
-        return { ok: true }
-    } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err))
-        logger.error(`Error saving candles for ${ticker}`, error)
-        return { ok: false, error }
-    }
-}
-
-
-export async function loadCandlesFromFile(ticker, options) {
-    const filePath = candlesFilePath(ticker, options)
-    try {
-        if (!fs.existsSync(filePath)) {
-            return { ok: false, reason: 'missing', data: null }
-        }
-        const raw = await fs.promises.readFile(filePath, 'utf8')
-        if (!raw.trim()) {
-            return { ok: false, reason: 'empty', data: null }
-        }
-        return { ok: true, data: JSON.parse(raw) }
-    } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err))
-        const reason = error instanceof SyntaxError ? 'parse_error' : 'io_error'
-        logger.error(`Error loading candles for ${ticker}`, error)
-        return { ok: false, reason, data: null, error }
-    }
-}
-
-export function candlesFilePath(ticker, { timeSpan, multiplier }) {
-    const letter = timeSpan.charAt(0).toUpperCase()
-    return path.resolve(
-        `./data/candles/${ticker}/${timeSpan}/${multiplier}${letter}.json`
-    )
-}
-
-
 export async function saveItemsToFile(type, name, data) {
     const filePath = _itemsFilePath(type, name)
     try {
