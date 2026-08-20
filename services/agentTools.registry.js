@@ -598,6 +598,43 @@ export const TOOL_SCHEMAS = {
         "type": "object",
         "properties": {}
     },
+    // Opens the EXPRESS SETUP FORM in the user's panel. Deliberately the NUCLEUS only, never the
+    // whole plan: an agent that wants to hand over a drawn setup already has a way to do it (its
+    // own <setup> emit), and duplicating scenarios/zones/conditions here would be a second, weaker
+    // authoring channel that could disagree with the first. This tool's job is the SURFACE.
+    open_setup_form: {
+        "type": "object",
+        "properties": {
+            "asset": {
+                "type": "string",
+                "description": "optional — ticker to pre-fill, e.g. NVDA. Omit if the user has not named one."
+            },
+            "direction": {
+                "type": "string",
+                "enum": ["long", "short"],
+                "description": "optional — pre-fill only what the user has actually said."
+            },
+            "type": {
+                "type": "string",
+                "enum": ["intraday", "day", "swing", "long term"],
+                "description": "optional — the horizon, if the user named one."
+            },
+            "timeframe": {
+                "type": "string",
+                "enum": ["1min", "5min", "15min", "30min", "1hr", "2hr", "4hr", "day", "week", "month"],
+                "description": "optional — the working timeframe, if the user named one. The monitor's ladder is derived from it."
+            },
+            "trade_mode": {
+                "type": "string",
+                "enum": ["discretionary", "smc", "institutional"],
+                "description": "optional — the lens, if the user named one."
+            },
+            "note": {
+                "type": "string",
+                "description": "optional — one short line shown above the form. Use it to say what you left for them to fill, not to restate the fields."
+            }
+        }
+    },
 }
 
 /** Every tool the registry knows. */

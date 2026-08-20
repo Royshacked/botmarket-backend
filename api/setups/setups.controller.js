@@ -4,6 +4,9 @@ import { makeEntityController } from '../_shared/entityController.util.js'
 import { setupService } from './setups.service.js'
 import { resolveCardsFor } from '../chat/chat.service.js'
 import { talosHandoffService } from '../../services/talos.handoff.service.js'
+import { normalizeSetup, setupReadiness, TRADE_MODES, TF_RUNGS, isFetchableRung } from '../../services/setup.schema.js'
+import { TRADE_HORIZONS } from '../../services/entity/vocabulary.js'
+import { hydrateBlueprint as hydrateDraft, blueprintProblems } from '../../services/setup.blueprint.js'
 
 const LOG = '[setups:controller]'
 
@@ -121,5 +124,109 @@ export async function generateSetup(req, res) {
     } catch (err) {
         logger.error(LOG, 'Failed to generate setup', err)
         res.status(500).send({ error: 'generate_failed' })
+    }
+}
+
+// ── Blueprint: opening a plan nobody has sized yet ─────────────────────────────
+
+/**
+ * THE FORM'S DROPDOWNS, and that is the point rather than a convenience. These four vocabularies
+ * are each already defined once on this side — the horizon list, the lens list, the rung ladder. A
+ * client that hardcoded them would be the copy that silently refuses a lens the rest of the app has
+ * gained, or offers a timeframe the providers cannot serve. Sent, not assumed.
+ *
+ * Frozen and shared by BOTH read-only routes: a form that opened on one bag and revalidated against
+ * another would be a form whose choices changed while you were looking at it.
+ */
+const FORM_VOCABULARY = Object.freeze({
+    directions: ['long', 'short'],
+    horizons:   TRADE_HORIZONS,
+    modes:      TRADE_MODES,
+    // Coarse → fine, and only the rungs that can actually be FETCHED. A setup authored on a rung
+    // with no candles behind it is one whose monitor reads "no data" at the end it looks at first
+    // (see FINEST_RUNG in setup.schema).
+    timeframes: TF_RUNGS.filter(isFetchableRung),
+})
+
+/**
+ * Hydrate a setup BLUEPRINT into a draft the express form can render.
+ *
+ * The one door for every way a pre-drawn plan reaches the form — the "I have the exact setup"
+ * button (blueprint absent → the blank skeleton), an agent handing one over, and later a setup
+ * shared by another user. They differ only in the payload, so they cannot drift in how the plan is
+ * read: hydrate → the SAME `normalizeSetup` a Mentor emit goes through → the SAME readiness gate
+ * the button and the save path use.
+ *
+ * Answers the shape a Mentor turn's `done` already answers with — `{ setup, readiness }` — so the
+ * panel's existing apply path handles it with no second branch, plus `problems`: what was sent and
+ * did not survive the read (see blueprintProblems). A hydrate NEVER writes; nothing exists until
+ * the user sizes it and presses Generate.
+ */
+export async function hydrateBlueprint(req, res) {
+    try {
+        const { blueprint = null, accounts } = req.body ?? {}
+        if (blueprint != null && (typeof blueprint !== 'object' || Array.isArray(blueprint))) {
+            return res.status(400).send({ error: 'blueprint must be an object' })
+        }
+
+        const setup    = normalizeSetup(hydrateDraft(blueprint))
+        const problems = blueprintProblems(blueprint, setup)
+        if (!setup) return res.status(400).send({ error: 'invalid_blueprint', problems })
+
+        // `hasAccount` mirrors Generate's own question rather than re-deriving one: the marked
+        // account lives in client state during authoring and is not bound until the save.
+        const readiness = setupReadiness(setup, Array.isArray(accounts) && accounts.length > 0)
+
+        res.send({
+            setup,
+            readiness,
+            problems,
+            // Envelope metadata, never folded into the setup: whose plan this was and when it was
+            // drawn are things the FORM says out loud, not things the monitor watches.
+            drawn_at: blueprint?.drawn_at ?? null,
+            from:     blueprint?.from ?? null,
+            vocabulary: FORM_VOCABULARY,
+        })
+    } catch (err) {
+        logger.error(LOG, 'Failed to hydrate blueprint', err)
+        res.status(500).send({ error: 'hydrate_failed' })
+    }
+}
+
+/**
+ * Re-run the readiness gate on a live draft. Reads nothing, writes nothing.
+ *
+ * The express form has no turns. In the build conversation `readiness` arrives with every `done`,
+ * so it is never more than one reply stale; a user typing their own plan into a form would
+ * otherwise stare at a dark Generate button that had last been told anything at hydrate time —
+ * before they had entered a single number.
+ *
+ * A CLIENT-SIDE COPY OF THE GATE WAS THE OTHER OPTION AND IS THE WRONG ONE. `setupReadiness` exists
+ * so the agent's claim, the button and the save path cannot disagree about what a finished setup is
+ * (see its own header); a fourth implementation in JSX would disagree first and be believed longest.
+ * This is pure — normalise, ask, answer — so the round trip costs a request and nothing else.
+ *
+ * Returns the normalised setup too, but callers driving it from a keystroke should use only
+ * `readiness`: adopting the normalised copy mid-type would re-sort the band under the cursor.
+ */
+export async function validateDraft(req, res) {
+    try {
+        const { setup: raw, accounts } = req.body ?? {}
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+            return res.status(400).send({ error: 'setup must be an object' })
+        }
+        const setup = normalizeSetup(raw)
+        if (!setup) return res.status(400).send({ error: 'invalid_setup' })
+
+        res.send({
+            setup,
+            readiness:  setupReadiness(setup, Array.isArray(accounts) && accounts.length > 0),
+            // Carried here too so the form can open straight onto a live draft (no blueprint to
+            // hydrate) and still render its dropdowns from the server's vocabulary.
+            vocabulary: FORM_VOCABULARY,
+        })
+    } catch (err) {
+        logger.error(LOG, 'Failed to validate setup', err)
+        res.status(500).send({ error: 'validate_failed' })
     }
 }
