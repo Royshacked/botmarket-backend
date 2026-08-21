@@ -19,7 +19,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
 // Hot-reload the system prompt on file change (mtime-gated) — no restart needed.
 const _systemPrompt = makePromptLoader(join(__dirname, '../../prompts/axl_system_prompt.md'), LOG)
-const MAX_MESSAGES = 12
+// How deep reception remembers. 20, not the 12 it was: trimHistory cuts on a HIGH-WATER MARK of
+// keep × 3, so 12 meant a thread ran to 36 messages and then dropped to the last 6 turns in one
+// step — the app's shallowest floor, on the desk most likely to run long. 20 pushes that cliff to 60
+// and leaves 10 turns standing on the other side of it. The extra depth is nearly free here: Axl's
+// turns are short by construction (BREVITY_RULE), and a longer history costs one cache miss per
+// trim, which now happens a third as often. See agentUtils.trimHistory.
+const MAX_MESSAGES = 20
 
 // Axl is the non-trading meta-layer: the social-chat assistant, app guide, and
 // (later) the account-report / trade-analysis concierge. It is READ-ONLY by

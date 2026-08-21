@@ -112,3 +112,24 @@ test('cachedBlock: carries the ephemeral breakpoint, and the text untouched', ()
     assert.deepEqual(cachedBlock('SYSTEM PROMPT'),
         { type: 'text', text: 'SYSTEM PROMPT', cache_control: { type: 'ephemeral' } })
 })
+
+// ── reception's depth: the cliff Axl fell off ────────────────────────────────
+// The trim is a HIGH-WATER MARK (keep × 3), so `keep` sets two things at once: how much survives a
+// trim, and how long a thread runs before one happens. At 12 that meant a reception chat ran to 36
+// messages and then dropped to the last 6 turns in a single step — the shallowest floor in the app,
+// on the desk most likely to run long. Pinned at Axl's real number so a "tidy it down" edit has to
+// argue with the reason.
+test('normalize: Axl keeps 20 messages and does not trim until 60', () => {
+    const thread = n => Array.from({ length: n }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `m${i}` }))
+
+    // Below the ceiling nothing is dropped — that is what keeps the cached prefix byte-stable.
+    assert.equal(normalizeMessages(thread(59), 20).length, 59)
+
+    const trimmed = normalizeMessages(thread(61), 20)
+    assert.ok(trimmed.length <= 20)
+    assert.ok(trimmed.length >= 19)
+    // The API rejects a history opening on an assistant turn, and slicing an odd total to an even
+    // count lands on one — on exactly the turns the user is speaking.
+    assert.equal(trimmed[0].role, 'user')
+    assert.equal(trimmed.at(-1).content, 'm60')
+})
