@@ -25,9 +25,13 @@ export async function getDb() {
     })
 
     await _client.connect()
-    _db = _client.db()
+    // `db(undefined)` is the driver's own "use the name in the URI" — so an unset DB_NAME keeps the
+    // historical behaviour EXACTLY, and the deployed environment does not have to be told anything.
+    // Set locally, it is what stops a laptop and the deployed instance from being the same database
+    // (and therefore contending for the one background-loops lease). See config.dbName.
+    _db = _client.db(config.dbName ?? undefined)
 
-    logger.info(LOG, 'Connected to MongoDB')
+    logger.info(LOG, `Connected to MongoDB — db "${_db.databaseName}"`)
     return _db
 }
 

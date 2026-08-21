@@ -95,6 +95,13 @@ export const config = {
     // ── core ──
     /** Mongo connection string. REQUIRED — the app cannot serve a request without it. */
     get mongoUri()  { return process.env.MONGODB_URI },
+    // Which database on that cluster. UNSET is the historical behaviour — the name comes from the
+    // URI path, and an `mongodb+srv://host/` with no path lands on `test`. It exists so a developer
+    // can point a laptop at its OWN database on the shared cluster: sharing one meant local dev and
+    // the deployed instance contended for the SAME background-loops lease, the laptop always lost,
+    // and every paper fill it executed went onto an in-process executionBus with no reconciler on
+    // it (2026-08-20). Leave it unset in the deployed environment.
+    get dbName()    { return process.env.DB_NAME || null },
     /** Signing secret for the session JWT and the broker OAuth `state`. REQUIRED. */
     get jwtSecret() { return process.env.JWT_SECRET },
     get port()      { return _num('PORT', 3030) },
@@ -271,7 +278,7 @@ export const KNOWN_KEYS = new Set([
     'IBKR_GW_HOST', 'IBKR_GW_PORT', 'IBKR_GW_CLIENTID',
     'HTTP_METER_MS', 'HTTP_RETRIES', 'HTTP_RETRY_BASE_MS',
     'DNS_SERVERS', 'SHUTDOWN_GRACE_MS', 'UNHANDLED_REJECTION_FATAL', 'TRUST_PROXY_HOPS',
-    'INSTANCE_LEASE_TTL_MS', 'INSTANCE_LEASE_RENEW_MS',
+    'INSTANCE_LEASE_TTL_MS', 'INSTANCE_LEASE_RENEW_MS', 'DB_NAME',
     'RATE_LIMIT_API_PER_MIN', 'RATE_LIMIT_AUTH_PER_15M', 'RATE_LIMIT_AGENT_PER_15M',
     'RATE_LIMIT_DISABLED',
 ])

@@ -168,6 +168,48 @@ Two things to hold onto once it is wired:
   second instance becomes *harmless* rather than *useful*. Do not read a green guard as
   permission to raise the replica count.
 
+## The case the lease cannot help with: a laptop sharing the deployed database
+
+**Diagnosed 2026-08-20. This is the failure mode that actually bit, and it is not a bug in the
+lease — it is the lease working exactly as designed, against a topology nobody meant to create.**
+
+Local `.env` pointed at the same Atlas cluster the deployed Render instance uses, and neither set a
+database name, so both landed on `test`. One database means one `system_locks.background_loops`
+row, which means one leader for both — and the deployed instance, renewing every 10s forever,
+always wins it. **Every local dev process was therefore a permanent FOLLOWER**: for 26 minutes
+across nine restarts that evening, the log said so nine times and nobody read it as a problem.
+
+Why that is worse than "no monitors locally": the browser talks to the LAPTOP. So the laptop is
+the process that executes work, and the leader is a different machine entirely.
+
+1. The user accepted an Atlas review. `applyRebalance` ran **locally** and the paper venue
+   trimmed AVGO and scaled into MU — real writes, correct ones.
+2. Those fills were emitted on the laptop's **in-process** `executionBus`.
+3. `execution.reconciler` is leader-gated, so nothing was attached to that bus. Render's
+   reconciler was attached to *its own* bus and never saw a thing — `executionBus` is a plain
+   EventEmitter, not a shared channel.
+4. Result: positions moved, `trades` captured nothing, no journal entry, no broker-truth stamping
+   of the legs, no card. The holdings were right only because the rebalance path writes leg sizes
+   itself (its own compare-and-set), which is a coincidence, not a design.
+
+Meanwhile Render's loops were ticking against the same live data the whole time, and any card they
+emitted went to sockets connected to Render — item 2 above, from the other side.
+
+**The fix is not a lease change — it is not sharing a database.** `DB_NAME` (2026-08-21) selects
+the database on the cluster; unset it behaves exactly as before, so the deployed environment needs
+no change. Set it locally and the laptop gets its own `system_locks`, wins its own lease, and runs
+its own loops. `scripts/clone-db-for-dev.mjs` copies the shared database (collections + indexes)
+into a dev one so you keep working with real books.
+
+Two traps if you take a different route:
+
+- **Do not "just let the laptop win the lease."** It can — briefly, when Render redeploys, which
+  is what happened at 21:40 that evening. That is strictly worse: production's loops stand down and
+  a laptop becomes the thing monitoring live stops.
+- **A follower is not visibly broken.** It serves HTTP normally, chats normally, and executes
+  orders normally. `GET /api/health`'s `leader` flag is the only signal, and one WARN at boot is
+  easy to scroll past.
+
 ## Verifying the constraint still holds
 
 There is no automated check, and adding one is awkward (the failure only appears with two
