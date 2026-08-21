@@ -36,6 +36,7 @@ import { ENTITIES }               from '../../services/entity/entityCollection.j
 import { orderSymbol }            from '../../monitoring/exitOrders.util.js'
 import { deferIfClosed }          from '../../services/pendingAction/executionGate.js'
 import { isSelfExecuted }         from '../../services/venue.resolve.service.js'
+import { notifyRebalanceApplied } from '../../services/rebalanceNotify.service.js'
 
 const LOG        = '[portfolio:rebalance]'
 const COLLECTION = ENTITIES
@@ -76,6 +77,42 @@ const _deferred = (gate, extra = {}) => ({
     ...extra,
 })
 
+/**
+ * The asset a change names, when the change itself knows it. Only an add carries one (its holding
+ * does not exist yet); every other verb points at an itemId, and `_postReceipt` resolves those.
+ */
+const _specAsset = change => change.item?.asset ?? null
+
+/**
+ * Post the review receipt — the record the user goes looking for when the toast is gone.
+ *
+ * Resolves the missing asset names in ONE read: a change identifies its holding by id, and a card
+ * that says "trimmed a holding" is barely better than no card. An add already carried its asset
+ * down from the spec; an add that SUCCEEDED also has a brand-new itemId, so both are looked up.
+ *
+ * Best-effort throughout. The moves are already done and the review is already closed — a receipt
+ * that cannot be built must not turn a completed rebalance into a failed one.
+ */
+async function _postReceipt(portfolioId, userId, results) {
+    try {
+        const db   = await getDb()
+        const ids  = [...new Set(results.map(r => r.itemId).filter(Boolean))]
+        const docs = ids.length
+            ? await db.collection(COLLECTION).find({ id: { $in: ids } }, { projection: { id: 1, asset: 1 } }).toArray()
+            : []
+        const assetById = new Map(docs.map(d => [d.id, d.asset]))
+        const sib = await db.collection(COLLECTION).findOne({ portfolioId, userId }, { projection: { portfolioName: 1 } })
+
+        await notifyRebalanceApplied(userId, {
+            portfolioId,
+            portfolioName: sib?.portfolioName ?? null,
+            results: results.map(r => ({ ...r, asset: r.asset ?? assetById.get(r.itemId) ?? null })),
+        })
+    } catch (err) {
+        logger.warn(LOG, 'receipt card could not be built', err.message)
+    }
+}
+
 export async function applyRebalance(portfolioId, userId, update) {
     if (!portfolioId) return { ok: false, reason: 'missing_portfolioId' }
     if (!update || !Array.isArray(update.changes) || update.changes.length === 0) {
@@ -97,10 +134,13 @@ export async function applyRebalance(portfolioId, userId, update) {
             const r = await _applyOne(portfolioId, userId, change, bookValue)
             if (r?.manualExitLeg)  manualExitLegs.push(r.manualExitLeg)
             if (r?.manualEntryLeg) manualEntryLegs.push(r.manualEntryLeg)
-            results.push({ action: change.action, itemId: change.itemId ?? null, ...r })
+            // `asset` rides along for the receipt card, which has to NAME what moved. An add carries
+            // it on the spec (the holding does not exist yet); everything else is resolved from the
+            // docs afterwards in one read rather than a lookup per change.
+            results.push({ action: change.action, itemId: change.itemId ?? null, asset: _specAsset(change), ...r })
         } catch (err) {
             logger.error(LOG, `change failed (${change.action})`, err.message)
-            results.push({ action: change.action, itemId: change.itemId ?? null, ok: false, error: err.message })
+            results.push({ action: change.action, itemId: change.itemId ?? null, asset: _specAsset(change), ok: false, error: err.message })
         }
     }
 
@@ -154,6 +194,11 @@ export async function applyRebalance(portfolioId, userId, update) {
         portfolioId, applied: applied.length, deferred: deferred.length, failed: failed.length,
         manualExitPosted, manualEntryPosted,
     })
+
+    // The receipt. Posted LAST, after every write and after the clock: a card is an alert about a
+    // state change, never part of it, so nothing above may depend on it — and `postCard` cannot
+    // throw back into this function even if delivery fails.
+    await _postReceipt(portfolioId, userId, results)
     return {
         ok: true, results, manualExitPosted, manualEntryPosted,
         nextReviewAt: rev?.nextReviewAt ?? null,
@@ -234,6 +279,10 @@ export async function _exitItem(db, itemId, userId, reason, gate = _gate) {
         closed++
     }
     await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingCloseReason: reason } })
+    // Same unnamed-refusal shape as the scale-in below: every leg sits at a broker that cannot close
+    // a position programmatically (IBKR today), so nothing was closed and the user must be told WHY
+    // rather than handed a bare "couldn't be applied".
+    if (!closed && skipped) return { ok: false, reason: 'broker_cannot_close', legsSkipped: skipped }
     return { ok: closed > 0, legsClosed: closed, legsSkipped: skipped }
 }
 
@@ -637,6 +686,12 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
     // Same refusal as trim: a scale-in too small to round up to one share did not happen, and must
     // not read as though it did. This is the exact shape of the MU add that reported success.
     if (!added && skipped && !failed) return { ok: false, reason: 'add_too_small', legsSkipped: skipped }
+    // Every leg was REJECTED by the venue. Without a `reason` this returned ok:false carrying only
+    // `legsFailed`, and the toast's REASON_COPY had nothing to look up — so an EME scale-in the
+    // paper venue refused for want of a price reached the user as a bare "1 change couldn't be
+    // applied". The per-leg cause is already in the log line above; this names the CLASS, which is
+    // what the toast can say.
+    if (!added && failed) return { ok: false, reason: 'broker_rejected', legsFailed: failed, legsSkipped: skipped }
     return { ok: added > 0, legsAdded: added, legsSkipped: skipped, ...(failed ? { legsFailed: failed } : {}) }
 }
 

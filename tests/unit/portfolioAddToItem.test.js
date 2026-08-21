@@ -273,3 +273,45 @@ test('a queue write that fails still blocks the order', async () => {
     assert.equal(r.ok, false, 'losing the row is a bookkeeping failure; sending the order would be a trading one')
     assert.equal(r.reason, 'error')
 })
+
+// ── Named refusals ───────────────────────────────────────────────────────────
+// A change that comes back ok:false with NO `reason` reaches the user as a bare "1 change couldn't
+// be applied": the toast looks the reason up in REASON_COPY and finds nothing. That is exactly how
+// an EME scale-in the paper venue refused for want of a price (2026-08-20 21:36) landed with no
+// asset and no cause anywhere the user could see.
+
+test('every leg rejected by the venue → reason broker_rejected', async () => {
+    const db = fakeDb(liveIdea())
+    const broker = fakeBroker()
+    broker.placeOrder = async () => { throw new Error('paper: no live price for EME') }
+
+    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, broker, OPEN)
+    assert.equal(r.ok, false)
+    assert.equal(r.reason, 'broker_rejected', 'the toast cannot name a refusal the result does not carry')
+    assert.equal(r.legsFailed, 2)
+})
+
+test('a PARTIAL rejection still succeeds — one good leg is not a failed change', async () => {
+    const db = fakeDb(liveIdea())
+    const broker = fakeBroker()
+    const real = broker.placeOrder
+    let n = 0
+    broker.placeOrder = async (...args) => {
+        if (n++ === 0) throw new Error('rejected')
+        return real(...args)
+    }
+
+    const r = await _addToItem(db, 'i1', 'u1', { addFraction: 0.5 }, broker, OPEN)
+    assert.equal(r.ok, true)
+    assert.equal(r.reason, undefined, 'a successful change must not carry a refusal reason')
+    assert.equal(r.legsAdded, 1)
+    assert.equal(r.legsFailed, 1)
+})
+
+test('too-small still wins over broker_rejected when nothing was even attempted', async () => {
+    // Both buckets can be non-empty; the one that describes what actually stopped the change is
+    // the one the user needs. Nothing reached the venue here, so "too small" is the true answer.
+    const db = fakeDb(liveIdea({ brokerOrders: [{ broker: 'ctrader', accountId: 'a1', positionId: 'p1', quantity: 1 }] }))
+    const r  = await _addToItem(db, 'i1', 'u1', { addFraction: 0.1 }, fakeBroker(), OPEN)
+    assert.equal(r.reason, 'add_too_small')
+})
