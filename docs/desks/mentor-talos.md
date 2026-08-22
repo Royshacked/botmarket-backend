@@ -1,7 +1,13 @@
 # Mentor + Talos — the `setup` kind
 
-The user's own trade, built with **Mentor** and watched by **Talos**: a zone gate plus a
-setup-driven assessment.
+The user's own trade, built with **Mentor** and watched by **Talos**.
+
+> **THE ZONE GATE DESCRIBED HERE IS GONE (2026-08-22).** [talos-guards.md](talos-guards.md) replaced
+> it with LLM-authored wake guards over time AND price, and Mentor no longer draws bands — every
+> level is an exact price. Read that doc first; it is the contract. What survives here is everything
+> guards did not touch: the scenario model, conditions, validity, the pipeline, and the history of
+> why the exits are shaped as they are. Sections marked **SUPERSEDED** describe how it used to work
+> and are kept because the reasoning still explains the shape of what replaced them.
 
 Replaces `docs/setup-entity.md` and `docs/mentor-talos-refactor.md` (2026-08-08). The refactor doc
 already superseded parts of the contract doc — the `watch[]` taxonomy — so the two disagreed with
@@ -23,8 +29,8 @@ prompt + card, and no plumbing change. This is that payload and evaluator contra
 
 | | `idea` (legacy) | `setup` | `call` |
 |---|---|---|---|
-| levels | exact points, condition trees | **zones** | zones |
-| trigger | tree evaluates true → fire | zone trip → **assess** → fire | zone trip → assess → fire |
+| levels | exact points, condition trees | **exact prices** | zones |
+| trigger | tree evaluates true → fire | **guard fires** → assess → fire | zone trip → assess → fire |
 | what is monitored | the leaves | the **declared** factors | four fixed axes |
 
 The two shapes coexist by strangler: nothing in flight migrates, and legacy tree-ideas — including
@@ -88,7 +94,19 @@ the same question in two places with two vocabularies.
 
 ---
 
-## Exits — the TP window (BUILT 2026-08-15)
+## Exits — the TP window (BUILT 2026-08-15, **SUPERSEDED 2026-08-22**)
+
+> The WINDOW is gone: a target is the price the user named and nothing hangs beneath it. What the
+> breadth used to buy — room for Talos to propose banking early — is a GUARD the monitor arms for
+> itself, at a level it chooses per wake rather than one Mentor drew once
+> ([talos-guards.md](talos-guards.md)).
+>
+> Principle 1 below is truer than ever and now cuts both ways: an unconditional level is just an
+> order, and a conditional TARGET is the opposite — it does not rest at all, because a limit would
+> fill regardless of what its condition said. Principle 4's "conditional stops are out of scope" is
+> also void: they are built, and a conditional stop ALWAYS keeps its resting stop-market.
+>
+> The rest of this section is kept for the reasoning, which is what explains the shape.
 
 Four principles, in the user's words:
 
@@ -207,7 +225,8 @@ principle 3's cheap half is opening exactly that door.
 
 ## Talos
 
-A poll loop with a zone gate, drawing from the **shared monitor tool kit**
+A poll loop woken by GUARDS (see [talos-guards.md](talos-guards.md)), drawing from the **shared
+monitor tool kit**
 (`monitoring/assessTools.js`) rather than a private copy, with symbol scope and per-wake cost
 accounting.
 
