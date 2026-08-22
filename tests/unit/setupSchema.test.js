@@ -2,10 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     buildLadder, buildCadence, normalizeZone, normalizeZones, scenarioQuantity,
-    normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems, windowProblems,
+    normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
-    stopEdge, targetEdges, targetWindows, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, CONDITION_MODES, TRADE_MODES,
+    stopEdge, targetEdges, targetLevels, clampGuards, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, CONDITION_MODES, TRADE_MODES,
 } from '../../services/setup.schema.js'
 import { MODES } from '../../services/analysisModes.js'
 
@@ -416,30 +416,55 @@ test('targetEdges come back NEAREST-FIRST — the order price reaches them', () 
     assert.deepEqual(targetEdges(short), [233, 221], 'a short reaches the HIGHEST target first')
 })
 
-test('targetWindows reads a tp zone as the target plus the breadth beneath it', () => {
-    // The framing that makes the whole exit design work: `target` is the price the user named and
-    // where the limit rests, `wake` is where Talos is allowed to start talking about it.
+test('targetLevels reads a tp zone as the price the limit rests at', () => {
+    // A level authored today is zero-width, so this is simply "the target". On a LEGACY band it is
+    // the far side — the level such a document was already resting at, so a deploy moves nothing.
     const long = normalizeSetup({ ...DRAFT, direction: 'long',
-        tp_zones: [{ lower: 258, upper: 260 }, { lower: 244, upper: 245 }] })
-    assert.deepEqual(targetWindows(long), [
-        { wake: 244, target: 245 },
-        { wake: 258, target: 260 },
-    ], 'nearest-first, and the target is always the far side')
+        tp_zones: [{ price: 260 }, { price: 245 }] })
+    assert.deepEqual(long.scenarios[0].tp_zones.map(z => [z.lower, z.upper]), [[260, 260], [245, 245]],
+        'a bare price collapses to a zero-width level')
+    assert.deepEqual(targetLevels(long).map(t => t.target), [245, 260], 'nearest-first')
 
-    const short = normalizeSetup({ ...DRAFT, direction: 'short',
-        tp_zones: [{ lower: 220, upper: 221 }, { lower: 232, upper: 233 }] })
-    assert.deepEqual(targetWindows(short), [
-        { wake: 233, target: 232 },
-        { wake: 221, target: 220 },
-    ], 'a short falls to its target, so the far side is the LOWER edge')
+    const short = normalizeSetup({ ...DRAFT, direction: 'short', tp_zones: [{ price: 220 }, { price: 232 }] })
+    assert.deepEqual(targetLevels(short).map(t => t.target), [232, 220], 'a short reaches the HIGHEST target first')
+
+    const legacy = normalizeSetup({ ...DRAFT, direction: 'long', tp_zones: [{ lower: 258, upper: 260 }] })
+    assert.deepEqual(targetLevels(legacy).map(t => t.target), [260], 'a legacy band rests at the far side')
 })
 
-test('targetWindows agrees with targetEdges about where Talos wakes', () => {
-    // Two functions reading the same band must never disagree about which side is which — that
-    // divergence would put the limit and the wake on the same edge again, silently.
+test('a target carries its own conditions, in the same shape an entry condition has', () => {
+    // The whole reason there is no exit evaluator: an exit condition is a SENTENCE the model judges,
+    // not a tree software resolves. Same normaliser, same three axes, same document-wide id space.
     const s = normalizeSetup({ ...DRAFT, direction: 'long',
-        tp_zones: [{ lower: 258, upper: 260 }, { lower: 244, upper: 245 }] })
-    assert.deepEqual(targetWindows(s).map(w => w.wake), targetEdges(s))
+        tp_zones: [{ price: 260, conditions: [{ text: 'only if volume confirms the push', weight: 'primary' }] }] })
+    const [tp] = s.scenarios[0].tp_zones
+    assert.equal(tp.conditions.length, 1)
+    assert.equal(tp.conditions[0].text, 'only if volume confirms the push')
+    assert.equal(tp.conditions[0].weight, 'primary')
+    assert.equal(tp.conditions[0].mode, 'judgment', 'unstamped defaults exactly as a scenario condition does')
+    assert.equal(tp.conditions[0].persistence, 'live')
+    assert.deepEqual(targetLevels(s)[0].conditions, tp.conditions, 'and it rides out with the level')
+})
+
+test('a leg condition claims its id from the DOCUMENT-WIDE set, not its own list', () => {
+    // `monitor_state.conditions` is ONE latch map for the setup. A target's condition sharing an id
+    // with a scenario's would let one latch answer for the other.
+    const s = normalizeSetup({ ...DRAFT, direction: 'long',
+        conditions: [{ id: 'x1', text: 'regime is risk-on' }],
+        tp_zones:   [{ price: 260, conditions: [{ id: 'x1', text: 'volume confirms' }] }],
+        stop_zones: [{ price: 234, conditions: [{ id: 'x1', text: 'closes below the 4hr VWAP' }] }],
+    })
+    const ids = [
+        ...s.conditions.map(c => c.id),
+        ...s.scenarios[0].tp_zones.flatMap(z => z.conditions.map(c => c.id)),
+        ...s.scenarios[0].stop_zones.flatMap(z => z.conditions.map(c => c.id)),
+    ]
+    assert.equal(new Set(ids).size, ids.length, `ids collided: ${ids.join(', ')}`)
+})
+
+test('a zero-width tp zone is a level with nothing to discuss', () => {
+    const s = normalizeSetup({ ...DRAFT, direction: 'long', tp_zones: [{ lower: 246, upper: 246 }] })
+    assert.deepEqual(targetLevels(s), [{ target: 246, conditions: [] }])
 })
 
 test('a setup cannot be generated without a target PRICE', () => {
@@ -474,44 +499,6 @@ test('a missing target names WHICH premise is short of one', () => {
         ],
     })
     assert.deepEqual(setupReadiness(two, true).missing, ['target price on break and go'])
-})
-
-test('windowProblems refuses a target window too thin to act inside', () => {
-    // Price crosses it between two checks, so the limit fills before the card is read — worse than
-    // no window, because it advertises a conversation that cannot happen.
-    const s = normalizeSetup({ ...DRAFT, direction: 'long',
-        entry_zones: [{ lower: 237.8, upper: 238.6 }], tp_zones: [{ lower: 259.98, upper: 260 }] })
-    assert.match(windowProblems(s).join(' '), /too thin/)
-})
-
-test('windowProblems refuses a window covering more than a third of the move', () => {
-    // Talos would open the conversation at a fraction of the planned R.
-    const s = normalizeSetup({ ...DRAFT, direction: 'long',
-        entry_zones: [{ lower: 237.8, upper: 238.6 }], tp_zones: [{ lower: 248, upper: 260 }] })
-    assert.match(windowProblems(s).join(' '), /more than a third/)
-})
-
-test('windowProblems leaves a sane window and an exact level alone', () => {
-    const ok = normalizeSetup({ ...DRAFT, direction: 'long',
-        entry_zones: [{ lower: 237.8, upper: 238.6 }], tp_zones: [{ lower: 258, upper: 260 }] })
-    assert.deepEqual(windowProblems(ok), [])
-
-    // Zero is not "too thin" — it is the unconditional case, a plain limit with nothing to discuss.
-    const exact = normalizeSetup({ ...DRAFT, direction: 'long',
-        entry_zones: [{ lower: 237.8, upper: 238.6 }], tp_zones: [{ lower: 260, upper: 260 }] })
-    assert.deepEqual(windowProblems(exact), [])
-})
-
-test('the window check reaches readiness, so a bad breadth cannot be generated', () => {
-    // Prompt-only rules are advice; this is the half that cannot be talked out of it.
-    const bad = normalizeSetup({ ...DRAFT, direction: 'long',
-        entry_zones: [{ lower: 237.8, upper: 238.6 }], tp_zones: [{ lower: 248, upper: 260 }] })
-    assert.match(validityProblems(bad).join(' '), /more than a third/)
-})
-
-test('a zero-width tp zone is a level, not a window', () => {
-    const s = normalizeSetup({ ...DRAFT, direction: 'long', tp_zones: [{ lower: 246, upper: 246 }] })
-    assert.deepEqual(targetWindows(s), [{ wake: 246, target: 246 }])
 })
 
 test('targetEdges is empty, never [null], when none is authored', () => {
@@ -952,4 +939,75 @@ test('Mentor and Kairos offer the SAME three lenses', () => {
     // The point of the change. Two desks describing one concept with different words is how a user
     // ends up thinking they are different concepts.
     assert.deepEqual([...TRADE_MODES].sort(), [...MODES].sort())
+})
+
+// ─── Guards: the model asks, the server decides ───────────────────────────────
+// docs/desks/talos-guards.md. A guard fires when EVERY term it carries holds, and `clampGuards` is
+// the half of the contract that cannot be talked out of it.
+
+const GSETUP = { cadence: { min: 5, max: 240 } }
+
+test('a guard keeps both terms, so the conjunction survives the clamp', () => {
+    const [g] = clampGuards([{ after_min: 30, price: 305, direction: 'above' }], GSETUP, 300)
+    assert.deepEqual(g, { after_min: 30, price: 305, direction: 'above', means: null })
+})
+
+test('the time term is clamped to the horizon band, never refused', () => {
+    // A model asking to be woken in one minute on a swing burns the budget; one asking for three
+    // days goes blind. Both are honest asks made badly, so both are corrected rather than dropped.
+    assert.equal(clampGuards([{ after_min: 1 }], GSETUP)[0].after_min, 5)
+    assert.equal(clampGuards([{ after_min: 4320 }], GSETUP)[0].after_min, 240)
+})
+
+test('a missing direction is inferred from where price actually is', () => {
+    // A level with no side is not a crossing, it is a number.
+    assert.equal(clampGuards([{ price: 311.5 }], GSETUP, 305)[0].direction, 'above')
+    assert.equal(clampGuards([{ price: 300 }],   GSETUP, 305)[0].direction, 'below')
+})
+
+test('an ALREADY-TRUE price guard is dropped — it would be a paid infinite loop', () => {
+    // "below 305" armed while price is already 300 is satisfied the instant it is written: it wakes
+    // the model, which re-arms it, which wakes the model. The backstop is what remains.
+    const out = clampGuards([{ price: 305, direction: 'below' }], GSETUP, 300)
+    assert.deepEqual(out.map(g => g.price), [null], 'only the injected backstop survives')
+})
+
+test('a guard with neither a time nor a price term cannot fire, so it is dropped', () => {
+    const out = clampGuards([{ means: 'entry' }, { price: 'soon' }], GSETUP, 300)
+    assert.equal(out.filter(g => g.price != null).length, 0)
+})
+
+test('THE BACKSTOP IS INJECTED when the read forgot one', () => {
+    // Without an unconditional time guard a pure conjunction STARVES: price sits 20 away for three
+    // weeks, nothing trips, nothing looks — while earnings came and went. No symptom until far too
+    // late, so a forgotten backstop is repaired rather than reported.
+    const out = clampGuards([{ price: 311.5, direction: 'above' }], GSETUP, 305)
+    const backstop = out.find(g => g.after_min != null && g.price == null)
+    assert.ok(backstop, 'a set with only price guards must gain a heartbeat')
+    assert.equal(backstop.after_min, 240, 'at the lazy end of the setup\'s own band')
+})
+
+test('a backstop the model DID arm is not doubled', () => {
+    const out = clampGuards([{ after_min: 60 }, { price: 311.5, direction: 'above' }], GSETUP, 305)
+    assert.equal(out.filter(g => g.after_min != null && g.price == null).length, 1)
+})
+
+test('an empty or junk set still comes back with a heartbeat', () => {
+    // The starvation guarantee cannot depend on the model returning anything at all.
+    for (const raw of [[], null, undefined, 'nonsense', [null, 7, 'x']]) {
+        const out = clampGuards(raw, GSETUP)
+        assert.equal(out.length, 1, `${JSON.stringify(raw)} should yield exactly the backstop`)
+        assert.equal(out[0].after_min, 240)
+    }
+})
+
+test('price levels are capped, so one read cannot arm a hedge instead of a watch', () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ price: 400 + i, direction: 'above' }))
+    const out  = clampGuards(many, GSETUP, 300)
+    assert.equal(out.filter(g => g.price != null).length, 6)
+})
+
+test('only a known MEANING survives, so a wake cannot arrive mislabelled', () => {
+    assert.equal(clampGuards([{ price: 311, direction: 'above', means: 'entry' }], GSETUP, 305)[0].means, 'entry')
+    assert.equal(clampGuards([{ price: 311, direction: 'above', means: 'vibes' }], GSETUP, 305)[0].means, null)
 })

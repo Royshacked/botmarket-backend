@@ -22,6 +22,9 @@ import { getCandles }                            from './ohlcv.service.js'
 import { toNum }                                 from './format.util.js'
 import { logger }                                from './logger.service.js'
 import { isSelfExecuted }                        from './venue.resolve.service.js'
+// The ONE rule for what price a leg acts at — shared with `stopEdge` and the journal, so the
+// working stop, the order that rests and the line the record reports can never be three answers.
+import { zoneLevel }                             from './setup.schema.js'
 
 const LOG = '[protectionPlan]'
 
@@ -124,37 +127,33 @@ export async function routeExits(idea) {
 }
 
 /**
- * WHICH EDGE of a zone becomes the order price: **the edge FURTHER FROM ENTRY**, on both legs.
- *
- *   long  → stop `lower`, tp `upper`     short → mirrored.
- *
- * The stop takes the far side so the zone has room to be a zone rather than a hair trigger. The tp
- * takes the far side because THE FAR SIDE IS THE TARGET THE USER NAMED — a tp zone is not a fuzzy
- * area the target lives somewhere inside, it is that target plus a stretch of price beneath it in
- * which Talos may propose taking something off (docs/desks/mentor-talos.md §"Exits — the TP window",
- * setup.schema.targetWindows).
- *
- * THIS USED TO REST THE TP ON THE NEAR EDGE, which is the same edge `setup.schema.targetEdges` wakes
- * Talos on — so the limit filled at the exact instant the `scale_out` gate tripped, and "sell only
- * half" was always a proposal about a position that was already flat. The window between the two is
- * the whole feature.
- *
- * R:R is deliberately NOT re-based to match. `computeRR` still prices the reward to the near edge —
- * now the level where Talos ASKS rather than where the trade exits — because that is the honest
- * worst case if the user banks at the first ask every time, and an R:R must never flatter.
- */
-export function zoneExitLevel(zone, isLong, which = 'stop') {
-    const takeLower = which === 'tp' ? !isLong : isLong
-    const level     = takeLower ? zone?.lower : zone?.upper
-    return Number.isFinite(level) ? level : null
-}
-
-/**
  * A setup's stop/tp ZONES → the same LegRouting shape the tree path returns, so `exitFields`,
  * `placeExits` and the reconciler consume it untouched.
  *
- * `monitorTree` is always null: there is no residual software-monitored condition, because a zone
- * IS a price. Every leg rests at the broker, which is what protects a position nobody is watching.
+ * `monitorTree` is always null, and stays null now that a leg may carry CONDITIONS. An exit
+ * condition is a SENTENCE the model judges on its next read — the same thing an entry condition is
+ * — not a tree for software to resolve. Nothing here evaluates it and nothing here should: this
+ * function's whole job is the order that rests at the broker.
+ *
+ * ── THE RULE A CONDITION MAY NOT BEND ────────────────────────────────────────
+ * **A stop ALWAYS rests, conditions or not.** A condition on a stop is a DISCRETIONARY exit —
+ * "out if it closes below the 4hr VWAP" — and it may only ever tighten the exit, never replace it.
+ * Talos proposes and never fires (every verdict is a card the user confirms), so a conditional stop
+ * that was the only protection would leave a live position naked whenever the model is late, the
+ * process is down, the market gaps, or the user is simply asleep. The broker order is what makes
+ * that impossible rather than merely unlikely.
+ *
+ * ── …AND THE MIRROR RULE, WHICH POINTS THE OTHER WAY ─────────────────────────
+ * **A CONDITIONAL TP DOES NOT REST.** Resting a limit at the target makes its condition dead
+ * letter: the order fills the moment price prints there, whatever the condition said, so
+ * "take 330 only if volume confirms" would take 330 on no volume at all. A conditional target is a
+ * DISCRETIONARY exit the model proposes and the user confirms; there is nothing for the broker to
+ * hold.
+ *
+ * The two rules look contradictory and are the same rule — **fail in the safe direction**. For a
+ * stop the safe failure is exiting anyway, so the order always rests. For a target the safe failure
+ * is NOT exiting, so it must not. The position is protected by the stop either way, which is what
+ * makes the target's the cheaper mistake.
  *
  * Quantities come from the SAME rule the tree path uses (`_assignSlotQuantities`): an explicit
  * per-zone quantity wins, and the rest split the remainder equally with the residue going to the
@@ -166,14 +165,21 @@ export function routeSetupZones(setup) {
     const totalQty = Number(setup?.quantity) || 0
 
     const leg = (zones, which) => {
-        const list = (Array.isArray(zones) ? zones : []).filter(z => Number.isFinite(zoneExitLevel(z, isLong, which)))
-        if (!list.length) return { single: null, nativeOrders: [], monitorTree: null, hasAny: false }
+        const all = (Array.isArray(zones) ? zones : []).filter(z => Number.isFinite(zoneLevel(z, isLong, which)))
+        // Quantities are assigned over EVERY authored leg, before any are held back: a conditional
+        // target still owns its share of the position. Splitting only the resting ones would hand
+        // the whole size to whichever targets happened to be unconditional.
+        const quantities = _assignSlotQuantities(all, totalQty)
 
-        const quantities = _assignSlotQuantities(list, totalQty)
-        const nativeOrders = list
-            .map((z, i) => ({ level: zoneExitLevel(z, isLong, which), quantity: quantities[i] }))
+        const list = all
+            .map((z, i) => ({ level: zoneLevel(z, isLong, which), quantity: quantities[i], conditions: z?.conditions ?? [] }))
+            // THE ASYMMETRY, in one line. A stop rests whatever it carries; a target with conditions
+            // is the model's to propose and must not be pre-empted by its own limit order.
+            .filter(o => which === 'stop' || !o.conditions.length)
             // A zero-quantity leg would be sent to the broker as an order for nothing.
             .filter(o => o.quantity > 0)
+
+        const nativeOrders = list.map(({ level, quantity }) => ({ level, quantity }))
         return { single: null, nativeOrders, monitorTree: null, hasAny: nativeOrders.length > 0 }
     }
 

@@ -356,13 +356,17 @@ test('a zero-width target rests and never wakes anything', async () => {
     assert.notEqual(positionGate({ ...PS(), targets: ladder }, 250).flag, 'scale_out')
 })
 
-test('the seeded ladder carries both ends of the window', () => {
-    // `price` is where Talos may start talking, `resting` is where the limit sits. A model shown only
-    // one of them cannot tell "take it here" from "let the limit have it".
+test('a legacy BAND still rests where it always did, so a deploy moves nothing', () => {
+    // The fixture predates docs/desks/talos-guards.md and carries a 246–247.2 band. `resting` must
+    // stay the far edge — the level the broker was ALREADY holding — because a live position finding
+    // its limit moved by a deploy is the one migration failure that cannot be undone.
+    //
+    // `price` is null: the band carries no conditions, so there is nothing to wake the model for.
+    // What the near edge used to buy (room for Talos to propose banking early) is a GUARD now.
     const deps = stubDeps()
     return _checkSetup(INPOS(PS({ entry: { intended: 238.6, direction: 'long' } })), T, deps)
         .then(() => assert.deepEqual(deps.writes[0]['position_state.targets'],
-            [{ price: 246, resting: 247.2, hit_at: null }]))
+            [{ price: null, resting: 247.2, hit_at: null }]))
 })
 
 // ─── Scaling in ───────────────────────────────────────────────────────────────
