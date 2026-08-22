@@ -8,6 +8,12 @@ The one-line version: **a price band was never the point. It was a workaround fo
 too rarely, and for looking at only one price when we looked.** Fix the sampling and the band has no
 job left — so Mentor stops drawing bands, and Talos decides for itself when to look next.
 
+> **PROPOSED EXTENSION — [design/triggered-setups.md](../design/triggered-setups.md), not built.**
+> A guard's price term becomes an ARRAY of terms over prices *and* indicator subjects (`ema(9)`
+> crossing `sma(21)`, price within 0.5% of `vwap`), which in turn allows a setup whose entry is a
+> trigger rather than a level. Guards as written here are unaffected — that design is strictly
+> additive, and it turns on the rule that most "pattern" triggers resolve to a price anyway.
+
 ---
 
 ## Why zones exist today, and why that reason expires
