@@ -165,8 +165,17 @@ TWO TIMEFRAMES, TWO JOBS. You are shown one view up front and your LADDER lists 
 
 "next_timeframe" is the rung you want to OPEN on next time, and it is also how you set the pace — asking for a coarser rung means you are content to look less often, a finer one means you want to watch closely. Pick it from your ladder; anything else is ignored.
 
+"guards" ARE WHEN YOU WANT TO BE WOKEN, and they are the most consequential thing you write. Nothing looks at this setup between your reads except a cheap price check against these lines, so a guard you did not arm is a move you will not see, and a guard armed carelessly is a read someone pays for with nothing to say.
+
+Each guard fires only when EVERY term it carries holds:
+- {"price":311.5,"direction":"above","means":"entry"} — wake me the moment it crosses, ahead of any timer. Use these for the level that would actually change your answer.
+- {"after_min":30,"price":305,"direction":"above"} — look again in 30 minutes, but ONLY if price is above 305 by then. The conjunction is what makes this cheap: if price is still nowhere near, the timer costs nothing.
+- {"after_min":240} — the unconditional backstop. It runs even if price does nothing, because some things a chart cannot show — a catalyst landing, the session closing, the premise simply going stale.
+
+Arm the levels that matter and no more. Price is at one place now; ask yourself where it would have to go for you to say something different, and put your lines THERE. Tighten them as price approaches and loosen them as it walks away — that is how you spend attention well. Every guard is rewritten from scratch each read, so what you do not re-arm is forgotten.
+
 Output ONLY a JSON object, no prose. Return one entry per declared condition, keyed by its id:
-{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw, or why you couldn't look"}],"verdict":"enter|wait|stand_aside|edit|let_expire","warning":"<one line, ONLY when the verdict is not enter: what is missing or wrong, for the setup's record — the user is NOT asked to enter on a non-enter verdict, so this is not pre-confirmation copy>","next_timeframe":"15min","memo_update":"..."}
+{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw, or why you couldn't look"}],"verdict":"enter|wait|stand_aside|edit|let_expire","warning":"<one line, ONLY when the verdict is not enter: what is missing or wrong, for the setup's record — the user is NOT asked to enter on a non-enter verdict, so this is not pre-confirmation copy>","next_timeframe":"15min","guards":[{"price":311.5,"direction":"above","means":"entry"},{"after_min":30,"price":305,"direction":"above"},{"after_min":240}],"memo_update":"..."}
 Include "edit_proposal":{"why":"...","changes":{}} only when the verdict is "edit".`
 
 /**
@@ -256,6 +265,7 @@ export async function assessSetup(setup, hit, ctx = {}) {
             `REASON WOKEN: ${ctx.reason ?? 'zone_trip'}`,
             _ladderLine(setup, ladder, tf),
             `LENS: ${lensLine(setup.trade_mode)}`,
+            _armedLine(setup),
             `PRIOR MEMO: ${setup.monitor_state?.memo || '(none)'}`,
             ..._dataBlocks(setup, g, tf),
         ].filter(Boolean).join('\n\n')
@@ -401,10 +411,19 @@ Always include "read": ONE short first-person sentence — what you see and what
 
 TWO TIMEFRAMES, TWO JOBS. Your LADDER lists the rungs you may work on. The setup's own timeframe is where the THESIS lives; a rung or two finer is where the management decision lives — where the stop is actually being pressed, where a target is actually being reached. "next_timeframe" is the rung you want to open on next time, and it sets the pace with it: a coarser rung means you are content to look less often, a finer one means you want to watch this closely. Pick it from your ladder; anything else is ignored.
 
-A TARGET IS A WINDOW, NOT A LINE. Each target has a resting limit at the price the user named, and a wake level a little beneath it. You are woken when price enters that window, WITH THE LIMIT STILL RESTING ABOVE — so the question is never "shall we take the target", it is "shall we take something HERE, or let price carry on to the limit". Saying nothing is a real answer: the limit fills the whole position at the target on its own.
+TARGETS COME IN TWO KINDS, and "resting" tells you which. A target with a resting limit is already an ORDER: it fills at that price on its own and needs nothing from you, so the question is only ever "shall we take something HERE, on the way", not "shall we take the target". A target with NO resting limit is one the author made conditional — nothing is holding it at the broker, so if you say nothing, nothing happens. Read its condition and answer.
+
+THE STOP ALWAYS RESTS, whatever conditions it carries. You can propose tightening it and never removing it; if you say nothing, the position is still protected. That is deliberate — you propose, the user confirms, and neither of you is awake at 3am.
+
+"guards" ARE WHEN YOU WANT TO BE WOKEN, and in a position they are what stands between a move and a missed reaction. Nothing looks at this trade between your reads except a cheap price check against these lines. Each guard fires only when EVERY term it carries holds:
+- {"price":306,"direction":"below","means":"invalidation"} — wake me the moment it goes, ahead of any timer.
+- {"after_min":30,"price":330,"direction":"above"} — look again in 30 minutes, but only if price got there.
+- {"after_min":240} — the unconditional backstop, for what a chart cannot show.
+
+Arm the levels where you would actually say something different: where the stop starts being pressed, where a conditional target comes into reach, where the thesis would break. Every guard is rewritten each read, so what you do not re-arm is forgotten.
 
 Output ONLY a JSON object, no prose:
-{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw"}],"verdict":"hold|let_run|take_partial|move_stop|exit_now","proposal":{"fraction":"third|half|two_thirds","stop":123.45,"new_tp":123.45,"why":"<what the level is anchored to>"},"next_timeframe":"15min","memo_update":"..."}
+{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw"}],"verdict":"hold|let_run|take_partial|move_stop|exit_now","proposal":{"fraction":"third|half|two_thirds","stop":123.45,"new_tp":123.45,"why":"<what the level is anchored to>"},"next_timeframe":"15min","guards":[{"price":306,"direction":"below","means":"invalidation"},{"after_min":240}],"memo_update":"..."}
 Include "proposal" ONLY for take_partial (fraction), move_stop (stop + why) or a let_run that moves the target (new_tp + why). Omit it entirely otherwise.`
 
 /**
@@ -449,6 +468,7 @@ export async function assessPosition(setup, ps, ctx = {}) {
             // "price is pressing the stop" is a different question from "a target came into reach".
             `WHY YOU WERE WOKEN: ${_wakeReason(ctx.reason)}`,
             _ladderLine(setup, ladder, tf),
+            _armedLine(setup),
             `PRIOR MEMO: ${setup.monitor_state?.memo || '(none)'}`,
             ..._dataBlocks(setup, g, tf),
         ].filter(Boolean).join('\n\n')
@@ -468,6 +488,23 @@ export async function assessPosition(setup, ps, ctx = {}) {
 function _armedScenario(setup) {
     const id = setup?.armed_scenario_id
     return (setup?.scenarios ?? []).find(s => s.id === id) ?? pickScenario(setup)
+}
+
+/**
+ * The guards standing right now — what the LAST read asked to be woken by
+ * (docs/desks/talos-guards.md).
+ *
+ * Shown because a guard set is REPLACED WHOLE on every read, never merged: a model that cannot see
+ * what it armed three hours ago is re-deriving the watch from scratch each time, and the lines it
+ * happens not to re-arm go quiet without anyone deciding they should. Seeing them makes the rewrite
+ * a decision — keep this one, move that one in, drop the one the trade has walked away from.
+ *
+ * Absent on the first read of a setup, which is honest: there is nothing armed yet.
+ */
+function _armedLine(setup) {
+    const guards = setup?.monitor_state?.guards
+    if (!Array.isArray(guards) || !guards.length) return null
+    return `CURRENTLY ARMED (you wrote these last read; they are replaced by whatever you return now): ${JSON.stringify(guards)}`
 }
 
 function _wakeReason(reason) {
