@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
     isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap, gradedGap,
 } from '../../monitoring/readinessGates.js'
+import { guardFires } from '../../services/setup.schema.js'
 import * as talos from '../../monitoring/talos.monitor.service.js'
 
 // The chores both readiness monitors do before they can think. Each one used to exist twice, and
@@ -111,9 +112,13 @@ test('Talos does NOT spare `edit` from the past-expiry cutoff', () => {
     assert.equal(talos._effectiveVerdict('edit', 'expiry_review', true), 'let_expire')
 })
 
-test('a zero-width zone IS a zone to Talos', () => {
-    // A setup zone may legally be an exact level the user named, so Talos measures distance to it.
-    // (Hermes read the same shape as no usable band and fell to its lazy cadence.)
-    const zone = [{ id: 'z', lower: 100, upper: 100 }]
-    assert.ok(Number.isFinite(talos.zoneDistance(zone, 105)), 'setup: an exact level, measurable')
+test('a zero-width level IS watchable by Talos', () => {
+    // The claim is unchanged and the mechanism is not. A setup level may legally be an exact price
+    // the user named, and it used to need a distance RULER (`zoneDistance`, with a 0.1%-of-price
+    // fallback so a zero band did not divide by zero). Talos arms a guard on it now, and a guard
+    // needs no width at all — which is the point of docs/desks/talos-guards.md: an exact level
+    // became as catchable as a wide band, so the widths could go.
+    const touch = { after_min: null, price: 100, direction: 'any' }
+    assert.equal(guardFires(touch, { range: { high: 105, low: 99 } }), true, 'reached during the window')
+    assert.equal(guardFires(touch, { range: { high: 105, low: 101 } }), false, 'never came back to it')
 })

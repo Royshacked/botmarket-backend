@@ -24,14 +24,73 @@ import { logger } from './logger.service.js'
 
 const LOG = '[priceFeed]'
 
-// symbol → { price, at }. In memory on purpose: it is a cache of the newest observation, not a
-// record — the durable copy is the mark stamped on each position row by the mark loop.
+// symbol → { price, at, recent: [{price, at}, …] }. In memory on purpose: it is a cache of the
+// newest observation, not a record — the durable copy is the mark stamped on each position row by
+// the mark loop.
 const _marks = new Map()
 
-/** Publish an observed price. Called by whatever owns the polling cadence (the paper mark loop). */
+// ── The third door: a short TRAIL of observations, not just the newest ────────
+//
+// `readMark` answers "where is it now". Talos's guard sweep has to answer a different question —
+// "did it CROSS this line since I last looked" — and the newest price cannot answer that. A level
+// touched and left between two polls is invisible to a spot read, which is precisely the miss that
+// price BANDS existed to paper over (docs/desks/talos-guards.md).
+//
+// So every publication is kept for a short while and `rangeSince` reads the high/low across them.
+// It costs no extra provider call — it reuses prices this app already pays for, from whichever
+// consumer happened to fetch them.
+//
+// BOUNDED TWICE, because this is a process-lifetime map: by COUNT per symbol (a runaway publisher
+// cannot grow one entry without limit) and by AGE on read (a trail older than the caller's window
+// is not evidence about it). The count is the memory bound; the age is the correctness one.
+const TRAIL_MAX = 240
+
+/**
+ * Publish an observed price. Called by whatever owns the polling cadence (the paper mark loop) —
+ * and, incidentally, by every fetch in the app, which is what makes the trail cheap.
+ */
 export function publish(symbol, price, at = Date.now()) {
     if (!symbol || price == null || !Number.isFinite(price) || price <= 0) return
-    _marks.set(String(symbol).toUpperCase(), { price, at })
+    const key  = String(symbol).toUpperCase()
+    const prev = _marks.get(key)
+    // Out-of-order publications are kept, not sorted: `rangeSince` scans and takes a min/max, so
+    // ordering buys nothing, and dropping a late arrival would drop a real observation.
+    const recent = prev?.recent ?? []
+    recent.push({ price, at })
+    if (recent.length > TRAIL_MAX) recent.splice(0, recent.length - TRAIL_MAX)
+    // `price`/`at` stay the NEWEST BY TIME rather than the last written, so a late arrival cannot
+    // roll the current mark backwards for every readMark caller.
+    const newest = !prev || at >= prev.at ? { price, at } : { price: prev.price, at: prev.at }
+    _marks.set(key, { ...newest, recent })
+}
+
+/**
+ * The high and low observed for a symbol since `sinceMs`, or null when nothing was seen in that
+ * window. Pure apart from reading the map.
+ *
+ * THE POINT: a guard asks whether price crossed a line, and a crossing is a fact about an interval,
+ * not about an instant. `{high, low}` over the interval answers it; the last price does not.
+ *
+ * Resolution is bounded by how often anything publishes — a wick between two publications is still
+ * invisible. That is a real limit and a far smaller one than a 30-to-240-minute scheduled glance,
+ * and the escalation if it ever bites is to confirm a near-firing guard with a real 1-minute candle.
+ *
+ * @param {string} symbol
+ * @param {number} sinceMs  epoch ms; observations at or after this are counted
+ * @returns {{high: number, low: number, count: number}|null}
+ */
+export function rangeSince(symbol, sinceMs) {
+    const hit = _marks.get(String(symbol ?? '').toUpperCase())
+    if (!hit?.recent?.length) return null
+
+    let high = -Infinity, low = Infinity, count = 0
+    for (const o of hit.recent) {
+        if (!(o.at >= sinceMs)) continue
+        if (o.price > high) high = o.price
+        if (o.price < low)  low  = o.price
+        count++
+    }
+    return count ? { high, low, count } : null
 }
 
 /**

@@ -7,13 +7,13 @@ import { fetchLastPrice, fetchCandles } from './monitorUtils.js'
 import { createDueLoop, makePersist } from './dueLoop.js'
 import { journalEntry, failNote } from './monitorJournal.js'
 import {
-    isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap, gradedGap,
+    isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap,
     hasEditProposal,
 } from './readinessGates.js'
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, MANAGEMENT_VERDICTS } from './talos.assess.js'
-import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetWindows, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, clampRung, usableLadder, rungMinutes } from '../services/setup.schema.js'
+import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetLevels, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, clampRung, clampGuards, usableLadder, rungMinutes } from '../services/setup.schema.js'
 import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage } from '../services/tradeNotify.service.js'
 import { isSelfExecuted } from '../services/venue.resolve.service.js'
 
@@ -127,9 +127,18 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     }
 
     const price = await deps.getPrice(setup)
+    // WHY THIS WAKE HAPPENED, as recorded by the sweep that caused it (guardSweep.service.js).
+    // One-shot: cleared by every write below, so it describes this wake and no later one.
+    const woke  = setup.monitor_state?.woke_on ?? null
     // Which PREMISE price reached, not merely which zone: the scenario decides what gets judged,
     // what size is taken and which stop rests behind it.
-    const hit   = scenarioGate(setup, price)
+    //
+    // TWO WAYS TO ARRIVE, and the second is why guards work at all. `scenarioGate` asks where price
+    // is RIGHT NOW; the sweep already established where it has BEEN, up to a minute earlier. A
+    // level touched and left in that minute would make the spot check say "nothing here" and throw
+    // away the very crossing that paid for the wake. So a fired price guard resolves to its own
+    // zone, whatever price is doing by the time we look.
+    const hit   = scenarioGate(setup, price) ?? _hitFromGuard(setup, woke)
     const zone  = hit?.zone ?? null
 
     // Nothing tripped and not expiring → the cheap path. No LLM, just a proximity-aware
@@ -141,22 +150,18 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
         const breached = await _checkValidity(setup, price, nowMs, deps)
         if (breached) return breached
 
-        // TIER 2. Price has left the map far enough to be a different situation than the one that
-        // was authored — one read, throttled, that can re-map the setup. Asked after the validity
-        // gate on purpose: a premise that just BROKE is dead, and paying to look at it is waste.
-        if (shouldPulse(setup, price, nowMs)) return _pulse(setup, price, nowMs, deps)
-
+        // TIER 2 IS GONE, and nothing replaced it here. The momentum pulse existed to catch a setup
+        // developing at a level nobody had mapped: it measured price walking away from the authored
+        // bands and bought ONE re-mapping read. Guards make it unnecessary — the model arms its own
+        // invalidation levels, so "price has left the map" is a line somebody drew rather than an
+        // inference from band widths (docs/desks/talos-guards.md).
         const patch = _reschedule(setup, nowMs, price)
-        // Seed the pulse anchor on first sight — the "eyes-on" price the next material move is
-        // measured from. Costs nothing and needs no LLM, but until it exists nothing can ever pulse.
-        if (Number.isFinite(price) && !Number.isFinite(Number(setup.monitor_state?.pulse_anchor_px))) {
-            patch['monitor_state.pulse_anchor_px'] = price
-        }
-        await deps.persist(setup.id, patch, _entry('scheduled', { setup, nowMs, price, nextAt: patch['monitor_state.next_check_at'] }))
-        return { reason: 'scheduled' }
+        const quiet = wakeReason(woke)
+        await deps.persist(setup.id, patch, _entry(quiet, { setup, nowMs, price, woke, nextAt: patch['monitor_state.next_check_at'] }))
+        return { reason: quiet }
     }
 
-    const reason = expiring ? 'expiry_review' : 'zone_trip'
+    const reason = expiring ? 'expiry_review' : wakeReason(woke)
     const raw    = await deps.assess(setup, hit, { reason, price })
 
     if (!raw || raw._failReason) {
@@ -172,48 +177,6 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     if (verdict !== onMenu) logger.info(LOG, `[${setup.id}] verdict "${onMenu}" → "${verdict}" (${reason}${_isPastExpiry(setup, nowMs) ? ', past expiry' : ''})`)
 
     return _applyVerdict(setup, hit, { ...raw, verdict }, nowMs, reason, price, deps)
-}
-
-/**
- * ONE momentum pulse — the Tier 2 escalation (see shouldPulse). Same full read a zone trip buys,
- * woken for a different reason and allowed to do less with the answer.
- *
- * WHAT A PULSE MAY NOT DO IS ENTER. It fires with price OUTSIDE every zone, so nothing is armed:
- * there is no `armed_zone_id`, no leg to take size from (`legQuantity`) and no fill anchor for the
- * position's entry price. An 'enter' here would fire a confirm card with no leg behind it. What the
- * pulse is FOR is `edit` — re-map the zones onto what price is actually doing, after which the
- * ordinary zone trip takes the entry through the intact path on a later wake. Everything else is
- * recorded as a `wait`, which is still worth the money: the read lands on the setup's own record.
- *
- * The anchor and the time floor are stamped on EVERY outcome, failures included. That is the whole
- * throttle: without it a failed read would re-fire on the next wake, and a trending name would buy
- * a pulse on every bar.
- */
-async function _pulse(setup, price, nowMs, deps) {
-    const reason = 'momentum_pulse'
-    const stamp  = {
-        'monitor_state.pulse_anchor_px': price,
-        'monitor_state.last_pulse_at':   new Date(nowMs).toISOString(),
-    }
-
-    // No `hit`: nothing is armed. The assessment falls back to the PROJECTED premise (pickScenario),
-    // which is the same thing an expiry review judges.
-    const raw = await deps.assess(setup, null, { reason, price })
-
-    if (!raw || raw._failReason) {
-        const patch = { ..._reschedule(setup, nowMs, price), ...stamp }
-        await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, nextAt: patch['monitor_state.next_check_at'], failed: true, failReason: raw?._failReason }))
-        return { reason, failed: true }
-    }
-
-    const onMenu = READINESS_VERDICTS.has(raw.verdict) ? raw.verdict : 'wait'
-    if (onMenu !== raw.verdict) logger.warn(LOG, `off-menu pulse verdict "${raw.verdict}" for ${setup.id} — treating as wait`)
-
-    const verdict = (onMenu === 'edit' && _hasEditProposal(raw)) ? 'edit' : 'wait'
-    if (verdict !== onMenu) logger.info(LOG, `[${setup.id}] pulse verdict "${onMenu}" → "wait" — a pulse may only re-map`)
-
-    logger.info(LOG, `[${setup.id}] momentum pulse at ${price} — ${verdict}`)
-    return _applyVerdict(setup, null, { ...raw, verdict }, nowMs, reason, price, deps, stamp)
 }
 
 /**
@@ -327,14 +290,28 @@ async function _checkPosition(setup, nowMs, deps) {
         'position_state.stop.current':     stop,
         // Nearest-first — the order price reaches them, which is the order partials fire in.
         //
-        // Each rung is a WINDOW, not a point (setup.schema.targetWindows): `resting` is the TP the
-        // user named and where the limit sits at the broker, `price` is where Talos is allowed to
-        // start proposing. A ZERO-WIDTH zone gets `price: null` — an exact level has no window to
-        // talk in, so it simply rests and never wakes anything, which is what makes an unconditional
-        // target just an order. The gate already skips a non-finite `price`.
-        'position_state.targets':          targetWindows(setup).map(w => ({
-            price:   w.wake !== w.target ? w.wake : null,
-            resting: w.target,
+        // `resting` is the target the user named. `price` is where the gate wakes Talos to TALK
+        // about it, and it exists only when there is something to talk about:
+        //
+        //   no conditions  → `price: null`. A plain limit rests at the broker and wakes nothing.
+        //                    An unconditional target is just an order.
+        //   conditions     → `price: target`. Nothing rests (routeSetupZones holds a conditional
+        //                    target back, or the limit would fill and make the condition dead
+        //                    letter), so the gate has to wake the model AT the level to judge it.
+        //
+        // Waking exactly at the target is the interim: under docs/desks/talos-guards.md the model
+        // arms its own guard and can ask to be woken beneath it. The gate already skips a non-finite
+        // `price`.
+        //
+        // KNOWN, ACCEPTED REGRESSION UNTIL GUARDS LAND. A LEGACY banded target used to wake the
+        // `scale_out` gate at its near edge, so Talos could offer "bank half here?" on the way up.
+        // Bands carry no conditions, so those positions now get `price: null` and no offer. The
+        // money outcome is unchanged — the limit still rests at the same level it always did, which
+        // is the guarantee that mattered — and what is lost is an optional conversation that guards
+        // restore, at a level the model chooses rather than one Mentor happened to draw.
+        'position_state.targets':          targetLevels(setup).map(t => ({
+            price:   t.conditions.length ? t.target : null,
+            resting: t.target,
             hit_at:  null,
         })),
     }
@@ -442,6 +419,18 @@ async function _managePosition(setup, psIn, nowMs, deps) {
         // Same rung memory the readiness read keeps — a position being watched on the 5-minute
         // because its stop is being pressed should not silently reopen on the ladder's default.
         ...(nextRung ? { 'monitor_state.timeframe': nextRung } : {}),
+        // The wake conditions this read armed (docs/desks/talos-guards.md). Written WHOLE on every
+        // read, never merged: a guard set is a snapshot of one judgment about where price would have
+        // to go to change the answer, and half of yesterday's judgment beside half of today's is a
+        // set neither read would have written. What the model does not re-arm is forgotten, and the
+        // prompt says so in those words.
+        'monitor_state.guards': clampGuards(raw.guards, setup, price),
+        // Stamped WITH the guards, because it is the clock their time term is measured
+        // against: `after_min` means 'this long since a MODEL last looked at me', not since
+        // the sweep last ran. Two clocks, and conflating them would let a fast sweep cadence
+        // quietly reset the model's own patience. Only a real read writes it.
+        'monitor_state.last_read_at': new Date(nowMs).toISOString(),
+        'monitor_state.woke_on':      null,
         'position_state.last_management': { at: new Date(nowMs).toISOString(), verdict },
         ...(raw.memo_update ? { 'monitor_state.memo': String(raw.memo_update) } : {}),
         ...(fires ? { 'position_state.pending_action': { verdict, proposal: raw.proposal ?? null, at: new Date(nowMs).toISOString(), read: raw.read ?? null } } : {}),
@@ -690,6 +679,10 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps, stamp 
     const declared = declaredConditions(setup, scenario)
 
     const conditions = normalizeConditionResults(raw.conditions, declared)
+    // The wake conditions this read is ARMING. Computed once and used for both the write and
+    // the journal line: an entry has to report what is watched from here on, and `setup` still
+    // holds the set this read is replacing.
+    const armedNow   = clampGuards(raw.guards, setup, price)
     // The rung the NEXT read opens on. Off-ladder resolves to null, and null leaves the stored rung
     // alone rather than silently reverting a deliberate climb to the ladder's default.
     const nextRung   = clampRung(raw.next_timeframe, usableLadder(setup))
@@ -715,12 +708,19 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps, stamp 
         // Only an assessment writes the rung, and no cheap wake touches it, so the choice stands
         // until the model revisits it.
         ...(nextRung ? { 'monitor_state.timeframe': nextRung } : {}),
-        // RE-ANCHOR THE PULSE ON EVERY REAL LOOK. The anchor means "where price was when I last had
-        // eyes on this plan", and this IS that moment, whatever woke it. Without this a zone trip
-        // would leave the anchor wherever it was seeded, so price leaving the zone could buy a
-        // second full read minutes after the first one — the pulse firing at exactly the moment we
-        // are least ignorant. (Hermes re-anchors on its zone trips for the same reason.)
-        ...(Number.isFinite(price) ? { 'monitor_state.pulse_anchor_px': price } : {}),
+        // …and the same is true of the guards: only a real read arms them, so the set standing at
+        // any moment is the one the last judgment wrote. See the management path for why it is
+        // replaced whole rather than merged.
+        'monitor_state.guards': armedNow,
+        // Stamped WITH the guards, because it is the clock their time term is measured
+        // against: `after_min` means 'this long since a MODEL last looked at me', not since
+        // the sweep last ran. Two clocks, and conflating them would let a fast sweep cadence
+        // quietly reset the model's own patience. Only a real read writes it.
+        'monitor_state.last_read_at': new Date(nowMs).toISOString(),
+        // ONE-SHOT, cleared here as on every other write: `woke_on` describes the wake being handled
+        // right now. Left set, every later wake would claim the same cause and `_hitFromGuard` would
+        // keep resolving a stale zone long after price left it.
+        'monitor_state.woke_on':      null,
         ...latchPatch(setup, conditions, nowMs, declared),
         ...costPatch(setup, raw._calls),
         // Caller-supplied $set that must ride EVERY branch below (the pulse's re-anchor + throttle).
@@ -733,7 +733,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps, stamp 
     // the user can act. Never a silent auto-close.
     if (reason === 'expiry_review' && raw.verdict === 'let_expire') {
         await deps.persist(setup.id, { ...base, status: 'closed', closedReason: 'expired', closedAt: nowMs },
-            _entry(reason, { setup, nowMs, price, verdict: raw.verdict, read: raw.read }))
+            _entry(reason, { setup, nowMs, price, armed: armedNow, verdict: raw.verdict, read: raw.read }))
         return { reason, verdict: raw.verdict, closed: true }
     }
 
@@ -754,7 +754,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps, stamp 
             invalidation_edge:   'time',
             invalidation_reason: raw.edit_proposal?.why ?? raw.read ?? null,
         }
-        await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
+        await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, armed: armedNow, zone, verdict: raw.verdict, read: raw.read }))
         try { await deps.onEditCard(setup, assessment) }
         catch (err) { logger.warn(LOG, `edit card failed for ${setup.id}:`, err.message) }
         return { reason, verdict: raw.verdict, edited: true }
@@ -766,7 +766,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps, stamp 
     // confirm an entry Talos just declined is the one thing this gate exists to prevent.
     if (zone && raw.verdict !== 'enter') {
         await deps.persist(setup.id, { ...base, status: _nextStatus(raw.verdict, reason), armed_zone_id: zone.id, armed_scenario_id: scenario?.id ?? null },
-            _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
+            _entry(reason, { setup, nowMs, price, armed: armedNow, zone, verdict: raw.verdict, read: raw.read }))
         return { reason, verdict: raw.verdict, watching: true }
     }
 
@@ -800,7 +800,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps, stamp 
         // themselves and reports the fill. Its own card, not the confirm dialog.
         if (isSelfExecuted(setup.broker)) {
             patch.orderState = 'awaiting_manual_fill'
-            await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
+            await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, armed: armedNow, zone, verdict: raw.verdict, read: raw.read }))
             // The PROJECTED setup, not the document as it was read: the leg the user is told to place
             // must be the armed premise's, at the armed premise's size.
             try { await deps.onManualCard(executable) }
@@ -821,7 +821,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps, stamp 
             logger.info(LOG, `[${setup.id}] zone tripped with no placeable accounts — alert only`)
         }
 
-        await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, zone, verdict: raw.verdict, read: raw.read }))
+        await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, armed: armedNow, zone, verdict: raw.verdict, read: raw.read }))
 
         // Only an order actually awaiting confirmation gets the confirm card. 'awaiting_market'
         // defers silently until the market sweep surfaces it (marketOpen.monitor).
@@ -833,7 +833,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps, stamp 
         return { reason, verdict: raw.verdict, fired: true, orderState: patch.orderState ?? null }
     }
 
-    await deps.persist(setup.id, base, _entry(reason, { setup, nowMs, price, verdict: raw.verdict, read: raw.read }))
+    await deps.persist(setup.id, base, _entry(reason, { setup, nowMs, price, armed: armedNow, verdict: raw.verdict, read: raw.read }))
     return { reason, verdict: raw.verdict }
 }
 
@@ -847,6 +847,46 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps, stamp 
 export function zoneGate(zones, price) {
     if (!Number.isFinite(price)) return null
     return (zones ?? []).find(z => price >= z.lower && price <= z.upper) ?? null
+}
+
+/**
+ * The premise a FIRED PRICE GUARD belongs to, or null.
+ *
+ * The guard sweep proved price reached a level; this says which plan that level was part of, so the
+ * wake can judge the right premise and arm the right leg. Matched by containment rather than by
+ * equality: a guard armed at 312 on a legacy 311.8–312.4 band is that band's, and a model arming a
+ * level a little inside its own zone means the zone.
+ *
+ * Null when the level belongs to no zone — a line the model drew somewhere the plan does not reach.
+ * That is a legitimate wake and deliberately NOT an entry: `_applyVerdict` only fires with a zone,
+ * so a read woken here can re-map the setup (`edit`) but can never open a position with no leg
+ * behind it and no size to take. Pure.
+ */
+export function _hitFromGuard(setup, woke) {
+    const lvl = toNum(woke?.price)
+    if (!Number.isFinite(lvl)) return null
+    for (const sc of liveScenarios(setup)) {
+        const zone = (sc.entry_zones ?? []).find(z => lvl >= z.lower && lvl <= z.upper)
+        if (zone) return { scenario: sc, zone }
+    }
+    return null
+}
+
+/**
+ * What to call this wake on the record. Derived from the guard that caused it, so the journal says
+ * WHY rather than merely when (docs/desks/talos-guards.md).
+ *
+ *   guard_price   a level was reached — `means` says whether that is an entry or an invalidation
+ *   backstop      the unconditional heartbeat: nothing happened, look anyway
+ *   guard_time    a conditional guard whose time AND price terms both held
+ *
+ * Absent `woke` is a wake the sweep did not cause — the first look at a newly armed setup, or a
+ * deploy landing mid-cadence. `guard_time` is the honest label for those: a timer brought us here.
+ */
+export function wakeReason(woke) {
+    if (Number.isFinite(toNum(woke?.price))) return 'guard_price'
+    if (woke && woke.after_min != null) return 'backstop'
+    return 'guard_time'
 }
 
 /** What a scenario's own invalidation axis says, or null while it is untouched. */
@@ -879,114 +919,6 @@ export function scenarioGate(setup, price) {
         if (zone) return { scenario, zone }
     }
     return null
-}
-
-/** Every entry zone still armed, across live scenarios — what proximity cadence measures against. */
-export function liveEntryZones(setup) {
-    return liveScenarios(setup).flatMap(sc => sc.entry_zones ?? [])
-}
-
-/** Distance from price to the nearest zone edge, as a multiple of that zone's width. */
-export function zoneDistance(zones, price) {
-    if (!Number.isFinite(price) || !zones?.length) return null
-    return Math.min(...zones.map(z => {
-        const gap   = price < z.lower ? z.lower - price : price > z.upper ? price - z.upper : 0
-        const width = zoneWidth(z)
-        return gap / width
-    }))
-}
-
-/**
- * A zone's width as a YARDSTICK — never zero. A Mentor zone is ATR-sized, so its width is a free
- * volatility measure; but Talos deliberately supports a ZERO-WIDTH zone (an exact level the user
- * named), and that would divide to Infinity here and reject the zone entirely there. So a degenerate
- * band falls back to 0.1% of price, which keeps an exact level measurable instead of invisible.
- *
- * Extracted from zoneDistance so the pulse gate below measures with the SAME ruler. Two rulers is
- * how "4 widths away" and "1 width away" end up disagreeing about the same zone.
- */
-export function zoneWidth(z) {
-    return Math.max(Number(z?.upper) - Number(z?.lower), Math.abs(Number(z?.upper)) * 0.001, 1e-9)
-}
-
-// ─── Out-of-zone momentum pulse (Tier 2) ──────────────────────────────────────
-//
-// Tier 1 (the zone gate) can only fire where Mentor drew a zone, and the out-of-zone validity gate
-// can only KILL — `broke` / `drifting`, never a way IN. So a setup that develops at a level nobody
-// mapped is invisible: price runs, the premise changes, and the next assessment is whenever price
-// happens to wander back into a band that no longer means anything.
-//
-// This is the middle gate. On a scheduled (out-of-zone) wake, a MATERIAL, THROTTLED move away from
-// every live zone earns ONE full read that can re-map the setup.
-//
-// ┌ MODELLED ON hermes.monitor.service.js's pulse (_shouldPulse), NOT SHARED WITH IT ──────────────┐
-// │ Hermes's version is pure but shaped around a CALL: it hardcodes status 'waiting', reads a flat │
-// │ call.entry_zones, and rejects a zero-width band. None of the three survives a setup, whose     │
-// │ zones live inside rival scenarios and whose exact levels are legitimate. What is genuinely     │
-// │ common is the SHAPE — anchor, material move in band-widths, time floor — and that is cheap to  │
-// │ state twice while Hermes is being retired. DELETE HERMES'S COPY WHEN HERMES SLEEPS; this is    │
-// │ the one that survives.                                                                         │
-// └────────────────────────────────────────────────────────────────────────────────────────────────┘
-//
-// Material = >= PULSE_MOVE_BANDS x the nearest live zone's width from the last "eyes-on" anchor.
-// Throttled twice over: each pulse RE-ANCHORS (so it needs a fresh full move to fire again) and each
-// pulse stamps a time floor, so a name trending away doesn't buy a read on every bar.
-const PULSE_MOVE_BANDS = 4
-
-/**
- * The time floor between pulses. Talos takes the LAZY END OF ITS OWN CADENCE BAND rather than
- * Hermes's flat 20 minutes, because a setup's band is horizon-scaled and a call's is not: 15m for an
- * intraday setup, 24h for a long-term one. A fixed floor would either spam the slow book or throttle
- * the fast one. Falls back to the swing default when a document carries no cadence.
- */
-export function pulseGapMin(setup) {
-    return setup?.cadence?.max ?? 30
-}
-
-/**
- * Band width of the live zone whose band price is NEAREST to — the volatility yardstick a material
- * move is measured in. Null when there is no usable zone. Pure.
- *
- * Measured over `liveEntryZones`, not every authored zone: a scenario whose premise BROKE is not a
- * yardstick, and letting a dead band size the gate would silently change the threshold the moment a
- * rival scenario died.
- */
-export function nearestZoneWidth(setup, price) {
-    if (!Number.isFinite(price)) return null
-    let width = null, bestDist = Infinity
-    for (const z of liveEntryZones(setup)) {
-        const lo = Number(z?.lower), hi = Number(z?.upper)
-        if (!Number.isFinite(lo) || !Number.isFinite(hi)) continue
-        const dist = price < lo ? lo - price : price > hi ? price - hi : 0
-        if (dist < bestDist) { bestDist = dist; width = zoneWidth(z) }
-    }
-    return width
-}
-
-/**
- * Should this scheduled (out-of-zone) wake escalate to a full read? Pure — every input comes from
- * the setup, the live price and the clock.
- *
- * Guards cheapest-first: a finite price; still PRE-ENTRY (a live position is _managePosition's
- * problem, and its zones already did their job); NOT in a zone (that is Tier 1, and a trip must
- * never be pre-empted by this); the anchor seeded; a usable yardstick; a material move; the floor.
- */
-export function shouldPulse(setup, price, nowMs) {
-    if (!Number.isFinite(price)) return false
-    if (!ACTIVE_STATUSES.includes(setup?.status)) return false
-    if (scenarioGate(setup, price)) return false
-
-    const ms     = setup?.monitor_state ?? {}
-    const anchor = Number(ms.pulse_anchor_px)
-    if (!Number.isFinite(anchor)) return false
-
-    const w = nearestZoneWidth(setup, price)
-    if (!Number.isFinite(w) || w <= 0) return false
-    if (Math.abs(price - anchor) < PULSE_MOVE_BANDS * w) return false
-
-    const lastAt = Date.parse(ms.last_pulse_at ?? '')
-    if (Number.isFinite(lastAt) && (nowMs - lastAt) < pulseGapMin(setup) * 60_000) return false
-    return true
 }
 
 // ─── In-position arithmetic ────────────────────────────────────────────────────
@@ -1403,20 +1335,6 @@ export const _effectiveVerdict = (verdict, reason, pastExpiry) =>
  */
 export const _nextStatus = nextStatus
 
-// Talos's bands. Tighter than Hermes's (1/8 vs 2/10) because a setup's cadence is already
-// horizon-scaled, so its floor is cheap. The DISTANCE is measured locally too: zoneDistance treats
-// a zero-width zone as an exact level worth measuring to, where Hermes ignores such a band entirely
-// — a real difference, test-locked on both sides, and not something an extraction should quietly
-// settle. Only the interpolation between the bands is shared.
-const NEAR_WIDTHS = 1
-const FAR_WIDTHS  = 8
-export function proximityGapMin(setup, price) {
-    const { min = 5, max = 30 } = setup?.cadence ?? {}
-    // Measured against EVERY live premise's entry, not the projected one: price walking toward the
-    // breakout must tighten the loop even while the projection still shows the false break.
-    return gradedGap(zoneDistance(liveEntryZones(setup), price), { min, max, near: NEAR_WIDTHS, far: FAR_WIDTHS })
-}
-
 /**
  * When to look again, DERIVED from the rung the model asked to open on next.
  *
@@ -1438,12 +1356,30 @@ export function _nextCheckAt(setup, nowMs, nextTimeframe) {
     return new Date(nowMs + gap * 60_000).toISOString()
 }
 
-function _reschedule(setup, nowMs, price) {
-    const gap = proximityGapMin(setup, price)
+/**
+ * When to look again after a wake that had nothing to say.
+ *
+ * THE LAZY END, ALWAYS. This used to grade the gap by distance-to-zone (`proximityGapMin`: floor
+ * within one band width, ceiling beyond eight, linear between) because a scheduled glance was the
+ * only thing that could catch price arriving. It is not any more — the guard sweep watches every
+ * armed level continuously and makes a setup due the moment one is crossed, so tightening this
+ * timer buys nothing and pays for it in reads.
+ *
+ * What is left for this to do is the heartbeat: come back eventually even if price does nothing.
+ * That is the backstop's job too, and `cadence.max` is where the model's own backstop is clamped,
+ * so the two agree by construction.
+ */
+function _reschedule(setup, nowMs) {
+    const { max = 30 } = setup?.cadence ?? {}
+    const gap = max
     return {
         // No zone tripped (or market closed / assessment failed) → the setup isn't actively being
         'monitor_state.check_count':   (setup.monitor_state?.check_count ?? 0) + 1,
         'monitor_state.next_check_at': new Date(nowMs + gap * 60_000).toISOString(),
+        // ONE-SHOT.  describes the wake being handled right now; leaving it set would make
+        // every later wake claim the same cause, and would keep resolving a stale zone through
+        // _hitFromGuard long after price left it.
+        'monitor_state.woke_on':       null,
     }
 }
 
@@ -1454,7 +1390,16 @@ function _reschedule(setup, nowMs, price) {
 // reader could turn into a line of prose, so a setup's journal could only ever be rendered as JSON.
 // Talos's own contribution is the model's `read`; the arithmetic wakes word themselves.
 function _entry(reason, { setup, read = null, verdict = null, ...rest }) {
-    return journalEntry(reason, { ...rest, entity: setup, note: read, raw: { verdict, read } })
+    return journalEntry(reason, {
+        ...rest,
+        entity: setup,
+        note:   read,
+        raw:    { verdict, read },
+        // Read off the document rather than threaded through six call sites: the sweep put it there
+        // and every branch that writes a line wants it. An explicit `woke` still wins, for a caller
+        // that knows better than the stored value.
+        woke: rest.woke ?? setup?.monitor_state?.woke_on ?? null,
+    })
 }
 
 // The wake's write, from the shared writer (dueLoop.makePersist) — the monitor's $set plus the

@@ -74,6 +74,7 @@ import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
 import { paperEquityService } from './monitoring/paperEquity.service.js'
 import { paperMarkService }   from './monitoring/paperMark.service.js'
+import { guardSweepService } from './monitoring/guardSweep.service.js'
 import { marketBriefNotifier } from './monitoring/marketBrief.notify.js'
 import { marketOpenMonitor } from './monitoring/marketOpen.monitor.js'
 // The software exit monitor — kind-blind, and the caller positionMonitor.checkPosition lost when
@@ -239,6 +240,10 @@ function startBackgroundLoops() {
     startLoop('exits',        exitMonitor)
     startLoop('entries',      entryMonitor)
     startLoop('talos',        talosService)
+    // Talos's tier-0. Runs far faster than the Talos loop itself and costs no tokens: it
+    // evaluates each armed setup's wake guards against the price RANGE since its last pass and,
+    // when one fires, marks the setup due so the loop above claims it. See guardSweep's header.
+    startLoop('guardSweep',   guardSweepService)
     startLoop('coverage',     coverageMonitorService)
     startLoop('tilt',         tiltMonitorService)
     startLoop('themis',       themisService)

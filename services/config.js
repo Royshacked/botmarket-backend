@@ -155,6 +155,14 @@ export const config = {
     get paperQuoteTtlMs()         { return _num('PAPER_QUOTE_TTL_MS', 5_000) },
     get paperFastQuoteTtlMs()     { return _num('PAPER_FAST_QUOTE_TTL_MS', 3_000) },
 
+    // ── guard sweep (Talos tier-0) ──
+    // How often armed setups' wake guards are evaluated, and therefore the resolution of every price
+    // term in the system: a wick between two sweeps is invisible. 30s is a deliberate middle — far
+    // finer than the 30-to-240-minute scheduled glance it replaces, and lazy enough that a book of
+    // setups costs a handful of quotes a minute, deduped by symbol. Our own polling is what caused
+    // the FMP 429s before, so this is the knob to turn UP if quota bites, not down.
+    get guardSweepIntervalMs()    { return _num('GUARD_SWEEP_INTERVAL_MS', 30_000) },
+
     // ── market brief ──
     get marketBriefTtlMs()       { return _num('MARKET_BRIEF_TTL_MS', 45 * 60 * 1000) },
     get marketBriefOfferHourUtc() { return _num('MARKET_BRIEF_OFFER_HOUR_UTC', 12) },

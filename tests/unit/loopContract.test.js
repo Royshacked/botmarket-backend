@@ -47,8 +47,11 @@ test('server.js registers the full fleet', () => {
         // hermes left on 2026-08-18 with Kairos — see archive/README.md. 'exits' and 'entries'
         // arrived the same day: the two halves of what Minos used to do, deliberately split so
         // neither can be switched off with the other.
-        'coverage', 'entries', 'exits', 'marketBrief', 'marketOpen', 'paperEquity', 'paperFill',
-        'paperMark', 'reconciler', 'talos', 'themis', 'tilt',
+        // 'guardSweep' is Talos's tier-0 (docs/desks/talos-guards.md) and belongs on this list for
+        // the reason the list exists: it is the only thing watching price between Talos's own reads,
+        // so switching it off would not fail anywhere — armed setups would simply stop being seen.
+        'coverage', 'entries', 'exits', 'guardSweep', 'marketBrief', 'marketOpen', 'paperEquity',
+        'paperFill', 'paperMark', 'reconciler', 'talos', 'themis', 'tilt',
     ])
 })
 
