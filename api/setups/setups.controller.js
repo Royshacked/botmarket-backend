@@ -149,13 +149,15 @@ const FORM_VOCABULARY = Object.freeze({
 })
 
 /**
- * Hydrate a setup BLUEPRINT into a draft the express form can render.
+ * Hydrate a setup BLUEPRINT into a draft a surface can render.
  *
- * The one door for every way a pre-drawn plan reaches the form — the "I have the exact setup"
- * button (blueprint absent → the blank skeleton), an agent handing one over, and later a setup
- * shared by another user. They differ only in the payload, so they cannot drift in how the plan is
- * read: hydrate → the SAME `normalizeSetup` a Mentor emit goes through → the SAME readiness gate
- * the button and the save path use.
+ * NO CALLER TODAY. Its consumer was the express setup form, deleted in 2026-08-21 when a
+ * user arriving with a finished plan started being interviewed for it instead. It is kept for the
+ * one caller a blueprint was always the right answer to — a setup SHARED by another user, opened
+ * and sized by the recipient. See services/setup.blueprint.js for the full note.
+ *
+ * Whatever opens it next reads the plan the one way: hydrate → the SAME `normalizeSetup` a Mentor
+ * emit goes through → the SAME readiness gate the save path uses.
  *
  * Answers the shape a Mentor turn's `done` already answers with — `{ setup, readiness }` — so the
  * panel's existing apply path handles it with no second branch, plus `problems`: what was sent and
@@ -196,10 +198,10 @@ export async function hydrateBlueprint(req, res) {
 /**
  * Re-run the readiness gate on a live draft. Reads nothing, writes nothing.
  *
- * The express form has no turns. In the build conversation `readiness` arrives with every `done`,
- * so it is never more than one reply stale; a user typing their own plan into a form would
- * otherwise stare at a dark Generate button that had last been told anything at hydrate time —
- * before they had entered a single number.
+ * FOR A SURFACE THAT HAS NO TURNS. In the build conversation `readiness` arrives with every `done`,
+ * so it is never more than one reply stale; anything that lets the user edit a plan OUTSIDE a turn
+ * — the deleted express form, and the shared-setup surface it is kept for — would otherwise leave
+ * them staring at a dark Generate button last told anything before they typed a single number.
  *
  * A CLIENT-SIDE COPY OF THE GATE WAS THE OTHER OPTION AND IS THE WRONG ONE. `setupReadiness` exists
  * so the agent's claim, the button and the save path cannot disagree about what a finished setup is

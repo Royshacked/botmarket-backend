@@ -6,7 +6,6 @@ import { buildTagCaptures } from '../llmStream.util.js'
 import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
-import { setupFormDescription, makeSetupFormHandler } from '../tools/setupForm.tools.js'
 import { buildVenueSection } from '../tools/tradingContext.tools.js'
 import { normalizeSetup, setupReadiness, computeRR, validityProblems } from '../setup.schema.js'
 import { logger } from '../logger.service.js'
@@ -51,52 +50,13 @@ export const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
 export const MENTOR_TOOLS = [
     ...TRADING_TOOLS,
     ...toolsFor({
-        // The user who is not here for the conversation. Ordered BEFORE `consult` because the
-        // sidecar is contractually last at every desk that declares it (agentToolsRegistry.test.js).
-        // Both sit past the tools cache breakpoint — which is inside TRADING_TOOLS, on
-        // get_derivatives_context — so nothing here touches the cached prefix either way.
-        open_setup_form: setupFormDescription(`Reach for it the moment the user signals the plan is already made — "I have the exact setup", "just take these levels", or they simply start reciting entry / stop / targets at you. Also when they ask for the form by name.
-
-Do NOT reach for it to escape a conversation that is going slowly, and never on a name you are still building with them. A form is for a plan that already exists; offered mid-build it reads as being shown the door. And it is never a way to skip your own objection — if the plan they are about to type is one you would argue with, say your piece in a line first, open the form anyway, and let them type it. It is their trade.`),
+        // The sidecar is contractually last at every desk that declares it
+        // (agentToolsRegistry.test.js), and it sits past the tools cache breakpoint — which is
+        // inside TRADING_TOOLS, on get_derivatives_context — so declaring it here touches no
+        // cached prefix.
         consult: consultDescription(`Reach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs the entry; and **placing a zone where the structure is ambiguous** — a level that is both a prior high and a supply shelf, say.`),
     }),
 ]
-
-/**
- * The turn the EXPRESS FORM fires when its plan is handed over. Built HERE, on the server, and it is
- * worth being explicit about why rather than having the client say it.
- *
- * The client used to send this as the user's own message: a fabricated line ("that's my exact setup,
- * draw the zones") pushed into the conversation as though they had typed it. Two things wrong with
- * that. It is a claim about what someone said that they did not say — it lands in their history, is
- * persisted with the thread, and is read back later as their words. And it can CONTRADICT them: a
- * fixed sentence sitting next to whatever they actually typed a moment earlier is a second voice in
- * the conversation, and when the two disagree the model has to pick one.
- *
- * So it never enters the conversation. The controller appends it as the final user turn on the wire
- * — the API needs one, and it is what `attachTurnContext` hangs the venue block on — and it is
- * absent from the displayed thread and from what is saved. The plan itself rides in
- * `chatState.draft`, so this is the INSTRUCTION and never the data.
- *
- * Deliberately thin: the contract lives in the prompt's express hand-off section, where it can be
- * read alongside the rules it depends on. A rule that lives only in a sentence the model sees once
- * is a rule it drops the moment the conversation gets interesting.
- *
- * @param {string[]} timeframes  every chart the user says they read this off. A document holds ONE
- *   (it is what the monitor's rung window is centred on), so when several are named the extras have
- *   nowhere in the artifact to live and are handed over as words for Mentor to place.
- */
-export function buildExpressHandoffPrompt({ timeframes = [] } = {}) {
-    const list = (Array.isArray(timeframes) ? timeframes : []).filter(t => typeof t === 'string' && t.trim())
-    const charts = list.length > 1
-        ? ` They read it off the ${list.join(' and the ')} — pick which one it is monitored on and place the others in the plan.`
-        : ''
-    return 'EXPRESS HAND-OFF. The user filled in the setup form: their prices, their conditions, their size,'
-        + ' all of it in the worksheet above.'
-        + charts
-        + ' Do the five things the express hand-off asks of you and emit the complete worksheet.'
-        + ' Do not re-open the plan and do not ask them anything.'
-}
 
 export function emptyMentorState() {
     return { active_asset: '', draft: null, coverage: [] }
@@ -108,7 +68,7 @@ async function chatStream({
     messages, userPrompt, chatState = emptyMentorState(), accounts = [], mainAccountId = null,
     clientTime = null, audience = null, seed = null,
     model: requestedModel, reasoningEffort, userId,
-    onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, onSetupForm, signal,
+    onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     _venueSection = buildVenueSection,
 }) {
@@ -117,14 +77,7 @@ async function chatStream({
     // `consult` is deliberately absent: runAgentStream builds it from the tool declaration, which is
     // also the only place that holds `onReasoning` — wiring it here would swallow the sidecar's
     // thinking silently. See the MENTOR_TOOLS note above.
-    // `open_setup_form` is wired HERE and not inside buildTradingToolHandlers: that kit is market
-    // data and price structure — things any desk reads. This one drives the USER'S SCREEN, so it
-    // belongs to the desk that owns the screen, and a desk that adopts the tool without a surface
-    // to open it on gets told so by the handler rather than lying to its model about it.
-    const toolHandlers = {
-        ...buildTradingToolHandlers(onChart, userId),
-        open_setup_form: makeSetupFormHandler({ log: LOG, onSetupForm }),
-    }
+    const toolHandlers = buildTradingToolHandlers(onChart, userId)
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, audience, seed)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than

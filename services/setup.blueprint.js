@@ -5,12 +5,17 @@
 // half of that sentence — the part that is true regardless of whose money is behind it. Prices,
 // conditions, direction, horizon, lens. Nothing else.
 //
-// It exists because three different callers want the same thing and none of them should invent it:
+// ── NO LIVE CALLER TODAY, AND THAT IS DELIBERATE ─────────────────────────────
+// It was built for the EXPRESS SETUP FORM, which is gone (2026-08-21): a user who arrives with the
+// plan already made is now INTERVIEWED for it instead — Mentor asks one question at a time and
+// draws the bands from the answers (see "The interview" in its prompt). A form was the wrong shape
+// for that conversation, but the blueprint was never the form's idea. It is the answer to a
+// separate question — how a plan travels between two people — and that is the caller it is kept
+// for: a shared setup, where one user sends their plan to another, who opens it and sizes it.
 //
-//   • the express form — "I already have the setup, just take it". A BLANK blueprint hydrates to
-//     the same skeleton a shared one does, so the button and the card walk one path.
-//   • an agent — any desk may hand the user a pre-drawn plan to fill in (`open_setup_form`).
-//   • a shared setup — one user sends their plan to another, who opens it and sizes it.
+// So this module and the two routes over it (`/api/setups/blueprint`, `/validate`) are covered by
+// their tests and reachable by nothing. Wire them to sharing, or delete them; do not quietly grow a
+// second way for a plan to travel while they sit here.
 //
 // ── QUANTITY IS THE FIELD A BLUEPRINT CANNOT HOLD ────────────────────────────
 // Stripped on the way out AND on the way in, which is deliberate belt-and-braces rather than an

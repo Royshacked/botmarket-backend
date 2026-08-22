@@ -2435,66 +2435,6 @@
       }
     },
     {
-      "name": "open_setup_form",
-      "description": "Open the EXPRESS SETUP FORM in the user's panel — a blank worksheet they type their own plan straight into (entry / stop / targets as price bands, the conditions in their own words, size, horizon, timeframe, direction, lens) and press Generate.\n\nReach for it the moment the user signals the plan is already made — \"I have the exact setup\", \"just take these levels\", or they simply start reciting entry / stop / targets at you. Also when they ask for the form by name.\n\nDo NOT reach for it to escape a conversation that is going slowly, and never on a name you are still building with them. A form is for a plan that already exists; offered mid-build it reads as being shown the door. And it is never a way to skip your own objection — if the plan they are about to type is one you would argue with, say your piece in a line first, open the form anyway, and let them type it. It is their trade.\n\nPre-fill ONLY what the user has actually said. A field you guess at is one they have to notice and correct, which is slower than leaving it empty. Say one short line alongside the call — that the form is open and what is left for them — and then STOP: do not restate the fields, do not ask the questions the form is already asking, and do not start analysing the name. They came here to type, not to talk. If they ask for your read afterwards, give it then.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "asset": {
-            "type": "string",
-            "description": "optional — ticker to pre-fill, e.g. NVDA. Omit if the user has not named one."
-          },
-          "direction": {
-            "type": "string",
-            "enum": [
-              "long",
-              "short"
-            ],
-            "description": "optional — pre-fill only what the user has actually said."
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "intraday",
-              "day",
-              "swing",
-              "long term"
-            ],
-            "description": "optional — the horizon, if the user named one."
-          },
-          "timeframe": {
-            "type": "string",
-            "enum": [
-              "1min",
-              "5min",
-              "15min",
-              "30min",
-              "1hr",
-              "2hr",
-              "4hr",
-              "day",
-              "week",
-              "month"
-            ],
-            "description": "optional — the working timeframe, if the user named one. The monitor's ladder is derived from it."
-          },
-          "trade_mode": {
-            "type": "string",
-            "enum": [
-              "discretionary",
-              "smc",
-              "institutional"
-            ],
-            "description": "optional — the lens, if the user named one."
-          },
-          "note": {
-            "type": "string",
-            "description": "optional — one short line shown above the form. Use it to say what you left for them to fill, not to restate the fields."
-          }
-        }
-      }
-    },
-    {
       "name": "consult",
       "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs the entry; and **placing a zone where the structure is ambiguous** — a level that is both a prior high and a supply shelf, say.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
       "input_schema": {
