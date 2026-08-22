@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { journalEntry, withJournal, zonesLabel, failNote, verdictFallbackNote, readReason } from '../../monitoring/monitorJournal.js'
+import { journalEntry, withJournal, levelsLabel, failNote, verdictFallbackNote, readReason } from '../../monitoring/monitorJournal.js'
 
 // The shared monitor journal. Hermes's copy of this is pinned by hermesMonitor.test.js (the prose
 // must not drift for calls); these tests pin that the SAME builder is kind-agnostic, because the
@@ -14,25 +14,51 @@ const setup = (over = {}) => ({
     ...over,
 })
 
-test('scheduled: a setup gets the same arithmetic sentence a call gets', () => {
-    const e = journalEntry('scheduled', {
+test('guard_time: a timer came back and found nothing at the levels', () => {
+    // The wake used to be called 'scheduled' and said "outside my zones". Under guards it is a TIMER
+    // that found nothing, and the price levels stay armed and watched by the sweep in the meantime —
+    // so the line says what is being watched, not merely when we will stir (docs/desks/talos-guards.md).
+    const e = journalEntry('guard_time', {
         nowMs: NOW, entity: setup(), price: 151.45,
         nextAt: new Date(NOW + 65 * 60_000).toISOString(),
     })
-    assert.equal(e.reason, 'scheduled')
+    assert.equal(e.reason, 'guard_time')
     assert.equal(e.price, 151.45)
     assert.match(e.note, /151\.45/)
-    assert.match(e.note, /147\.28–148\.3, 145\.35–147\.27/)   // both zones, plural
+    assert.match(e.note, /147\.28–148\.3, 145\.35–147\.27/)   // both legacy bands, plural
     assert.match(e.note, /65m/)
     assert.equal(e.next_check_at, new Date(NOW + 65 * 60_000).toISOString())
 })
 
-test('scheduled: one zone → singular "zone", and an unparseable next check drops the gap clause', () => {
-    const e = journalEntry('scheduled', {
-        nowMs: NOW, entity: setup({ entry_zones: [{ lower: 100, upper: 101 }] }), price: 99, nextAt: null,
+test('guard_time: one level → singular, and an unparseable next check drops the gap clause', () => {
+    const e = journalEntry('guard_time', {
+        nowMs: NOW, entity: setup({ entry_zones: [{ lower: 312, upper: 312 }] }), price: 305, nextAt: null,
     })
-    assert.match(e.note, /my zone 100–101/)
-    assert.doesNotMatch(e.note, /checking back/)
+    assert.match(e.note, /my level 312/, 'a zero-width level prints as ONE number, never 312–312')
+    assert.doesNotMatch(e.note, /back in/)
+})
+
+test('the wake carries WHICH guard fired, when it was armed, and what is watched now', () => {
+    // The audit trail: a reader can see the line was drawn deliberately hours earlier rather than
+    // stumbled into, and what replaced it.
+    const armed = [{ after_min: null, price: 318, direction: 'above', means: 'entry' },
+                   { after_min: 240, price: null, direction: null, means: null }]
+    const e = journalEntry('guard_price', {
+        nowMs: NOW, entity: setup(), price: 312.4, nextAt: null, armed,
+        woke: { price: 312, direction: 'above', means: 'entry', armed_at: '2026-08-22T08:20:00.000Z', skipped: 9 },
+        raw: { verdict: 'wait', read: 'Tagged it, but the candle is still open.' },
+    })
+    assert.deepEqual(e.fired, { price: 312, direction: 'above', means: 'entry', armed_at: '2026-08-22T08:20:00.000Z' })
+    assert.deepEqual(e.armed, armed, 'the set armed NOW, not the one just replaced')
+    assert.equal(e.skipped, 9, 'wakes deliberately not taken — the saving, made visible')
+})
+
+test('an entry with nothing to say about guards OMITS the fields rather than nulling them', () => {
+    // Fifty capped entries per document; three null keys on each is storage bought for nothing.
+    const e = journalEntry('guard_time', { nowMs: NOW, entity: setup(), price: 151, nextAt: null })
+    assert.equal('fired' in e, false)
+    assert.equal('armed' in e, false)
+    assert.equal('skipped' in e, false)
 })
 
 test('closed / pre_active: named by the entity, and pre_active says which KIND when there is no asset', () => {
@@ -90,10 +116,14 @@ test('assessment: axes ride along when the monitor has them (Hermes)', () => {
     assert.equal(e.fetched, 'chart 15min')
 })
 
-test('zonesLabel: joins bands, flags multi, and survives a zoneless entity', () => {
-    assert.equal(zonesLabel(setup()).multi, true)
-    assert.equal(zonesLabel({ entry_zones: [] }).text, '(no zones)')
-    assert.equal(zonesLabel(null).text, '(no zones)')
+test('levelsLabel: exact levels print as ONE number, legacy bands still print as a range', () => {
+    assert.equal(levelsLabel(setup()).multi, true)
+    assert.equal(levelsLabel({ entry_zones: [{ lower: 312, upper: 312 }] }).text, '312',
+        'the shape everything is authored in now')
+    assert.equal(levelsLabel({ entry_zones: [{ lower: 311, upper: 313 }] }).text, '311–313',
+        'a document that really does hold a band says so')
+    assert.equal(levelsLabel({ entry_zones: [] }).text, '(no levels)')
+    assert.equal(levelsLabel(null).text, '(no levels)')
 })
 
 test('withJournal: appends under the cap, and a wake with no entry writes no $push', () => {
@@ -157,5 +187,15 @@ test('journals written before the rename still read as the market being shut', (
     // suddenly render as a position close, which is the opposite event.
     assert.equal(readReason('closed'), 'market_closed')
     assert.equal(readReason('exit'), 'exit', 'anything current passes through untouched')
-    assert.equal(readReason('zone_trip'), 'zone_trip')
+})
+
+test('the zone gate\'s vocabulary still reads, mapped to the guards that replaced it', () => {
+    // Live documents hold entries written before 2026-08-22. Both name the same event, so they
+    // render as the same thing rather than as an unknown key.
+    assert.equal(readReason('zone_trip'), 'guard_price')
+    assert.equal(readReason('scheduled'), 'guard_time')
+    assert.equal(readReason('closed'),    'market_closed')
+    // …and the pulse is deliberately NOT mapped: no guard means what it meant, so relabelling it
+    // would be a claim about history rather than a translation of it.
+    assert.equal(readReason('momentum_pulse'), 'momentum_pulse')
 })

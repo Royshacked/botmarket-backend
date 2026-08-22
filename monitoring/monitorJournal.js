@@ -14,10 +14,28 @@
 // are the long ones. Talos's older `{kind, next_at}` entries stay readable — the client tolerates
 // both — and age out of the cap on their own.
 //
-//   { at, reason, price, verdict, note, next_check_at, zone_id?, fetched?, axes?, failed?, fail_reason? }
+//   { at, reason, price, verdict, note, next_check_at, zone_id?, fetched?, axes?, failed?, fail_reason?,
+//     fired?, armed?, skipped? }
 //
-// `reason` ∈ pre_active | market_closed | scheduled | momentum_pulse | zone_trip | expiry_review
+// `reason` ∈ pre_active | market_closed | guard_time | guard_price | backstop | expiry_review
 //            | entry | exit
+//
+// ── WHAT A LINE IS ABOUT, SINCE GUARDS ───────────────────────────────────────
+// docs/desks/talos-guards.md. `reason` used to answer "what KIND of wake was this"; it now answers
+// WHICH GUARD FIRED, so a run of entries reads as an audit trail of ATTENTION rather than a list of
+// glances. Three fields carry the rest of that story:
+//
+//   `fired`    the guard that caused this wake, WITH the time it was armed — so a reader can see the
+//              line was drawn hours earlier, deliberately, rather than stumbled into.
+//   `armed`    what is being watched from here on. Replaces a bare `next_check_at`, which only ever
+//              said when we would next stir and never what would bring us back sooner.
+//   `skipped`  conjunctive guards that held on TIME but not on price since the last entry — wakes
+//              deliberately NOT taken. The saving, made visible.
+//
+// AND THE RULE THAT PROTECTS ALL OF IT: A FREE POLL NEVER WRITES. The guard sweep evaluates every
+// armed setup on a fast cadence and almost always answers "no". At that rate a line per pass would
+// push 50 entries through the cap in under an hour, leaving a journal that is all heartbeat and no
+// history. Only a wake that cost a model read may append.
 //
 // NAMING, and why `market_closed` is spelled out. This value used to be `closed`, which read as "the
 // POSITION closed" to everyone who met it — while it actually means "the MARKET is shut, I'm holding
@@ -35,7 +53,17 @@ export const JOURNAL_MAX = 50
  * Applied when rendering a stored timeline so old lines keep their meaning; never write through it.
  * Entries age out of the cap on their own, so this can be deleted once no live journal predates it.
  */
-const LEGACY_REASON = { closed: 'market_closed' }
+const LEGACY_REASON = {
+    closed: 'market_closed',
+    // The zone gate's vocabulary, mapped to the guards that replaced it (2026-08-22). Same events
+    // under both names — a level was reached, or a timer brought us back — so old entries keep their
+    // meaning rather than rendering as an unknown key.
+    zone_trip: 'guard_price',
+    scheduled: 'guard_time',
+    // `momentum_pulse` is deliberately NOT mapped. It was its own kind of wake (price walking far
+    // enough from the map to buy one re-drawing read) and no guard means quite that, so relabelling
+    // it would be a claim about history. It renders under its own name until it ages out.
+}
 
 /** Normalise a stored entry's `reason` for display. Pure. */
 export function readReason(reason) {
@@ -44,13 +72,22 @@ export function readReason(reason) {
 
 function _fmt(n) { return Number.isFinite(Number(n)) ? String(Number(n)) : '?' }
 
-/** "188–189" (single) or "188–189, 192–193" (multi). Calls and setups both carry `entry_zones`. */
-export function zonesLabel(entity) {
+/**
+ * The entry levels being watched: "312" (single) or "312, 318" (multi).
+ *
+ * WAS `zonesLabel`, which always printed a range. A level authored now is ZERO-WIDTH, so that
+ * spelling would render "312–312" — and worse, it would go on telling the user about a BAND at
+ * exactly the point the app stopped having any (docs/desks/talos-guards.md). A legacy band still
+ * prints as a range, because that is honestly what such a document holds.
+ *
+ * Calls and setups both carry `entry_zones`.
+ */
+export function levelsLabel(entity) {
     const zones = Array.isArray(entity?.entry_zones) ? entity.entry_zones : []
     const parts = zones
         .filter(z => Number.isFinite(Number(z?.lower)) && Number.isFinite(Number(z?.upper)))
-        .map(z => `${_fmt(z.lower)}–${_fmt(z.upper)}`)
-    return { text: parts.length ? parts.join(', ') : '(no zones)', multi: parts.length > 1 }
+        .map(z => (Number(z.lower) === Number(z.upper) ? _fmt(z.lower) : `${_fmt(z.lower)}–${_fmt(z.upper)}`))
+    return { text: parts.length ? parts.join(', ') : '(no levels)', multi: parts.length > 1 }
 }
 
 /** Whole-minute gap between now and an ISO next-check (≥1), or null if unparseable. */
@@ -105,9 +142,21 @@ export function journalEntry(reason, {
     raw = null, note = null, axes = null, fetched = null,
     verb = 'read', failed = false, failReason = null,
     closedReason = null, pnl = null,
+    // The guard that woke this (guardSweep writes it to `monitor_state.woke_on`). Absent on a wake
+    // the sweep did not cause — a first look, or a deploy landing mid-cadence.
+    woke = null,
+    // What is armed AFTER this wake. Passed explicitly by a read that just rewrote the set, because
+    // the entity in hand still carries the one being replaced.
+    armed: armedIn = null,
 } = {}) {
     const at   = new Date(nowMs).toISOString()
     const noun = entity?.kind ?? 'call'
+    // What is armed AFTER this wake, and how many conjunctive guards held on time but not on price
+    // since the last entry. Both read off the entity rather than passed per call site, so every
+    // branch below carries them without six call sites remembering to.
+    const armed   = Array.isArray(armedIn) ? armedIn
+        : (Array.isArray(entity?.monitor_state?.guards) ? entity.monitor_state.guards : null)
+    const skipped = Number(woke?.skipped) > 0 ? Number(woke.skipped) : 0
 
     if (reason === 'market_closed') {
         return { at, reason, price: null, verdict: null,
@@ -128,11 +177,17 @@ export function journalEntry(reason, {
             note: `Not live yet for ${entity?.asset ?? `this ${noun}`} — I start watching at ${entity?.active_from ?? '?'}.`,
             next_check_at: nextAt }
     }
-    if (reason === 'scheduled') {
-        const zl  = zonesLabel(entity)
+    // A wake that reached no premise. Under guards this is a TIMER that came back and found nothing
+    // — the price levels are still armed and still watched by the sweep between now and next time,
+    // which is why the line says what it is watching rather than only when it will stir.
+    if (reason === 'guard_time' || reason === 'backstop') {
+        const ll  = levelsLabel(entity)
         const gap = gapMin(nextAt, nowMs)
         return { at, reason, price: toNum(price), verdict: null,
-            note: `Price ${_fmt(price)} is outside my zone${zl.multi ? 's' : ''} ${zl.text}. No setup forming${gap ? ` — checking back in ${gap}m` : ''}.`,
+            note: `Price ${_fmt(price)} — nothing at my level${ll.multi ? 's' : ''} ${ll.text}`
+                + `${skipped ? `. ${skipped} timer wake${skipped === 1 ? '' : 's'} passed without a look` : ''}`
+                + `${gap ? ` — back in ${gap}m unless something moves` : '.'}`,
+            ..._guardFields({ woke, armed, skipped }),
             next_check_at: nextAt }
     }
     if (failed) {
@@ -150,7 +205,27 @@ export function journalEntry(reason, {
         verdict: raw?.verdict ?? null,
         note:    read || verdictFallbackNote(raw?.verdict),
         ...(axes ? { axes } : {}),
+        ..._guardFields({ woke, armed, skipped }),
         next_check_at: nextAt,
+    }
+}
+
+/**
+ * The wake-and-watch half of an entry, omitted entirely when there is nothing to say.
+ *
+ * OMITTED, NOT NULLED: these ride in a capped array on every setup document, and three null keys on
+ * every line of fifty is storage bought for nothing. A reader tolerating their absence is cheaper
+ * than a document carrying their emptiness.
+ *
+ * `armed_at` is what makes `fired` worth recording at all — it says the line was drawn deliberately,
+ * hours earlier, rather than stumbled into.
+ */
+function _guardFields({ woke, armed, skipped }) {
+    return {
+        ...(woke ? { fired: { price: woke.price ?? null, direction: woke.direction ?? null,
+                              means: woke.means ?? null, armed_at: woke.armed_at ?? null } } : {}),
+        ...(armed?.length ? { armed } : {}),
+        ...(skipped ? { skipped } : {}),
     }
 }
 

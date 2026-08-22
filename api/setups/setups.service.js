@@ -175,13 +175,14 @@ async function _insert(bound, userId) {
         ...bound,
         // `scenarios` here is the monitor's per-premise invalidation ledger, NOT the authored plan
         // (that rides in `bound`). Declared at birth for the same reason the axis below is.
-        // `pulse_anchor_px` / `last_pulse_at` are the out-of-zone momentum pulse's state, and they
-        // live INSIDE monitor_state — which is where Talos and Hermes both read them from. They were
-        // declared at the top level here, one level up from anything that has ever read them: inert
-        // while nothing pulsed, and actively wrong the moment something did (see the re-draw below).
+        // `guards` are the wake conditions Talos arms for itself (docs/desks/talos-guards.md) and
+        // `last_read_at` is the clock their time term is measured against. Both are declared at
+        // birth for the same reason the axis below is — so every consumer can read them without an
+        // existence check. Empty means "never read"; the sweep falls back to the setup's own zones
+        // until the first assessment writes a real set.
         monitor_state: {
             next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {}, scenarios: {},
-            pulse_anchor_px: null, last_pulse_at: null, timeframe: null,
+            guards: [], last_read_at: null, woke_on: null, timeframe: null,
         },
         armed_zone_id:     null,
         armed_scenario_id: null,
@@ -270,14 +271,15 @@ async function _update(id, bound, userId) {
         $set.status = 'waiting'
         $set.armed_zone_id = null
         $set.armed_scenario_id = null
-        // Re-seed the pulse: the anchor is "where price was when I last had eyes on this plan", and
-        // the plan just changed, so the old anchor measures a move against a map that no longer
-        // exists. Nulling the TOP-LEVEL copy (what this did before) left the real one under
-        // monitor_state untouched, so a re-drawn setup kept measuring from the dead plan's anchor.
+        // THE GUARDS DIE WITH THE PLAN THAT ARMED THEM. They are levels chosen for a specific map —
+        // "wake me at 311.5 because the base is building under it" — and the map just changed, so
+        // keeping them would watch prices that no longer mean anything while the new plan's own
+        // levels went unwatched. Emptying them is safe rather than blind: the sweep falls back to
+        // the setup's zones until the next read arms a real set.
         // The stored rung goes with it — the new plan may not even be on the same ladder.
-        $set['monitor_state.pulse_anchor_px'] = null
-        $set['monitor_state.last_pulse_at']   = null
-        $set['monitor_state.timeframe']       = null
+        $set['monitor_state.guards']    = []
+        $set['monitor_state.woke_on']   = null
+        $set['monitor_state.timeframe'] = null
         $set['monitor_state.next_check_at'] = null
         // Per-premise invalidation latches die with the plan that earned them: a re-drawn scenario
         // keeps its id, so without this a fresh premise would inherit the dead one's verdict and
