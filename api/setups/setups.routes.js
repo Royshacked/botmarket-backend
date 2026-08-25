@@ -2,7 +2,7 @@ import express from 'express'
 
 import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
-import { generateSetup, hydrateBlueprint, validateDraft, listSetups, getSetup, patchSetup, deleteSetup, actOnSetup } from './setups.controller.js'
+import { generateSetup, hydrateBlueprint, validateDraft, listSetups, getSetup, patchSetup, deleteSetup, actOnSetup, disarmSetupEntry } from './setups.controller.js'
 
 const router = express.Router()
 
@@ -18,6 +18,7 @@ router.post('/validate',  log, validateDraft)
 router.get('/',          log, listSetups)
 router.get('/:id',       log, getSetup)
 router.post('/:id/action', log, actOnSetup)   // accept / dismiss Talos's in-position card
+router.post('/:id/disarm', log, disarmSetupEntry)   // cancel a pending limit order
 router.patch('/:id',     log, patchSetup)
 router.delete('/:id',    log, deleteSetup)
 

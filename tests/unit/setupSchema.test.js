@@ -622,6 +622,18 @@ test('a scenario with nothing to check anywhere arms blind, and is refused', () 
     assert.ok(setupReadiness(s, true).missing.includes('condition on false break'))
 })
 
+test('a limit setup with no conditions is ready — the price touch IS the trigger', () => {
+    const s = normalizeSetup({
+        asset: 'NVDA', direction: 'long', type: 'swing',
+        entry_mode: 'limit',
+        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
+        stop_zones:  [{ lower: 234.8, upper: 235.9 }],
+        tp_zones:    [{ lower: 246, upper: 247.2 }],
+    })
+    const { missing } = setupReadiness(s, true)
+    assert.ok(!missing.some(m => m.includes('condition')), `condition must not be required for limit setups; got: ${missing.join(', ')}`)
+})
+
 test('two entries in ONE scenario is scaling in — allowed, once every leg carries a size', () => {
     // The block this replaces refused a second leg outright, because execution placed the premise's
     // whole size on the first print. It places the LEG's size now, so the rule narrows to the thing

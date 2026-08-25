@@ -23,10 +23,11 @@ const SETUP_REASONS = {
     no_venue:      [400, 'Mark a trading account before generating'],
     // Management refusals. `confirm_order` is not an error the user caused: a printing second leg is
     // placed by confirming its order, so the client is being told WHERE the action lives.
-    confirm_order:     [409, 'That leg is placed by confirming its order, not from here'],
-    no_pending_action: [409, 'Talos has not proposed that'],
-    bad_proposal:      [422, 'The proposal is missing the level it needs'],
-    no_position_link:  [409, 'No broker position is linked to this setup'],
+    confirm_order:        [409, 'That leg is placed by confirming its order, not from here'],
+    no_pending_action:    [409, 'Talos has not proposed that'],
+    bad_proposal:         [422, 'The proposal is missing the level it needs'],
+    no_position_link:     [409, 'No broker position is linked to this setup'],
+    not_a_pending_limit:  [409, 'This setup is not a confirmed limit order awaiting a fill'],
 }
 // Named reasons win over the prefix rules — `invalid_setup` / `invalid_zone` have their own copy and
 // must not be swallowed by the generic `invalid_*` passthrough below them.
@@ -80,6 +81,21 @@ export async function actOnSetup(req, res) {
         res.status(500).send({ error: 'action_failed' })
     }
 }
+/**
+ * Cancel a pending limit order and return the setup to 'waiting'. The fast path for a user who
+ * wants to pull the order immediately rather than waiting for the next Talos wake.
+ */
+export async function disarmSetupEntry(req, res) {
+    try {
+        const result = await talosHandoffService.disarmSetup(req.params.id, req.user._id)
+        if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallbackMessage: 'action_failed' })
+        res.send(result)
+    } catch (err) {
+        logger.error(LOG, 'disarmSetupEntry failed:', err.message)
+        res.status(500).send({ error: 'action_failed' })
+    }
+}
+
 /** Status transitions (arm / disarm) and chat-state saves. Plan rewrites go through generate. */
 export const patchSetup  = crud.patch
 export const deleteSetup = crud.remove

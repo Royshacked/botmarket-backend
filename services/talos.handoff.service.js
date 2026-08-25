@@ -1,6 +1,6 @@
 import { getDb } from '../providers/mongodb.provider.js'
 import { ENTITIES } from './entity/entityCollection.js'
-import { notifySetupManage } from './tradeNotify.service.js'
+import { notifySetupManage, notifySetupLimitDisarm } from './tradeNotify.service.js'
 import { ownsEntity } from './entity/entityCrud.service.js'
 import { isLivePosition } from './entity/vocabulary.js'
 import * as manage from './positionManage.service.js'
@@ -90,6 +90,7 @@ const _deps = {
     cancelOrder:      manage._deps.cancelOrder,
     syncExit:         manage._deps.syncExit,
     notifyManage:     (setup, card) => notifySetupManage(setup, card),
+    notifyDisarm:     (setup, reason) => notifySetupLimitDisarm(setup, reason),
 }
 
 async function _loadOwned(db, id, userId) {
@@ -230,4 +231,50 @@ export async function dismissSetupCard(id, userId, deps = _deps) {
     return { ok: true, dismissed: 'card' }
 }
 
-export const talosHandoffService = { manageSetup, dismissSetupCard, toExecutionProposal, movedLadder, amendedLevel, SETUP_MANAGE_VERBS }
+/**
+ * Immediately cancel a pending limit order and return the setup to 'waiting'.
+ *
+ * The monitor's own disarm path fires on the next Talos wake — this is the fast path for a user who
+ * wants to pull the order now rather than waiting for the next poll. Only applies to 'hit' limit
+ * setups (the limit order was confirmed but not yet filled). A setup already at 'waiting' or 'looking'
+ * has no broker order to cancel.
+ */
+export async function disarmSetup(id, userId, deps = _deps) {
+    const db = await deps.getDb()
+    const { setup, err } = await _loadOwned(db, id, userId)
+    if (err) return { ok: false, reason: err }
+    if (setup.status !== 'hit' || setup.entry_mode !== 'limit') {
+        return { ok: false, reason: 'not_a_pending_limit' }
+    }
+
+    if (setup.orderState === 'placed') {
+        for (const link of setup.brokerOrders ?? []) {
+            if (link.orderId && !link.positionId) {
+                try {
+                    await deps.cancelOrder(link.broker, userId, link.accountId, link.orderId)
+                } catch (cancelErr) {
+                    logger.warn(LOG, `disarmSetup: cancel failed for ${link.orderId}: ${cancelErr.message}`)
+                }
+            }
+        }
+    }
+
+    await db.collection(COLLECTION).updateOne({ id }, { $set: {
+        status:            'waiting',
+        orderState:        null,
+        pendingOrder:      null,
+        brokerOrders:      null,
+        entryTriggeredAt:  null,
+        armed_zone_id:     null,
+        armed_scenario_id: null,
+        ordersPlacedAt:    null,
+    }})
+
+    try { await deps.notifyDisarm(setup, 'manual') }
+    catch (notifyErr) { logger.warn(LOG, `disarmSetup: notify failed for ${id}: ${notifyErr.message}`) }
+
+    logger.info(LOG, `setup ${id} limit order disarmed manually`)
+    return { ok: true }
+}
+
+export const talosHandoffService = { manageSetup, dismissSetupCard, disarmSetup, toExecutionProposal, movedLadder, amendedLevel, SETUP_MANAGE_VERBS }

@@ -803,7 +803,8 @@ export function setupReadiness(setup, hasAccount = false) {
         // scenario with nothing to check arms blind: Talos falls through to `judge on price structure
         // at the zone alone` and the premise never gets tested. A scenario needs no trigger of its
         // own when the root carries one.
-        if (!root.length && !(sc.conditions?.length)) missing.push(at('condition'))
+        // limit setups intentionally carry zero conditions — the price touch IS the trigger.
+        if (setup.entry_mode !== 'limit' && !root.length && !(sc.conditions?.length)) missing.push(at('condition'))
     }
     if (!list.length && !root.length) missing.push('condition')
 

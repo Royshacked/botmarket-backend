@@ -616,6 +616,8 @@ function stubDeps(over = {}) {
         getClose:       async () => null,
         assessPosition: async () => ({ verdict: 'hold', read: 'Doing what it should.', next_check_min: 30 }),
         onManageCard:   async () => {},
+        cancelOrder:    async () => {},
+        onDisarmCard:   async () => {},
         writes,
         // The journal line rides alongside the $set. Kept as a SECOND array rather than folded into
         // `writes` so the existing assertions on writes[0] stay exact.
@@ -1004,6 +1006,7 @@ test("a setup awaiting the user's confirm says nothing the card didn't already s
     assert.equal(deps.writes.length, 1, 'the schedule moves and nothing else')
 })
 
+
 test('a live position parks on the lazy end of the cadence', async () => {
     // Nothing here is time-critical: the broker holds the protective orders.
     const deps = stubDeps()
@@ -1177,4 +1180,125 @@ test('a conditional setup still goes through the normal price-and-assessment pat
     const deps = stubDeps({ assess: async () => { assessed = true; return { verdict: 'wait', read: 'Not yet.' } } })
     await _checkSetup(LIVE, T, deps)
     assert.equal(assessed, true, 'entry_mode: conditional must not be short-circuited')
+})
+
+test('a past-expiry limit setup falls through to the normal path — the model decides, not the shortcut', async () => {
+    // T = 2026-07-26T12:00:00Z; valid_until 5 min before → _isPastExpiry = true
+    const expired = { ...LIMIT_LIVE, valid_until: '2026-07-26T11:55:00Z' }
+    let carded = false, assessed = false
+    const deps = stubDeps({
+        onCard:  async () => { carded = true },
+        assess:  async () => { assessed = true; return { verdict: 'wait', read: 'Reviewing.' } },
+    })
+    await _checkSetup(expired, T, deps)
+    assert.equal(carded,   false, 'limit shortcut must not fire for a past-expiry setup')
+    assert.equal(assessed, true,  'the model is consulted on the expiry path')
+})
+
+const LIMIT_WITH_VALIDITY = {
+    ...mk({ entry_mode: 'limit', valid_until: null, validity: VALID }, VENUE),
+    quantity: 100,
+}
+
+test('a limit setup with a validity range checks the premise before firing — a breach prevents the confirm card', async () => {
+    let carded = false
+    const deps = stubDeps({
+        getPrice:       async () => 233,   // below validity.lower (234) for a long → breach
+        getClose:       async () => 233,   // close confirms it — not just a wick
+        onCard:         async () => { carded = true },
+        onInvalidation: async () => {},
+    })
+    const res = await _checkSetup(LIMIT_WITH_VALIDITY, T, deps)
+    assert.equal(carded, false, 'a breached premise must not fire the limit confirm card')
+    assert.equal(res.reason, 'invalidation')
+})
+
+test('a limit setup with no entry zones on its scenario falls through without crashing', async () => {
+    const base = mk({ entry_mode: 'limit', valid_until: null }, VENUE)
+    const noZone = {
+        ...base,
+        quantity: 100,
+        scenarios: (base.scenarios ?? []).map(sc => ({ ...sc, entry_zones: [] })),
+    }
+    let carded = false
+    const deps = stubDeps({ onCard: async () => { carded = true } })
+    await _checkSetup(noZone, T, deps)
+    assert.equal(carded, false, 'no confirm card when the scenario has no entry zones')
+    assert.ok(deps.writes.length > 0, 'setup was rescheduled rather than left hanging')
+})
+
+// ─── Limit-order disarm (in _checkPosition) ───────────────────────────────────
+// A confirmed limit order exists only while the setup is armed. Expiry, validity breach and
+// a manual request cancel the broker order and return the setup to 'waiting'.
+
+const HIT_LIMIT = {
+    ...LIMIT_LIVE, status: 'hit',
+    orderState: 'placed',
+    brokerOrders: [{ broker: 'ctrader', accountId: 'a1', orderId: 'ord1', quantity: 100 }],
+}
+
+test('a past-expiry limit order is disarmed on the next Talos wake', async () => {
+    const expired = { ...HIT_LIMIT, valid_until: '2026-07-26T11:55:00Z' }
+    let cancelled = null, disarmed = false
+    const deps = stubDeps({
+        cancelOrder:  async (_b, _u, _a, id) => { cancelled = id },
+        onDisarmCard: async () => { disarmed = true },
+    })
+    const res = await _checkSetup(expired, T, deps)
+    assert.equal(res.reason, 'limit_disarmed')
+    assert.equal(res.disarmReason, 'expired')
+    assert.equal(cancelled, 'ord1', 'the resting order is canceled at the broker')
+    assert.equal(disarmed, true)
+    assert.equal(deps.writes[0].status, 'waiting', 'setup goes dormant until re-armed')
+    assert.equal(deps.writes[0].orderState, null)
+})
+
+test('a manual disarm_requested flag disarms the order on the next wake', async () => {
+    const requested = { ...HIT_LIMIT, disarm_requested: true }
+    let disarmed = false
+    const deps = stubDeps({
+        cancelOrder:  async () => {},
+        onDisarmCard: async (_s, reason) => { disarmed = reason },
+    })
+    const res = await _checkSetup(requested, T, deps)
+    assert.equal(res.reason, 'limit_disarmed')
+    assert.equal(disarmed, 'manual')
+    assert.equal(deps.writes[0].disarm_requested, null, 'flag is cleared after handling')
+})
+
+test('a validity breach on a hit limit setup disarms the order', async () => {
+    let cancelled = false, disarmed = false
+    const deps = stubDeps({
+        getPrice:       async () => 233,   // below validity.lower (234) for a long
+        getClose:       async () => 233,
+        cancelOrder:    async () => { cancelled = true },
+        onDisarmCard:   async () => { disarmed = true },
+        onInvalidation: async () => {},
+    })
+    const res = await _checkSetup({ ...LIMIT_WITH_VALIDITY, status: 'hit', orderState: 'placed',
+        brokerOrders: [{ broker: 'ctrader', accountId: 'a1', orderId: 'ord1', quantity: 100 }] }, T, deps)
+    assert.equal(res.reason, 'limit_disarmed')
+    assert.equal(cancelled, true)
+    assert.equal(disarmed, true)
+})
+
+test('a limit order not yet placed (awaiting_confirm) is disarmed without a broker cancel', async () => {
+    const expired = { ...HIT_LIMIT, orderState: 'awaiting_confirm', brokerOrders: [],
+        valid_until: '2026-07-26T11:55:00Z' }
+    let cancelled = false
+    const deps = stubDeps({
+        cancelOrder:  async () => { cancelled = true },
+        onDisarmCard: async () => {},
+    })
+    const res = await _checkSetup(expired, T, deps)
+    assert.equal(res.reason, 'limit_disarmed')
+    assert.equal(cancelled, false, 'no broker call when the order was never placed')
+    assert.equal(deps.writes[0].status, 'waiting')
+})
+
+test('a conditional (non-limit) hit setup is not affected by the disarm path', async () => {
+    const deps = stubDeps()
+    const res  = await _checkSetup({ ...ARMED, status: 'hit', entry_mode: 'conditional',
+        valid_until: '2026-07-26T11:55:00Z' }, T, deps)
+    assert.equal(res.reason, 'awaiting_fill', 'conditional setups never go through the disarm path')
 })

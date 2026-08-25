@@ -14,8 +14,9 @@ import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, MANAGEMENT_VERDICTS } from './talos.assess.js'
 import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetLevels, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, clampRung, clampGuards, usableLadder, rungMinutes } from '../services/setup.schema.js'
-import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage } from '../services/tradeNotify.service.js'
+import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage, notifySetupLimitDisarm } from '../services/tradeNotify.service.js'
 import { isSelfExecuted } from '../services/venue.resolve.service.js'
+import { brokerService } from '../api/broker/broker.service.js'
 
 // Talos — the guardian of the `setup` kind (docs/desks/mentor-talos.md).
 //
@@ -115,9 +116,12 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
 
     // Pure price-touch — no conditions to assess. The confirm card fires on the first open-market
     // wake; Talos's value is in judging conditions, and when there are none the limit order IS the plan.
-    if (setup.entry_mode === 'limit') {
+    // Past-expiry setups fall through: the normal path runs an expiry_review so the model decides,
+    // rather than auto-firing an enter on a setup whose window may have closed.
+    if (setup.entry_mode === 'limit' && !_isPastExpiry(setup, nowMs)) {
         const sc   = liveScenarios(setup)[0] ?? null
         const zone = sc?.entry_zones?.[0] ?? null
+        if (sc && !zone) logger.warn(LOG, `[${setup.id}] limit setup has scenario but no entry_zones — falling through to normal path`)
         if (sc && zone) {
             if (!deps.isAssetOpen(setup.asset, setup.asset_class)) {
                 const patch  = _reschedule(setup, nowMs)
@@ -125,6 +129,12 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
                 if (Number.isFinite(openMs) && openMs > nowMs) patch['monitor_state.next_check_at'] = new Date(openMs).toISOString()
                 await deps.persist(setup.id, patch, _entry('market_closed', { setup, nowMs, nextAt: patch['monitor_state.next_check_at'] }))
                 return { reason: 'market_closed' }
+            }
+            // If validity is set, verify the premise hasn't been breached before firing.
+            if (liveScenarios(setup).some(s => s.validity)) {
+                const price    = await deps.getPrice(setup)
+                const breached = await _checkValidity(setup, price, nowMs, deps)
+                if (breached) return breached
             }
             return _applyVerdict(setup, { scenario: sc, zone },
                 { verdict: 'enter', read: 'Limit order — no conditions to assess.', guards: [], conditions: [], next_timeframe: null, memo_update: null },
@@ -216,6 +226,44 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
  * 'closed', which drops it out of the polled statuses before this ever sees it. It rides the same
  * guarded write as the status flip instead (entityRepo.finalizeClose).
  */
+/**
+ * Cancel the pending broker order and return the setup to 'waiting'.
+ *
+ * A limit order exists only while its setup is armed. When expiry, a validity breach or a manual
+ * request fires, the order is canceled at the broker and the setup goes dormant — the user's
+ * explicit re-arm is the gate back in. Only `orderState: 'placed'` has a live broker order to
+ * cancel; earlier states (awaiting_confirm, awaiting_market) have no order at the broker yet.
+ */
+async function _disarmLimit(setup, disarmReason, nowMs, deps) {
+    if (setup.orderState === 'placed') {
+        for (const link of setup.brokerOrders ?? []) {
+            if (link.orderId && !link.positionId) {
+                try {
+                    await deps.cancelOrder(link.broker, setup.userId, link.accountId, link.orderId)
+                } catch (err) {
+                    logger.warn(LOG, `[${setup.id}] limit order cancel failed (${link.orderId}): ${err.message}`)
+                }
+            }
+        }
+    }
+    const patch = {
+        status:            'waiting',
+        orderState:        null,
+        pendingOrder:      null,
+        brokerOrders:      null,
+        entryTriggeredAt:  null,
+        armed_zone_id:     null,
+        armed_scenario_id: null,
+        ordersPlacedAt:    null,
+        disarm_requested:  null,
+        'monitor_state.check_count': (setup.monitor_state?.check_count ?? 0) + 1,
+    }
+    await deps.persist(setup.id, patch, _entry('limit_disarmed', { setup, nowMs, read: disarmReason }))
+    try { await deps.onDisarmCard(setup, disarmReason) }
+    catch (err) { logger.warn(LOG, `[${setup.id}] disarm card failed: ${err.message}`) }
+    return { reason: 'limit_disarmed', disarmReason }
+}
+
 async function _checkPosition(setup, nowMs, deps) {
     const ps     = setup.position_state ?? {}
     const inPos  = setup.status === 'long' || setup.status === 'short'
@@ -228,9 +276,21 @@ async function _checkPosition(setup, nowMs, deps) {
         'monitor_state.check_count':   (setup.monitor_state?.check_count ?? 0) + 1,
     }
 
-    // Awaiting confirm/fill → keep the schedule moving. No journal entry: an idle wake that writes a
-    // line turns the monologue into noise, and the entry card already said everything there is.
+    // Awaiting confirm/fill → check disarm triggers for limit orders, then keep the schedule moving.
     if (!inPos) {
+        // A limit order lives only while the setup is armed. Expiry, a validity breach or a manual
+        // request cancel it at the broker and return the setup to 'waiting' for re-arming.
+        if (setup.entry_mode === 'limit') {
+            if (_isPastExpiry(setup, nowMs)) return _disarmLimit(setup, 'expired', nowMs, deps)
+            if (setup.disarm_requested)      return _disarmLimit(setup, 'manual',  nowMs, deps)
+            if (liveScenarios(setup).some(s => s.validity)) {
+                const price    = await deps.getPrice(setup)
+                const breached = await _checkValidity(setup, price, nowMs, deps)
+                if (breached)               return _disarmLimit(setup, 'validity_breach', nowMs, deps)
+            }
+        }
+        // No journal entry: an idle wake that writes a line turns the monologue into noise, and the
+        // entry card already said everything there is.
         await deps.persist(setup.id, base, null)
         return { reason: 'awaiting_fill' }
     }
@@ -1476,6 +1536,11 @@ const _deps = {
     // The management proposal — its own copy rather than the call's, which is branded Kairos and
     // keyed on a callId. Shares the one card transport, nothing else.
     onManageCard: notifySetupManage,
+    // Cancel a resting limit entry at the broker when the setup is disarmed. Follows the same
+    // signature as positionManage._deps.cancelOrder so the two are swappable in tests.
+    cancelOrder: (broker, userId, acct, orderId) => brokerService.cancelOrder(broker, userId, acct, orderId),
+    // The disarm notification — informs the user their limit order was removed and offers Re-arm.
+    onDisarmCard: notifySetupLimitDisarm,
 }
 
 export const _testDeps = _deps

@@ -394,6 +394,38 @@ export async function notifySetupManage(setup, card) {
     return _post(buildSetupManage(setup, card), `Setup-manage card (${card?.verdict})`)
 }
 
+/**
+ * A pending limit order was canceled because the setup's conditions changed.
+ *
+ *   expired         valid_until passed before a fill — the window closed.
+ *   validity_breach price closed past the validity range — the premise is broken.
+ *   manual          the user disarmed it deliberately.
+ *
+ * Each carries a Re-arm action so the user can put the order back when ready.
+ */
+export function buildSetupLimitDisarm(setup, reason) {
+    const dir   = String(setup?.direction || '').toUpperCase()
+    const asset = setup?.asset ?? 'your setup'
+    const content = {
+        expired:         `Your ${dir} ${asset} limit order was removed — the setup's window closed before a fill. Re-arm to place the order again.`,
+        validity_breach: `Your ${dir} ${asset} limit order was removed — the premise is no longer valid. Re-draw or re-arm when you're ready.`,
+        manual:          `Your ${dir} ${asset} limit order was removed as requested. Re-arm when ready.`,
+    }[reason] ?? `Your ${dir} ${asset} limit order was removed.`
+
+    return {
+        userId:  setup?.userId ?? null,
+        content,
+        type:    'limit_disarmed',
+        payload: { kind: 'setup', setupId: setup?.id, asset: setup?.asset, direction: setup?.direction ?? null, reason },
+        botId:   'mentor',
+        actions: cardActions('Re-arm'),
+    }
+}
+
+export async function notifySetupLimitDisarm(setup, reason) {
+    return _post(buildSetupLimitDisarm(setup, reason), `Limit-disarm card (${reason})`)
+}
+
 export async function notifyCallManage(call, card) {
     return _post(buildCallManage(call, card), `Call-manage card (${card?.verdict})`)
 }

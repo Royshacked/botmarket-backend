@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { manageSetup, dismissSetupCard, toExecutionProposal, FRACTION_PCT } from '../../services/talos.handoff.service.js'
+import { manageSetup, dismissSetupCard, disarmSetup, toExecutionProposal, FRACTION_PCT } from '../../services/talos.handoff.service.js'
 
 // The setup half of in-position management. Talos has written `position_state.pending_action` since
 // Phase 5; until this service there was nowhere to say yes, so a proposal died on the card.
@@ -369,4 +369,73 @@ test('dismiss on a setup with no position is refused rather than closing anythin
     const res = await dismissSetupCard('setup_NVDA_1', 'u1', deps(db))
     assert.equal(res.reason, 'not_in_position')
     assert.equal(db.updates.length, 0)
+})
+
+// ── Disarm ────────────────────────────────────────────────────────────────────
+
+function hitLimitSetup(extra = {}) {
+    return {
+        id: 'setup_NVDA_1', userId: 'u1', kind: 'setup', asset: 'NVDA', direction: 'long',
+        broker: 'paper', accounts: ['p1'], mainAccountId: 'p1',
+        status: 'hit', entry_mode: 'limit',
+        orderState: 'placed',
+        brokerOrders: [{ broker: 'paper', accountId: 'p1', orderId: 'ord1', quantity: 100 }],
+        ...extra,
+    }
+}
+
+test('disarm cancels the broker order and returns the setup to waiting', async () => {
+    let cancelled = null
+    const db  = fakeDb(hitLimitSetup())
+    const res = await disarmSetup('setup_NVDA_1', 'u1', deps(db, {
+        cancelOrder:  async (broker, userId, acct, orderId) => { cancelled = orderId },
+        notifyDisarm: async () => {},
+    }))
+
+    assert.equal(res.ok, true)
+    assert.equal(cancelled, 'ord1')
+    assert.equal(db.updates[0].$set.status, 'waiting')
+    assert.equal(db.updates[0].$set.orderState, null)
+    assert.equal(db.updates[0].$set.brokerOrders, null)
+})
+
+test('disarm with no placed order skips the broker cancel but still disarms', async () => {
+    let cancelled = false
+    const db  = fakeDb(hitLimitSetup({ orderState: 'awaiting_confirm', brokerOrders: [] }))
+    const res = await disarmSetup('setup_NVDA_1', 'u1', deps(db, {
+        cancelOrder:  async () => { cancelled = true },
+        notifyDisarm: async () => {},
+    }))
+
+    assert.equal(res.ok, true)
+    assert.equal(cancelled, false, 'no broker call when order was not yet placed')
+    assert.equal(db.updates[0].$set.status, 'waiting')
+})
+
+test('a filled limit order (positionId set) is not canceled — only unfilled links are', async () => {
+    let cancelledIds = []
+    const db = fakeDb(hitLimitSetup({
+        brokerOrders: [
+            { broker: 'paper', accountId: 'p1', orderId: 'ord-filled', positionId: 'pos1', quantity: 100 },
+            { broker: 'paper', accountId: 'p1', orderId: 'ord-resting', quantity: 50 },
+        ],
+    }))
+    await disarmSetup('setup_NVDA_1', 'u1', deps(db, {
+        cancelOrder:  async (_b, _u, _a, id) => { cancelledIds.push(id) },
+        notifyDisarm: async () => {},
+    }))
+    assert.deepEqual(cancelledIds, ['ord-resting'], 'the filled link must never be canceled')
+})
+
+test('disarm on a non-limit or non-hit setup is refused', async () => {
+    const conditional = hitLimitSetup({ entry_mode: 'conditional' })
+    assert.equal((await disarmSetup('setup_NVDA_1', 'u1', deps(fakeDb(conditional), { notifyDisarm: async () => {} }))).reason, 'not_a_pending_limit')
+
+    const looking = hitLimitSetup({ status: 'looking' })
+    assert.equal((await disarmSetup('setup_NVDA_1', 'u1', deps(fakeDb(looking), { notifyDisarm: async () => {} }))).reason, 'not_a_pending_limit')
+})
+
+test('another user cannot disarm a limit setup', async () => {
+    const res = await disarmSetup('setup_NVDA_1', 'u2', deps(fakeDb(hitLimitSetup()), { notifyDisarm: async () => {} }))
+    assert.equal(res.reason, 'forbidden')
 })
