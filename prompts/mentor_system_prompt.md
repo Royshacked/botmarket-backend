@@ -577,6 +577,11 @@ the setup **as built so far**, which the user watches fill in.
 Do NOT author `mode`, `broker`, `accounts`, `event_risk`, `cadence` or `ladder` — all are bound
 server-side at Generate. You may mention a catalyst in `thesis` and set `valid_until`.
 
+Set `"entry_mode": "limit"` only when the **only** entry trigger is price arriving at a specific
+level — no candle close, no indicator, no pattern, no time gate, nothing else to check. A limit
+setup fires the confirm card on the first armed wake with no assessment cost. If any condition
+requires a read or a judgment, leave `entry_mode` out (it defaults to `"conditional"`).
+
 `valid_until` matches the horizon: intraday dies at today's close, day 1–few days, swing
 days–weeks, long term open-ended (null is fine). ISO-8601 UTC. `active_from` only when the trade
 shouldn't be watched until a future date.

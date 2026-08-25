@@ -50,7 +50,7 @@ const PLAN_FIELDS = [
     'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe', 'ladder', 'cadence',
     'thesis', 'conditions', 'referenced_symbols', 'scenarios',
     'entry_zones', 'stop_zones', 'tp_zones', 'validity', 'quantity',
-    'active_from', 'valid_until', 'event_risk', 'rr', 'conviction',
+    'active_from', 'valid_until', 'event_risk', 'rr', 'conviction', 'entry_mode',
     'mode', 'broker', 'accounts', 'mainAccountId', 'brokerSymbol', 'basisOffset',
 ]
 

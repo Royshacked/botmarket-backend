@@ -730,6 +730,11 @@ export function normalizeSetup(raw) {
 
         conviction: cleanConviction(raw.conviction) || null,
 
+        // The model sets this when the only entry trigger is price arriving at a specific level —
+        // no candle close, no indicator, no pattern. Talos skips the assessment and fires the
+        // confirm card on the first armed wake. Everything else is 'conditional' (the default).
+        entry_mode: raw.entry_mode === 'limit' ? 'limit' : 'conditional',
+
         // Server-derived — recomputed every time, never taken from the model. `entry_zones`,
         // `stop_zones`, `tp_zones`, `validity`, `quantity` and `rr` are the EXECUTION PROJECTION of
         // one scenario (projectScenario): pre-arm the first, and re-stamped by Talos to the armed

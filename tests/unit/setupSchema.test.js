@@ -1011,3 +1011,16 @@ test('only a known MEANING survives, so a wake cannot arrive mislabelled', () =>
     assert.equal(clampGuards([{ price: 311, direction: 'above', means: 'entry' }], GSETUP, 305)[0].means, 'entry')
     assert.equal(clampGuards([{ price: 311, direction: 'above', means: 'vibes' }], GSETUP, 305)[0].means, null)
 })
+
+// ─── entry_mode ───────────────────────────────────────────────────────────────
+
+test('entry_mode defaults to "conditional" when absent or unknown', () => {
+    assert.equal(normalizeSetup({}).entry_mode, 'conditional')
+    assert.equal(normalizeSetup({ entry_mode: null }).entry_mode, 'conditional')
+    assert.equal(normalizeSetup({ entry_mode: 'something' }).entry_mode, 'conditional')
+    assert.equal(normalizeSetup({ entry_mode: '' }).entry_mode, 'conditional')
+})
+
+test('entry_mode is "limit" only when the model explicitly says so', () => {
+    assert.equal(normalizeSetup({ entry_mode: 'limit' }).entry_mode, 'limit')
+})

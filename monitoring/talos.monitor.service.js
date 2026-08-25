@@ -113,6 +113,25 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
         return { reason: 'pre_active' }
     }
 
+    // Pure price-touch — no conditions to assess. The confirm card fires on the first open-market
+    // wake; Talos's value is in judging conditions, and when there are none the limit order IS the plan.
+    if (setup.entry_mode === 'limit') {
+        const sc   = liveScenarios(setup)[0] ?? null
+        const zone = sc?.entry_zones?.[0] ?? null
+        if (sc && zone) {
+            if (!deps.isAssetOpen(setup.asset, setup.asset_class)) {
+                const patch  = _reschedule(setup, nowMs)
+                const openMs = deps.nextOpenMs(setup.asset, setup.asset_class)
+                if (Number.isFinite(openMs) && openMs > nowMs) patch['monitor_state.next_check_at'] = new Date(openMs).toISOString()
+                await deps.persist(setup.id, patch, _entry('market_closed', { setup, nowMs, nextAt: patch['monitor_state.next_check_at'] }))
+                return { reason: 'market_closed' }
+            }
+            return _applyVerdict(setup, { scenario: sc, zone },
+                { verdict: 'enter', read: 'Limit order — no conditions to assess.', guards: [], conditions: [], next_timeframe: null, memo_update: null },
+                nowMs, 'limit_order', null, deps)
+        }
+    }
+
     const expiring = _isExpiring(setup, nowMs)
 
     // Market closed → no entry can happen. Sleep until it reopens rather than burning the normal

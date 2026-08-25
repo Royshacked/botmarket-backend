@@ -1129,3 +1129,52 @@ test('the last management read resets the review clock, not the fill', () => {
                  last_management: { at: new Date(T - 31 * 60_000).toISOString() } }
     assert.equal(reviewDue(ps, T, cadence), true, 'read 31m ago wins over a 5m-old fill')
 })
+
+// ─── entry_mode: limit — pure price-touch shortcut ───────────────────────────
+// When Mentor sets entry_mode: 'limit', the confirm card fires on the first open-market wake
+// with no price fetch and no assessment. Talos's value is in evaluating conditions; when there
+// are none the limit order IS the plan.
+
+const LIMIT_LIVE = { ...mk({ entry_mode: 'limit', valid_until: null }, VENUE), quantity: 100 }
+
+test('a limit setup fires the confirm card on the first wake — no price fetch, no assessment', async () => {
+    let fetched = false, assessed = false, carded = false
+    const deps = stubDeps({
+        getPrice: async () => { fetched = true; return 238.0 },
+        assess:   async () => { assessed = true; return {} },
+        onCard:   async () => { carded = true },
+    })
+    const res = await _checkSetup(LIMIT_LIVE, T, deps)
+    assert.equal(fetched,   false, 'no price fetch — skip straight to the confirm card')
+    assert.equal(assessed,  false, 'no model call — there are no conditions to evaluate')
+    assert.equal(carded,    true)
+    assert.equal(res.fired, true)
+    assert.equal(deps.writes[0].status, 'hit')
+})
+
+test('a limit setup on a closed market sleeps to open, still without assessing', async () => {
+    let assessed = false
+    const deps = stubDeps({
+        isAssetOpen: () => false,
+        assess:      async () => { assessed = true; return {} },
+    })
+    const res = await _checkSetup(LIMIT_LIVE, T, deps)
+    assert.equal(assessed, false)
+    assert.equal(res.reason, 'market_closed')
+})
+
+test('a limit setup that is pre-active still waits — active_from is respected', async () => {
+    const preActive = { ...LIMIT_LIVE, active_from: new Date(T + 86400_000).toISOString() }
+    let carded = false
+    const deps = stubDeps({ onCard: async () => { carded = true } })
+    const res  = await _checkSetup(preActive, T, deps)
+    assert.equal(carded,    false, 'pre_active is checked before the limit shortcut')
+    assert.equal(res.reason, 'pre_active')
+})
+
+test('a conditional setup still goes through the normal price-and-assessment path', async () => {
+    let assessed = false
+    const deps = stubDeps({ assess: async () => { assessed = true; return { verdict: 'wait', read: 'Not yet.' } } })
+    await _checkSetup(LIVE, T, deps)
+    assert.equal(assessed, true, 'entry_mode: conditional must not be short-circuited')
+})
