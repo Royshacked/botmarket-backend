@@ -1,12 +1,14 @@
-// HTTP handlers for the Analyst: the streaming research agent (P3) + coverage CRUD (P1).
-import { coverageService }    from './coverage.service.js'
-import { analystAgentService } from '../../services/agents/analyst.agent.service.js'
+// HTTP handlers for the Analyst: the streaming research agent (P3) + coverage CRUD (P1) +
+// research queue (Argus→Prometheus admin pipeline).
+import { coverageService }        from './coverage.service.js'
+import { researchQueueService }   from '../../services/researchQueue.service.js'
+import { analystAgentService }    from '../../services/agents/analyst.agent.service.js'
 import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
-import { parseChatMessages }   from '../_shared/parse.util.js'
-import { sendReason }          from '../_shared/reason.util.js'
-import { logger }             from '../../services/logger.service.js'
-import { getExperienceLevel } from '../../services/experience.service.js'
-import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
+import { parseChatMessages }      from '../_shared/parse.util.js'
+import { sendReason }             from '../_shared/reason.util.js'
+import { logger }                 from '../../services/logger.service.js'
+import { getExperienceLevel }     from '../../services/experience.service.js'
+import { sanitizeScanSeed }       from '../../services/scanSeed.util.js'
 
 const LOG = '[analystCtrl]'
 
@@ -130,4 +132,42 @@ export async function deleteCoverage(req, res) {
         logger.error(LOG, 'deleteCoverage failed', err)
         res.status(500).send({ error: 'Failed to delete coverage' })
     }
+}
+
+// ─── Research queue (Argus→Prometheus admin pipeline) ─────────────────────────
+
+export async function listResearchQueue(req, res) {
+    const { status } = req.query
+    const docs = await researchQueueService.listQueue({ status: status ?? undefined })
+    res.json(docs)
+}
+
+export async function enqueueResearch(req, res) {
+    const { symbol, source } = req.body ?? {}
+    if (!symbol) return res.status(400).json({ error: 'symbol is required' })
+    const result = await researchQueueService.enqueue({
+        symbol,
+        source:      source ?? 'manual',
+        requestedBy: req.user._id,
+    })
+    if (!result.ok) return res.status(500).json({ error: 'Failed to enqueue', reason: result.reason })
+    res.status(result.duplicate ? 200 : 201).json(result)
+}
+
+export async function startResearch(req, res) {
+    const result = await researchQueueService.startResearch(req.params.id)
+    if (!result.ok) return res.status(result.reason === 'not_found_or_wrong_status' ? 404 : 500).json(result)
+    res.json(result.doc)
+}
+
+export async function completeResearch(req, res) {
+    const result = await researchQueueService.markDone(req.params.id)
+    if (!result.ok) return res.status(result.reason === 'not_found_or_wrong_status' ? 404 : 500).json(result)
+    res.json(result.doc)
+}
+
+export async function rejectResearch(req, res) {
+    const result = await researchQueueService.reject(req.params.id)
+    if (!result.ok) return res.status(result.reason === 'not_found_or_wrong_status' ? 404 : 500).json(result)
+    res.json(result.doc)
 }

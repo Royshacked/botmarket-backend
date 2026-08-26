@@ -4,6 +4,7 @@ import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
 import {
     streamAnalyst,
     listCoverage, getCoverageOne, initiateCoverage, updateCoverage, retireCoverage, deleteCoverage,
+    listResearchQueue, enqueueResearch, startResearch, completeResearch, rejectResearch,
 } from './analyst.controller.js'
 
 const router = express.Router()
@@ -20,5 +21,12 @@ router.post('/coverage',            log, requireAdmin, initiateCoverage)
 router.put('/coverage/:id',         log, requireAdmin, updateCoverage)
 router.post('/coverage/:id/retire', log, requireAdmin, retireCoverage)
 router.delete('/coverage/:id',      log, requireAdmin, deleteCoverage)
+
+// Research queue — the Argus→Prometheus pipeline. Admin-only: all endpoints gate on role.
+router.get('/research-queue',                   log, requireAdmin, listResearchQueue)
+router.post('/research-queue',                  log, requireAdmin, enqueueResearch)
+router.post('/research-queue/:id/start',        log, requireAdmin, startResearch)
+router.post('/research-queue/:id/complete',     log, requireAdmin, completeResearch)
+router.post('/research-queue/:id/reject',       log, requireAdmin, rejectResearch)
 
 export const analystRoutes = router
