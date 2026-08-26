@@ -51,6 +51,38 @@ workspace (live / paper / manual).
 researches it and puts it in DB. Same trigger regardless of which flow surfaced
 the name.
 
+**Coverage has two origins — Atlas must handle both:**
+
+| Origin | Has Aether signal? | What's present |
+|---|---|---|
+| Aether surfaced the name → Prometheus covered it | Yes | Thesis + PT + exposure score + lag profile + channel attribution |
+| Direct research (user request, Argus scan, Pythia-convicted sector) | No | Thesis + PT + qualitative conviction only |
+
+Atlas allocates from a mixed pool. The Aether exposure score is optional
+enrichment, not a required field. When present, it is weighted; when absent,
+Atlas falls back to the qualitative conviction score alone. Names without an
+Aether score are not second-class — they have a different evidence basis.
+
+Atlas should be transparent about which backing a name has:
+- `conviction: thesis + quantitative channel exposure` — Aether-backed
+- `conviction: thesis only` — direct research, no Aether signal
+
+Allocation weight draws from both sources:
+```
+allocation_weight = f(
+  coverage_conviction,      // always present
+  PT_upside,                // always present
+  aether_exposure_score,    // present if Aether surfaced the name
+  aether_lag_confidence,    // present if Aether surfaced the name
+  channel_correlation       // portfolio-level: cap gross exposure per channel
+)
+```
+
+The mandate build pre-filter is Pythia's convicted sectors — Atlas never
+scans all covered names, only names inside convicted sectors. An
+Aether-surfaced name reaches the mandate pool naturally if it is covered and
+its sector is convicted. No separate routing path needed.
+
 ### Argus — three triggers, no pre-market scheduled scan
 
 1. **Pythia-triggered** — tilt published → Argus auto-scans convicted sectors →
@@ -183,6 +215,44 @@ Argus personal scans, all conversations.
 Prometheus uses draft → confirm before publishing coverage. The admin layer
 manages the research queue that feeds Prometheus and governs the channel
 engine's edge admission.
+
+### 7.1 User roles
+
+Multi-user platform. Role enum on the user record:
+
+| Role | Access |
+|---|---|
+| `admin` | Ops dashboard + all trading desks. Superset of trader. |
+| `trader` | Own desks + workspace. Reads house output. |
+| `viewer` | Read-only. Add later if needed. |
+
+Admin is set by an existing admin or seeded at setup. Traders cannot
+self-promote. At least two admins should exist at all times — no single
+point of failure on one person's session.
+
+### 7.2 Admin absence — the pipeline must never block
+
+The house layer runs on a schedule regardless of who is logged in. Ops
+actions (research queue approvals, edge governance, coverage lifecycle) are
+human gates in that pipeline — if no admin acts, the pipeline stalls silently.
+
+**Design rule: ops actions are async approvals, not blocking gates.**
+
+- The pipeline continues with existing state while the queue waits
+- Admin is notified (in-app, email) when items need a decision
+- Nothing is lost; nothing blocks traders from using the desks
+
+**Timeout defaults** — the queue drains itself if unchallenged:
+
+| Queue | Default | Rationale |
+|---|---|---|
+| Research queue item | Auto-approve after N days | Coverage is low-risk to generate |
+| Provisional K edge | Auto-reject after one quarter | Edges are high-risk to add |
+| Coverage drop | Requires explicit admin action | No safe default for deletion |
+
+Admin is the override, not the gatekeeper. A logged-out admin should be
+invisible to traders — they see slightly stale coverage until the queue
+drains, nothing more.
 
 ---
 
