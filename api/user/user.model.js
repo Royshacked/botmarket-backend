@@ -4,6 +4,9 @@ import { getDb } from '../../providers/mongodb.provider.js'
 
 export const COLLECTION = 'users'
 
+export const ROLES = ['admin', 'trader']
+export const DEFAULT_ROLE = 'trader'
+
 export async function buildUserDoc({ username, fullname, password }) {
     const passwordHash = await bcrypt.hash(password, 10)
     const now = Date.now()
@@ -12,11 +15,8 @@ export async function buildUserDoc({ username, fullname, password }) {
         username,
         fullname,
         passwordHash,
-        preferences: {}, // account-level UI prefs (theme/accent/design/AI settings), synced from the client
-        // Spend ceiling, USD/month. null = use config.tokenDegradeUsd. Past it, chat DEGRADES to
-        // the cheap model — it is never refused. `exemptFromBudget` opts an account out entirely;
-        // it exists instead of reading `isAdmin`, which auth.middleware force-sets to false on
-        // every request by design. See tokenUsage.ceilingFor.
+        role: DEFAULT_ROLE,
+        preferences: {},
         budgetUsd: null,
         exemptFromBudget: false,
         createdAt: now,

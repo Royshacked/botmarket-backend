@@ -164,10 +164,9 @@ export function _formatCoverage(rows) {
     ].join('\n')
 }
 
-// Per-session handler — coverage is per-user, so it binds userId (like Kairos's userId-bound tools).
-function makeCoverageHandler(userId) {
+function makeCoverageHandler() {
     return makeToolHandler('get_coverage',
-        async ({ sector } = {}) => _formatCoverage(await coverageService.getCoverage(userId, { status: 'active', sector: sector ?? null })),
+        async ({ sector } = {}) => _formatCoverage(await coverageService.getCoverage({ status: 'active', sector: sector ?? null })),
         (err) => `Could not fetch coverage: ${err.message}`, LOG)
 }
 
@@ -262,7 +261,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
         toolHandlers: {
             ...TOOL_HANDLERS,
             ...makeTradingContextHandlers(userId),
-            get_coverage: makeCoverageHandler(userId),
+            get_coverage: makeCoverageHandler(),
             get_chart:    makeChartHandler({ log: LOG, onChart, readText: 'Read it as a POSITIONING question — where in the range, trend intact or broken, base or breakdown. Weights still come from the numbers.' }),
         },
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,

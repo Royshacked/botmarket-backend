@@ -105,7 +105,7 @@ export async function placeOrdersForIdea(id, orders, userId) {
         const now    = Date.now()
         const status = idea.direction === 'short' ? 'short' : 'long'
         // The research we're opening ON, frozen for the life of the position (see the service doc).
-        const basis  = await coverageService.captureResearchBasis({ userId: idea.userId, symbol: idea.asset })
+        const basis  = await coverageService.captureResearchBasis({ symbol: idea.asset })
         const set    = {
             status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed', brokerOrders,
             brokerSymbol: idea.brokerSymbol,

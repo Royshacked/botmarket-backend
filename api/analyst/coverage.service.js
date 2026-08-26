@@ -1,83 +1,62 @@
-// Persistence for the Analyst's `coverage` — the living per-name research thesis (P1 of the
-// Analyst build; see project_analyst_agent). One document per name per user in the `coverage`
-// collection: identity + the variant-perception thesis + our price target vs the Street (the GAP =
-// the edge) + monitorable kill-criteria + an append-only `revisions[]` history (the "living" part).
+// Persistence for the house `coverage` — the living per-name research thesis.
+// One document per symbol in the `coverage` collection: identity + the variant-perception
+// thesis + our price target vs the Street (the GAP = the edge) + monitorable kill-criteria
+// + an append-only `revisions[]` history (the "living" part).
+//
+// HOUSE-OWNED. Coverage is a broadcast artifact — no userId, one thesis per symbol,
+// authored by Prometheus (admin pipeline) and read by every desk. It mirrors the tilt's
+// ownership model: one active view per name, superseded on revision, owner-blind.
 //
 // This module owns persistence + the schema normalizer. It is NOT part of the execution-tier
-// `entities` collection (idea/call/portfolio_item) — coverage is a research artifact, monitored by
-// its own coverage-monitor (P5), never by an execution-tier monitor. compute_valuation (P2) fills
-// estimates/price_target/gap; the Analyst agent (P3) authors the thesis.
+// `entities` collection — coverage is a research artifact, monitored by its own coverage-monitor,
+// never by an execution-tier monitor.
 
 import { randomUUID }      from 'crypto'
 import { getDb }           from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
 import { toNum }           from '../../services/format.util.js'
-import { makeEntityCrud }  from '../../services/entity/entityCrud.service.js'
 import { HORIZONS, DEFAULT_HORIZON, openWindow } from '../../services/forecastClock.js'
 import { normalizeSector }  from '../../services/entity/vocabulary.js'
 import { newRevision, diffFields } from '../../services/revisionTrail.js'
 
-const LOG        = '[coverage]'
-// The physical collection. EXPORTED because the coverage monitor reads the same documents on the
-// background path — it used to name 'coverage' itself, so the name lived in two files that had to
-// be changed together and nothing would have failed if they hadn't.
+const LOG = '[coverage]'
 export const COLLECTION = 'coverage'
 
-// Owner-scoped CRUD (the shared mechanism), same factory the entity kinds use. Coverage differs
-// only in its wiring, not its rules: its own collection, no `kind` discriminator, and recency is
-// `updated_at` — a thesis is as fresh as its last revision, not its initiation.
-//
-// No deleteLock: retiring is a STATUS change through updateCoverage, not a delete. What stays
-// below is coverage judgment — one-per-(user,symbol) initiation, the revision trail, and which
-// plan fields an update may rewrite.
-const crud = makeEntityCrud({
-    collection: COLLECTION,
-    sortBy:     { updated_at: -1 },
-    log:        LOG,
-})
+// ─── vocabulary ───────────────────────────────────────────────────────────────
 
-// Rating vocabulary — mirrors FMP grades-consensus so our rating and the Street's are comparable.
 export const RATINGS  = ['strong_buy', 'buy', 'hold', 'sell', 'strong_sell']
-// Price-target HORIZONS — the vocabulary and the arithmetic live in the shared forecast clock, since
-// the strategy desk's per-sector stances are graded over the identical kind of window. Re-exported
-// here because a price target's horizon is part of the coverage contract that callers read.
-//
-// A target with no deadline can never be wrong, which is why every research house publishes one. Ours
-// was documented in the Analyst prompt as an enum "the normalizer validates" while the code kept it
-// as free text — so `"12m"`, `"12 months"`, `"end of 2027"` and nothing at all all persisted alike,
-// and NOTHING read the field. That made the target unscoreable: the monitor stamps `target_hit` on a
-// bare price comparison, so a 12-month target reached in three weeks and one reached in month eleven
-// were recorded identically — opposite outcomes in real research, where the early one means the target
-// was too LOW and calls for a re-model, not a victory lap.
 export { HORIZONS, DEFAULT_HORIZON }
-// Lifecycle. active = live thesis; target_hit / thesis_broken = terminal-but-kept for the record;
-// retired = churned out of the book; watchlist = proposed (e.g. an Argus hit) but not yet initiated.
+
+// Lifecycle — active = live thesis; target_hit / thesis_broken = terminal-but-kept;
+// retired = churned out of the book; watchlist = proposed but not yet initiated.
 export const STATUSES = ['active', 'thesis_broken', 'target_hit', 'retired', 'watchlist']
 const DEFAULT_STATUS = 'active'
 
-// Plan fields re-written on an update; identity (id/userId/symbol/created_at) + revisions history
-// are preserved out of band.
+// Selection schools Prometheus tags at research time and updates on re-model.
+// Atlas uses these for the mandate-build DB filter; it still applies school judgment
+// over the thesis — the tag is a pre-filter, not a cage.
+export const SCHOOLS = ['quality_value', 'growth_durability', 'income', 'passive']
+
 const PLAN_FIELDS = ['sector', 'thesis', 'rating', 'price_target', 'estimates', 'gap',
-    'catalysts', 'kill_criteria', 'risk_reward', 'conviction', 'status', 'evidence', 'flags']
+    'catalysts', 'kill_criteria', 'risk_reward', 'conviction', 'status', 'evidence', 'flags', 'schools']
 
-export const coverageService = { initiateCoverage, getCoverage, getCoverageById, listActiveBySector, updateCoverage, retireCoverage, deleteCoverage, captureResearchBasis, recordMonitorState, claimRemodel }
+export const coverageService = {
+    initiateCoverage,
+    getCoverage,
+    getCoverageBySymbol,
+    getCoverageById,
+    listActiveBySector,
+    updateCoverage,
+    retireCoverage,
+    deleteCoverage,
+    captureResearchBasis,
+    recordMonitorState,
+    claimRemodel,
+}
 
-// ─── the monitor.* namespace ──────────────────────────────────────────────────
-// `updateCoverage` deliberately does not touch `monitor.*` — that subtree is the MONITOR's record
-// of its own work (when it last looked, how many times, when it last re-modelled), not part of the
-// thesis a user edits. But "the service doesn't write it" had turned into "the monitor writes the
-// collection itself", so coverage.monitor held its own getDb() + the collection name + the shape of
-// this subtree. Two writers, one schema, and nothing to keep them agreeing.
-//
-// These two functions are that subtree's only writer. The monitor still decides WHEN to call them
-// and WHAT the values mean — the judgment stays there; only the write comes here.
+// ─── monitor.* namespace ─────────────────────────────────────────────────────
 
-/**
- * Stamp the monitor's bookkeeping. `set` is a flat map of dotted `monitor.*` paths; `inc` the same
- * for counters. Fails loudly rather than silently: a bookkeeping write that vanishes leaves the doc
- * due forever, re-checking on every tick.
- */
 async function recordMonitorState(id, { set = {}, inc = null } = {}) {
     const db = await getDb()
     const update = { $set: set }
@@ -86,18 +65,6 @@ async function recordMonitorState(id, { set = {}, inc = null } = {}) {
     return { ok: res.matchedCount === 1 }
 }
 
-/**
- * Single-winner claim on an expensive re-model. Returns TRUE only for the caller that won.
- *
- * A re-model wakes a full multi-phase research run and takes MINUTES, so the stamp has to land
- * BEFORE the run starts — otherwise the next hourly tick starts a second one for the same name.
- * The monitor said exactly that in a comment and then wrote unconditionally, which stops a second
- * TICK (the loop is single-flight) but not a second PROCESS.
- *
- * The guard is compare-and-swap on the value just read: if another worker stamped in between, the
- * match fails and this caller stands down. `null` matches a missing field in Mongo, so a coverage
- * that has never been re-modelled is handled by the same expression.
- */
 async function claimRemodel(id, { previousAt = null, reason, at = new Date().toISOString() } = {}) {
     const db  = await getDb()
     const res = await db.collection(COLLECTION).updateOne(
@@ -110,32 +77,13 @@ async function claimRemodel(id, { previousAt = null, reason, at = new Date().toI
     return res.modifiedCount === 1
 }
 
-// Exported for tests + downstream phases (P2 valuation, P3 agent, P5 monitor).
 export { normalizeCoverage, newRevision }
 
-// ─── the rating/target coherence gate ─────────────────────────────────────────
-// A rating is a claim about the PRICE; the gap is a claim about the STREET. Nothing in the research
-// pipeline compared the two until the daily monitor did — so a thesis whose rating and target pointed
-// in opposite directions passed every gate on the way in and surfaced a day later as a bogus verdict.
-// (ZTS, 2026-08-02: rated `sell` with a target of 85.15 while the stock traded at 77.29, i.e. our own
-// number was 10% of UPSIDE. The monitor read it as the bearish target being reached and stamped
-// `target_hit` 26 minutes after initiation.)
-//
-// This is the one comparison that closes it, and it belongs here rather than at a call site: every
-// authoring path — the UI's initiate, a user edit, and the headless re-model — funnels through this
-// service, and a second copy would be a second chance to diverge.
+// ─── coherence + plausibility gates ──────────────────────────────────────────
+
 const BULLISH_RATINGS = new Set(['strong_buy', 'buy'])
 const BEARISH_RATINGS = new Set(['sell', 'strong_sell'])
 
-/**
- * Does the rating agree with the target, given where the stock actually trades? PURE.
- * → `{ ok: true }` | `{ ok: false, reason, detail }`.
- *
- * ABSTAINS (ok) whenever the question doesn't arise: a `hold` or absent rating (no direction claimed),
- * a thesis with no price target, or no price. That last one is deliberate — market data being
- * unreachable must never block research from being written. The gate is a contradiction detector, not
- * a data requirement.
- */
 export function ratingCoherence({ rating, price_target, price } = {}) {
     const pt = _num(price_target?.value ?? price_target)
     const px = _num(price)
@@ -156,43 +104,14 @@ export function ratingCoherence({ rating, price_target, price } = {}) {
     return { ok: true }
 }
 
-// ─── the plausibility flags ───────────────────────────────────────────────────
-// RECORDED, NEVER REFUSED — and that is the whole difference from the gate above. `ratingCoherence`
-// catches a LOGIC error: a rating that contradicts its own target is never right, in any thesis, so
-// refusing it costs nothing. These two catch a JUDGMENT that may well be correct — arguing a name
-// re-rates outside its own history is precisely the variant view Prometheus exists to write. Refusing
-// those would make the desk unable to say the very thing it is for.
-//
-// So they stamp `flags[]` and let the thesis through, the same way `risk_reward.ordered` records a
-// hand-written band rather than dropping it. The cost of the alternative is silence: TSLA was
-// initiated with a $42 bear (a 30x trough multiple, BELOW the lowest annual P/E the stock has ever
-// printed) sitting next to a $420 bull and a `high` conviction — a 10x valuation band, which is a way
-// of saying "I don't know", stamped 0.78 sure. Every field was individually well-formed; nothing
-// compared them, so nothing said a word.
-
-/**
- * The widest bear→bull spread each conviction level can honestly carry. A band IS an uncertainty
- * statement, so it and the conviction are two answers to one question and they have to agree.
- * `low` is unbounded on purpose: a wide band with low conviction is not a contradiction, it is a
- * correctly-labelled unknown.
- */
 const BAND_CEILING = { high: 4, medium: 8, low: Infinity }
 
-/**
- * Does the valuation band agree with the stated conviction? PURE.
- * → `{ ok: true }` | `{ ok: false, reason, detail, spread }`.
- *
- * ABSTAINS when either side is missing (no level, no bear/bull, a non-positive bear) — there is no
- * contradiction to find between a number and nothing.
- */
 export function bandConviction({ risk_reward, conviction } = {}) {
     const bear = _num(risk_reward?.bear?.value), bull = _num(risk_reward?.bull?.value)
     const level = conviction?.level
     const ceiling = BAND_CEILING[level]
     if (!ceiling || bear === null || bull === null || bear <= 0 || bull <= 0) return { ok: true }
 
-    // Compare the RAW ratio, report the rounded one — rounding first would let a 4.04x band through a
-    // 4x ceiling on a display concern.
     const ratio  = bull / bear
     const spread = Math.round(ratio * 10) / 10
     if (ratio <= ceiling) return { ok: true }
@@ -202,30 +121,12 @@ export function bandConviction({ risk_reward, conviction } = {}) {
         + `is unknown; pick one, and if the band is right the conviction should come down.` }
 }
 
-// A leg is judged against a P/E history only when its own arithmetic IS a P/E: multiple x forward
-// metric lands on the leg's value. The EV methods bridge through net debt and shares, so the product
-// misses by a mile — which makes this a deterministic method discriminator, and means an ev_sales
-// thesis silently abstains instead of being compared against the wrong series.
 const _looksLikePE = leg => {
     const v = _num(leg?.value), m = _num(leg?.multiple), f = _num(leg?.forward_metric)
     return v !== null && m !== null && f !== null && v > 0 && Math.abs(m * f - v) / v < 0.02
 }
-// Below this many annual observations the range is not a range. FMP returns one row per fiscal year,
-// and a young or newly-covered name can come back with two.
 const MIN_MULTIPLE_HISTORY = 5
 
-/**
- * Where does a leg's multiple sit inside the stock's OWN history? PURE.
- * → `{ ok: true, pctile }` | `{ ok: false, reason, detail, pctile, min, max }`.
- *
- * The mirror of `gap.pctile`, which places our TARGET inside the STREET's range: this places our
- * MULTIPLE inside the range the market has actually paid for this name. Fires only OUTSIDE the
- * observed range — inside it, however far from the median, some year already traded there and the
- * assumption has a precedent. (TSLA's own annual P/E runs 31x–941x, so the $210 base at 100x is
- * unremarkable; the $42 bear at 30x is the leg with no precedent at all.)
- *
- * ABSTAINS on a thin sample, a missing multiple, or a non-P/E leg — see `_looksLikePE`.
- */
 export function multipleStretch({ multiple, history, leg = 'base' } = {}) {
     const m = _num(multiple)
     const obs = (Array.isArray(history) ? history : []).map(_num).filter(x => x !== null && x > 0).sort((a, b) => a - b)
@@ -245,26 +146,22 @@ export function multipleStretch({ multiple, history, leg = 'base' } = {}) {
         + `say what re-rates it there, or move the leg inside the range.` }
 }
 
-// The reads the gate and the flags need. Injected so tests exercise the branching, and imported
-// LAZILY so that merely importing this service (the schema normalizer is used in pure unit tests, and
-// half the app imports coverageService) never drags in the monitor's whole provider stack.
 const _io = {
     getPrice: async (symbol) => {
         try {
             const { fetchLastPrice } = await import('../../monitoring/monitorUtils.js')
             return await fetchLastPrice(symbol)
-        } catch { return null }   // no price → the gate abstains (see ratingCoherence)
+        } catch { return null }
     },
     getMultipleHistory: async (symbol) => {
         try {
             const { getHistoricalMultiples } = await import('../../providers/fmp.provider.js')
             return await getHistoricalMultiples(symbol, 'pe')
-        } catch { return [] }     // no history → multipleStretch abstains
+        } catch { return [] }
     },
 }
 export function _setCoverageIO(io) { Object.assign(_io, io) }
 
-/** Resolve spot and run the gate over a normalized doc. Skips the fetch when no direction is claimed. */
 async function _checkCoherence(doc, io = _io) {
     const rating = doc?.rating
     if (!BULLISH_RATINGS.has(rating) && !BEARISH_RATINGS.has(rating)) return { ok: true }
@@ -272,14 +169,6 @@ async function _checkCoherence(doc, io = _io) {
     return ratingCoherence({ rating, price_target: doc.price_target, price: await io.getPrice(doc.symbol) })
 }
 
-/**
- * Run the plausibility checks over a normalized doc → the `flags[]` to stamp on it. Never throws and
- * never rejects: the caller stores what comes back and saves the thesis either way.
- *
- * The history is fetched ONCE and shared across the three legs (it is a per-name series, not a
- * per-leg one), and only when at least one leg is a P/E leg worth judging — so an EV-method thesis
- * costs no request at all.
- */
 export async function _plausibilityFlags(doc, io = _io) {
     const flags = []
     try {
@@ -294,17 +183,6 @@ export async function _plausibilityFlags(doc, io = _io) {
             const judged = legs.map(({ name, leg }) => ({ name, s: multipleStretch({ multiple: leg.multiple, history, leg: name }) }))
             const missed = judged.filter(({ s }) => !s.ok)
 
-            // WHOLESALE OFFSET = A METRIC MISMATCH, NOT A BAD ASSUMPTION. `_looksLikePE` proves a leg is
-            // an equity per-share multiple; it cannot prove the EARNINGS underneath it are the GAAP ones
-            // FMP's ratios series divides by. A thesis valued off adjusted EPS is a different metric
-            // against the same price, so every leg lands outside the range together and the comparison
-            // is apples-to-oranges — INTU (11/22/30x against a 39x–69x GAAP series) and SHOP (11/15/18x
-            // against 59x–779x) are both that, and both would have cried wolf on all three legs.
-            //
-            // The signal this flag is actually for is a leg out of line with its OWN siblings: TSLA's
-            // 30x bear next to a 100x base and a 150x bull, on one shared earnings basis. So when every
-            // judged leg misses the same way, stay quiet — a flag that fires on a units mismatch is a
-            // flag the desk learns to scroll past.
             const wholesale = judged.length > 1 && missed.length === judged.length
                 && new Set(missed.map(({ s }) => s.below)).size === 1
             if (wholesale) {
@@ -315,41 +193,24 @@ export async function _plausibilityFlags(doc, io = _io) {
             }
         }
     } catch (err) {
-        // A flag that can't be computed is a flag that isn't raised — never a thesis that isn't saved.
         logger.warn(LOG, 'plausibility flags failed (thesis unaffected)', err.message)
     }
     return flags
 }
 
-// ─── pure helpers ──────────────────────────────────────────────────────────────
+// ─── pure helpers ─────────────────────────────────────────────────────────────
 const _str = v => (typeof v === 'string' && v.trim() ? v.trim() : null)
 const _arr = v => (Array.isArray(v) ? v : [])
-const _num = toNum   // the one safe coercion — see format.util.toNum
-/**
- * OUR price target: the number, the deadline it must arrive by, and the basis that produced it.
- *
- * The window comes from the shared forecast clock, which owns the reaffirm-vs-restart rule: a patch
- * that doesn't carry `price_target` spreads the stored one through with its `set_at` intact (the
- * deadline holds through a daily monitor tick), while a re-model supplies a fresh target with no
- * `set_at` and re-stamps from now — a new target is a new call, same as a real analyst raising a PT.
- * `target_date` is this schema's name for the window's end; it is always derived, never trusted.
- */
+const _num = toNum
+
 function _priceTarget(pt, now) {
     if (!pt || typeof pt !== 'object') return null
     const value = _num(pt.value)
-    if (value === null) return null   // a PT with no number is meaningless
+    if (value === null) return null
     const { horizon, set_at, ends_at } = openWindow(pt, now)
     return { value, horizon, basis: _str(pt.basis), set_at, target_date: ends_at }
 }
-/**
- * THE GAP — our PT against the Street's, kept as a DISTRIBUTION rather than a single number.
- *
- * The Street arrives as {consensus, high, low, median} and only `consensus` used to survive, which
- * flattered every thesis: "12% below the Street" sounds contrarian, but with targets spanning
- * 500–700 our 516 sits in the 8th percentile of a crowded range — an analyst is already lower than
- * us. `pctile` is that position, and it is the honest read of a variant view; `pct` (vs the mean) is
- * kept because it is what the existing card copy and FE render.
- */
+
 function _gap(g) {
     if (!g || typeof g !== 'object') return null
     const our_pt = _num(g.our_pt), consensus_pt = _num(g.consensus_pt), pct = _num(g.pct)
@@ -357,8 +218,7 @@ function _gap(g) {
     if (our_pt === null && consensus_pt === null && pct === null && low === null && high === null) return null
     return { our_pt, consensus_pt, pct, low, high, median, pctile }
 }
-// One valuation leg → { value, multiple, forward_metric }. A bare number is accepted and widened
-// (legacy docs predate the inputs); anything else is null.
+
 function _leg(v) {
     if (v === null || v === undefined) return null
     if (typeof v === 'object' && !Array.isArray(v)) {
@@ -369,17 +229,6 @@ function _leg(v) {
     return value === null ? null : { value, multiple: null, forward_metric: null }
 }
 
-/**
- * The bear/base/bull band, each leg carrying the inputs that produced it, plus `band_basis` naming
- * what the band MEANS ('scenario' = own multiple + own earnings per leg; 'multiple_sensitivity' =
- * ±15% re-rate on unchanged earnings). Both come straight from valuation.engine.
- *
- * `ordered:false` is stamped when bear < base < bull does not hold. It is recorded rather than
- * rejected — a malformed band must not silently vanish and take the thesis with it — but it flags a
- * band that was hand-written rather than computed. That is not hypothetical: SNDK was persisted with
- * a bull matching the engine exactly (2530) and a bear that did not (700 vs the engine's 1870),
- * because nothing here ever compared the emitted band against the tool's own output.
- */
 function _riskReward(rr) {
     if (!rr || typeof rr !== 'object') return null
     const bull = _leg(rr.bull), base = _leg(rr.base), bear = _leg(rr.bear)
@@ -388,7 +237,7 @@ function _riskReward(rr) {
     const vals = [bear?.value, base?.value, bull?.value]
     const ordered = vals.every(v => v !== null && v !== undefined)
         ? (vals[0] < vals[1] && vals[1] < vals[2])
-        : true   // an incomplete band can't be judged out of order
+        : true
 
     return {
         bear, base, bull,
@@ -397,48 +246,37 @@ function _riskReward(rr) {
     }
 }
 
-// The plausibility flags, on the way back IN. They are DERIVED — `_plausibilityFlags` is their only
-// author — so the normalizer's job is to let a stored one round-trip through the monitor's patches
-// without letting an agent-emitted `flags` invent one: anything outside the known codes is dropped.
 const FLAG_CODES = new Set(['band_contradicts_conviction', 'multiple_outside_history'])
 const _flags = v => _arr(v)
     .filter(f => f && typeof f === 'object' && FLAG_CODES.has(f.code))
     .map(f => ({ code: f.code, leg: _str(f.leg), detail: _str(f.detail) }))
 
-/**
- * Defensively normalize a raw coverage object (from the agent, an update patch, or a manual create)
- * into the stored shape. Pure. Symbol is uppercased; unknown rating/status → null/default; numeric
- * fields coerced or nulled; arrays guaranteed. `estimates`/`gap`/`price_target` may be empty until
- * compute_valuation (P2) fills them. Identity + timestamps are stamped here.
- */
-function normalizeCoverage(raw, userId = null) {
+// Schools: Prometheus tags which selection schools this name fits. Atlas uses this
+// as a pre-filter on mandate-build; it re-evaluates fit from the thesis at allocation time.
+const _schools = v => _arr(v).filter(s => SCHOOLS.includes(s))
+
+function normalizeCoverage(raw) {
     const r = (raw && typeof raw === 'object') ? raw : {}
     const symbol = (typeof r.symbol === 'string' ? r.symbol : '').toUpperCase().trim()
     const now = new Date().toISOString()
     return {
         id:            _str(r.id) ?? `cov_${symbol || 'x'}_${randomUUID().slice(0, 8)}`,
-        // Owner — camelCase like every other owner-scoped list (the payload below stays snake_case).
-        userId,
         symbol,
-        // Canonicalised at the boundary (the shared vocabulary), not left as the LLM typed it — this
-        // is the join key the strategy desk aggregates our book on, and a GICS spelling would match
-        // nothing while looking perfectly reasonable in the UI.
         sector:        normalizeSector(r.sector),
-        thesis:        _str(r.thesis),                 // the VARIANT PERCEPTION vs consensus
+        thesis:        _str(r.thesis),
         rating:        RATINGS.includes(r.rating) ? r.rating : null,
-        price_target:  _priceTarget(r.price_target, now),   // OUR target + its deadline (P2)
-        estimates:     (r.estimates && typeof r.estimates === 'object' && !Array.isArray(r.estimates)) ? r.estimates : {}, // {ours, consensus, revision_trend} (P2)
-        gap:           _gap(r.gap),                    // our PT vs Street — the edge (P2)
+        price_target:  _priceTarget(r.price_target, now),
+        estimates:     (r.estimates && typeof r.estimates === 'object' && !Array.isArray(r.estimates)) ? r.estimates : {},
+        gap:           _gap(r.gap),
         catalysts:     _arr(r.catalysts),
-        kill_criteria: _arr(r.kill_criteria),          // MONITORABLE (P5)
-        risk_reward:   _riskReward(r.risk_reward),      // {bull, base, bear}
+        kill_criteria: _arr(r.kill_criteria),
+        risk_reward:   _riskReward(r.risk_reward),
         conviction:    cleanConviction(r.conviction),
-        flags:         _flags(r.flags),                 // DERIVED plausibility warnings — see _plausibilityFlags
+        schools:       _schools(r.schools),
+        flags:         _flags(r.flags),
         status:        STATUSES.includes(r.status) ? r.status : DEFAULT_STATUS,
-        revisions:     _arr(r.revisions),               // append-only history (the "living" part)
+        revisions:     _arr(r.revisions),
         evidence:      _arr(r.evidence),
-        // Coverage-monitor bookkeeping (P5) — written by the monitor, not a plan field. next_check_at
-        // null → due on the next tick. Preserved across plan updates (updateCoverage never $sets it).
         monitor:       (r.monitor && typeof r.monitor === 'object' && !Array.isArray(r.monitor))
             ? r.monitor : { next_check_at: null, last_checked: null, checks: 0 },
         created_at:    _str(r.created_at) ?? now,
@@ -446,80 +284,82 @@ function normalizeCoverage(raw, userId = null) {
     }
 }
 
-// Which plan fields are worth a trail entry when they move. The FIELDS are coverage's judgment; the
-// diffing and the entry shape are the shared trail's mechanism.
-// Revision kinds coverage writes: 'initiate' | 'remodel' | 'rating_change' | 'thesis_broken' |
-// 'target_hit' | 'target_hit_early' | 'retire' | 'update'.
-const LOGGED_FIELDS = ['rating', 'status', 'price_target', 'thesis']
-const _diffPlan = (prev, next) => diffFields(prev, next, LOGGED_FIELDS)
-
 async function _ensureIndexes(db) {
     await db.collection(COLLECTION).createIndex({ id: 1 }, { unique: true })
-    // One coverage per (user, symbol) — unique is the race backstop for the initiate check below.
-    await db.collection(COLLECTION).createIndex({ userId: 1, symbol: 1 }, { unique: true })
-    await db.collection(COLLECTION).createIndex({ userId: 1, status: 1 })
+    await db.collection(COLLECTION).createIndex({ symbol: 1 }, { unique: true })
+    await db.collection(COLLECTION).createIndex({ sector: 1, status: 1, schools: 1 })
 }
 
-// ─── CRUD ────────────────────────────────────────────────────────────────────
-// Initiation is an EVENT — one coverage per (user, symbol). A second initiate on the same name is a
-// conflict (use updateCoverage to change a live thesis). Stamps the initiation as the first revision.
-async function initiateCoverage(raw, userId) {
+// ─── CRUD ─────────────────────────────────────────────────────────────────────
+
+async function initiateCoverage(raw) {
     const symbol = (typeof raw?.symbol === 'string' ? raw.symbol : '').toUpperCase().trim()
     if (!symbol) return { ok: false, reason: 'symbol_required' }
     try {
         const db = await getDb()
         await _ensureIndexes(db)
-        const existing = await db.collection(COLLECTION).findOne({ userId, symbol })
+        const existing = await db.collection(COLLECTION).findOne({ symbol })
         if (existing) return { ok: false, reason: 'already_covered', id: existing.id }
 
-        const doc = normalizeCoverage(raw, userId)
-        // A thesis that contradicts itself is not research worth keeping — refuse it here, where the
-        // analyst (or the user) can still fix it, rather than storing one that the monitor will
-        // resolve into a nonsense verdict tomorrow.
+        const doc = normalizeCoverage(raw)
         const coherent = await _checkCoherence(doc)
         if (!coherent.ok) {
             logger.warn(LOG, 'coverage REJECTED — rating contradicts target', { symbol, rating: doc.rating, pt: doc.price_target?.value, detail: coherent.detail })
             return coherent
         }
-        // Recorded, not refused — the thesis is stored either way (see the plausibility flags).
         doc.flags = await _plausibilityFlags(doc)
         if (doc.flags.length) logger.warn(LOG, 'coverage FLAGGED — implausible, stored anyway', { symbol, codes: doc.flags.map(f => f.code) })
         doc.revisions = [newRevision({ kind: 'initiate', note: _str(raw?.init_note) ?? `Initiated coverage on ${symbol}` })]
-        const saved = await crud.insert(doc)
+        await db.collection(COLLECTION).insertOne({ ...doc })
         logger.info(LOG, 'coverage initiated', { id: doc.id, symbol, sector: doc.sector })
-        return { ok: true, doc: saved }
+        return { ok: true, doc: _strip(doc) }
     } catch (err) {
-        // Lost the race to a concurrent initiate on the same (user, symbol) → unique-index conflict.
         if (err?.code === 11000) return { ok: false, reason: 'already_covered' }
         logger.error(LOG, 'Failed to initiate coverage', err)
         return { ok: false, error: err }
     }
 }
 
-async function getCoverage(userId, { sector = null, status = null, onError } = {}) {
-    // Validate/coerce the filters — never let a raw query param (e.g. status[$ne]) inject a Mongo operator.
-    const filter = {}
-    // Canonicalise the QUERY too, not just the stored value — otherwise a caller filtering on the
-    // GICS spelling ("Financials") searches for a string this collection never contains.
-    const sec = normalizeSector(sector)
-    if (sec) filter.sector = sec
-    if (typeof status === 'string' && STATUSES.includes(status)) filter.status = status
-    return crud.list(userId, { filter, onError })
+async function getCoverage({ sector = null, status = null, onError } = {}) {
+    try {
+        const db = await getDb()
+        const filter = {}
+        const sec = normalizeSector(sector)
+        if (sec) filter.sector = sec
+        if (typeof status === 'string' && STATUSES.includes(status)) filter.status = status
+        return (await db.collection(COLLECTION).find(filter).sort({ updated_at: -1 }).toArray()).map(_strip)
+    } catch (err) {
+        logger.error(LOG, 'getCoverage failed', err)
+        if (onError === 'throw') throw err
+        return []
+    }
 }
 
-/**
- * Every ACTIVE thesis in these sectors, across ALL users → `[{ userId, symbol, sector }]`.
- *
- * OWNER-BLIND by design, like entityRepo.listByStatus, and for the same reason: it serves a
- * cross-user sweep — the strategy desk asking "who researches Energy?" so a house-view change
- * reaches the people it is news to. The CALLER must group by owner; handing one user's names to
- * another is exactly the bug the owner-scoped CRUD exists to prevent, so this returns nothing but
- * the join columns.
- *
- * Only `active` theses: a retired one is a book the user closed, and telling them their sector view
- * moved would be telling them about research they stopped doing. Sectors are canonicalised on the
- * way in, so a caller may ask in GICS and still match.
- */
+async function getCoverageBySymbol(symbol) {
+    try {
+        const sym = (typeof symbol === 'string' ? symbol : '').toUpperCase().trim()
+        if (!sym) return null
+        const db  = await getDb()
+        const doc = await db.collection(COLLECTION).findOne({ symbol: sym })
+        return doc ? _strip(doc) : null
+    } catch (err) {
+        logger.warn(LOG, 'getCoverageBySymbol failed', err.message)
+        return null
+    }
+}
+
+async function getCoverageById(id) {
+    try {
+        const db  = await getDb()
+        const doc = await db.collection(COLLECTION).findOne({ id })
+        if (!doc) return { ok: false, reason: 'not_found' }
+        return { ok: true, doc: _strip(doc) }
+    } catch (err) {
+        logger.error(LOG, 'getCoverageById failed', err)
+        return { ok: false, error: err }
+    }
+}
+
 async function listActiveBySector(sectors) {
     const want = [...new Set((Array.isArray(sectors) ? sectors : []).map(normalizeSector).filter(Boolean))]
     if (!want.length) return []
@@ -527,7 +367,7 @@ async function listActiveBySector(sectors) {
         const db = await getDb()
         return await db.collection(COLLECTION)
             .find({ status: 'active', sector: { $in: want } })
-            .project({ _id: 0, userId: 1, symbol: 1, sector: 1 })
+            .project({ _id: 0, symbol: 1, sector: 1 })
             .toArray()
     } catch (err) {
         logger.error(LOG, 'sector sweep failed', err)
@@ -535,26 +375,17 @@ async function listActiveBySector(sectors) {
     }
 }
 
-// The shared crud's shape, `{ ok, doc }` — the same one every other kind's service answers in.
-async function getCoverageById(id, userId) {
-    return crud.getOwnedStripped(id, userId)
-}
+const LOGGED_FIELDS = ['rating', 'status', 'price_target', 'thesis', 'schools']
+const _diffPlan = (prev, next) => diffFields(prev, next, LOGGED_FIELDS)
 
-// In-place update of a live thesis. Re-normalizes the patch merged over current (partial patches keep
-// prior fields + identity), APPENDS a revision (never loses history), preserves created_at.
-async function updateCoverage(id, patch, userId) {
-    const found = await crud.getOwned(id, userId)
+async function updateCoverage(id, patch = {}) {
+    const found = await getCoverageById(id)
     if (!found.ok) return found
-    const cur = found.doc
 
-    const p      = (patch && typeof patch === 'object') ? patch : {}
-    const merged = normalizeCoverage(
-        { ...cur, ...p, id: cur.id, symbol: cur.symbol, created_at: cur.created_at, revisions: cur.revisions },
-        cur.userId ?? userId,
-    )
-    // Only when the patch AUTHORS a view. The monitor patches gap/status/revision_* on every material
-    // verdict and must not be gated: it would re-litigate a rating it never touched, and pay for a
-    // price fetch on every tick to do it. A re-model or a user edit does carry these fields.
+    const cur = found.doc
+    const p   = (patch && typeof patch === 'object') ? patch : {}
+    const merged = normalizeCoverage({ ...cur, ...p, id: cur.id, symbol: cur.symbol, created_at: cur.created_at, revisions: cur.revisions })
+
     if ('rating' in p || 'price_target' in p) {
         const coherent = await _checkCoherence(merged)
         if (!coherent.ok) {
@@ -563,48 +394,35 @@ async function updateCoverage(id, patch, userId) {
         }
     }
 
-    // Re-derive the flags whenever the patch touches an input they are computed FROM — otherwise the
-    // stored ones spread through untouched (the monitor's status/gap patches must not silently clear
-    // a warning they never addressed, nor pay for a history fetch on every tick).
     if (['rating', 'price_target', 'risk_reward', 'conviction'].some(k => k in p)) {
         merged.flags = await _plausibilityFlags(merged)
         if (merged.flags.length) logger.warn(LOG, 'coverage FLAGGED — implausible, stored anyway', { id, symbol: merged.symbol, codes: merged.flags.map(f => f.code) })
     }
 
-    const revision = newRevision({ kind: _str(p.revision_kind) ?? 'update', note: _str(p.revision_note), changed: _diffPlan(cur, merged) })
+    const revision  = newRevision({ kind: _str(p.revision_kind) ?? 'update', note: _str(p.revision_note), changed: _diffPlan(cur, merged) })
     const revisions = [revision, ..._arr(cur.revisions)]
 
     const $set = { updated_at: merged.updated_at, revisions }
     for (const k of PLAN_FIELDS) $set[k] = merged[k]
 
-    const res = await crud.patchOwned(id, userId, $set)
-    if (!res.ok) return res
-    logger.info(LOG, 'coverage updated', { id, kind: revision.kind })
-    return res
+    try {
+        const db  = await getDb()
+        const res = await db.collection(COLLECTION).updateOne({ id }, { $set })
+        if (!res.matchedCount) return { ok: false, reason: 'not_found' }
+        logger.info(LOG, 'coverage updated', { id, kind: revision.kind })
+        return { ok: true, doc: { ..._strip(merged), revisions } }
+    } catch (err) {
+        logger.error(LOG, 'coverage update failed', err)
+        return { ok: false, error: err }
+    }
 }
 
-/**
- * The research a position is being opened ON, frozen for the life of that position:
- * `{ coverageId, coveragePt, at }`, or null when the name isn't covered.
- *
- * WHY IT IS FROZEN. Invalidation belongs to the POSITION, not to the research — a thesis whose price
- * falls is cheaper, not wrong — so what a held name needs is "has our own price target moved against
- * what we paid?". That question needs a fixed "what we believed at entry" to measure from, and the
- * live coverage doc is precisely the thing that moves.
- *
- * Best-effort BY DESIGN: research is not a precondition for trading, and no order may fail because
- * the coverage book was unreachable. Any problem → null, and the gate simply never fires.
- *
- * Shared by every path into a live position (broker placement and manual fill both call it) so the
- * two can't drift into freezing different things.
- */
-async function captureResearchBasis({ userId, symbol } = {}, deps = { getCoverage }) {
+async function captureResearchBasis({ symbol } = {}, deps = { getBySymbol: getCoverageBySymbol }) {
     try {
         const sym = String(symbol ?? '').toUpperCase().trim()
-        if (!sym || !userId) return null
-        const rows = await deps.getCoverage(userId)
-        const cov  = (Array.isArray(rows) ? rows : []).find(c => String(c.symbol ?? '').toUpperCase() === sym)
-        const pt   = _num(cov?.price_target?.value)
+        if (!sym) return null
+        const cov = await deps.getBySymbol(sym)
+        const pt  = _num(cov?.price_target?.value)
         if (!cov || pt === null) return null
         return { coverageId: cov.id, coveragePt: pt, at: new Date().toISOString() }
     } catch (err) {
@@ -613,23 +431,25 @@ async function captureResearchBasis({ userId, symbol } = {}, deps = { getCoverag
     }
 }
 
-// Churn a name out of the book (S5) — a status change to `retired`, logged as a revision. The doc and
-// its whole revision trail stay: a retired thesis is archived research, not deleted research.
-async function retireCoverage(id, userId) {
-    return updateCoverage(id, { status: 'retired', revision_kind: 'retire', revision_note: 'Coverage retired' }, userId)
+async function retireCoverage(id) {
+    return updateCoverage(id, { status: 'retired', revision_kind: 'retire', revision_note: 'Coverage retired' })
 }
 
-/**
- * REMOVE the document — permanently, trail and all. The one operation `retireCoverage` deliberately
- * is not.
- *
- * Retiring is the normal way a name leaves the book, because the revision history is usually the
- * most valuable thing on the doc. Delete is for research that should never have existed: a mistaken
- * ticker, a test run, a duplicate. There is no undo, so the UI confirms first.
- *
- * No deleteLock: unlike an execution-tier entity there is no broker state to strand, and a held name
- * losing its coverage costs only the review gate's basis comparison — never a position.
- */
-async function deleteCoverage(id, userId) {
-    return crud.remove(id, userId)
+async function deleteCoverage(id) {
+    try {
+        const db  = await getDb()
+        const res = await db.collection(COLLECTION).deleteOne({ id })
+        if (!res.deletedCount) return { ok: false, reason: 'not_found' }
+        return { ok: true }
+    } catch (err) {
+        logger.error(LOG, 'coverage delete failed', err)
+        return { ok: false, error: err }
+    }
+}
+
+// Strip Mongo's _id before returning to callers.
+function _strip(doc) {
+    if (!doc) return doc
+    const { _id, ...rest } = doc
+    return rest
 }
