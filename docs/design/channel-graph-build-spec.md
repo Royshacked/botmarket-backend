@@ -401,12 +401,44 @@ only at the desk that consumes the output.
 - Engine surfaces uncovered 2nd/3rd order names → Prometheus research demand
   grows → house coverage list expands
 
-**Atlas (position layer)**
-- Inputs: structural long-lag channel shifts (months–quarters horizon)
-- Routing rule: long lag → Atlas builds a position, not a setup
-- Example: "Coal bill passes" → Atlas builds a 6-month mining equipment sleeve
-- Atlas reads pre-researched coverage that is already backed by the engine's
-  quantitative exposure data — discovery and research cost already paid
+**Atlas (position layer) — two distinct paths**
+
+*Path A — conviction trade (direct):* engine surfaces a specific name with a
+long-lag signal → Atlas builds a conviction position on that name. Engine
+hands Atlas the exposure score, lag profile, channel attribution; Prometheus
+coverage provides the qualitative layer.
+
+*Path B — mandate / portfolio build (indirect):* engine's sector-level channel
+pressure feeds Pythia → Pythia validates and publishes a sector tilt → Argus
+scans convicted sectors → Prometheus covers names → Atlas allocates from the
+covered pool. Engine does not feed Atlas directly in this flow.
+
+The mandate pre-filter is Pythia's convicted sectors. Atlas never scans all
+covered names — only names inside convicted sectors. An engine-surfaced name
+reaches the mandate pool naturally if it is covered and its sector is convicted.
+
+**Coverage in Atlas's pool has two origins — both are valid:**
+
+| Origin | Aether signal? | Fields present |
+|---|---|---|
+| Engine surfaced the name → Prometheus covered it | Yes | Thesis + PT + exposure score + lag profile + channel attribution |
+| Direct research (user request, Argus scan, Pythia-convicted sector) | No | Thesis + PT + qualitative conviction only |
+
+The Aether exposure score is optional enrichment, not a required field. When
+present it is weighted; when absent Atlas falls back to qualitative conviction
+alone. Atlas should be transparent about which backing a name has
+(`thesis only` vs `thesis + quantitative channel exposure`).
+
+Allocation weight draws from both sources:
+```
+allocation_weight = f(
+  coverage_conviction,      // always present
+  PT_upside,                // always present
+  aether_exposure_score,    // present if engine surfaced the name
+  aether_lag_confidence,    // present if engine surfaced the name
+  channel_correlation       // cap gross exposure per channel across the portfolio
+)
+```
 
 **Mentor (setup layer)**
 - Inputs: short-lag signals (days–weeks) where repricing has not yet occurred
@@ -416,6 +448,9 @@ only at the desk that consumes the output.
   trade
 - This is the fastest path in the pipeline: no discovery step, no research
   queue, pre-computed answer waiting
+- Prometheus coverage is **not on the critical path** for Mentor. The name goes
+  into the Prometheus queue asynchronously — coverage is built behind the trade,
+  not before it. There is no time to wait on a days-to-weeks horizon.
 
 ---
 
