@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _parseAnalystResponse, analystAgentService } from '../../services/agents/analyst.agent.service.js'
+import { _parseAnalystResponse, _buildSystemPrompt, analystAgentService } from '../../services/agents/analyst.agent.service.js'
 import { _sanitizeAnalystSeed } from '../../api/analyst/analyst.controller.js'
 
 // Analyst P3 — <coverage> extraction from the streamed research turn (pure).
@@ -41,6 +41,37 @@ test('parse: no coverage tag at all → { reply, coverage:null }', () => {
     const { reply, coverage } = _parseAnalystResponse('Just discussing the name, no pitch yet.')
     assert.equal(coverage, null)
     assert.equal(reply, 'Just discussing the name, no pitch yet.')
+})
+
+// ── _buildSystemPrompt — coverage_symbols block ───────────────────────────────
+
+test('system prompt: coverage_symbols listed + no existing_coverage → includes book warning', () => {
+    const prompt = _buildSystemPrompt({ active_symbol: 'MSFT', coverage_symbols: ['AAPL', 'SPGI', 'MSFT'] })
+    const dynamic = prompt[1].text
+    assert.match(dynamic, /COVERAGE BOOK/)
+    assert.match(dynamic, /AAPL, SPGI, MSFT/)
+    assert.match(dynamic, /already in the book/)
+})
+
+test('system prompt: coverage_symbols + existing_coverage set → book warning suppressed (update mode takes over)', () => {
+    const prompt = _buildSystemPrompt({
+        active_symbol: 'SPGI',
+        coverage_symbols: ['SPGI', 'AAPL'],
+        existing_coverage: { symbol: 'SPGI', rating: 'buy', thesis: 'old thesis' },
+    })
+    const dynamic = prompt[1].text
+    assert.doesNotMatch(dynamic, /COVERAGE BOOK/)
+    assert.match(dynamic, /EXISTING COVERAGE/)
+})
+
+test('system prompt: empty coverage_symbols → no book warning', () => {
+    const prompt = _buildSystemPrompt({ active_symbol: 'NVDA', coverage_symbols: [] })
+    assert.doesNotMatch(prompt[1].text, /COVERAGE BOOK/)
+})
+
+test('system prompt: no coverage_symbols key → no book warning', () => {
+    const prompt = _buildSystemPrompt({ active_symbol: 'NVDA' })
+    assert.doesNotMatch(prompt[1].text, /COVERAGE BOOK/)
 })
 
 // ── chatStream, analyst-specific ──────────────────────────────────────────────

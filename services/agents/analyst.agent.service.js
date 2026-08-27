@@ -160,6 +160,9 @@ export function _buildSystemPrompt(chatState, seed = null, audience = null) {
             + `${JSON.stringify(_withoutFlags(chatState.existing_coverage), null, 2)}`
             + _objectionsBlock(chatState.existing_coverage?.flags)
         : ''
+    const coverageListBlock = chatState?.coverage_symbols?.length && !chatState?.existing_coverage
+        ? `\nCOVERAGE BOOK — names already in coverage: ${chatState.coverage_symbols.join(', ')}.\nIf the user asks to research or cover one of these names and you are NOT in update mode, do NOT start the research. Instead, tell them the name is already in the book and ask whether they want to update the existing thesis or work on a different name.`
+        : ''
     // P4b: an Argus INVESTING-profile candidate handed over for research. Start Phase 1 with this name +
     // Argus's screen read as a provisional input — VERIFY it, don't take it on faith, and form your OWN view.
     const seedBlock = seed?.ticker
@@ -173,7 +176,7 @@ CURRENT DATE: ${today}. Resolve relative dates (this quarter, next earnings) aga
 ${audienceBlock ? `
 ${audienceBlock}
 
-` : ''}Active name: ${active}${seedBlock}${existingBlock}`
+` : ''}Active name: ${active}${seedBlock}${coverageListBlock}${existingBlock}`
     return [
         cachedBlock(_systemPrompt() + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
         { type: 'text', text: dynamic },
