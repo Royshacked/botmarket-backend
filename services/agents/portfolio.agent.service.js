@@ -44,7 +44,7 @@ export const TOOLS = toolsFor({
         description: `Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it.`,
         cache: true,
     },
-    get_coverage: `The Analyst's researched coverage — the living per-name theses you can build a book from (a variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, and the status). Prefer constructing from a RESEARCHED name (a thesis + a target) over a raw screen hit. Optionally filter by sector. Read-only.`,
+    get_coverage: `The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status). This is the ONLY source for mandate build: fetch filtered by sector (from the tilt's overweight sectors) and by the mandate's selection school. Optionally combine both filters. For an uncovered name the user explicitly asks for, emit a <coverage_request> instead of using this tool. Read-only.`,
     get_chart: `Render a candlestick chart IMAGE for ONE name and look at it directly. Your job is allocation, not entry timing, so use this for the questions a picture answers better than a number: where a candidate sits in its multi-year range, whether a holding's trend is intact or broken, how ugly a drawdown was, what a long base looks like. Prefer weekly/monthly for a multi-month or multi-year hold; a daily view is for judging whether to phase into a position now or wait. Numbers (valuation, risk metrics, correlations) still decide the WEIGHT — this only informs the read. Set show_to_user true when the picture is part of the case you're making to the user, so they see what you saw.`,
     // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
     // array prefix.
@@ -100,22 +100,22 @@ const TOOL_HANDLERS = {
 // sleeve, and quietly filing it under one would be the guess this grouping exists to prevent.
 const UNSECTORED = 'Unclassified'
 
-// P4d: render the Analyst's active coverage as an LLM-ready read for Atlas to construct from. Pure —
-// exported for tests. Shows OUR PT vs the Street (the gap = the edge) so Atlas allocates on research,
-// grouped by sector so it can see which SLEEVE each name was researched for.
+// P4d: render the house coverage pool as an LLM-ready read for Atlas to construct from. Pure —
+// exported for tests. Shows OUR PT vs the Street (the gap = the edge) and the schools each name fits,
+// grouped by sector so Atlas can see which SLEEVE each name was researched for.
 export function _formatCoverage(rows) {
     const list = (Array.isArray(rows) ? rows : []).filter(c => c && c.symbol)
-    // This message is an INSTRUCTION, not a status line — it lands late in the context, right where
-    // the model is deciding what to do next, so it outranks the prompt's sourcing rule in practice.
-    // It used to end "or screen directly", which is the one thing Atlas must never do: it then read
-    // fundamentals, picked names and allocated, and the screening desk and the research desk were
-    // both skipped. Say only what is actually allowed, and say to stop.
-    if (!list.length) return 'No Analyst coverage yet — nothing researched to build from. You have NO screener of your own: emit a <screen_request> for the sleeve and END THE TURN there. Argus screens, the Analyst researches, and you construct once coverage comes back. Do NOT pick names yourself from get_fundamentals, web_search or memory — a name you sourced is a name nobody screened or researched.'
+    // This message is an INSTRUCTION, not a status line — it lands late in the context right where
+    // the model is deciding what to do next. The house coverage pool is the ONLY construction source.
+    // For names not in coverage, emit a <coverage_request> (routes to Prometheus); never screen or
+    // pick names from get_fundamentals / web_search / memory.
+    if (!list.length) return 'No house coverage yet for these filters — nothing researched to build from. If the mandate targets a sector/school with no coverage, emit a <coverage_request> for a specific name the user mentioned, or tell the user the pool is empty for this filter and suggest they check the research queue.'
     const line = (c) => {
-        const pt   = c.price_target?.value
-        const gap  = Number.isFinite(c.gap?.pct) ? ` (${c.gap.pct >= 0 ? '+' : ''}${c.gap.pct}% vs Street${Number.isFinite(c.gap?.consensus_pt) ? ` ${c.gap.consensus_pt}` : ''})` : ''
-        const th   = typeof c.thesis === 'string' && c.thesis ? ` — ${c.thesis.length > 160 ? c.thesis.slice(0, 157) + '…' : c.thesis}` : ''
-        return `- ${c.symbol} [${c.rating ?? 'unrated'}]${pt != null ? ` our PT ${pt}${gap}` : ''} · ${c.status ?? 'active'}${th}`
+        const pt      = c.price_target?.value
+        const gap     = Number.isFinite(c.gap?.pct) ? ` (${c.gap.pct >= 0 ? '+' : ''}${c.gap.pct}% vs Street${Number.isFinite(c.gap?.consensus_pt) ? ` ${c.gap.consensus_pt}` : ''})` : ''
+        const th      = typeof c.thesis === 'string' && c.thesis ? ` — ${c.thesis.length > 160 ? c.thesis.slice(0, 157) + '…' : c.thesis}` : ''
+        const schools = Array.isArray(c.schools) && c.schools.length ? ` [schools: ${c.schools.join(', ')}]` : ''
+        return `- ${c.symbol} [${c.rating ?? 'unrated'}]${pt != null ? ` our PT ${pt}${gap}` : ''} · ${c.status ?? 'active'}${schools}${th}`
     }
 
     // GROUPED BY SECTOR, not a flat list. Atlas builds a book of SLEEVES, and a sleeve is a sector
@@ -152,21 +152,23 @@ export function _formatCoverage(rows) {
     ].join('\n'))
 
     return [
-        'Analyst coverage (researched theses — build from these, our target vs the Street).',
-        'Grouped by the sector the Analyst researched each name UNDER — that is the sleeve it was sourced for. A sleeve from your architecture with no heading here has nothing researched behind it yet: route it, do not fill it from another sector\'s names.',
+        'House coverage pool (Prometheus-researched theses — build from these; our target vs the Street is the edge).',
+        'Grouped by the sector Prometheus researched each name UNDER — that is the sleeve it was sourced for. A sleeve from your architecture with no heading here has nothing researched behind it yet: do not fill it from another sector\'s names.',
         ...blocks.flatMap(b => ['', b]),
         ...(uncovered.length ? ['', `NO COVERAGE AT ALL IN: ${uncovered.join(', ')}.`
-            + ' If your architecture targets any of these, it has nothing researched behind it —'
-            + ' emit a <screen_request> for that sleeve (one per sleeve, all in this turn). Do NOT'
-            + ' shrink the sleeve to fit what happens to be covered, and do not fill it from a'
-            + ' neighbouring sector: what is already researched is a fact about our past work, not a'
-            + ' view about this mandate.'] : []),
+            + ' If the user asks to add a specific name from one of these, emit a <coverage_request>'
+            + ' (routes the name to Prometheus for research). Do NOT shrink the sleeve to fit what'
+            + ' happens to be covered, do not fill it from a neighbouring sector, and do not pick'
+            + ' names from get_fundamentals or memory: what is already researched is a fact about our'
+            + ' past work, not a view about this mandate.'] : []),
     ].join('\n')
 }
 
 function makeCoverageHandler() {
     return makeToolHandler('get_coverage',
-        async ({ sector } = {}) => _formatCoverage(await coverageService.getCoverage({ status: 'active', sector: sector ?? null })),
+        async ({ sector, school } = {}) => _formatCoverage(
+            await coverageService.getCoverage({ status: 'active', sector: sector ?? null, school: school ?? null })
+        ),
         (err) => `Could not fetch coverage: ${err.message}`, LOG)
 }
 
@@ -277,17 +279,19 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     const screenRequests = _parseScreenRequests(raw)
     // G1: Atlas hands a HELD name back to Prometheus for an async re-research when its coverage is stale.
     const coverageRefresh = _parseCoverageRefresh(raw)
+    // 4th flow: user asked for a name not in house coverage → route to Prometheus via research queue.
+    const coverageRequest = _parseCoverageRequest(raw)
 
     const reply = stripEmitTags(
         // <ticker> keeps its inner text in the reply (unwrap, don't strip).
         raw.replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1'),
-        ['phase', 'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis', 'screen_request', 'coverage_refresh'],
+        ['phase', 'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis', 'screen_request', 'coverage_refresh', 'coverage_request'],
     ).trim()
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, phase: phase.get() })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}) }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, coverageRequest: !!coverageRequest, phase: phase.get() })
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...(coverageRequest ? { coverageRequest } : {}) }
 }
 
 // ─── Coverage-refresh extraction (pure) ─────────────────────────────────────────
@@ -302,6 +306,20 @@ export function _parseCoverageRefresh(raw) {
     if (!ticker) return null
     const question = typeof o?.question === 'string' && o.question.trim() ? o.question.trim() : null
     return { ticker, question }
+}
+
+// ─── Coverage-request extraction (pure) ─────────────────────────────────────────
+// 4th Atlas flow — uncovered name on-demand. When the user asks to add a name that is NOT in the
+// house coverage pool, Atlas emits <coverage_request> to route it to Prometheus via the research
+// queue. The controller picks this up and enqueues the symbol. Atlas then ends the turn and waits
+// for Prometheus to research and return. Exported for tests.
+export function _parseCoverageRequest(raw) {
+    const o = parseEmitBlock(raw, 'coverage_request', LOG)
+    if (!o) return null
+    const symbol = String(o?.symbol ?? '').toUpperCase().trim()
+    if (!symbol) return null
+    const reason = typeof o?.reason === 'string' && o.reason.trim() ? o.reason.trim() : null
+    return { symbol, reason }
 }
 
 // ─── Screen-request extraction (pure) ───────────────────────────────────────────

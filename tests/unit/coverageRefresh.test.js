@@ -48,7 +48,7 @@ function harness({ draft, initResult, existing = null, updResult = { ok: true } 
         initiate: async (d, userId) => { calls.initiate.push({ d, userId }); return initResult },
         update:   async (id, patch, userId) => { calls.update.push({ id, patch, userId }); return updResult },
         notify:   async (a) => { calls.notify.push(a) },
-        existing: async (userId, sym) => { calls.existing.push({ userId, sym }); return existing },
+        existing: async (sym) => { calls.existing.push(sym); return existing },
     }
     return { deps, calls }
 }
@@ -134,7 +134,7 @@ test('an existing thesis is handed to the agent as update-mode context', async (
     const h = harness({ draft: { symbol: 'NVDA', thesis: 'v2' }, initResult: { ok: false, reason: 'already_covered', id: 'covOLD' }, existing: prior })
     await refreshCoverage({ userId: 'u1', ticker: 'nvda' }, h.deps)
 
-    assert.deepEqual(h.calls.existing[0], { userId: 'u1', sym: 'NVDA' })
+    assert.equal(h.calls.existing[0], 'NVDA')
     const sent = h.calls.research[0]
     assert.deepEqual(sent.chatState.existing_coverage, prior)
     assert.equal(sent.chatState.active_symbol, 'NVDA')

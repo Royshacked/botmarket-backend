@@ -36,7 +36,7 @@ const DEFAULT_STATUS = 'active'
 // Selection schools Prometheus tags at research time and updates on re-model.
 // Atlas uses these for the mandate-build DB filter; it still applies school judgment
 // over the thesis — the tag is a pre-filter, not a cage.
-export const SCHOOLS = ['quality_value', 'growth_durability', 'income', 'passive']
+export const SCHOOLS = ['quality-value', 'growth-durability', 'income', 'passive']
 
 const PLAN_FIELDS = ['sector', 'thesis', 'rating', 'price_target', 'estimates', 'gap',
     'catalysts', 'kill_criteria', 'risk_reward', 'conviction', 'status', 'evidence', 'flags', 'schools']
@@ -320,13 +320,16 @@ async function initiateCoverage(raw) {
     }
 }
 
-async function getCoverage({ sector = null, status = null, onError } = {}) {
+async function getCoverage({ sector = null, status = null, school = null, onError } = {}) {
     try {
         const db = await getDb()
         const filter = {}
         const sec = normalizeSector(sector)
         if (sec) filter.sector = sec
         if (typeof status === 'string' && STATUSES.includes(status)) filter.status = status
+        // Atlas mandate-build pre-filter: `schools` is an array field; MongoDB's scalar equality
+        // on an array field matches documents where the value appears as an element (implicit $elemMatch).
+        if (typeof school === 'string' && SCHOOLS.includes(school)) filter.schools = school
         return (await db.collection(COLLECTION).find(filter).sort({ updated_at: -1 }).toArray()).map(_strip)
     } catch (err) {
         logger.error(LOG, 'getCoverage failed', err)

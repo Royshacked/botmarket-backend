@@ -133,12 +133,11 @@ test('never negative — an over-committed account reports nothing to deploy', (
 // hundreds of lines earlier in the system prompt. It must not offer a route the prompt forbids.
 import { _formatCoverage } from '../../services/agents/portfolio.agent.service.js'
 
-test('empty coverage tells Atlas to hand off and stop — never to screen itself', () => {
+test('empty coverage tells Atlas to hand off — emit coverage_request, never screen itself', () => {
     const out = _formatCoverage([])
     assert.ok(!/screen directly/i.test(out), 'this phrase is what caused Atlas to self-source')
-    assert.match(out, /<screen_request>/)
-    assert.match(out, /END THE TURN/)
-    assert.match(out, /NO screener of your own/)
+    assert.match(out, /No house coverage yet/)
+    assert.match(out, /<coverage_request>/)
 })
 
 test('coverage that exists is offered as the thing to build from', () => {

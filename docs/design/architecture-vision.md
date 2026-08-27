@@ -298,6 +298,52 @@ Admin is the override, not the gatekeeper.
 
 ---
 
+## 9. Implementation plan — `feat/multiuser-refactor` (branch)
+
+### Agreed design decisions
+
+**House pipeline (admin only):**
+- Pythia forecast → Argus house scan → all schools, all cap sizes (no cap filter) → Prometheus batch research → coverage tagged with school(s)
+- Coverage is house-owned (no userId). All users read. Only admin can write (CRUD).
+- Every Prometheus revision updates the school tags if the fit changes.
+
+**Atlas — four flows, no Argus in the portfolio build loop:**
+- Atlas fetches directly from the Prometheus coverage pool (`get_coverage`).
+- For mandate build: filter by convicted sectors (from Pythia tilt) AND mandate selection school.
+- `<screen_request>` does NOT exist in the portfolio build flow. Atlas never routes to Argus for portfolio construction.
+- Empty sleeve (no coverage for this sector/school) → tell the user, do not hand off to Argus.
+- User explicitly asks for an uncovered name → `<coverage_request>` → research queue → Prometheus.
+- `<coverage_request>` is the only Atlas → Prometheus path available to traders.
+
+**Argus — unchanged for now:**
+- Trade desk pipeline (user scan + Mentor helper) unchanged.
+- Users can still chat with Argus directly.
+- Argus is NOT in the Atlas portfolio build pipeline.
+
+**Schools:**
+- Source of truth: `investorSchools.js` — hyphens (`quality-value`, `growth-durability`, `income`, `passive`).
+- `coverage.service.js` SCHOOLS must match (hyphens). Mandate block emits hyphens. Filter must match.
+- Prometheus tags schools; Atlas reads them. Tag is a pre-filter, not a cage — Atlas still applies school judgment over each thesis.
+
+**Aether — deferred (build last).**
+
+---
+
+### Step status (as of 2026-08-26)
+
+| # | What | Status |
+|---|---|---|
+| 1 | Coverage pivot — house-owned, role split, admin middleware | ✅ committed (`5c12b8c`) |
+| 2 | Admin pipeline — research queue, Argus house scan, Pythia gate | ✅ committed (`159e894`) |
+| 3 | `school` filter on `getCoverage` + schools shown per coverage line + tests | ✅ done, uncommitted |
+| 4 | `coverage_request` 4th Atlas flow — parse, enqueue, strip from reply + tests | ✅ done, uncommitted |
+| 5 | Add `school` to `get_coverage` tool schema (`agentTools.registry.js`) | ⬜ todo |
+| 6 | Fix SCHOOLS naming — align `coverage.service.js` to hyphens (matches `investorSchools.js`) | ⬜ todo |
+| 7a | Prometheus (analyst) prompt — instruct to tag school(s) on every `<coverage>` block and update on revision | ⬜ todo |
+| 7b | Atlas prompt Phase 4 — remove `<screen_request>` from portfolio build; add `<coverage_request>` for user-named uncovered name; instruct `get_coverage` call to filter by sector + school | ⬜ todo |
+
+---
+
 ## Related
 
 - `docs/design/channel-graph-build-spec.md` — channel engine full build spec
