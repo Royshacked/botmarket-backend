@@ -94,6 +94,11 @@ export const TOOL_SCHEMAS = {
             "sector": {
                 "type": "string",
                 "description": "optional — narrow to one sector, e.g. Technology"
+            },
+            "school": {
+                "type": "string",
+                "enum": ["quality-value", "growth-durability", "income", "passive"],
+                "description": "optional — narrow to names Prometheus tagged for this selection school; combine with sector for the mandate-build pre-filter"
             }
         }
     },

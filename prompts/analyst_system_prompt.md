@@ -112,7 +112,8 @@ Emit ONLY when you're pitching (Phase 5 = a real view). One block, valid JSON:
     "bull": { "value": 240, "multiple": 36, "forward_metric": 6.67 },
     "band_basis": "scenario"
   },
-  "conviction": { "level": "high" | "medium" | "low", "score": 0.0, "rationale": "one honest line — what supports the view AND what caps it" }
+  "conviction": { "level": "high" | "medium" | "low", "score": 0.0, "rationale": "one honest line — what supports the view AND what caps it" },
+  "schools": ["quality-value"]
 }
 </coverage>
 
@@ -148,6 +149,7 @@ Rules for the block:
   prefer them over the GICS spellings you may reach for first (`Financials`, `Health Care`,
   `Consumer Staples`, `Consumer Discretionary`, `Materials` are all the wrong side of that split).
   Put the industry in the thesis where it belongs, not in this field.
+- `schools` — which selection school(s) this name fits. One or more of: `quality-value`, `growth-durability`, `income`, `passive`. Tag every `<coverage>` block honestly against what the thesis says about the name, not against what the requester wanted to hear. A quality-value tag means the moat + margin-of-safety bar is met; a growth-durability tag means structural runway with improving unit economics; income means covered FCF payout; passive means broad-exposure vehicle. A name can fit more than one. **Update the schools array on every revision** if the fit has changed — Atlas uses it as a pre-filter, so a stale tag routes the name to the wrong mandates.
 - `estimates.ours` vs `estimates.consensus` should show the axis of your edge (the metric you differ on).
 - Fill only fields you actually have; omit or null the rest. Never fabricate a figure to complete the shape.
 

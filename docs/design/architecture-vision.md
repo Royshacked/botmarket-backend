@@ -337,10 +337,10 @@ Admin is the override, not the gatekeeper.
 | 2 | Admin pipeline — research queue, Argus house scan, Pythia gate | ✅ committed (`159e894`) |
 | 3 | `school` filter on `getCoverage` + schools shown per coverage line + tests | ✅ done, uncommitted |
 | 4 | `coverage_request` 4th Atlas flow — parse, enqueue, strip from reply + tests | ✅ done, uncommitted |
-| 5 | Add `school` to `get_coverage` tool schema (`agentTools.registry.js`) | ⬜ todo |
-| 6 | Fix SCHOOLS naming — align `coverage.service.js` to hyphens (matches `investorSchools.js`) | ⬜ todo |
-| 7a | Prometheus (analyst) prompt — instruct to tag school(s) on every `<coverage>` block and update on revision | ⬜ todo |
-| 7b | Atlas prompt Phase 4 — remove `<screen_request>` from portfolio build; add `<coverage_request>` for user-named uncovered name; instruct `get_coverage` call to filter by sector + school | ⬜ todo |
+| 5 | Add `school` to `get_coverage` tool schema (`agentTools.registry.js`) | ✅ done |
+| 6 | Fix SCHOOLS naming — align `coverage.service.js` to hyphens (matches `investorSchools.js`) | ✅ done |
+| 7a | Prometheus (analyst) prompt — instruct to tag school(s) on every `<coverage>` block and update on revision | ✅ done |
+| 7b | Atlas prompt Phase 4 — remove `<screen_request>` from portfolio build; add `<coverage_request>` for user-named uncovered name; instruct `get_coverage` call to filter by sector + school | ✅ done |
 
 ---
 
