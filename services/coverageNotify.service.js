@@ -41,12 +41,13 @@ export function buildCoverageEvent(coverage, verdict) {
     }
 
     return {
-        userId:  coverage.userId,
+        userId:     coverage.userId,
         content,
-        type:    'coverage_event',
-        payload: { kind: 'coverage', symbol: sym, coverageId: coverage.id, state, edge_gone: !!verdict.edge_gone },
-        botId:   'analyst',
-        actions: cardActions('Open coverage'),
+        type:       'coverage_event',
+        payload:    { kind: 'coverage', symbol: sym, coverageId: coverage.id, state, edge_gone: !!verdict.edge_gone },
+        botId:      'analyst',
+        actions:    cardActions('Open coverage'),
+        visibility: 'admin',
     }
 }
 
@@ -77,10 +78,12 @@ export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, por
     return {
         userId,
         content,
-        type:    'coverage_refreshed',
-        payload: { kind: 'coverage', symbol: sym, coverageId, portfolioId, ok },
-        botId:   'analyst',
-        actions: portfolioId ? cardActions('Resume review') : cardActions('Open coverage'),
+        type:       'coverage_refreshed',
+        payload:    { kind: 'coverage', symbol: sym, coverageId, portfolioId, ok },
+        botId:      'analyst',
+        actions:    portfolioId ? cardActions('Resume review') : cardActions('Open coverage'),
+        visibility: 'own',
+        forUserId:  userId,
     }
 }
 

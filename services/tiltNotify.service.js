@@ -81,12 +81,13 @@ export function buildTiltEvent(tilt, changes, userId) {
             // it — an active-weight set that does not net out is not directly allocatable.
             balanced: tilt?.balanced !== false,
         },
-        botId:   'strategy',
+        botId:      'strategy',
         // A READ, not an ask: the house view is a STATE and there is nothing to revise from here,
         // so putting the board in front of the reader IS the whole job. One of only two cards that
         // opting out of the stays-alive default is honest for — its sibling below ("Run the review")
         // asks for work and keeps the default.
-        actions: cardActions('Open sector view', { resolvesOn: 'open' }),
+        actions:    cardActions('Open sector view', { resolvesOn: 'open' }),
+        visibility: 'admin',
     }
 }
 
@@ -178,8 +179,9 @@ export function buildTiltReviewOffer(tilt, { reason = null, userId } = {}) {
             matured:      rows.filter(r => r?.state === 'matured').map(r => r?.sector).filter(Boolean),
             published_at: tilt?.created_at ?? null,
         },
-        botId:   'strategy',
-        actions: cardActions('Run the review'),
+        botId:      'strategy',
+        actions:    cardActions('Run the review'),
+        visibility: 'admin',
     }
 }
 

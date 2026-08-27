@@ -19,6 +19,11 @@ test('target_hit → analyst card; edge_gone adds the harvest nudge', () => {
     assert.match(gone.content, /edge is gone.*harvest/i)
 })
 
+test('coverage_event is admin-only — only the house pipeline produces these', () => {
+    const c = buildCoverageEvent(cov(), { state: 'target_hit', reason: 'x' })
+    assert.equal(c.visibility, 'admin')
+})
+
 test('target_hit_early reads as a MISS — never as a target reached worth harvesting', () => {
     const c = buildCoverageEvent(cov(), {
         state: 'target_hit_early',

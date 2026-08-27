@@ -40,6 +40,12 @@ test('buildCoverageRefreshed: no user or ticker → null', () => {
     assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: '' }), null)
 })
 
+test('coverage_refreshed is own-only — it is the reply to the specific user who triggered the Atlas review', () => {
+    const card = buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA' })
+    assert.equal(card.visibility, 'own')
+    assert.equal(card.forUserId, 'u1')
+})
+
 // ─── refreshCoverage orchestration (injected deps) ──────────────────────────────
 function harness({ draft, initResult, existing = null, updResult = { ok: true } }) {
     const calls = { research: [], initiate: [], update: [], notify: [], existing: [] }
