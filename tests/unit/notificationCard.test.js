@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { cardActions, cardLifecycle, cardSubject, normalizeResolveStatus, isBot } from '../../api/chat/chat.service.js'
 import { isScaffoldOnlyPatch } from '../../api/_shared/entityController.util.js'
 import { buildIdeaEntryConfirm, buildSetupEntryConfirm, buildCallReady, buildCallExpiry, buildCallManage, buildCallReentry } from '../../services/tradeNotify.service.js'
-import { buildCoverageEvent } from '../../services/coverageNotify.service.js'
 
 // The unified card contract: "actionable" is a property of the MESSAGE (does it carry `actions`?),
 // not the sender. cardActions() defines the one two-button rule (do-something + dismiss); cardLifecycle()
@@ -117,7 +116,6 @@ function allCards() {
     const idea  = { id: 'i1',  userId: 'u1', asset: 'NQ',   direction: 'long' }
     const setup = { id: 's1',  userId: 'u1', asset: 'AVGO', direction: 'long' }
     const call  = { id: 'c1',  userId: 'u1', asset: 'AAPL', bias: 'long' }
-    const cov   = { id: 'cov1', userId: 'u1', symbol: 'NVDA', price_target: { value: 200 } }
     return [
         buildIdeaEntryConfirm(idea),
         buildSetupEntryConfirm(setup, { verdict: 'enter' }),
@@ -125,7 +123,6 @@ function allCards() {
         buildCallExpiry(call, 'expired'),
         buildCallManage(call, { verdict: 'move_stop' }),
         buildCallReentry(call),
-        buildCoverageEvent(cov, { state: 'target_hit' }),
     ]
 }
 

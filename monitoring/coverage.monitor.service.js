@@ -17,7 +17,6 @@ import { getPriceTargetConsensus } from '../providers/fmp.provider.js'
 import { coverageService, COLLECTION } from '../api/analyst/coverage.service.js'
 import { classifyGapState, recomputeGap, statusForState, nextCheckAt } from './coverage.assess.js'
 import { remodelDecision }        from './coverage.remodel.js'
-import { notifyCoverageEvent }    from '../services/coverageNotify.service.js'
 import { refreshCoverage }        from '../services/coverageRefresh.service.js'
 import { entityRepo }             from '../services/entity/entityRepo.service.js'
 import { LIVE_POSITION }          from '../services/entity/vocabulary.js'
@@ -70,10 +69,10 @@ const _deps = {
             return new Set()
         }
     },
-    // Post to the Analyst's social-chat feed on a material verdict (P5). Logs too, for the server trail.
+    // Log the verdict; fan-out to admin users wired after the DB refresh
+    // (house-owned coverage has no userId — notifyCoverageEvent removed until then).
     notify: (cov, verdict) => {
         logger.info(LOG, 'coverage event', { symbol: cov.symbol, state: verdict.state, reason: verdict.reason, edge_gone: verdict.edge_gone })
-        notifyCoverageEvent(cov, verdict)   // fire-and-forget; never throws
     },
 }
 export function _setDeps(d) { Object.assign(_deps, d) }

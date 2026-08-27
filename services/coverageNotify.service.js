@@ -1,60 +1,16 @@
-// Coverage-event notifications (P5) — the Analyst bot posts to social chat when the coverage monitor
-// reaches a material verdict on a living thesis (target hit, thesis broken, validating, diverging).
-// Mirrors tradeNotify: a PURE builder (unit-tested) + a thin wrapper over the shared postCard. Each
-// agent owns its own notifications (Idea→invalidation, Kairos→readiness, Analyst→coverage events).
+// Coverage notifications (Analyst) — two kinds:
+//
+// 1. coverage_event (P5): the coverage MONITOR fired a material verdict (target hit, thesis broken,
+//    validating, diverging). DEAD until the DB refresh: house-owned coverage has no userId, so the
+//    fan-out target is unknown. Wire after the refresh — admin user IDs, not coverage.userId.
+//
+// 2. coverage_refreshed (G1): Prometheus pinged a specific user after an async refresh-by-hop
+//    (Atlas mid-review). This one IS live: the userId comes from the requesting user, not the doc.
 
 import { cardActions } from '../api/chat/chat.service.js'
 import { postCard } from './notifyCard.js'
 
 const LOG = '[coverageNotify]'
-
-/**
- * Build the coverage-event card for a monitor verdict. Pure → returns
- * { userId, content, type, payload, botId } (or null when there's no user to notify).
- * verdict = { state, reason, edge_gone } from coverage.assess.classifyGapState.
- */
-export function buildCoverageEvent(coverage, verdict) {
-    if (!coverage?.userId || !verdict?.state) return null
-    const sym = coverage.symbol
-    const pt  = coverage.price_target?.value
-    const state = verdict.state
-
-    // Body carries NO brand prefix — the card's agent tag (FE: CardAgentTag → AGENTS.analyst)
-    // already reads "Prometheus", same as the Idea/Atlas cards. Keep the copy a plain sentence.
-    let content
-    if (state === 'target_hit') {
-        content = `${sym} reached our price target${pt != null ? ` (${pt})` : ''}`
-            + (verdict.edge_gone ? ' — the Street has caught up, so the edge is gone. Consider harvesting.' : '.')
-    } else if (state === 'target_hit_early') {
-        // Reads as a MISS, not a win — the copy has to say so, or a card announcing "target reached"
-        // invites exactly the harvest the verdict is arguing against.
-        content = `${sym} reached our price target${pt != null ? ` (${pt})` : ''} far too fast: ${verdict.reason}.`
-            + ' Re-modelling rather than closing the call.'
-    } else if (state === 'thesis_broken') {
-        content = `${sym} thesis BROKEN: ${verdict.reason}.`
-    } else if (state === 'validating') {
-        content = `${sym} thesis is playing out: ${verdict.reason}.`
-    } else if (state === 'diverging') {
-        content = `${sym}: ${verdict.reason} — we're increasingly contrarian; worth a re-look.`
-    } else {
-        return null   // 'stable' and anything else → no notification
-    }
-
-    return {
-        userId:     coverage.userId,
-        content,
-        type:       'coverage_event',
-        payload:    { kind: 'coverage', symbol: sym, coverageId: coverage.id, state, edge_gone: !!verdict.edge_gone },
-        botId:      'analyst',
-        actions:    cardActions('Open coverage'),
-        visibility: 'admin',
-    }
-}
-
-/** Post the coverage-event card (fire-and-forget; never throws into the monitor loop). */
-export async function notifyCoverageEvent(coverage, verdict) {
-    return postCard(buildCoverageEvent(coverage, verdict), { tag: 'Coverage-event card', log: LOG })
-}
 
 // ─── Coverage refresh (G1) ──────────────────────────────────────────────────────
 // Prometheus pings the user when an async refresh-by-hop (requested by Atlas mid-review) has rewritten
