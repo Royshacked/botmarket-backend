@@ -7,11 +7,17 @@
 import { getDb } from '../../providers/mongodb.provider.js'
 
 export const COLLECTIONS = {
-    CHANNEL_STATE: 'aether_channel_state',
-    REGIMES:       'aether_regimes',
-    EXPOSURES:     'aether_exposures',
-    FORECASTS:     'aether_forecasts',
-    SITUATIONS:    'aether_situations',
+    CHANNEL_STATE:   'aether_channel_state',
+    REGIMES:         'aether_regimes',
+    EXPOSURES:       'aether_exposures',
+    FORECASTS:       'aether_forecasts',
+    SITUATIONS:      'aether_situations',
+    TAXONOMY:        'aether_taxonomy',
+    BRIER_SCORES:    'aether_brier_scores',
+    // Phase 7
+    INTERFERENCE:    'aether_interference',
+    PORTFOLIO_SLOTS: 'aether_portfolio_slots',
+    LOSS_SURFACE:    'aether_loss_surface',
 }
 
 export async function ensureAetherIndexes() {
@@ -26,4 +32,17 @@ export async function ensureAetherIndexes() {
     await db.collection(COLLECTIONS.FORECASTS).createIndex({ entity: 1, resolution_date: 1 }, { background: true })
     // situations: active arcs
     await db.collection(COLLECTIONS.SITUATIONS).createIndex({ status: 1, updated_at: -1 }, { background: true })
+    // taxonomy: one doc per channel_id
+    await db.collection(COLLECTIONS.TAXONOMY).createIndex({ channel_id: 1 }, { unique: true, background: true })
+    // brier scores: one doc per (channel_id, event_type, regime) — calibration status
+    await db.collection(COLLECTIONS.BRIER_SCORES).createIndex(
+        { channel_id: 1, event_type: 1, regime: 1 }, { unique: true, background: true }
+    )
+    // interference: cross-forecast interactions, read by run (computed_at) and severity
+    await db.collection(COLLECTIONS.INTERFERENCE).createIndex({ computed_at: -1, severity: -1 }, { background: true })
+    // portfolio slots: one per entity per run; read latest run then sort by weight
+    await db.collection(COLLECTIONS.PORTFOLIO_SLOTS).createIndex({ entity: 1, forecast_id: 1 }, { unique: true, background: true })
+    await db.collection(COLLECTIONS.PORTFOLIO_SLOTS).createIndex({ computed_at: -1, weight: -1 }, { background: true })
+    // loss surface: one per run; read latest
+    await db.collection(COLLECTIONS.LOSS_SURFACE).createIndex({ computed_at: -1 }, { background: true })
 }
