@@ -143,6 +143,46 @@ export async function getLossSurface() {
     }
 }
 
+// ── Phase 8 readers ───────────────────────────────────────────────────────────
+
+/**
+ * All EdgeCandidate docs (any status) for budget computation + active pipeline view.
+ * Returns null when governance has not yet run (no candidates submitted).
+ */
+export async function getAllCandidates() {
+    try {
+        const db   = await getDb()
+        const docs = await db.collection(COLLECTIONS.EDGE_CANDIDATES)
+            .find({}, { projection: { _id: 0 } })
+            .toArray()
+        return docs.length ? docs : null
+    } catch (err) {
+        logger.warn(LOG, 'getAllCandidates failed', err.message)
+        return null
+    }
+}
+
+/**
+ * Latest decay audit batch from the most recent run_governance.py --decay-audit run.
+ * Uses the two-query sentinel pattern: find newest audit_date, then fetch the full batch.
+ * Returns null when no decay audit has run.
+ */
+export async function getDecayAudit() {
+    try {
+        const db = await getDb()
+        const sentinel = await db.collection(COLLECTIONS.DECAY_AUDIT)
+            .findOne({}, { sort: { audit_date: -1 }, projection: { audit_date: 1 } })
+        if (!sentinel) return null
+        const docs = await db.collection(COLLECTIONS.DECAY_AUDIT)
+            .find({ audit_date: sentinel.audit_date }, { sort: { recommendation: 1, weight_ratio: 1 }, projection: { _id: 0 } })
+            .toArray()
+        return docs.length ? docs : null
+    } catch (err) {
+        logger.warn(LOG, 'getDecayAudit failed', err.message)
+        return null
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Exposure record for one ticker, or null. */

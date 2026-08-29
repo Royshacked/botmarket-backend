@@ -7,7 +7,7 @@
 // Aether reasons qualitatively (LLM knowledge) in that state and says so plainly.
 
 import { makeToolHandler }   from '../agentUtils.js'
-import { getChannelState, getCurrentRegime, getExposure, getTaxonomy, getForecasts, getCalibration, getPortfolioSlots, getInterference, getLossSurface } from '../../api/aether/aether.service.js'
+import { getChannelState, getCurrentRegime, getExposure, getTaxonomy, getForecasts, getCalibration, getPortfolioSlots, getInterference, getLossSurface, getAllCandidates, getDecayAudit } from '../../api/aether/aether.service.js'
 
 const LOG = '[aetherTools]'
 
@@ -83,6 +83,8 @@ export const AETHER_TOOL_SPECS = {
     get_portfolio:        `The current channel-correlation portfolio from Phase 7: one slot per entity with allocation weight, direction, attribution confidence, and per-channel decomposition. Weights are computed from probability × attribution_confidence × residual_score, then trimmed if any channel's gross portfolio exposure exceeds 30%. Returns "not yet computed" when Phase 7 has not run. Call it when Atlas is building or reviewing a portfolio, when the user asks about allocation or position weighting, or when you need to see which names the engine is currently long/short and why.`,
     get_interference:     `Cross-forecast interference classification from Phase 7: compounding (two names betting the same channel direction, superlinear risk near capacity), offsetting (one name pulled in opposite directions), masking (a loud event suppressing repricing of a quiet one — the primary durable edge), conditioning (a fast channel in forecast A shifts the regime for forecast B), sequencing (repeated entity/channel forecast with decaying surprise). Returns "not yet computed" when Phase 7 has not run. Call it when Atlas is evaluating portfolio construction, when you want to flag cross-name dynamics, or when the user asks how the current forecasts interact. No arguments.`,
     get_loss_surface:     `Monte Carlo portfolio loss surface from Phase 7: P&L quantiles (p01–p99), per-channel variance contributions, and gross channel exposures relative to the 30% cap. Simulates 10,000 joint channel state draws using the channel correlation matrix built from channel decompositions (not returns). Returns "not yet computed" when Phase 7 has not run. Call it when the user asks about portfolio risk, tail exposure, drawdown scenarios, or which channels are driving P&L uncertainty. No arguments.`,
+    get_governance_budget: `Phase 8 edge governance budget: how many new K edges (transmission weights) have been promoted in the last 365 days out of the hard cap of 4/year, how many are actively moving through the 5-step admission pipeline, and how many are still waiting for an out-of-sample check. The residual monitor always has more suggestions than the budget allows — the budget is the mechanism that prevents overfitting. Returns "not yet run" when no candidates have been submitted. Call it when the user asks about the model's edge count, how conservative the engine is, or whether there is capacity to add new relationships.`,
+    get_decay_audit:       `Latest decay audit from Phase 8: each existing K edge (channel transmission weight) re-estimated against the most recent 2 years of proxy data. Each edge is labelled keep / demote / delete based on how much of its original weight survives in recent data. "Dead edges are worse than missing ones — they generate confident wrong forecasts." Returns "not yet run" when no audit has been completed. Call it when the user asks about model staleness, whether any channel relationships have weakened, or when discussing model maintenance and re-estimation.`,
 }
 
 // ── Formatters (pure — exported for testing) ─────────────────────────────────
@@ -339,6 +341,113 @@ export function formatLossSurface(doc) {
     ].join('\n')
 }
 
+const ANNUAL_BUDGET_CAP = 4
+const ANNUAL_BUDGET_WARN = 2
+
+export function formatGovernanceBudget(docs) {
+    if (!docs) return NOT_YET('Governance budget')
+
+    const now = Date.now()
+    const cutoff = now - 365 * 24 * 60 * 60 * 1000
+
+    const promoted = docs.filter(d =>
+        d.status === 'promoted' && d.decided_at && new Date(d.decided_at).getTime() >= cutoff
+    ).length
+    const remaining   = Math.max(0, ANNUAL_BUDGET_CAP - promoted)
+    const exhausted   = remaining === 0
+    const atWarn      = promoted >= ANNUAL_BUDGET_WARN
+    const inProcess   = docs.filter(d =>
+        d.status === 'candidate' && d.admission_step >= 2 ||
+        d.status === 'provisional'
+    ).length
+    const unreviewed  = docs.filter(d => d.status === 'candidate' && d.admission_step === 1).length
+    const blocked     = docs.filter(d => d.status === 'budget_blocked').length
+
+    const lines = [
+        `EDGE GOVERNANCE BUDGET (${ANNUAL_BUDGET_CAP} edges/year hard cap):`,
+        `  Promoted in last 365 days : ${promoted} / ${ANNUAL_BUDGET_CAP}`,
+        `  Remaining capacity        : ${remaining}`,
+    ]
+    if (exhausted) {
+        lines.push('  *** BUDGET EXHAUSTED — no new admissions until a promotion ages out ***')
+    } else if (atWarn) {
+        lines.push(`  Warning: ${ANNUAL_BUDGET_WARN} of ${ANNUAL_BUDGET_CAP} annual slots used`)
+    }
+    lines.push(`  Candidates in process     : ${inProcess}`)
+    lines.push(`  Candidates awaiting OOS   : ${unreviewed}`)
+    if (blocked) lines.push(`  Budget-blocked (queued)   : ${blocked}`)
+    lines.push('')
+    lines.push(
+        'The residual monitor always has more suggestions than the budget allows.',
+        'The budget is the mechanism that prevents spurious edge additions.'
+    )
+
+    // Show active candidates if any
+    const active = docs.filter(d => d.status === 'candidate' || d.status === 'provisional')
+    if (active.length) {
+        lines.push('\nActive pipeline:')
+        for (const c of active) {
+            const stepLabel = ['', 'submitted', 'OOS check', 'provisional', 'scoring', 'deciding'][c.admission_step] ?? `step${c.admission_step}`
+            lines.push(
+                `  K[${c.channel_from}→${c.channel_to}] lag=${c.lag}w  `
+                + `${c.status.padEnd(11)} (${stepLabel})  source=${c.source}`
+            )
+        }
+    }
+
+    return lines.join('\n')
+}
+
+export function formatDecayAudit(docs) {
+    if (!docs) return NOT_YET('Decay audit')
+    const runDate  = String(docs[0]?.audit_date ?? '').slice(0, 10)
+    const nKeep    = docs.filter(d => d.recommendation === 'keep').length
+    const nDemote  = docs.filter(d => d.recommendation === 'demote').length
+    const nDelete  = docs.filter(d => d.recommendation === 'delete').length
+
+    const lines = [
+        `DECAY AUDIT — ${docs.length} K edges audited (run ${runDate}):`,
+        `  keep   : ${nKeep}`,
+        `  demote : ${nDemote}`,
+        `  delete : ${nDelete}`,
+    ]
+
+    const deleteEdges = docs.filter(d => d.recommendation === 'delete')
+    if (deleteEdges.length) {
+        lines.push('\nEdges flagged for DELETION (recent weight < 20% of original):')
+        for (const r of deleteEdges) {
+            lines.push(
+                `  K[${r.channel_from}→${r.channel_to}] lag=${r.lag}w  `
+                + `regime=${r.regime}  `
+                + `original=${r.original_weight.toFixed(4)}  `
+                + `recent=${r.recent_weight.toFixed(4)}  `
+                + `ratio=${(r.weight_ratio * 100).toFixed(0)}%`
+            )
+        }
+    }
+
+    const demoteEdges = docs.filter(d => d.recommendation === 'demote')
+    if (demoteEdges.length) {
+        lines.push('\nEdges flagged for DEMOTION (recent weight 20–50% of original):')
+        for (const r of demoteEdges) {
+            lines.push(
+                `  K[${r.channel_from}→${r.channel_to}] lag=${r.lag}w  `
+                + `ratio=${(r.weight_ratio * 100).toFixed(0)}%  `
+                + `OOS R²=${r.recent_oos_r2.toFixed(4)}`
+            )
+        }
+    }
+
+    if (!deleteEdges.length && !demoteEdges.length) {
+        lines.push('\nAll audited edges remain healthy (weight_ratio ≥ 50%).')
+    }
+
+    lines.push('')
+    lines.push('"Dead edges are worse than missing ones — they generate confident wrong forecasts."')
+
+    return lines.join('\n')
+}
+
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 export function makeAetherToolHandlers() {
@@ -378,5 +487,13 @@ export function makeAetherToolHandlers() {
         get_loss_surface: makeToolHandler('get_loss_surface',
             async () => formatLossSurface(await getLossSurface()),
             (err) => `Could not read loss surface: ${err.message}`, LOG),
+
+        get_governance_budget: makeToolHandler('get_governance_budget',
+            async () => formatGovernanceBudget(await getAllCandidates()),
+            (err) => `Could not read governance budget: ${err.message}`, LOG),
+
+        get_decay_audit: makeToolHandler('get_decay_audit',
+            async () => formatDecayAudit(await getDecayAudit()),
+            (err) => `Could not read decay audit: ${err.message}`, LOG),
     }
 }

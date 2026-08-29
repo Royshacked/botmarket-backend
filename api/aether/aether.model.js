@@ -18,6 +18,10 @@ export const COLLECTIONS = {
     INTERFERENCE:    'aether_interference',
     PORTFOLIO_SLOTS: 'aether_portfolio_slots',
     LOSS_SURFACE:    'aether_loss_surface',
+    // Phase 8
+    EDGE_CANDIDATES: 'aether_edge_candidates',
+    GOVERNANCE_LOG:  'aether_governance_log',
+    DECAY_AUDIT:     'aether_decay_audit',
 }
 
 export async function ensureAetherIndexes() {
@@ -45,4 +49,13 @@ export async function ensureAetherIndexes() {
     await db.collection(COLLECTIONS.PORTFOLIO_SLOTS).createIndex({ computed_at: -1, weight: -1 }, { background: true })
     // loss surface: one per run; read latest
     await db.collection(COLLECTIONS.LOSS_SURFACE).createIndex({ computed_at: -1 }, { background: true })
+    // edge candidates: read by status (active pipeline) and by decided_at (budget window)
+    await db.collection(COLLECTIONS.EDGE_CANDIDATES).createIndex({ candidate_id: 1 }, { unique: true, background: true })
+    await db.collection(COLLECTIONS.EDGE_CANDIDATES).createIndex({ status: 1, admission_step: 1 }, { background: true })
+    await db.collection(COLLECTIONS.EDGE_CANDIDATES).createIndex({ decided_at: -1 }, { background: true })
+    // governance log: one row per event; read by candidate
+    await db.collection(COLLECTIONS.GOVERNANCE_LOG).createIndex({ log_id: 1 }, { unique: true, background: true })
+    await db.collection(COLLECTIONS.GOVERNANCE_LOG).createIndex({ candidate_id: 1, timestamp: 1 }, { background: true })
+    // decay audit: batch per audit run; read latest batch via sentinel on audit_date
+    await db.collection(COLLECTIONS.DECAY_AUDIT).createIndex({ audit_date: -1, recommendation: 1 }, { background: true })
 }
