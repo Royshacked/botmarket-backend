@@ -7,7 +7,7 @@ import { getMarketBrief } from '../../services/marketBrief.service.js'
 // The desks a reply may hand the user to. Validated here rather than trusted from the model: an
 // unknown key would leave the client trying to navigate to a tab that doesn't exist, so it becomes
 // null and the user simply stays with Axl.
-export const VALID_PIPELINES = new Set(['trade', 'portfolio', 'scan', 'assist', 'research', 'strategy'])
+export const VALID_PIPELINES = new Set(['trade', 'portfolio', 'scan', 'assist', 'research', 'strategy', 'aether'])
 const LOG = '[axl:controller]'
 
 // The ticker a reply may hand over with the desk (`<route>research NVDA</route>`). Sanitized on the

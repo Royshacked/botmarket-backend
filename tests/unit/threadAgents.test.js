@@ -18,12 +18,12 @@ import { isSubstantive } from '../../services/thread.util.js'
 // panel save — neither half fails loudly on its own.
 
 test('every desk agent that drives its own draft persistence is whitelisted', () => {
-    for (const agent of ['idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'axl', 'analyst', 'strategy'])
+    for (const agent of ['idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'axl', 'analyst', 'strategy', 'aether'])
         assert.ok(AGENTS.has(agent), `${agent} is missing — its desk would 400 silently on every save`)
 })
 
 test('the whitelist is exactly that set — an unknown agent is refused', () => {
-    assert.equal(AGENTS.size, 8)
+    assert.equal(AGENTS.size, 9)
     for (const agent of ['prometheus', 'pythia', 'atlas', 'argus', '', 'ANALYST'])
         assert.equal(AGENTS.has(agent), false, `${agent} should not be accepted`)
 })

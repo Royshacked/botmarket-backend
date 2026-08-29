@@ -8,6 +8,7 @@ import { TOOLS as PORTFOLIO_TOOLS } from '../../services/agents/portfolio.agent.
 import { TOOLS as SCANNER_TOOLS }   from '../../services/agents/scanner.agent.service.js'
 import { TOOLS as ANALYST_TOOLS }   from '../../services/agents/analyst.agent.service.js'
 import { TOOLS as AXL_TOOLS }       from '../../services/agents/axl.agent.service.js'
+import { TOOLS as AETHER_TOOLS }   from '../../services/agents/aether.agent.service.js'
 import { TOOLS as STRATEGY_TOOLS } from '../../services/agents/strategy.agent.service.js'
 import { TRADING_TOOLS }             from '../../services/tools/trading.tools.js'
 import { MENTOR_TOOLS }             from '../../services/agents/mentor.agent.service.js'
@@ -45,6 +46,7 @@ const SNAPSHOT  = JSON.parse(fs.readFileSync(join(__dirname, '../fixtures/agentT
 // now (Kairos's kit + the `consult` sidecar), which is also what stops `consult` reading as an
 // orphan schema below.
 const LIVE = {
+    aether:    AETHER_TOOLS,
     strategy:  STRATEGY_TOOLS,
     portfolio: PORTFOLIO_TOOLS,
     scanner:   SCANNER_TOOLS,

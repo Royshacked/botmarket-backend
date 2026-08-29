@@ -245,7 +245,12 @@
           },
           "school": {
             "type": "string",
-            "enum": ["quality-value", "growth-durability", "income", "passive"],
+            "enum": [
+              "quality-value",
+              "growth-durability",
+              "income",
+              "passive"
+            ],
             "description": "optional — narrow to names Prometheus tagged for this selection school; combine with sector for the mandate-build pre-filter"
           }
         }
@@ -2690,6 +2695,14 @@
           "category"
         ]
       }
+    },
+    {
+      "name": "get_channel_state",
+      "description": "The latest channel-state snapshot from the Aether engine: current pressure scores per channel and the active regime label. Call it for \"what's the channel picture\", \"where is pressure building\", \"what's the Aether read\", or any question about which macro channels are elevated right now. READ-ONLY and broadcast — it knows nothing about this user's book. If no data is available yet it says so; do not invent a state. No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
     }
   ],
   "strategy": [
@@ -2747,6 +2760,48 @@
         "required": [
           "question",
           "context"
+        ]
+      }
+    }
+  ],
+  "aether": [
+    {
+      "name": "get_channel_taxonomy",
+      "description": "The static channel taxonomy: the ~15-25 measurable pressure channels the engine uses as its state space, their observable proxies, and their clock (fast/medium/slow). Call it to explain the mental model, to ground a channel discussion, or any time the user asks \"what channels does Aether track?\" No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_channel_state",
+      "description": "The latest channel-state snapshot written by the Python engine: current pressure scores per channel, computed_at timestamp, and the active regime label. Returns \"not yet computed\" when Phase 1 has not run. Call it for \"what is the channel picture\", \"where is pressure building\", \"what's the current state\". No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_regime",
+      "description": "The current market regime as classified by the engine: label, definition, and which channels are driving it. Returns \"not yet computed\" when Phase 1 has not run. Call it when the user asks about the regime or when you need the regime label to contextualise channel pressure. No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_name_exposure",
+      "description": "The exposure record for one name from the Phase 3 matrix: per-channel elasticity, lag_profile, hedge_coverage, pass_through, confidence, and supply-graph connections. Returns \"not yet computed\" when Phase 3 has not populated this ticker. Call it to anchor a company discussion in channel-exposure data.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "The ticker to look up, e.g. AAPL, XOM"
+          }
+        },
+        "required": [
+          "ticker"
         ]
       }
     }

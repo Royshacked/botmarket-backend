@@ -14,6 +14,7 @@ import { makeExperienceHandlers, EXPERIENCE_TOOL_SPEC } from '../tools/experienc
 import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from '../tools/marketBrief.tools.js'
 import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorView.tools.js'
 import { makeNewsHandlers, NEWS_TOOL_SPEC } from '../tools/news.tools.js'
+import { makeChannelStateHandlers, CHANNEL_STATE_TOOL_SPEC } from '../tools/channelState.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -68,6 +69,9 @@ export const TOOLS = toolsFor({
     // that can answer only the broadcast half has to send a headline question to a desk that would
     // then have to form a view to answer it.
     get_news: NEWS_TOOL_SPEC.get_news,
+    // Appended last, per the rule above. The broadcast channel-state read — Axl answers "what's the
+    // channel picture" without routing to Aether. Authoring or changing engine data is Python's.
+    get_channel_state: CHANNEL_STATE_TOOL_SPEC.get_channel_state,
 })
 
 // NO `consult` HERE, deliberately — the reasoning sidecar reached the other five desks on
@@ -162,6 +166,7 @@ async function chatStream({ messages = [], audience = null, model: requestedMode
     _marketHoursHandlers = makeMarketHoursHandlers,
     _sectorViewHandlers = makeSectorViewHandlers,
     _newsHandlers = makeNewsHandlers,
+    _channelStateHandlers = makeChannelStateHandlers,
     _venueSection = buildVenueSection,
 } = {}) {
     // The venue rides the last USER message, not the system prompt: free cash moves whenever
@@ -215,6 +220,8 @@ ${audienceBlock}` : ''}` },
         // Unbound as well, and here it is the load-bearing kind: the tool that fetches headlines about
         // a name the user very likely holds is the one that must not be able to see that they hold it.
         ..._newsHandlers(),
+        // Unbound — channel state is a house-layer broadcast; handler has no userId by design.
+        ..._channelStateHandlers(),
         ..._experienceHandlers(userId),
     }
 

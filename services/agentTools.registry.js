@@ -603,6 +603,29 @@ export const TOOL_SCHEMAS = {
         "type": "object",
         "properties": {}
     },
+    // ── Aether desk (channel-graph engine) ───────────────────────────────────
+    get_channel_taxonomy: {
+        "type": "object",
+        "properties": {}
+    },
+    get_channel_state: {
+        "type": "object",
+        "properties": {}
+    },
+    get_name_exposure: {
+        "type": "object",
+        "properties": {
+            "ticker": {
+                "type": "string",
+                "description": "The ticker to look up, e.g. AAPL, XOM"
+            }
+        },
+        "required": ["ticker"]
+    },
+    get_regime: {
+        "type": "object",
+        "properties": {}
+    },
 }
 
 /** Every tool the registry knows. */
