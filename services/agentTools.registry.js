@@ -626,6 +626,14 @@ export const TOOL_SCHEMAS = {
         "type": "object",
         "properties": {}
     },
+    get_forecasts: {
+        "type": "object",
+        "properties": {}
+    },
+    get_loss_surface: {
+        "type": "object",
+        "properties": {}
+    },
 }
 
 /** Every tool the registry knows. */

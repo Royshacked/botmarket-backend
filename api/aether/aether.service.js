@@ -12,8 +12,9 @@ const LOG = '[aetherService]'
 export async function getChannelState() {
     try {
         const db  = await getDb()
+        // Python writes one summary doc keyed by _id:'latest_snapshot' — shaped for the component.
         const doc = await db.collection(COLLECTIONS.CHANNEL_STATE)
-            .findOne({}, { sort: { computed_at: -1 }, projection: { _id: 0 } })
+            .findOne({ _id: 'latest_snapshot' }, { projection: { _id: 0 } })
         return doc ?? null
     } catch (err) {
         logger.warn(LOG, 'getChannelState failed', err.message)

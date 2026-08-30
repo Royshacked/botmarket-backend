@@ -333,6 +333,38 @@
       }
     },
     {
+      "name": "get_name_exposure",
+      "description": "The exposure record for one name from the Phase 3 matrix: per-channel elasticity, lag_profile, hedge_coverage, pass_through, confidence, and supply-graph connections. Returns \"not yet computed\" when Phase 3 has not populated this ticker. Call it to anchor a company discussion in channel-exposure data.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "The ticker to look up, e.g. AAPL, XOM"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
+      "name": "get_forecasts",
+      "description": "Active and recently resolved forecasts from the Phase 6 engine: entity, direction, magnitude, probability, channels responsible, attribution_confidence, and resolution date. Returns \"not yet computed\" when Phase 6 has not emitted any forecasts. Call it when the user asks about signals, open positions the engine is tracking, or what the model currently sees. No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_loss_surface",
+      "description": "Monte Carlo portfolio loss surface from Phase 7: P&L quantiles (p01–p99), per-channel variance contributions, and gross channel exposures relative to the 30% cap. Simulates 10,000 joint channel state draws using the channel correlation matrix built from channel decompositions (not returns). Returns \"not yet computed\" when Phase 7 has not run. Call it when the user asks about portfolio risk, tail exposure, drawdown scenarios, or which channels are driving P&L uncertainty. No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
       "name": "consult",
       "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in exactly three situations: **the final weights on a real-money book** (live or manual — the capital is at risk, and a weight is the one number here that cannot be walked back cheaply); **two names you cannot tell apart as ONE bet or two** — the correlation number is high but not decisive and the concentration call rests on your read of it; and **a rebalance where cutting the winner and adding to the laggard are both defensible** against the mandate, and you have to pick one.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
       "input_schema": {
@@ -1206,6 +1238,22 @@
               "crypto"
             ],
             "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
+      "name": "get_name_exposure",
+      "description": "The exposure record for one name from the Phase 3 matrix: per-channel elasticity, lag_profile, hedge_coverage, pass_through, confidence, and supply-graph connections. Returns \"not yet computed\" when Phase 3 has not populated this ticker. Call it to anchor a company discussion in channel-exposure data.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "The ticker to look up, e.g. AAPL, XOM"
           }
         },
         "required": [
@@ -2445,6 +2493,30 @@
       }
     },
     {
+      "name": "get_name_exposure",
+      "description": "The exposure record for one name from the Phase 3 matrix: per-channel elasticity, lag_profile, hedge_coverage, pass_through, confidence, and supply-graph connections. Returns \"not yet computed\" when Phase 3 has not populated this ticker. Call it to anchor a company discussion in channel-exposure data.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "The ticker to look up, e.g. AAPL, XOM"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
+      "name": "get_forecasts",
+      "description": "Active and recently resolved forecasts from the Phase 6 engine: entity, direction, magnitude, probability, channels responsible, attribution_confidence, and resolution date. Returns \"not yet computed\" when Phase 6 has not emitted any forecasts. Call it when the user asks about signals, open positions the engine is tracking, or what the model currently sees. No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
       "name": "consult",
       "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs the entry; and **placing a zone where the structure is ambiguous** — a level that is both a prior high and a supply shelf, say.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
       "input_schema": {
@@ -2737,6 +2809,22 @@
     {
       "name": "get_coverage_by_sector",
       "description": "OUR OWN analysts' book, aggregated by sector: how many active theses per sector, and which sectors we cover at all. The bottom-up cross-check for Phase 4 — where the book agrees with your top-down read that is your strongest basis, and where it disagrees you must say so rather than reconciling it away. No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_channel_state",
+      "description": "The latest channel-state snapshot written by the Python engine: current pressure scores per channel, computed_at timestamp, and the active regime label. Returns \"not yet computed\" when Phase 1 has not run. Call it for \"what is the channel picture\", \"where is pressure building\", \"what's the current state\". No arguments.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_regime",
+      "description": "The current market regime as classified by the engine: label, definition, and which channels are driving it. Returns \"not yet computed\" when Phase 1 has not run. Call it when the user asks about the regime or when you need the regime label to contextualise channel pressure. No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}

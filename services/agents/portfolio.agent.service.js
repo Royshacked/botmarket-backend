@@ -14,6 +14,7 @@ import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingC
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorView.tools.js'
 import { makeChartHandler } from '../tools/marketData.tools.js'
+import { AETHER_TOOL_SPECS, makeAetherToolHandlers } from '../tools/aether.tools.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { SECTORS } from '../entity/vocabulary.js'
 import { buildTagCaptures } from '../llmStream.util.js'
@@ -53,10 +54,17 @@ export const TOOLS = toolsFor({
     // broadcast has one text and two readers, not two texts. Advisory: it informs which sectors
     // Atlas sources, and the mandate still wins (see the prompt).
     get_sector_view: SECTOR_VIEW_TOOL_SPEC.get_sector_view,
-    // Appended last, per the rule above. The reasoning sidecar (services/deepThink.service.js):
-    // one bounded decision put to a stronger model and handed back as a tool result. The mechanism
-    // half of this description is shared with every other desk; the clause below is Atlas's own
-    // judgment about WHEN, and is the only part that does not transfer.
+    // Aether engine reads for construction and risk. Each returns "not yet computed" when the
+    // relevant engine phase has not run; reason qualitatively in that state.
+    //
+    // get_name_exposure: per-name channel elasticity + lag profile — use when evaluating a candidate
+    //   or sizing a position; the elasticity tells you which channels the name amplifies.
+    // get_forecasts: what the engine is currently tracking — open signals + recently resolved ones.
+    // get_loss_surface: Monte Carlo P&L quantiles (p01–p99) and per-channel VaR — use for tail-risk
+    //   framing and to check whether any channel is near its 30% gross exposure cap.
+    get_name_exposure: AETHER_TOOL_SPECS.get_name_exposure,
+    get_forecasts:     AETHER_TOOL_SPECS.get_forecasts,
+    get_loss_surface:  AETHER_TOOL_SPECS.get_loss_surface,
     consult: consultDescription(`Reach for it in exactly three situations: **the final weights on a real-money book** (live or manual — the capital is at risk, and a weight is the one number here that cannot be walked back cheaply); **two names you cannot tell apart as ONE bet or two** — the correlation number is high but not decisive and the concentration call rests on your read of it; and **a rebalance where cutting the winner and adding to the laggard are both defensible** against the mandate, and you have to pick one.`),
 })
 
@@ -94,6 +102,14 @@ const TOOL_HANDLERS = {
     // Unbound (market hours belong to the instrument, not the user) — so it lives in the
     // static map, unlike the venue handlers that are rebuilt per request around a userId.
     ...makeMarketHoursHandlers(),
+}
+
+// Unbound — all Aether reads are house-layer broadcasts, no userId.
+const { get_name_exposure: _atlas_get_name_exposure, get_forecasts: _atlas_get_forecasts, get_loss_surface: _atlas_get_loss_surface } = makeAetherToolHandlers()
+const AETHER_TOOL_HANDLERS = {
+    get_name_exposure: _atlas_get_name_exposure,
+    get_forecasts:     _atlas_get_forecasts,
+    get_loss_surface:  _atlas_get_loss_surface,
 }
 
 // Coverage the Analyst never classified. Its own bucket, always last: a name with no sector is not a
@@ -265,6 +281,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
             ...makeTradingContextHandlers(userId),
             get_coverage: makeCoverageHandler(),
             get_chart:    makeChartHandler({ log: LOG, onChart, readText: 'Read it as a POSITIONING question — where in the range, trend intact or broken, base or breakdown. Weights still come from the numbers.' }),
+            ...AETHER_TOOL_HANDLERS,
         },
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
         meta: { accountCount: ideaAccounts.length, editMode: !!portfolioId },

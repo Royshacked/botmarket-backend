@@ -21,6 +21,7 @@ import { getMacroSnapshot, getSectorSnapshot } from '../../providers/fmp.provide
 import { getPricedIn } from '../../providers/fred.provider.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { SECTORS } from '../entity/vocabulary.js'
+import { AETHER_TOOL_SPECS, makeAetherToolHandlers } from '../tools/aether.tools.js'
 import { logger } from '../logger.service.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
@@ -46,15 +47,24 @@ export const TOOLS = [
         // A tilt is a BROADCAST every other desk reads, so the blast radius of getting the regime
         // wrong is larger here than at a desk authoring one entity — which is what makes the once-
         // per-tilt consult below cheap in relative terms, not what makes it unlimited.
+        // Aether — quantitative channel read; grounds the regime call in measured z-scores rather
+        // than soft macro narrative. Both return "not yet computed" when Phase 1 has not run.
+        get_channel_state: AETHER_TOOL_SPECS.get_channel_state,
+        get_regime:        AETHER_TOOL_SPECS.get_regime,
         consult: consultDescription(`A tilt is a broadcast the whole house reads, so it is worth thinking hard about ONCE. Reach for it in exactly two situations: **the regime call itself**, when the macro data, the tape and what is already priced do not point the same way and you have to name one regime anyway; and **a sector stance that contradicts our own coverage book** — your top-down read and the analysts' bottom-up theses disagree, and you must decide which one the stance follows and say why. Not per sector: the stances follow from the regime, and re-consulting each one is the same call answered eight times.`),
     }),
 ]
+
+const { get_channel_state: _get_channel_state, get_regime: _get_regime } = makeAetherToolHandlers()
 
 const TOOL_HANDLERS = {
     get_macro_snapshot:  makeToolHandler('get_macro_snapshot',  () => getMacroSnapshot(),  (e) => `Could not fetch macro snapshot: ${e.message}`, LOG),
     get_sector_snapshot: makeToolHandler('get_sector_snapshot', () => getSectorSnapshot(), (e) => `Could not fetch sector snapshot: ${e.message}`, LOG),
     get_priced_in:       makeToolHandler('get_priced_in',       () => getPricedIn(),       (e) => `Could not fetch market-implied levels: ${e.message}`, LOG),
     get_coverage_by_sector: makeToolHandler('get_coverage_by_sector', () => _coverageBySector(), (e) => `Could not read the coverage book: ${e.message}`, LOG),
+    // Unbound — channel state and regime are house-layer broadcasts, no userId.
+    get_channel_state: _get_channel_state,
+    get_regime:        _get_regime,
 }
 
 export const strategyAgentService = { chatStream }

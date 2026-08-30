@@ -18,6 +18,7 @@ import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPE
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from '../tools/valuation.tools.js'
+import { AETHER_TOOL_SPECS, makeAetherToolHandlers } from '../tools/aether.tools.js'
 import { logger } from '../logger.service.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
@@ -51,9 +52,14 @@ export const TOOLS = [
         // put to a stronger model and handed back as a tool result. The mechanism half of this
         // description is shared with every other desk; the clause below is this desk's own judgment
         // about WHEN, and is the only part that does not transfer.
+        // Aether — channel exposure for the name under research. Returns "not yet computed" when
+        // Phase 3 has not run; reason qualitatively in that state.
+        get_name_exposure: AETHER_TOOL_SPECS.get_name_exposure,
         consult: consultDescription(`Reach for it in exactly three situations: **the price target you are about to publish** — our number against the Street IS the edge, so the multiple and the arithmetic behind it have to hold up to someone attacking them; **a variant perception you cannot separate from consensus** — the bull and bear cases read as evenly weighted and you must say which way the evidence actually leans rather than splitting the difference; and **two valuation methods that disagree materially** (a DCF against comps, say) where you have to decide which one governs the target and defend that choice.`),
     }),
 ]
+
+const { get_name_exposure: _get_name_exposure } = makeAetherToolHandlers()
 
 const TOOL_HANDLERS = {
     ...VALUATION_TOOL_HANDLERS,
@@ -67,6 +73,8 @@ const TOOL_HANDLERS = {
     // Unbound (market hours belong to the instrument, not the user) — so it lives in the
     // static map, unlike the venue handlers that are rebuilt per request around a userId.
     ...makeMarketHoursHandlers(),
+    // Unbound — channel exposure is a house-layer broadcast, no userId.
+    get_name_exposure: _get_name_exposure,
 }
 
 export const analystAgentService = { chatStream }
