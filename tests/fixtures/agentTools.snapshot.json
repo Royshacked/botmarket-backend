@@ -483,7 +483,7 @@
     },
     {
       "name": "get_shock_feed",
-      "description": "The Aether shock feed: (1) most recent FRED-confirmed and rejected channel predictions with channel, direction, and Brier calibration score — which macro bets just got validated or disproved; (2) active opportunity cards generated from confirmed predictions, with ticker, why, lag window, trade type (swing vs position), and risk note. Argus: call it in Phase 2 to surface channel-validated macro tailwinds/headwinds as a catalyst angle, then screen_candidates INSIDE the sectors those channels affect. A confirmed channel is a real macro event — use it as a hard catalyst, not a soft hypothesis.",
+      "description": "The Aether shock feed returns three lists: (1) outcomes — most recent FRED-confirmed and rejected channel predictions with channel, direction, and Brier calibration score; (2) opportunities — active confirmed cards: ticker, direction, why (full thesis from news → FRED confirmation), lag window, trade type (swing/position), agent (mentor/atlas), and risk note; (3) predicted_signals — active predicted cards from news predictions not yet FRED-confirmed: same shape as opportunities but earlier in the pipeline (thesis = news headline → channel → ticker exposure chain, no Brier yet). Use predicted_signals as early-warning context; use opportunities as hard macro catalysts. Argus: call in Phase 2, screen_candidates inside affected sectors. Mentor/Atlas: call when user asks about macro-driven trades — opportunities are actionable now, predicted_signals are watch-list.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -1089,7 +1089,7 @@
     },
     {
       "name": "get_shock_feed",
-      "description": "The Aether shock feed: (1) most recent FRED-confirmed and rejected channel predictions with channel, direction, and Brier calibration score — which macro bets just got validated or disproved; (2) active opportunity cards generated from confirmed predictions, with ticker, why, lag window, trade type (swing vs position), and risk note. Argus: call it in Phase 2 to surface channel-validated macro tailwinds/headwinds as a catalyst angle, then screen_candidates INSIDE the sectors those channels affect. A confirmed channel is a real macro event — use it as a hard catalyst, not a soft hypothesis.",
+      "description": "The Aether shock feed returns three lists: (1) outcomes — most recent FRED-confirmed and rejected channel predictions with channel, direction, and Brier calibration score; (2) opportunities — active confirmed cards: ticker, direction, why (full thesis from news → FRED confirmation), lag window, trade type (swing/position), agent (mentor/atlas), and risk note; (3) predicted_signals — active predicted cards from news predictions not yet FRED-confirmed: same shape as opportunities but earlier in the pipeline (thesis = news headline → channel → ticker exposure chain, no Brier yet). Use predicted_signals as early-warning context; use opportunities as hard macro catalysts. Argus: call in Phase 2, screen_candidates inside affected sectors. Mentor/Atlas: call when user asks about macro-driven trades — opportunities are actionable now, predicted_signals are watch-list.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -2659,7 +2659,7 @@
     },
     {
       "name": "get_shock_feed",
-      "description": "The Aether shock feed: (1) most recent FRED-confirmed and rejected channel predictions with channel, direction, and Brier calibration score — which macro bets just got validated or disproved; (2) active opportunity cards generated from confirmed predictions, with ticker, why, lag window, trade type (swing vs position), and risk note. Argus: call it in Phase 2 to surface channel-validated macro tailwinds/headwinds as a catalyst angle, then screen_candidates INSIDE the sectors those channels affect. A confirmed channel is a real macro event — use it as a hard catalyst, not a soft hypothesis.",
+      "description": "The Aether shock feed returns three lists: (1) outcomes — most recent FRED-confirmed and rejected channel predictions with channel, direction, and Brier calibration score; (2) opportunities — active confirmed cards: ticker, direction, why (full thesis from news → FRED confirmation), lag window, trade type (swing/position), agent (mentor/atlas), and risk note; (3) predicted_signals — active predicted cards from news predictions not yet FRED-confirmed: same shape as opportunities but earlier in the pipeline (thesis = news headline → channel → ticker exposure chain, no Brier yet). Use predicted_signals as early-warning context; use opportunities as hard macro catalysts. Argus: call in Phase 2, screen_candidates inside affected sectors. Mentor/Atlas: call when user asks about macro-driven trades — opportunities are actionable now, predicted_signals are watch-list.",
       "input_schema": {
         "type": "object",
         "properties": {}

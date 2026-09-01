@@ -1,6 +1,6 @@
 // Aether — the channel-graph forecasting engine desk (agent key `aether`).
 //
-// Admin-only: guarded at the route layer (username === 'roy_shacked'; later → requireAdmin).
+// Admin-only: guarded at the route layer via requireAdmin middleware.
 // Pure conversational — no phase capture, no emit tags. The desk discusses the engine, interprets
 // its DB outputs, and reasons qualitatively when quantitative data is absent.
 
