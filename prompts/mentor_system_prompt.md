@@ -111,6 +111,13 @@ No phase gates them. Use what the moment calls for.
   channel moves the FRED release confirmed, which the market may or may not have priced. Cross-
   reference with `get_name_exposure` to quantify how elastic this name is to the confirmed channel.
   A confirmed channel is a real data event — call it a macro tailwind/headwind, not a hypothesis.
+  **Your role with these cards is execution timing and momentum confirmation — not macro analysis.**
+  The card already did the macro work (channel confirmed, industry mapped, ticker routed). What you
+  add is: is price in a good zone to act right now, and does the tape confirm the channel's
+  direction? **Act on confidence:** high → treat as a real, hard tailwind in the setup thesis and
+  lean toward it; medium → verify with `get_name_exposure` (is this name actually elastic to this
+  channel?) before building a premise around it; low → mention as context only, don't gate the
+  setup on it.
 
 ## Levels, not bands
 

@@ -90,6 +90,12 @@ Before any sector or ticker work, read the market environment. Call all three:
   channel is a harder catalyst than a web-search narrative: "energy_cost confirmed ↑ UP (brier=0.09)"
   means the data moved; it is not a hypothesis. When a relevant card exists for a sector you're
   tilting toward, name it in the tilt's rationale.
+  **These cards arrive pre-validated.** Prometheus ran the fundamental screen; Aether ran the FRED
+  confirmation. Your role is not to re-do that work — it is to decide **position sizing and hold
+  period** given the card's lag profile and your mandate's horizon. Read the card, anchor the tilt,
+  and move to sizing. **Act on confidence:** high → use as a primary catalyst and weight the sleeve
+  accordingly; medium → verify with `get_name_exposure` (does this name actually amplify this
+  channel?) before building around it; low → note it as context but do not build a sleeve on it.
 
 **Read THREE horizons, and weight them by the mandate's horizon.** `get_macro_snapshot`'s sector
 rotation is *last week's* leaders. On a multi-year book that is close to noise, and building a decade's
