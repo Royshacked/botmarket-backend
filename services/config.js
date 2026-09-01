@@ -255,6 +255,14 @@ export const config = {
     /** Escape hatch for load testing. Opt-IN, and logged loudly at boot when it is on. */
     get rateLimitDisabled()    { return _bool('RATE_LIMIT_DISABLED', 'opt-in') },
 
+    // ── Aether engine scheduler ──
+    /**
+     * Absolute path to the aether-engine Python repo. When set, the backend spawns
+     * scripts/scheduler.py from that directory as a child process on startup (loop-leader only).
+     * Leave unset to disable the scheduler — the engine still serves its read endpoints normally.
+     */
+    get aetherEnginePath() { return _str('AETHER_ENGINE_PATH', '') },
+
     // ── misc ──
     /** How often the outbound-HTTP meter logs its rolling counts. */
     get httpMeterMs() { return _num('HTTP_METER_MS', 60_000) },
@@ -289,6 +297,7 @@ export const KNOWN_KEYS = new Set([
     'INSTANCE_LEASE_TTL_MS', 'INSTANCE_LEASE_RENEW_MS', 'DB_NAME',
     'RATE_LIMIT_API_PER_MIN', 'RATE_LIMIT_AUTH_PER_15M', 'RATE_LIMIT_AGENT_PER_15M',
     'RATE_LIMIT_DISABLED',
+    'AETHER_ENGINE_PATH',
 ])
 
 /**

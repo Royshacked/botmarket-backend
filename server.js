@@ -79,6 +79,7 @@ import { paperMarkService }   from './monitoring/paperMark.service.js'
 import { guardSweepService } from './monitoring/guardSweep.service.js'
 import { marketBriefNotifier } from './monitoring/marketBrief.notify.js'
 import { marketOpenMonitor } from './monitoring/marketOpen.monitor.js'
+import { aetherSchedulerService } from './services/aetherScheduler.service.js'
 // The software exit monitor — kind-blind, and the caller positionMonitor.checkPosition lost when
 // Minos was deleted. Until it started, a stop that was not a plain price level was accepted, stored
 // and shown as protection while nothing evaluated it. Tied to a CAPABILITY, not to a desk.
@@ -256,6 +257,7 @@ function startBackgroundLoops() {
     startLoop('paperEquity',  paperEquityService)
     startLoop('paperMark',    paperMarkService)
     startLoop('marketBrief',  marketBriefNotifier)
+    startLoop('aetherScheduler', aetherSchedulerService)
 }
 
 const loopsLock = createInstanceLock({
