@@ -260,8 +260,10 @@ export async function getActiveOpportunities(agent = null) {
         const filter = { status: 'active' }
         if (agent) filter.agent = agent
         const docs = await db.collection(COLLECTIONS.OPPORTUNITIES)
-            .find(filter, { sort: { confidence_llm: -1, validated_at: -1 }, projection: { _id: 0 } })
+            .find(filter, { projection: { _id: 0 } })
+            .sort({ confidence_llm: -1, validated_at: -1 })
             .toArray()
+        logger.info(LOG, `getActiveOpportunities: ${docs.length} doc(s)`)
         return docs.length ? docs : null
     } catch (err) {
         logger.warn(LOG, 'getActiveOpportunities failed', err.message)
