@@ -26,6 +26,7 @@ export const COLLECTIONS = {
     PREDICTIONS:         'aether_predictions',
     VALIDATION_OUTCOMES: 'aether_validation_outcomes',
     OPPORTUNITIES:       'aether_opportunities',
+    PREDICTED_SIGNALS:   'aether_predicted_signals',
 }
 
 export async function ensureAetherIndexes() {
@@ -70,4 +71,9 @@ export async function ensureAetherIndexes() {
     await db.collection(COLLECTIONS.OPPORTUNITIES).createIndex({ ticker: 1, status: 1 }, { background: true })
     await db.collection(COLLECTIONS.OPPORTUNITIES).createIndex({ agent: 1, status: 1 }, { background: true })
     await db.collection(COLLECTIONS.OPPORTUNITIES).createIndex({ validated_at: -1 }, { background: true })
+    // predicted signals: B1 ticker-level predictions before FRED confirmation
+    await db.collection(COLLECTIONS.PREDICTED_SIGNALS).createIndex({ signal_id: 1 }, { unique: true, background: true })
+    await db.collection(COLLECTIONS.PREDICTED_SIGNALS).createIndex({ ticker: 1, status: 1 }, { background: true })
+    await db.collection(COLLECTIONS.PREDICTED_SIGNALS).createIndex({ agent: 1, status: 1 }, { background: true })
+    await db.collection(COLLECTIONS.PREDICTED_SIGNALS).createIndex({ news_id: 1 }, { background: true })
 }

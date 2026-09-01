@@ -229,7 +229,28 @@ export async function getRecentValidationOutcomes(limit = 20) {
 }
 
 /**
- * Active opportunity cards from D2 card_writer.
+ * Active predicted signals from B1a (news-fired, pre-FRED-confirmation).
+ * The B1 side of the prediction/confirmation pair.
+ * Optionally filtered by agent ("mentor" | "atlas" | null = all active).
+ * Returns null when no active signals exist.
+ */
+export async function getActivePredictedSignals(agent = null) {
+    try {
+        const db     = await getDb()
+        const filter = { status: 'active' }
+        if (agent) filter.agent = agent
+        const docs = await db.collection(COLLECTIONS.PREDICTED_SIGNALS)
+            .find(filter, { sort: { confidence_llm: -1, created_at: -1 }, projection: { _id: 0 } })
+            .toArray()
+        return docs.length ? docs : null
+    } catch (err) {
+        logger.warn(LOG, 'getActivePredictedSignals failed', err.message)
+        return null
+    }
+}
+
+/**
+ * Active opportunity cards from D2 card_writer (FRED-confirmed).
  * Optionally filtered by agent ("mentor" | "atlas" | null = all active).
  * Returns null when no active cards exist.
  */
