@@ -184,6 +184,70 @@ export async function getDecayAudit() {
     }
 }
 
+// ── Mission 5 (shock pipeline) readers ───────────────────────────────────────
+
+/**
+ * Active provisional shock predictions from aether_predictions.
+ * Returns up to `limit` docs sorted by confidence descending, then created_at descending.
+ * Returns null when the shock pipeline has not produced any predictions yet.
+ */
+export async function getActiveShockPredictions(limit = 40) {
+    try {
+        const db   = await getDb()
+        const docs = await db.collection(COLLECTIONS.PREDICTIONS)
+            .find(
+                { status: 'provisional' },
+                { sort: { confidence_llm: -1, created_at: -1 }, projection: { _id: 0 }, limit },
+            )
+            .toArray()
+        return docs.length ? docs : null
+    } catch (err) {
+        logger.warn(LOG, 'getActiveShockPredictions failed', err.message)
+        return null
+    }
+}
+
+/**
+ * Recent confirmed/rejected validation outcomes from the FRED validation loop.
+ * Returns up to `limit` docs sorted by validated_at desc, then created_at desc.
+ * Returns null when no outcomes have been written yet.
+ */
+export async function getRecentValidationOutcomes(limit = 20) {
+    try {
+        const db   = await getDb()
+        const docs = await db.collection(COLLECTIONS.VALIDATION_OUTCOMES)
+            .find(
+                { new_status: { $in: ['confirmed', 'rejected'] } },
+                { sort: { validated_at: -1, created_at: -1 }, projection: { _id: 0 }, limit },
+            )
+            .toArray()
+        return docs.length ? docs : null
+    } catch (err) {
+        logger.warn(LOG, 'getRecentValidationOutcomes failed', err.message)
+        return null
+    }
+}
+
+/**
+ * Active opportunity cards from D2 card_writer.
+ * Optionally filtered by agent ("mentor" | "atlas" | null = all active).
+ * Returns null when no active cards exist.
+ */
+export async function getActiveOpportunities(agent = null) {
+    try {
+        const db     = await getDb()
+        const filter = { status: 'active' }
+        if (agent) filter.agent = agent
+        const docs = await db.collection(COLLECTIONS.OPPORTUNITIES)
+            .find(filter, { sort: { confidence_llm: -1, validated_at: -1 }, projection: { _id: 0 } })
+            .toArray()
+        return docs.length ? docs : null
+    } catch (err) {
+        logger.warn(LOG, 'getActiveOpportunities failed', err.message)
+        return null
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Exposure record for one ticker, or null. */

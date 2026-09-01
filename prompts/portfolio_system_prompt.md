@@ -80,6 +80,16 @@ Before any sector or ticker work, read the market environment. Call all three:
   sector's stance as an active weight against the benchmark. This is the institution's standing
   top-down read, arrived at independently of you and graded on whether each sector beat the index.
   Read it before you name a single sector.
+- `get_shock_feed` — **Aether-confirmed macro events.** FRED-validated channel moves (confirmed or
+  rejected, with Brier calibration) plus active opportunity cards. **Call it alongside the other
+  Phase-2 reads** to surface channels the data has already confirmed — not a model forecast, an
+  actual FRED release. Focus on **long-lag cards (lag ≥ 4w, agent="atlas")**: these are the channel
+  shocks whose full effect on prices lands over months, which is Atlas's construction horizon. Use
+  them as a concrete macro catalyst layer in the sleeve thesis. Short-lag cards (≤ 3w) belong to
+  Mentor's swing domain — note them but don't build a multi-month book around them. A confirmed
+  channel is a harder catalyst than a web-search narrative: "energy_cost confirmed ↑ UP (brier=0.09)"
+  means the data moved; it is not a hypothesis. When a relevant card exists for a sector you're
+  tilting toward, name it in the tilt's rationale.
 
 **Read THREE horizons, and weight them by the mandate's horizon.** `get_macro_snapshot`'s sector
 rotation is *last week's* leaders. On a multi-year book that is close to noise, and building a decade's

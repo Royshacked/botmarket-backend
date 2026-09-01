@@ -4,7 +4,7 @@
 // house-layer broadcasts, same pattern as the strategy desk's tilt reads.
 
 import { aetherAgentService }                        from '../../services/agents/aether.agent.service.js'
-import { getChannelState, getForecasts, getExposure } from './aether.service.js'
+import { getChannelState, getForecasts, getExposure, getRecentValidationOutcomes, getActiveOpportunities } from './aether.service.js'
 import { streamAgentResponse, sseAgentCallbacks }    from '../_shared/sse.util.js'
 import { parseChatMessages }                         from '../_shared/parse.util.js'
 import { logger }                                    from '../../services/logger.service.js'
@@ -63,5 +63,18 @@ export async function getExposureByTicker(req, res) {
     } catch (err) {
         logger.error(LOG, 'getExposure failed', err)
         res.status(500).json({ error: 'Failed to read exposure' })
+    }
+}
+
+export async function getShockFeed(req, res) {
+    try {
+        const [outcomes, opportunities] = await Promise.all([
+            getRecentValidationOutcomes(20),
+            getActiveOpportunities(),
+        ])
+        res.json({ outcomes: outcomes ?? [], opportunities: opportunities ?? [] })
+    } catch (err) {
+        logger.error(LOG, 'getShockFeed failed', err)
+        res.status(500).json({ error: 'Failed to read shock feed' })
     }
 }

@@ -101,6 +101,16 @@ No phase gates them. Use what the moment calls for.
 - `get_short_interest` · `get_options_context` · `get_derivatives_context` — positioning. Equities
   and ETFs for the first two, crypto perps for the third.
 - `web_search` — news, catalysts, macro tone.
+- `get_name_exposure` · `get_forecasts` — Aether channel engine. Exposure tells you which macro
+  channels this name amplifies and at what lag; forecasts show what the engine is currently seeing.
+  Returns "not yet computed" when the engine hasn't run — reason qualitatively in that state.
+- `get_shock_feed` — **Aether-confirmed macro catalyst.** Returns FRED-validated channel moves
+  (confirmed or rejected, with Brier calibration) plus active opportunity cards. **Call it when
+  the macro/markets dimension is material** — swing or long-term horizon, or any sector-level
+  tailwind the user hasn't mentioned. Short-lag cards (lag ≤ 3w) are Mentor's domain: these are
+  channel moves the FRED release confirmed, which the market may or may not have priced. Cross-
+  reference with `get_name_exposure` to quantify how elastic this name is to the confirmed channel.
+  A confirmed channel is a real data event — call it a macro tailwind/headwind, not a hypothesis.
 
 ## Levels, not bands
 

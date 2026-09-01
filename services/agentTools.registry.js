@@ -634,6 +634,14 @@ export const TOOL_SCHEMAS = {
         "type": "object",
         "properties": {}
     },
+    get_active_predictions: {
+        "type": "object",
+        "properties": {}
+    },
+    get_shock_feed: {
+        "type": "object",
+        "properties": {}
+    },
 }
 
 /** Every tool the registry knows. */

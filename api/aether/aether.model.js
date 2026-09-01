@@ -22,6 +22,10 @@ export const COLLECTIONS = {
     EDGE_CANDIDATES: 'aether_edge_candidates',
     GOVERNANCE_LOG:  'aether_governance_log',
     DECAY_AUDIT:     'aether_decay_audit',
+    // Mission 5 (shock pipeline)
+    PREDICTIONS:         'aether_predictions',
+    VALIDATION_OUTCOMES: 'aether_validation_outcomes',
+    OPPORTUNITIES:       'aether_opportunities',
 }
 
 export async function ensureAetherIndexes() {
@@ -58,4 +62,12 @@ export async function ensureAetherIndexes() {
     await db.collection(COLLECTIONS.GOVERNANCE_LOG).createIndex({ candidate_id: 1, timestamp: 1 }, { background: true })
     // decay audit: batch per audit run; read latest batch via sentinel on audit_date
     await db.collection(COLLECTIONS.DECAY_AUDIT).createIndex({ audit_date: -1, recommendation: 1 }, { background: true })
+    // validation outcomes: read by status + validated_at (recent confirmed/rejected feed)
+    await db.collection(COLLECTIONS.VALIDATION_OUTCOMES).createIndex({ new_status: 1, validated_at: -1 }, { background: true })
+    await db.collection(COLLECTIONS.VALIDATION_OUTCOMES).createIndex({ prediction_id: 1 }, { background: true })
+    // opportunity cards: read by status + agent (Argus shock feed)
+    await db.collection(COLLECTIONS.OPPORTUNITIES).createIndex({ card_id: 1 }, { unique: true, background: true })
+    await db.collection(COLLECTIONS.OPPORTUNITIES).createIndex({ ticker: 1, status: 1 }, { background: true })
+    await db.collection(COLLECTIONS.OPPORTUNITIES).createIndex({ agent: 1, status: 1 }, { background: true })
+    await db.collection(COLLECTIONS.OPPORTUNITIES).createIndex({ validated_at: -1 }, { background: true })
 }

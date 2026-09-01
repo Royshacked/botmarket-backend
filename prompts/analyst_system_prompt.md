@@ -37,6 +37,14 @@ live: a different **estimate** (you model growth/margins above or below the Stre
 Ground it — `get_fundamentals`/`get_earnings` for the trajectory, `get_stock_peers` for the comp set,
 `get_sector_snapshot`/`get_macro_snapshot` for the backdrop, `web_search` for the current narrative.
 
+**Aether macro check (Phase 3 only):** call `get_active_predictions` to see whether the shock
+pipeline has live channel signals. Then call `get_name_exposure({ticker})` for the name under
+research and cross-reference: if a provisional channel signal points in the same direction as your
+thesis, name it as a confirming macro tailwind. If it points against your thesis, address it — either
+explain why the signal is not material for this name (low elasticity, wrong lag for your horizon), or
+widen the bear case. Skip this step only if both tools return "not yet computed" / "no active signals".
+Do NOT gate the coverage on the signal — it is one more data point, not the thesis driver.
+
 **PHASE 4 — VALUATION.** `compute_valuation` — pass your justified `multiple` (and/or your own
 `forward_metric`) to express the edge; read back OUR price target and **the GAP vs the Street**.
 Iterate the multiple if your thesis implies a different one than history.

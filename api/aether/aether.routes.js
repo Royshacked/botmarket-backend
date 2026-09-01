@@ -1,7 +1,7 @@
 import express        from 'express'
 import { log }        from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
-import { streamAether, getState, getAetherForecasts, getExposureByTicker } from './aether.controller.js'
+import { streamAether, getState, getAetherForecasts, getExposureByTicker, getShockFeed } from './aether.controller.js'
 
 const router = express.Router()
 
@@ -20,5 +20,6 @@ router.post('/stream', log, requireRoyShacked, streamAether)
 router.get('/state',             log, getState)
 router.get('/forecasts',         log, getAetherForecasts)
 router.get('/exposure/:ticker',  log, getExposureByTicker)
+router.get('/shock-feed',        log, getShockFeed)
 
 export const aetherRoutes = router

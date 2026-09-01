@@ -7,7 +7,7 @@
 // Aether reasons qualitatively (LLM knowledge) in that state and says so plainly.
 
 import { makeToolHandler }   from '../agentUtils.js'
-import { getChannelState, getCurrentRegime, getExposure, getTaxonomy, getForecasts, getCalibration, getPortfolioSlots, getInterference, getLossSurface, getAllCandidates, getDecayAudit } from '../../api/aether/aether.service.js'
+import { getChannelState, getCurrentRegime, getExposure, getTaxonomy, getForecasts, getCalibration, getPortfolioSlots, getInterference, getLossSurface, getAllCandidates, getDecayAudit, getActiveShockPredictions, getRecentValidationOutcomes, getActiveOpportunities } from '../../api/aether/aether.service.js'
 
 const LOG = '[aetherTools]'
 
@@ -85,6 +85,8 @@ export const AETHER_TOOL_SPECS = {
     get_loss_surface:     `Monte Carlo portfolio loss surface from Phase 7: P&L quantiles (p01–p99), per-channel variance contributions, and gross channel exposures relative to the 30% cap. Simulates 10,000 joint channel state draws using the channel correlation matrix built from channel decompositions (not returns). Returns "not yet computed" when Phase 7 has not run. Call it when the user asks about portfolio risk, tail exposure, drawdown scenarios, or which channels are driving P&L uncertainty. No arguments.`,
     get_governance_budget: `Phase 8 edge governance budget: how many new K edges (transmission weights) have been promoted in the last 365 days out of the hard cap of 4/year, how many are actively moving through the 5-step admission pipeline, and how many are still waiting for an out-of-sample check. The residual monitor always has more suggestions than the budget allows — the budget is the mechanism that prevents overfitting. Returns "not yet run" when no candidates have been submitted. Call it when the user asks about the model's edge count, how conservative the engine is, or whether there is capacity to add new relationships.`,
     get_decay_audit:       `Latest decay audit from Phase 8: each existing K edge (channel transmission weight) re-estimated against the most recent 2 years of proxy data. Each edge is labelled keep / demote / delete based on how much of its original weight survives in recent data. "Dead edges are worse than missing ones — they generate confident wrong forecasts." Returns "not yet run" when no audit has been completed. Call it when the user asks about model staleness, whether any channel relationships have weakened, or when discussing model maintenance and re-estimation.`,
+    get_active_predictions: `Active provisional channel predictions from the Aether shock pipeline: channels the news pipeline currently expects to move, with direction, magnitude, confidence, lag, and the reasoning for each signal. Groups by channel so you can see the net picture per channel across multiple news events. Returns "no active signals" when the pipeline has not produced any predictions yet. Call this during Phase 3 to check whether any macro channels have live pressure that confirms or contradicts your variant perception — then cross-reference with get_name_exposure({ticker}) to see how exposed the name is to those channels. No arguments.`,
+    get_shock_feed: `The Aether shock feed: (1) most recent FRED-confirmed and rejected channel predictions with channel, direction, and Brier calibration score — which macro bets just got validated or disproved; (2) active opportunity cards generated from confirmed predictions, with ticker, why, lag window, trade type (swing vs position), and risk note. Argus: call it in Phase 2 to surface channel-validated macro tailwinds/headwinds as a catalyst angle, then screen_candidates INSIDE the sectors those channels affect. A confirmed channel is a real macro event — use it as a hard catalyst, not a soft hypothesis.`,
 }
 
 // ── Formatters (pure — exported for testing) ─────────────────────────────────
@@ -448,6 +450,120 @@ export function formatDecayAudit(docs) {
     return lines.join('\n')
 }
 
+export function formatActiveShockPredictions(docs) {
+    if (!docs || !docs.length) {
+        return 'ACTIVE SHOCK PREDICTIONS: no active signals — the Aether shock pipeline has not produced provisional predictions yet. Reason qualitatively from your own macro knowledge and say so.'
+    }
+
+    // Aggregate by channel: keep highest-confidence signal per channel
+    const byChannel = {}
+    for (const d of docs) {
+        const ch    = d.channel_id
+        const entry = (byChannel[ch] ??= { top: d, signals: [] })
+        if (d.confidence_llm > entry.top.confidence_llm) entry.top = d
+        entry.signals.push(d)
+    }
+
+    const total    = docs.length
+    const channels = Object.keys(byChannel).length
+    const lines = [
+        `ACTIVE SHOCK PREDICTIONS — ${total} provisional signal${total !== 1 ? 's' : ''} across ${channels} channel${channels !== 1 ? 's' : ''}`,
+        '(status: provisional — not yet confirmed by a FRED release)',
+        '',
+        'SIGNALS BY CHANNEL (highest-confidence signal shown; N = total for that channel):',
+    ]
+
+    const dirArrow = { up: '↑ UP', down: '↓ DOWN', neutral: '→ NEUTRAL' }
+
+    for (const [chId, { top, signals }] of Object.entries(byChannel).sort((a, b) => b[1].top.confidence_llm - a[1].top.confidence_llm)) {
+        const d       = top
+        const lagStr  = d.lag_weeks_min === d.lag_weeks_max
+            ? `lag ${d.lag_weeks_min}w`
+            : `lag ${d.lag_weeks_min}–${d.lag_weeks_max}w`
+        const expStr  = d.expires_at ? `  expires ${d.expires_at}` : ''
+        const nStr    = signals.length > 1 ? `  [N=${signals.length}]` : ''
+        lines.push(
+            `  ${chId.padEnd(28)} ${(dirArrow[d.direction] ?? d.direction).padEnd(11)} `
+            + `${d.magnitude.padEnd(8)} conf=${d.confidence_llm.toFixed(2)}  ${lagStr}${expStr}${nStr}`
+        )
+        lines.push(`    "${d.reasoning}"`)
+    }
+
+    lines.push('')
+    lines.push('Cross-reference: call get_name_exposure({ticker}) to see how exposed the name is to each flagged channel.')
+    return lines.join('\n')
+}
+
+const DIR_ARROWS = { up: '↑ UP', down: '↓ DOWN', neutral: '→ NEUTRAL' }
+
+export function formatValidationOutcomes(docs) {
+    if (!docs || !docs.length) return null   // caller handles the no-data case
+    const confirmed = docs.filter(d => d.new_status === 'confirmed')
+    const rejected  = docs.filter(d => d.new_status === 'rejected')
+    const lines = [
+        `VALIDATION OUTCOMES — ${confirmed.length} confirmed, ${rejected.length} rejected (most recent first):`,
+    ]
+    for (const d of docs) {
+        const icon    = d.new_status === 'confirmed' ? '✓' : '✗'
+        const dirLbl  = DIR_ARROWS[d.direction] ?? d.direction.toUpperCase()
+        const brier   = d.brier != null ? `  brier=${d.brier.toFixed(3)}` : ''
+        const correct = d.direction_correct != null ? `  correct=${d.direction_correct}` : ''
+        lines.push(
+            `  ${icon} ${d.channel_id.padEnd(28)} ${dirLbl.padEnd(11)} `
+            + `conf=${d.confidence_llm.toFixed(2)}${brier}${correct}  validated=${d.validated_at}`
+        )
+    }
+    return lines.join('\n')
+}
+
+export function formatOpportunityCards(docs) {
+    if (!docs || !docs.length) return null   // caller handles the no-data case
+    const mentor = docs.filter(d => d.agent === 'mentor')
+    const atlas  = docs.filter(d => d.agent === 'atlas')
+    const lines  = [
+        `OPPORTUNITY CARDS — ${docs.length} active (${mentor.length} swing/Mentor, ${atlas.length} position/Atlas):`,
+    ]
+
+    function renderGroup(group, label) {
+        if (!group.length) return
+        lines.push(`\n${label}:`)
+        for (const c of group) {
+            const dirLbl = DIR_ARROWS[c.direction] ?? c.direction.toUpperCase()
+            const lagStr = c.lag_weeks_min === c.lag_weeks_max
+                ? `${c.lag_weeks_min}w`
+                : `${c.lag_weeks_min}–${c.lag_weeks_max}w`
+            const brier  = c.brier != null ? `  brier=${c.brier.toFixed(3)}` : ''
+            lines.push(
+                `  ${c.ticker.padEnd(6)} ${(c.ticker_direction ?? '').padEnd(6)} `
+                + `${dirLbl.padEnd(11)} ${c.channel_id.padEnd(24)} `
+                + `lag=${lagStr}  conf=${c.confidence_llm.toFixed(2)}${brier}  ${c.magnitude}`
+            )
+            lines.push(`    Why:  ${c.why}`)
+            lines.push(`    When: ${c.when}`)
+            lines.push(`    Risk: ${c.risk_note}`)
+        }
+    }
+
+    renderGroup(mentor, 'SWING (Mentor domain, lag ≤ 3w)')
+    renderGroup(atlas,  'POSITION (Atlas domain, lag ≥ 4w)')
+    return lines.join('\n')
+}
+
+export function formatShockFeed(outcomes, opportunities) {
+    const outcomeText = formatValidationOutcomes(outcomes)
+        ?? 'VALIDATION OUTCOMES: none yet — FRED validation loop has not produced results.'
+    const cardText    = formatOpportunityCards(opportunities)
+        ?? 'OPPORTUNITY CARDS: none active — no confirmed predictions have generated cards yet.'
+
+    return [
+        outcomeText,
+        '',
+        cardText,
+        '',
+        'Cross-reference: call get_name_exposure({ticker}) to see how exposed a candidate is to a confirmed channel.',
+    ].join('\n')
+}
+
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 export function makeAetherToolHandlers() {
@@ -495,5 +611,19 @@ export function makeAetherToolHandlers() {
         get_decay_audit: makeToolHandler('get_decay_audit',
             async () => formatDecayAudit(await getDecayAudit()),
             (err) => `Could not read decay audit: ${err.message}`, LOG),
+
+        get_active_predictions: makeToolHandler('get_active_predictions',
+            async () => formatActiveShockPredictions(await getActiveShockPredictions()),
+            (err) => `Could not read active shock predictions: ${err.message}`, LOG),
+
+        get_shock_feed: makeToolHandler('get_shock_feed',
+            async () => {
+                const [outcomes, opportunities] = await Promise.all([
+                    getRecentValidationOutcomes(20),
+                    getActiveOpportunities(),
+                ])
+                return formatShockFeed(outcomes, opportunities)
+            },
+            (err) => `Could not read Aether shock feed: ${err.message}`, LOG),
     }
 }

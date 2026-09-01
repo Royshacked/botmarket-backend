@@ -59,6 +59,10 @@ export const MENTOR_TOOLS = [
         // get_forecasts: what the engine sees for this name — open signals + resolved ones.
         get_name_exposure: AETHER_TOOL_SPECS.get_name_exposure,
         get_forecasts:     AETHER_TOOL_SPECS.get_forecasts,
+        // Confirmed FRED channel moves + short-lag opportunity cards (≤ 3w). Call when the
+        // macro dimension is material — swing/long-term horizon, or any sector-level tailwind
+        // that would change the thesis. Cross-reference with get_name_exposure for elasticity.
+        get_shock_feed: AETHER_TOOL_SPECS.get_shock_feed,
         // The sidecar is contractually last at every desk that declares it
         // (agentToolsRegistry.test.js), and it sits past the tools cache breakpoint — which is
         // inside TRADING_TOOLS, on get_derivatives_context — so declaring it here touches no
@@ -68,10 +72,11 @@ export const MENTOR_TOOLS = [
 ]
 
 // Unbound — Aether reads are house-layer broadcasts, no userId.
-const { get_name_exposure: _mentor_get_name_exposure, get_forecasts: _mentor_get_forecasts } = makeAetherToolHandlers()
+const { get_name_exposure: _mentor_get_name_exposure, get_forecasts: _mentor_get_forecasts, get_shock_feed: _mentor_get_shock_feed } = makeAetherToolHandlers()
 const _MENTOR_AETHER_HANDLERS = {
     get_name_exposure: _mentor_get_name_exposure,
     get_forecasts:     _mentor_get_forecasts,
+    get_shock_feed:    _mentor_get_shock_feed,
 }
 
 export function emptyMentorState() {
