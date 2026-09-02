@@ -1,21 +1,19 @@
-// HTTP handlers for the Analyst: the streaming research agent (P3) + coverage CRUD (P1).
-import { coverageService }    from './coverage.service.js'
-import { analystAgentService } from '../../services/agents/analyst.agent.service.js'
+// HTTP handlers for the Analyst: the streaming research agent (P3) + coverage CRUD (P1) +
+// research queue (Argus→Prometheus admin pipeline).
+import { coverageService }        from './coverage.service.js'
+import { researchQueueService }   from '../../services/researchQueue.service.js'
+import { analystAgentService }    from '../../services/agents/analyst.agent.service.js'
 import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
-import { parseChatMessages }   from '../_shared/parse.util.js'
-import { sendReason }          from '../_shared/reason.util.js'
-import { makeEntityController } from '../_shared/entityController.util.js'
-import { logger }             from '../../services/logger.service.js'
-import { getExperienceLevel } from '../../services/experience.service.js'
-import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
+import { parseChatMessages }      from '../_shared/parse.util.js'
+import { sendReason }             from '../_shared/reason.util.js'
+import { logger }                 from '../../services/logger.service.js'
+import { getExperienceLevel }     from '../../services/experience.service.js'
+import { sanitizeScanSeed }       from '../../services/scanSeed.util.js'
 
 const LOG = '[analystCtrl]'
 
-// The hand-off parser is shared (services/scanSeed.util.js). Analyst reads `sector`; the fields it
-// has no use for are simply ignored rather than parsed a second time here.
 export const _sanitizeAnalystSeed = sanitizeScanSeed
 
-// Streaming research chat → emits a <coverage> draft (returned for preview; POST /coverage initiates it).
 export async function streamAnalyst(req, res) {
     const { messages, userPrompt, model, chatState } = req.body ?? {}
     const seed = _sanitizeAnalystSeed(req.body?.seed)
@@ -44,43 +42,36 @@ export async function streamAnalyst(req, res) {
 }
 
 // ─── Coverage CRUD ────────────────────────────────────────────────────────────
-// Coverage is owner-scoped like every other kind — its own collection, but the same crud factory
-// and the same HTTP tier. What stays analyst-OWNED is one reason: initiation is an EVENT, so a
-// second one on a name already covered is a conflict, not an update.
+
 const COVERAGE_REASONS = {
-    symbol_required: [400, 'A symbol is required to initiate coverage'],
-    already_covered: [409, 'Already covered — update the thesis instead of initiating it again'],
-    // The thesis contradicts itself — a buy-side rating with a target below spot, or the reverse.
-    // 422, not 400: the body is well-formed, the research isn't. `detail` says which way it breaks.
+    symbol_required:           [400, 'A symbol is required to initiate coverage'],
+    already_covered:           [409, 'Already covered — update the thesis instead of initiating it again'],
     rating_contradicts_target: [422, 'The rating and the price target point in opposite directions'],
 }
 
-const crud = makeEntityController({
-    log: LOG, noun: 'coverage', overrides: COVERAGE_REASONS,
-    service: {
-        // `?sector=` / `?status=` — the service validates them; a raw query param must never reach
-        // Mongo as an operator. Named explicitly rather than spread: the options bag now also
-        // carries `onError`, which decides whether a failed read degrades to [] or 500s, and that
-        // is a caller's decision — not something a client gets to flip from the URL.
-        list: (userId, req) => coverageService.getCoverage(userId, {
+export async function listCoverage(req, res) {
+    try {
+        const docs = await coverageService.getCoverage({
             sector: req.query?.sector ?? null,
             status: req.query?.status ?? null,
-        }),
-        get:  (id, userId)  => coverageService.getCoverageById(id, userId),
-    },
-})
+        })
+        res.send(docs)
+    } catch (err) {
+        logger.error(LOG, 'listCoverage failed', err)
+        res.status(500).send({ error: 'Failed to list coverage' })
+    }
+}
 
-export const listCoverage   = crud.list
-export const getCoverageOne = crud.get
-
-// ── The moves that aren't CRUD ────────────────────────────────────────────────
-// Initiate and update each carry judgment a shared shell can't hold: initiation guards a once-per-name
-// event, update takes a patch under an envelope.
-//
-// Retire and delete are DIFFERENT operations and now have different routes. Retire (POST …/retire) is
-// a status change that keeps the document and its revision trail — archived research. Delete (DELETE
-// …/:id) removes it for good. Retire used to wear the DELETE verb, which made the API say "removed"
-// while the doc stayed; the verbs now mean what they say.
+export async function getCoverageOne(req, res) {
+    try {
+        const result = await coverageService.getCoverageById(req.params.id)
+        if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 404, fallbackMessage: 'Not found' })
+        res.send(result.doc)
+    } catch (err) {
+        logger.error(LOG, 'getCoverageOne failed', err)
+        res.status(500).send({ error: 'Failed to get coverage' })
+    }
+}
 
 export async function initiateCoverage(req, res) {
     try {
@@ -88,9 +79,7 @@ export async function initiateCoverage(req, res) {
         if (!coverage || typeof coverage !== 'object' || Array.isArray(coverage)) {
             return res.status(400).send({ error: 'coverage must be an object' })
         }
-        const result = await coverageService.initiateCoverage(coverage, req.user._id)
-        // The existing id rides along on `already_covered` so the caller can go straight to it —
-        // coverageRefresh depends on that to update instead of giving up.
+        const result = await coverageService.initiateCoverage(coverage)
         if (!result.ok) {
             return sendReason(res, result.reason, {
                 overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to initiate coverage',
@@ -110,7 +99,7 @@ export async function updateCoverage(req, res) {
         if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
             return res.status(400).send({ error: 'patch must be an object' })
         }
-        const result = await coverageService.updateCoverage(req.params.id, patch, req.user._id)
+        const result = await coverageService.updateCoverage(req.params.id, patch)
         if (!result.ok) return sendReason(res, result.reason, {
             overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to update coverage',
             extra: result.detail ? { detail: result.detail } : null,
@@ -124,9 +113,8 @@ export async function updateCoverage(req, res) {
 
 export async function retireCoverage(req, res) {
     try {
-        const result = await coverageService.retireCoverage(req.params.id, req.user._id)
+        const result = await coverageService.retireCoverage(req.params.id)
         if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to retire coverage' })
-        // Answers the updated document, not `{ok:true}` — the name is still in the book, retired.
         res.send(result.doc)
     } catch (err) {
         logger.error(LOG, 'retireCoverage failed', err)
@@ -134,11 +122,9 @@ export async function retireCoverage(req, res) {
     }
 }
 
-// Permanent — the document and its revision trail are gone. Answers `{ ok: true }` because there is
-// no longer a document to answer with, which is exactly the difference from retire above.
 export async function deleteCoverage(req, res) {
     try {
-        const result = await coverageService.deleteCoverage(req.params.id, req.user._id)
+        const result = await coverageService.deleteCoverage(req.params.id)
         if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to delete coverage' })
         logger.info(LOG, 'coverage deleted', { id: req.params.id })
         res.send({ ok: true })
@@ -146,4 +132,42 @@ export async function deleteCoverage(req, res) {
         logger.error(LOG, 'deleteCoverage failed', err)
         res.status(500).send({ error: 'Failed to delete coverage' })
     }
+}
+
+// ─── Research queue (Argus→Prometheus admin pipeline) ─────────────────────────
+
+export async function listResearchQueue(req, res) {
+    const { status } = req.query
+    const docs = await researchQueueService.listQueue({ status: status ?? undefined })
+    res.json(docs)
+}
+
+export async function enqueueResearch(req, res) {
+    const { symbol, source } = req.body ?? {}
+    if (!symbol) return res.status(400).json({ error: 'symbol is required' })
+    const result = await researchQueueService.enqueue({
+        symbol,
+        source:      source ?? 'manual',
+        requestedBy: req.user._id,
+    })
+    if (!result.ok) return res.status(500).json({ error: 'Failed to enqueue', reason: result.reason })
+    res.status(result.duplicate ? 200 : 201).json(result)
+}
+
+export async function startResearch(req, res) {
+    const result = await researchQueueService.startResearch(req.params.id)
+    if (!result.ok) return res.status(result.reason === 'not_found_or_wrong_status' ? 404 : 500).json(result)
+    res.json(result.doc)
+}
+
+export async function completeResearch(req, res) {
+    const result = await researchQueueService.markDone(req.params.id)
+    if (!result.ok) return res.status(result.reason === 'not_found_or_wrong_status' ? 404 : 500).json(result)
+    res.json(result.doc)
+}
+
+export async function rejectResearch(req, res) {
+    const result = await researchQueueService.reject(req.params.id)
+    if (!result.ok) return res.status(result.reason === 'not_found_or_wrong_status' ? 404 : 500).json(result)
+    res.json(result.doc)
 }

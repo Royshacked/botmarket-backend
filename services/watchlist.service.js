@@ -66,7 +66,7 @@ export async function listWatchedItems(userId, { kinds = DEFAULT_KINDS, includeF
     const {
         setups = (uid) => setupService.listSetups(uid, { onError: 'throw' }),
         scans = (uid) => scanService.getScans(uid, { onError: 'throw' }),
-        coverage = (uid) => coverageService.getCoverage(uid, { onError: 'throw' }),
+        coverage = () => coverageService.getCoverage({ onError: 'throw' }),
         portfolios = listPortfolios,
     } = deps
 

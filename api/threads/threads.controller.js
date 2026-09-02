@@ -19,7 +19,7 @@ const LOG    = '[threads:controller]'
 // answer. THIS LIST IS THE SECOND HALF OF A PAIR — a panel that saves and an agent named here — and a
 // new desk needs both. Neither half fails loudly on its own: a missing name is a silent 400, and a
 // panel that never saves simply has nothing to reject.
-export const AGENTS = new Set(['idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'axl', 'analyst', 'strategy'])
+export const AGENTS = new Set(['idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'axl', 'analyst', 'strategy', 'aether'])
 
 export async function saveDraftThread(req, res) {
     try {

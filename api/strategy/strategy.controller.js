@@ -10,6 +10,7 @@ import { tiltService, balanceOf } from './tilt.service.js'
 import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
 import { diffStances }          from '../../monitoring/tilt.assess.js'
 import { notifyTiltChanged }    from '../../services/tiltNotify.service.js'
+import { runHouseScan }         from '../../services/houseScan.service.js'
 import { streamAgentResponse, sseAgentCallbacks }  from '../_shared/sse.util.js'
 import { parseChatMessages }    from '../_shared/parse.util.js'
 import { sendReason }           from '../_shared/reason.util.js'
@@ -107,6 +108,11 @@ export async function publishTilt(req, res) {
     const changes = diffStances(previous, result.doc)
     notifyTiltChanged(result.doc, changes)
         .catch(err => logger.warn(LOG, 'tilt notify failed (view is published)', err.message))
+
+    // Trigger the admin pipeline: Argus house scan → research queue → Prometheus.
+    // Fire-and-forget — the view is already stored; a scan failure must not un-publish it.
+    runHouseScan(result.doc)
+        .catch(err => logger.warn(LOG, 'house scan trigger failed (view is published)', err.message))
 
     logger.info(LOG, 'view published', { id: result.doc.id, rows: result.doc.tilts.length, changed: changes.length })
     res.status(201).json({ ...result.doc, changed: changes })

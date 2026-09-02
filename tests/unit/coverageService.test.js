@@ -8,23 +8,22 @@ import { normalizeCoverage, newRevision, RATINGS, STATUSES, HORIZONS, DEFAULT_HO
 
 // ── normalizeCoverage: identity + defaults ──────────────────────────────────
 test('normalize: uppercases symbol, defaults status=active, stamps id + timestamps', () => {
-    const c = normalizeCoverage({ symbol: 'nvda' }, 'u1')
+    const c = normalizeCoverage({ symbol: 'nvda' })
     assert.equal(c.symbol, 'NVDA')
-    assert.equal(c.userId, 'u1')
     assert.equal(c.status, 'active')
     assert.match(c.id, /^cov_NVDA_[0-9a-f]{8}$/)
     assert.ok(c.created_at && c.updated_at)
 })
 
 test('normalize: a passed id + created_at are preserved (the update path); updated_at is fresh', () => {
-    const c = normalizeCoverage({ symbol: 'AAPL', id: 'cov_fixed', created_at: '2026-01-01T00:00:00.000Z' }, 'u1')
+    const c = normalizeCoverage({ symbol: 'AAPL', id: 'cov_fixed', created_at: '2026-01-01T00:00:00.000Z' })
     assert.equal(c.id, 'cov_fixed')
     assert.equal(c.created_at, '2026-01-01T00:00:00.000Z')
     assert.notEqual(c.updated_at, '2026-01-01T00:00:00.000Z')
 })
 
 test('normalize: non-object raw → empty symbol + defaults, never throws', () => {
-    const c = normalizeCoverage(null, 'u1')
+    const c = normalizeCoverage(null)
     assert.equal(c.symbol, '')
     assert.equal(c.status, 'active')
     assert.deepEqual(c.catalysts, [])
@@ -170,33 +169,34 @@ test('newRevision: builds {at,kind,note,changed}; non-object changed → null; d
 // The gate that replaced price-invalidation asks "has our own PT moved against what we paid?", which
 // needs a fixed "what we believed at entry" — the live coverage doc is the thing that moves.
 
-const basisDeps = (rows) => ({ getCoverage: async () => rows })
+const basisDeps = (doc) => ({ getBySymbol: async () => doc })
 
 test('research basis: freezes the coverage id + the PT we bought on', async () => {
     const b = await coverageService.captureResearchBasis(
-        { userId: 'u1', symbol: 'tsm' },
-        basisDeps([{ id: 'cov_TSM_1', symbol: 'TSM', price_target: { value: 702 } }]))
+        { symbol: 'tsm' },
+        basisDeps({ id: 'cov_TSM_1', symbol: 'TSM', price_target: { value: 702 } }))
     assert.equal(b.coverageId, 'cov_TSM_1')
     assert.equal(b.coveragePt, 702)
     assert.ok(Date.parse(b.at) > 0)
 })
 
 test('research basis: an uncovered name freezes nothing — research is not a precondition for trading', async () => {
-    assert.equal(await coverageService.captureResearchBasis({ userId: 'u1', symbol: 'AAPL' },
-        basisDeps([{ id: 'c', symbol: 'TSM', price_target: { value: 702 } }])), null)
-    assert.equal(await coverageService.captureResearchBasis({ userId: 'u1', symbol: '' }, basisDeps([])), null)
-    assert.equal(await coverageService.captureResearchBasis({ symbol: 'TSM' }, basisDeps([])), null)
+    assert.equal(await coverageService.captureResearchBasis({ symbol: 'AAPL' }, basisDeps(null)), null)
+    assert.equal(await coverageService.captureResearchBasis({ symbol: '' }, basisDeps(null)), null)
+    assert.equal(await coverageService.captureResearchBasis({}, basisDeps(null)), null)
 })
 
 test('research basis: coverage with no usable PT freezes nothing (never a zero)', async () => {
     for (const pt of [null, undefined, {}, { value: null }, { value: 'x' }]) {
-        assert.equal(await coverageService.captureResearchBasis({ userId: 'u1', symbol: 'TSM' },
-            basisDeps([{ id: 'c', symbol: 'TSM', price_target: pt }])), null, JSON.stringify(pt))
+        assert.equal(await coverageService.captureResearchBasis(
+            { symbol: 'TSM' },
+            basisDeps({ id: 'c', symbol: 'TSM', price_target: pt })), null, JSON.stringify(pt))
     }
 })
 
 test('research basis: a failing coverage read NEVER breaks the order path', async () => {
-    const b = await coverageService.captureResearchBasis({ userId: 'u1', symbol: 'TSM' },
-        { getCoverage: async () => { throw new Error('mongo down') } })
+    const b = await coverageService.captureResearchBasis(
+        { symbol: 'TSM' },
+        { getBySymbol: async () => { throw new Error('mongo down') } })
     assert.equal(b, null)
 })

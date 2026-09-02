@@ -3,6 +3,7 @@ import { portfolioChatService }  from './portfolioChat.service.js'
 import { applyRebalance, snapshotConvictions } from './portfolioRebalance.service.js'
 import { invalidatePortfolioState, listPortfolioItems, listPortfolios } from '../../services/portfolioState.service.js'
 import { refreshCoverage }        from '../../services/coverageRefresh.service.js'
+import { researchQueueService }   from '../../services/researchQueue.service.js'
 import { logger }                from '../../services/logger.service.js'
 import { streamAgentResponse, sseAgentCallbacks }   from '../_shared/sse.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
@@ -252,7 +253,16 @@ export async function streamPortfolio(req, res) {
                 }).catch(err => logger.warn(LOG, 'coverage refresh hop failed', err.message))
             }
 
-            return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null, ...(result.screenRequests ? { screen_requests: result.screenRequests } : {}), ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}) }
+            // 4th flow: uncovered name the user asked to add. Enqueue for Prometheus — fire-and-forget.
+            if (result.coverageRequest?.symbol) {
+                researchQueueService.enqueue({
+                    symbol:      result.coverageRequest.symbol,
+                    source:      'manual',
+                    requestedBy: req.user._id,
+                }).catch(err => logger.warn(LOG, 'coverage request enqueue failed', err.message))
+            }
+
+            return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null, ...(result.screenRequests ? { screen_requests: result.screenRequests } : {}), ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}), ...(result.coverageRequest ? { coverage_request: result.coverageRequest } : {}) }
         },
     })
 }

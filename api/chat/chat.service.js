@@ -182,7 +182,7 @@ export function normalizeResolveStatus(status) {
     return 'dismissed'
 }
 
-export async function sendMessage(conversationId, senderId, content, type = 'text', payload = null, actions = null) {
+export async function sendMessage(conversationId, senderId, content, type = 'text', payload = null, actions = null, visibility = 'all', forUserId = null) {
     const db  = await getDb()
     const msg = {
         id:             `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -196,6 +196,8 @@ export async function sendMessage(conversationId, senderId, content, type = 'tex
         resolveOutcome: null,
         createdAt:      Date.now(),
         readAt:         null,
+        visibility:     visibility ?? 'all',
+        ...(forUserId != null ? { forUserId: String(forUserId) } : {}),
     }
     await db.collection(MSGS).insertOne(msg)
     await db.collection(CONVS).updateOne(
@@ -212,7 +214,7 @@ export async function sendMessage(conversationId, senderId, content, type = 'tex
  * shared `sendMessage`, and pushes the WS event. Never throws (logs + returns null) — so a broker
  * hiccup in a monitor loop can't take the loop down.
  */
-export async function postBotCard({ userId, content, type = 'text', payload = null, botId = BOT_USER_ID, actions = null }) {
+export async function postBotCard({ userId, content, type = 'text', payload = null, botId = BOT_USER_ID, actions = null, visibility = 'all', forUserId = null }) {
     if (!userId) return null
     try {
         const bot = isBot(botId) ? String(botId) : BOT_USER_ID
@@ -222,7 +224,7 @@ export async function postBotCard({ userId, content, type = 'text', payload = nu
         // pending cards for one unfinished job, and "stays alive" would read as "nags". The newest
         // card carries the current situation, so it replaces rather than joins.
         await _supersedePending(conv.id, type, cardSubject(payload), actions)
-        const msg = await sendMessage(conv.id, bot, content, type, payload, actions)
+        const msg = await sendMessage(conv.id, bot, content, type, payload, actions, visibility, forUserId)
         await _tryEmit(String(userId), 'new_message', msg)
         return msg
     } catch (err) {

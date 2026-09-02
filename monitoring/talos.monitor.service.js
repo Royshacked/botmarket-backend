@@ -170,20 +170,32 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     const hit   = scenarioGate(setup, price) ?? _hitFromGuard(setup, woke)
     const zone  = hit?.zone ?? null
 
-    // Nothing tripped and not expiring → the cheap path. No LLM, just a proximity-aware
-    // reschedule that tightens as price approaches the nearest zone.
-    if (!zone && !expiring) {
-        // The second arithmetic gate. Only reached when price is OUTSIDE every zone — a setup
-        // sitting in its own zone is doing exactly what it was built to do, whatever the range
-        // says, so a trip can never be overridden by an invalidation.
-        const breached = await _checkValidity(setup, price, nowMs, deps)
-        if (breached) return breached
+    // TWO REASONS TO RUN AN ASSESSMENT WITHOUT A ZONE HIT.
+    //
+    // 1. NEVER READ. A setup's first wake has no guards yet — the model hasn't had a chance to arm
+    //    any. Running the assessment lets it read the chart and arm its own guards. Without this, a
+    //    setup with no entry zones (entry triggered by a pattern, not a level) is never assessed
+    //    and never receives guards, so it monitors nothing.
+    //
+    // 2. PRICE GUARD FIRED. The model set a guard at a level that is NOT an entry zone — an
+    //    invalidation line, a momentum level, a structure point it wanted to re-check. The sweep
+    //    fired it, which is the model's explicit request to be woken here. Ignoring it because the
+    //    level isn't inside a zone defeats the purpose of guards entirely.
+    //
+    // In both cases there is no entry card (no zone = no position), but the assessment still runs
+    // and the journal records it. The backstop (unconditional heartbeat, no price term) is NOT a
+    // reason — it is a fallback "come back eventually", and running a full assessment on every
+    // heartbeat when nothing is happening would drain budget on silence.
+    // Validity is a hard safety check — always run it first, regardless of whether an assessment
+    // follows. A breached premise that would normally skip assessment must still fire its card.
+    const breached = await _checkValidity(setup, price, nowMs, deps)
+    if (breached) return breached
 
-        // TIER 2 IS GONE, and nothing replaced it here. The momentum pulse existed to catch a setup
-        // developing at a level nobody had mapped: it measured price walking away from the authored
-        // bands and bought ONE re-mapping read. Guards make it unnecessary — the model arms its own
-        // invalidation levels, so "price has left the map" is a line somebody drew rather than an
-        // inference from band widths (docs/desks/talos-guards.md).
+    const neverRead        = !setup.monitor_state?.last_read_at
+    const guardFiredPrice  = woke != null && Number.isFinite(toNum(woke?.price))
+    const needsAssessment  = zone || expiring || neverRead || guardFiredPrice
+
+    if (!needsAssessment) {
         const patch = _reschedule(setup, nowMs, price)
         const quiet = wakeReason(woke)
         await deps.persist(setup.id, patch, _entry(quiet, { setup, nowMs, price, woke, nextAt: patch['monitor_state.next_check_at'] }))

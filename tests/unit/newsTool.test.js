@@ -125,7 +125,7 @@ test('Axl carries the tool, and it is APPENDED last', () => {
     assert.ok(names.includes('get_news'))
     // The kit is compared by index by the snapshot test and cached by array prefix — a tool inserted
     // mid-array invalidates Axl's cached tool block on every request until it re-warms.
-    assert.equal(names[names.length - 1], 'get_news')
+    assert.equal(names[names.length - 1], 'get_channel_state')
 })
 
 test('the tool description holds the line against the brief and against advice', () => {

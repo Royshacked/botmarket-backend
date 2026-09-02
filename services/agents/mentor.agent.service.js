@@ -7,6 +7,7 @@ import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
 import { buildVenueSection } from '../tools/tradingContext.tools.js'
+import { AETHER_TOOL_SPECS, makeAetherToolHandlers } from '../tools/aether.tools.js'
 import { normalizeSetup, setupReadiness, computeRR, validityProblems } from '../setup.schema.js'
 import { logger } from '../logger.service.js'
 
@@ -50,6 +51,18 @@ export const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
 export const MENTOR_TOOLS = [
     ...TRADING_TOOLS,
     ...toolsFor({
+        // Aether engine reads for setup context. Both return "not yet computed" when the relevant
+        // engine phase has not run; reason qualitatively in that state.
+        //
+        // get_name_exposure: per-name channel elasticity + lag profile — use when sizing; the
+        //   exposure confidence scales how much weight to put on the channel thesis.
+        // get_forecasts: what the engine sees for this name — open signals + resolved ones.
+        get_name_exposure: AETHER_TOOL_SPECS.get_name_exposure,
+        get_forecasts:     AETHER_TOOL_SPECS.get_forecasts,
+        // Confirmed FRED channel moves + short-lag opportunity cards (≤ 3w). Call when the
+        // macro dimension is material — swing/long-term horizon, or any sector-level tailwind
+        // that would change the thesis. Cross-reference with get_name_exposure for elasticity.
+        get_shock_feed: AETHER_TOOL_SPECS.get_shock_feed,
         // The sidecar is contractually last at every desk that declares it
         // (agentToolsRegistry.test.js), and it sits past the tools cache breakpoint — which is
         // inside TRADING_TOOLS, on get_derivatives_context — so declaring it here touches no
@@ -57,6 +70,14 @@ export const MENTOR_TOOLS = [
         consult: consultDescription(`Reach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs the entry; and **placing a zone where the structure is ambiguous** — a level that is both a prior high and a supply shelf, say.`),
     }),
 ]
+
+// Unbound — Aether reads are house-layer broadcasts, no userId.
+const { get_name_exposure: _mentor_get_name_exposure, get_forecasts: _mentor_get_forecasts, get_shock_feed: _mentor_get_shock_feed } = makeAetherToolHandlers()
+const _MENTOR_AETHER_HANDLERS = {
+    get_name_exposure: _mentor_get_name_exposure,
+    get_forecasts:     _mentor_get_forecasts,
+    get_shock_feed:    _mentor_get_shock_feed,
+}
 
 export function emptyMentorState() {
     return { active_asset: '', draft: null, coverage: [] }
@@ -77,7 +98,7 @@ async function chatStream({
     // `consult` is deliberately absent: runAgentStream builds it from the tool declaration, which is
     // also the only place that holds `onReasoning` — wiring it here would swallow the sidecar's
     // thinking silently. See the MENTOR_TOOLS note above.
-    const toolHandlers = buildTradingToolHandlers(onChart, userId)
+    const toolHandlers = { ...buildTradingToolHandlers(onChart, userId), ..._MENTOR_AETHER_HANDLERS }
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, audience, seed)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than

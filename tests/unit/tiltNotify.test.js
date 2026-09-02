@@ -28,6 +28,10 @@ test('one moved sector → a strategy card with the regime as the reason', () =>
     assert.ok(c.actions, 'the card is actionable — it opens the view')
 })
 
+test('tilt_event is admin-only — only the Pythia pipeline produces these', () => {
+    assert.equal(buildTiltEvent(tilt(), [change()], 'u1').visibility, 'admin')
+})
+
 test('several moved sectors are counted in the head and listed in the body', () => {
     const c = buildTiltEvent(tilt(), [change(), change({ sector: 'Technology', from: 'over', to: 'neutral', to_bp: 0 })], 'u1')
     assert.match(c.content, /^2 sector views changed:/)
@@ -131,6 +135,10 @@ test('the offer names the trigger — a card that only says "review due" sends y
     assert.match(c.content, /2 stances standing/)
     assert.match(c.content, /late-cycle disinflation/, 'the regime is the reason the view exists')
     assert.equal(c.actions.primary.label, 'Run the review')
+})
+
+test('tilt_review offer is admin-only — only the admin runs the Pythia review', () => {
+    assert.equal(buildTiltReviewOffer(view(), { reason: 'x', userId: 'u1' }).visibility, 'admin')
 })
 
 test('the payload separates what is DUE from what is merely standing', () => {

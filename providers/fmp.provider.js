@@ -406,7 +406,10 @@ export async function getFundamentals(ticker) {
 // from memory. Short TTL keyed by the normalized filter set; the same screen run
 // twice in a construction session shouldn't re-burn a call.
 const SCREEN_TTL_MS = 30 * 60 * 1000
-const _screenCache  = createTtlCache({ ttlMs: SCREEN_TTL_MS, max: 50 })
+// Raw rows are the canonical cache entry; screenCandidates formats from them on demand.
+// Two callers — the LLM agent (formatted text) and the house scan (raw symbols) — share
+// one fetch and one cache instead of maintaining separate caches for the same data.
+const _screenRawCache = createTtlCache({ ttlMs: SCREEN_TTL_MS, max: 50 })
 
 // Whitelisted screener params → their FMP query keys. Anything not here is
 // ignored, so a hallucinated filter can't reach the API.
@@ -417,6 +420,20 @@ const SCREEN_PARAMS = {
     betaMoreThan: 'betaMoreThan', betaLowerThan: 'betaLowerThan',
     dividendMoreThan: 'dividendMoreThan', volumeMoreThan: 'volumeMoreThan',
     isEtf: 'isEtf',
+}
+
+/** Build and sort the screener query string from whitelisted filters. */
+function _buildScreenQs(f) {
+    const parts = []
+    for (const [k, apiKey] of Object.entries(SCREEN_PARAMS)) {
+        const v = f[k]
+        if (v == null || v === '') continue
+        parts.push(`${apiKey}=${encodeURIComponent(v)}`)
+    }
+    const limit = Math.min(Math.max(parseInt(f.limit, 10) || 25, 1), 50)
+    parts.push(`limit=${limit}`)
+    parts.push('isActivelyTrading=true')
+    return parts.sort().join('&')
 }
 
 /** One-line " (Technology, mcap>$10B)" suffix describing the applied filters. */
@@ -465,30 +482,31 @@ export function formatScreenerRows(rows, filters = {}) {
 }
 
 /**
+ * Screen the US universe and return the raw rows array.
+ * The canonical fetch — one cache entry serves both the LLM (screenCandidates)
+ * and the house scan (screenCandidatesRaw).
+ */
+export async function screenCandidatesRaw(filters = {}) {
+    const f  = filters && typeof filters === 'object' ? filters : {}
+    const qs = _buildScreenQs(f)
+    const hit = _screenRawCache.get(qs)
+    if (hit) return hit
+    const rows   = await _fmpGet(`/company-screener?${qs}`)
+    const result = Array.isArray(rows) ? rows : []
+    _screenRawCache.set(qs, result)
+    logger.info(LOG, 'screen', { filters: _describeFilters(f).trim(), matches: result.length })
+    return result
+}
+
+/**
  * Screen the US universe by the whitelisted filters and return an LLM-ready list.
  * `filters` may include any SCREEN_PARAMS key plus `limit` (1–50, default 25).
  * Discovery only — the agent still qualifies each hit with get_fundamentals.
  */
 export async function screenCandidates(filters = {}) {
-    const f = filters && typeof filters === 'object' ? filters : {}
-    const parts = []
-    for (const [k, apiKey] of Object.entries(SCREEN_PARAMS)) {
-        const v = f[k]
-        if (v == null || v === '') continue
-        parts.push(`${apiKey}=${encodeURIComponent(v)}`)
-    }
-    const limit = Math.min(Math.max(parseInt(f.limit, 10) || 25, 1), 50)
-    parts.push(`limit=${limit}`)
-    parts.push('isActivelyTrading=true')
-    const qs  = parts.sort().join('&')   // sorted → stable cache key regardless of input order
-    const hit = _screenCache.get(qs)
-    if (hit) return hit
-
-    const rows = await _fmpGet(`/company-screener?${qs}`)
-    const text = formatScreenerRows(rows, f)
-    _screenCache.set(qs, text)
-    logger.info(LOG, 'screen', { filters: _describeFilters(f).trim(), matches: Array.isArray(rows) ? rows.length : 0 })
-    return text
+    const f    = filters && typeof filters === 'object' ? filters : {}
+    const rows = await screenCandidatesRaw(f)
+    return formatScreenerRows(rows, f)
 }
 
 // ─── Macro snapshot (hard regime data) ──────────────────────────────────────

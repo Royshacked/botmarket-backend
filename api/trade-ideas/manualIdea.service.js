@@ -91,7 +91,7 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId) {
         const status    = idea.direction === 'short' ? 'short' : 'long'
         // Same freeze as broker placement — a manual fill is still a position, and the coverage gate
         // measures every held name against the research it was opened on.
-        const basis     = await coverageService.captureResearchBasis({ userId: idea.userId, symbol: idea.asset })
+        const basis     = await coverageService.captureResearchBasis({ symbol: idea.asset })
         const set = {
             status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed',
             ...(basis ? { research_basis: basis } : {}),

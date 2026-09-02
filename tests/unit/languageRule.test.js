@@ -27,6 +27,7 @@ const SERVICES = join(ROOT, 'services')
 // scanner_mode_handoff.md) are deliberately absent: they are concatenated onto a base that already
 // carries the rule, and appending it again would repeat the same paragraph twice in one request.
 const DESKS = [
+    'aether.agent.service.js',
     'analyst.agent.service.js',
     'axl.agent.service.js',
     'marketBrief.service.js',
@@ -123,7 +124,7 @@ test('the rule rides on the CACHED prefix, not the volatile tail', () => {
 // TWO desks are deliberately absent, and the list below is the record of why — both write for
 // EVERYBODY at once, so they have no user whose venue could be read: marketBrief and strategy
 // (Pythia) are broadcasts, and neither carries the venue TOOLS either, for the same reason.
-const VENUE_DESKS = DESKS.filter(f => !['marketBrief.service.js', 'strategy.agent.service.js'].includes(f))
+const VENUE_DESKS = DESKS.filter(f => !['aether.agent.service.js', 'marketBrief.service.js', 'strategy.agent.service.js'].includes(f))
 
 test('every desk that has a user carries the venue rule, exactly once', () => {
     for (const f of VENUE_DESKS) {
@@ -135,7 +136,7 @@ test('every desk that has a user carries the venue rule, exactly once', () => {
 })
 
 test('a broadcast desk carries NO venue rule — it has no user to read one for', () => {
-    for (const f of ['marketBrief.service.js', 'strategy.agent.service.js']) {
+    for (const f of ['aether.agent.service.js', 'marketBrief.service.js', 'strategy.agent.service.js']) {
         assert.doesNotMatch(src(f), /VENUE_RULE/,
             `${f} writes for every user at once; a venue block there would be one user's book leaking into a broadcast`)
     }

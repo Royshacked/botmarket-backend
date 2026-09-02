@@ -94,6 +94,11 @@ export const TOOL_SCHEMAS = {
             "sector": {
                 "type": "string",
                 "description": "optional — narrow to one sector, e.g. Technology"
+            },
+            "school": {
+                "type": "string",
+                "enum": ["quality-value", "growth-durability", "income", "passive"],
+                "description": "optional — narrow to names Prometheus tagged for this selection school; combine with sector for the mandate-build pre-filter"
             }
         }
     },
@@ -595,6 +600,45 @@ export const TOOL_SCHEMAS = {
         "properties": {}
     },
     get_sector_view: {
+        "type": "object",
+        "properties": {}
+    },
+    // ── Aether desk (channel-graph engine) ───────────────────────────────────
+    get_channel_taxonomy: {
+        "type": "object",
+        "properties": {}
+    },
+    get_channel_state: {
+        "type": "object",
+        "properties": {}
+    },
+    get_name_exposure: {
+        "type": "object",
+        "properties": {
+            "ticker": {
+                "type": "string",
+                "description": "The ticker to look up, e.g. AAPL, XOM"
+            }
+        },
+        "required": ["ticker"]
+    },
+    get_regime: {
+        "type": "object",
+        "properties": {}
+    },
+    get_forecasts: {
+        "type": "object",
+        "properties": {}
+    },
+    get_loss_surface: {
+        "type": "object",
+        "properties": {}
+    },
+    get_active_predictions: {
+        "type": "object",
+        "properties": {}
+    },
+    get_shock_feed: {
         "type": "object",
         "properties": {}
     },

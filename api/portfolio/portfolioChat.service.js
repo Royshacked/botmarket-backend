@@ -115,7 +115,7 @@ async function computeReviewSignals(portfolioId, userId) {
         }
         let coverage = []
         if (holdings.size) {
-            const rows = await coverageService.getCoverage(userId).catch(() => [])
+            const rows = await coverageService.getCoverage().catch(() => [])
             coverage = (Array.isArray(rows) ? rows : [])
                 .filter(c => holdings.has(String(c.symbol ?? '').toUpperCase()))
                 .map(c => {

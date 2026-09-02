@@ -133,7 +133,9 @@ const _SYSTEM = `You are Talos, the guardian watching a trade SETUP the user bui
 
 - "zone_trip" — price reached one of the setup's zones. Judge whether this is the moment.
 - "expiry_review" — the setup is near its expiry. Judge whether it dies, or is still worth carrying.
-- "momentum_pulse" — price is NOWHERE NEAR a zone, and has moved a long way from where it was when you last looked. Nobody mapped this level. You are not being asked whether to enter — you cannot, nothing is armed. You are being asked ONE question: is the map still right? If price has simply gone somewhere the plan never described and the premise still makes sense at new levels, return "edit" with an edit_proposal that re-draws the zones onto what price is actually doing — the ordinary zone trip will take the entry later. If it is noise, or the thesis is done, return "wait" and say why in one line. "enter" is NOT available on a pulse and will be ignored.
+- "guard_price" — a guard you armed fired at a level that is NOT inside an entry zone. You are not being asked whether to enter — you cannot, nothing is armed at a zone yet. You are being asked: does the plan still make sense at current price, or does the map need re-drawing? If the premise holds and price is simply developing, return "wait" with a note and re-arm guards at the levels that now matter. If the map is stale, return "edit" with an edit_proposal. "enter" is NOT available on a guard_price wake with no armed zone and will be ignored.
+- "guard_time" — a scheduled re-read on a setup where price IS inside an entry zone. Treat it the same as zone_trip.
+- "momentum_pulse" — legacy name for what guard_price now handles. Treat it the same as guard_price.
 
 You are given the setup — its THESIS, the SCENARIO price actually reached, and that scenario's CONDITIONS — plus a chart, recent candles and the current price. Anything else you want, you go and get with your tools.
 
@@ -256,10 +258,14 @@ export async function assessSetup(setup, hit, ctx = {}) {
             })}`,
             _otherScenariosBlock(setup, scenario),
             _conditionsBlock(setup, scenario),
-            // No zone means nothing is armed — and WHY nothing is armed is the difference between
-            // "its clock ran out" and "price walked off the map". Saying "expiry review" on a pulse
-            // would describe the wrong situation to the one reader who has to get it right.
-            `ARMED ZONE: ${zone ? JSON.stringify(zone) : `(none — ${ctx.reason === 'momentum_pulse' ? 'price is outside every zone' : 'expiry review'})`}`,
+            // WHY THERE IS NO ZONE MATTERS. "Expiry" and "a guard fired outside every zone" are both
+            // no-zone wakes, but they call for different reads. Naming the right one keeps the model
+            // from framing a guard-woken re-evaluation as an expiry decision.
+            `ARMED ZONE: ${zone ? JSON.stringify(zone) : `(none — ${
+                ctx.reason === 'guard_price'  ? 'the guard you armed fired; price is not inside any entry zone' :
+                ctx.reason === 'momentum_pulse' ? 'price is outside every zone' :
+                'expiry review'
+            })`}`,
             `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
             `SESSION NOW: ${sessionPhase(setup.asset, setup.asset_class)}`,
             `REASON WOKEN: ${ctx.reason ?? 'zone_trip'}`,

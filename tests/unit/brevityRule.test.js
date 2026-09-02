@@ -27,6 +27,7 @@ const SERVICES = join(ROOT, 'services')
 
 // Every desk a user TALKS to. marketBrief is deliberately absent — see the last test in this file.
 const DESKS = [
+    'aether.agent.service.js',
     'analyst.agent.service.js',
     'axl.agent.service.js',
     'mentor.agent.service.js',

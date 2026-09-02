@@ -18,6 +18,7 @@ import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPE
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from '../tools/valuation.tools.js'
+import { AETHER_TOOL_SPECS, makeAetherToolHandlers } from '../tools/aether.tools.js'
 import { logger } from '../logger.service.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
@@ -51,9 +52,18 @@ export const TOOLS = [
         // put to a stronger model and handed back as a tool result. The mechanism half of this
         // description is shared with every other desk; the clause below is this desk's own judgment
         // about WHEN, and is the only part that does not transfer.
+        // Aether — channel exposure for the name under research. Returns "not yet computed" when
+        // Phase 3 has not run; reason qualitatively in that state.
+        get_name_exposure: AETHER_TOOL_SPECS.get_name_exposure,
+        // Aether shock pipeline — active provisional predictions. Call in Phase 3 to surface
+        // macro channel pressure that confirms or contradicts the variant perception.
+        get_active_predictions: AETHER_TOOL_SPECS.get_active_predictions,
+        // consult is contractually last at every desk that declares it.
         consult: consultDescription(`Reach for it in exactly three situations: **the price target you are about to publish** — our number against the Street IS the edge, so the multiple and the arithmetic behind it have to hold up to someone attacking them; **a variant perception you cannot separate from consensus** — the bull and bear cases read as evenly weighted and you must say which way the evidence actually leans rather than splitting the difference; and **two valuation methods that disagree materially** (a DCF against comps, say) where you have to decide which one governs the target and defend that choice.`),
     }),
 ]
+
+const { get_name_exposure: _get_name_exposure, get_active_predictions: _get_active_predictions } = makeAetherToolHandlers()
 
 const TOOL_HANDLERS = {
     ...VALUATION_TOOL_HANDLERS,
@@ -67,6 +77,10 @@ const TOOL_HANDLERS = {
     // Unbound (market hours belong to the instrument, not the user) — so it lives in the
     // static map, unlike the venue handlers that are rebuilt per request around a userId.
     ...makeMarketHoursHandlers(),
+    // Unbound — channel exposure is a house-layer broadcast, no userId.
+    get_name_exposure: _get_name_exposure,
+    // Unbound — shock pipeline predictions are a house-layer broadcast, no userId.
+    get_active_predictions: _get_active_predictions,
 }
 
 export const analystAgentService = { chatStream }
@@ -160,6 +174,9 @@ export function _buildSystemPrompt(chatState, seed = null, audience = null) {
             + `${JSON.stringify(_withoutFlags(chatState.existing_coverage), null, 2)}`
             + _objectionsBlock(chatState.existing_coverage?.flags)
         : ''
+    const coverageListBlock = chatState?.coverage_symbols?.length && !chatState?.existing_coverage
+        ? `\nCOVERAGE BOOK — names already in coverage: ${chatState.coverage_symbols.join(', ')}.\nIf the user asks to research or cover one of these names and you are NOT in update mode, do NOT start the research. Instead, tell them the name is already in the book and ask whether they want to update the existing thesis or work on a different name.`
+        : ''
     // P4b: an Argus INVESTING-profile candidate handed over for research. Start Phase 1 with this name +
     // Argus's screen read as a provisional input — VERIFY it, don't take it on faith, and form your OWN view.
     const seedBlock = seed?.ticker
@@ -173,7 +190,7 @@ CURRENT DATE: ${today}. Resolve relative dates (this quarter, next earnings) aga
 ${audienceBlock ? `
 ${audienceBlock}
 
-` : ''}Active name: ${active}${seedBlock}${existingBlock}`
+` : ''}Active name: ${active}${seedBlock}${coverageListBlock}${existingBlock}`
     return [
         cachedBlock(_systemPrompt() + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
         { type: 'text', text: dynamic },

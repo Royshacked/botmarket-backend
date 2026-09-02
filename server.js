@@ -45,6 +45,7 @@ import { ensureTradeIndexes } from './services/tradeCapture.service.js'
 import { ensureExperienceIndexes } from './api/experience/experience.model.js'
 import { ensureWorkspaceIndexes } from './api/workspace/workspace.model.js'
 import { ensurePendingActionIndexes } from './services/pendingAction/pendingAction.repo.js'
+import { ensureAetherIndexes }        from './api/aether/aether.model.js'
 import { pendingActionRoutes } from './api/pendingAction/pendingAction.routes.js'
 import { threadService } from './services/thread.service.js'
 import { mentorRoutes } from './api/mentor/mentor.routes.js'
@@ -61,6 +62,7 @@ import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
 import { scannerRoutes }     from './api/scanner/scanner.routes.js'
 import { analystRoutes }     from './api/analyst/analyst.routes.js'
 import { strategyRoutes }    from './api/strategy/strategy.routes.js'
+import { aetherRoutes }      from './api/aether/aether.routes.js'
 import { axlRoutes }         from './api/axl/axl.routes.js'
 import { threadsRoutes }     from './api/threads/threads.routes.js'
 import { turnsRoutes }       from './api/turns/turns.routes.js'
@@ -77,6 +79,7 @@ import { paperMarkService }   from './monitoring/paperMark.service.js'
 import { guardSweepService } from './monitoring/guardSweep.service.js'
 import { marketBriefNotifier } from './monitoring/marketBrief.notify.js'
 import { marketOpenMonitor } from './monitoring/marketOpen.monitor.js'
+import { aetherSchedulerService } from './services/aetherScheduler.service.js'
 // The software exit monitor — kind-blind, and the caller positionMonitor.checkPosition lost when
 // Minos was deleted. Until it started, a stop that was not a plain price level was accepted, stored
 // and shown as protection while nothing evaluated it. Tied to a CAPABILITY, not to a desk.
@@ -172,7 +175,7 @@ if (config.isProduction) {
 // tests/unit/agentLimiterCoverage.test.js walks every mounted `/stream` route and fails when one
 // of them is not here, so the omission is caught at the point it is made.
 app.use('/api/auth', authLimiter)
-for (const desk of ['axl', 'mentor', 'portfolio', 'scanner', 'analyst', 'strategy']) {
+for (const desk of ['axl', 'mentor', 'portfolio', 'scanner', 'analyst', 'strategy', 'aether']) {
     app.use(`/api/${desk}/stream`, agentLimiter)
 }
 app.use('/api/axl/brief/stream', agentLimiter)
@@ -195,6 +198,7 @@ app.use('/api/pending-actions', pendingActionRoutes)
 app.use('/api/scanner',     scannerRoutes)
 app.use('/api/analyst',     analystRoutes)
 app.use('/api/strategy',    strategyRoutes)
+app.use('/api/aether',      aetherRoutes)
 app.use('/api/axl',         axlRoutes)
 app.use('/api/threads',     threadsRoutes)
 // Stopping an agent turn — its own endpoint because stopping and walking away are different
@@ -212,6 +216,7 @@ ensureTradeIndexes()
 ensureExperienceIndexes()
 ensureWorkspaceIndexes()
 ensurePendingActionIndexes()
+ensureAetherIndexes()
 threadService.ensureThreadIndexes()
 
 // ─── Background loops ─────────────────────────────────────────────────────────
@@ -252,6 +257,7 @@ function startBackgroundLoops() {
     startLoop('paperEquity',  paperEquityService)
     startLoop('paperMark',    paperMarkService)
     startLoop('marketBrief',  marketBriefNotifier)
+    startLoop('aetherScheduler', aetherSchedulerService)
 }
 
 const loopsLock = createInstanceLock({

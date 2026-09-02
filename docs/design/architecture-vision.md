@@ -4,6 +4,10 @@
 - No → house layer (runs once, writes to DB, all users read)
 - Yes → user layer (scoped to user + workspace)
 
+**Role split:**
+- `admin` — can author house-layer outputs (tilt, coverage batch, channel graph) and access admin-gated desks (Pythia, Argus→Prometheus feed, Prometheus lifecycle, Aether feed controls)
+- `trader` — all trading desks + workspace. Reads house output. Can trigger single-name on-demand research through Atlas.
+
 The monitors and reconciler always run across all workspaces. The workspace
 is a UI/authoring scope, never an engine filter.
 
@@ -12,14 +16,16 @@ is a UI/authoring scope, never an engine filter.
 ## 1. House Layer
 
 Runs once, shared across all users. No user identity involved.
+Admin is the human gate for house-layer authoring; the pipeline continues with
+existing state while the queue waits.
 
-| Process | Trigger | Output |
-|---|---|---|
-| **Pythia** | Monitor cadence / macro catalyst | One published tilt in DB — all users read the same view |
-| **Argus** (house mode) | Pythia publishes / updates tilt | Candidate list → Prometheus research queue (no human step) |
-| **Prometheus** | Argus candidate queue | Coverage theses in DB — owner-blind, all users read |
-| **Channel engine** | Scheduled | Channel states, K matrix, exposure matrix, forecasts in DB |
-| **Market Brief** | Daily, market open | One brief per TTL, cached across users |
+| Process | Trigger | Who can trigger | Output |
+|---|---|---|---|
+| **Pythia** | Monitor cadence / macro catalyst / admin on-demand | Admin only | One published tilt in DB — all users read the same view |
+| **Argus** (house mode) | Pythia publishes / updates tilt | Admin only (auto from Pythia) | Candidate list → Prometheus research queue |
+| **Prometheus** (batch) | Argus candidate queue | Admin only | Coverage theses in DB — owner-blind, all users read |
+| **Aether** | Scheduled + admin-curated | Admin authors; all users read | Channel states, K matrix, exposure matrix, sector/name feed |
+| **Market Brief** | Daily, market open | Automated | One brief per TTL, shared across all users |
 
 **The tilt is the mandate.** When Pythia publishes, Argus kicks off automatically
 → Prometheus queue → coverage in DB. No human is needed until Prometheus
@@ -32,7 +38,7 @@ confirms the coverage draft.
 Per-user, reads from the house layer. All per-user work is scoped to a
 workspace (live / paper / manual).
 
-### Atlas — three flows, no forced phases
+### Atlas — three flows + one on-demand path, no forced phases
 
 1. **Mandate build** — user activates a mandate → Atlas reads the Pythia tilt
    → fetches covered names in convicted sectors → allocates. Atlas is a pure
@@ -47,16 +53,18 @@ workspace (live / paper / manual).
    asks only for what it cannot derive (entry prices + quantities) → generates a
    monitored portfolio.
 
-**Coverage rule:** if coverage does not exist for a requested name → Prometheus
-researches it and puts it in DB. Same trigger regardless of which flow surfaced
-the name.
+4. **Uncovered name (on-demand)** — user building a portfolio asks for a name
+   that is not in coverage → Atlas hands the name to Prometheus (single-name
+   on-demand research, available to all users) → Prometheus researches and
+   writes coverage to DB → Atlas resumes and allocates the name. This path is
+   distinct from the admin-initiated batch research queue.
 
 **Coverage has two origins — Atlas must handle both:**
 
 | Origin | Has Aether signal? | What's present |
 |---|---|---|
 | Aether surfaced the name → Prometheus covered it | Yes | Thesis + PT + exposure score + lag profile + channel attribution |
-| Direct research (user request, Argus scan, Pythia-convicted sector) | No | Thesis + PT + qualitative conviction only |
+| Direct research (user request via Atlas, Argus scan, Pythia-convicted sector) | No | Thesis + PT + qualitative conviction only |
 
 Atlas allocates from a mixed pool. The Aether exposure score is optional
 enrichment, not a required field. When present, it is weighted; when absent,
@@ -79,46 +87,100 @@ allocation_weight = f(
 ```
 
 The mandate build pre-filter is Pythia's convicted sectors — Atlas never
-scans all covered names, only names inside convicted sectors. An
-Aether-surfaced name reaches the mandate pool naturally if it is covered and
-its sector is convicted. No separate routing path needed.
+scans all covered names, only names inside convicted sectors.
 
 ### Argus — three triggers, no pre-market scheduled scan
 
-1. **Pythia-triggered** — tilt published → Argus auto-scans convicted sectors →
-   candidate list → Prometheus queue
+1. **Pythia-triggered** (admin / house) — tilt published → Argus auto-scans
+   convicted sectors → candidate list → Prometheus batch queue
 2. **User scan** — user asks Argus against their own criteria → personal scan
    list → can feed Mentor
 3. **Mentor helper** — user building a trade with Mentor → turns to Argus
    mid-session to find or confirm a name
 
+Triggers 2 and 3 are available to all users. Trigger 1 is admin-only (fired
+automatically when Pythia publishes).
+
 ### Mentor
 
 Per-user setups and trades, scoped to user + workspace. Reads Argus scan lists.
 Constructs entry / stop / target from engine signals and Argus candidates.
+Available to all users.
 
 ---
 
-## 3. The Full Pipeline
+## 3. Admin-Only Desks
+
+### Pythia
+
+Admin-only desk. All users can read the published tilt and see the forecast
+view, but only admins can access the Pythia chat interface or trigger a new
+forecast (on-demand or cadence).
+
+- Chat with Pythia to author / revise the macro narrative
+- Trigger a forecast manually (outside the normal monitor cadence)
+- Confirm / reject the draft before it publishes to the house layer
+
+### Prometheus — coverage lifecycle
+
+Batch research (Argus-queued) is admin-only. On-demand single-name research
+(Atlas-triggered) is available to all users.
+
+**Coverage lifecycle states (admin-managed):**
+
+| State | Description | Who can transition |
+|---|---|---|
+| `queued` | Argus surfaced the name, waiting for research | Admin approves or rejects |
+| `draft` | Prometheus wrote the thesis, pending review | Admin confirms or revises |
+| `live` | Published coverage, visible to all desks | Admin retires or revises |
+| `revised` | Admin edits an existing live thesis | Admin publishes revision |
+| `retired` | Coverage dropped — name no longer in pool | Requires explicit admin action; no safe default |
+
+**Rules:**
+- Retiring coverage requires explicit admin action. No auto-timeout.
+- Revising creates a new draft state; the live thesis stays visible until the
+  revision is confirmed.
+- On-demand single-name research (user → Atlas → Prometheus) bypasses the
+  queue and goes straight to `draft`, then `live` on admin confirm.
+
+### Aether
+
+Admin-authors the channel graph. All users see a read view (TBD — exact UI not yet defined).
+
+**What Aether does:**
+- Maintains the channel graph (nodes, edges, weights, K matrix)
+- Feeds **sectors → Pythia** so Pythia can validate tilt against channel pressure scores
+- Feeds **names → Prometheus** so uncovered names with quantitative channel exposure get
+  added to the research queue
+- Exposes the channel state and exposure matrix to Atlas and Mentor as enrichment
+
+**User-facing surface:** TBD. At minimum, users should be able to see which channels
+are active and how a name they care about sits in the graph. Exact UI to be designed.
+
+---
+
+## 4. The Full Pipeline
 
 ```
-Pythia (macro conviction)
-  + Channel engine (quantitative exposure)
-         ↓
-       ARGUS  ← shared discovery engine
-      ↙      ↘
-Coverage      Setup/scan candidates
-candidates    (for Mentor)
-    ↓
-Prometheus → coverage in DB
-    ↓
-Atlas (allocates from pre-researched pool)
-Mentor (builds setups from scan lists)
+Aether (channel graph) ──→ sectors ──→ Pythia (macro conviction, admin)
+                       └──→ names ───→ Prometheus research queue
+                                  ↓
+                                ARGUS  ← shared discovery engine
+                               ↙      ↘
+                         Coverage      Setup/scan candidates
+                         candidates    (for Mentor)
+                               ↓
+                         Prometheus → coverage in DB
+                               ↓
+                 Atlas (allocates from pre-researched pool)
+                                  ↑
+                         on-demand: Atlas → Prometheus → Atlas
+                 Mentor (builds setups from scan lists)
 ```
 
 ---
 
-## 4. How the Channel Engine Feeds Each Desk
+## 5. How the Channel Engine Feeds Each Desk
 
 See `docs/design/channel-graph-build-spec.md` §4 for the full contract. Summary:
 
@@ -156,24 +218,18 @@ Mentor constructs entry / stop / target.
 
 ### Lag determines the desk — always
 
-The same event, at different hops, routes to different desks. The exposure
-matrix's `lag_profile` makes this deterministic:
-
 | Signal | Lag | Desk | Nature |
 |---|---|---|---|
 | 1st / 2nd order repricing gap | Days–weeks | Mentor | Setup — trade before gap closes |
 | Structural channel shift | Months–quarters | Atlas | Position — own the exposure |
 | Regime change | Quarters | Pythia → Atlas | Tilt — rebalance the book |
 
-The Hormuz 1st-order airline trade is Mentor. The 3rd-order regional bank play
-is Atlas. Not a judgment call at routing time — read off `lag_profile`.
-
 ---
 
-## 5. The Flywheel
+## 6. The Flywheel
 
 ```
-engine surfaces uncovered 2nd/3rd order name
+Aether engine surfaces uncovered 2nd/3rd order name
   → Argus screens it
   → Prometheus covers it → DB grows
   → Pythia cross-check improves
@@ -185,16 +241,15 @@ engine surfaces uncovered 2nd/3rd order name
 ```
 
 The DB is the primary cost-reduction mechanism. A richer shared state means
-less per-user computation at every desk. Coverage researched once is read by
-Pythia, Atlas, Mentor, and the coverage monitor indefinitely.
+less per-user computation at every desk.
 
 ---
 
-## 6. Token Savings
+## 7. Token Savings
 
 | What | How costs are reduced |
 |---|---|
-| Pythia | One run per review cycle, not per user session |
+| Pythia | One run per review cycle (admin), not per user session |
 | Coverage | Researched once per name, consumed by every desk forever |
 | Argus house scan | Event-driven (tilt change), not daily |
 | Atlas | Discovery and research cost already paid — Atlas just fetches + allocates |
@@ -205,36 +260,25 @@ Argus personal scans, all conversations.
 
 ---
 
-## 7. Admin / Ops Layer (not built)
+## 8. Admin / Ops Layer
 
 - Research queue management — names Argus surfaced, waiting for Prometheus
-- Coverage lifecycle — initiate, maintain, drop
+- Coverage lifecycle — initiate, revise, maintain, retire
 - Channel engine edge governance — K admission process (`channel-graph-build-spec.md` §8)
-- Pythia re-author approval — already exists as the confirm-offer pattern
+- Pythia re-author / trigger — already exists as the confirm-offer pattern
 
-Prometheus uses draft → confirm before publishing coverage. The admin layer
-manages the research queue that feeds Prometheus and governs the channel
-engine's edge admission.
-
-### 7.1 User roles
-
-Multi-user platform. Role enum on the user record:
+### 8.1 User roles
 
 | Role | Access |
 |---|---|
-| `admin` | Ops dashboard + all trading desks. Superset of trader. |
-| `trader` | Own desks + workspace. Reads house output. |
+| `admin` | Pythia desk, Aether feed controls, Prometheus lifecycle, Argus→Prometheus feed, ops dashboard + all trading desks. Superset of trader. |
+| `trader` | Mentor, Atlas, Argus (user scan + Mentor helper), reads Pythia tilt / Aether view / coverage. |
 | `viewer` | Read-only. Add later if needed. |
 
 Admin is set by an existing admin or seeded at setup. Traders cannot
-self-promote. At least two admins should exist at all times — no single
-point of failure on one person's session.
+self-promote. At least two admins should exist at all times.
 
-### 7.2 Admin absence — the pipeline must never block
-
-The house layer runs on a schedule regardless of who is logged in. Ops
-actions (research queue approvals, edge governance, coverage lifecycle) are
-human gates in that pipeline — if no admin acts, the pipeline stalls silently.
+### 8.2 Admin absence — the pipeline must never block
 
 **Design rule: ops actions are async approvals, not blocking gates.**
 
@@ -242,7 +286,7 @@ human gates in that pipeline — if no admin acts, the pipeline stalls silently.
 - Admin is notified (in-app, email) when items need a decision
 - Nothing is lost; nothing blocks traders from using the desks
 
-**Timeout defaults** — the queue drains itself if unchallenged:
+**Timeout defaults:**
 
 | Queue | Default | Rationale |
 |---|---|---|
@@ -250,14 +294,57 @@ human gates in that pipeline — if no admin acts, the pipeline stalls silently.
 | Provisional K edge | Auto-reject after one quarter | Edges are high-risk to add |
 | Coverage drop | Requires explicit admin action | No safe default for deletion |
 
-Admin is the override, not the gatekeeper. A logged-out admin should be
-invisible to traders — they see slightly stale coverage until the queue
-drains, nothing more.
+Admin is the override, not the gatekeeper.
+
+---
+
+## 9. Implementation plan — `feat/multiuser-refactor` (branch)
+
+### Agreed design decisions
+
+**House pipeline (admin only):**
+- Pythia forecast → Argus house scan → all schools, all cap sizes (no cap filter) → Prometheus batch research → coverage tagged with school(s)
+- Coverage is house-owned (no userId). All users read. Only admin can write (CRUD).
+- Every Prometheus revision updates the school tags if the fit changes.
+
+**Atlas — four flows, no Argus in the portfolio build loop:**
+- Atlas fetches directly from the Prometheus coverage pool (`get_coverage`).
+- For mandate build: filter by convicted sectors (from Pythia tilt) AND mandate selection school.
+- `<screen_request>` does NOT exist in the portfolio build flow. Atlas never routes to Argus for portfolio construction.
+- Empty sleeve (no coverage for this sector/school) → tell the user, do not hand off to Argus.
+- User explicitly asks for an uncovered name → `<coverage_request>` → research queue → Prometheus.
+- `<coverage_request>` is the only Atlas → Prometheus path available to traders.
+
+**Argus — unchanged for now:**
+- Trade desk pipeline (user scan + Mentor helper) unchanged.
+- Users can still chat with Argus directly.
+- Argus is NOT in the Atlas portfolio build pipeline.
+
+**Schools:**
+- Source of truth: `investorSchools.js` — hyphens (`quality-value`, `growth-durability`, `income`, `passive`).
+- `coverage.service.js` SCHOOLS must match (hyphens). Mandate block emits hyphens. Filter must match.
+- Prometheus tags schools; Atlas reads them. Tag is a pre-filter, not a cage — Atlas still applies school judgment over each thesis.
+
+**Aether — deferred (build last).**
+
+---
+
+### Step status (as of 2026-08-26)
+
+| # | What | Status |
+|---|---|---|
+| 1 | Coverage pivot — house-owned, role split, admin middleware | ✅ committed (`5c12b8c`) |
+| 2 | Admin pipeline — research queue, Argus house scan, Pythia gate | ✅ committed (`159e894`) |
+| 3 | `school` filter on `getCoverage` + schools shown per coverage line + tests | ✅ done, uncommitted |
+| 4 | `coverage_request` 4th Atlas flow — parse, enqueue, strip from reply + tests | ✅ done, uncommitted |
+| 5 | Add `school` to `get_coverage` tool schema (`agentTools.registry.js`) | ✅ done |
+| 6 | Fix SCHOOLS naming — align `coverage.service.js` to hyphens (matches `investorSchools.js`) | ✅ done |
+| 7a | Prometheus (analyst) prompt — instruct to tag school(s) on every `<coverage>` block and update on revision | ✅ done |
+| 7b | Atlas prompt Phase 4 — remove `<screen_request>` from portfolio build; add `<coverage_request>` for user-named uncovered name; instruct `get_coverage` call to filter by sector + school | ✅ done |
 
 ---
 
 ## Related
 
 - `docs/design/channel-graph-build-spec.md` — channel engine full build spec
-- `docs/design/opportunist-desk.md` — Tyche desk design (reads engine output, builds lag-trade candidates)
 - `docs/desks/trade-pipeline.md` — Mentor pipeline detail

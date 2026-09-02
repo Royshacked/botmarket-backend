@@ -18,29 +18,17 @@ const RESEARCH_TIMEOUT_MS = 3 * 60 * 1000
 // Injectable IO so tests exercise the branching (draft/no-draft, initiate/update, notify) without a
 // real LLM run or DB writes.
 const _deps = {
-    research: (args)               => analystAgentService.chatStream(args),
-    initiate: (draft, userId)      => coverageService.initiateCoverage(draft, userId),
-    update:   (id, patch, userId)  => coverageService.updateCoverage(id, patch, userId),
-    notify:   (args)               => notifyCoverageRefreshed(args),
-    // The thesis being refreshed. Fetched so the agent runs in UPDATE mode (analyst.agent.service
-    // `existing_coverage`) instead of from a blank slate — see _existingCoverage below.
-    existing: (userId, symbol)     => _existingCoverage(userId, symbol),
+    research: (args)          => analystAgentService.chatStream(args),
+    initiate: (draft)         => coverageService.initiateCoverage(draft),
+    update:   (id, patch)     => coverageService.updateCoverage(id, patch),
+    notify:   (args)          => notifyCoverageRefreshed(args),
+    existing: (symbol)        => coverageService.getCoverageBySymbol(symbol),
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
 /** Why a persist failed, for the caller's log — the service's own reason when it gave one. */
 const _reason = r => (typeof r === 'string' && r.trim() ? r.trim() : 'persist_failed')
 
-/** The user's live thesis for this name, or null. Never throws — a refresh must survive a bad read. */
-async function _existingCoverage(userId, symbol) {
-    try {
-        const rows = await coverageService.getCoverage(userId)
-        return (Array.isArray(rows) ? rows : [])
-            .find(c => String(c.symbol ?? '').toUpperCase() === symbol) ?? null
-    } catch {
-        return null
-    }
-}
 
 // The headless research prompt. A refresh is a re-model of an EXISTING thesis, optionally focused by
 // Atlas's question. Pure — exported for tests.
@@ -77,7 +65,7 @@ export async function refreshCoverage({ userId, ticker, question = null, portfol
         // monitor schedules re-models off earnings dates, every one of them would discard the prior
         // view rather than revise against it, which is exactly what the revision trail exists to show.
         // It also carries the language of the existing thesis (see _buildRefreshPrompt).
-        const existing = await deps.existing(userId, sym)
+        const existing = await deps.existing(sym)
 
         const result = await withTimeout(deps.research({
             messages:  [],
@@ -99,12 +87,12 @@ export async function refreshCoverage({ userId, ticker, question = null, portfol
         // Persist: initiate a fresh thesis, or update the existing one (appends a revision). initiate
         // returns already_covered + the id when a thesis already exists for (user, symbol).
         let coverageId = null, persisted = false, failReason = 'persist_failed'
-        const init = await deps.initiate(draft, userId)
+        const init = await deps.initiate(draft)
         if (init?.ok) {
             coverageId = init.doc?.id ?? null
             persisted  = true
         } else if (init?.reason === 'already_covered') {
-            const upd = await deps.update(init.id, draft, userId)
+            const upd = await deps.update(init.id, draft)
             coverageId = init.id
             persisted  = Boolean(upd?.ok)
             if (!upd?.ok) { failReason = _reason(upd?.reason); logger.warn(LOG, 'coverage update returned not-ok', { id: init.id, reason: upd?.reason, detail: upd?.detail }) }

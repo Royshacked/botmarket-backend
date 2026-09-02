@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { postCard } from '../../services/notifyCard.js'
 import { notifyManualExit, notifyManualEntry } from '../../services/manualNotify.service.js'
 import { notifySetupEntryConfirm, notifyIdeaEntryConfirm } from '../../services/tradeNotify.service.js'
-import { notifyCoverageEvent } from '../../services/coverageNotify.service.js'
 
 // The one rule these tests exist to hold: POSTING A CARD NEVER THROWS.
 //
@@ -65,9 +64,6 @@ test('an entry-confirm notify never throws into the monitor that sent it', async
     ))
 })
 
-test('a coverage notify never throws into the monitor loop', async () => {
-    await assert.doesNotReject(() => notifyCoverageEvent({ symbol: 'NVDA', userId: 'u1' }, { state: 'target_hit' }))
-})
 
 test('notifiers with nothing to send resolve to null rather than erroring', async () => {
     // Empty legs / missing owner are ordinary states, not failures.

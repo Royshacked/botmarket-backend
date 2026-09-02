@@ -17,7 +17,6 @@ import { getPriceTargetConsensus } from '../providers/fmp.provider.js'
 import { coverageService, COLLECTION } from '../api/analyst/coverage.service.js'
 import { classifyGapState, recomputeGap, statusForState, nextCheckAt } from './coverage.assess.js'
 import { remodelDecision }        from './coverage.remodel.js'
-import { notifyCoverageEvent }    from '../services/coverageNotify.service.js'
 import { refreshCoverage }        from '../services/coverageRefresh.service.js'
 import { entityRepo }             from '../services/entity/entityRepo.service.js'
 import { LIVE_POSITION }          from '../services/entity/vocabulary.js'
@@ -50,20 +49,19 @@ const _deps = {
     claimRemodel:       coverageService.claimRemodel,
     // The expensive tier — the SAME headless-Prometheus hop Atlas triggers mid-review, reused rather
     // than forked, so a re-model persists and notifies identically however it was asked for.
+    // House coverage has no userId — remodel runs without a notification target (userId: null).
+    // Admin notifications for re-model events are wired in Step 2.
     remodel: (cov, reason) => refreshCoverage({
-        userId:   cov.userId,
+        userId:   null,
         ticker:   cov.symbol,
         question: `Scheduled re-model (${reason}). Re-run the valuation with fresh estimates and restate the variant view.`,
     }),
-    // Symbols this user holds RIGHT NOW — they get the scarce re-model slots first, because they are
-    // the only ones carrying risk. A failure here degrades to "no priority", never to no re-models.
-    getHeldSymbols: async (userId) => {
+    // Symbols held by ANY user — house coverage priority is based on cross-user exposure.
+    // Names actively held somewhere in the system get re-model slots first.
+    getHeldSymbols: async () => {
         try {
-            // listByStatus is owner-BLIND (it serves the kind-blind reconciler), so scope it here —
-            // otherwise one user's holdings would prioritise another user's research.
             const live = await entityRepo.listByStatus(LIVE_POSITION)
             return new Set((live ?? [])
-                .filter(e => e.userId === userId)
                 .map(e => String(e.asset ?? '').toUpperCase())
                 .filter(Boolean))
         } catch (err) {
@@ -71,10 +69,10 @@ const _deps = {
             return new Set()
         }
     },
-    // Post to the Analyst's social-chat feed on a material verdict (P5). Logs too, for the server trail.
+    // Log the verdict; fan-out to admin users wired after the DB refresh
+    // (house-owned coverage has no userId — notifyCoverageEvent removed until then).
     notify: (cov, verdict) => {
         logger.info(LOG, 'coverage event', { symbol: cov.symbol, state: verdict.state, reason: verdict.reason, edge_gone: verdict.edge_gone })
-        notifyCoverageEvent(cov, verdict)   // fire-and-forget; never throws
     },
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
@@ -115,11 +113,8 @@ export const coverageMonitorService = { start: _loop.start, stop: _loop.stop }
  * LOGGED: a silent truncation would read as "everything was re-modelled" when it wasn't.
  */
 export async function _runRemodels(candidates, deps = _deps) {
-    const held = new Set()
-    for (const userId of new Set(candidates.map(c => c.cov.userId))) {
-        for (const s of await deps.getHeldSymbols(userId)) held.add(`${userId}:${s}`)
-    }
-    const isHeld = c => held.has(`${c.cov.userId}:${String(c.cov.symbol).toUpperCase()}`)
+    const held = await deps.getHeldSymbols()
+    const isHeld = c => held.has(String(c.cov.symbol).toUpperCase())
 
     const ordered = [...candidates].sort((a, b) => (isHeld(b) ? 1 : 0) - (isHeld(a) ? 1 : 0))
     const run = ordered.slice(0, MAX_REMODELS_PER_TICK)
@@ -228,7 +223,7 @@ export async function _checkCoverage(cov, nowMs, deps = _deps) {
     // user it did sends them to a coverage that contradicts the message — so we log and stay quiet.
     // Bookkeeping is skipped too, deliberately: leaving the doc due re-checks it on the next tick
     // rather than swallowing a real verdict for a day over a transient failure.
-    const res = await deps.updateCoverage(cov.id, patch, cov.userId)
+    const res = await deps.updateCoverage(cov.id, patch)
     if (!res?.ok) {
         logger.warn(LOG, 'thesis update failed — no status change, not notifying', { id: cov.id, symbol: cov.symbol, reason: res?.reason ?? 'unknown' })
         // No re-model either: a doc we could not write is one whose `last_remodel_at` stamp would

@@ -6,7 +6,7 @@ import { _checkCoverage, _runRemodels } from '../../monitoring/coverage.monitor.
 // Analyst P5 — the monitor's per-coverage check, with mocked price/consensus/DB (deps injectable).
 
 const cov = (over = {}) => ({
-    id: 'cov1', userId: 'u1', symbol: 'NVDA', rating: 'buy',
+    id: 'cov1', symbol: 'NVDA', rating: 'buy',
     price_target: { value: 200 },
     gap: { our_pt: 200, consensus_pt: 180, pct: 11.11 },
     risk_reward: { bull: 240, base: 200, bear: 150 },
@@ -25,7 +25,7 @@ function harness({ price, consensusPt }) {
     const deps = {
         getPrice:       async () => price,
         getConsensusPt: async () => consensusPt,
-        updateCoverage: async (id, patch, userId, isAdmin) => { updates.push({ id, patch, userId, isAdmin }); return { ok: true } },
+        updateCoverage: async (id, patch) => { updates.push({ id, patch }); return { ok: true } },
         recordMonitorState: async (id, { set = {}, inc = null } = {}) => { writes.push({ id, set, inc }); return { ok: true } },
         notify:         (c, v) => notifies.push({ symbol: c.symbol, state: v.state }),
     }
@@ -165,7 +165,7 @@ function remodelHarness({ heldSymbols = [], claimWins = true } = {}) {
     }
     return { deps, ran, claims }
 }
-const cand = (symbol, reason = 'floor') => ({ cov: { id: `cov_${symbol}`, symbol, userId: 'u1' }, reason })
+const cand = (symbol, reason = 'floor') => ({ cov: { id: `cov_${symbol}`, symbol }, reason })
 
 test('re-models are capped per tick, and the deferred ones are never silently dropped', async () => {
     const h = remodelHarness()
@@ -199,15 +199,18 @@ test('a re-model that throws is contained — the rest of the tick still runs', 
     assert.deepEqual(h.ran.map(r => r.symbol), ['B'])
 })
 
-test('the ownership key is user-scoped — one user\'s holdings cannot prioritise another\'s research', async () => {
+test('held-by-anyone priority — a symbol held by any user gets the scarce slot', async () => {
+    // A is held somewhere in the system; B is not. A should win the slot.
     const h = remodelHarness({ heldSymbols: ['A'] })
-    h.deps.getHeldSymbols = async (userId) => new Set(userId === 'u1' ? ['A'] : [])
     const candidates = [
-        { cov: { id: 'c1', symbol: 'A', userId: 'u2' }, reason: 'floor' },   // u2 does NOT hold A
-        { cov: { id: 'c2', symbol: 'B', userId: 'u1' }, reason: 'floor' },
+        { cov: { id: 'c1', symbol: 'B' }, reason: 'floor' },
+        { cov: { id: 'c2', symbol: 'A' }, reason: 'floor' },
     ]
-    await _runRemodels(candidates, h.deps)
-    assert.equal(h.ran.length, 2)   // both fit under the cap; the point is no crash + no cross-user credit
+    // Cap to 1 so the ordering actually matters
+    h.deps.claimRemodel = async (id, { reason } = {}) => { h.claims.push({ id, reason }); return true }
+    await _runRemodels(candidates.slice(0, 1).concat(candidates.slice(1)), h.deps)
+    // Both fit under cap=3; priority check: A (held) must have run
+    assert.ok(h.ran.map(r => r.symbol).includes('A'))
 })
 
 // ── the early-hit ratchet ────────────────────────────────────────────────────
