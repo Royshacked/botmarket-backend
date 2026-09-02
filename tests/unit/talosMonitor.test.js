@@ -75,12 +75,14 @@ test('an unknown price never trips the gate', () => {
 // pay for it in reads (docs/desks/talos-guards.md).
 
 test('a wake with nothing to say comes back at the horizon ceiling, whatever price is doing', async () => {
+    // Needs last_read_at: a first-ever wake would run an assessment; this tests the idle heartbeat.
+    const setup = { ...LIVE, scenarios: [], monitor_state: { ...LIVE.monitor_state, last_read_at: new Date(T - 60_000).toISOString() } }
     const deps = stubDeps({ price: 238.0 })          // sitting right on its own entry
-    await _checkSetup({ ...LIVE, scenarios: [] }, T, deps)
+    await _checkSetup(setup, T, deps)
     const near = deps.writes[0]['monitor_state.next_check_at']
 
     const far = stubDeps({ price: 300.0 })           // miles away
-    await _checkSetup({ ...LIVE, scenarios: [] }, T, far)
+    await _checkSetup(setup, T, far)
 
     assert.equal(near, far.writes[0]['monitor_state.next_check_at'], 'distance no longer sets the pace')
     assert.equal(near, new Date(T + 240 * 60_000).toISOString(), 'the swing ceiling')
@@ -643,7 +645,9 @@ test('a closed market skips the price fetch AND the assessment entirely', async 
 
 test('price outside every zone reschedules without ever calling the model', async () => {
     let assessed = false
-    const res = await _checkSetup(LIVE, T, stubDeps({
+    // Needs last_read_at so this is treated as an ongoing heartbeat, not a first wake.
+    const initialized = { ...LIVE, monitor_state: { ...LIVE.monitor_state, last_read_at: new Date(T - 60_000).toISOString() } }
+    const res = await _checkSetup(initialized, T, stubDeps({
         getPrice: async () => 300,
         assess:   async () => { assessed = true; return {} },
     }))
