@@ -45,7 +45,8 @@ async function signin(username, password) {
         throw err
     }
 
-    const payload = { _id: user.id, username: user.username, fullname: user.fullname, role: user.role ?? 'trader' }
+    const role    = user.role ?? (user.isAdmin ? 'admin' : 'trader')
+    const payload = { _id: user.id, username: user.username, fullname: user.fullname, role }
     const token = jwt.sign(payload, config.jwtSecret, { expiresIn: '7d' })
 
     logger.info(LOG, 'user signed in', { username })
