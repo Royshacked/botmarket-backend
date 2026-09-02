@@ -271,6 +271,23 @@ export async function getActiveOpportunities(agent = null) {
     }
 }
 
+/**
+ * Latest predicted channel state (news-adjusted z-scores between FRED releases), or null.
+ * Document shape: { channels, fred_anchor, news_delta_applied, fred_date, run_date, updated_at }
+ * Written by B1c in the Python compute repo after each news ingest run.
+ */
+export async function getPredictedChannelState() {
+    try {
+        const db  = await getDb()
+        const doc = await db.collection(COLLECTIONS.PREDICTED_CHANNEL_STATE)
+            .findOne({ _id: 'latest' }, { projection: { _id: 0 } })
+        return doc ?? null
+    } catch (err) {
+        logger.warn(LOG, 'getPredictedChannelState failed', err.message)
+        return null
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Exposure record for one ticker, or null. */

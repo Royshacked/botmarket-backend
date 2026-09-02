@@ -23,10 +23,11 @@ export const COLLECTIONS = {
     GOVERNANCE_LOG:  'aether_governance_log',
     DECAY_AUDIT:     'aether_decay_audit',
     // Mission 5 (shock pipeline)
-    PREDICTIONS:         'aether_predictions',
-    VALIDATION_OUTCOMES: 'aether_validation_outcomes',
-    OPPORTUNITIES:       'aether_opportunities',
-    PREDICTED_SIGNALS:   'aether_predicted_signals',
+    PREDICTIONS:             'aether_predictions',
+    VALIDATION_OUTCOMES:     'aether_validation_outcomes',
+    OPPORTUNITIES:           'aether_opportunities',
+    PREDICTED_SIGNALS:       'aether_predicted_signals',
+    PREDICTED_CHANNEL_STATE: 'aether_predicted_channel_state',
 }
 
 export async function ensureAetherIndexes() {

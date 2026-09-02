@@ -4,7 +4,7 @@
 // house-layer broadcasts, same pattern as the strategy desk's tilt reads.
 
 import { aetherAgentService }                        from '../../services/agents/aether.agent.service.js'
-import { getChannelState, getForecasts, getExposure, getRecentValidationOutcomes, getActiveOpportunities, getActivePredictedSignals } from './aether.service.js'
+import { getChannelState, getForecasts, getExposure, getRecentValidationOutcomes, getActiveOpportunities, getActivePredictedSignals, getPredictedChannelState } from './aether.service.js'
 import { streamAgentResponse, sseAgentCallbacks }    from '../_shared/sse.util.js'
 import { parseChatMessages }                         from '../_shared/parse.util.js'
 import { logger }                                    from '../../services/logger.service.js'
@@ -41,6 +41,16 @@ export async function getState(req, res) {
     } catch (err) {
         logger.error(LOG, 'getState failed', err)
         res.status(500).json({ error: 'Failed to read channel state' })
+    }
+}
+
+export async function getPredictedState(req, res) {
+    try {
+        const doc = await getPredictedChannelState()
+        res.json(doc)
+    } catch (err) {
+        logger.error(LOG, 'getPredictedState failed', err)
+        res.status(500).json({ error: 'Failed to read predicted channel state' })
     }
 }
 
