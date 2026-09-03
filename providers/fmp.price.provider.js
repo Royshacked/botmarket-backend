@@ -355,5 +355,23 @@ export async function getFmpCandles(ticker, options = {}) {
         .sort((a, b) => a.timestamp - b.timestamp)   // ascending — aggregation + downstream expect it
 
     if (spec.groupBy) return groupOhlcByPeriod(mapped, spec.groupBy)   // week/month built from daily EOD
-    return spec.aggregate > 1 ? aggregateOhlc(mapped, spec.aggregate) : mapped
+
+    // EOD daily bars: no dedup needed — each bar is one calendar day and FMP doesn't duplicate them.
+    if (spec.kind !== 'intraday') return mapped
+
+    // FMP occasionally emits two rows within the same bar period — e.g. "10:30:00" and "10:30:30"
+    // for a 5-min bar — causing duplicate candles on the chart. Normalise every timestamp to its
+    // slot floor and keep the first occurrence (the array is ascending, so the canonical ":00" row
+    // wins when it exists; an off-boundary-only bar is corrected in place).
+    const barSec = spec.interval.endsWith('min')
+        ? parseInt(spec.interval, 10) * 60
+        : parseInt(spec.interval, 10) * 3600
+    const bySlot = new Map()
+    for (const c of mapped) {
+        const slot = Math.floor(c.timestamp / barSec) * barSec
+        if (!bySlot.has(slot)) bySlot.set(slot, { ...c, timestamp: slot })
+    }
+    const deduped = [...bySlot.values()]
+
+    return spec.aggregate > 1 ? aggregateOhlc(deduped, spec.aggregate) : deduped
 }
