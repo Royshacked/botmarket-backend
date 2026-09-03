@@ -7,7 +7,7 @@
 // Aether reasons qualitatively (LLM knowledge) in that state and says so plainly.
 
 import { makeToolHandler }   from '../agentUtils.js'
-import { getChannelState, getCurrentRegime, getExposure, getTaxonomy, getForecasts, getCalibration, getPortfolioSlots, getInterference, getLossSurface, getAllCandidates, getDecayAudit, getActiveShockPredictions, getRecentValidationOutcomes, getActiveOpportunities } from '../../api/aether/aether.service.js'
+import { getChannelState, getCurrentRegime, getExposure, getTaxonomy, getForecasts, getCalibration, getPortfolioSlots, getInterference, getLossSurface, getAllCandidates, getDecayAudit, getActiveShockPredictions, getRecentValidationOutcomes, getActiveOpportunities, getOpportunityCardsByTicker } from '../../api/aether/aether.service.js'
 
 const LOG = '[aetherTools]'
 
@@ -87,6 +87,7 @@ export const AETHER_TOOL_SPECS = {
     get_decay_audit:       `Latest decay audit from Phase 8: each existing K edge (channel transmission weight) re-estimated against the most recent 2 years of proxy data. Each edge is labelled keep / demote / delete based on how much of its original weight survives in recent data. "Dead edges are worse than missing ones — they generate confident wrong forecasts." Returns "not yet run" when no audit has been completed. Call it when the user asks about model staleness, whether any channel relationships have weakened, or when discussing model maintenance and re-estimation.`,
     get_active_predictions: `Active provisional channel predictions from the Aether shock pipeline: channels the news pipeline currently expects to move, with direction, magnitude, confidence, lag, and the reasoning for each signal. Groups by channel so you can see the net picture per channel across multiple news events. Returns "no active signals" when the pipeline has not produced any predictions yet. Call this during Phase 3 to check whether any macro channels have live pressure that confirms or contradicts your variant perception — then cross-reference with get_name_exposure({ticker}) to see how exposed the name is to those channels. No arguments.`,
     get_shock_feed: `The Aether shock feed returns three lists: (1) outcomes — most recent FRED-confirmed and rejected channel predictions with channel, direction, and Brier calibration score; (2) opportunities — active confirmed cards: ticker, direction, why (full thesis from news → FRED confirmation), lag window, trade type (swing/position), agent (mentor/atlas), and risk note; (3) predicted_signals — active predicted cards from news predictions not yet FRED-confirmed: same shape as opportunities but earlier in the pipeline (thesis = news headline → channel → ticker exposure chain, no Brier yet). Use predicted_signals as early-warning context; use opportunities as hard macro catalysts. Argus: call in Phase 2, screen_candidates inside affected sectors. Mentor/Atlas: call when user asks about macro-driven trades — opportunities are actionable now, predicted_signals are watch-list.`,
+    get_ticker_signals: `Active aether signals for ONE ticker: FRED-confirmed opportunity cards (opportunities[]) and news-provisional predicted signals (signals[]). Each entry carries channel_id, direction, magnitude, lag_weeks_min/max, confidence_llm, ticker_direction (long/short), why, when, risk_note, and action_label. Call this during a PT revision or coverage re-model to see what channel pressure is currently pointing at this name. Arg: { ticker }.`,
 }
 
 // ── Formatters (pure — exported for testing) ─────────────────────────────────
@@ -564,6 +565,37 @@ export function formatShockFeed(outcomes, opportunities) {
     ].join('\n')
 }
 
+export function formatTickerSignals(ticker, { opportunities = [], signals = [] } = {}) {
+    if (!opportunities.length && !signals.length) {
+        return `AETHER SIGNALS — ${ticker}: no active signals. No channel pressure currently confirmed or predicted for this name.`
+    }
+
+    const renderCard = (c, label) => {
+        const lagStr = c.lag_weeks_min === c.lag_weeks_max ? `${c.lag_weeks_min}w` : `${c.lag_weeks_min}–${c.lag_weeks_max}w`
+        const lines = [
+            `  ${c.ticker_direction?.padEnd(6) ?? '?'.padEnd(6)} ${(c.channel_id ?? '').padEnd(24)} `
+            + `${(c.direction ?? '').padEnd(6)} ${(c.magnitude ?? '').padEnd(8)} `
+            + `lag=${lagStr}  conf=${(c.confidence_llm ?? 0).toFixed(2)}  [${label}]`,
+        ]
+        if (c.why)  lines.push(`    Why:  ${c.why}`)
+        if (c.when) lines.push(`    When: ${c.when}`)
+        if (c.action_label && c.action_label !== 'watch') lines.push(`    Action: ${c.action_label}`)
+        return lines.join('\n')
+    }
+
+    const out = [`AETHER SIGNALS — ${ticker} (${opportunities.length} confirmed, ${signals.length} provisional):`]
+    if (opportunities.length) {
+        out.push('\nCONFIRMED (FRED-validated):')
+        for (const c of opportunities) out.push(renderCard(c, 'confirmed'))
+    }
+    if (signals.length) {
+        out.push('\nPROVISIONAL (news-driven, awaiting FRED):')
+        for (const c of signals) out.push(renderCard(c, 'provisional'))
+    }
+    out.push('\nUse these channel deltas with get_name_exposure({ticker}) elasticity to compute a PT revision.')
+    return out.join('\n')
+}
+
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 export function makeAetherToolHandlers() {
@@ -625,5 +657,9 @@ export function makeAetherToolHandlers() {
                 return formatShockFeed(outcomes, opportunities)
             },
             (err) => `Could not read Aether shock feed: ${err.message}`, LOG),
+
+        get_ticker_signals: makeToolHandler('get_ticker_signals',
+            async ({ ticker }) => formatTickerSignals(ticker, await getOpportunityCardsByTicker(ticker)),
+            (err, { ticker }) => `Could not read aether signals for ${ticker}: ${err.message}`, LOG),
     }
 }

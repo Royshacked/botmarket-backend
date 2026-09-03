@@ -642,6 +642,16 @@ export const TOOL_SCHEMAS = {
         "type": "object",
         "properties": {}
     },
+    get_ticker_signals: {
+        "type": "object",
+        "properties": {
+            "ticker": {
+                "type": "string",
+                "description": "The ticker to look up, e.g. AAPL, XOM"
+            }
+        },
+        "required": ["ticker"]
+    },
 }
 
 /** Every tool the registry knows. */

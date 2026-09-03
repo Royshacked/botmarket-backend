@@ -290,6 +290,31 @@ export async function getPredictedChannelState() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Active opportunity cards + predicted signals for a specific ticker.
+ * Used by Prometheus when revising a coverage that appears in the shock feed.
+ */
+export async function getOpportunityCardsByTicker(ticker) {
+    try {
+        const upper = ticker.toUpperCase()
+        const db = await getDb()
+        const [opportunities, signals] = await Promise.all([
+            db.collection(COLLECTIONS.OPPORTUNITIES)
+                .find({ ticker: upper, status: 'active' }, { projection: { _id: 0 } })
+                .sort({ confidence_llm: -1 })
+                .toArray(),
+            db.collection(COLLECTIONS.PREDICTED_SIGNALS)
+                .find({ ticker: upper, status: 'active' }, { projection: { _id: 0 } })
+                .sort({ confidence_llm: -1 })
+                .toArray(),
+        ])
+        return { opportunities, signals }
+    } catch (err) {
+        logger.warn(LOG, 'getOpportunityCardsByTicker failed', err.message)
+        return { opportunities: [], signals: [] }
+    }
+}
+
 /** Exposure record for one ticker, or null. */
 export async function getExposure(ticker) {
     try {

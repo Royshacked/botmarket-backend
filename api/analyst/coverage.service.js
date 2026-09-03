@@ -53,6 +53,7 @@ export const coverageService = {
     captureResearchBasis,
     recordMonitorState,
     claimRemodel,
+    scheduleAetherRemodel,
 }
 
 // ─── monitor.* namespace ─────────────────────────────────────────────────────
@@ -75,6 +76,24 @@ async function claimRemodel(id, { previousAt = null, reason, at = new Date().toI
         },
     )
     return res.modifiedCount === 1
+}
+
+async function scheduleAetherRemodel(symbol, reason) {
+    try {
+        const db  = await getDb()
+        const sym = String(symbol).toUpperCase().trim()
+        const res = await db.collection(COLLECTION).updateOne(
+            { symbol: sym, status: { $ne: 'retired' } },
+            { $set: {
+                'monitor.next_check_at':         new Date().toISOString(),
+                'monitor.pending_aether_remodel': reason,
+            }},
+        )
+        return res.modifiedCount === 1
+    } catch (err) {
+        logger.warn(LOG, 'scheduleAetherRemodel failed', err.message)
+        return false
+    }
 }
 
 export { normalizeCoverage, newRevision }

@@ -58,12 +58,14 @@ export const TOOLS = [
         // Aether shock pipeline — active provisional predictions. Call in Phase 3 to surface
         // macro channel pressure that confirms or contradicts the variant perception.
         get_active_predictions: AETHER_TOOL_SPECS.get_active_predictions,
+        // Aether signals for the specific ticker under revision — confirmed + provisional.
+        get_ticker_signals: AETHER_TOOL_SPECS.get_ticker_signals,
         // consult is contractually last at every desk that declares it.
         consult: consultDescription(`Reach for it in exactly three situations: **the price target you are about to publish** — our number against the Street IS the edge, so the multiple and the arithmetic behind it have to hold up to someone attacking them; **a variant perception you cannot separate from consensus** — the bull and bear cases read as evenly weighted and you must say which way the evidence actually leans rather than splitting the difference; and **two valuation methods that disagree materially** (a DCF against comps, say) where you have to decide which one governs the target and defend that choice.`),
     }),
 ]
 
-const { get_name_exposure: _get_name_exposure, get_active_predictions: _get_active_predictions } = makeAetherToolHandlers()
+const { get_name_exposure: _get_name_exposure, get_active_predictions: _get_active_predictions, get_ticker_signals: _get_ticker_signals } = makeAetherToolHandlers()
 
 const TOOL_HANDLERS = {
     ...VALUATION_TOOL_HANDLERS,
@@ -81,6 +83,7 @@ const TOOL_HANDLERS = {
     get_name_exposure: _get_name_exposure,
     // Unbound — shock pipeline predictions are a house-layer broadcast, no userId.
     get_active_predictions: _get_active_predictions,
+    get_ticker_signals: _get_ticker_signals,
 }
 
 export const analystAgentService = { chatStream }
