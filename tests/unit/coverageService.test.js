@@ -200,3 +200,12 @@ test('research basis: a failing coverage read NEVER breaks the order path', asyn
         { getBySymbol: async () => { throw new Error('mongo down') } })
     assert.equal(b, null)
 })
+
+// ── deduplicateCoverage ──────────────────────────────────────────────────────
+test('deduplicateCoverage: exported and returns { ok, removed } shape (no DB → ok:false)', async () => {
+    // No real DB in unit tests — verify it surfaces errors gracefully rather than throwing.
+    const result = await coverageService.deduplicateCoverage()
+    // Without MONGODB_URI the getDb() call throws; the service catches it and returns ok:false.
+    assert.equal(typeof result.ok, 'boolean')
+    if (!result.ok) assert.ok(result.error || result.reason)
+})

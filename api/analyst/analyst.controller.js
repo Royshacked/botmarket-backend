@@ -14,6 +14,40 @@ const LOG = '[analystCtrl]'
 
 export const _sanitizeAnalystSeed = sanitizeScanSeed
 
+// Enrich chatState with coverage data from the DB so the agent always knows what's already
+// covered — without depending on the frontend to send it. The frontend can still override
+// by pre-populating either field; we only fill what's missing.
+export async function _resolveCoverageContext(chatState, seed) {
+    const state = { ...chatState }
+
+    if (!state.coverage_symbols?.length) {
+        try {
+            const all = await coverageService.getCoverage()
+            state.coverage_symbols = all.map(d => d.symbol)
+        } catch (err) {
+            logger.warn(LOG, '_resolveCoverageContext: getCoverage failed (non-fatal)', err.message)
+        }
+    }
+
+    // Check the active ticker — seed hand-off takes precedence over chatState.active_symbol.
+    const ticker = seed?.ticker
+        ? String(seed.ticker).toUpperCase().trim()
+        : chatState.active_symbol
+            ? String(chatState.active_symbol).toUpperCase().trim()
+            : null
+
+    if (ticker && !state.existing_coverage) {
+        try {
+            const existing = await coverageService.getCoverageBySymbol(ticker)
+            if (existing) state.existing_coverage = existing
+        } catch (err) {
+            logger.warn(LOG, '_resolveCoverageContext: getCoverageBySymbol failed (non-fatal)', err.message)
+        }
+    }
+
+    return state
+}
+
 export async function streamAnalyst(req, res) {
     const { messages, userPrompt, model, chatState } = req.body ?? {}
     const seed = _sanitizeAnalystSeed(req.body?.seed)
@@ -21,6 +55,12 @@ export async function streamAnalyst(req, res) {
         const v = parseChatMessages(messages)
         if (v.error) return res.status(400).json({ error: v.error })
     }
+
+    const resolvedState = await _resolveCoverageContext(
+        (chatState && typeof chatState === 'object') ? chatState : {},
+        seed
+    )
+
     await streamAgentResponse(req, res, {
         log: LOG,
         handler: async ({ sendEvent, signal }) => {
@@ -28,7 +68,7 @@ export async function streamAnalyst(req, res) {
                 audience:  await getExperienceLevel(req.user._id),
                 messages,
                 userPrompt,
-                chatState:     (chatState && typeof chatState === 'object') ? chatState : {},
+                chatState:     resolvedState,
                 seed,
                 model,
                 userId: req.user._id,
@@ -70,6 +110,28 @@ export async function getCoverageOne(req, res) {
     } catch (err) {
         logger.error(LOG, 'getCoverageOne failed', err)
         res.status(500).send({ error: 'Failed to get coverage' })
+    }
+}
+
+export async function getCoverageBySymbol(req, res) {
+    try {
+        const doc = await coverageService.getCoverageBySymbol(req.params.symbol)
+        if (!doc) return res.status(404).send({ error: 'Coverage not found' })
+        res.send(doc)
+    } catch (err) {
+        logger.error(LOG, 'getCoverageBySymbol failed', err)
+        res.status(500).send({ error: 'Failed to get coverage' })
+    }
+}
+
+export async function deduplicateCoverage(req, res) {
+    try {
+        const result = await coverageService.deduplicateCoverage()
+        logger.info(LOG, 'coverage dedup', { removed: result.removed })
+        res.send(result)
+    } catch (err) {
+        logger.error(LOG, 'deduplicateCoverage failed', err)
+        res.status(500).send({ error: 'Failed to deduplicate coverage' })
     }
 }
 

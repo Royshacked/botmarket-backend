@@ -3,7 +3,8 @@ import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
 import {
     streamAnalyst,
-    listCoverage, getCoverageOne, initiateCoverage, updateCoverage, retireCoverage, deleteCoverage,
+    listCoverage, getCoverageOne, getCoverageBySymbol, deduplicateCoverage,
+    initiateCoverage, updateCoverage, retireCoverage, deleteCoverage,
     listResearchQueue, enqueueResearch, startResearch, completeResearch, rejectResearch,
 } from './analyst.controller.js'
 
@@ -15,12 +16,14 @@ router.use(requireAuth)
 router.post('/stream',             log, streamAnalyst)
 
 // Coverage — reads open to all users; writes admin-only (house coverage is a broadcast artifact).
-router.get('/coverage',             log, listCoverage)
-router.get('/coverage/:id',         log, getCoverageOne)
-router.post('/coverage',            log, requireAdmin, initiateCoverage)
-router.put('/coverage/:id',         log, requireAdmin, updateCoverage)
-router.post('/coverage/:id/retire', log, requireAdmin, retireCoverage)
-router.delete('/coverage/:id',      log, requireAdmin, deleteCoverage)
+router.get('/coverage',                         log, listCoverage)
+router.get('/coverage/by-symbol/:symbol',       log, getCoverageBySymbol)
+router.get('/coverage/:id',                     log, getCoverageOne)
+router.post('/coverage',                        log, requireAdmin, initiateCoverage)
+router.post('/coverage/deduplicate',            log, requireAdmin, deduplicateCoverage)
+router.put('/coverage/:id',                     log, requireAdmin, updateCoverage)
+router.post('/coverage/:id/retire',             log, requireAdmin, retireCoverage)
+router.delete('/coverage/:id',                  log, requireAdmin, deleteCoverage)
 
 // Research queue — the Argus→Prometheus pipeline. Admin-only: all endpoints gate on role.
 router.get('/research-queue',                   log, requireAdmin, listResearchQueue)
