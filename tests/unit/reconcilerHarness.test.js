@@ -327,3 +327,36 @@ test('scale-in: take-profits are left alone — a ladder is not under-protection
     assert.equal(tps.length, 1)
     assert.equal(tps[0].quantity, 40, 'still the authored ladder size')
 })
+
+// ── Scenario G: resting fill on a pre-live entity (setup/idea already 'long') ──────────────────
+// placeOrdersForIdea pre-flips the entity to 'long' before the resting paper order fills.
+// claimRestingFill misses (status is 'long', not 'resting'); stampPositionIdByOrderId catches it
+// by orderId so the positionId is reliably stamped. Without this, findActiveByPosition cannot
+// match the entity on the subsequent position.closed event and the entity stays stuck at 'long'.
+test('pre-live resting fill: stampPositionIdByOrderId stamps positionId via orderId', async () => {
+    const seed = [{
+        id: 'idea1', userId: 'u1', asset: 'AAPL', direction: 'long', status: 'long', quantity: 100,
+        brokerSymbol: 'AAPL', basisOffset: 0,
+        // positionId null because the resting paper order hasn't filled yet at placement time.
+        // broker: null keeps _growStops from making a broker call — the stop is the point of this test.
+        brokerOrders: [{ accountId: 'a1', positionId: null, orderId: 'e1', broker: null, quantity: 100 }],
+        exitPlacedAccounts: ['a1'],   // exits already placed by placeOrdersForIdea
+    }]
+    const { opLog, store, restore } = harness(seed)
+    try {
+        await executionReconciler.handleExecution({
+            type: 'position.opened', accountId: 'a1', positionId: 'p1',
+            orderId: 'e1', symbol: 'AAPL', direction: 'long', at: 10,
+        })
+    } finally { restore() }
+
+    assert.deepEqual(opLog, [
+        'db:findOneAndUpdate',   // claimRestingFill → null (status 'long', not 'resting')
+        'db:findOne',            // findLinkedByPosition → null (positionId not yet on entity)
+        'db:findOneAndUpdate',   // stampPositionIdByOrderId → match by orderId, stamps positionId
+        'capture:captureOpen',
+        // _growStops: broker is null → returns immediately, no broker call
+    ])
+    const idea = store.get('idea1')
+    assert.equal(idea.brokerOrders[0].positionId, 'p1')   // stamped by orderId — the close can now find it
+})

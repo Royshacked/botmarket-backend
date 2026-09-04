@@ -315,8 +315,22 @@ async function _onOpened(exec) {
         return
     }
 
-    // Find an active idea on this account+symbol with an unlinked order slot and
-    // stamp the positionId onto it (positional $ + arrayFilters target one element).
+    // Resting entry on an already-live entity: `placeOrdersForIdea` pre-flips the status to
+    // 'long'/'short' before the resting order fills, so `claimRestingFill` (which looks for
+    // 'resting') missed it. Match by orderId — the slot was stamped with it at placement — so
+    // we target the exact entity rather than any unlinked slot on the account.
+    if (exec.orderId != null) {
+        const byOrder = await _deps.entityRepo.stampPositionIdByOrderId(exec.accountId, exec.orderId, exec.positionId)
+        if (byOrder) {
+            logger.info(LOG, `Stamped positionId ${exec.positionId} onto live entity ${byOrder.id} (orderId match)`)
+            await _deps.tradeCaptureService.captureOpen(byOrder, exec)
+            await _withLock(exec.accountId, exec.positionId, () => _growStops(byOrder, exec.accountId, exec.positionId))
+            return
+        }
+    }
+
+    // Last resort: any active entity on this account with an unlinked slot, constrained to
+    // the symbol. Used only when the fill event carries no orderId (rare — idealess fills).
     const result = await _deps.entityRepo.backfillPositionId(exec.accountId, exec.positionId, exec.symbol)
     if (!result) {
         // No idea linkage at all — for a simulated venue, still record the open so the

@@ -77,8 +77,37 @@ export function makeEntityRepo({ coll = _defaultColl } = {}) {
         },
 
         /**
+         * Stamp a positionId onto a live (long/short) entity's order slot matched by orderId.
+         *
+         * WHY THIS EXISTS. `placeOrdersForIdea` pre-flips a setup/idea to 'long'/'short' the
+         * moment orders are placed — before a resting entry (limit/stop) can fill and return a
+         * positionId. When the resting fill arrives, `claimRestingFill` misses because the status
+         * is already 'long' (it looks for 'resting'), and `backfillPositionId` matches only on
+         * account+symbol which is ambiguous when multiple live entities share a ticker. This
+         * method uses the orderId that was stamped onto `brokerOrders` at placement time, giving
+         * a precise 1:1 match that cannot accidentally target a sibling entity.
+         */
+        async stampPositionIdByOrderId(accountId, orderId, positionId) {
+            const c = await coll()
+            return c.findOneAndUpdate(
+                {
+                    status: { $in: ACTIVE_STATUSES },
+                    brokerOrders: { $elemMatch: { accountId: String(accountId), orderId: String(orderId), positionId: null } },
+                },
+                { $set: { 'brokerOrders.$[slot].positionId': String(positionId) } },
+                {
+                    arrayFilters:   [{ 'slot.accountId': String(accountId), 'slot.orderId': String(orderId) }],
+                    returnDocument: 'after',
+                },
+            )
+        },
+
+        /**
          * Backfill a positionId onto an active entity's unlinked order slot on this account
          * (optionally constrained to a symbol). Returns the updated doc (or null).
+         *
+         * Less precise than `stampPositionIdByOrderId` — it matches any unlinked slot on the
+         * account, not a specific orderId. Used only when the fill event carries no orderId.
          */
         async backfillPositionId(accountId, positionId, symbol) {
             const c = await coll()
