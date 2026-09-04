@@ -666,4 +666,40 @@ async function _resumeFeeds() {
         }
     }
     if (count > 0) logger.info(LOG, `Resumed ${count} execution feed(s) for active positions`)
+
+    // Stale-position sweep: close any entity stuck in long/short whose broker position
+    // is gone — covers the case where the position was closed via the broker UI while
+    // the server was down and no position.closed event was ever received.
+    _sweepStalePositions().catch(err => logger.error(LOG, 'sweepStalePositions error:', err.message))
+}
+
+async function _sweepStalePositions() {
+    const db   = await _deps.getDb()
+    const live = await _deps.entityRepo.liveWithBrokerLinks()
+    let closed = 0
+    for (const idea of live) {
+        let done = false
+        for (const link of idea.brokerOrders ?? []) {
+            if (done || !link.positionId || !link.broker || !link.accountId) continue
+            try {
+                const position = await _deps.brokerService.findOpenPosition(
+                    link.broker, idea.userId, link.accountId, link.positionId
+                )
+                if (position === null) {
+                    logger.warn(LOG, `Stale position: entity ${idea.id} is ${idea.status} but pos ${link.positionId} is gone — closing`)
+                    await _withLock(link.accountId, link.positionId, () =>
+                        _finalizeClose(db, idea, {
+                            reason: 'manual', at: Date.now(),
+                            accountId: link.accountId, positionId: link.positionId,
+                        })
+                    )
+                    done = true
+                    closed++
+                }
+            } catch (err) {
+                logger.warn(LOG, `Stale-pos check failed (${idea.id} ${link.accountId}/${link.positionId}): ${err.message}`)
+            }
+        }
+    }
+    if (closed > 0) logger.info(LOG, `Stale-position sweep: closed ${closed} stuck entit${closed === 1 ? 'y' : 'ies'}`)
 }

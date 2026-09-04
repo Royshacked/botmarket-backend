@@ -128,6 +128,14 @@ export function makeEntityRepo({ coll = _defaultColl } = {}) {
             ).toArray()
         },
 
+        /** Live (long/short) entities with broker links — for the stale-position startup sweep. Full docs. */
+        async liveWithBrokerLinks() {
+            const c = await coll()
+            return c.find(
+                { status: { $in: ACTIVE_STATUSES }, brokerOrders: { $exists: true, $ne: [] } },
+            ).toArray()
+        },
+
         // ── by-id lifecycle writes ──────────────────────────────────────────────────────────
         async getById(id) {
             const c = await coll()

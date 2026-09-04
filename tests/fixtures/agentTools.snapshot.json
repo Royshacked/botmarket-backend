@@ -1403,6 +1403,22 @@
       }
     },
     {
+      "name": "get_ticker_signals",
+      "description": "Active aether signals for ONE ticker: FRED-confirmed opportunity cards (opportunities[]) and news-provisional predicted signals (signals[]). Each entry carries channel_id, direction, magnitude, lag_weeks_min/max, confidence_llm, ticker_direction (long/short), why, when, risk_note, and action_label. Call this during a PT revision or coverage re-model to see what channel pressure is currently pointing at this name. Arg: { ticker }.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "The ticker to look up, e.g. AAPL, XOM"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
       "name": "consult",
       "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in exactly three situations: **the price target you are about to publish** — our number against the Street IS the edge, so the multiple and the arithmetic behind it have to hold up to someone attacking them; **a variant perception you cannot separate from consensus** — the bull and bear cases read as evenly weighted and you must say which way the evidence actually leans rather than splitting the difference; and **two valuation methods that disagree materially** (a DCF against comps, say) where you have to decide which one governs the target and defend that choice.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
       "input_schema": {

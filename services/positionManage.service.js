@@ -213,7 +213,21 @@ export async function applyManage({ entity, holder, verb, proposal, userId, orig
     const db    = await deps.getDb()
     const ps    = entity.position_state ?? {}
     const links = resolveAllLinks(holder, entity)
-    if (!links.length) return { ok: false, reason: 'no_position_link' }
+    if (!links.length) {
+        // exit_now on a live entity with no positionId linked: the fill event was lost across a
+        // restart (or the position was never confirmed at the broker), so there is nothing to close
+        // at the broker. Force-close the record so it does not stay stuck in 'long'/'short' forever.
+        if (verb === 'exit_now' && (entity?.status === 'long' || entity?.status === 'short')) {
+            const db = await deps.getDb()
+            await db.collection(ENTITIES).findOneAndUpdate(
+                { id: entity.id, status: { $in: ['long', 'short'] } },
+                { $set: { status: 'closed', closedReason: 'orphaned', closedAt: nowMs } },
+            )
+            logger.warn(LOG, `${entity.id} force-closed (orphaned — exit_now with no broker position link)`)
+            return { ok: true, orphaned: true }
+        }
+        return { ok: false, reason: 'no_position_link' }
+    }
 
     // THE HOURS GATE, and it lives here rather than in each desk's handoff for the reason the gate
     // itself was built: five call sites deciding hours policy privately is how they came to disagree.

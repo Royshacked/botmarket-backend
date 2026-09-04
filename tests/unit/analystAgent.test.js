@@ -116,9 +116,9 @@ function makeCoverageService({ symbols = [], bySymbol = null } = {}) {
 }
 
 test('resolveCoverage: populates coverage_symbols from DB when chatState has none', async () => {
-    const svc = makeCoverageService({ symbols: ['AAPL', 'MSFT'] })
+    const _svc = makeCoverageService({ symbols: ['AAPL', 'MSFT'] })
     // Swap the real service inside the module for this call
-    const { default: csModule } = await import('../../api/analyst/analyst.controller.js')
+    const { default: _csModule } = await import('../../api/analyst/analyst.controller.js')
     // _resolveCoverageContext takes the service as a third arg (optional, defaults to real svc)
     // Since the controller is a real module, we test the logic by mocking coverageService via
     // the exported function's third parameter — not available yet. Test the invariant instead:

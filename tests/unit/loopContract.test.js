@@ -24,17 +24,24 @@ function registeredLoops() {
 
 /** The object literal a module exports under `export const <ident> = { … }`. */
 function exportedLiteral(ident) {
-    const dir = new URL('../../monitoring/', import.meta.url)
-    for (const file of readdirSync(dir).filter(f => f.endsWith('.js'))) {
-        const src = readFileSync(new URL(file, dir), 'utf8')
-        const at = src.indexOf(`export const ${ident} = {`)
-        if (at === -1) continue
-        // Balance braces from the opening one so a nested literal cannot end the match early.
-        const open = src.indexOf('{', at)
-        let depth = 0
-        for (let i = open; i < src.length; i++) {
-            if (src[i] === '{') depth++
-            else if (src[i] === '}' && --depth === 0) return { file, body: src.slice(open, i + 1) }
+    // Loop services live under monitoring/ by convention; scheduler-type services that run
+    // as background loops but belong in services/ are also accepted.
+    const dirs = [
+        new URL('../../monitoring/', import.meta.url),
+        new URL('../../services/', import.meta.url),
+    ]
+    for (const dir of dirs) {
+        for (const file of readdirSync(dir).filter(f => f.endsWith('.js'))) {
+            const src = readFileSync(new URL(file, dir), 'utf8')
+            const at = src.indexOf(`export const ${ident} = {`)
+            if (at === -1) continue
+            // Balance braces from the opening one so a nested literal cannot end the match early.
+            const open = src.indexOf('{', at)
+            let depth = 0
+            for (let i = open; i < src.length; i++) {
+                if (src[i] === '{') depth++
+                else if (src[i] === '}' && --depth === 0) return { file, body: src.slice(open, i + 1) }
+            }
         }
     }
     return null
@@ -50,7 +57,7 @@ test('server.js registers the full fleet', () => {
         // 'guardSweep' is Talos's tier-0 (docs/desks/talos-guards.md) and belongs on this list for
         // the reason the list exists: it is the only thing watching price between Talos's own reads,
         // so switching it off would not fail anywhere — armed setups would simply stop being seen.
-        'coverage', 'entries', 'exits', 'guardSweep', 'marketBrief', 'marketOpen', 'paperEquity',
+        'aetherScheduler', 'coverage', 'entries', 'exits', 'guardSweep', 'marketBrief', 'marketOpen', 'paperEquity',
         'paperFill', 'paperMark', 'reconciler', 'talos', 'themis', 'tilt',
     ])
 })
