@@ -22,12 +22,20 @@ export async function getChannelState() {
     }
 }
 
-/** Latest regime snapshot, or null. */
+/**
+ * Latest regime snapshot, or null.
+ *
+ * Sorts on `date` — the observation the regime describes — NOT on `computed_at`. A run
+ * writes the whole history back with ONE computed_at (1042 rows, 1 distinct value), so
+ * sorting on it is a no-op and Mongo returns an arbitrary row: this used to hand back
+ * 2006-06-19 "crisis" as the current regime. computed_at stays as the tiebreaker, so a
+ * later re-run of the same date still wins.
+ */
 export async function getCurrentRegime() {
     try {
         const db  = await getDb()
         const doc = await db.collection(COLLECTIONS.REGIMES)
-            .findOne({}, { sort: { computed_at: -1 }, projection: { _id: 0 } })
+            .findOne({}, { sort: { date: -1, computed_at: -1 }, projection: { _id: 0 } })
         return doc ?? null
     } catch (err) {
         logger.warn(LOG, 'getCurrentRegime failed', err.message)
@@ -315,13 +323,43 @@ export async function getOpportunityCardsByTicker(ticker) {
     }
 }
 
-/** Exposure record for one ticker, or null. */
+/**
+ * Fold the flat per-(entity, channel_id) rows Python writes into one per-ticker record.
+ * Pure — exported for unit tests; callers should use getExposure().
+ */
+export function assembleExposure(entity, rows, edges = []) {
+    if (!rows?.length) return null
+    const channels = {}
+    for (const row of rows) {
+        const { entity: _entity, channel_id, ...rest } = row
+        if (channel_id) channels[channel_id] = rest
+    }
+    if (!Object.keys(channels).length) return null
+    return { ticker: entity, channels, supply_graph: edges ?? [] }
+}
+
+/**
+ * Exposure record for one ticker, or null when Phase 3 has not covered it.
+ *
+ * Python writes one FLAT doc per (entity, channel_id), keyed on `entity` — never on a
+ * `ticker` field, which it does not emit at all (exposure/mongo_writer.py,
+ * ExposureRecord.to_mongo). Supply edges live in their own collection, keyed by the
+ * entity they propagate INTO. This assembles both into the single per-ticker shape the
+ * formatter and the HTTP route consume: { ticker, channels: { channel_id: {...} },
+ * supply_graph: [...] }.
+ */
 export async function getExposure(ticker) {
     try {
-        const db  = await getDb()
-        const doc = await db.collection(COLLECTIONS.EXPOSURES)
-            .findOne({ ticker: ticker.toUpperCase() }, { projection: { _id: 0 } })
-        return doc ?? null
+        const db     = await getDb()
+        const entity = String(ticker).toUpperCase()
+
+        const [rows, edges] = await Promise.all([
+            db.collection(COLLECTIONS.EXPOSURES)
+                .find({ entity }, { projection: { _id: 0 } }).toArray(),
+            db.collection(COLLECTIONS.SUPPLY_EDGES)
+                .find({ to_entity: entity }, { projection: { _id: 0 } }).toArray(),
+        ])
+        return assembleExposure(entity, rows, edges)
     } catch (err) {
         logger.warn(LOG, 'getExposure failed', err.message)
         return null

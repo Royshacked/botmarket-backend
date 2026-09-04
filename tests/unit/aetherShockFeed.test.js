@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatValidationOutcomes, formatOpportunityCards, formatShockFeed } from '../../services/tools/aether.tools.js'
+import { formatValidationOutcomes, formatOpportunityCards, formatShockFeed, formatTickerSignals } from '../../services/tools/aether.tools.js'
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -176,4 +176,70 @@ test('formatShockFeed: empty arrays → no-data messages (same as null)', () => 
     const out = formatShockFeed([], [])
     assert.match(out, /VALIDATION OUTCOMES: none yet/)
     assert.match(out, /OPPORTUNITY CARDS: none active/)
+})
+
+// ── Event cards (8-K sourced) ──────────────────────────────────────────────────
+//
+// Event cards land in the SAME aether_opportunities collection as macro cards but carry a
+// different provenance: channel_id holds the filing item ("8-K:1.01") rather than a macro
+// channel id, plus source_type/dimension/event_type that macro cards never have. The
+// formatters used to render channel_id bare, so the agent saw an opaque code with nothing
+// marking it as an idiosyncratic filing signal — while the frontend showed an EVENT badge.
+
+const _eventCard = (overrides = {}) => ({
+    ..._card(),
+    card_id:      'event:0000100517-26-000045:YUM:revenue',
+    ticker:       'YUM',
+    channel_id:   '8-K:5.02',
+    source_type:  'event',
+    dimension:    'revenue',
+    event_type:   '8-K:5.02',
+    brier:        null,
+    expires_at:   null,
+    risk_note:    'Event-sourced signal — not FRED-validated.',
+    ...overrides,
+})
+
+test('formatOpportunityCards: an event card is marked as event-sourced, not left bare', () => {
+    const out = formatOpportunityCards([_eventCard()])
+    assert.match(out, /8-K:5\.02/)
+    assert.match(out, /revenue/, 'the dimension must reach the agent')
+    assert.match(out, /EVENT cards are sourced from the company's own 8-K filing/)
+})
+
+test('formatOpportunityCards: the legend explains a missing brier means never, not pending', () => {
+    const out = formatOpportunityCards([_eventCard()])
+    assert.match(out, /never FRED-validated/)
+    assert.match(out, /"never scored", not "pending"/)
+})
+
+test('formatOpportunityCards: the 8-K item number is decoded in the legend', () => {
+    const out = formatOpportunityCards([_eventCard()])
+    assert.match(out, /5\.02=officer\/director change/)
+})
+
+test('formatOpportunityCards: the header splits event-sourced from macro', () => {
+    const out = formatOpportunityCards([_eventCard(), _card()])
+    assert.match(out, /1 event-sourced, 1 macro/)
+})
+
+test('formatOpportunityCards: a pure macro feed carries no event legend or mix count', () => {
+    const out = formatOpportunityCards([_card()])
+    assert.ok(!out.includes('EVENT cards'), 'no legend when nothing is event-sourced')
+    assert.ok(!out.includes('event-sourced,'), 'no mix count on a pure macro feed')
+    assert.match(out, /energy_cost/, 'macro cards still render their channel id')
+})
+
+test('formatTickerSignals: event provenance survives the per-ticker view', () => {
+    const out = formatTickerSignals('YUM', { opportunities: [_eventCard()], signals: [] })
+    assert.match(out, /8-K:5\.02·revenue/)
+    assert.match(out, /\[event\]/)
+    assert.match(out, /EVENT cards are sourced/)
+})
+
+test('formatTickerSignals: a macro-only view is unchanged — no legend, no event tag', () => {
+    const out = formatTickerSignals('XOM', { opportunities: [_card()], signals: [] })
+    assert.ok(!out.includes('EVENT cards'))
+    assert.match(out, /\[confirmed\]/)
+    assert.match(out, /energy_cost/)
 })

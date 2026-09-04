@@ -86,7 +86,7 @@ export const AETHER_TOOL_SPECS = {
     get_governance_budget: `Phase 8 edge governance budget: how many new K edges (transmission weights) have been promoted in the last 365 days out of the hard cap of 4/year, how many are actively moving through the 5-step admission pipeline, and how many are still waiting for an out-of-sample check. The residual monitor always has more suggestions than the budget allows — the budget is the mechanism that prevents overfitting. Returns "not yet run" when no candidates have been submitted. Call it when the user asks about the model's edge count, how conservative the engine is, or whether there is capacity to add new relationships.`,
     get_decay_audit:       `Latest decay audit from Phase 8: each existing K edge (channel transmission weight) re-estimated against the most recent 2 years of proxy data. Each edge is labelled keep / demote / delete based on how much of its original weight survives in recent data. "Dead edges are worse than missing ones — they generate confident wrong forecasts." Returns "not yet run" when no audit has been completed. Call it when the user asks about model staleness, whether any channel relationships have weakened, or when discussing model maintenance and re-estimation.`,
     get_active_predictions: `Active provisional channel predictions from the Aether shock pipeline: channels the news pipeline currently expects to move, with direction, magnitude, confidence, lag, and the reasoning for each signal. Groups by channel so you can see the net picture per channel across multiple news events. Returns "no active signals" when the pipeline has not produced any predictions yet. Call this during Phase 3 to check whether any macro channels have live pressure that confirms or contradicts your variant perception — then cross-reference with get_name_exposure({ticker}) to see how exposed the name is to those channels. No arguments.`,
-    get_shock_feed: `The Aether shock feed returns three lists: (1) outcomes — most recent FRED-confirmed and rejected channel predictions with channel, direction, and Brier calibration score; (2) opportunities — active confirmed cards: ticker, direction, why (full thesis from news → FRED confirmation), lag window, trade type (swing/position), agent (mentor/atlas), and risk note; (3) predicted_signals — active predicted cards from news predictions not yet FRED-confirmed: same shape as opportunities but earlier in the pipeline (thesis = news headline → channel → ticker exposure chain, no Brier yet). Use predicted_signals as early-warning context; use opportunities as hard macro catalysts. Argus: call in Phase 2, screen_candidates inside affected sectors. Mentor/Atlas: call when user asks about macro-driven trades — opportunities are actionable now, predicted_signals are watch-list.`,
+    get_shock_feed: `The Aether shock feed returns three lists: (1) outcomes — most recent FRED-confirmed and rejected channel predictions with channel, direction, and Brier calibration score; (2) opportunities — active confirmed cards: ticker, direction, why (full thesis from news → FRED confirmation), lag window, trade type (swing/position), agent (mentor/atlas), and risk note; (3) predicted_signals — active predicted cards from news predictions not yet FRED-confirmed: same shape as opportunities but earlier in the pipeline (thesis = news headline → channel → ticker exposure chain, no Brier yet). Some opportunity cards are EVENT-sourced: they come from the company's own 8-K filing rather than a macro channel, so they are idiosyncratic to that name, carry a dimension (revenue, financing, supply_access…) in place of a macro channel, and are never FRED-validated — their missing brier means "never scored", not "pending". Use predicted_signals as early-warning context; use opportunities as hard macro catalysts. Argus: call in Phase 2, screen_candidates inside affected sectors. Mentor/Atlas: call when user asks about macro-driven trades — opportunities are actionable now, predicted_signals are watch-list.`,
     get_ticker_signals: `Active aether signals for ONE ticker: FRED-confirmed opportunity cards (opportunities[]) and news-provisional predicted signals (signals[]). Each entry carries channel_id, direction, magnitude, lag_weeks_min/max, confidence_llm, ticker_direction (long/short), why, when, risk_note, and action_label. Call this during a PT revision or coverage re-model to see what channel pressure is currently pointing at this name. Arg: { ticker }.`,
 }
 
@@ -149,13 +149,20 @@ const NOT_YET = (name) =>
     `${name}: not yet computed — the Python engine has not run this phase yet. `
     + `Reason qualitatively from your own knowledge and say so explicitly.`
 
+// Mongo returns a Date for date-typed fields and a string for ISO text. Slicing
+// String(aDate) yields "Sun Aug 30 2026 17:" — take the ISO form before slicing.
+const iso = (v, len) => v == null ? '' : (v instanceof Date ? v.toISOString() : String(v)).slice(0, len)
+const isoDay = v => iso(v, 10)
+const isoSec = v => iso(v, 19).replace('T', ' ')
+
 export function formatChannelState(doc) {
     if (!doc) return NOT_YET('Channel state')
     const channels = Object.entries(doc.channels ?? {})
-        .map(([ch, v]) => `  ${ch.padEnd(24)} ${typeof v === 'number' ? v.toFixed(3) : v}`)
+        .map(([ch, v]) => `  ${ch.padEnd(27)} ${typeof v === 'number' ? v.toFixed(3) : v}`)
         .join('\n')
+    const when = isoSec(doc.computed_at)
     return [
-        `CHANNEL STATE (computed ${String(doc.computed_at ?? '').slice(0, 19)}):`,
+        `CHANNEL STATE${when ? ` (computed ${when})` : ''}:`,
         channels || '  (no channel values)',
         doc.regime_label ? `Active regime: ${doc.regime_label}` : '',
     ].filter(Boolean).join('\n')
@@ -163,11 +170,21 @@ export function formatChannelState(doc) {
 
 export function formatRegime(doc) {
     if (!doc) return NOT_YET('Regime')
+    // Python writes the label as `regime` (aether_regimes); `label` is the build spec's name
+    // for the same field. Accept either, so neither writer renders as "(unlabelled)".
     const lines = [
-        `REGIME: ${doc.label ?? '(unlabelled)'}`,
+        `REGIME: ${doc.regime ?? doc.label ?? '(unlabelled)'}`,
         doc.definition ? doc.definition : '',
-        doc.computed_at ? `Computed: ${String(doc.computed_at).slice(0, 19)}` : '',
+        // `date` is the observation the regime describes; computed_at is only when the run ran.
+        doc.date ? `As of: ${isoDay(doc.date)}` : '',
+        doc.computed_at ? `Computed: ${isoSec(doc.computed_at)}` : '',
     ]
+    // The classifier's own inputs, when the doc carries them instead of a channel list.
+    const inputs = [
+        doc.credit_access_z != null ? `credit_access ${doc.credit_access_z.toFixed(2)}` : null,
+        doc.risk_premium_z  != null ? `risk_premium ${doc.risk_premium_z.toFixed(2)}`   : null,
+    ].filter(Boolean)
+    if (inputs.length) lines.push(`Classifier inputs: ${inputs.join(', ')}`)
     if (Array.isArray(doc.driving_channels) && doc.driving_channels.length) {
         lines.push(`Driving channels: ${doc.driving_channels.join(', ')}`)
     }
@@ -242,21 +259,37 @@ export function formatCalibration(docs) {
     return lines.join('\n')
 }
 
+// lag_profile is a DISTRIBUTION — { p10_weeks, median_weeks, p90_weeks } — not a scalar.
+// Interpolating it directly renders "[object Object]".
+function formatLagProfile(profile) {
+    if (profile == null) return null
+    if (typeof profile !== 'object') return `lag ${profile}w`
+    const pts = [profile.p10_weeks, profile.median_weeks, profile.p90_weeks].filter(v => v != null)
+    return pts.length ? `lag ${pts.join('–')}w` : null
+}
+
 export function formatExposure(ticker, doc) {
-    if (!doc) return NOT_YET(`Exposure for ${ticker}`)
-    const channels = Object.entries(doc.channels ?? {})
+    const entries = Object.entries(doc?.channels ?? {})
+    if (!doc || !entries.length) return NOT_YET(`Exposure for ${ticker}`)
+
+    const channels = entries
         .map(([ch, e]) => {
-            const parts = [`  ${ch.padEnd(24)}`]
-            if (e.elasticity != null) parts.push(`elasticity ${e.elasticity.toFixed(3)}`)
-            if (e.lag_profile)       parts.push(`lag ${e.lag_profile}`)
-            if (e.confidence != null) parts.push(`conf ${e.confidence.toFixed(2)}`)
+            // 26 = longest channel id in channels.yaml (supply_chain_concentration).
+            const parts = [`  ${ch.padEnd(27)}`]
+            if (e.elasticity != null)     parts.push(`elasticity ${e.elasticity.toFixed(3)}`)
+            const lag = formatLagProfile(e.lag_profile)
+            if (lag)                      parts.push(lag)
+            if (e.hedge_coverage != null) parts.push(`hedged ${e.hedge_coverage.toFixed(2)}`)
+            if (e.pass_through != null)   parts.push(`pass-through ${e.pass_through.toFixed(2)}`)
+            if (e.confidence != null)     parts.push(`conf ${e.confidence.toFixed(2)}`)
             return parts.join('  ')
         })
         .join('\n')
+
     return [
-        `EXPOSURE — ${ticker} (updated ${String(doc.updated_at ?? '').slice(0, 10)}):`,
-        channels || '  (no channel entries)',
-        doc.supply_graph?.length ? `Supply-graph edges: ${doc.supply_graph.length}` : '',
+        `EXPOSURE — ${ticker} (${entries.length} channel${entries.length === 1 ? '' : 's'}; lag shown p10–median–p90):`,
+        channels,
+        doc.supply_graph?.length ? `Supply-graph edges into ${ticker}: ${doc.supply_graph.length}` : '',
     ].filter(Boolean).join('\n')
 }
 
@@ -517,12 +550,51 @@ export function formatValidationOutcomes(docs) {
     return lines.join('\n')
 }
 
+// 8-K item numbers the event pipeline whitelists (sec_8k_fetcher._MATERIAL_ITEMS).
+// The bare number is opaque to a reader; the label is what makes the card legible.
+const EIGHT_K_ITEMS = {
+    '1.01': 'material agreement',
+    '1.02': 'agreement terminated',
+    '2.01': 'acquisition/disposition',
+    '2.03': 'financial obligation',
+    '5.02': 'officer/director change',
+    '7.01': 'Reg FD disclosure',
+    '8.01': 'other material event',
+}
+
+// An event card puts the FILING ITEM in channel_id ("8-K:1.01") — not a macro channel id —
+// and carries source_type/dimension that macro cards do not have. Rendering channel_id bare
+// leaves the agent unable to tell an idiosyncratic filing signal from a macro channel move.
+function formatCardSource(c) {
+    if (c?.source_type !== 'event') return c?.channel_id ?? ''
+    return `${c.channel_id}${c.dimension ? `·${c.dimension}` : ''}`
+}
+
+// One legend for the whole feed rather than a label repeated on every card.
+function eventLegend(events) {
+    const items = [...new Set(
+        events.map(c => String(c.channel_id ?? '').split(':')[1]).filter(Boolean)
+    )].sort()
+    const lines = [
+        'EVENT cards are sourced from the company\'s own 8-K filing, not a macro channel:'
+        + ' idiosyncratic to the name, and never FRED-validated — a missing brier means'
+        + ' "never scored", not "pending".',
+    ]
+    if (items.length) {
+        lines.push(`  8-K items present: ${items.map(i => `${i}=${EIGHT_K_ITEMS[i] ?? 'other'}`).join(', ')}`)
+    }
+    return lines
+}
+
 export function formatOpportunityCards(docs) {
     if (!docs || !docs.length) return null   // caller handles the no-data case
     const mentor = docs.filter(d => d.agent === 'mentor')
     const atlas  = docs.filter(d => d.agent === 'atlas')
+    const events = docs.filter(d => d.source_type === 'event')
+    const mix    = events.length ? `; ${events.length} event-sourced, ${docs.length - events.length} macro` : ''
     const lines  = [
-        `OPPORTUNITY CARDS — ${docs.length} active (${mentor.length} swing/Mentor, ${atlas.length} position/Atlas):`,
+        `OPPORTUNITY CARDS — ${docs.length} active (${mentor.length} swing/Mentor, ${atlas.length} position/Atlas${mix}):`,
+        ...(events.length ? eventLegend(events) : []),
     ]
 
     function renderGroup(group, label) {
@@ -536,7 +608,7 @@ export function formatOpportunityCards(docs) {
             const brier  = c.brier != null ? `  brier=${c.brier.toFixed(3)}` : ''
             lines.push(
                 `  ${c.ticker.padEnd(6)} ${(c.ticker_direction ?? '').padEnd(6)} `
-                + `${dirLbl.padEnd(11)} ${c.channel_id.padEnd(24)} `
+                + `${dirLbl.padEnd(11)} ${formatCardSource(c).padEnd(30)} `
                 + `lag=${lagStr}  conf=${c.confidence_llm.toFixed(2)}${brier}  ${c.magnitude}`
             )
             lines.push(`    Why:  ${c.why}`)
@@ -573,9 +645,9 @@ export function formatTickerSignals(ticker, { opportunities = [], signals = [] }
     const renderCard = (c, label) => {
         const lagStr = c.lag_weeks_min === c.lag_weeks_max ? `${c.lag_weeks_min}w` : `${c.lag_weeks_min}–${c.lag_weeks_max}w`
         const lines = [
-            `  ${c.ticker_direction?.padEnd(6) ?? '?'.padEnd(6)} ${(c.channel_id ?? '').padEnd(24)} `
+            `  ${c.ticker_direction?.padEnd(6) ?? '?'.padEnd(6)} ${formatCardSource(c).padEnd(30)} `
             + `${(c.direction ?? '').padEnd(6)} ${(c.magnitude ?? '').padEnd(8)} `
-            + `lag=${lagStr}  conf=${(c.confidence_llm ?? 0).toFixed(2)}  [${label}]`,
+            + `lag=${lagStr}  conf=${(c.confidence_llm ?? 0).toFixed(2)}  [${c.source_type === 'event' ? 'event' : label}]`,
         ]
         if (c.why)  lines.push(`    Why:  ${c.why}`)
         if (c.when) lines.push(`    When: ${c.when}`)
@@ -583,7 +655,11 @@ export function formatTickerSignals(ticker, { opportunities = [], signals = [] }
         return lines.join('\n')
     }
 
-    const out = [`AETHER SIGNALS — ${ticker} (${opportunities.length} confirmed, ${signals.length} provisional):`]
+    const events = [...opportunities, ...signals].filter(c => c.source_type === 'event')
+    const out = [
+        `AETHER SIGNALS — ${ticker} (${opportunities.length} confirmed, ${signals.length} provisional):`,
+        ...(events.length ? eventLegend(events) : []),
+    ]
     if (opportunities.length) {
         out.push('\nCONFIRMED (FRED-validated):')
         for (const c of opportunities) out.push(renderCard(c, 'confirmed'))

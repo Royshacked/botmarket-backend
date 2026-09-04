@@ -10,6 +10,7 @@ export const COLLECTIONS = {
     CHANNEL_STATE:   'aether_channel_state',
     REGIMES:         'aether_regimes',
     EXPOSURES:       'aether_exposures',
+    SUPPLY_EDGES:    'aether_supply_edges',
     FORECASTS:       'aether_forecasts',
     SITUATIONS:      'aether_situations',
     TAXONOMY:        'aether_taxonomy',
@@ -36,8 +37,10 @@ export async function ensureAetherIndexes() {
     await db.collection(COLLECTIONS.CHANNEL_STATE).createIndex({ label: 1 }, { background: true })
     // regimes: current + historical; read latest
     await db.collection(COLLECTIONS.REGIMES).createIndex({ computed_at: -1 }, { background: true })
-    // exposures: look up by entity ticker
-    await db.collection(COLLECTIONS.EXPOSURES).createIndex({ ticker: 1 }, { background: true })
+    // exposures: one doc per (entity, channel_id) — Python keys on `entity`, not `ticker`
+    await db.collection(COLLECTIONS.EXPOSURES).createIndex({ entity: 1, channel_id: 1 }, { background: true })
+    // supply edges: 2nd-order propagation, read by the entity being propagated INTO
+    await db.collection(COLLECTIONS.SUPPLY_EDGES).createIndex({ to_entity: 1 }, { background: true })
     // forecasts: read by entity and horizon
     await db.collection(COLLECTIONS.FORECASTS).createIndex({ entity: 1, resolution_date: 1 }, { background: true })
     // situations: active arcs
