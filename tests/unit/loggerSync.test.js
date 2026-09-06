@@ -1,8 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, mkdtempSync, rmSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 
-import { logger, switchToSyncLogging } from '../../services/logger.service.js'
+import { logger, switchToSyncLogging, _setLogSinkForTests } from '../../services/logger.service.js'
 
 // THE BUG THIS EXISTS FOR, found while diagnosing a shutdown that appeared to hang.
 //
@@ -19,7 +21,19 @@ import { logger, switchToSyncLogging } from '../../services/logger.service.js'
 // asserted first. node:test runs a file's tests in order, and each test FILE gets its own process
 // (see the npm test script), so nothing else can have flipped it.
 
-const LOG_FILE = './logs/backend.log'
+// A TEMP sink, not ./logs/backend.log. This file used to probe the real log, which meant
+// the operational record grew a `sync-probe-*` line on every run — and backend.log is the
+// only forensic account of what the server did. Redirecting keeps the timing property
+// under test while leaving that record to the server alone.
+const TMP_DIR  = mkdtempSync(join(tmpdir(), 'logger-sync-'))
+const LOG_FILE = join(TMP_DIR, 'backend.log')
+_setLogSinkForTests(LOG_FILE)
+
+test.after(() => {
+    _setLogSinkForTests(null)
+    rmSync(TMP_DIR, { recursive: true, force: true })
+})
+
 const marker = (tag) => `sync-probe-${tag}-${process.pid}-${process.hrtime.bigint()}`
 const onDisk = (m) => existsSync(LOG_FILE) && readFileSync(LOG_FILE, 'utf8').includes(m)
 
