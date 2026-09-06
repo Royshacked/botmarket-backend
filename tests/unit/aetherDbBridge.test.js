@@ -14,7 +14,11 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import os from 'node:os'
 import { getDbName } from '../../providers/mongodb.provider.js'
+import { aetherSchedulerService } from '../../services/aetherScheduler.service.js'
 
 // getDbName() prefers the live connection and falls back to config.dbName, which reads
 // process.env.DB_NAME on every access. Nothing here connects, so these exercise the
@@ -58,4 +62,52 @@ test('the name is passed through verbatim — no normalising, no substitution', 
     withDbNameEnv('botmarket_dev', () => {
         assert.equal(getDbName(), 'botmarket_dev')
     })
+})
+
+// ── The host gate ─────────────────────────────────────────────────────────────
+//
+// The scheduler is no longer started behind the instance lease. The lease answers
+// "should this process own the shared work?", which is the wrong question: only a
+// machine with an aether-engine checkout and a built venv can run the engine at all.
+// Under the lease it ran essentially nowhere — the holder is the deployed instance,
+// which has no Python, and the laptop that does was a follower.
+//
+// start() must therefore be a SAFE no-op on a host without the engine, and must never
+// leave a child process behind. These run in-process, so a spawn here would be a real
+// Python daemon attached to the test run.
+
+function withEnginePath(value, fn) {
+    const had = Object.hasOwn(process.env, 'AETHER_ENGINE_PATH')
+    const prev = process.env.AETHER_ENGINE_PATH
+    if (value === undefined) delete process.env.AETHER_ENGINE_PATH
+    else process.env.AETHER_ENGINE_PATH = value
+    try {
+        return fn()
+    } finally {
+        if (had) process.env.AETHER_ENGINE_PATH = prev
+        else delete process.env.AETHER_ENGINE_PATH
+    }
+}
+
+test('no AETHER_ENGINE_PATH means no scheduler, and no throw', () => {
+    withEnginePath(undefined, () => {
+        assert.doesNotThrow(() => aetherSchedulerService.start())
+    })
+})
+
+test('an engine path with no venv does not spawn — the deployed-instance case', () => {
+    // A directory that exists but holds no .venv: precisely what a Render checkout of
+    // the backend looks like if AETHER_ENGINE_PATH is ever pointed at something real.
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'aether-noengine-'))
+    try {
+        withEnginePath(empty, () => {
+            assert.doesNotThrow(() => aetherSchedulerService.start())
+        })
+    } finally {
+        fs.rmSync(empty, { recursive: true, force: true })
+    }
+})
+
+test('stop() is safe when nothing was ever started', async () => {
+    await assert.doesNotReject(() => aetherSchedulerService.stop())
 })

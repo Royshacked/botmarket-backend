@@ -57,7 +57,14 @@ test('server.js registers the full fleet', () => {
         // 'guardSweep' is Talos's tier-0 (docs/desks/talos-guards.md) and belongs on this list for
         // the reason the list exists: it is the only thing watching price between Talos's own reads,
         // so switching it off would not fail anywhere — armed setups would simply stop being seen.
-        'aetherScheduler', 'coverage', 'entries', 'exits', 'guardSweep', 'marketBrief', 'marketOpen', 'paperEquity',
+        //
+        // 'aetherScheduler' left this list on 2026-09-06, and its absence is the fix rather than a
+        // regression. The lease decides which PROCESS owns shared work; the Aether engine needs a
+        // MACHINE with a Python checkout, and the lease holder is the deploy, which has neither.
+        // Under the lease it completed zero scheduled runs in twelve days. It is now started
+        // unconditionally in server.js, gated on the engine being present on this host, and its
+        // mutual exclusion comes from claiming each job occurrence in aether_scheduler_runs.
+        'coverage', 'entries', 'exits', 'guardSweep', 'marketBrief', 'marketOpen', 'paperEquity',
         'paperFill', 'paperMark', 'reconciler', 'talos', 'themis', 'tilt',
     ])
 })

@@ -1,11 +1,17 @@
 // Aether engine scheduler — spawns the Python scheduler as a child process.
 //
-// Registered in startBackgroundLoops() behind the instance lock, so only one server process
-// runs it. The scheduler fires: news (every 4h), FRED validation (daily, release-gated),
-// weekly coupling rebuild (Sundays), monthly decay audit (1st of month).
+// Started from server.js OUTSIDE the instance lease, gated instead on whether this machine
+// actually has the engine: AETHER_ENGINE_PATH pointing at an aether-engine checkout with a
+// built venv. It used to sit inside startBackgroundLoops(), which meant it only ran on the
+// lease holder — the deployed instance, which has no Python and no engine repo. It therefore
+// ran essentially nowhere, and the one machine that COULD run it was a follower that never
+// called start(). See the note at its call site in server.js.
 //
-// Requires AETHER_ENGINE_PATH in .env pointing at the aether-engine repo root.
-// If unset, start() is a no-op and the engine still serves its read endpoints normally.
+// Two hosts that both have the engine are safe: scheduler.py claims each job occurrence in
+// aether_scheduler_runs before running it, so exclusion is per job, not per host.
+//
+// If the engine is not present here, start() is a quiet no-op and the read endpoints keep
+// serving normally — the vast majority of deploys are in exactly that state.
 //
 // Env bridging: Node uses MONGODB_URI / DB_NAME; aether-engine uses MONGO_URI / MONGO_DB.
 // The spawn env maps them so both sides read the same database without duplicating the values.
@@ -18,6 +24,7 @@
 // like it was running. A database name we cannot resolve is now a refusal to spawn.
 
 import { spawn } from 'child_process'
+import fs       from 'fs'
 import path     from 'path'
 import { getDbName } from '../providers/mongodb.provider.js'
 import { config } from './config.js'
@@ -50,7 +57,17 @@ function _buildEnv() {
 function start() {
     const engineDir = config.aetherEnginePath
     if (!engineDir) {
-        logger.warn(LOG, 'AETHER_ENGINE_PATH not set — scheduler not started')
+        logger.info(LOG, 'AETHER_ENGINE_PATH not set — no engine on this host, scheduler not started')
+        return
+    }
+
+    // The host check comes BEFORE the database check on purpose. A deploy with no engine
+    // should say so once, calmly, and not go on to complain about a database name it was
+    // never going to use.
+    const python = _pythonExe(engineDir)
+    const script = path.join(engineDir, 'scripts', 'scheduler.py')
+    if (!fs.existsSync(python) || !fs.existsSync(script)) {
+        logger.info(LOG, `no engine venv at ${python} — scheduler not started on this host`)
         return
     }
 
@@ -60,9 +77,6 @@ function start() {
             + 'Set DB_NAME, or start the scheduler after the first DB connection.')
         return
     }
-
-    const python = _pythonExe(engineDir)
-    const script = path.join(engineDir, 'scripts', 'scheduler.py')
 
     _proc = spawn(python, [script], {
         cwd: engineDir,

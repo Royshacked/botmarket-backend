@@ -258,9 +258,27 @@ function startBackgroundLoops() {
     startLoop('paperEquity',  paperEquityService)
     startLoop('paperMark',    paperMarkService)
     startLoop('marketBrief',  marketBriefNotifier)
-    startLoop('aetherScheduler', aetherSchedulerService)
     startAetherChangeStream()
 }
+
+// The Aether scheduler is NOT one of these, and that is the point.
+//
+// It used to be, and the consequence was that it ran nowhere. The lease is held by the
+// deployed instance, which has no aether-engine checkout and no Python venv, so it could
+// never spawn the engine; the laptop, which can, is a follower and never even called
+// start(). In twelve days the scheduler started four times — only on the days a Mongo
+// blip briefly handed the laptop the lease — for 2m, 52m, 1s and 10m, and completed zero
+// scheduled runs.
+//
+// The lease answers "should this process own the shared work?". The engine asks a
+// different question: "can this MACHINE run Python against the engine repo?". Only the
+// host with the checkout can, so that is the gate. Two hosts that both qualify are safe
+// because the scheduler claims each job occurrence in Mongo before running it — mutual
+// exclusion per job, which is stricter than per host.
+//
+// Started outside the lease, and deliberately outside startLoop(): stopLoops() also runs
+// when the lease is LOST, and losing a lease we never depended on must not kill the engine.
+aetherSchedulerService.start()
 
 const loopsLock = createInstanceLock({
     getCollection: async () => (await getDb()).collection(LOCK_COLLECTION),
@@ -354,6 +372,9 @@ async function shutdown(signal, code = 0) {
         //    broker round trip after this point has nowhere left to write the answer.
         const stopped = await stopLoops()
         logger.info('[server]', `stopped ${stopped.length} background loops`)
+
+        // Not in the loop registry (see the note by its start), so it is stopped by name.
+        await aetherSchedulerService.stop()
 
         // Release AFTER the loops are down, never before: handing the lease over while ours are
         // still winding up would put a replacement's reconciler alongside our own.
