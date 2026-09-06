@@ -637,6 +637,17 @@ export function formatShockFeed(outcomes, opportunities) {
     ].join('\n')
 }
 
+// A news signal now stands for the whole day's coverage of one channel, not one article.
+// `agreement` is |net| / gross across that batch: 1.0 unanimous, 0 a dead heat. An agent
+// reading conf=0.55 cannot otherwise tell a lone confident article from thirteen articles
+// that nearly cancelled out — and those call for different position sizes.
+export function formatConsensus(c) {
+    const n = c?.contributing_count
+    if (!n || n < 2) return null
+    const pct = c.agreement != null ? `${(c.agreement * 100).toFixed(0)}% net agreement` : null
+    return [`${n} articles`, pct].filter(Boolean).join(', ')
+}
+
 export function formatTickerSignals(ticker, { opportunities = [], signals = [] } = {}) {
     if (!opportunities.length && !signals.length) {
         return `AETHER SIGNALS — ${ticker}: no active signals. No channel pressure currently confirmed or predicted for this name.`
@@ -649,6 +660,8 @@ export function formatTickerSignals(ticker, { opportunities = [], signals = [] }
             + `${(c.direction ?? '').padEnd(6)} ${(c.magnitude ?? '').padEnd(8)} `
             + `lag=${lagStr}  conf=${(c.confidence_llm ?? 0).toFixed(2)}  [${c.source_type === 'event' ? 'event' : label}]`,
         ]
+        const consensus = formatConsensus(c)
+        if (consensus) lines.push(`    Basis: ${consensus}`)
         if (c.why)  lines.push(`    Why:  ${c.why}`)
         if (c.when) lines.push(`    When: ${c.when}`)
         if (c.action_label && c.action_label !== 'watch') lines.push(`    Action: ${c.action_label}`)
