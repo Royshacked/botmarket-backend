@@ -36,6 +36,24 @@ export async function getDb() {
 }
 
 /**
+ * The database this process is ACTUALLY using — not what an env var says it should be.
+ *
+ * The Aether engine is a separate Python process that has to reach the same database.
+ * Having both sides read their own env var is what let one run write a full parallel copy
+ * of every aether_* collection into `botmarket` while everything else read `test`: the
+ * bridge in aetherScheduler mapped DB_NAME → MONGO_DB, DB_NAME was unset, so it mapped
+ * nothing and both sides landed on a hardcoded default that happened to agree. Passing the
+ * resolved name instead means the engine cannot disagree with us, whatever the env holds.
+ *
+ * Synchronous on purpose: by the time the scheduler starts, the loop lease has already
+ * awaited getDb(), so `_db` is live. `config.dbName` is the fallback before we connect,
+ * and null means "the driver will pick" — which the caller must then refuse to guess at.
+ */
+export function getDbName() {
+    return _db?.databaseName ?? config.dbName ?? null
+}
+
+/**
  * The other half of the lazy singleton above. A connected MongoClient keeps a pool AND a topology
  * monitor that pings every replica-set member on a heartbeat — all of it `ref`'d, so the event loop
  * can never drain and the process can never exit on its own.

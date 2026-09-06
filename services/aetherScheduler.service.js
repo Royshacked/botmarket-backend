@@ -9,9 +9,17 @@
 //
 // Env bridging: Node uses MONGODB_URI / DB_NAME; aether-engine uses MONGO_URI / MONGO_DB.
 // The spawn env maps them so both sides read the same database without duplicating the values.
+//
+// It maps the database Node is CONNECTED TO, not the env var Node was configured with.
+// The old bridge mapped DB_NAME → MONGO_DB; DB_NAME was unset, so it mapped nothing, and
+// both sides fell through to their own hardcoded "test" — agreeing by luck. The day one
+// engine process had MONGO_DB=botmarket in its environment it wrote a full parallel copy
+// of every aether_* collection, silently, and the pipeline stalled for five days looking
+// like it was running. A database name we cannot resolve is now a refusal to spawn.
 
 import { spawn } from 'child_process'
 import path     from 'path'
+import { getDbName } from '../providers/mongodb.provider.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
 
@@ -25,11 +33,17 @@ function _pythonExe(engineDir) {
         : path.join(engineDir, '.venv', 'bin', 'python')
 }
 
+// Returns null when the database cannot be resolved — the caller must not spawn on null.
 function _buildEnv() {
+    const dbName = getDbName()
+    if (!dbName) return null
+
     const env = { ...process.env }
     // aether-engine reads MONGO_URI / MONGO_DB; the backend sets MONGODB_URI / DB_NAME.
-    if (!env.MONGO_URI  && env.MONGODB_URI) env.MONGO_URI = env.MONGODB_URI
-    if (!env.MONGO_DB   && env.DB_NAME)     env.MONGO_DB  = env.DB_NAME
+    // Both are set unconditionally: an inherited MONGO_DB from the parent shell is exactly
+    // the way the engine ends up in a different database from the app.
+    env.MONGO_URI = config.mongoUri
+    env.MONGO_DB  = dbName
     return env
 }
 
@@ -40,12 +54,19 @@ function start() {
         return
     }
 
+    const env = _buildEnv()
+    if (!env) {
+        logger.error(LOG, 'cannot resolve the database name — scheduler NOT started. '
+            + 'Set DB_NAME, or start the scheduler after the first DB connection.')
+        return
+    }
+
     const python = _pythonExe(engineDir)
     const script = path.join(engineDir, 'scripts', 'scheduler.py')
 
     _proc = spawn(python, [script], {
         cwd: engineDir,
-        env: _buildEnv(),
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
     })
 
@@ -68,7 +89,7 @@ function start() {
         _proc = null
     })
 
-    logger.info(LOG, `started  pid=${_proc.pid}  cwd=${engineDir}`)
+    logger.info(LOG, `started  pid=${_proc.pid}  cwd=${engineDir}  db="${env.MONGO_DB}"`)
 }
 
 async function stop() {
