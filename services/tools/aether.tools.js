@@ -1,4 +1,14 @@
-// Aether desk tools — channel-graph engine reads.
+// Aether desk tools — the surviving channel MEASUREMENT reads.
+//
+// Eleven tools were retired on 2026-09-09 with the channel-forecasting stack they read
+// from: exposure elasticities, forecasts, calibration, portfolio slots, interference,
+// loss surface, governance budget, decay audit, shock predictions, the opportunity
+// feed and per-ticker signals. Their collections are archived, empty, or — worst —
+// stale: get_shock_feed was serving Mentor and Atlas the 170 opportunity cards built
+// on June's channel state by a generator that no longer runs.
+//
+// What is left is the measurement path: taxonomy, channel state, regime. The event
+// pipeline (aether_event_runs, aether_event_candidates) has no tool surface yet.
 //
 // UNBOUND: channel state, regime and forecasts are house-layer broadcasts written by the Python
 // compute repo and shared across all users (same pattern as sectorView). No userId.
@@ -7,7 +17,7 @@
 // Aether reasons qualitatively (LLM knowledge) in that state and says so plainly.
 
 import { makeToolHandler }   from '../agentUtils.js'
-import { getChannelState, getCurrentRegime, getExposure, getTaxonomy, getForecasts, getCalibration, getPortfolioSlots, getInterference, getLossSurface, getAllCandidates, getDecayAudit, getActiveShockPredictions, getRecentValidationOutcomes, getActiveOpportunities, getOpportunityCardsByTicker } from '../../api/aether/aether.service.js'
+import { getChannelState, getCurrentRegime, getTaxonomy } from '../../api/aether/aether.service.js'
 
 const LOG = '[aetherTools]'
 
@@ -76,18 +86,7 @@ Always one matrix operation — never propagate a chain in isolation (it double-
 export const AETHER_TOOL_SPECS = {
     get_channel_taxonomy: `The static channel taxonomy: the ~15-25 measurable pressure channels the engine uses as its state space, their observable proxies, and their clock (fast/medium/slow). Call it to explain the mental model, to ground a channel discussion, or any time the user asks "what channels does Aether track?" No arguments.`,
     get_channel_state:    `The latest channel-state snapshot written by the Python engine: current pressure scores per channel, computed_at timestamp, and the active regime label. Returns "not yet computed" when Phase 1 has not run. Call it for "what is the channel picture", "where is pressure building", "what's the current state". No arguments.`,
-    get_name_exposure:    `The exposure record for one name from the Phase 3 matrix: per-channel elasticity, lag_profile, hedge_coverage, pass_through, confidence, and supply-graph connections. Returns "not yet computed" when Phase 3 has not populated this ticker. Call it to anchor a company discussion in channel-exposure data.`,
     get_regime:           `The current market regime as classified by the engine: label, definition, and which channels are driving it. Returns "not yet computed" when Phase 1 has not run. Call it when the user asks about the regime or when you need the regime label to contextualise channel pressure. No arguments.`,
-    get_forecasts:        `Active and recently resolved forecasts from the Phase 6 engine: entity, direction, magnitude, probability, channels responsible, attribution_confidence, and resolution date. Returns "not yet computed" when Phase 6 has not emitted any forecasts. Call it when the user asks about signals, open positions the engine is tracking, or what the model currently sees. No arguments.`,
-    get_calibration:      `Brier score calibration report by (channel × event_type × regime): which channel/event combinations are deployment-ready (mean Brier < 0.20), which need more data, which are not calibrated, and which are performing worse than a coin flip (flagged for Phase 8 governance). Returns "not yet computed" when no forecasts have resolved. Call it when the user asks about model accuracy, calibration, or which channels to trust. No arguments.`,
-    get_portfolio:        `The current channel-correlation portfolio from Phase 7: one slot per entity with allocation weight, direction, attribution confidence, and per-channel decomposition. Weights are computed from probability × attribution_confidence × residual_score, then trimmed if any channel's gross portfolio exposure exceeds 30%. Returns "not yet computed" when Phase 7 has not run. Call it when Atlas is building or reviewing a portfolio, when the user asks about allocation or position weighting, or when you need to see which names the engine is currently long/short and why.`,
-    get_interference:     `Cross-forecast interference classification from Phase 7: compounding (two names betting the same channel direction, superlinear risk near capacity), offsetting (one name pulled in opposite directions), masking (a loud event suppressing repricing of a quiet one — the primary durable edge), conditioning (a fast channel in forecast A shifts the regime for forecast B), sequencing (repeated entity/channel forecast with decaying surprise). Returns "not yet computed" when Phase 7 has not run. Call it when Atlas is evaluating portfolio construction, when you want to flag cross-name dynamics, or when the user asks how the current forecasts interact. No arguments.`,
-    get_loss_surface:     `Monte Carlo portfolio loss surface from Phase 7: P&L quantiles (p01–p99), per-channel variance contributions, and gross channel exposures relative to the 30% cap. Simulates 10,000 joint channel state draws using the channel correlation matrix built from channel decompositions (not returns). Returns "not yet computed" when Phase 7 has not run. Call it when the user asks about portfolio risk, tail exposure, drawdown scenarios, or which channels are driving P&L uncertainty. No arguments.`,
-    get_governance_budget: `Phase 8 edge governance budget: how many new K edges (transmission weights) have been promoted in the last 365 days out of the hard cap of 4/year, how many are actively moving through the 5-step admission pipeline, and how many are still waiting for an out-of-sample check. The residual monitor always has more suggestions than the budget allows — the budget is the mechanism that prevents overfitting. Returns "not yet run" when no candidates have been submitted. Call it when the user asks about the model's edge count, how conservative the engine is, or whether there is capacity to add new relationships.`,
-    get_decay_audit:       `Latest decay audit from Phase 8: each existing K edge (channel transmission weight) re-estimated against the most recent 2 years of proxy data. Each edge is labelled keep / demote / delete based on how much of its original weight survives in recent data. "Dead edges are worse than missing ones — they generate confident wrong forecasts." Returns "not yet run" when no audit has been completed. Call it when the user asks about model staleness, whether any channel relationships have weakened, or when discussing model maintenance and re-estimation.`,
-    get_active_predictions: `Active provisional channel predictions from the Aether shock pipeline: channels the news pipeline currently expects to move, with direction, magnitude, confidence, lag, and the reasoning for each signal. Groups by channel so you can see the net picture per channel across multiple news events. Returns "no active signals" when the pipeline has not produced any predictions yet. Call this during Phase 3 to check whether any macro channels have live pressure that confirms or contradicts your variant perception — then cross-reference with get_name_exposure({ticker}) to see how exposed the name is to those channels. No arguments.`,
-    get_shock_feed: `The Aether shock feed returns three lists: (1) outcomes — most recent FRED-confirmed and rejected channel predictions with channel, direction, and Brier calibration score; (2) opportunities — active confirmed cards: ticker, direction, why (full thesis from news → FRED confirmation), lag window, trade type (swing/position), agent (mentor/atlas), and risk note; (3) predicted_signals — active predicted cards from news predictions not yet FRED-confirmed: same shape as opportunities but earlier in the pipeline (thesis = news headline → channel → ticker exposure chain, no Brier yet). Some opportunity cards are EVENT-sourced: they come from the company's own 8-K filing rather than a macro channel, so they are idiosyncratic to that name, carry a dimension (revenue, financing, supply_access…) in place of a macro channel, and are never FRED-validated — their missing brier means "never scored", not "pending". Use predicted_signals as early-warning context; use opportunities as hard macro catalysts. Argus: call in Phase 2, screen_candidates inside affected sectors. Mentor/Atlas: call when user asks about macro-driven trades — opportunities are actionable now, predicted_signals are watch-list.`,
-    get_ticker_signals: `Active aether signals for ONE ticker: FRED-confirmed opportunity cards (opportunities[]) and news-provisional predicted signals (signals[]). Each entry carries channel_id, direction, magnitude, lag_weeks_min/max, confidence_llm, ticker_direction (long/short), why, when, risk_note, and action_label. Call this during a PT revision or coverage re-model to see what channel pressure is currently pointing at this name. Arg: { ticker }.`,
 }
 
 // ── Formatters (pure — exported for testing) ─────────────────────────────────
@@ -524,7 +523,6 @@ export function formatActiveShockPredictions(docs) {
     }
 
     lines.push('')
-    lines.push('Cross-reference: call get_name_exposure({ticker}) to see how exposed the name is to each flagged channel.')
     return lines.join('\n')
 }
 
@@ -633,7 +631,6 @@ export function formatShockFeed(outcomes, opportunities) {
         '',
         cardText,
         '',
-        'Cross-reference: call get_name_exposure({ticker}) to see how exposed a candidate is to a confirmed channel.',
     ].join('\n')
 }
 
@@ -681,7 +678,6 @@ export function formatTickerSignals(ticker, { opportunities = [], signals = [] }
         out.push('\nPROVISIONAL (news-driven, awaiting FRED):')
         for (const c of signals) out.push(renderCard(c, 'provisional'))
     }
-    out.push('\nUse these channel deltas with get_name_exposure({ticker}) elasticity to compute a PT revision.')
     return out.join('\n')
 }
 
@@ -701,54 +697,15 @@ export function makeAetherToolHandlers() {
             async () => formatRegime(await getCurrentRegime()),
             (err) => `Could not read the regime: ${err.message}`, LOG),
 
-        get_name_exposure: makeToolHandler('get_name_exposure',
-            async ({ ticker }) => formatExposure(ticker, await getExposure(ticker)),
-            (err, { ticker }) => `Could not read exposure for ${ticker}: ${err.message}`, LOG),
 
-        get_forecasts: makeToolHandler('get_forecasts',
-            async () => formatForecasts(await getForecasts()),
-            (err) => `Could not read forecasts: ${err.message}`, LOG),
 
-        get_calibration: makeToolHandler('get_calibration',
-            async () => formatCalibration(await getCalibration()),
-            (err) => `Could not read calibration scores: ${err.message}`, LOG),
 
-        get_portfolio: makeToolHandler('get_portfolio',
-            async () => formatPortfolio(await getPortfolioSlots()),
-            (err) => `Could not read portfolio slots: ${err.message}`, LOG),
 
-        get_interference: makeToolHandler('get_interference',
-            async () => formatInterference(await getInterference()),
-            (err) => `Could not read interference records: ${err.message}`, LOG),
 
-        get_loss_surface: makeToolHandler('get_loss_surface',
-            async () => formatLossSurface(await getLossSurface()),
-            (err) => `Could not read loss surface: ${err.message}`, LOG),
 
-        get_governance_budget: makeToolHandler('get_governance_budget',
-            async () => formatGovernanceBudget(await getAllCandidates()),
-            (err) => `Could not read governance budget: ${err.message}`, LOG),
 
-        get_decay_audit: makeToolHandler('get_decay_audit',
-            async () => formatDecayAudit(await getDecayAudit()),
-            (err) => `Could not read decay audit: ${err.message}`, LOG),
 
-        get_active_predictions: makeToolHandler('get_active_predictions',
-            async () => formatActiveShockPredictions(await getActiveShockPredictions()),
-            (err) => `Could not read active shock predictions: ${err.message}`, LOG),
 
-        get_shock_feed: makeToolHandler('get_shock_feed',
-            async () => {
-                const [outcomes, opportunities] = await Promise.all([
-                    getRecentValidationOutcomes(20),
-                    getActiveOpportunities(),
-                ])
-                return formatShockFeed(outcomes, opportunities)
-            },
-            (err) => `Could not read Aether shock feed: ${err.message}`, LOG),
 
-        get_ticker_signals: makeToolHandler('get_ticker_signals',
-            async ({ ticker }) => formatTickerSignals(ticker, await getOpportunityCardsByTicker(ticker)),
-            (err, { ticker }) => `Could not read aether signals for ${ticker}: ${err.message}`, LOG),
     }
 }

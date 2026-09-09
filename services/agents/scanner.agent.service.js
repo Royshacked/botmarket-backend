@@ -14,7 +14,6 @@ import { logger }        from '../logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, TRADE_HORIZONS, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
-import { AETHER_TOOL_SPECS, makeAetherToolHandlers } from '../tools/aether.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { isToolError } from '../toolResult.util.js'
 import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS } from '../scanner.grounding.js'
@@ -81,7 +80,6 @@ export const TOOLS = toolsFor({
     get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
     // Appended. Aether shock feed — FRED-confirmed channel moves + opportunity cards. Call once
     // per scan in Phase 2 to surface channel-validated macro catalysts before discovery.
-    get_shock_feed: AETHER_TOOL_SPECS.get_shock_feed,
     // Appended last — contractually. The reasoning sidecar (services/deepThink.service.js): one
     // bounded decision put to a stronger model and handed back as a tool result. The mechanism half
     // of this description is shared with every other desk; the clause below is Argus's own judgment
@@ -144,7 +142,6 @@ const TOOL_HANDLERS = {
     // static map, unlike the venue handlers that are rebuilt per request around a userId.
     ...makeMarketHoursHandlers(),
     // Unbound — shock feed is a house-layer broadcast, no userId.
-    get_shock_feed: makeAetherToolHandlers().get_shock_feed,
 }
 
 // Wrap the module-level handlers with a per-session grounding recorder. A
@@ -181,7 +178,7 @@ export { _normalizeScan, _cleanScore, SCANNER_TOOLS_FOR_PROFILE }
 const INVESTING_TOOL_NAMES = new Set([
     'web_search', 'screen_candidates', 'get_fundamentals', 'get_sector_snapshot',
     'get_earnings', 'get_earnings_calendar', 'get_analyst_actions', 'get_sec_filings',
-    'get_quotes', 'get_price_action', 'get_shock_feed',
+    'get_quotes', 'get_price_action',
 ])
 function SCANNER_TOOLS_FOR_PROFILE(profile) {
     return profile === 'investing' ? TOOLS.filter(t => INVESTING_TOOL_NAMES.has(t.name)) : TOOLS

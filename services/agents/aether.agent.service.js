@@ -24,7 +24,6 @@ export const TOOLS = toolsFor({
     get_channel_taxonomy: AETHER_TOOL_SPECS.get_channel_taxonomy,
     get_channel_state:    AETHER_TOOL_SPECS.get_channel_state,
     get_regime:           AETHER_TOOL_SPECS.get_regime,
-    get_name_exposure:    AETHER_TOOL_SPECS.get_name_exposure,
 })
 
 const TOOL_HANDLERS = makeAetherToolHandlers()

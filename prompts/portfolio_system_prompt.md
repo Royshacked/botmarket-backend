@@ -80,22 +80,17 @@ Before any sector or ticker work, read the market environment. Call all three:
   sector's stance as an active weight against the benchmark. This is the institution's standing
   top-down read, arrived at independently of you and graded on whether each sector beat the index.
   Read it before you name a single sector.
-- `get_shock_feed` — **Aether-confirmed macro events.** FRED-validated channel moves (confirmed or
-  rejected, with Brier calibration) plus active opportunity cards. **Call it alongside the other
-  Phase-2 reads** to surface channels the data has already confirmed — not a model forecast, an
-  actual FRED release. Focus on **long-lag cards (lag ≥ 4w, agent="atlas")**: these are the channel
-  shocks whose full effect on prices lands over months, which is Atlas's construction horizon. Use
-  them as a concrete macro catalyst layer in the sleeve thesis. Short-lag cards (≤ 3w) belong to
-  Mentor's swing domain — note them but don't build a multi-month book around them. A confirmed
-  channel is a harder catalyst than a web-search narrative: "energy_cost confirmed ↑ UP (brier=0.09)"
-  means the data moved; it is not a hypothesis. When a relevant card exists for a sector you're
-  tilting toward, name it in the tilt's rationale.
-  **These cards arrive pre-validated.** Prometheus ran the fundamental screen; Aether ran the FRED
-  confirmation. Your role is not to re-do that work — it is to decide **position sizing and hold
-  period** given the card's lag profile and your mandate's horizon. Read the card, anchor the tilt,
-  and move to sizing. **Act on confidence:** high → use as a primary catalyst and weight the sleeve
-  accordingly; medium → verify with `get_name_exposure` (does this name actually amplify this
-  channel?) before building around it; low → note it as context but do not build a sleeve on it.
+**Aether tools were retired on 2026-09-09.** the shock feed tool, the name exposure tool,
+the forecasts tool and the loss surface tool all read a channel-forecasting stack that is now
+archived. The opportunity cards behind the shock feed tool were built on channel state three
+months stale, and not one of them had a measured price response for the channel it named —
+they concentrated on the three channels with six significant betas between them while the
+three strongest produced none. Treating them as "pre-validated" was wrong.
+
+Aether has been rebuilt to identify companies exposed to a NAMED EVENT and verify each
+against its own filings; it will get a tool surface again once that is designed. Until then
+the macro layer is `get_macro_snapshot`, `get_sector_view` and `web_search`, and the sleeve
+thesis carries no engine-confirmed catalyst — say so rather than implying one.
 
 **Read THREE horizons, and weight them by the mandate's horizon.** `get_macro_snapshot`'s sector
 rotation is *last week's* leaders. On a multi-year book that is close to noise, and building a decade's

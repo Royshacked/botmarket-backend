@@ -14,7 +14,6 @@ import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingC
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorView.tools.js'
 import { makeChartHandler } from '../tools/marketData.tools.js'
-import { AETHER_TOOL_SPECS, makeAetherToolHandlers } from '../tools/aether.tools.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { SECTORS } from '../entity/vocabulary.js'
 import { buildTagCaptures } from '../llmStream.util.js'
@@ -57,19 +56,12 @@ export const TOOLS = toolsFor({
     // Aether engine reads for construction and risk. Each returns "not yet computed" when the
     // relevant engine phase has not run; reason qualitatively in that state.
     //
-    // get_name_exposure: per-name channel elasticity + lag profile — use when evaluating a candidate
     //   or sizing a position; the elasticity tells you which channels the name amplifies.
-    // get_forecasts: what the engine is currently tracking — open signals + recently resolved ones.
-    // get_loss_surface: Monte Carlo P&L quantiles (p01–p99) and per-channel VaR — use for tail-risk
     //   framing and to check whether any channel is near its 30% gross exposure cap.
-    get_name_exposure: AETHER_TOOL_SPECS.get_name_exposure,
-    get_forecasts:     AETHER_TOOL_SPECS.get_forecasts,
-    get_loss_surface:  AETHER_TOOL_SPECS.get_loss_surface,
     // FRED-confirmed channel moves + long-lag opportunity cards (lag ≥ 4w = Atlas's domain).
     // Call in Phase 2 alongside the macro reads, or in Phase 3/5 when sizing a sleeve where a
     // confirmed macro channel is a construction thesis input. Short-lag cards (≤ 3w) belong to
     // Mentor (swing trades), not portfolio construction — note but do not act on them here.
-    get_shock_feed: AETHER_TOOL_SPECS.get_shock_feed,
     consult: consultDescription(`Reach for it in exactly three situations: **the final weights on a real-money book** (live or manual — the capital is at risk, and a weight is the one number here that cannot be walked back cheaply); **two names you cannot tell apart as ONE bet or two** — the correlation number is high but not decisive and the concentration call rests on your read of it; and **a rebalance where cutting the winner and adding to the laggard are both defensible** against the mandate, and you have to pick one.`),
 })
 
@@ -110,12 +102,7 @@ const TOOL_HANDLERS = {
 }
 
 // Unbound — all Aether reads are house-layer broadcasts, no userId.
-const { get_name_exposure: _atlas_get_name_exposure, get_forecasts: _atlas_get_forecasts, get_loss_surface: _atlas_get_loss_surface, get_shock_feed: _atlas_get_shock_feed } = makeAetherToolHandlers()
 const AETHER_TOOL_HANDLERS = {
-    get_name_exposure: _atlas_get_name_exposure,
-    get_forecasts:     _atlas_get_forecasts,
-    get_loss_surface:  _atlas_get_loss_surface,
-    get_shock_feed:    _atlas_get_shock_feed,
 }
 
 // Coverage the Analyst never classified. Its own bucket, always last: a name with no sector is not a
