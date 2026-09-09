@@ -118,4 +118,80 @@ async function stop() {
     })
 }
 
-export const aetherSchedulerService = { start, stop }
+// ── discovery, on demand ──────────────────────────────────────────────────────
+//
+// DELIBERATELY NOT ON THE SCHEDULE. scheduler.py runs six jobs and discovery is not one
+// of them: it fills the queues discovery reads and stops there. This is the other half —
+// an admin presses it, and nothing else can.
+//
+// The reason it is manual rather than daily is what it costs. One run is an Opus call
+// with web search per selected event, plus roughly nine SEC requests for every candidate
+// it proposes — a few hundred in a run. Everything else the engine does is a data fetch.
+// A schedule spends that every morning whether or not anything happened worth spending it
+// on, and "was there an event today" is a judgement, which is exactly the thing a cron
+// cannot make.
+//
+// ONE AT A TIME. Two concurrent runs would work the same queue, and the selector's
+// recent-subject skip reads Mongo at start-up, so the second would re-run the first's
+// picks before it had written any of them.
+
+let _discovery = null            // the child process, while one is running
+let _lastRun   = null            // { startedAt, finishedAt, code, ok }
+
+function discoveryStatus() {
+    return { running: Boolean(_discovery), last: _lastRun }
+}
+
+/**
+ * Spawn one discovery run. Resolves as soon as the process is RUNNING, not when it
+ * finishes — a run takes minutes and the caller is an HTTP request.
+ *
+ * Throws for the reasons a caller should hear about: no engine on this host, no
+ * resolvable database, or a run already in flight.
+ */
+function runDiscovery({ maxRuns = 2, hours = 36, top = 5 } = {}) {
+    if (_discovery) throw new Error('a discovery run is already in flight')
+
+    const engineDir = config.aetherEnginePath
+    if (!engineDir) throw new Error('AETHER_ENGINE_PATH not set — no engine on this host')
+
+    const python = _pythonExe(engineDir)
+    const script = path.join(engineDir, 'scripts', 'select_events.py')
+    if (!fs.existsSync(python) || !fs.existsSync(script)) {
+        throw new Error(`no engine venv at ${python}`)
+    }
+
+    // Same resolution as the scheduler: the engine must reach the database this process is
+    // actually connected to, not one inherited from the shell. See the note at the top.
+    const env = _buildEnv()
+    if (!env) throw new Error('cannot resolve the database name')
+
+    const args = [script, '--run',
+        '--max-runs', String(maxRuns), '--hours', String(hours), '--top', String(top)]
+    const startedAt = new Date().toISOString()
+
+    _discovery = spawn(python, args, { cwd: engineDir, env, stdio: ['ignore', 'pipe', 'pipe'] })
+
+    _discovery.stdout.on('data', buf => {
+        for (const line of buf.toString().trim().split('\n')) if (line) logger.info(LOG, line)
+    })
+    _discovery.stderr.on('data', buf => {
+        for (const line of buf.toString().trim().split('\n')) if (line) logger.warn(LOG, line)
+    })
+    _discovery.on('exit', code => {
+        _lastRun = { startedAt, finishedAt: new Date().toISOString(), code, ok: code === 0 }
+        logger.info(LOG, `discovery finished  code=${code ?? '-'}`)
+        _discovery = null
+    })
+    _discovery.on('error', err => {
+        _lastRun = { startedAt, finishedAt: new Date().toISOString(), code: null, ok: false,
+                     error: err.message }
+        logger.error(LOG, 'discovery spawn failed:', err.message)
+        _discovery = null
+    })
+
+    logger.info(LOG, `discovery started  pid=${_discovery.pid}  maxRuns=${maxRuns}  hours=${hours}`)
+    return { startedAt, pid: _discovery.pid, maxRuns, hours, top }
+}
+
+export const aetherSchedulerService = { start, stop, runDiscovery, discoveryStatus }

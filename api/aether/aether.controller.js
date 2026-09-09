@@ -5,6 +5,7 @@
 
 import { aetherAgentService }                        from '../../services/agents/aether.agent.service.js'
 import { getChannelState, getForecasts, getExposure, getRecentValidationOutcomes, getActiveOpportunities, getActivePredictedSignals, getPredictedChannelState, getEventCandidates } from './aether.service.js'
+import { aetherSchedulerService }                    from '../../services/aetherScheduler.service.js'
 import { streamAgentResponse, sseAgentCallbacks }    from '../_shared/sse.util.js'
 import { parseChatMessages }                         from '../_shared/parse.util.js'
 import { logger }                                    from '../../services/logger.service.js'
@@ -105,4 +106,42 @@ export async function getCandidates(req, res) {
         logger.error(LOG, 'getCandidates failed', err.message)
         res.status(500).json({ error: 'Could not read event candidates' })
     }
+}
+
+// ── discovery, on demand (admin) ──────────────────────────────────────────────
+//
+// The engine's expensive leg is not on the schedule. scheduler.py keeps the news and 8-K
+// queues fresh; turning a queue into named companies costs an Opus call with web search
+// per event plus several hundred SEC requests, and whether today held an event worth that
+// is a judgement a cron cannot make. So an admin presses it.
+
+/**
+ * Start a run. Returns 202 the moment the process is up — a run takes minutes, so the
+ * response says it STARTED, never that it finished. Watch the backend log, or poll
+ * GET /discover for the outcome.
+ */
+export async function startDiscovery(req, res) {
+    try {
+        // Clamped, because this is the spend dial. --max-runs is a per-event multiplier on
+        // both the model cost and the SEC traffic; a fat-fingered 200 is a very expensive
+        // afternoon.
+        const maxRuns = Math.min(Math.max(Number(req.body?.maxRuns) || 2, 1), 10)
+        const hours   = Math.min(Math.max(Number(req.body?.hours)   || 36, 1), 168)
+        const top     = Math.min(Math.max(Number(req.body?.top)     || 5, 1), 20)
+
+        const started = aetherSchedulerService.runDiscovery({ maxRuns, hours, top })
+        logger.info(LOG, `discovery requested by ${req.user?.username ?? 'admin'}`)
+        res.status(202).json({ started: true, ...started })
+    } catch (err) {
+        // A run already in flight is the caller's answer, not a server fault — 409 so a
+        // double-click reads as "already going" rather than as a failure.
+        const conflict = /already in flight/.test(err.message)
+        logger.warn(LOG, 'startDiscovery refused', err.message)
+        res.status(conflict ? 409 : 503).json({ started: false, error: err.message })
+    }
+}
+
+/** Whether a run is going, and how the last one ended. */
+export async function getDiscoveryStatus(req, res) {
+    res.json(aetherSchedulerService.discoveryStatus())
 }
