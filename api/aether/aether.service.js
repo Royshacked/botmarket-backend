@@ -368,6 +368,43 @@ export async function getExposure(ticker) {
 
 
 /**
+ * Group flat candidate rows into their events, newest event first, best rank first
+ * inside it.
+ *
+ * The event is the unit a reader reasons about — "this happened, and these names are
+ * exposed to it" — so a flat ticker list loses the question the names answer. The event
+ * fields are denormalised onto every candidate by the engine, so the first row of a run
+ * carries the header; `?? ''` throughout because a field added later (event_category) is
+ * absent on every row stored before it existed.
+ *
+ * Exported so the grouping can be tested without a database.
+ */
+export function groupCandidatesByRun(rows) {
+    const byRun = new Map()
+    for (const r of rows) {
+        if (!byRun.has(r.run_id)) {
+            byRun.set(r.run_id, {
+                run_id:         r.run_id,
+                subject:        r.subject ?? '',
+                event:          r.event ?? '',
+                answer_shape:   r.answer_shape ?? '',
+                // trade / fiscal / regulatory / geopolitical / macro / disruption.
+                event_category: r.event_category ?? '',
+                event_date:     r.event_date ?? '',
+                created_at:     r.created_at ?? '',
+                candidates:     [],
+            })
+        }
+        byRun.get(r.run_id).candidates.push(r)
+    }
+
+    const runs = [...byRun.values()]
+    for (const run of runs) run.candidates.sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0))
+    runs.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+    return runs
+}
+
+/**
  * Event candidates for the desk list, newest event first, best rank first inside it.
  *
  * SURVIVORS ONLY BY DEFAULT. Every candidate is stored — including the ones a gate
@@ -387,28 +424,7 @@ export async function getEventCandidates({ days = 30, includeDropped = false, li
             .limit(limit)
             .toArray()
 
-        // Group by event so the list reads as "this happened, these names" rather than a
-        // flat ticker soup — the event is the unit a user reasons about.
-        const byRun = new Map()
-        for (const r of rows) {
-            if (!byRun.has(r.run_id)) {
-                byRun.set(r.run_id, {
-                    run_id:       r.run_id,
-                    subject:      r.subject ?? '',
-                    event:        r.event ?? '',
-                    answer_shape: r.answer_shape ?? '',
-                    event_date:   r.event_date ?? '',
-                    created_at:   r.created_at ?? '',
-                    candidates:   [],
-                })
-            }
-            byRun.get(r.run_id).candidates.push(r)
-        }
-
-        const runs = [...byRun.values()]
-        for (const run of runs) run.candidates.sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0))
-        runs.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
-        return runs
+        return groupCandidatesByRun(rows)
     } catch (err) {
         logger.warn(LOG, 'getEventCandidates failed', err.message)
         return []

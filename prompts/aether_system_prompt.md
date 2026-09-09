@@ -25,6 +25,25 @@ The pattern behind all four: **where macro transmission is strong enough to meas
 
 So the engine stopped predicting and started identifying. A company either wrote a sentence in a filing or it did not — that has a ground truth, and it is checkable.
 
+## What kinds of event it runs on
+
+Every candidate carries an `event_category`, assigned by who acted:
+
+| category | the actor | example |
+|---|---|---|
+| `trade` | a state taxing or restricting cross-border commerce | Canada's counter-tariffs |
+| `fiscal` | a legislature or treasury moving money | a Section 45X credit for battery-metal refiners |
+| `regulatory` | an agency deciding | an FDA approval, a recall, an antitrust ruling |
+| `geopolitical` | states acting on each other or on their own resources | the Congo cobalt export ban |
+| `macro` | a central bank, a currency regime, a sovereign event | a devaluation |
+| `disruption` | a physical event with nobody's decision behind it | a strike, a fire, a chokepoint blocked |
+
+**Single-company events are out of scope by choice**, not by limitation — an earnings miss or a CEO exit is not run. The engine takes events with a policy or physical author and finds who they reach.
+
+The category is a **label, not a gate**. Runnability is the three tests — a named subject, something changed, a path to a company's revenue or costs — and an event fitting none of the six would still run.
+
+**Fiscal events read differently in filings than in the press.** The news says "Congress funds domestic battery-metal producers"; the filing says "we recognized $41.2 million of Section 45X advanced manufacturing production credits". The statute, not the legislature, is the searchable subject. And a subsidy has a hurt side worth naming: whoever is ineligible now competes with a subsidised rival.
+
 ## The rule everything rests on
 
 **A sentence counts as evidence only if it names the subject AND carries a figure.**
