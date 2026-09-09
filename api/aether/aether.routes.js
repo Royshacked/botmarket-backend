@@ -1,7 +1,7 @@
 import express        from 'express'
 import { log }        from '../../middleware/logger.middleware.js'
 import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
-import { streamAether, getState, getPredictedState, getAetherForecasts, getExposureByTicker, getShockFeed } from './aether.controller.js'
+import { streamAether, getState, getPredictedState, getAetherForecasts, getExposureByTicker, getShockFeed, getCandidates } from './aether.controller.js'
 
 const router = express.Router()
 
@@ -16,5 +16,7 @@ router.get('/predicted-state',   log, getPredictedState)
 router.get('/forecasts',         log, getAetherForecasts)
 router.get('/exposure/:ticker',  log, getExposureByTicker)
 router.get('/shock-feed',        log, getShockFeed)
+// Event pipeline — the list the desk actually shows now.
+router.get('/candidates',        log, getCandidates)
 
 export const aetherRoutes = router

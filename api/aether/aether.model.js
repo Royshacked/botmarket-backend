@@ -7,6 +7,11 @@
 import { getDb } from '../../providers/mongodb.provider.js'
 
 export const COLLECTIONS = {
+    // Event pipeline (2026-09) — what the engine writes now. A run is one event; a
+    // candidate is one company named by it, kept whether or not it survived the filter.
+    EVENT_RUNS:       'aether_event_runs',
+    EVENT_CANDIDATES: 'aether_event_candidates',
+
     CHANNEL_STATE:   'aether_channel_state',
     REGIMES:         'aether_regimes',
     EXPOSURES:       'aether_exposures',
