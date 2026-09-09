@@ -612,45 +612,9 @@ export const TOOL_SCHEMAS = {
         "type": "object",
         "properties": {}
     },
-    get_name_exposure: {
-        "type": "object",
-        "properties": {
-            "ticker": {
-                "type": "string",
-                "description": "The ticker to look up, e.g. AAPL, XOM"
-            }
-        },
-        "required": ["ticker"]
-    },
     get_regime: {
         "type": "object",
         "properties": {}
-    },
-    get_forecasts: {
-        "type": "object",
-        "properties": {}
-    },
-    get_loss_surface: {
-        "type": "object",
-        "properties": {}
-    },
-    get_active_predictions: {
-        "type": "object",
-        "properties": {}
-    },
-    get_shock_feed: {
-        "type": "object",
-        "properties": {}
-    },
-    get_ticker_signals: {
-        "type": "object",
-        "properties": {
-            "ticker": {
-                "type": "string",
-                "description": "The ticker to look up, e.g. AAPL, XOM"
-            }
-        },
-        "required": ["ticker"]
     },
 }
 

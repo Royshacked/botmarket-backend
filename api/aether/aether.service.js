@@ -365,3 +365,52 @@ export async function getExposure(ticker) {
         return null
     }
 }
+
+
+/**
+ * Event candidates for the desk list, newest event first, best rank first inside it.
+ *
+ * SURVIVORS ONLY BY DEFAULT. Every candidate is stored — including the ones a gate
+ * dropped, with the reason — because a filter whose rejections leave no trace can never
+ * be shown to be wrong. That is a storage rule; showing them is a display decision, and
+ * the screen wants the shortlist. Pass includeDropped to see the rest.
+ */
+export async function getEventCandidates({ days = 30, includeDropped = false, limit = 200 } = {}) {
+    try {
+        const db    = await getDb()
+        const since = new Date(Date.now() - days * 86_400_000).toISOString()
+        const query = { created_at: { $gte: since } }
+        if (!includeDropped) query.survived = true
+
+        const rows = await db.collection(COLLECTIONS.EVENT_CANDIDATES)
+            .find(query, { projection: { _id: 0 } })
+            .limit(limit)
+            .toArray()
+
+        // Group by event so the list reads as "this happened, these names" rather than a
+        // flat ticker soup — the event is the unit a user reasons about.
+        const byRun = new Map()
+        for (const r of rows) {
+            if (!byRun.has(r.run_id)) {
+                byRun.set(r.run_id, {
+                    run_id:       r.run_id,
+                    subject:      r.subject ?? '',
+                    event:        r.event ?? '',
+                    answer_shape: r.answer_shape ?? '',
+                    event_date:   r.event_date ?? '',
+                    created_at:   r.created_at ?? '',
+                    candidates:   [],
+                })
+            }
+            byRun.get(r.run_id).candidates.push(r)
+        }
+
+        const runs = [...byRun.values()]
+        for (const run of runs) run.candidates.sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0))
+        runs.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        return runs
+    } catch (err) {
+        logger.warn(LOG, 'getEventCandidates failed', err.message)
+        return []
+    }
+}
