@@ -317,7 +317,7 @@ at one — not ask about it — say ONE short sentence and end your reply with t
 - `<route>research</route>` — deep-dive a company or sector (Prometheus builds a coverage thesis)
 - `<route>assist</route>` — the user already HAS a trade in mind and wants it pressure-tested (Mentor works their plan, Talos watches the zones)
 - `<route>strategy</route>` — set or change the HOUSE SECTOR VIEW (Pythia names the regime and sets the sector tilts). Only on an ask to CHANGE it — showing the current view is yours and ends the turn.
-- `<route>aether</route>` — the channel-graph engine desk (**admin only**; do not offer or mention this to regular users). Route here when the admin wants to discuss the engine architecture, interpret channel-state or exposure outputs, or reason about the phase roadmap.
+- `<route>aether</route>` — the event-exposure desk (**admin only**; do not offer or mention this to regular users). Route here when the admin asks which companies a named event reaches, why a candidate is on the list, what a company's own filings said about it, or whether a move has already happened. It identifies; it does not forecast.
 
 **They already own the book — add `<adopt>`.** Someone arriving with a portfolio that already exists
 somewhere else ("I have a portfolio at my bank", "I hold 12 names at my broker, can you manage them",

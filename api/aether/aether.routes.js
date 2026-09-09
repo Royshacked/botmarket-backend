@@ -1,7 +1,7 @@
 import express        from 'express'
 import { log }        from '../../middleware/logger.middleware.js'
 import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
-import { streamAether, getState, getPredictedState, getAetherForecasts, getExposureByTicker, getShockFeed, getCandidates, startDiscovery, getDiscoveryStatus } from './aether.controller.js'
+import { streamAether, getCandidates, startDiscovery, getDiscoveryStatus } from './aether.controller.js'
 
 const router = express.Router()
 
@@ -10,13 +10,10 @@ router.use(requireAuth)
 // Chat stream — admin-only.
 router.post('/stream', log, requireAdmin, streamAether)
 
-// Read endpoints — broadcast, same for all authenticated users (Pythia tilt pattern).
-router.get('/state',             log, getState)
-router.get('/predicted-state',   log, getPredictedState)
-router.get('/forecasts',         log, getAetherForecasts)
-router.get('/exposure/:ticker',  log, getExposureByTicker)
-router.get('/shock-feed',        log, getShockFeed)
-// Event pipeline — the list the desk actually shows now.
+// The list the desk shows — broadcast, same for all authenticated users (Pythia tilt
+// pattern). Five sibling reads went with the channel engine on 2026-09-09: /state,
+// /predicted-state, /forecasts, /exposure/:ticker and /shock-feed were all still serving
+// signed-in users from collections nothing had written in months.
 router.get('/candidates',        log, getCandidates)
 
 // Discovery is MANUAL and ADMIN-ONLY. It is the one leg of the engine that spends real

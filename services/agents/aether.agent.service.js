@@ -1,8 +1,12 @@
-// Aether — the channel-graph forecasting engine desk (agent key `aether`).
+// Aether — the event-exposure desk (agent key `aether`).
 //
 // Admin-only: guarded at the route layer via requireAdmin middleware.
 // Pure conversational — no phase capture, no emit tags. The desk discusses the engine, interprets
 // its DB outputs, and reasons qualitatively when quantitative data is absent.
+//
+// It IDENTIFIES rather than forecasts. The channel-graph engine this desk was built around
+// is archived; what it reads now is the event pipeline — a named event, the companies it
+// reaches, and what each one's own filings say.
 
 import { fileURLToPath } from 'url'
 import { dirname, join }  from 'path'
@@ -21,9 +25,7 @@ const MAX_RECENT_MESSAGES = 12
 
 export const TOOLS = toolsFor({
     // Order is preserved exactly — prompt caching keys off the array prefix.
-    get_channel_taxonomy: AETHER_TOOL_SPECS.get_channel_taxonomy,
-    get_channel_state:    AETHER_TOOL_SPECS.get_channel_state,
-    get_regime:           AETHER_TOOL_SPECS.get_regime,
+    get_event_candidates: AETHER_TOOL_SPECS.get_event_candidates,
 })
 
 const TOOL_HANDLERS = makeAetherToolHandlers()

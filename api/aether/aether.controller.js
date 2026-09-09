@@ -1,10 +1,15 @@
-// HTTP handlers for the Aether desk (channel-graph forecasting engine).
+// HTTP handlers for the Aether desk (event exposure).
 //
-// Stream: admin-only (guarded in routes). Read endpoints: requireAuth — the engine outputs are
-// house-layer broadcasts, same pattern as the strategy desk's tilt reads.
+// Stream and discovery: admin-only. The candidate list: requireAuth — a run is a house-layer
+// broadcast, same pattern as the strategy desk's tilt reads.
+//
+// Five read endpoints went with the channel engine on 2026-09-09 — /state, /predicted-state,
+// /forecasts, /exposure/:ticker and /shock-feed. All five were still serving authenticated
+// users from collections that had stopped being written; /shock-feed was the worst of them,
+// handing out 170 opportunity cards built on June's channel state.
 
 import { aetherAgentService }                        from '../../services/agents/aether.agent.service.js'
-import { getChannelState, getForecasts, getExposure, getRecentValidationOutcomes, getActiveOpportunities, getActivePredictedSignals, getPredictedChannelState, getEventCandidates } from './aether.service.js'
+import { getEventCandidates }                        from './aether.service.js'
 import { aetherSchedulerService }                    from '../../services/aetherScheduler.service.js'
 import { streamAgentResponse, sseAgentCallbacks }    from '../_shared/sse.util.js'
 import { parseChatMessages }                         from '../_shared/parse.util.js'
@@ -33,67 +38,8 @@ export async function streamAether(req, res) {
     })
 }
 
-// ─── Read endpoints — house-layer broadcasts ──────────────────────────────────
+// ─── The candidate list — a house-layer broadcast ─────────────────────────────
 
-export async function getState(req, res) {
-    try {
-        const doc = await getChannelState()
-        res.json(doc)
-    } catch (err) {
-        logger.error(LOG, 'getState failed', err)
-        res.status(500).json({ error: 'Failed to read channel state' })
-    }
-}
-
-export async function getPredictedState(req, res) {
-    try {
-        const doc = await getPredictedChannelState()
-        res.json(doc)
-    } catch (err) {
-        logger.error(LOG, 'getPredictedState failed', err)
-        res.status(500).json({ error: 'Failed to read predicted channel state' })
-    }
-}
-
-export async function getAetherForecasts(req, res) {
-    try {
-        const docs = await getForecasts()
-        res.json(docs)
-    } catch (err) {
-        logger.error(LOG, 'getForecasts failed', err)
-        res.status(500).json({ error: 'Failed to read forecasts' })
-    }
-}
-
-export async function getExposureByTicker(req, res) {
-    try {
-        const { ticker } = req.params
-        if (!ticker || typeof ticker !== 'string') return res.status(400).json({ error: 'ticker is required' })
-        const doc = await getExposure(ticker)
-        res.json(doc)
-    } catch (err) {
-        logger.error(LOG, 'getExposure failed', err)
-        res.status(500).json({ error: 'Failed to read exposure' })
-    }
-}
-
-export async function getShockFeed(req, res) {
-    try {
-        const [outcomes, opportunities, predicted_signals] = await Promise.all([
-            getRecentValidationOutcomes(20),
-            getActiveOpportunities(),
-            getActivePredictedSignals(),
-        ])
-        res.json({
-            outcomes:         outcomes         ?? [],
-            opportunities:    opportunities    ?? [],
-            predicted_signals: predicted_signals ?? [],
-        })
-    } catch (err) {
-        logger.error(LOG, 'getShockFeed failed', err)
-        res.status(500).json({ error: 'Failed to read shock feed' })
-    }
-}
 
 
 export async function getCandidates(req, res) {
@@ -110,10 +56,10 @@ export async function getCandidates(req, res) {
 
 // ── discovery, on demand (admin) ──────────────────────────────────────────────
 //
-// The engine's expensive leg is not on the schedule. scheduler.py keeps the news and 8-K
-// queues fresh; turning a queue into named companies costs an Opus call with web search
-// per event plus several hundred SEC requests, and whether today held an event worth that
-// is a judgement a cron cannot make. So an admin presses it.
+// The engine's expensive leg is not on the schedule. scheduler.py keeps the news queue
+// fresh and stops there; turning a queue into named companies costs an Opus call with web
+// search per event plus several hundred SEC requests, and whether today held an event
+// worth that is a judgement a cron cannot make. So an admin presses it.
 
 /**
  * Start a run. Returns 202 the moment the process is up — a run takes minutes, so the

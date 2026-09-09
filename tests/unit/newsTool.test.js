@@ -125,7 +125,10 @@ test('Axl carries the tool, and it is APPENDED last', () => {
     assert.ok(names.includes('get_news'))
     // The kit is compared by index by the snapshot test and cached by array prefix — a tool inserted
     // mid-array invalidates Axl's cached tool block on every request until it re-warms.
-    assert.equal(names[names.length - 1], 'get_channel_state')
+    //
+    // get_news is last again. get_channel_state was appended after it and has now gone with the
+    // channel engine, which puts the tail back where this test found it.
+    assert.equal(names[names.length - 1], 'get_news')
 })
 
 test('the tool description holds the line against the brief and against advice', () => {
