@@ -1,11 +1,18 @@
 # Architecture Vision — House vs Per-User Pipeline
 
+> **Revised 2026-09-10.** Aether's channel-graph engine was deleted, not paused — it was
+> measured against held-out data and did not work. Every section describing Aether now
+> describes what it actually does: identify the companies a named event reaches, and quote
+> what their own filings say. The paragraphs that still name channels are the record of why
+> that engine went, which is worth keeping; nothing in this document describes it as
+> something that runs. `channel-graph-build-spec.md` went with the code.
+
 **Core principle:** Does the process need to know WHO the user is?
 - No → house layer (runs once, writes to DB, all users read)
 - Yes → user layer (scoped to user + workspace)
 
 **Role split:**
-- `admin` — can author house-layer outputs (tilt, coverage batch, channel graph) and access admin-gated desks (Pythia, Argus→Prometheus feed, Prometheus lifecycle, Aether feed controls)
+- `admin` — can author house-layer outputs (tilt, coverage batch) and access admin-gated desks (Pythia, Argus→Prometheus feed, Prometheus lifecycle, Aether discovery runs)
 - `trader` — all trading desks + workspace. Reads house output. Can trigger single-name on-demand research through Atlas.
 
 The monitors and reconciler always run across all workspaces. The workspace
@@ -24,7 +31,7 @@ existing state while the queue waits.
 | **Pythia** | Monitor cadence / macro catalyst / admin on-demand | Admin only | One published tilt in DB — all users read the same view |
 | **Argus** (house mode) | Pythia publishes / updates tilt | Admin only (auto from Pythia) | Candidate list → Prometheus research queue |
 | **Prometheus** (batch) | Argus candidate queue | Admin only | Coverage theses in DB — owner-blind, all users read |
-| **Aether** | Scheduled + admin-curated | Admin authors; all users read | Channel states, K matrix, exposure matrix, sector/name feed |
+| **Aether** | Admin presses Run discovery | Admin runs; all users read | Event candidates — companies a named event reaches, each with a filing sentence |
 | **Market Brief** | Daily, market open | Automated | One brief per TTL, shared across all users |
 
 **The tilt is the mandate.** When Pythia publishes, Argus kicks off automatically
@@ -63,7 +70,7 @@ workspace (live / paper / manual).
 
 | Origin | Has Aether signal? | What's present |
 |---|---|---|
-| Aether surfaced the name → Prometheus covered it | Yes | Thesis + PT + exposure score + lag profile + channel attribution |
+| Aether surfaced the name → Prometheus covered it | Yes | Thesis + PT + the event that named it, and what its filings said |
 | Direct research (user request via Atlas, Argus scan, Pythia-convicted sector) | No | Thesis + PT + qualitative conviction only |
 
 Atlas allocates from a mixed pool. The Aether exposure score is optional
@@ -72,7 +79,7 @@ Atlas falls back to the qualitative conviction score alone. Names without an
 Aether score are not second-class — they have a different evidence basis.
 
 Atlas should be transparent about which backing a name has:
-- `conviction: thesis + quantitative channel exposure` — Aether-backed
+- `conviction: thesis + a disclosed exposure to a named event` — Aether-backed
 - `conviction: thesis only` — direct research, no Aether signal
 
 Allocation weight draws from both sources:
@@ -82,7 +89,7 @@ allocation_weight = f(
   PT_upside,                // always present
   aether_exposure_score,    // present if Aether surfaced the name
   aether_lag_confidence,    // present if Aether surfaced the name
-  channel_correlation       // portfolio-level: cap gross exposure per channel
+  event_correlation         // portfolio-level: cap gross exposure to any one event
 )
 ```
 
@@ -145,25 +152,45 @@ Batch research (Argus-queued) is admin-only. On-demand single-name research
 
 ### Aether
 
-Admin-authors the channel graph. All users see a read view (TBD — exact UI not yet defined).
+**It identifies; it does not forecast.** A named event goes in, and the companies it
+reaches come out — each with a mechanism, a citable press fact, and whatever its own SEC
+filings say. That distinction is the whole design, because the previous version did the
+opposite and was deleted for it (2026-09-10).
 
-**What Aether does:**
-- Maintains the channel graph (nodes, edges, weights, K matrix)
-- Feeds **sectors → Pythia** so Pythia can validate tilt against channel pressure scores
-- Feeds **names → Prometheus** so uncovered names with quantitative channel exposure get
-  added to the research queue
-- Exposes the channel state and exposure matrix to Atlas and Mentor as enrichment
+The engine used to model the world as coupled macro channels transmitting pressure through
+a matrix `K`, and forecast a company as `channel_state × exposure − priced_in`. Measured
+against held-out data it did not work, from four independent directions: 13 channel→
+fundamentals edges tested and 1 survived; rate channels moving a blended cost of debt ~7bp
+on a 480bp base; fx scaled by read foreign-revenue share right in sign and ordering and
+wrong by a factor of 5,000; channel moves against analyst revisions over 90 months showing
+no decay curve. The pattern behind all four: where macro transmission is strong enough to
+measure, it is obvious enough to be priced.
 
-**User-facing surface:** TBD. At minimum, users should be able to see which channels
-are active and how a name they care about sits in the graph. Exact UI to be designed.
+**What Aether does now:**
+- A news queue is filled daily; an admin presses **Run discovery** when a story is worth it
+- The selector triages headlines to the few that are runnable — a named subject, something
+  that changed, a path to a company's revenue or costs, and an actor that is not the
+  company itself
+- Claude with web search proposes the companies each event reaches, both sides
+- Every proposed name is verified against its own filings on EDGAR, where a sentence counts
+  only if it names the subject AND carries a figure
+- Survivors are ranked on evidence depth, tier, disclosed size and whether the move has
+  already happened, and every drop keeps its row and its reason
+
+**Why discovery is manual:** it is the one leg that spends per run — a model call with web
+search per event, plus several hundred SEC requests. Whether today held an event worth that
+is a judgement, and a schedule cannot make one.
+
+**User-facing surface:** the Aether desk in the right column — one row per company, with
+the events that named it inside. Readable by every signed-in user; only an admin can start
+a run, and only on a host that has the engine.
 
 ---
 
 ## 4. The Full Pipeline
 
 ```
-Aether (channel graph) ──→ sectors ──→ Pythia (macro conviction, admin)
-                       └──→ names ───→ Prometheus research queue
+Aether (event exposure) ──→ names ───→ (a candidate list the desks can read)
                                   ↓
                                 ARGUS  ← shared discovery engine
                                ↙      ↘
@@ -180,15 +207,15 @@ Aether (channel graph) ──→ sectors ──→ Pythia (macro conviction, adm
 
 ---
 
-## 5. How the Channel Engine Feeds Each Desk
+## 5. How the Aether Engine Feeds Each Desk
 
-See `docs/design/channel-graph-build-spec.md` §4 for the full contract. Summary:
+Summary:
 
 ### Pythia — validator, not discoverer
 
-Engine hands Pythia: channel pressure scores by sector, regime signals, what is
-moving and why. Pythia's job is judgment — does the channel state support this
-regime label? Is it already priced? What kills it?
+Engine hands Pythia: the events in the window and the companies each reached.
+Pythia's job is judgment — does what is happening support this regime label? Is
+it already priced? What kills it?
 
 Pythia can say NO. If the coverage book is thin or the move is already priced,
 she publishes neutral and states why. **Pythia is what turns the engine's output
@@ -196,9 +223,9 @@ into a position the house is willing to be graded against.**
 
 ### Prometheus — thesis backbone
 
-Engine hands Prometheus: which channels hit a specific name, elasticity estimate,
-lag profile, 2nd/3rd order supply-graph connections. Prometheus adds what the
-engine cannot — management quality, moat, price target, rating, catalysts, risks.
+Engine hands Prometheus: which events reached a specific name, the mechanism for
+each, and the sentence its own filings carry. Prometheus adds what the engine
+cannot — management quality, moat, price target, rating, catalysts, risks.
 
 Engine surfaces uncovered 2nd/3rd order names → creates research demand →
 Prometheus fills it → house coverage list grows.
@@ -221,7 +248,7 @@ Mentor constructs entry / stop / target.
 | Signal | Lag | Desk | Nature |
 |---|---|---|---|
 | 1st / 2nd order repricing gap | Days–weeks | Mentor | Setup — trade before gap closes |
-| Structural channel shift | Months–quarters | Atlas | Position — own the exposure |
+| Structural shift in a named exposure | Months–quarters | Atlas | Position — own the exposure |
 | Regime change | Quarters | Pythia → Atlas | Tilt — rebalance the book |
 
 ---
@@ -264,7 +291,6 @@ Argus personal scans, all conversations.
 
 - Research queue management — names Argus surfaced, waiting for Prometheus
 - Coverage lifecycle — initiate, revise, maintain, retire
-- Channel engine edge governance — K admission process (`channel-graph-build-spec.md` §8)
 - Pythia re-author / trigger — already exists as the confirm-offer pattern
 
 ### 8.1 User roles
@@ -346,5 +372,4 @@ Admin is the override, not the gatekeeper.
 
 ## Related
 
-- `docs/design/channel-graph-build-spec.md` — channel engine full build spec
 - `docs/desks/trade-pipeline.md` — Mentor pipeline detail
