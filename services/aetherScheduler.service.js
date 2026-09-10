@@ -137,9 +137,59 @@ async function stop() {
 
 let _discovery = null            // the child process, while one is running
 let _lastRun   = null            // { startedAt, finishedAt, code, ok }
+let _progress  = null            // { stage, detail, event, events, at }
+
+/**
+ * WHERE THE RUN IS, read off the engine's own log lines.
+ *
+ * A run is minutes long and its stages are wildly uneven — the news triage takes twenty
+ * seconds, the proposal takes six and a half minutes, verification takes as long as EDGAR
+ * feels like. "Running" for all of that tells the reader nothing, and on the day the Iran
+ * run died it looked identical to a run that was working.
+ *
+ * PARSED FROM STDOUT rather than reported by the engine. The engine is a separate process
+ * in another language whose only channel here is its log, and a progress protocol between
+ * the two would be a second thing to keep in sync for a status chip. The cost is that
+ * these patterns follow the Python log strings: if one changes, the stage silently stops
+ * updating. That failure is deliberately benign — an unrecognised line leaves the previous
+ * stage standing, and `running` is still true, so the worst case is the chip we had before.
+ */
+const _STAGES = [
+    [/selector: (\d+) queued -> (\d+) after cheap cuts/,
+        m => ({ stage: 'triage', detail: `reading ${m[2]} of ${m[1]} headlines` })],
+    [/selector: (\d+) runnable/,
+        m => ({ stage: 'selected', detail: `${m[1]} events worth a run` })],
+    [/discovery: (.+)$/,
+        m => ({ stage: 'proposing', detail: m[1].slice(0, 80), bumpEvent: true })],
+    [/(\d+) candidates proposed/,
+        m => ({ stage: 'proposed', detail: `${m[1]} names proposed` })],
+    [/verifying (\d+) of (\d+)/,
+        m => ({ stage: 'verifying', detail: `0 of ${m[1]} against EDGAR` })],
+    [/verified (\d+)\/(\d+)/,
+        m => ({ stage: 'verifying', detail: `${m[1]} of ${m[2]} against EDGAR` })],
+    [/stored (\d+) candidates under run_id=(\S+)/,
+        m => ({ stage: 'stored', detail: `${m[1]} stored for ${m[2]}` })],
+]
+
+function _readProgress(line) {
+    for (const [re, build] of _STAGES) {
+        const m = re.exec(line)
+        if (!m) continue
+        const next = build(m)
+        _progress = {
+            stage:  next.stage,
+            detail: next.detail,
+            // Which event of how many, so "proposing" on a two-event run says which one.
+            event:  (_progress?.event ?? 0) + (next.bumpEvent ? 1 : 0),
+            events: _progress?.events ?? 0,
+            at:     new Date().toISOString(),
+        }
+        return
+    }
+}
 
 function discoveryStatus() {
-    return { running: Boolean(_discovery), last: _lastRun }
+    return { running: Boolean(_discovery), progress: _progress, last: _lastRun }
 }
 
 /**
@@ -169,25 +219,45 @@ function runDiscovery({ maxRuns = 2, hours = 36, top = 5 } = {}) {
     const args = [script, '--run',
         '--max-runs', String(maxRuns), '--hours', String(hours), '--top', String(top)]
     const startedAt = new Date().toISOString()
+    // Reset, or the chip opens on the last run's final stage. `events` is the ceiling this
+    // run was given, so "event 1 of 2" can be read before the engine says anything.
+    _progress = { stage: 'starting', detail: 'spawning the engine', event: 0, events: maxRuns, at: startedAt }
 
     _discovery = spawn(python, args, { cwd: engineDir, env, stdio: ['ignore', 'pipe', 'pipe'] })
 
+    // The engine logs to stderr (Python's logging default), so BOTH streams are read for
+    // progress — reading stdout alone would leave the chip on "starting" for the whole run.
     _discovery.stdout.on('data', buf => {
-        for (const line of buf.toString().trim().split('\n')) if (line) logger.info(LOG, line)
+        for (const line of buf.toString().trim().split('\n')) {
+            if (!line) continue
+            _readProgress(line)
+            logger.info(LOG, line)
+        }
     })
     _discovery.stderr.on('data', buf => {
-        for (const line of buf.toString().trim().split('\n')) if (line) logger.warn(LOG, line)
+        for (const line of buf.toString().trim().split('\n')) {
+            if (!line) continue
+            _readProgress(line)
+            logger.warn(LOG, line)
+        }
     })
     _discovery.on('exit', code => {
-        _lastRun = { startedAt, finishedAt: new Date().toISOString(), code, ok: code === 0 }
-        logger.info(LOG, `discovery finished  code=${code ?? '-'}`)
+        // The last stage reached is kept on `last`, because WHERE a failed run died is the
+        // useful half of knowing that it did. The Iran run reported exit 1 and nothing
+        // else; "died in verifying, 45 names already proposed" is the sentence that would
+        // have pointed straight at the SEC outage.
+        _lastRun = { startedAt, finishedAt: new Date().toISOString(), code, ok: code === 0,
+                     lastStage: _progress?.stage ?? null, lastDetail: _progress?.detail ?? null }
+        logger.info(LOG, `discovery finished  code=${code ?? '-'}  last stage=${_progress?.stage ?? '-'}`)
         _discovery = null
+        _progress = null
     })
     _discovery.on('error', err => {
         _lastRun = { startedAt, finishedAt: new Date().toISOString(), code: null, ok: false,
                      error: err.message }
         logger.error(LOG, 'discovery spawn failed:', err.message)
         _discovery = null
+        _progress = null
     })
 
     logger.info(LOG, `discovery started  pid=${_discovery.pid}  maxRuns=${maxRuns}  hours=${hours}`)
