@@ -74,7 +74,12 @@ export async function getEventCandidates({ days = 30, includeDropped = false, li
 
         return groupCandidatesByRun(rows)
     } catch (err) {
+        // THROWN, NOT SWALLOWED. This returned [] on failure, which is indistinguishable
+        // from a window with no runs in it — and on 2026-09-10 a DNS wobble at Atlas took
+        // every read in the app down while this screen calmly reported "No events in the
+        // window. Nothing has run recently." Twice. The controller answers 500 and the
+        // client says the read failed; an empty list now means an empty list.
         logger.warn(LOG, 'getEventCandidates failed', err.message)
-        return []
+        throw err
     }
 }
