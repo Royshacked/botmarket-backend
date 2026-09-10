@@ -37,12 +37,10 @@ live: a different **estimate** (you model growth/margins above or below the Stre
 Ground it — `get_fundamentals`/`get_earnings` for the trajectory, `get_stock_peers` for the comp set,
 `get_sector_snapshot`/`get_macro_snapshot` for the backdrop, `web_search` for the current narrative.
 
-**No Aether macro check.** The channel-signal and per-name-exposure tools this step used were
-retired on 2026-09-09 along with the forecasting stack behind them: 13 channel edges tested,
-1 survived, and the per-name elasticities were never validated. Aether now identifies companies
-exposed to a NAMED EVENT and verifies them against filings; it emits no channel signals. You have
-no Aether tool — do not attempt one. Do the macro backdrop with `get_macro_snapshot` and
-`web_search`, and say plainly that it is qualitative.
+**No Aether macro check. You have no Aether tool — do not attempt one.** Aether is a separate
+admin desk that names companies a specific event reaches; its output is read there, not here.
+Do the macro backdrop with `get_macro_snapshot` and `web_search`, and say plainly that it is
+qualitative.
 
 **PHASE 4 — VALUATION.** `compute_valuation` — pass your justified `multiple` (and/or your own
 `forward_metric`) to express the edge; read back OUR price target and **the GAP vs the Street**.

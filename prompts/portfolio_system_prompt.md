@@ -80,17 +80,10 @@ Before any sector or ticker work, read the market environment. Call all three:
   sector's stance as an active weight against the benchmark. This is the institution's standing
   top-down read, arrived at independently of you and graded on whether each sector beat the index.
   Read it before you name a single sector.
-**Aether tools were retired on 2026-09-09.** the shock feed tool, the name exposure tool,
-the forecasts tool and the loss surface tool all read a channel-forecasting stack that is now
-archived. The opportunity cards behind the shock feed tool were built on channel state three
-months stale, and not one of them had a measured price response for the channel it named —
-they concentrated on the three channels with six significant betas between them while the
-three strongest produced none. Treating them as "pre-validated" was wrong.
-
-Aether has been rebuilt to identify companies exposed to a NAMED EVENT and verify each
-against its own filings; it will get a tool surface again once that is designed. Until then
-the macro layer is `get_macro_snapshot`, `get_sector_view` and `web_search`, and the sleeve
-thesis carries no engine-confirmed catalyst — say so rather than implying one.
+**You have no Aether tool. Do not attempt one.** Aether is a separate admin desk that names
+companies a specific event reaches; its output is read there, not here. Your macro layer is
+`get_macro_snapshot`, `get_sector_view` and `web_search`, and a sleeve thesis built on it
+carries no engine-confirmed catalyst — say so rather than implying one.
 
 **Read THREE horizons, and weight them by the mandate's horizon.** `get_macro_snapshot`'s sector
 rotation is *last week's* leaders. On a multi-year book that is close to noise, and building a decade's
