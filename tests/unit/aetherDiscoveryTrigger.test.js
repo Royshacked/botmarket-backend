@@ -119,3 +119,49 @@ test('the scheduler does not run discovery itself', async () => {
     assert.equal(typeof aetherSchedulerService.runDiscovery, 'function')
     assert.equal(typeof aetherSchedulerService.discoveryStatus, 'function')
 })
+
+// ── capability, not identity ─────────────────────────────────────────────────
+//
+// There are two admins on two different hosts: one with a local aether-engine checkout,
+// one using the deployed app. Discovery spawns a Python process on the SERVER's own
+// filesystem, so what decides whether a run is possible is the host — never the person.
+//
+// Gating on the person would be wrong in both directions at once: it would offer the run
+// to whoever it named while they were on the deployed app, where nothing can be spawned,
+// and withhold it from a second admin whose local checkout works.
+
+test('status reports whether THIS host can run a discovery', async () => {
+    const res = fakeRes()
+    await getDiscoveryStatus({}, res)
+    assert.equal(typeof res.body.available, 'boolean')
+})
+
+test('an unavailable host says why, in words worth reading', async () => {
+    // "no engine on this host" and "no engine venv at <path>" are different problems with
+    // different fixes; a boolean would collapse them.
+    const real = aetherSchedulerService.discoveryStatus
+    aetherSchedulerService.discoveryStatus = () => ({
+        running: false, available: false,
+        unavailableReason: 'no engine on this host — AETHER_ENGINE_PATH is not set',
+    })
+    try {
+        const res = fakeRes()
+        await getDiscoveryStatus({}, res)
+        assert.equal(res.body.available, false)
+        assert.match(res.body.unavailableReason, /AETHER_ENGINE_PATH/)
+    } finally {
+        aetherSchedulerService.discoveryStatus = real
+    }
+})
+
+test('the server still refuses on its own — the button is only a courtesy', async () => {
+    // Hiding the button is politeness. A request that arrives anyway, from a stale tab or
+    // curl, must still be refused by the same check.
+    await withRunner(() => { throw new Error('no engine on this host — AETHER_ENGINE_PATH is not set') },
+        async () => {
+            const res = fakeRes()
+            await startDiscovery({ body: {}, user: {} }, res)
+            assert.equal(res.statusCode, 503)
+            assert.match(res.body.error, /no engine on this host/)
+        })
+})

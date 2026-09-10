@@ -188,8 +188,42 @@ function _readProgress(line) {
     }
 }
 
+/**
+ * Can THIS host run a discovery, and if not, why not.
+ *
+ * A CAPABILITY, NOT AN IDENTITY. The engine is a Python process spawned on the same
+ * filesystem, so the question is whether this server has one — never which admin is
+ * asking. Gating on the person would be wrong in both directions at once: it would show
+ * the button to whoever it named while they were using the DEPLOYED app, where nothing
+ * can be spawned, and hide it from a second admin with a local checkout that works
+ * perfectly. There are two admins on two different hosts; the host is the thing that
+ * differs.
+ *
+ * Cheap enough to answer on every status poll: two `existsSync` calls on a path that is
+ * almost certainly in the OS cache.
+ */
+function discoveryCapability() {
+    const engineDir = config.aetherEnginePath
+    if (!engineDir) {
+        return { available: false, reason: 'no engine on this host — AETHER_ENGINE_PATH is not set' }
+    }
+    const python = _pythonExe(engineDir)
+    const script = path.join(engineDir, 'scripts', 'select_events.py')
+    if (!fs.existsSync(python) || !fs.existsSync(script)) {
+        return { available: false, reason: `no engine venv at ${python}` }
+    }
+    return { available: true, reason: '' }
+}
+
 function discoveryStatus() {
-    return { running: Boolean(_discovery), progress: _progress, last: _lastRun }
+    const cap = discoveryCapability()
+    return {
+        running: Boolean(_discovery),
+        available: cap.available,
+        unavailableReason: cap.reason,
+        progress: _progress,
+        last: _lastRun,
+    }
 }
 
 /**
@@ -202,14 +236,15 @@ function discoveryStatus() {
 function runDiscovery({ maxRuns = 2, hours = 36, top = 5 } = {}) {
     if (_discovery) throw new Error('a discovery run is already in flight')
 
-    const engineDir = config.aetherEnginePath
-    if (!engineDir) throw new Error('AETHER_ENGINE_PATH not set — no engine on this host')
+    // ONE ANSWER TO "CAN THIS HOST RUN IT", asked here and by the status endpoint the
+    // button polls. Two copies of this check is how the button ends up offering a run the
+    // server will refuse.
+    const cap = discoveryCapability()
+    if (!cap.available) throw new Error(cap.reason)
 
-    const python = _pythonExe(engineDir)
+    const engineDir = config.aetherEnginePath
     const script = path.join(engineDir, 'scripts', 'select_events.py')
-    if (!fs.existsSync(python) || !fs.existsSync(script)) {
-        throw new Error(`no engine venv at ${python}`)
-    }
+    const python = _pythonExe(engineDir)
 
     // Same resolution as the scheduler: the engine must reach the database this process is
     // actually connected to, not one inherited from the shell. See the note at the top.
