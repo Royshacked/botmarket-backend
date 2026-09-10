@@ -83,3 +83,71 @@ export async function getEventCandidates({ days = 30, includeDropped = false, li
         throw err
     }
 }
+
+/**
+ * Every event that has reached one company, best-evidenced first.
+ *
+ * The list answers "what has Aether found"; this answers "why is THIS name here", which is
+ * the question someone arrives with from anywhere else in the app — a position, a chart, a
+ * search. Cheap: `ticker` is indexed, and a name appears in a handful of events at most.
+ *
+ * DROPPED APPEARANCES ARE INCLUDED BY DEFAULT, and that is the deliberate difference from
+ * getEventCandidates. The list hides them because a screen wants a shortlist. Here the
+ * reader already has the name in mind, so "nothing found" would be a lie when the truth is
+ * "the tariff run named it and dropped it for having no direction" — which is an answer,
+ * and often the useful one. Each appearance carries `survived` and its reason.
+ *
+ * Returns null for a ticker the engine has never named, so a caller can say so rather than
+ * render an empty shell.
+ */
+export async function getCandidatesForTicker(ticker, { days = 90, includeDropped = true } = {}) {
+    // Normalised and validated before it reaches Mongo: this comes off a URL path.
+    //
+    // NOT TRUNCATED. `slice(0, 12)` before the test turned forty characters of junk into a
+    // perfectly valid twelve-character ticker and queried for it — inventing a symbol the
+    // caller never asked about and answering as if it were the question. The regex bounds
+    // the length itself, so anything too long is refused rather than trimmed into shape.
+    //
+    // BRK.B and RDS-A are both real tickers, so dot and dash belong in the class; the dash
+    // is last so it needs no escape.
+    const sym = String(ticker ?? '').trim().toUpperCase()
+    if (!/^[A-Z0-9.-]{1,12}$/.test(sym)) return null
+
+    const db    = await getDb()
+    const since = new Date(Date.now() - days * 86_400_000).toISOString()
+    const query = { ticker: sym, created_at: { $gte: since } }
+    if (!includeDropped) query.survived = true
+
+    const rows = await db.collection(COLLECTIONS.EVENT_CANDIDATES)
+        .find(query, { projection: { _id: 0 } })
+        .toArray()
+
+    return shapeTickerResult(sym, rows)
+}
+
+/**
+ * The answer's shape, separated from the read so it can be tested without a database —
+ * the same split groupCandidatesByRun uses, for the same reason.
+ */
+export function shapeTickerResult(sym, rows = []) {
+    if (!rows.length) return null
+
+    // Best rank first: the strongest claim about this name leads, whichever event made it.
+    // Copied rather than sorted in place — the caller's array is not ours to reorder.
+    const appearances = [...rows].sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0))
+    return {
+        ticker: sym,
+        appearances,
+        events: appearances.length,
+        // The headline a caller wants without re-deriving it: is anything here still live?
+        // `=== true` on purpose — an appearance stored before survival ran is `undefined`,
+        // which is not a claim that it survived.
+        survived: appearances.some(r => r.survived === true),
+        best: appearances[0],
+    }
+}
+
+/** The window, clamped. It comes off a query string, so it is never trusted as given. */
+export function tickerWindowDays(raw) {
+    return Math.min(Math.max(Number(raw) || 90, 1), 365)
+}

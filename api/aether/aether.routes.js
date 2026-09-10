@@ -1,7 +1,7 @@
 import express        from 'express'
 import { log }        from '../../middleware/logger.middleware.js'
 import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
-import { streamAether, getCandidates, startDiscovery, getDiscoveryStatus } from './aether.controller.js'
+import { streamAether, getCandidates, getCandidatesByTicker, startDiscovery, getDiscoveryStatus } from './aether.controller.js'
 
 const router = express.Router()
 
@@ -15,6 +15,10 @@ router.post('/stream', log, requireAdmin, streamAether)
 // /predicted-state, /forecasts, /exposure/:ticker and /shock-feed were all still serving
 // signed-in users from collections nothing had written in months.
 router.get('/candidates',        log, getCandidates)
+// One name, every event that reached it — "why is this here", asked from anywhere in the
+// app. Declared AFTER the bare /candidates so the literal path is never shadowed by the
+// parameter, and readable by any signed-in user like the list it drills into.
+router.get('/candidates/:ticker', log, getCandidatesByTicker)
 
 // Discovery is MANUAL and ADMIN-ONLY. It is the one leg of the engine that spends real
 // money per press — an Opus call with web search per event, plus several hundred SEC

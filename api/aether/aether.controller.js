@@ -9,7 +9,7 @@
 // handing out 170 opportunity cards built on June's channel state.
 
 import { aetherAgentService }                        from '../../services/agents/aether.agent.service.js'
-import { getEventCandidates }                        from './aether.service.js'
+import { getEventCandidates, getCandidatesForTicker, tickerWindowDays } from './aether.service.js'
 import { aetherSchedulerService }                    from '../../services/aetherScheduler.service.js'
 import { streamAgentResponse, sseAgentCallbacks }    from '../_shared/sse.util.js'
 import { parseChatMessages }                         from '../_shared/parse.util.js'
@@ -51,6 +51,31 @@ export async function getCandidates(req, res) {
     } catch (err) {
         logger.error(LOG, 'getCandidates failed', err.message)
         res.status(500).json({ error: 'Could not read event candidates' })
+    }
+}
+
+/**
+ * Every event that has reached one ticker — the "why is this name here" read.
+ *
+ * 404 rather than an empty object when the engine has never named it: the caller asked
+ * about a specific company, and "no such candidate" is a different answer from "here is a
+ * candidate with nothing in it".
+ */
+export async function getCandidatesByTicker(req, res) {
+    try {
+        // Dropped appearances are included unless explicitly excluded — see the service.
+        // A name the reader already has in mind deserves "named and dropped, because…"
+        // rather than silence.
+        const days = tickerWindowDays(req.query.days)
+        const row  = await getCandidatesForTicker(req.params.ticker, {
+            days,
+            includeDropped: req.query.includeDropped !== 'false',
+        })
+        if (!row) return res.status(404).json({ error: 'No Aether candidate for that ticker' })
+        res.json(row)
+    } catch (err) {
+        logger.error(LOG, 'getCandidatesByTicker failed', err.message)
+        res.status(500).json({ error: 'Could not read the candidate' })
     }
 }
 
