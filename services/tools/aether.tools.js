@@ -53,6 +53,25 @@ export function formatEventCandidates(runs) {
             + `${run.event_date ? `  effective ${run.event_date}` : ''}`)
         if (run.event) out.push(run.event)
 
+        // WHETHER THIS EVENT DISCLOSES AT ALL, before any of its names.
+        //
+        // Without it, a run where filings had nothing to say reads exactly like one where
+        // they did — the same forty-odd rows — and the desk would describe a list of
+        // press-only names in the language it uses for disclosed exposure. The rule it
+        // states is the engine's own: disclosure follows the accounting entry, not the
+        // economic exposure.
+        const ev = run.evidence
+        if (ev?.n_survived) {
+            out.push(`Evidence: ${ev.n_quantified} of ${ev.n_survived} names carry a figure`
+                + ` (${Math.round(ev.quantified_share * 100)}%) · ${ev.n_mentioned} name it`
+                + ` without a figure · ${ev.n_silent} silent in their filings`
+                + (ev.discloses
+                    ? ''
+                    : ' — THIS EVENT DOES NOT DISCLOSE. Filings never turn it into a line'
+                      + ' item, so verification rejected almost nothing and the names below'
+                      + ' rest mostly on their press mechanism. Say so when you use them.'))
+        }
+
         for (const c of run.candidates ?? []) {
             const side = { hurt: 'SHORT', helped: 'LONG', mixed: 'MIXED' }[c.side] ?? '—'
             out.push(`\n  ${c.ticker}  ${side}  tier ${c.tier ?? '—'}  filing: ${c.verdict ?? '—'}`

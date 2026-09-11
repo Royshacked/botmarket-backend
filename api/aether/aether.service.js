@@ -47,9 +47,53 @@ export function groupCandidatesByRun(rows) {
     }
 
     const runs = [...byRun.values()]
-    for (const run of runs) run.candidates.sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0))
+    for (const run of runs) {
+        run.candidates.sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0))
+        run.evidence = evidenceOf(run.candidates)
+    }
     runs.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
     return runs
+}
+
+// A run whose names are mostly unquantified is not a weak run. It is a run on an event
+// that does not disclose, and that is a different statement — the engine's own rule, at the
+// level of the run instead of the name: disclosure follows the accounting entry, not the
+// economic exposure.
+const DISCLOSES_AT = 0.35
+
+/**
+ * What backs a run's names, tallied from the verdicts the engine already wrote.
+ *
+ * A TALLY, NOT A SECOND OPINION. The verdict is judgment and it belongs to the engine that
+ * read the filings; counting what it said is a summary. The summary lives here because two
+ * readers want it — this screen and the desk's tool — and neither should recompute it.
+ *
+ * It exists because everything the engine records about quality is per NAME, so nothing
+ * answered "did this event disclose at all" — and runs that differ enormously on exactly
+ * that read identically in a list. Canada came back 26 of 41 survivors quantified and Iran
+ * 8 of 45; both look like "forty-odd names" and only one of them is breadth.
+ *
+ * Counted off `verdict` rather than a label of its own, deliberately. A separate evidence
+ * grade was built for this and measured against the live rows: it agreed with the verdict on
+ * 114 of 114, because a filing carrying a revenue percentage is `quantified` by
+ * construction. A second vocabulary saying the same thing is one more thing to keep in step.
+ */
+export function evidenceOf(candidates = []) {
+    const n = candidates.length
+    const count = v => candidates.filter(c => c.verdict === v).length
+    const quantified = count('quantified')
+    // Of the SURVIVORS in hand. A name gated before verification never had the chance to
+    // disclose, and counting it as a failure to disclose would make a tidy run read as a
+    // silent one.
+    const share = n ? quantified / n : 0
+    return {
+        n_survived:   n,
+        n_quantified: quantified,
+        n_mentioned:  count('mentioned'),
+        n_silent:     count('silent'),
+        quantified_share: Math.round(share * 1000) / 1000,
+        discloses:    n > 0 && share >= DISCLOSES_AT,
+    }
 }
 
 /**

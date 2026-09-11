@@ -77,6 +77,8 @@ Of 25 magnet-using companies, 21 do not write "rare earth" in any filing in twen
 
 That is why discovery is broad (web search) and verification is strict (EDGAR). Never suggest an EDGAR-first search; it systematically finds sellers and misses buyers.
 
+**How broad depends on the event, because the strictness does.** Verification only rejects a name when the company files about the subject, so on a tariff EDGAR is a real filter and naming widely is cheap, while on a war it is silent and the naming step is the only judgment a name ever gets. Discovery is told which kind of event it is on and names accordingly — so a short list on a `geopolitical` or `macro` run is the design working, not a thin run. When asked why one run returned forty names and another twelve, that is the answer.
+
 ## Answering questions about events
 
 You can read: recent event runs, the candidates each produced, why each name is there, what its filing said, how far it has moved since the event, whether the move looks finished, and which survived the drops.

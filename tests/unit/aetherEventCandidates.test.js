@@ -84,3 +84,68 @@ test('a row stored before the category existed reads as unlabelled, not undefine
 test('an empty list is an empty list, not a group with no candidates', () => {
     assert.deepEqual(groupCandidatesByRun([]), [])
 })
+
+// ── Did this event disclose at all ───────────────────────────────────────────
+//
+// Everything the engine records about quality is per NAME, so nothing answered the
+// run-level question — and the three live runs differ enormously on exactly that while
+// reading identically as a list. Canada came back 26 of 41 survivors quantified, Bombardier
+// 19 of 28, Iran 8 of 45. All three look like "forty-odd names"; only two are breadth.
+
+test('a run carries a reading of its own evidence', () => {
+    const runs = groupCandidatesByRun([
+        row({ ticker: 'A', verdict: 'quantified' }),
+        row({ ticker: 'B', verdict: 'quantified' }),
+        row({ ticker: 'C', verdict: 'mentioned' }),
+    ])
+    assert.equal(runs[0].evidence.n_survived, 3)
+    assert.equal(runs[0].evidence.n_quantified, 2)
+    assert.equal(runs[0].evidence.n_mentioned, 1)
+    assert.equal(runs[0].evidence.discloses, true)
+})
+
+test('an event filings never turn into a line item is marked as not disclosing', () => {
+    // The Iran shape: almost nothing quantified, so verification rejected almost nothing
+    // and the length of the list said nothing about the strength of it.
+    const runs = groupCandidatesByRun([
+        row({ ticker: 'A', verdict: 'mentioned' }),
+        row({ ticker: 'B', verdict: 'mentioned' }),
+        row({ ticker: 'C', verdict: 'silent' }),
+    ])
+    assert.equal(runs[0].evidence.n_quantified, 0)
+    assert.equal(runs[0].evidence.discloses, false)
+})
+
+test('the reading is per run, not pooled across the window', () => {
+    const runs = groupCandidatesByRun([
+        row({ run_id: 'Canada:1', ticker: 'A', verdict: 'quantified', created_at: '2026-09-09T00:00:00+00:00' }),
+        row({ run_id: 'Iran:1', ticker: 'B', verdict: 'silent', created_at: '2026-09-08T00:00:00+00:00' }),
+    ])
+    const byId = Object.fromEntries(runs.map(r => [r.run_id, r.evidence]))
+    assert.equal(byId['Canada:1'].discloses, true)
+    assert.equal(byId['Iran:1'].discloses, false)
+})
+
+test('an empty run is not a division by zero and does not claim to disclose', () => {
+    const runs = groupCandidatesByRun([])
+    assert.deepEqual(runs, [])
+})
+
+test('a verdict nobody thought of is counted as a survivor, not as a figure', () => {
+    // no_filer, skipped and unverified are all real values here, and none of them is a
+    // reading of a filing. Counting one as quantified would overstate the run.
+    const runs = groupCandidatesByRun([
+        row({ ticker: 'A', verdict: 'quantified' }),
+        row({ ticker: 'B', verdict: 'something_new' }),
+    ])
+    assert.equal(runs[0].evidence.n_survived, 2)
+    assert.equal(runs[0].evidence.n_quantified, 1)
+    assert.equal(runs[0].evidence.n_mentioned, 0)
+    assert.equal(runs[0].evidence.n_silent, 0)
+})
+
+test('a missing verdict does not throw', () => {
+    const runs = groupCandidatesByRun([row({ ticker: 'A' })])
+    assert.equal(runs[0].evidence.n_quantified, 0)
+    assert.equal(runs[0].evidence.quantified_share, 0)
+})
