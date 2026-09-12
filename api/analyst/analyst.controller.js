@@ -2,6 +2,7 @@
 // research queue (Argus→Prometheus admin pipeline).
 import { coverageService }        from './coverage.service.js'
 import { researchQueueService }   from '../../services/researchQueue.service.js'
+import { researchRunService }     from '../../services/researchRun.service.js'
 import { analystAgentService }    from '../../services/agents/analyst.agent.service.js'
 import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
 import { parseChatMessages }      from '../_shared/parse.util.js'
@@ -201,6 +202,9 @@ export async function deleteCoverage(req, res) {
 export async function listResearchQueue(req, res) {
     const { status } = req.query
     const docs = await researchQueueService.listQueue({ status: status ?? undefined })
+    // null is a FAILED READ, not an empty queue — see the service. Reporting it as 503 rather than
+    // as `[]` is what keeps "Argus queued nothing" distinguishable from "Mongo was unreachable".
+    if (docs === null) return res.status(503).send({ error: 'Research queue unavailable' })
     res.json(docs)
 }
 
@@ -232,4 +236,42 @@ export async function rejectResearch(req, res) {
     const result = await researchQueueService.reject(req.params.id)
     if (!result.ok) return res.status(result.reason === 'not_found_or_wrong_status' ? 404 : 500).json(result)
     res.json(result.doc)
+}
+
+// ─── Research run — the queue, researched headlessly ─────────────────────────
+// See researchRun.service.js. One run at a time; the client polls the run (and the queue) for
+// progress. The admin's venue and level are what the agent researches with, as at the desk.
+
+const RUN_REASONS = {
+    already_running:      [409, 'A research run is already going — stop it first'],
+    nothing_queued:       [409, 'Nothing is queued'],
+    queue_unavailable:    [503, 'Research queue unavailable'],
+    coverage_unavailable: [503, 'Could not read the coverage book'],
+    not_running:          [409, 'No research run is going'],
+}
+
+export async function startResearchRun(req, res) {
+    const result = await researchRunService.startRun({
+        userId:   req.user._id,
+        audience: await getExperienceLevel(req.user._id),
+        model:    typeof req.body?.model === 'string' ? req.body.model : null,
+    })
+    if (!result.ok) return sendReason(res, result.reason, { overrides: RUN_REASONS, fallback: 500, fallbackMessage: 'Could not start the research run', extra: result.run ? { run: result.run } : {} })
+    res.status(202).json(result.run)
+}
+
+export function getResearchRun(_req, res) {
+    res.json(researchRunService.getRun())   // null when no run has happened this process
+}
+
+export function stopResearchRun(_req, res) {
+    const result = researchRunService.stopRun()
+    if (!result.ok) return sendReason(res, result.reason, { overrides: RUN_REASONS, fallback: 500, fallbackMessage: 'Could not stop the research run' })
+    res.json(result.run)
+}
+
+export async function requeueStalledResearch(_req, res) {
+    const result = await researchRunService.requeueStalled()
+    if (!result.ok) return sendReason(res, result.reason, { overrides: RUN_REASONS, fallback: 500, fallbackMessage: 'Could not requeue the claimed names' })
+    res.json({ requeued: result.requeued })
 }

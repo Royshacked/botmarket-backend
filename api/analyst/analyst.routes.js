@@ -6,6 +6,7 @@ import {
     listCoverage, getCoverageOne, getCoverageBySymbol, deduplicateCoverage,
     initiateCoverage, updateCoverage, retireCoverage, deleteCoverage,
     listResearchQueue, enqueueResearch, startResearch, completeResearch, rejectResearch,
+    startResearchRun, getResearchRun, stopResearchRun, requeueStalledResearch,
 } from './analyst.controller.js'
 
 const router = express.Router()
@@ -28,6 +29,14 @@ router.delete('/coverage/:id',                  log, requireAdmin, deleteCoverag
 // Research queue — the Argus→Prometheus pipeline. Admin-only: all endpoints gate on role.
 router.get('/research-queue',                   log, requireAdmin, listResearchQueue)
 router.post('/research-queue',                  log, requireAdmin, enqueueResearch)
+// The headless run over the whole queue (researchRun.service). Registered ahead of the `:id`
+// routes so `run` is never read as an id.
+router.get('/research-queue/run',               log, requireAdmin, getResearchRun)
+router.post('/research-queue/run',              log, requireAdmin, startResearchRun)
+router.post('/research-queue/run/stop',         log, requireAdmin, stopResearchRun)
+// Every claimed (in_research) name back to queued — off the queue's own state, so it works after
+// a restart took the run's memory. Leaves the name a running batch is mid-turn on.
+router.post('/research-queue/requeue',          log, requireAdmin, requeueStalledResearch)
 router.post('/research-queue/:id/start',        log, requireAdmin, startResearch)
 router.post('/research-queue/:id/complete',     log, requireAdmin, completeResearch)
 router.post('/research-queue/:id/reject',       log, requireAdmin, rejectResearch)

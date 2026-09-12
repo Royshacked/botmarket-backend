@@ -33,8 +33,17 @@ function _strip(doc) { const d = { ...doc }; delete d._id; return d }
 /**
  * Add a symbol to the queue. Idempotent — if the symbol is already queued or
  * in_research, returns { ok: true, duplicate: true } without inserting.
+ *
+ * `context` is WHY this name is here: the view, regime, sector and stance that surfaced it. It is
+ * carried rather than re-derived because by the time Prometheus picks the name up the view may have
+ * been superseded, and "research AAPL" without the mandate that surfaced it is a different — worse —
+ * instruction than "research AAPL because the house is +300bp Technology on a disinflation regime".
+ *
+ * A duplicate keeps the context it was FIRST queued with. Overwriting would silently re-motivate a
+ * name that may already be in research under the old reason, and the queue is not the place to
+ * resolve which mandate a half-finished thesis belongs to.
  */
-async function enqueue({ symbol, source, requestedBy = 'house' } = {}) {
+async function enqueue({ symbol, source, requestedBy = 'house', context = null } = {}) {
     const sym = String(symbol || '').toUpperCase().trim()
     if (!sym) return { ok: false, reason: 'missing_symbol' }
     const src = SOURCES.includes(source) ? source : 'manual'
@@ -55,11 +64,12 @@ async function enqueue({ symbol, source, requestedBy = 'house' } = {}) {
             source:      src,
             requestedBy,
             status:      'queued',
+            context:     context && typeof context === 'object' ? context : null,
             created_at:  now,
             updated_at:  now,
         }
         await db.collection(COLLECTION).insertOne(doc)
-        logger.info(LOG, 'queued', { symbol: sym, source: src })
+        logger.info(LOG, 'queued', { symbol: sym, source: src, sector: doc.context?.sector ?? null })
         return { ok: true, id: doc.id, doc: _strip(doc) }
     } catch (err) {
         logger.error(LOG, 'enqueue failed', err)
@@ -68,7 +78,13 @@ async function enqueue({ symbol, source, requestedBy = 'house' } = {}) {
 }
 
 /**
- * List queue entries. Admin view — no userId filter.
+ * List queue entries. Admin view — no userId filter. → the rows, or NULL when the read failed.
+ *
+ * Null and not `[]`, and the distinction is the whole point: this used to swallow a DB failure into
+ * an empty array, so an Atlas outage rendered in the admin tab as "no names queued" — visually
+ * identical to a queue that is genuinely empty. That is the worst possible failure for a diagnostic
+ * surface, because it answers the question you are asking it with a confident lie. The caller turns
+ * null into a 503; an empty array still means empty.
  */
 async function listQueue({ status, limit = 200 } = {}) {
     try {
@@ -80,7 +96,7 @@ async function listQueue({ status, limit = 200 } = {}) {
         return docs.map(_strip)
     } catch (err) {
         logger.error(LOG, 'listQueue failed', err)
-        return []
+        return null
     }
 }
 
@@ -101,22 +117,59 @@ async function markDone(id) {
 
 /**
  * Reject — misfire, low-quality screen hit, or admin decision.
+ *
+ * `reason` is WHY, when a machine decided it: the batch run (researchRun.service) rejects a name
+ * it skipped because the house already covers it, and one Prometheus researched and passed on.
+ * Those are different outcomes from an admin's click, and a rejected row that cannot say which
+ * it was is a row the admin has to re-derive. Free text, stored as given; absent on a manual
+ * reject.
  */
-async function reject(id) {
-    return _transition(id, 'rejected', ['queued', 'in_research'])
+async function reject(id, reason = null) {
+    return _transition(id, 'rejected', ['queued', 'in_research'], reason ? { reason } : {})
 }
 
-async function _transition(id, to, from) {
+/**
+ * Back to the line — in_research → queued. For a claim that produced nothing: a research turn
+ * that failed on the account (researchRun.requeueFailed), or one lost to a refresh. Not a
+ * lifecycle step, a correction; it clears any reason the row carried.
+ */
+async function requeue(id) {
+    return _transition(id, 'queued', ['in_research'], { reason: null })
+}
+
+/**
+ * Every claimed name back to the line at once — the whole `in_research` set, minus `except`.
+ *
+ * Reads the QUEUE, not a run's memory: the first batch run died on the account with 22 names
+ * claimed, and the tally that knew which 22 died with the process on the restart that fixed it.
+ * The rows themselves never forgot. `except` is the one name a running batch is mid-turn on.
+ */
+async function requeueInResearch({ except = [] } = {}) {
+    try {
+        const db  = await getDb()
+        const now = new Date().toISOString()
+        const q   = { status: 'in_research' }
+        if (except.length) q.symbol = { $nin: except.map(s => String(s).toUpperCase()) }
+        const res = await db.collection(COLLECTION).updateMany(q, { $set: { status: 'queued', updated_at: now, reason: null } })
+        logger.info(LOG, 'requeued in_research', { requeued: res.modifiedCount, except })
+        return { ok: true, requeued: res.modifiedCount }
+    } catch (err) {
+        logger.error(LOG, 'requeueInResearch failed', err)
+        return { ok: false, error: err }
+    }
+}
+
+async function _transition(id, to, from, extra = {}) {
     try {
         const db  = await getDb()
         const now = new Date().toISOString()
         const res = await db.collection(COLLECTION).findOneAndUpdate(
             { id, status: { $in: from } },
-            { $set: { status: to, updated_at: now } },
+            { $set: { status: to, updated_at: now, ...extra } },
             { returnDocument: 'after' },
         )
         if (!res) return { ok: false, reason: 'not_found_or_wrong_status' }
-        logger.info(LOG, to, { id })
+        logger.info(LOG, to, { id, ...extra })
         return { ok: true, doc: _strip(res) }
     } catch (err) {
         logger.error(LOG, `transition → ${to} failed`, err)
@@ -124,4 +177,4 @@ async function _transition(id, to, from) {
     }
 }
 
-export const researchQueueService = { enqueue, listQueue, startResearch, markDone, reject }
+export const researchQueueService = { enqueue, listQueue, startResearch, markDone, reject, requeue, requeueInResearch }

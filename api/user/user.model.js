@@ -48,6 +48,25 @@ export async function listAllUserIds() {
     return rows.map(r => r?.id).filter(Boolean).map(String)
 }
 
+/**
+ * Every ADMIN user id. The narrowed fan-out, for a feed traders cannot see at all: the strategy
+ * desk's conversation is dropped client-side for non-admins (`ADMIN_BOT_IDS`), so a card posted to
+ * a trader is a row nobody will ever read.
+ *
+ * The `role ?? isAdmin` fallback is not a second rule — it is the SAME one the token is minted from
+ * (authentication.service), kept in step because a legacy doc predating `role` must not silently
+ * drop out of a feed its owner can still sign in and see.
+ */
+export async function listAdminUserIds() {
+    const db   = await getDb()
+    const rows = await db.collection(COLLECTION)
+        // `{ role: null }` matches missing AND explicitly null — the exact reach of the `??` the
+        // token uses, which `$exists: false` would have narrowed by one case.
+        .find({ $or: [{ role: 'admin' }, { role: null, isAdmin: true }] }, { projection: { id: 1 } })
+        .toArray()
+    return rows.map(r => r?.id).filter(Boolean).map(String)
+}
+
 export function stripUser(doc) {
     if (!doc) return doc
     const { _id, passwordHash, ...rest } = doc

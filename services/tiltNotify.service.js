@@ -20,7 +20,7 @@
 
 import { cardActions, listCardRecipientsSince } from '../api/chat/chat.service.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
-import { listAllUserIds }  from '../api/user/user.model.js'
+import { listAdminUserIds } from '../api/user/user.model.js'
 import { reviewAnchorMs, REVIEW_FLOOR_DAYS }    from '../monitoring/tilt.assess.js'
 import { postCard }        from './notifyCard.js'
 import { logger }          from './logger.service.js'
@@ -29,11 +29,16 @@ const LOG = '[tiltNotify]'
 
 // Injectable so the audience join is testable without a DB. `listActiveBySector` is coverage's
 // owner-blind sweep — the read this desk needs and the only one that puts a sector next to a user.
-// The review offer needs neither (see below): it is a broadcast, so it reads the roster and the
+// The review offer does not use it (see below): it is a broadcast, so it reads the roster and the
 // cards already posted instead.
+//
+// `adminUserIds`, not the whole roster, and it bounds BOTH cards. Every card this module builds
+// carries `visibility: 'admin'`, and the client drops the strategy conversation outright for a
+// trader — so a card addressed to one is a document nobody can ever open. Narrowing here rather
+// than trusting the client keeps the delivered set equal to the visible set.
 const _deps = {
     listActiveBySector: (s)    => coverageService.listActiveBySector(s),
-    allUserIds:         ()     => listAllUserIds(),
+    adminUserIds:       ()     => listAdminUserIds(),
     recipientsSince:    (t, s) => listCardRecipientsSince(t, s),
     // The one transport, injected only so delivery is assertable without a database. It is still
     // postCard — this is a test seam, not a second way for a card to reach the user.
@@ -103,7 +108,15 @@ export async function notifyTiltChanged(tilt, changes, deps = _deps) {
 
     let byUser
     try {
-        byUser = await audienceBySector(moved.map(c => c.sector), deps)
+        // Two narrowings, and they answer different questions: coverage says who CARES about the
+        // moved sector, the roster says who can SEE this desk at all. A trader researching Energy
+        // passes the first and fails the second.
+        const [audience, admins] = await Promise.all([
+            audienceBySector(moved.map(c => c.sector), deps),
+            deps.adminUserIds(),
+        ])
+        const allowed = new Set(admins ?? [])
+        byUser = new Map([...audience].filter(([userId]) => allowed.has(userId)))
     } catch (err) {
         // A view that published but could not find its audience is still published. Degrade to
         // "nobody told" rather than failing the publish that already happened.
@@ -134,9 +147,12 @@ export async function notifyTiltChanged(tilt, changes, deps = _deps) {
 // review runs there, in the thread where it can be questioned — the same call the daily market
 // brief makes, and for the same reason (see marketBrief.notify).
 //
-// WHY EVERY USER. A tilt has no owner by construction. The change card can narrow to whoever
-// researches the moved sector, because that card is news ABOUT a book; this one is a request to
-// re-examine the house view itself, which serves everyone equally.
+// WHY EVERY ADMIN, AND NOT EVERY USER. A tilt has no owner by construction, so within the desk's
+// audience this is a broadcast: the change card can narrow to whoever researches the moved sector,
+// because that card is news ABOUT a book, while this one is a request to re-examine the house view
+// itself and serves every admin equally. The roster is the admin roster because authoring the house
+// view is an admin job and the desk is hidden from traders — asking a trader to run a review they
+// cannot open is worse than not asking.
 //
 // DEDUPE, without a second source of truth. "Has this user already been asked about THIS view?" is
 // answered by looking for the card, exactly as the brief offer does — so a restart mid-fan-out
@@ -186,7 +202,7 @@ export function buildTiltReviewOffer(tilt, { reason = null, userId } = {}) {
 }
 
 /**
- * Offer the review to everyone who has not already been asked about this view. Never throws — the
+ * Offer the review to every admin not already asked about this view. Never throws — the
  * caller is a monitor tick, and a card that cannot be delivered must not stop the daily grade.
  *
  * Returns the number of cards posted, so "asked nobody" is distinguishable from "asked twelve
@@ -204,7 +220,7 @@ export async function notifyTiltReviewDue(tilt, { reason = null, nowMs = Date.no
     let userIds, already
     try {
         [userIds, already] = await Promise.all([
-            deps.allUserIds(),
+            deps.adminUserIds(),
             deps.recipientsSince(REVIEW_CARD_TYPE, since),
         ])
     } catch (err) {

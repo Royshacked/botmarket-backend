@@ -107,8 +107,29 @@ test('nothing moved → no lookup, no cards, and 0 returned', async () => {
 test('an audience lookup that fails degrades to "nobody told", never a throw', async () => {
     const n = await notifyTiltChanged(tilt(), [change()], {
         listActiveBySector: async () => { throw new Error('mongo down') },
+        adminUserIds:       async () => ['u1', 'u2'],
     })
     assert.equal(n, 0)   // the view is already published; delivery failing must not undo that
+})
+
+// The desk is hidden from traders, so covering the moved sector is necessary and not sufficient.
+test('a trader who covers the moved sector is NOT told — they cannot see this desk', async () => {
+    const posted = []
+    const n = await notifyTiltChanged(tilt(), [change()], {
+        listActiveBySector: async () => COVERAGE,   // u1 and u2 both cover Energy
+        adminUserIds:       async () => ['u1'],     // ...but only u1 is an admin
+        post:               async (card) => { if (!card) return null; posted.push(card); return card },
+    })
+    assert.equal(n, 1)
+    assert.deepEqual(posted.map(c => c.userId), ['u1'])
+})
+
+test('a roster read that fails costs the cards, never the publish', async () => {
+    const n = await notifyTiltChanged(tilt(), [change()], {
+        listActiveBySector: async () => COVERAGE,
+        adminUserIds:       async () => { throw new Error('mongo down') },
+    })
+    assert.equal(n, 0)
 })
 
 // ── the review OFFER ─────────────────────────────────────────────────────────
@@ -155,21 +176,22 @@ test('no user → no card, and a triggerless offer still reads as a sentence', (
     assert.match(c.content, /^Sector view due for review\. /)
 })
 
-// The fan-out is a BROADCAST: a tilt has no owner, and re-examining the house view is not a fact
-// about anyone's book.
+// The fan-out is a BROADCAST within the desk's audience: a tilt has no owner, and re-examining the
+// house view is not a fact about anyone's book. The audience is the ADMIN roster — traders never see
+// this desk, so a card addressed to one is a row nobody can open.
 function offerHarness({ users = ['u1', 'u2', 'u3'], already = new Set() } = {}) {
     const posted = [], asked = []
     return {
         posted, asked,
         deps: {
-            allUserIds:      async () => users,
+            adminUserIds:    async () => users,
             recipientsSince: async (type, since) => { asked.push({ type, since }); return already },
             post:            async (card) => { if (!card) return null; posted.push(card); return card },
         },
     }
 }
 
-test('everyone who has not been asked about THIS view gets the card', async () => {
+test('every admin who has not been asked about THIS view gets the card', async () => {
     const h = offerHarness()
     const n = await notifyTiltReviewDue(view(), { reason: 'no review in 34 days', nowMs: T0 + 34 * DAY }, h.deps)
     assert.equal(n, 3)
@@ -207,7 +229,7 @@ test('everyone already asked → no cards, and that is the steady state, not a f
 
 test('a roster or dedupe read that fails degrades to "nobody asked", never a throw', async () => {
     const h = offerHarness()
-    h.deps.allUserIds = async () => { throw new Error('mongo down') }
+    h.deps.adminUserIds = async () => { throw new Error('mongo down') }
     assert.equal(await notifyTiltReviewDue(view(), { reason: 'x' }, h.deps), 0)
     // The view is still due; the next tick asks again.
     assert.equal(h.posted.length, 0)
