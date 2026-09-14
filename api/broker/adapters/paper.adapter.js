@@ -31,8 +31,24 @@ import { openPosition,
          entryMarkPrice,
          dirSign, round2 }    from '../paperExecution.service.js'
 import { logger }             from '../../../services/logger.service.js'
+import { config }             from '../../../services/config.js'
 
 const LOG = '[paper.adapter]'
+
+// How old a stored mark may be before a positions READ goes and buys a fresh quote.
+//
+// The mark loop stamps `currentPrice` / `markedAt` on every open position every
+// PAPER_MARK_INTERVAL_MS (3s), in whichever process holds the instance lease. The positions read
+// used to ignore that and re-price every symbol on every call — and the client polls it every 4s,
+// one beat past the 3s quote cache, so every poll refetched every symbol: 13 open symbols was
+// 195 FMP requests a minute from a process that was not even running the mark loop, most of the
+// plan's quota, and the reason candles for a chart came back 429 and the chart fell back to
+// chart-img. A mark a few seconds old is exactly the price this read would have bought.
+//
+// Five intervals, not one: a follower process cannot see the leader's tick, a leader mid-tick has
+// marks up to one interval old by construction, and a leader that has just died should age past
+// this and let the read start pricing again — which is what it always did, and now only then.
+const MARK_FRESH_MS = config.paperMarkIntervalMs * 5
 
 /**
  * The refusal that means "our own price feed had nothing", as opposed to a venue declining the
@@ -129,7 +145,7 @@ export class PaperAdapter extends BrokerAdapter {
     async _getPositionsForMode(userId, accountId, mode) {
         const all        = await paperBrokerService.listPositions(userId, { status: 'open', accountId })
         const positions  = accountId ? all : all.filter(p => paperBrokerService.accountMode(p.accountId) === mode)
-        const priceBy   = await this._priceMap(positions.map(p => p.symbol))
+        const priceBy   = await this._priceMap(positions)
         const acctBy    = await this._accountMap(userId, positions.map(p => p.accountId))
         return positions.map(p => this._toBrokerPosition(p, priceBy.get(p.symbol), acctBy.get(p.accountId)))
     }
@@ -373,11 +389,31 @@ export class PaperAdapter extends BrokerAdapter {
         }
     }
 
-    /** Map of symbol → mark price for the distinct symbols given (real-time quote for
-     *  equities, candle-close fallback otherwise). Used to price P&L, not to fill. */
-    async _priceMap(symbols) {
-        const distinct = [...new Set(symbols)]
-        const entries  = await Promise.all(distinct.map(async s => [s, await latestMarkPrice(s)]))
+    /**
+     * Map of symbol → mark price for the positions given. Used to price P&L, not to fill.
+     *
+     * THE STORED MARK FIRST. The mark loop already paid for a price on every open symbol a few
+     * seconds ago and wrote it on the position; a read that buys it again is the request storm
+     * described at MARK_FRESH_MS. Only a symbol with no mark, or a mark older than the window, is
+     * fetched — which is the case the old behaviour was right for (a leader that stopped, a
+     * position opened between ticks) and the only case it now handles.
+     *
+     * Freshest mark per symbol, since several positions can share one: the newest is the one
+     * the loop wrote last, and one stale row among fresh ones must not force a fetch.
+     */
+    async _priceMap(positions, { now = Date.now(), fetch = latestMarkPrice, freshMs = MARK_FRESH_MS } = {}) {
+        const stored = new Map()   // symbol → { price, at }
+        for (const p of positions) {
+            if (p.currentPrice == null || !Number.isFinite(p.markedAt)) continue
+            const cur = stored.get(p.symbol)
+            if (!cur || p.markedAt > cur.at) stored.set(p.symbol, { price: p.currentPrice, at: p.markedAt })
+        }
+        const distinct = [...new Set(positions.map(p => p.symbol))]
+        const entries  = await Promise.all(distinct.map(async s => {
+            const m = stored.get(s)
+            if (m && now - m.at <= freshMs) return [s, m.price]
+            return [s, await fetch(s)]
+        }))
         return new Map(entries)
     }
 
