@@ -17,6 +17,8 @@ test('formats each covered name with rating, our PT, the gap vs Street, status, 
 test('empty coverage → a clear "nothing researched" read', () => {
     assert.match(_formatCoverage([]), /No house coverage yet/)
     assert.match(_formatCoverage(null), /No house coverage yet/)
+    // and the empty pool is an instruction to source the sleeve, not to stop
+    assert.match(_formatCoverage([]), /Emit a <screen_request> for this sleeve/)
 })
 
 test('missing fields degrade gracefully (no PT / no gap / no thesis / unrated)', () => {
@@ -80,7 +82,10 @@ test('names the sectors coverage has NOTHING in — an absence is not on the pag
     assert.match(out, /NO COVERAGE AT ALL IN:/)
     assert.match(out, /Healthcare/)
     assert.match(out, /Utilities/)
-    assert.match(out, /emit a <coverage_request>/)
+    // The sleeve is SOURCED (2026-09-14): one <screen_request> per empty sleeve runs the Argus →
+    // Prometheus hop on the server; <coverage_request> stays for a name the user asked for by ticker.
+    assert.match(out, /<screen_request> per such sleeve/)
+    assert.match(out, /<coverage_request> for it/)
     // A covered sector must not be reported as a gap.
     assert.doesNotMatch(out.split('NO COVERAGE AT ALL IN:')[1], /Technology/)
     // The failure worth naming outright: bending the architecture to fit what happens to be researched.

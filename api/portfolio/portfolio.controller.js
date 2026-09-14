@@ -4,6 +4,7 @@ import { applyRebalance, snapshotConvictions } from './portfolioRebalance.servic
 import { invalidatePortfolioState, listPortfolioItems, listPortfolios } from '../../services/portfolioState.service.js'
 import { refreshCoverage }        from '../../services/coverageRefresh.service.js'
 import { researchQueueService }   from '../../services/researchQueue.service.js'
+import { sourceSleeve }           from '../../services/sleeveSource.service.js'
 import { logger }                from '../../services/logger.service.js'
 import { streamAgentResponse, sseAgentCallbacks }   from '../_shared/sse.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
@@ -243,7 +244,15 @@ export async function streamPortfolio(req, res) {
             // G1: Atlas asked Prometheus to re-research a held name. Fire the async refresh-by-hop
             // (route-and-return) — it runs headless and pings the user when the coverage is rewritten,
             // then they resume the review. Never blocks the response; best-effort.
-            if (result.coverageRefresh?.ticker) {
+            //
+            // ADMIN-ONLY (2026-09-14). The hop REWRITES house coverage — a revision, which the routes
+            // reserve for admins — and its ping lands in Prometheus's feed, which traders cannot see.
+            // A trader's Atlas keeps reading the standing coverage; the ask is logged so the desk can
+            // see it was made. (The <coverage_request> path below is the trader's route to new
+            // research: it queues for an admin instead of writing.)
+            if (result.coverageRefresh?.ticker && req.user.role !== 'admin') {
+                logger.info(LOG, 'coverage refresh skipped — not an admin', { userId: req.user._id, ticker: result.coverageRefresh.ticker })
+            } else if (result.coverageRefresh?.ticker) {
                 refreshCoverage({
                     userId:        req.user._id,
                     ticker:        result.coverageRefresh.ticker,
@@ -251,6 +260,28 @@ export async function streamPortfolio(req, res) {
                     portfolioId:   portfolioId ?? null,
                     portfolioName: portfolioState?.portfolioName ?? null,
                 }).catch(err => logger.warn(LOG, 'coverage refresh hop failed', err.message))
+            }
+
+            // SLEEVE SOURCING — the autonomous Atlas → Argus → Prometheus → Atlas hop, for ANY role.
+            // An empty pool for a sleeve is not the end of the turn any more: each <screen_request>
+            // Atlas emitted is screened, queued and researched server-side (sleeveSource), and the
+            // user gets an Atlas card when the sleeve is decided. Fire-and-forget; the response is
+            // already out. The school rides as `lens`, the sleeve's threadId/portfolioId as the way
+            // back. Not admin-gated, unlike the refresh above: this WRITES nothing a user owns — the
+            // coverage it produces is house coverage, researched and written AS the house (the run
+            // takes no user), exactly as the house scan's.
+            for (const sr of result.screenRequests ?? []) {
+                sourceSleeve({
+                    userId:        req.user._id,
+                    threadId:      threadId ?? null,
+                    portfolioId:   portfolioId ?? null,
+                    portfolioName: portfolioState?.portfolioName ?? null,
+                    sector:        sr.sector,
+                    industry:      sr.industry ?? null,
+                    school:        sr.lens ?? statedMandate?.selection ?? mandate?.selection ?? null,
+                    note:          sr.note ?? sr.constraints ?? null,
+                }).then(r => { if (!r.ok) logger.info(LOG, 'sleeve not sourced', { sector: sr.sector, reason: r.reason }) })
+                  .catch(err => logger.warn(LOG, 'sleeve sourcing failed', err.message))
             }
 
             // 4th flow: uncovered name the user asked to add. Enqueue for Prometheus — fire-and-forget.

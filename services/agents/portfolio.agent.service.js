@@ -116,9 +116,10 @@ export function _formatCoverage(rows) {
     const list = (Array.isArray(rows) ? rows : []).filter(c => c && c.symbol)
     // This message is an INSTRUCTION, not a status line — it lands late in the context right where
     // the model is deciding what to do next. The house coverage pool is the ONLY construction source.
-    // For names not in coverage, emit a <coverage_request> (routes to Prometheus); never screen or
+    // An empty sleeve is SOURCED, not improvised: <screen_request> runs the Argus → Prometheus hop
+    // on the server (sleeveSource.service) and the user is carded when it is done. Never screen or
     // pick names from get_fundamentals / web_search / memory.
-    if (!list.length) return 'No house coverage yet for these filters — nothing researched to build from. If the mandate targets a sector/school with no coverage, emit a <coverage_request> for a specific name the user mentioned, or tell the user the pool is empty for this filter and suggest they check the research queue.'
+    if (!list.length) return `No house coverage yet for these filters — nothing researched to build from. Emit a <screen_request> for this sleeve (sector + lens = the mandate's selection school): Argus screens it and Prometheus researches the hits on the server, and the user gets a card to resume the build when the sleeve is decided. Say that, then end the turn. For a specific uncovered name the user asked for by ticker, emit a <coverage_request> instead.`
     const line = (c) => {
         const pt      = c.price_target?.value
         const gap     = Number.isFinite(c.gap?.pct) ? ` (${c.gap.pct >= 0 ? '+' : ''}${c.gap.pct}% vs Street${Number.isFinite(c.gap?.consensus_pt) ? ` ${c.gap.consensus_pt}` : ''})` : ''
@@ -165,11 +166,13 @@ export function _formatCoverage(rows) {
         'Grouped by the sector Prometheus researched each name UNDER — that is the sleeve it was sourced for. A sleeve from your architecture with no heading here has nothing researched behind it yet: do not fill it from another sector\'s names.',
         ...blocks.flatMap(b => ['', b]),
         ...(uncovered.length ? ['', `NO COVERAGE AT ALL IN: ${uncovered.join(', ')}.`
-            + ' If the user asks to add a specific name from one of these, emit a <coverage_request>'
-            + ' (routes the name to Prometheus for research). Do NOT shrink the sleeve to fit what'
-            + ' happens to be covered, do not fill it from a neighbouring sector, and do not pick'
-            + ' names from get_fundamentals or memory: what is already researched is a fact about our'
-            + ' past work, not a view about this mandate.'] : []),
+            + ' Emit one <screen_request> per such sleeve (sector + lens) — Argus screens and'
+            + ' Prometheus researches on the server, and the user is carded to resume when it is'
+            + ' done. If the user asks to add a specific name from one of these, emit a'
+            + ' <coverage_request> for it. Do NOT shrink the sleeve to fit what happens to be'
+            + ' covered, do not fill it from a neighbouring sector, and do not pick names from'
+            + ' get_fundamentals or memory: what is already researched is a fact about our past'
+            + ' work, not a view about this mandate.'] : []),
     ].join('\n')
 }
 

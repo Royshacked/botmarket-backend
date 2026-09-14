@@ -35,6 +35,13 @@ const LOG = '[researchRun]'
 // next one replaces it, so the UI can show "done: 22 covered, 4 skipped" after the fact.
 const state = { run: null, abort: null }
 
+// Who wants to know when a run settles. The sleeve orchestrator (sleeveSource.service) listens so
+// it can tell Atlas its names are researched — and start the next run when the one that just ended
+// listed the queue before its names were on it. Called AFTER the run's own bookkeeping, so a listener
+// reads the run as the UI will: status set, tallies final.
+const _settledListeners = new Set()
+export function onRunSettled(fn) { _settledListeners.add(fn); return () => _settledListeners.delete(fn) }
+
 /** What the UI reads. Never the internal object — `abort` and `stop` are not the client's. */
 export function getRun() {
     const r = state.run
@@ -81,9 +88,13 @@ export async function startRun({ userId, audience = null, model = null } = {}, d
     state.abort = new AbortController()
     logger.info(LOG, 'run starting', { id: run.id, total: run.total, alreadyCovered: queued.filter(q => covered.has(_sym(q.symbol))).length })
 
-    _loop(run, queued, covered, { userId, audience, model, signal: state.abort.signal }, deps)
+    // Clear only OUR controller. A settled-listener may start the next run before this loop's
+    // promise resolves (the listener runs inside it), and nulling that run's controller would leave
+    // it unstoppable.
+    const abort = state.abort
+    _loop(run, queued, covered, { userId, audience, model, signal: abort.signal }, deps)
         .catch(err => logger.error(LOG, 'run loop crashed', err))
-        .finally(() => { state.abort = null })
+        .finally(() => { if (state.abort === abort) state.abort = null })
 
     return { ok: true, run: getRun() }
 }
@@ -180,6 +191,10 @@ async function _loop(run, queued, covered, { userId, audience, model, signal }, 
     run.status     = run.error ? 'failed' : run.stop ? 'stopped' : 'done'
     run.finishedAt = new Date().toISOString()
     logger.info(LOG, `run ${run.status}`, { id: run.id, total: run.total, covered: run.covered, skipped: run.skipped, passed: run.passed, failed: run.failed })
+    for (const fn of _settledListeners) {
+        try { await fn(getRun()) }
+        catch (err) { logger.warn(LOG, 'a run-settled listener threw (run unaffected)', err.message) }
+    }
 }
 
 /**
@@ -221,6 +236,13 @@ export function researchOpening(item) {
     const c = item?.context
     const symbol = _sym(item?.symbol)
     if (!c?.sector) return `Research ${symbol} for coverage.`
+    // A SLEEVE candidate (sleeveSource): the mandate that surfaced it is a user's book, not the house
+    // view, so the sentence names the sleeve and the selection school Prometheus has to judge it by.
+    if (c.sleeve) {
+        const school = c.school ? ` under a ${c.school} selection` : ''
+        const note   = c.note ? ` (${c.note})` : ''
+        return `Research ${symbol} for coverage — a candidate for the ${c.sector} sleeve of a portfolio build${school}${note}.`
+    }
     const bp     = Number.isFinite(Number(c.active_bp)) ? ` +${c.active_bp}bp` : ''
     const regime = c.regime ? ` on a “${c.regime}” regime` : ''
     const basis  = c.basis ? ` (basis: ${String(c.basis).replace(/_/g, ' ')})` : ''
