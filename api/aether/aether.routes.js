@@ -1,7 +1,7 @@
 import express        from 'express'
 import { log }        from '../../middleware/logger.middleware.js'
 import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
-import { streamAether, getCandidates, getCandidatesByTicker, getScorecardRead, startDiscovery, getDiscoveryStatus } from './aether.controller.js'
+import { streamAether, getCandidates, getCandidatesByTicker, getScorecardRead, postQuickRead, startDiscovery, getDiscoveryStatus } from './aether.controller.js'
 
 const router = express.Router()
 
@@ -22,6 +22,9 @@ router.get('/candidates/:ticker', log, getCandidatesByTicker)
 // What the names did — graded at expiry by the engine's nightly refresh. Broadcast, like
 // the list it grades: a desk whose record only its admin can see is a desk on trust.
 router.get('/scorecard',          log, getScorecardRead)
+// Prometheus's quick read on one name — credible, priced in, or contradicted. Any signed-in
+// user: their model call, their budget; the read is a broadcast annotation on the list.
+router.post('/quickread',         log, postQuickRead)
 
 // Discovery is MANUAL and ADMIN-ONLY. It is the one leg of the engine that spends real
 // money per press — an Opus call with web search per event, plus several hundred SEC

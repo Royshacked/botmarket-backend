@@ -10,6 +10,7 @@
 
 import { aetherAgentService }                        from '../../services/agents/aether.agent.service.js'
 import { getEventCandidates, getCandidatesForTicker, tickerWindowDays, getScorecard } from './aether.service.js'
+import { quickRead } from '../../services/aetherQuickRead.service.js'
 import { aetherSchedulerService }                    from '../../services/aetherScheduler.service.js'
 import { streamAgentResponse, sseAgentCallbacks }    from '../_shared/sse.util.js'
 import { parseChatMessages }                         from '../_shared/parse.util.js'
@@ -92,6 +93,23 @@ export async function getScorecardRead(req, res) {
     } catch (err) {
         logger.error(LOG, 'getScorecard failed', err.message)
         res.status(500).json({ error: 'Could not read the scorecard' })
+    }
+}
+
+/**
+ * Prometheus's quick read on one name from one event. Any signed-in user — it is their model
+ * call, under their budget, and the result is a broadcast annotation like the list it sits on.
+ * Returns the stored read when one exists; a second press mid-run joins the first.
+ */
+export async function postQuickRead(req, res) {
+    try {
+        const { run_id: runId, ticker } = req.body ?? {}
+        const read = await quickRead({ runId, ticker, userId: req.user?._id })
+        res.json(read)
+    } catch (err) {
+        const status = err.status ?? 500
+        if (status >= 500) logger.error(LOG, 'quickRead failed', err.message)
+        res.status(status).json({ error: status >= 500 ? 'Could not get a quick read' : err.message })
     }
 }
 

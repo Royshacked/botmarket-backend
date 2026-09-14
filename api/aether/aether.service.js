@@ -11,6 +11,7 @@
 
 import { getDb }     from '../../providers/mongodb.provider.js'
 import { COLLECTIONS } from './aether.model.js'
+import { readsFor, attachReads } from '../../services/aetherQuickRead.service.js'
 import { logger }    from '../../services/logger.service.js'
 
 const LOG = '[aetherService]'
@@ -116,7 +117,10 @@ export async function getEventCandidates({ days = 30, includeDropped = false, li
             .limit(limit)
             .toArray()
 
-        return groupCandidatesByRun(rows)
+        const runs = groupCandidatesByRun(rows)
+        // Prometheus's quick reads live in a Node-owned collection (the engine's rows are
+        // Python's to write); joined here so the screen and the Aether tool get one shape.
+        return attachReads(runs, await readsFor(runs.map(r => r.run_id)))
     } catch (err) {
         // THROWN, NOT SWALLOWED. This returned [] on failure, which is indistinguishable
         // from a window with no runs in it — and on 2026-09-10 a DNS wobble at Atlas took

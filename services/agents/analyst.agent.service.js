@@ -26,6 +26,13 @@ const PROMPT_PATH = join(__dirname, '../../prompts/analyst_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 const MAX_RECENT_MESSAGES = 8
 
+// QUICK READ is a MODE of Prometheus, not a desk of its own — the same shape as Argus's hand-off
+// module (scanner_mode_handoff.md): the spine stays, and on a quick-read turn one more cached block
+// narrows it to phases 1–2 and a <quickread> verdict instead of a <coverage> draft. Injected as its
+// own block so the coverage-mode prefix stays byte-identical and keeps its cache.
+const _quickreadMode = makePromptLoader(join(__dirname, '../../prompts/analyst_mode_quickread.md'), LOG)
+export const MODES = Object.freeze({ COVERAGE: null, QUICKREAD: 'quickread' })
+
 export const TOOLS = [
     // web_search leads, then the SHARED valuation module (its own single home), then the
     // read tools. Order is preserved exactly — prompt caching keys off the array prefix.
@@ -81,13 +88,13 @@ const TOOL_HANDLERS = {
 export const analystAgentService = { chatStream }
 
 async function chatStream({
-    messages, userPrompt, chatState = {}, seed = null, audience = null,
+    messages, userPrompt, chatState = {}, seed = null, audience = null, mode = MODES.COVERAGE,
     model: requestedModel, reasoningEffort, userId,
     onToken, onToolStart, onReasoning, onPhase, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     _venueSection = buildVenueSection,
 }) {
-    const systemPrompt  = _buildSystemPrompt(chatState, seed, audience)
+    const systemPrompt  = _buildSystemPrompt(chatState, seed, audience, mode)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
@@ -109,7 +116,11 @@ async function chatStream({
     })
 
     const { reply, coverage } = _parseAnalystResponse(raw)
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCoverage: Boolean(coverage), phase: phase.get() })
+    // A quick read never enters the book: in that mode the <coverage> block is dropped even if the
+    // model emitted one against instruction, and the <quickread> verdict is what comes back.
+    const quickread = mode === MODES.QUICKREAD ? _parseQuickRead(raw) : null
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCoverage: Boolean(coverage), mode, phase: phase.get() })
+    if (mode === MODES.QUICKREAD) return { reply, phase: phase.get(), quickread }
     // The coverage is a DRAFT — returned for preview, NOT saved. Initiating persists it (P1).
     return { reply, phase: phase.get(), ...(coverage ? { coverage } : {}) }
 }
@@ -119,8 +130,31 @@ async function chatStream({
 // parsed draft (null when absent, malformed, or missing a symbol). A "no-edge" turn emits no block.
 export function _parseAnalystResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['coverage', 'phase']).trim()
+    const reply = stripEmitTags(text, ['coverage', 'phase', 'quickread']).trim()
     return { reply, coverage: _cleanDraft(parseEmitBlock(text, 'coverage', LOG)) }
+}
+
+const QUICKREAD_VERDICTS = new Set(['credible', 'priced_in', 'contradicted', 'unclear'])
+
+/**
+ * The <quickread> block, checked rather than trusted. A verdict outside the four is `unclear` —
+ * the model saying something the vocabulary does not have is not a fifth verdict, it is an
+ * unreadable one, and `unclear` is the honest name for that. Confidence is clamped to [0, 1];
+ * evidence keeps only entries with a fact. Null when there is no block at all.
+ */
+export function _parseQuickRead(raw) {
+    const q = parseEmitBlock(raw ?? '', 'quickread', LOG)
+    if (!q || typeof q !== 'object' || Array.isArray(q)) return null
+    const conf = Number(q.confidence)
+    return {
+        verdict:    QUICKREAD_VERDICTS.has(q.verdict) ? q.verdict : 'unclear',
+        confidence: Number.isFinite(conf) ? Math.min(Math.max(conf, 0), 1) : null,
+        read:       typeof q.read === 'string' ? q.read.trim() : '',
+        evidence:   (Array.isArray(q.evidence) ? q.evidence : [])
+            .filter(e => e && typeof e.fact === 'string' && e.fact.trim())
+            .map(e => ({ fact: e.fact.trim(), source: typeof e.source === 'string' ? e.source.trim() : '' })),
+        checked:    (Array.isArray(q.checked) ? q.checked : []).filter(t => typeof t === 'string'),
+    }
 }
 
 // Light guard on the draft (full normalization happens at initiate): must be an object with a symbol.
@@ -161,7 +195,7 @@ function _objectionsBlock(flags) {
  * `existing_coverage` deliberately STAYS: it is the stored thesis, fetched once for the session and
  * byte-identical thereafter — it is the draft that moves, not everything shaped like JSON.
  */
-export function _buildSystemPrompt(chatState, seed = null, audience = null) {
+export function _buildSystemPrompt(chatState, seed = null, audience = null, mode = MODES.COVERAGE) {
     const today  = new Date().toISOString().slice(0, 10)
     const active = chatState?.active_symbol || 'none'
     const existingBlock = chatState?.existing_coverage
@@ -188,6 +222,9 @@ ${audienceBlock}
 ` : ''}Active name: ${active}${seedBlock}${coverageListBlock}${existingBlock}`
     return [
         cachedBlock(_systemPrompt() + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
+        // The mode module AFTER the spine and BEFORE the dynamic block, as its own cached block:
+        // coverage turns keep their prefix untouched, and quick-read turns share one across names.
+        ...(mode === MODES.QUICKREAD ? [cachedBlock(_quickreadMode())] : []),
         { type: 'text', text: dynamic },
     ]
 }
