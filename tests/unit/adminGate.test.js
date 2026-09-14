@@ -60,8 +60,8 @@ const pythia   = { id: 'c2', participants: ['u1', 'strategy'] }
 const retired  = { id: 'c3', participants: ['u1', 'idea'] }
 const human    = { id: 'c4', participants: ['u1', 'u2'] }
 
-test('the strategy feed is the admin-only one; idea stays the retired one', () => {
-    assert.deepEqual(ADMIN_BOT_IDS, ['strategy'])
+test('the strategy and analyst feeds are the admin-only ones; idea stays the retired one', () => {
+    assert.deepEqual(ADMIN_BOT_IDS, ['strategy', 'analyst'])
     assert.deepEqual(RETIRED_BOT_IDS, ['idea'])
 })
 

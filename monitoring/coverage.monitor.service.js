@@ -18,6 +18,7 @@ import { coverageService, COLLECTION } from '../api/analyst/coverage.service.js'
 import { classifyGapState, recomputeGap, statusForState, nextCheckAt } from './coverage.assess.js'
 import { remodelDecision }        from './coverage.remodel.js'
 import { refreshCoverage }        from '../services/coverageRefresh.service.js'
+import { notifyCoverageEvent }    from '../services/coverageNotify.service.js'
 import { entityRepo }             from '../services/entity/entityRepo.service.js'
 import { LIVE_POSITION }          from '../services/entity/vocabulary.js'
 import { fetchLastPrice } from './monitorUtils.js'
@@ -69,10 +70,12 @@ const _deps = {
             return new Set()
         }
     },
-    // Log the verdict; fan-out to admin users wired after the DB refresh
-    // (house-owned coverage has no userId — notifyCoverageEvent removed until then).
+    // Every admin hears a material verdict (coverageNotify derives the audience — house coverage has
+    // no userId). Traders never do: the feed is admin-only, and the card asks for a revision only an
+    // admin can make. Logged as well, so the verdict is on record even when the roster is empty.
     notify: (cov, verdict) => {
         logger.info(LOG, 'coverage event', { symbol: cov.symbol, state: verdict.state, reason: verdict.reason, edge_gone: verdict.edge_gone })
+        return notifyCoverageEvent(cov, verdict)
     },
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
