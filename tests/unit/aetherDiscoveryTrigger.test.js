@@ -85,7 +85,7 @@ test('maxRuns is clamped — it is the spend dial, not a preference', async () =
 test('a junk body falls back to the defaults rather than NaN', async () => {
     await withRunner(ok, async calls => {
         await startDiscovery({ body: { maxRuns: 'lots', hours: null, top: undefined }, user: {} }, fakeRes())
-        assert.deepEqual(calls[0], { maxRuns: 2, hours: 36, top: 5 })
+        assert.deepEqual(calls[0], { maxRuns: 2, hours: 168, top: 5 })
     })
 })
 
@@ -95,7 +95,7 @@ test('a missing body does not throw', async () => {
         const res = fakeRes()
         await startDiscovery({ user: {} }, res)
         assert.equal(res.statusCode, 202)
-        assert.equal(calls[0].hours, 36)
+        assert.equal(calls[0].hours, 168)
     })
 })
 

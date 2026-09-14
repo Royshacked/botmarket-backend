@@ -233,7 +233,7 @@ function discoveryStatus() {
  * Throws for the reasons a caller should hear about: no engine on this host, no
  * resolvable database, or a run already in flight.
  */
-function runDiscovery({ maxRuns = 2, hours = 36, top = 5 } = {}) {
+function runDiscovery({ maxRuns = 2, hours = 168, top = 5 } = {}) {
     if (_discovery) throw new Error('a discovery run is already in flight')
 
     // ONE ANSWER TO "CAN THIS HOST RUN IT", asked here and by the status endpoint the

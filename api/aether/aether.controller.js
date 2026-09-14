@@ -97,7 +97,10 @@ export async function startDiscovery(req, res) {
         // both the model cost and the SEC traffic; a fat-fingered 200 is a very expensive
         // afternoon.
         const maxRuns = Math.min(Math.max(Number(req.body?.maxRuns) || 2, 1), 10)
-        const hours   = Math.min(Math.max(Number(req.body?.hours)   || 36, 1), 168)
+        // `hours` is an AGE CEILING on unseen queue rows, not a window: the engine reads
+        // every headline the selector has not yet been shown, and this only stops a
+        // long gap between presses from dumping a month into one pass. A week.
+        const hours   = Math.min(Math.max(Number(req.body?.hours)   || 168, 1), 168)
         const top     = Math.min(Math.max(Number(req.body?.top)     || 5, 1), 20)
 
         const started = aetherSchedulerService.runDiscovery({ maxRuns, hours, top })
