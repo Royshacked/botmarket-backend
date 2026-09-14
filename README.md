@@ -388,7 +388,11 @@ A portfolio groups multiple ideas under one AI-planned allocation, with a period
 │  Construction is gated at TWO decision points: lock the mandate, │
 │  present regime + architecture, then selection/sizing/plan.      │
 │  Sizing enforces the mandate's hard constraints (max-position,   │
-│  sector caps, cash floor). Atlas NEVER screens — that's Argus.   │
+│  sector caps, cash floor). Atlas NEVER screens — that's Argus:   │
+│  an EMPTY sleeve emits <screen_request> and the server sources   │
+│  it (sleeveSource: FMP screen under the school → research queue  │
+│  → headless Prometheus AS THE HOUSE → an Atlas card, "Resume     │
+│  build"). Any role; the user waits, nobody walks three desks.    │
 │                                                                  │
 │  Agent emits  <portfolio_plan> JSON block                        │
 │    → _sizePlan():  normalizes allocation ratios to sum=1,        │
@@ -532,7 +536,9 @@ PROMETHEUS (buy-side research)        POST /api/analyst/stream
 PYTHIA (top-down strategy)            POST /api/strategy/stream
   ├─ ONE standing house view: a named regime + sector stances as ACTIVE WEIGHT (bps) vs a
   │  benchmark — a stance, never a return forecast
-  ├─ a BROADCAST: no userId anywhere. /api/strategy/tilt/current answers everyone the same doc
+  ├─ a BROADCAST: no userId anywhere — but the DESK is admin-only (every /api/strategy route is
+  │  requireAdmin, 2026-09-14). Traders never author or open it; they still READ the view through
+  │  Atlas (in-process) and Axl (get_sector_view). See docs/desks/roles-and-sourcing.md
   └─ retire ARCHIVES; there is no delete, because a desk that can erase its own calls has no
      track record
         │
@@ -541,6 +547,13 @@ PYTHIA (top-down strategy)            POST /api/strategy/stream
             reviewing (portfolioChat + sectorView.tools), and Axl surfaces it — a strategy desk
             nobody reads is a costume
 ```
+
+**Who gets which desk.** Two roles. A **trader** has Argus, Mentor and Atlas in full, Prometheus
+to research with (every coverage readable, none writable), Axl knowing those four desks plus the
+house forecast — and no Pythia, no Aether. An **admin** has everything, and is the only audience
+of Pythia's and Prometheus's social-chat feeds (coverage verdicts, review offers). The server owns
+every gate; the client hides what the server would refuse. The matrix and where each gate lives:
+[docs/desks/roles-and-sourcing.md](docs/desks/roles-and-sourcing.md).
 
 ---
 

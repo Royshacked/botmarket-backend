@@ -94,7 +94,10 @@ api/
                           sent them) + botForKind (kind → sender) and RETIRED_BOT_IDS (`idea`:
                           feed gone, thread hidden, its orphan cards fall back to Axl).
                           listCardRecipientsSince(type, since) = the shared dedupe read for any
-                          fan-out notifier ("who already got today's?"), conversation→user join
+                          fan-out notifier ("who already got today's?"), conversation→user join.
+                          ADMIN_BOT_IDS (`strategy`, `analyst`) + visibleConversationsFor(convs, role):
+                          the admin desks' feeds are hidden from a non-admin on list AND on
+                          read-by-id (getMessages takes the reader's role from the HTTP path only)
   market/ calendar/ user/ authentication/ transcribe/
   _shared/                cross-controller helpers:
       sse.util.js             startSseStream() — SSE headers + heartbeat + abort wiring
@@ -293,6 +296,25 @@ services/
                             low-impact dropped, 10d horizon. Never throws. A monitor reads it to hold
                             off entering into an unresolved binary
   tradeCapture.service.js   append-only `trades` history (captureOpen / captureOpenBare / captureClose)
+  sleeveSource.service.js   the autonomous Atlas → Argus → Prometheus → Atlas hop. One <screen_request>
+                            = one sleeve: FMP screen under the school's pond (SCHOOL_SCREEN, a proxy —
+                            Prometheus applies the real bar) → drop covered → research_queue rows
+                            (source 'argus', context.sleeve) → researchRun.startRun AS THE HOUSE
+                            (userId null: no budget degrade, house spend) → onRunSettled → an Atlas
+                            card `sleeve_sourced` to the requester. Pending sleeves are in-process
+                            memory, like the run. See docs/desks/roles-and-sourcing.md
+  researchRun.service.js    headless Prometheus over the research queue, one name at a time, writes
+                            the coverage. ONE run per process; onRunSettled(fn) is how sleeveSource
+                            learns a run ended (and chains the next when its names were queued after
+                            the run listed the queue). The abort controller is cleared only if still
+                            ours — a run chained from a listener must stay stoppable
+  houseScan.service.js      Argus's admin-pipeline mode: on tilt publish, FMP-screen each overweight
+                            sector and queue the hits. Same screener as sleeveSource, own inline call
+  coverageNotify.service.js Prometheus's cards. coverage_event = the monitor's material verdict,
+                            fanned out to EVERY ADMIN (listAdminUserIds, visibility 'admin') — house
+                            coverage has no owner, so the audience is derived at delivery, as
+                            tiltNotify's review offer does. coverage_refreshed = the per-user ping
+                            after an admin's <coverage_refresh> hop
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
   tradeNotify.service.js    notify+route cards → social chat: entry_confirm (paper/live idea entry)
                             + queue_ready (the market-open nudge, from Axl) + setup_invalidation /
@@ -519,6 +541,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | New Axl tool | APPEND to `TOOLS` in `axl.agent.service.js` (never insert — the snapshot compares by index and the prompt cache keys off the array prefix) + append the built entry to the `axl` array in `tests/fixtures/agentTools.snapshot.json` in the same commit |
 | New agent tool that is a FACT about the venue/instrument | ride it on `get_quote` (`makeQuoteHandler`) as well as giving it a tool — a desk cannot then be unaware of it |
 | New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince` |
+| New admin-only desk (or route) | `requireAdmin` on the router (router-wide when the whole desk is admin's), `adminOnly: true` on its `DESKS` entry + any Floor/Radar surface (frontend `agentMeta.jsx`, `FloorLists.jsx`), its bot id in `ADMIN_BOT_IDS` on BOTH sides if it has a feed, its notifier narrowed to `listAdminUserIds` + `visibility: 'admin'`, the desk in Axl's `ADMIN_DESKS` + a line in `buildRoleSection`, and a row in `docs/desks/roles-and-sourcing.md`. `adminGate.test.js` pins the router |
 | New emit tag (any agent) | add the name to `ALL_EMIT_TAGS` (llmStream.util.js) BEFORE anything else — unlisted tags leak into the chat and are never captured — then `buildTagCaptures({ tag })` in the agent + `stripEmitTags` on the return value |
 | Follow-up chips on another desk | `makeSuggestionCapture()` (suggestions.service.js) → wire `suggest:` into that agent's `buildTagCaptures` + add `'suggest'` to its `stripEmitTags` list + return `suggestions`. The plumbing is done; write the desk's OWN "what is worth asking next" section in its prompt |
 | New off-hours-queueable action | ask `executionGate.deferIfClosed` before the order, and register the origin's `execute` + `cancel` in `originRegistry.ORIGINS` — the gate REFUSES to queue an unregistered origin. Cancel must reach back into the deciding desk |

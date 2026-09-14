@@ -40,6 +40,7 @@ when to act on it only make sense together.
 |---|---|
 | [trade-pipeline.md](./desks/trade-pipeline.md) | **The path a new trade takes: Argus → Mentor → Talos.** Read this first — it is the record of why the trading desk is the one it is |
 | [mentor-talos.md](./desks/mentor-talos.md) | Mentor builds a `setup`; Talos watches it. Scenarios as rivals, conditions, validity |
+| [roles-and-sourcing.md](./desks/roles-and-sourcing.md) | **Trader vs admin, desk by desk** — where each gate lives — and the autonomous sleeve hop: Atlas → Argus → Prometheus → Atlas, researched as the house |
 
 Not yet written up: **Atlas/Themis** (portfolio — contract in APP_SPEC §3), **Argus** (scan —
 APP_SPEC §4), **Prometheus** (coverage) and **Pythia** (tilt). Their behaviour is specified in

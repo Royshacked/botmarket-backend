@@ -307,6 +307,14 @@ Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/b
 - **Construction** is gated at two decision points (lock mandate → present regime + architecture →
   then selection/sizing/plan flow); sizing enforces the mandate's hard constraints (max-position /
   sector caps, and the cash floor via a reduced `positionSize`, since `_sizePlan` re-normalizes ratios to 1.0).
+- **Every placed name came out of house coverage** (`get_coverage`, filtered by sector + selection
+  school). Atlas has no screener. **An empty sleeve is SOURCED, not improvised:** Atlas emits one
+  `<screen_request>` per empty sleeve and ends the turn; the server (`sleeveSource.service`) screens
+  the sector under the school, queues the hits, runs headless Prometheus **as the house** (no user:
+  full model, house spend), and posts the requester an Atlas card `sleeve_sourced` — "Resume build" —
+  when every name is decided. Any role. `<coverage_request>` is the narrower hop: one user-named
+  ticker, queued, no card. `<coverage_refresh>` (re-research a HELD name mid-review) is **admin-only**
+  because it rewrites house coverage.
 - **Review** runs in two modes on the same `reviewMode` stream: **in-position** (live P&L/drift →
   scoreboard + rebalance memo) and **pre-activation** (all-pending book, `~$0` notional — a pre-flight
   check before *Activate all*, no scoreboard). It is **thesis-anchored and data-grounded**: a **fingerprint**
@@ -546,6 +554,14 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
 ## 7. Auth & exposure
 
 - JWT in an httpOnly cookie; `requireAuth` guards most routes. `req.user._id` is the custom string id.
+- **Two roles, `trader` (default) and `admin`** (`users.role`, minted into the token at sign-in;
+  `scripts/promote-admin.js`). `requireAdmin` (403) is router-wide on `/api/strategy`, on the
+  coverage writes + the research queue under `/api/analyst`, and on Aether's chat + discovery.
+  Scanner, mentor, setups and trade-ideas routes are never role-gated (`tests/unit/adminGate.test.js`
+  pins both facts). Social-chat feeds of the admin desks (`ADMIN_BOT_IDS`: `strategy`, `analyst`)
+  are delivered to admins only and hidden from a non-admin on list and on read-by-id. Axl is told the
+  role in its prompt tail and the controller drops an admin desk from a trader's route. The full
+  matrix: `docs/desks/roles-and-sourcing.md`.
 - **Authed (cost/abuse guard):** transcribe.
 - **Unauthenticated, deliberately:** the broker OAuth callback (identity comes from the signed
   state) and `GET /api/health` + `GET /api/health/ready`. The probes are therefore thin: outside
