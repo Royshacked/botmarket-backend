@@ -15,6 +15,9 @@ import { visibleConversationsFor, ADMIN_BOT_IDS, RETIRED_BOT_IDS } from '../../a
 
 const here = dirname(fileURLToPath(import.meta.url))
 const routesSrc = readFileSync(join(here, '../../api/strategy/strategy.routes.js'), 'utf8')
+const scannerSrc = readFileSync(join(here, '../../api/scanner/scanner.routes.js'), 'utf8')
+const mentorSrc  = readFileSync(join(here, '../../api/mentor/mentor.routes.js'), 'utf8')
+const setupsSrc  = readFileSync(join(here, '../../api/setups/setups.routes.js'), 'utf8')
 
 // ── the middleware ───────────────────────────────────────────────────────────
 
@@ -51,6 +54,19 @@ test('strategy routes: requireAdmin is router-wide, ahead of every route', () =>
     assert.ok(gate < first && gate < firstGet, 'the gate is mounted before the first route')
     // and the reads are no longer the broadcast they used to be
     assert.doesNotMatch(routesSrc, /router\.get\([^\n]*requireAuth\b/)
+})
+
+// ── Argus and Mentor are the same desks for everyone ─────────────────────────
+
+// Decided 2026-09-14 with the other desks: the scan desk and the trade desk have no admin side.
+// Scans and setups are owner-scoped (each user sees their own, admins included), the streams are
+// open, Talos watches every user's setups alike, and a trader reaches Argus through Atlas's sleeve
+// hop as well. Pinned so a gate cannot slip into a router unnoticed.
+test('scanner, mentor and setups routes: authenticated, never admin-gated', () => {
+    for (const src of [scannerSrc, mentorSrc, setupsSrc]) {
+        assert.match(src, /router\.use\(requireAuth\)/)
+        assert.doesNotMatch(src, /requireAdmin/)
+    }
 })
 
 // ── the thread filter ────────────────────────────────────────────────────────

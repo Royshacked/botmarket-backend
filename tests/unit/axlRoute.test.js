@@ -355,3 +355,71 @@ test('adopt rides ONLY with the portfolio desk', () => {
 test('every desk adopt can arrive at is a real desk', () => {
     assert.ok(VALID_PIPELINES.has('portfolio'))
 })
+
+// ── who the user is (2026-09-14) ──────────────────────────────────────────────
+//
+// Pythia (strategy) and Aether are admin desks. Axl is the way in to every desk, so it is told the
+// role in the prompt tail (buildRoleSection) AND the controller drops an admin route for a trader
+// (_routeFor) — the prompt is the courtesy, the gate is the rule. The house sector view is not
+// closed: a trader still reads it; only authoring it is Pythia's.
+
+import { buildRoleSection, ADMIN_DESKS } from '../../services/agents/axl.agent.service.js'
+import { _routeFor } from '../../api/axl/axl.controller.js'
+
+test('role: the admin desks are Pythia and Aether', () => {
+    assert.deepEqual([...ADMIN_DESKS], ['strategy', 'aether'])
+    for (const d of ADMIN_DESKS) assert.ok(VALID_PIPELINES.has(d), `${d} is a real desk`)
+})
+
+test('role block: a trader is told the two desks do not exist, and that the view is still theirs to read', () => {
+    const t = buildRoleSection(false)
+    assert.match(t, /USER ROLE: TRADER/)
+    assert.match(t, /Never route to `strategy` or `aether`/)
+    assert.match(t, /get_sector_view/)
+    assert.match(t, /end the turn with NO route/)
+    // undefined / anything not exactly true reads as a trader — the safe default
+    assert.equal(buildRoleSection(undefined), t)
+})
+
+test('role block: an admin has every desk, both admin desks named', () => {
+    const a = buildRoleSection(true)
+    assert.match(a, /USER ROLE: ADMIN/)
+    assert.match(a, /<route>strategy<\/route>/)
+    assert.match(a, /<route>aether<\/route>/)
+})
+
+test('the role block rides the prompt TAIL, not the cached base', async () => {
+    let seen = null
+    await axlAgentService.chatStream({
+        messages: [{ role: 'user', content: 'hi' }],
+        isAdmin: false,
+        _run: async ({ systemPrompt }) => { seen = systemPrompt; return 'Hello.' },
+    })
+    assert.ok(Array.isArray(seen) && seen.length === 2)
+    // the base TEACHES the line ("Who the user is"); only the tail STATES it
+    assert.doesNotMatch(seen[0].text, /USER ROLE: (TRADER|ADMIN)\./)
+    assert.match(seen[1].text, /USER ROLE: TRADER\./)
+})
+
+test('gate: a trader is never handed to an admin desk, whatever the model emitted', () => {
+    assert.equal(_routeFor('trader', 'strategy'), null)
+    assert.equal(_routeFor('trader', 'aether'), null)
+    assert.equal(_routeFor(undefined, 'strategy'), null)   // a role-less token is a trader
+    assert.equal(_routeFor('trader', 'trade'), 'trade')
+    assert.equal(_routeFor('trader', 'research'), 'research')
+})
+
+test('gate: an admin is handed to every desk, and junk is still junk', () => {
+    assert.equal(_routeFor('admin', 'strategy'), 'strategy')
+    assert.equal(_routeFor('admin', 'aether'), 'aether')
+    assert.equal(_routeFor('admin', 'kairos'), null)
+    assert.equal(_routeFor('admin', null), null)
+})
+
+test('the prompt teaches the role line and marks both admin desks', () => {
+    const prompt = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md'), 'utf8')
+    assert.match(prompt, /## Who the user is/)
+    assert.match(prompt, /USER ROLE/)
+    assert.match(prompt, /`<route>strategy<\/route>` — \*\*admin only\.\*\*/)
+    assert.match(prompt, /`<route>aether<\/route>` — \*\*admin only\.\*\*/)
+})

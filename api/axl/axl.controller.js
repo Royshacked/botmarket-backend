@@ -1,4 +1,4 @@
-import { axlAgentService } from '../../services/agents/axl.agent.service.js'
+import { axlAgentService, ADMIN_DESKS } from '../../services/agents/axl.agent.service.js'
 import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
 import { parseChatMessages } from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
@@ -8,6 +8,15 @@ import { getMarketBrief } from '../../services/marketBrief.service.js'
 // unknown key would leave the client trying to navigate to a tab that doesn't exist, so it becomes
 // null and the user simply stays with Axl.
 export const VALID_PIPELINES = new Set(['trade', 'portfolio', 'scan', 'assist', 'research', 'strategy', 'aether'])
+
+// The desks a TRADER may be handed to — the admin desks (Pythia, Aether) removed. The prompt tells
+// Axl which user it has (buildRoleSection); this is the gate that holds when the model forgets, so
+// a trader is never sent to a desk the hub does not show them and the routes answer 403.
+export function _routeFor(role, route) {
+    if (!VALID_PIPELINES.has(route)) return null
+    if (role !== 'admin' && ADMIN_DESKS.includes(route)) return null
+    return route
+}
 const LOG = '[axl:controller]'
 
 // The ticker a reply may hand over with the desk (`<route>research NVDA</route>`). Sanitized on the
@@ -71,13 +80,14 @@ export async function streamAxl(req, res) {
             const result = await axlAgentService.chatStream({
                 messages,
                 audience: await getExperienceLevel(req.user._id),
+                isAdmin:  req.user.role === 'admin',
                 model,
                 userId:  req.user._id,
                 signal:  signal,
                 ...sseAgentCallbacks(sendEvent),
             })
 
-            const route = VALID_PIPELINES.has(result.route) ? result.route : null
+            const route = _routeFor(req.user.role, result.route)
             return {
                 reply: result.reply,
                 route,

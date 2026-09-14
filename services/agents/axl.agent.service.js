@@ -91,6 +91,31 @@ export const TOOLS = toolsFor({
 
 export const axlAgentService = { chatStream }
 
+// ─── Who the user is ───────────────────────────────────────────────────────────
+// Two desks are admin-only — Pythia (strategy) and Aether — and Axl is the way in to every desk, so
+// it has to know which user it is talking to or it offers a trader a door that answers 403. The
+// house sector view is NOT one of the closed things: it is a broadcast every user may READ
+// (get_sector_view), only its AUTHORING is Pythia's. So a trader's Axl still shows the forecast;
+// it just never sends them to set one.
+//
+// Rides the volatile tail of the system prompt, next to the audience block, for the same reason
+// that block does: the cached base is shared by every user, and a per-role base would split the
+// cache in two for a paragraph.
+export const ADMIN_DESKS = Object.freeze(['strategy', 'aether'])
+
+/** The role paragraph for the prompt tail. Pure; exported for tests. */
+export function buildRoleSection(isAdmin) {
+    if (isAdmin) {
+        return 'USER ROLE: ADMIN. Every desk is open to them, including Pythia (`<route>strategy</route>`, to set or change the house sector view) and Aether (`<route>aether</route>`, event exposure).'
+    }
+    return [
+        'USER ROLE: TRADER. Two desks DO NOT EXIST for this user — Pythia (the strategy desk) and Aether (event exposure).',
+        "Never route to `strategy` or `aether`, never offer them, never name Pythia or Aether as somewhere they can go, and leave them out of any list of the app's desks.",
+        "The HOUSE SECTOR VIEW is still theirs to read: on \"what's our view / forecast / which sectors do we like\", call `get_sector_view` and report it as \"the house view\" — the report is the whole answer.",
+        'If they ask to SET or CHANGE the view, say the house view is set centrally by the strategy desk and is not something they author here, offer to show the current one, and end the turn with NO route.',
+    ].join(' ')
+}
+
 // The route tag may carry the name the user is here for: `<route>research NVDA</route>`. Desk and
 // symbol travel as ONE capture because they are one decision — a desk that opens on a name the
 // router never picked is worse than a desk that opens empty. Split only; the controller validates
@@ -152,7 +177,7 @@ export function _cleanOpening(raw) {
     return text || null
 }
 
-async function chatStream({ messages = [], audience = null, model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], audience = null, isAdmin = false, model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     _tradingContextHandlers = makeTradingContextHandlers,
     _userDataHandlers = makeUserDataHandlers,
@@ -172,9 +197,12 @@ async function chatStream({ messages = [], audience = null, model: requestedMode
     // Stable cached base + volatile tail (today's date, so "this week" resolves).
     const today = new Date().toISOString().slice(0, 10)
     const audienceBlock = buildAudienceSection(audience)
+    const roleBlock     = buildRoleSection(isAdmin === true)
     const systemPrompt = [
         cachedBlock(_systemPrompt() + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
-        { type: 'text', text: `CURRENT DATE: ${today}. Resolve relative timeframes (today, this week, this month) against this date.${audienceBlock ? `
+        { type: 'text', text: `CURRENT DATE: ${today}. Resolve relative timeframes (today, this week, this month) against this date.
+
+${roleBlock}${audienceBlock ? `
 
 ${audienceBlock}` : ''}` },
     ]
