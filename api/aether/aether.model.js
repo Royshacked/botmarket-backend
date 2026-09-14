@@ -19,6 +19,9 @@ import { getDb } from '../../providers/mongodb.provider.js'
 export const COLLECTIONS = {
     EVENT_RUNS:       'aether_event_runs',
     EVENT_CANDIDATES: 'aether_event_candidates',
+    // One document, `_id: 'latest'`, replaced by the engine's nightly refresh. Node reads
+    // it rather than reproducing the tally in a second language.
+    SCORECARD:        'aether_scorecard',
 }
 
 export async function ensureAetherIndexes() {

@@ -195,3 +195,47 @@ export function shapeTickerResult(sym, rows = []) {
 export function tickerWindowDays(raw) {
     return Math.min(Math.max(Number(raw) || 90, 1), 365)
 }
+
+
+// ─── The scorecard — what the names did ───────────────────────────────────────
+//
+// Every candidate is a falsifiable claim, graded once at its expiry by the engine's nightly
+// refresh (scorecard.py) and written as ONE document. This is a read of that document, and
+// the shaping is split out so it can be tested without a database, like the two above.
+
+/**
+ * The card as the screen wants it, from the engine's document. Null when the engine has
+ * never written one — a different answer from an empty card.
+ *
+ * WHAT THE TWO EMPTY STATES MEAN. `overall.n === 0` with `pending > 0` is "nothing has
+ * expired yet, first grade on `next_expiry`"; with `pending === 0` it is "nothing to grade
+ * at all". Both read as a blank card, and the reader has to be able to tell them apart,
+ * which is why the engine carries `pending` and `next_expiry` on the document.
+ */
+export function shapeScorecard(doc) {
+    if (!doc) return null
+    const { _id, ...card } = doc
+    return {
+        computed_at: card.computed_at ?? '',
+        overall:     card.overall ?? { n: 0, hit: 0, miss: 0, flat: 0, unpriced: 0, hit_rate: null, avg_signed_pct: null },
+        by_verdict:  card.by_verdict ?? {},
+        by_tier:     card.by_tier ?? {},
+        by_category: card.by_category ?? {},
+        by_survived: card.by_survived ?? {},
+        by_side:     card.by_side ?? {},
+        by_run:      card.by_run ?? {},
+        pending:     card.pending ?? 0,
+        next_expiry: card.next_expiry ?? '',
+    }
+}
+
+export async function getScorecard() {
+    try {
+        const db  = await getDb()
+        const doc = await db.collection(COLLECTIONS.SCORECARD).findOne({ _id: 'latest' })
+        return shapeScorecard(doc)
+    } catch (err) {
+        logger.warn(LOG, 'getScorecard failed', err.message)
+        throw err
+    }
+}

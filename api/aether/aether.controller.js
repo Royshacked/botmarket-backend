@@ -9,7 +9,7 @@
 // handing out 170 opportunity cards built on June's channel state.
 
 import { aetherAgentService }                        from '../../services/agents/aether.agent.service.js'
-import { getEventCandidates, getCandidatesForTicker, tickerWindowDays } from './aether.service.js'
+import { getEventCandidates, getCandidatesForTicker, tickerWindowDays, getScorecard } from './aether.service.js'
 import { aetherSchedulerService }                    from '../../services/aetherScheduler.service.js'
 import { streamAgentResponse, sseAgentCallbacks }    from '../_shared/sse.util.js'
 import { parseChatMessages }                         from '../_shared/parse.util.js'
@@ -76,6 +76,22 @@ export async function getCandidatesByTicker(req, res) {
     } catch (err) {
         logger.error(LOG, 'getCandidatesByTicker failed', err.message)
         res.status(500).json({ error: 'Could not read the candidate' })
+    }
+}
+
+/**
+ * The scorecard — what the names did, graded at expiry by the engine's nightly refresh.
+ * Broadcast like the list it grades. 404 when the engine has never written one, which is
+ * "the nightly has not run" and not "the card is empty".
+ */
+export async function getScorecardRead(req, res) {
+    try {
+        const card = await getScorecard()
+        if (!card) return res.status(404).json({ error: 'No scorecard yet — the nightly refresh has not run' })
+        res.json(card)
+    } catch (err) {
+        logger.error(LOG, 'getScorecard failed', err.message)
+        res.status(500).json({ error: 'Could not read the scorecard' })
     }
 }
 
