@@ -34,6 +34,14 @@ export const isBot = (id) => BOT_IDS.includes(String(id))
 export const RETIRED_BOT_IDS = ['idea']
 export const isRetiredBot = (id) => RETIRED_BOT_IDS.includes(String(id))
 
+// ADMIN-ONLY feeds. Pythia posts only to admins (tiltNotify narrows to `listAdminUserIds`), so a
+// trader should never own one of these threads — but a demoted admin still does, and the client
+// dropping it (agentMeta ADMIN_BOT_IDS) was the only gate. getConversations now drops it too, so
+// the served set equals the visible set, the same rule the routes under /api/strategy apply.
+// Must stay in step with the frontend ADMIN_BOT_IDS.
+export const ADMIN_BOT_IDS = ['strategy']
+export const isAdminBot = (id) => ADMIN_BOT_IDS.includes(String(id))
+
 /**
  * Which bot speaks for an entity KIND. One home for the attribution rule, because the callers that
  * need it (the market-open sweep, the manual fill/exit cards, the position monitor) are all
@@ -377,17 +385,29 @@ export async function seedBotConversation(userId) {
     if (created) await sendMessage(conv.id, BOT_USER_ID, BOT_WELCOME)
 }
 
-export async function getConversations(userId) {
+/**
+ * Which of a user's threads the sidebar may show. Pure, so the two drops are assertable without a DB:
+ *  - a RETIRED bot's thread stays in Mongo but leaves the sidebar — nothing posts there any more, so
+ *    it can only ever show a frozen feed under a desk the app no longer has;
+ *  - an ADMIN-ONLY bot's thread is hidden from a non-admin — it exists only for an admin who was
+ *    since demoted, and a trader must not read the house desk through a thread the role no longer
+ *    entitles them to.
+ */
+export function visibleConversationsFor(convs, role = null) {
+    const admin = role === 'admin'
+    return (Array.isArray(convs) ? convs : []).filter(c =>
+        !c.participants.some(isRetiredBot) && (admin || !c.participants.some(isAdminBot))
+    )
+}
+
+export async function getConversations(userId, role = null) {
     const db  = await getDb()
     const uid = String(userId)
 
-    // A retired bot's thread stays in Mongo but leaves the sidebar: nothing posts there any more,
-    // so it can only ever show a frozen feed under a desk the app no longer has.
-    const convs = (await db.collection(CONVS)
+    const convs = visibleConversationsFor(await db.collection(CONVS)
         .find({ participants: uid })
         .sort({ lastMessageAt: -1 })
-        .toArray())
-        .filter(c => !c.participants.some(isRetiredBot))
+        .toArray(), role)
 
     if (!convs.length) return []
 
@@ -424,10 +444,17 @@ export async function getConversations(userId) {
     })
 }
 
-export async function getMessages(conversationId, userId, before, limit = 50) {
+/**
+ * `role` is the READER'S role and is only passed from the HTTP path: with it, the same gate the
+ * sidebar applies holds here — a thread the role cannot list is one it cannot read by id. The
+ * in-process callers (Axl's reply history, the post-permission check) leave it unset: they act on
+ * a thread the app already resolved for its owner, and the token's role is not theirs to assert.
+ */
+export async function getMessages(conversationId, userId, before, limit = 50, role = undefined) {
     const db   = await getDb()
     const conv = await db.collection(CONVS).findOne({ id: conversationId })
     if (!conv || !conv.participants.includes(String(userId))) return null
+    if (role !== undefined && !visibleConversationsFor([conv], role).length) return null
 
     const query = { conversationId }
     if (before) query.createdAt = { $lt: Number(before) }

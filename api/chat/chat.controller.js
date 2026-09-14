@@ -11,7 +11,7 @@ import {
 
 export async function listConversations(req, res, next) {
     try {
-        const convs = await getConversations(req.user._id)
+        const convs = await getConversations(req.user._id, req.user.role)
         res.json({ conversations: convs })
     } catch (err) {
         next(err)
@@ -22,7 +22,7 @@ export async function listMessages(req, res, next) {
     try {
         const { id } = req.params
         const { before, limit } = req.query
-        const msgs = await getMessages(id, req.user._id, before, Number(limit) || 50)
+        const msgs = await getMessages(id, req.user._id, before, Number(limit) || 50, req.user.role)
         if (msgs === null) return res.status(403).json({ error: 'Forbidden' })
         res.json({ messages: msgs })
     } catch (err) {
