@@ -7,15 +7,29 @@ import { _addToItem } from '../../api/portfolio/portfolioRebalance.service.js'
 // sizing (floor(qty × addFraction), same direction, no positionId), and the new-leg linkage.
 
 // Fake db: one collection with a fixed idea for findOne, recording updateOne calls.
+//
+// `updateOne` answers with a result like the driver's, because the leg resize goes through
+// entityRepo.setLegQuantity (shared with the reconciler) and that reads `modifiedCount`. A
+// leg-targeted write lands only when every arrayFilter matches a leg on the idea.
 function fakeDb(idea) {
     const updates = []
+    const matches = (opts) => {
+        const f = opts?.arrayFilters?.[0]
+        if (!f) return true
+        const want = Object.fromEntries(Object.entries(f).map(([k, v]) => [k.split('.').pop(), v]))
+        return (idea.brokerOrders ?? []).some(leg =>
+            Object.entries(want).every(([k, v]) => String(leg[k]) === String(v)))
+    }
     return {
         _updates: updates,
         collection: () => ({
             findOne: async () => idea,
             // `opts` is recorded too: a leg-targeted $set is only correct together with its
             // arrayFilters, so a test that ignored them could pass on an update that hit every leg.
-            updateOne: async (q, u, opts) => { updates.push({ q, u, opts }) },
+            updateOne: async (q, u, opts) => {
+                updates.push({ q, u, opts })
+                return { modifiedCount: matches(opts) ? 1 : 0 }
+            },
         }),
     }
 }
@@ -104,11 +118,12 @@ test('a netted add raises the existing leg instead of pushing a second one', asy
     assert.deepEqual(r, { ok: true, legsAdded: 1, legsSkipped: 0 })
     // No new leg: the holding still has exactly one, and it is bigger.
     assert.equal(db._updates.some(u => u.u.$push), false)
-    const resize = db._updates.find(u => u.u.$set?.['brokerOrders.$[leg].quantity'] != null)
-    assert.equal(resize.u.$set['brokerOrders.$[leg].quantity'], 13)   // 10 + floor(10 × 0.3)
+    const resize = db._updates.find(u => u.u.$set?.['brokerOrders.$[slot].quantity'] != null)
+    assert.equal(resize.u.$set['brokerOrders.$[slot].quantity'], 13)   // 10 + floor(10 × 0.3)
     // Guarded on the size it sized off, so a reconciler that stamped the broker's own volume in the
-    // meantime is not overwritten by this arithmetic — the late writer matches nothing.
-    assert.deepEqual(resize.opts.arrayFilters, [{ 'leg.positionId': 'p1', 'leg.quantity': 10 }])
+    // meantime is not overwritten by this arithmetic — the late writer matches nothing. Matched on
+    // the account too: a positionId is only unique within its account.
+    assert.deepEqual(resize.opts.arrayFilters, [{ 'slot.accountId': 'a1', 'slot.positionId': 'p1', 'slot.quantity': 10 }])
 })
 
 test('a hedging add is still tracked as a second leg', async () => {

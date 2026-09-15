@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { _trimItem } from '../../api/portfolio/portfolioRebalance.service.js'
+import { makeEntityRepo } from '../../services/entity/entityRepo.service.js'
 
 // THE XLU BUG. A review trim closed half the position at the broker and the app never wrote it down:
 // the holding still read 126 shares while 63 were held. That number is not decoration — it is the
@@ -13,15 +14,29 @@ import { _trimItem } from '../../api/portfolio/portfolioRebalance.service.js'
 // So the trim writes the reduction itself, and the reconciler re-stamps it from the broker's volume
 // when the reduce event lands.
 
+// The leg resize goes through entityRepo.setLegQuantity now — shared with the reconciler, which
+// writes the broker's own volume. It reads `modifiedCount`, so the fake answers like the driver: a
+// leg-targeted write lands only when every arrayFilter matches a leg on the item, which is what
+// makes the COMPARE-AND-SET below assertable rather than merely commented.
 function fakeDb(item) {
     const updates = []
+    const matches = (opts) => {
+        const f = opts?.arrayFilters?.[0]
+        if (!f) return true
+        const want = Object.fromEntries(Object.entries(f).map(([k, v]) => [k.split('.').pop(), v]))
+        return (item.brokerOrders ?? []).some(leg =>
+            Object.entries(want).every(([k, v]) => String(leg[k]) === String(v)))
+    }
     return {
         _updates: updates,
         collection: () => ({
             findOne:   async () => item,
             // arrayFilters matter as much as the $set here: without them a leg-targeted write hits
             // whichever leg Mongo reaches first.
-            updateOne: async (q, u, opts) => { updates.push({ q, u, opts }) },
+            updateOne: async (q, u, opts) => {
+                updates.push({ q, u, opts })
+                return { modifiedCount: matches(opts) ? 1 : 0 }
+            },
         }),
     }
 }
@@ -51,8 +66,8 @@ function fakeBroker() {
 const trim = (db, change, broker = fakeBroker()) => _trimItem(db, 'i1', 'u1', change, OPEN, broker)
 
 const legResizes = updates => updates
-    .filter(u => u.u.$set?.['brokerOrders.$[leg].quantity'] != null)
-    .map(u => ({ qty: u.u.$set['brokerOrders.$[leg].quantity'], filters: u.opts?.arrayFilters }))
+    .filter(u => u.u.$set?.['brokerOrders.$[slot].quantity'] != null)
+    .map(u => ({ qty: u.u.$set['brokerOrders.$[slot].quantity'], filters: u.opts?.arrayFilters }))
 
 test('a trim writes the reduced size onto the leg it trimmed', async () => {
     const db     = fakeDb(heldItem())
@@ -65,10 +80,27 @@ test('a trim writes the reduced size onto the leg it trimmed', async () => {
     const resized = legResizes(db._updates)
     assert.equal(resized.length, 1, 'exactly the trimmed leg is resized')
     assert.equal(resized[0].qty, 63, '126 − floor(126 × 0.5)')
-    // COMPARE-AND-SET: the filter pins the size this trim measured against. The paper venue emits its
-    // reduce synchronously inside closePosition, so the reconciler can already have stamped this leg
-    // from the broker's own volume — and that answer must win over our arithmetic, not lose to it.
-    assert.deepEqual(resized[0].filters, [{ 'leg.positionId': 'p1', 'leg.quantity': 126 }])
+    // COMPARE-AND-SET: the filter pins the size this trim measured against, AND the account — a
+    // positionId is only unique within its account. The paper venue emits its reduce synchronously
+    // inside closePosition, so the reconciler can already have stamped this leg from the broker's own
+    // volume — and that answer must win over our arithmetic, not lose to it.
+    assert.deepEqual(resized[0].filters, [{ 'slot.accountId': 'a1', 'slot.positionId': 'p1', 'slot.quantity': 126 }])
+})
+
+// The other half of the compare-and-set, and the half that was only ever a comment: when the
+// reconciler HAS already stamped the broker's volume, the trim's arithmetic must not land. Asserted
+// on the shared write itself, since that is where the guard now lives.
+test('a reconciler that stamped the leg first is not overwritten by the trim’s arithmetic', async () => {
+    // The trim sized off 126; the leg as STORED now says 63 — the reconciler got there in between.
+    const db   = fakeDb(heldItem({ brokerOrders: [{ broker: 'paper', accountId: 'a1', positionId: 'p1', quantity: 63 }] }))
+    const legs = makeEntityRepo({ coll: async () => db.collection() })
+
+    const late = await legs.setLegQuantity('i1', { accountId: 'a1', positionId: 'p1', quantity: 63, ifQuantity: 126 })
+    assert.equal(late, false, 'the guard did not match, so the late writer wrote nothing')
+
+    // Without the guard the same write lands — which is the reconciler's own call, from the broker.
+    const authoritative = await legs.setLegQuantity('i1', { accountId: 'a1', positionId: 'p1', quantity: 60 })
+    assert.equal(authoritative, true)
 })
 
 test('a refused trim writes nothing — a leg that never moved must not be resized', async () => {

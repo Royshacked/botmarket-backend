@@ -342,6 +342,76 @@ async function setMandate(portfolioId, userId, mandate) {
     }
 }
 
+// ─── The due-book readers, and the one read they share ──────────────────────────
+//
+// Two questions are asked of this collection on a clock — "which books are due a scheduled review"
+// and "which in-position books are due a Themis wake" — and they are genuinely different questions:
+// different due clause, different scope, different gate. What they are NOT different about is what a
+// due book has to come back AS: a display name, the workspace it trades in, and a labelled account,
+// all of which live on the book's holdings rather than on its chat doc.
+//
+// So the META READ is shared (one aggregate shape, one account-name resolve, one row shape) and the
+// JUDGMENT stays with each caller — which is the same split the notification transport takes.
+
+/** The fields a due book carries from its holdings. `liveCount` only when the caller gates on it. */
+function _metaStage(portfolioIds, { scopeToUser = null, withLiveCount = false } = {}) {
+    return [
+        // The Themis sweep runs across every user, so it does NOT scope; the route-facing read does.
+        { $match: scopeToUser
+            ? { portfolioId: { $in: portfolioIds }, userId: scopeToUser }
+            : { portfolioId: { $in: portfolioIds } } },
+        { $sort:  { createdAt: 1 } },
+        { $group: {
+            _id:           '$portfolioId',
+            portfolioName: { $first: '$portfolioName' },
+            broker:        { $first: '$broker' },
+            mainAccountId: { $first: '$mainAccountId' },
+            accounts:      { $first: '$accounts' },
+            // How many holdings are actually open. Only Themis asks — it monitors in-position books.
+            ...(withLiveCount
+                ? { liveCount: { $sum: { $cond: [{ $in: ['$status', LIVE_POSITION] }, 1, 0] } } }
+                : {}),
+        } },
+    ]
+}
+
+/**
+ * Resolve the per-book meta for a page of due chat docs: one representative idea per portfolio
+ * carries the display name plus the broker/account the whole batch was saved under (paper/live/
+ * manual is a uniform per-batch mode, applied at save time, so the first idea speaks for the batch),
+ * and virtual accounts are resolved to their user-facing names once per user.
+ *
+ * @returns {Promise<{ metaMap: object, nameByAccount: object }>}
+ */
+async function _bookMeta(db, docs, opts = {}) {
+    const metaRows = await db.collection(ENTITIES)
+        .aggregate(_metaStage(docs.map(d => d.portfolioId), opts))
+        .toArray()
+    return {
+        metaMap:       Object.fromEntries(metaRows.map(r => [r._id, r])),
+        // Live accounts fall back to their raw account id (the broker login number).
+        nameByAccount: await _virtualAccountNames(docs.map(d => d.userId)),
+    }
+}
+
+/** One due book, in the shape both readers answer with. Pure. */
+function _bookRow(doc, meta, nameByAccount) {
+    const accountId = meta.mainAccountId ?? _firstAccountId(meta.accounts)
+    const mode      = _deriveMode(meta.broker, accountId)
+    return {
+        portfolioId:   doc.portfolioId,
+        userId:        doc.userId,
+        portfolioName: meta.portfolioName ?? 'Portfolio',
+        mode,
+        account:       _accountLabel(mode, accountId, nameByAccount, meta.broker),
+        accountId:     accountId ?? null,
+        reviewCadence: doc.reviewCadence ?? 'weekly',
+        nextReviewAt:  doc.nextReviewAt ?? null,
+        lastReviewAt:  doc.lastReviewAt ?? null,
+        notifiedAt:    doc.notifiedAt   ?? null,
+    }
+}
+
 /**
  * Returns portfolios due for review (nextReviewAt <= now), with portfolioName
  * resolved from the ideas collection.
@@ -359,49 +429,8 @@ async function getPendingReviews(userId) {
 
         if (!docs.length) return []
 
-        const portfolioIds = docs.map(d => d.portfolioId)
-        // One representative idea per portfolio carries the display name plus the
-        // broker/account the whole batch was saved under. Paper/live/manual is a uniform
-        // per-batch mode (applied at save time), so the first idea speaks for the batch.
-        const ideaMatch = userId
-            ? { portfolioId: { $in: portfolioIds }, userId }
-            : { portfolioId: { $in: portfolioIds } }
-        const metaRows = await db.collection(ENTITIES)
-            .aggregate([
-                { $match: ideaMatch },
-                { $sort:  { createdAt: 1 } },
-                { $group: {
-                    _id:           '$portfolioId',
-                    portfolioName: { $first: '$portfolioName' },
-                    broker:        { $first: '$broker' },
-                    mainAccountId: { $first: '$mainAccountId' },
-                    accounts:      { $first: '$accounts' },
-                } },
-            ])
-            .toArray()
-
-        const metaMap = Object.fromEntries(metaRows.map(r => [r._id, r]))
-        // Virtual (paper/manual) accounts carry a user-facing name; resolve them once per
-        // user. Live accounts fall back to their raw account id (the broker login number).
-        const nameByAccount = await _virtualAccountNames(docs.map(d => d.userId))
-
-        return docs.map(d => {
-            const meta      = metaMap[d.portfolioId] ?? {}
-            const accountId = meta.mainAccountId ?? _firstAccountId(meta.accounts)
-            const mode      = _deriveMode(meta.broker, accountId)
-            return {
-                portfolioId:   d.portfolioId,
-                userId:        d.userId,
-                portfolioName: meta.portfolioName ?? 'Portfolio',
-                mode,
-                account:       _accountLabel(mode, accountId, nameByAccount, meta.broker),
-                accountId:     accountId ?? null,
-                reviewCadence: d.reviewCadence ?? 'weekly',
-                nextReviewAt:  d.nextReviewAt,
-                lastReviewAt:  d.lastReviewAt ?? null,
-                notifiedAt:    d.notifiedAt   ?? null,
-            }
-        })
+        const { metaMap, nameByAccount } = await _bookMeta(db, docs, { scopeToUser: userId ?? null })
+        return docs.map(d => _bookRow(d, metaMap[d.portfolioId] ?? {}, nameByAccount))
     } catch (err) {
         logger.error(LOG, 'Failed to get pending reviews', err)
         return []
@@ -430,45 +459,15 @@ async function getPendingThemisChecks(now = Date.now()) {
 
         if (!docs.length) return []
 
-        const portfolioIds = docs.map(d => d.portfolioId)
-        // One representative idea per portfolio carries the display name + broker/account (a uniform
-        // per-batch mode), plus liveCount = how many holdings are actually open (status long/short).
-        const metaRows = await db.collection(ENTITIES)
-            .aggregate([
-                { $match: { portfolioId: { $in: portfolioIds } } },
-                { $sort:  { createdAt: 1 } },
-                { $group: {
-                    _id:           '$portfolioId',
-                    portfolioName: { $first: '$portfolioName' },
-                    broker:        { $first: '$broker' },
-                    mainAccountId: { $first: '$mainAccountId' },
-                    accounts:      { $first: '$accounts' },
-                    liveCount:     { $sum: { $cond: [{ $in: ['$status', LIVE_POSITION] }, 1, 0] } },
-                } },
-            ])
-            .toArray()
-
-        const metaMap       = Object.fromEntries(metaRows.map(r => [r._id, r]))
-        const nameByAccount = await _virtualAccountNames(docs.map(d => d.userId))
+        // No user scope: this is the monitor's cross-user sweep, unlike the route-facing read above.
+        const { metaMap, nameByAccount } = await _bookMeta(db, docs, { withLiveCount: true })
 
         return docs.map(d => {
             const meta = metaMap[d.portfolioId] ?? {}
             if ((meta.liveCount ?? 0) < 1) return null   // not in position → invisible to Themis
-            const accountId = meta.mainAccountId ?? _firstAccountId(meta.accounts)
-            const mode      = _deriveMode(meta.broker, accountId)
-            return {
-                portfolioId:   d.portfolioId,
-                userId:        d.userId,
-                portfolioName: meta.portfolioName ?? 'Portfolio',
-                mode,
-                account:       _accountLabel(mode, accountId, nameByAccount, meta.broker),
-                accountId:     accountId ?? null,
-                reviewCadence: d.reviewCadence ?? 'weekly',
-                nextReviewAt:  d.nextReviewAt ?? null,
-                lastReviewAt:  d.lastReviewAt ?? null,
-                notifiedAt:    d.notifiedAt   ?? null,
-                themis:        d.themis       ?? null,
-            }
+            // The Themis sub-state rides ON TOP of the shared row rather than inside it: the
+            // scheduled-review reader has no use for it, and its clock is a different clock.
+            return { ..._bookRow(d, meta, nameByAccount), themis: d.themis ?? null }
         }).filter(Boolean)
     } catch (err) {
         logger.error(LOG, 'Failed to get pending Themis checks', err)

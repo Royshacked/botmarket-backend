@@ -133,17 +133,30 @@ export function makeEntityRepo({ coll = _defaultColl } = {}) {
          * from (a review's trim/scale-in, `remainingForAccount`, the exit-order scaling). A partial
          * close we couldn't attribute to a tracked exit order used to leave it at the pre-trim size
          * forever, so the next "trim half" was computed against a size the broker no longer held.
-         * The writer is the reconciler, from the broker's own volume — the same authority it already
-         * trusts for whether the position survived.
+         * TWO WRITERS, ONE WRITE, AND THEY YIELD DIFFERENTLY — which is why `ifQuantity` exists.
          *
+         *   • The RECONCILER writes the broker's own volume, the same authority it already trusts for
+         *     whether the position survived. It overwrites unconditionally: it knows better than
+         *     anything else does, so it passes no `ifQuantity`.
+         *   • A REVIEW's trim / scale-in (portfolioRebalance) writes ARITHMETIC — the size it just
+         *     sized off, minus or plus what it sent. The paper venue emits its reduce synchronously
+         *     inside closePosition, so the reconciler may already have stamped the leg from the real
+         *     volume; a plain write would clobber that with a guess. Passing `ifQuantity` (the size it
+         *     sized off) makes the late writer simply match nothing.
+         *
+         * So the guarded update is the shared pipe and WHETHER TO YIELD stays the caller's judgment.
+         *
+         * @param {number} [opts.ifQuantity]  only write if the leg still records this size
          * @returns {Promise<boolean>} true when a leg was actually resized
          */
-        async setLegQuantity(id, { accountId, positionId, quantity }) {
-            const c   = await coll()
+        async setLegQuantity(id, { accountId, positionId, quantity, ifQuantity = undefined }) {
+            const c    = await coll()
+            const slot = { 'slot.accountId': String(accountId), 'slot.positionId': String(positionId) }
+            if (ifQuantity !== undefined) slot['slot.quantity'] = ifQuantity
             const res = await c.updateOne(
                 { id },
                 { $set: { 'brokerOrders.$[slot].quantity': quantity } },
-                { arrayFilters: [{ 'slot.accountId': String(accountId), 'slot.positionId': String(positionId) }] },
+                { arrayFilters: [slot] },
             )
             return res.modifiedCount === 1
         },

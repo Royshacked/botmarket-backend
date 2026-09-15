@@ -33,6 +33,7 @@ import { invalidatePortfolioState, computePortfolioState } from '../../services/
 import { getNumericQuote }          from '../../providers/yahoofinance.provider.js'
 import { notifyManualExit, notifyManualEntry, exitLegFromIdea, entryLegFromIdea } from '../../services/manualNotify.service.js'
 import { ENTITIES }               from '../../services/entity/entityCollection.js'
+import { makeEntityRepo }         from '../../services/entity/entityRepo.service.js'
 import { orderSymbol }            from '../../monitoring/exitOrders.util.js'
 import { deferIfClosed }          from '../../services/pendingAction/executionGate.js'
 import { isSelfExecuted }         from '../../services/venue.resolve.service.js'
@@ -41,6 +42,13 @@ import { notifyRebalanceApplied } from '../../services/rebalanceNotify.service.j
 const LOG        = '[portfolio:rebalance]'
 const COLLECTION = ENTITIES
 const LIVE       = new Set(PAST_ENTRY)
+
+// The entity facade, built over the db THIS CALL was handed rather than the module singleton — every
+// function here takes its `db` (the queue replays them with one, and the tests hand them a fake), so
+// a repo that reached for getDb() would send half of one trim to a different database. Same shape
+// the desks use. Only the leg-resize goes through it today; the rest of this file's writes are still
+// inline, which is a separate move.
+const _legs = (db) => makeEntityRepo({ coll: async () => db.collection(COLLECTION) })
 
 /**
  * The hours gate, in the shape this file needs it.
@@ -84,6 +92,16 @@ const _deferred = (gate, extra = {}) => ({
 const _specAsset = change => change.item?.asset ?? null
 
 /**
+ * The book's display name, off any one of its holdings — a portfolio is not a document, so its name
+ * lives on the rows carrying its id. Both cards this file posts need it, and they were reading it
+ * separately: one read per request now, taken once and handed down.
+ */
+async function _portfolioName(db, portfolioId, userId) {
+    const sib = await db.collection(COLLECTION).findOne({ portfolioId, userId }, { projection: { portfolioName: 1 } })
+    return sib?.portfolioName ?? null
+}
+
+/**
  * Post the review receipt — the record the user goes looking for when the toast is gone.
  *
  * Resolves the missing asset names in ONE read: a change identifies its holding by id, and a card
@@ -93,7 +111,7 @@ const _specAsset = change => change.item?.asset ?? null
  * Best-effort throughout. The moves are already done and the review is already closed — a receipt
  * that cannot be built must not turn a completed rebalance into a failed one.
  */
-async function _postReceipt(portfolioId, userId, results) {
+async function _postReceipt(portfolioId, userId, results, portfolioName) {
     try {
         const db   = await getDb()
         const ids  = [...new Set(results.map(r => r.itemId).filter(Boolean))]
@@ -101,11 +119,11 @@ async function _postReceipt(portfolioId, userId, results) {
             ? await db.collection(COLLECTION).find({ id: { $in: ids } }, { projection: { id: 1, asset: 1 } }).toArray()
             : []
         const assetById = new Map(docs.map(d => [d.id, d.asset]))
-        const sib = await db.collection(COLLECTION).findOne({ portfolioId, userId }, { projection: { portfolioName: 1 } })
 
         await notifyRebalanceApplied(userId, {
             portfolioId,
-            portfolioName: sib?.portfolioName ?? null,
+            // Resolved by the caller when a manual card already needed it; otherwise read here.
+            portfolioName: portfolioName !== undefined ? portfolioName : await _portfolioName(db, portfolioId, userId),
             results: results.map(r => ({ ...r, asset: r.asset ?? assetById.get(r.itemId) ?? null })),
         })
     } catch (err) {
@@ -148,10 +166,11 @@ export async function applyRebalance(portfolioId, userId, update) {
     // entry legs (a scale-in or a brand-new holding) post ONE entry Fill card (the confirm endpoints
     // apply each as its price is submitted) instead of placing broker orders. See manual-mode.md §4b.
     let manualExitPosted = false, manualEntryPosted = false
+    // undefined = not looked up. The receipt below re-uses it when the manual branch already paid
+    // for the read, and does its own when it didn't.
+    let portfolioName
     if (manualExitLegs.length || manualEntryLegs.length) {
-        const db  = await getDb()
-        const sib = await db.collection(COLLECTION).findOne({ portfolioId, userId }, { projection: { portfolioName: 1 } })
-        const portfolioName = sib?.portfolioName ?? null
+        portfolioName = await _portfolioName(await getDb(), portfolioId, userId)
         if (manualExitLegs.length) {
             await notifyManualExit(userId, { portfolioId, portfolioName, reason: 'rebalance', legs: manualExitLegs })
             manualExitPosted = true
@@ -198,7 +217,7 @@ export async function applyRebalance(portfolioId, userId, update) {
     // The receipt. Posted LAST, after every write and after the clock: a card is an alert about a
     // state change, never part of it, so nothing above may depend on it — and `postCard` cannot
     // throw back into this function even if delivery fails.
-    await _postReceipt(portfolioId, userId, results)
+    await _postReceipt(portfolioId, userId, results, portfolioName)
     return {
         ok: true, results, manualExitPosted, manualEntryPosted,
         nextReviewAt: rev?.nextReviewAt ?? null,
@@ -248,22 +267,46 @@ async function _applyOne(portfolioId, userId, change, bookValue = null) {
     }
 }
 
+/**
+ * THE PREAMBLE EVERY POSITION-MOVING VERB OPENS WITH.
+ *
+ * Exit, trim and scale-in each begin by asking the same four questions in the same order — does the
+ * holding exist, is it this user's, (for a scale-in) is it actually on, and does it have legs at a
+ * broker to move. Three copies of that is three chances for one of them to drift, and the answers
+ * are the shared refusal vocabulary, so the copies had to agree anyway.
+ *
+ * What stays with each caller is what it does NEXT — the manual branch, the hours gate, the per-leg
+ * arithmetic. This only decides whether there is anything to act on.
+ *
+ * @returns {Promise<{item, legs}|{refusal}>}  `refusal` is the caller's own return value
+ */
+async function _positionedItem(db, itemId, userId, { requireLive = false } = {}) {
+    const item = await db.collection(COLLECTION).findOne({ id: itemId })
+    if (!item) return { refusal: { ok: false, reason: 'not_found' } }
+    if (item.userId && item.userId !== userId) return { refusal: { ok: false, reason: 'forbidden' } }
+    // Only the scale-in asks: growing a holding that is not on is add_item's job, not this one's.
+    if (requireLive && !LIVE.has(item.status)) return { refusal: { ok: false, reason: 'not_live' } }
+
+    const legs = (item.brokerOrders ?? []).filter(b => b.positionId != null)
+    if (legs.length === 0) return { refusal: { ok: false, reason: 'no_position' } }
+    return { item, legs }
+}
+
+/** Is any of these legs at a venue the user executes themselves (a manual book)? */
+const _manualLeg = legs => legs.find(l => isSelfExecuted(l.broker)) ?? null
+
 // Fully close every live leg of a holding. The execution reconciler finalizes the
 // idea to 'closed' as the broker reports the closes.
 // Exported since 2026-08-07: the queue replays a released exit through the SAME function that
 // first tried it, so an off-hours decision executes on exactly the path it would have taken had
 // the market been open — not a second implementation that can drift from this one.
 export async function _exitItem(db, itemId, userId, reason, gate = _gate) {
-    const item = await db.collection(COLLECTION).findOne({ id: itemId })
-    if (!item) return { ok: false, reason: 'not_found' }
-    if (item.userId && item.userId !== userId) return { ok: false, reason: 'forbidden' }
-
-    const legs = (item.brokerOrders ?? []).filter(b => b.positionId != null)
-    if (legs.length === 0) return { ok: false, reason: 'no_position' }
+    const { item, legs, refusal } = await _positionedItem(db, itemId, userId)
+    if (refusal) return refusal
 
     // Manual: can't place a broker close — hand the exit leg back so applyRebalance posts
     // ONE Fill card; the user confirms the real exit price (confirmManualExit finalizes it).
-    if (legs.some(l => isSelfExecuted(l.broker))) {
+    if (_manualLeg(legs)) {
         await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingCloseReason: reason } })
         return { ok: true, manual: true, manualExitLeg: exitLegFromIdea(item) }
     }
@@ -293,23 +336,22 @@ export async function _exitItem(db, itemId, userId, reason, gate = _gate) {
 // that the trim REFUSED, never what a successful one records. Appended rather than slotted in
 // beside the others so every existing caller (and the queue's replay) keeps its argument positions.
 export async function _trimItem(db, itemId, userId, change, gate = _gate, broker = brokerService) {
-    const item = await db.collection(COLLECTION).findOne({ id: itemId })
-    if (!item) return { ok: false, reason: 'not_found' }
-    if (item.userId && item.userId !== userId) return { ok: false, reason: 'forbidden' }
-
+    // The fraction is the CALLER'S OWN input and pure to check, so it is checked before the read —
+    // the same reasoning originRegistry gives for its verb check: answering "that is not a fraction"
+    // should not open a database connection.
     const f = Number(change.reduceFraction)
     if (!(f > 0 && f < 1)) return { ok: false, reason: 'bad_reduceFraction' }
 
-    const legs = (item.brokerOrders ?? []).filter(b => b.positionId != null)
-    if (legs.length === 0) return { ok: false, reason: 'no_position' }
+    const { item, legs, refusal } = await _positionedItem(db, itemId, userId)
+    if (refusal) return refusal
 
     // Manual: no broker to hit — hand the trim back as a PARTIAL exit leg so applyRebalance posts a
     // Fill card. confirmManualExit reduces the position (not full close) using the reported size, or the
     // pendingTrimQty stamped here if the FE doesn't forward a quantity. Stamp both so the confirm is
     // robust. (A manual holding is a single manual leg.)
-    if (legs.some(l => isSelfExecuted(l.broker))) {
-        const leg     = legs.find(l => isSelfExecuted(l.broker))
-        const openQty = leg.quantity ?? item.quantity ?? 0
+    const manualLeg = _manualLeg(legs)
+    if (manualLeg) {
+        const openQty = manualLeg.quantity ?? item.quantity ?? 0
         const trimQty = Math.floor(openQty * f)
         if (trimQty <= 0) return { ok: false, reason: 'trim_too_small' }
         await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingCloseReason: 'trim', pendingTrimQty: trimQty } })
@@ -317,7 +359,7 @@ export async function _trimItem(db, itemId, userId, change, gate = _gate, broker
             ideaId:       item.id,
             asset:        item.asset,
             direction:    item.direction,
-            positionId:   leg.positionId,
+            positionId:   manualLeg.positionId,
             quantity:     trimQty,
             partial:      true,
             remainingQty: openQty - trimQty,
@@ -338,17 +380,24 @@ export async function _trimItem(db, itemId, userId, change, gate = _gate, broker
         // cannot size — so the number every later fraction is measured against reached NEITHER
         // writer. A holding recorded as 126 while 63 was held made the next "trim half" close it all.
         //
-        // COMPARE-AND-SET on the size we just sized off. The paper venue emits its reduce
-        // synchronously inside closePosition, so the reconciler may already have stamped this leg
-        // from the broker's own volume — which is the authoritative answer, and a plain write here
-        // would overwrite it with our arithmetic. Filtering on the old value means the late writer
-        // simply matches nothing.
+        // COMPARE-AND-SET on the size we just sized off (`ifQuantity`). The paper venue emits its
+        // reduce synchronously inside closePosition, so the reconciler may already have stamped this
+        // leg from the broker's own volume — which is the authoritative answer, and a plain write
+        // here would overwrite it with our arithmetic. Guarding on the old value means the late
+        // writer simply matches nothing. The write itself is entityRepo's, shared with the
+        // reconciler; only the decision to yield is ours.
         const before = Number(leg.quantity) || 0
-        await db.collection(COLLECTION).updateOne(
-            { id: itemId },
-            { $set: { 'brokerOrders.$[leg].quantity': Math.max(0, before - qty) } },
-            { arrayFilters: [{ 'leg.positionId': leg.positionId, 'leg.quantity': before }] },
-        )
+        const wrote  = await _legs(db).setLegQuantity(itemId, {
+            accountId:  leg.accountId,
+            positionId: leg.positionId,
+            quantity:   Math.max(0, before - qty),
+            ifQuantity: before,
+        })
+        // Declining is the NORMAL outcome of losing the race, not a failure — so this is info, not a
+        // warning. It is logged at all because the guard makes the write silent either way, and a
+        // resize that never lands is the shape of the bug it was added to prevent: worth being able
+        // to tell "the reconciler got there first" from "nothing matched".
+        if (!wrote) logger.info(LOG, 'leg resize declined — already written by the reconciler', { itemId, positionId: leg.positionId, sizedOff: before })
         trimmed++
     }
     if (trimmed) await _syncItemQuantity(db, itemId)
@@ -587,24 +636,22 @@ async function _sizeNewItem(spec, bookValue, quote) {
  * LIMITATION: a holding that DOES carry native exits won't have them resized here.
  */
 export async function _addToItem(db, itemId, userId, change, broker = brokerService, gate = _gate) {
-    const item = await db.collection(COLLECTION).findOne({ id: itemId })
-    if (!item) return { ok: false, reason: 'not_found' }
-    if (item.userId && item.userId !== userId) return { ok: false, reason: 'forbidden' }
-    if (!LIVE.has(item.status)) return { ok: false, reason: 'not_live' }   // not in position → use add_item
-
+    // Checked before the read, for the same reason the trim's fraction is: it is the caller's own
+    // input and answering it costs nothing.
     const f = Number(change.addFraction)
     if (!(f > 0)) return { ok: false, reason: 'bad_addFraction' }
 
-    const legs = (item.brokerOrders ?? []).filter(b => b.positionId != null)
-    if (legs.length === 0) return { ok: false, reason: 'no_position' }
+    // `requireLive`: growing a holding that is not in position is add_item's job, not this one's.
+    const { item, legs, refusal } = await _positionedItem(db, itemId, userId, { requireLive: true })
+    if (refusal) return refusal
 
     // Manual: no broker to hit — hand the add back as an entry leg so applyRebalance posts a Fill card.
     // confirmManualAdd grows the live position using the reported size, or the pendingAddQty stamped
     // here. (Unlike trim, an add can't reuse the entry-confirm endpoint — the FE must route add legs to
     // /:id/manual-add; the stamp still records intent. A manual holding is a single manual leg.)
-    if (legs.some(l => isSelfExecuted(l.broker))) {
-        const leg    = legs.find(l => isSelfExecuted(l.broker))
-        const addQty = Math.floor((leg.quantity ?? item.quantity ?? 0) * f)
+    const manualLeg = _manualLeg(legs)
+    if (manualLeg) {
+        const addQty = Math.floor((manualLeg.quantity ?? item.quantity ?? 0) * f)
         if (addQty <= 0) return { ok: false, reason: 'add_too_small' }
         await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingAddQty: addQty } })
         return { ok: true, manual: true, manualEntryLeg: {
@@ -642,7 +689,7 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
             })
             const netted = res?.positionId != null && String(res.positionId) === String(leg.positionId)
             if (netted) {
-                grown.push({ positionId: leg.positionId, before: Number(leg.quantity) || 0, quantity: (Number(leg.quantity) || 0) + qty })
+                grown.push({ accountId: leg.accountId, positionId: leg.positionId, before: Number(leg.quantity) || 0, quantity: (Number(leg.quantity) || 0) + qty })
             } else {
                 newLegs.push({
                     broker:     leg.broker,
@@ -668,14 +715,17 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
         }
         // A netted add created no leg — it made one bigger. Raise its recorded size, or every later
         // fraction is measured against a position that no longer exists at that size. Guarded on the
-        // size we sized off, like the trim's write: whoever wrote in between (a reconciler stamping
-        // the broker's own volume) knows better than this arithmetic does.
-        for (const g of grown) {
-            await db.collection(COLLECTION).updateOne(
-                { id: itemId },
-                { $set: { 'brokerOrders.$[leg].quantity': g.quantity } },
-                { arrayFilters: [{ 'leg.positionId': g.positionId, 'leg.quantity': g.before }] },
-            )
+        // size we sized off (`ifQuantity`), like the trim's write and through the same shared one:
+        // whoever wrote in between (a reconciler stamping the broker's own volume) knows better than
+        // this arithmetic does.
+        for (const leg of grown) {
+            const wrote = await _legs(db).setLegQuantity(itemId, {
+                accountId:  leg.accountId,
+                positionId: leg.positionId,
+                quantity:   leg.quantity,
+                ifQuantity: leg.before,
+            })
+            if (!wrote) logger.info(LOG, 'leg resize declined — already written by the reconciler', { itemId, positionId: leg.positionId, sizedOff: leg.before })
         }
         await _syncItemQuantity(db, itemId)
         // Record the intended new weight (advisory) only when exposure actually changed.
