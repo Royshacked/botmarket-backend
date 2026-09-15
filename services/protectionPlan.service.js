@@ -25,6 +25,7 @@ import { isSelfExecuted }                        from './venue.resolve.service.j
 // The ONE rule for what price a leg acts at — shared with `stopEdge` and the journal, so the
 // working stop, the order that rests and the line the record reports can never be three answers.
 import { zoneLevel }                             from './setup.schema.js'
+import { round4 }                                from './number.util.js'
 
 const LOG = '[protectionPlan]'
 
@@ -312,12 +313,12 @@ function _assignSlotQuantities(children, totalQty) {
     // partially sized than not placed.
     for (let i = 0; i < out.length; i++) {
         if (out[i] == null) continue
-        const take = _round4(Math.min(out[i], left))
+        const take = round4(Math.min(out[i], left))
         if (take < out[i]) {
             logger.warn(LOG, `exit leg over-allocated — slot ${i} asked ${out[i]} of a ${cap} position, ${left} left; trimmed to ${take}`)
         }
         out[i] = take
-        left   = _round4(left - take)
+        left   = round4(left - take)
     }
 
     // Whatever the explicit rungs left over is shared equally by the rungs that didn't say, with
@@ -325,16 +326,15 @@ function _assignSlotQuantities(children, totalQty) {
     const defaultIdx = out.map((q, i) => (q == null ? i : -1)).filter(i => i >= 0)
     if (defaultIdx.length > 0) {
         const base  = Math.floor((left / defaultIdx.length) * 10000) / 10000
-        let residue = _round4(left - base * defaultIdx.length)
+        let residue = round4(left - base * defaultIdx.length)
         for (const i of defaultIdx) {
-            out[i]  = _round4(base + residue)
+            out[i]  = round4(base + residue)
             residue = 0
         }
     }
     return out.map(q => q ?? 0)
 }
 
-const _round4 = (n) => Math.round(n * 10000) / 10000
 
 /**
  * Return the price level of an offloadable single-leaf exit (a lone `touch` leg),

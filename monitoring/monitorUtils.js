@@ -8,6 +8,7 @@ import { sessionStartMs }      from '../services/market.service.js'
 import { brokerService }       from '../api/broker/broker.service.js'
 import { normSymbol }          from '../services/brokerSymbol.service.js'
 import { entityRepo }          from '../services/entity/entityRepo.service.js'
+import { roundOrZero }         from '../services/number.util.js'
 
 const LOG        = '[monitorUtils]'
 const CANDLE_COUNT = 300
@@ -186,7 +187,8 @@ export function logCheck(id, asset, status, tf, candles) {
 
 // ─── Quantity math ────────────────────────────────────────────────────────────
 
-export const round = n => Math.round((Number(n) || 0) * 10000) / 10000
+/** Idea-unit quantity precision: 4dp, and a non-number counts as nothing (an accumulator, not a display). */
+export const round = n => roundOrZero(n, 4)
 
 /**
  * How much of an entity is still on at one account: everything its entry legs put on there, minus

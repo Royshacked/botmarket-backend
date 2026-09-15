@@ -24,6 +24,7 @@ import { resolveMode } from './venue.resolve.service.js'
 import { logger }       from './logger.service.js'
 import { ENTITIES }     from './entity/entityCollection.js'
 import { COLLECTION as PORTFOLIO_CHATS } from '../api/portfolio/portfolioChat.service.js'
+import { roundOrZero }                   from './number.util.js'
 
 // Exported: Hermes reads the ledger directly to source a broker-authoritative fill/exit price,
 // and was naming 'trades' inline to do it.
@@ -438,7 +439,6 @@ async function tradeStats(userId, filter = {}) {
     return computeTradeStats(trades)
 }
 
-const _round = (n, d = 2) => { const f = 10 ** d; return Math.round((Number(n) || 0) * f) / f }
 
 /**
  * Core realized-P&L summary over a set of trades — only closed trades with a P&L count.
@@ -463,17 +463,17 @@ function _summarize(trades) {
     const netPnl = grossProfit - grossLoss
     return {
         count, wins, losses, breakeven,
-        winRate:       count ? _round(wins / count, 4) : 0,
-        netPnl:        _round(netPnl),
-        grossProfit:   _round(grossProfit),
-        grossLoss:     _round(grossLoss),
-        profitFactor:  grossLoss > 0 ? _round(grossProfit / grossLoss, 4) : null,
-        avgWin:        wins   ? _round(grossProfit / wins)   : 0,
-        avgLoss:       losses ? _round(grossLoss / losses)   : 0,
-        expectancy:    count  ? _round(netPnl / count)       : 0,
+        winRate:       count ? roundOrZero(wins / count, 4) : 0,
+        netPnl:        roundOrZero(netPnl),
+        grossProfit:   roundOrZero(grossProfit),
+        grossLoss:     roundOrZero(grossLoss),
+        profitFactor:  grossLoss > 0 ? roundOrZero(grossProfit / grossLoss, 4) : null,
+        avgWin:        wins   ? roundOrZero(grossProfit / wins)   : 0,
+        avgLoss:       losses ? roundOrZero(grossLoss / losses)   : 0,
+        expectancy:    count  ? roundOrZero(netPnl / count)       : 0,
         avgDurationMs: durN   ? Math.round(durSum / durN)    : null,
-        best:  best  == null ? null : _round(best),
-        worst: worst == null ? null : _round(worst),
+        best:  best  == null ? null : roundOrZero(best),
+        worst: worst == null ? null : roundOrZero(worst),
     }
 }
 

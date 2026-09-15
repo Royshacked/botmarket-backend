@@ -13,7 +13,8 @@
 
 import { randomUUID }         from 'crypto'
 import { paperBrokerService } from './paperBroker.service.js'
-import { dirSign, round2, blendPosition } from './paperExecution.service.js'
+import { dirSign, blendPosition } from './paperExecution.service.js'
+import { round2 }             from '../../services/number.util.js'
 import { logger }             from '../../services/logger.service.js'
 
 const LOG = '[manualExecution]'

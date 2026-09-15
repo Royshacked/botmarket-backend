@@ -6,14 +6,14 @@
 // Mirrors smc.engine.js (deterministic primitives, the agent decides). Shared by the agent (P3) and
 // the coverage monitor (P5) so "our number" has one source of truth.
 
-import { toNum } from './format.util.js'
+import { toNum }       from './format.util.js'
+import { roundOrNull } from './number.util.js'
 
 // Supported per-sector methods. pe → price = multiple × forward EPS. ev_* → EV = multiple × forward
 // metric, then EV→equity→per-share. (DCF/SOTP = T2, deferred.)
 export const VALUATION_METHODS = ['pe', 'ev_sales', 'ev_ebitda']
 
 const _num = toNum   // the one safe coercion — see format.util.toNum
-const _round2 = x => (x === null ? null : Math.round(x * 100) / 100)
 
 // Percentile over a numeric array (linear interpolation between ranks). Pure.
 export function percentile(xs, p) {
@@ -128,32 +128,32 @@ export function computeValuation(input = {}) {
     return {
         ok: true,
         method,
-        multiple: { used: _round2(base), low: _round2(low), high: _round2(high), basis },
+        multiple: { used: roundOrNull(base), low: roundOrNull(low), high: roundOrNull(high), basis },
         forward_metric: fwd,
         // What the band MEANS — 'scenario' (own multiple + own earnings per leg) or
         // 'multiple_sensitivity' (±15% re-rate on unchanged earnings). Never assume; read this.
         band_basis: bandBasis,
-        pt: { bear: _round2(ptLow), base: _round2(ptBase), bull: _round2(ptHigh) },
+        pt: { bear: roundOrNull(ptLow), base: roundOrNull(ptBase), bull: roundOrNull(ptHigh) },
         // Each leg carries the inputs that produced it, so a stored band documents itself: a bear of
         // 700 reads as "3.2x on trough EPS 220", not as a bare number indistinguishable from a typo.
         legs: {
-            bear: { value: _round2(ptLow),  multiple: _round2(lowLeg.multiple),  forward_metric: lowLeg.forward_metric,  basis: bearLeg ? 'scenario' : 'multiple_sensitivity' },
-            base: { value: _round2(ptBase), multiple: _round2(base),             forward_metric: fwd,                    basis: 'base' },
-            bull: { value: _round2(ptHigh), multiple: _round2(highLeg.multiple), forward_metric: highLeg.forward_metric, basis: bullLeg ? 'scenario' : 'multiple_sensitivity' },
+            bear: { value: roundOrNull(ptLow),  multiple: roundOrNull(lowLeg.multiple),  forward_metric: lowLeg.forward_metric,  basis: bearLeg ? 'scenario' : 'multiple_sensitivity' },
+            base: { value: roundOrNull(ptBase), multiple: roundOrNull(base),             forward_metric: fwd,                    basis: 'base' },
+            bull: { value: roundOrNull(ptHigh), multiple: roundOrNull(highLeg.multiple), forward_metric: highLeg.forward_metric, basis: bullLeg ? 'scenario' : 'multiple_sensitivity' },
         },
-        our_pt: _round2(ptBase),
+        our_pt: roundOrNull(ptBase),
         consensus_pt: consensusPt,
         // THE EDGE — our PT vs the Street's (absolute + %). null when no consensus PT to compare.
         gap: consensusPt !== null && consensusPt !== 0
-            ? { value: _round2(ptBase - consensusPt), pct: _round2((ptBase - consensusPt) / consensusPt * 100) }
+            ? { value: roundOrNull(ptBase - consensusPt), pct: roundOrNull((ptBase - consensusPt) / consensusPt * 100) }
             : null,
         // The MARKET leg. Echoed back (not just the derived %) because the reader has to be able to
         // see which side of spot the target landed on: a rating is a claim about the price, and a
         // target the market has already passed cannot support one in that direction.
         current_price: (price !== null && price > 0) ? price : null,
-        upside_pct: (price !== null && price > 0) ? _round2((ptBase - price) / price * 100) : null,
+        upside_pct: (price !== null && price > 0) ? roundOrNull((ptBase - price) / price * 100) : null,
         // Context for the reader: where our multiple sits vs the stock's own history + its peers.
-        historical_median_multiple: hist.length ? _round2(median(hist)) : null,
-        peer_median_multiple: peers.length ? _round2(median(peers)) : null,
+        historical_median_multiple: hist.length ? roundOrNull(median(hist)) : null,
+        peer_median_multiple: peers.length ? roundOrNull(median(peers)) : null,
     }
 }

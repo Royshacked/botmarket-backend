@@ -9,6 +9,7 @@
 
 import { toNum as _num }    from '../services/format.util.js'
 import { windowProgress }   from '../services/forecastClock.js'
+import { round2 }           from '../services/number.util.js'
 
 const BULLISH = new Set(['buy', 'strong_buy'])
 const BEARISH = new Set(['sell', 'strong_sell'])
@@ -63,7 +64,6 @@ function _hitVerdict(coverage, price, ourPt, nowMs, edgeGone) {
     }
 }
 
-const _round2 = x => Math.round(x * 100) / 100
 
 /**
  * A PRICE, or null — the stricter read the terminal verdicts below demand. Only a positive finite
@@ -93,9 +93,9 @@ export function recomputeGap(ourPt, street) {
 
     const low = _price(s.low), high = _price(s.high), median = _price(s.median)
     const pctile = (low !== null && high !== null && high > low)
-        ? _round2(Math.min(100, Math.max(0, (o - low) / (high - low) * 100)))
+        ? round2(Math.min(100, Math.max(0, (o - low) / (high - low) * 100)))
         : null
-    return { our_pt: o, consensus_pt: c, pct: _round2((o - c) / c * 100), low, high, median, pctile }
+    return { our_pt: o, consensus_pt: c, pct: round2((o - c) / c * 100), low, high, median, pctile }
 }
 
 /**

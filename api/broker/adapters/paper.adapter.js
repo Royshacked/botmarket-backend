@@ -25,8 +25,8 @@ import { openPosition,
          reducePosition,
          addToPaperPosition,
          exitMarkPrice,
-         entryMarkPrice,
-         round2 }             from '../paperExecution.service.js'
+         entryMarkPrice }     from '../paperExecution.service.js'
+import { round2 }             from '../../../services/number.util.js'
 import { logger }             from '../../../services/logger.service.js'
 
 const LOG = '[paper.adapter]'

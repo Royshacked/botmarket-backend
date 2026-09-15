@@ -20,13 +20,12 @@ import { createTtlCache }     from '../../services/ttlCache.util.js'
 import { logger }             from '../../services/logger.service.js'
 import { publish }            from '../../services/priceFeed.service.js'
 import { config } from '../../services/config.js'
+import { round2, round8 }     from '../../services/number.util.js'
 
 const LOG = '[paperExecution]'
 
 /** long → +1, short → −1 (P&L sign). */
 export const dirSign = dir => (dir === 'short' ? -1 : 1)
-export const round2  = n => Math.round(n * 100) / 100
-const round8 = n => Math.round(n * 1e8) / 1e8
 
 /**
  * Blend a scale-in into an existing position: the new size, and the SIZE-WEIGHTED average entry.

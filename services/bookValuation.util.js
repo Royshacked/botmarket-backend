@@ -14,9 +14,9 @@
 // exactly this arithmetic when the user re-states their book), and a future broker-read adoption
 // where the holdings arrive from an API instead of a paste.
 
-import { toNum } from './format.util.js'
+import { toNum }  from './format.util.js'
+import { round2 } from './number.util.js'
 
-const _round2 = v => Number(Number(v).toFixed(2))
 
 // A human types the account total off a bank screen, so it disagrees with our marks by rounding
 // and by seconds of drift. Under a unit of currency that is noise; past it, the numbers genuinely
@@ -24,7 +24,7 @@ const _round2 = v => Number(Number(v).toFixed(2))
 const CASH_TOLERANCE = 1
 
 /** Multiply, preserving null — `null * 3` is 0, which would read a missing total as an empty account. */
-const _mul = (v, by) => (v == null ? null : _round2(v * by))
+const _mul = (v, by) => (v == null ? null : round2(v * by))
 
 /**
  * One holding as intake states it. `mark` is the live price where we could resolve one and **null**
@@ -65,7 +65,7 @@ export function costBasis(holdings = []) {
         if (!_usable(h)) continue
         total += toNum(h.quantity) * toNum(h.avgCost)
     }
-    return _round2(total)
+    return round2(total)
 }
 
 /**
@@ -85,7 +85,7 @@ export function marketValue(holdings = []) {
         if (mark == null || !(mark > 0)) { unpriced.push(String(h.symbol).trim().toUpperCase()); continue }
         value += toNum(h.quantity) * mark
     }
-    return { value: _round2(value), unpriced }
+    return { value: round2(value), unpriced }
 }
 
 /**
@@ -107,7 +107,7 @@ export function actualWeights(holdings = []) {
         const mark = toNum(h.mark)
         if (mark == null || !(mark > 0)) continue
         const value = toNum(h.quantity) * mark
-        weights.push({ symbol: String(h.symbol).trim().toUpperCase(), weight: value / total, value: _round2(value) })
+        weights.push({ symbol: String(h.symbol).trim().toUpperCase(), weight: value / total, value: round2(value) })
     }
     return { weights, unpriced }
 }
@@ -159,7 +159,7 @@ export function reconcileAccount({ holdings = [], statedTotal = null, freeCash =
         // Stated directly. Negative cash is a real thing at a bank (margin/overdraft), but it is not
         // something we model, so it is a refusal rather than a silent negative balance.
         if (statedCash < 0) problems.push('negative_cash')
-        else cash = _round2(statedCash)
+        else cash = round2(statedCash)
     } else if (stated == null) {
         problems.push('no_account_value')
     } else if (excluded > 0) {
@@ -174,7 +174,7 @@ export function reconcileAccount({ holdings = [], statedTotal = null, freeCash =
     } else {
         const derived = stated - market
         if (derived < -CASH_TOLERANCE) problems.push('account_value_below_holdings')
-        else cash = _round2(Math.max(0, derived))
+        else cash = round2(Math.max(0, derived))
     }
 
     return {
@@ -184,7 +184,7 @@ export function reconcileAccount({ holdings = [], statedTotal = null, freeCash =
         freeCash:        cash,
         // Cost basis + cash, so that equity (= cash + unrealized) reports the book's real worth and
         // `deployable()` reports exactly the cash. Withheld whenever anything above is unresolved.
-        startingBalance: (problems.length === 0 && cash != null) ? _round2(basis + cash) : null,
+        startingBalance: (problems.length === 0 && cash != null) ? round2(basis + cash) : null,
         problems,
     }
 }

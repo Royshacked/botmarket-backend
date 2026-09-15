@@ -22,6 +22,7 @@ import { getStoredWorkspace } from './workspace.service.js'
 import { toBrokerSymbol } from './brokerSymbol.service.js'
 import { positionPnlPct } from './agentUtils.js'
 import { logger } from './logger.service.js'
+import { roundOrNull } from './number.util.js'
 
 const LOG = '[tradingContext]'
 
@@ -55,7 +56,7 @@ async function _positionsByAccount(userId, brokers, svc = brokerService) {
                     pnl:          p.pnl ?? null,
                     // The raw BrokerPosition carries no %, so derive it the way every other
                     // surface does (shared helper — sign-flipped for shorts).
-                    pnlPct:       _round(positionPnlPct(p)),
+                    pnlPct:       roundOrNull(positionPnlPct(p)),
                 })
             }
         } catch (err) {
@@ -66,7 +67,6 @@ async function _positionsByAccount(userId, brokers, svc = brokerService) {
     return { byAccount, failed }
 }
 
-const _round = (v) => (v == null || !Number.isFinite(Number(v))) ? null : Number(Number(v).toFixed(2))
 
 export async function getTradingContext(userId, deps = {}) {
     const { broker: svc = brokerService, storedWorkspace = getStoredWorkspace } = deps

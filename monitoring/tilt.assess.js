@@ -11,7 +11,8 @@
 //   • expensive     — wake Pythia to re-author. Gated by `reviewDecision` below.
 
 import { windowProgress } from '../services/forecastClock.js'
-import { toNum } from '../services/format.util.js'
+import { toNum }  from '../services/format.util.js'
+import { round2 } from '../services/number.util.js'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -31,7 +32,6 @@ const _price = v => {
     return (Number.isFinite(n) && n > 0) ? n : null
 }
 
-const _round2 = x => Math.round(x * 100) / 100
 
 // A number, or null — strictly; see format.util.toNum. The distinction is load-bearing here: an
 // unpriced stance must score as "unknown", never as "earned nothing".
@@ -48,7 +48,7 @@ export function relativeReturnPct({ sectorStart, sectorNow, benchStart, benchNow
     const s0 = _price(sectorStart), s1 = _price(sectorNow)
     const b0 = _price(benchStart),  b1 = _price(benchNow)
     if (s0 === null || s1 === null || b0 === null || b1 === null) return null
-    return _round2(((s1 - s0) / s0 - (b1 - b0) / b0) * 100)
+    return round2(((s1 - s0) / s0 - (b1 - b0) / b0) * 100)
 }
 
 /**
@@ -62,7 +62,7 @@ export function relativeReturnPct({ sectorStart, sectorNow, benchStart, benchNow
 export function contributionBp(activeBp, relPct) {
     const w = _num(activeBp), r = _num(relPct)
     if (w === null || r === null) return null
-    return _round2(w * r / 100)
+    return round2(w * r / 100)
 }
 
 /**
@@ -97,7 +97,7 @@ export function gradeRow(row, { sectorNow, benchNow } = {}, nowMs = 0) {
 /** Total contribution across graded stances, in bp. Pure — unpriced rows are skipped, not zeroed. */
 export function totalContributionBp(rows = []) {
     const known = (Array.isArray(rows) ? rows : []).map(r => _num(r?.contribution_bp)).filter(n => n !== null)
-    return known.length ? _round2(known.reduce((a, b) => a + b, 0)) : null
+    return known.length ? round2(known.reduce((a, b) => a + b, 0)) : null
 }
 
 /** Stances whose window has closed and which the desk now owes a verdict on. Pure. */

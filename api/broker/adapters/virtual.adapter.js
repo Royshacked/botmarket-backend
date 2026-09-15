@@ -29,7 +29,8 @@ import { computeEquity,
          committedByAccount,
          deployable,
          latestMarkPrice,
-         dirSign, round2 }    from '../paperExecution.service.js'
+         dirSign }            from '../paperExecution.service.js'
+import { round2 }             from '../../../services/number.util.js'
 import { config }             from '../../../services/config.js'
 
 // How old a stored mark may be before a positions READ goes and buys a fresh quote.

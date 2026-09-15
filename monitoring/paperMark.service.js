@@ -19,8 +19,8 @@
 
 import { getDb }        from '../providers/mongodb.provider.js'
 import { quoteMapForSymbols,
-         dirSign,
-         round2 }       from '../api/broker/paperExecution.service.js'
+         dirSign }      from '../api/broker/paperExecution.service.js'
+import { round2 }       from '../services/number.util.js'
 import { logger }       from '../services/logger.service.js'
 import { createPollLoop } from './pollLoop.js'
 import { partitionByFreshness, retainOnly } from '../services/priceFeed.service.js'

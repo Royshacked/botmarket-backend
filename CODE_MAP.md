@@ -234,6 +234,9 @@ services/
                           MISSING required value AND on a MALFORMED one (set but unparseable —
                           previously a silent fallback), and warns on .env keys nothing reads
   format.util.js  http.util.js  ttlCache.util.js  priceStats.util.js  cycleAnalysis.service.js
+  number.util.js            rounding, once: roundTo/round2/round4/round8 (NaN through), roundOrNull
+                            (display: not-reported → null), roundOrZero (quantities). Replaced twelve
+                            private `_round2`-style copies; import from here, never redeclare
   logger.service.js  tokenUsage.service.js
   ohlcv.service.js          getCandles(symbol,timeframe,count) → the compact {t,o,h,l,c,v} the
                             EVALUATORS read. A relabel over priceService, not a fetcher. Was

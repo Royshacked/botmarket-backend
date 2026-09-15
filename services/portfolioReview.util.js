@@ -3,6 +3,7 @@
 import { toNum } from './format.util.js'
 // Pure too (forecast clock + arithmetic), so this module stays no-I/O as its header claims.
 import { diffStances } from '../monitoring/tilt.assess.js'
+import { round2 }      from './number.util.js'
 //
 // A review is a delta operation anchored to the thesis, but the book's "then" state
 // (the regime, book value, and benchmark price it was last reviewed / constructed in)
@@ -35,7 +36,6 @@ export function benchmarkTicker(benchmark) {
     return null
 }
 
-const _round2 = v => Number(Number(v).toFixed(2))
 
 const _CONVICTION_RANK = { low: 1, medium: 2, high: 3 }
 const _convictionFell = (prev, cur) => {
@@ -89,7 +89,7 @@ export function computeReviewTriggers({ state = null, fingerprint = null, delta 
 
         const entry = _n(c?.entryPrice)
         if (pt !== null && entry !== null && entry > 0 && pt <= entry) {
-            triggers.push({ kind: 'coverage', severity: 'high', label: `${c.symbol}: our price target ${pt} is at or below our entry ${_round2(entry)} — no upside left on our own numbers` })
+            triggers.push({ kind: 'coverage', severity: 'high', label: `${c.symbol}: our price target ${pt} is at or below our entry ${round2(entry)} — no upside left on our own numbers` })
             continue   // the harder finding already covers the softer one
         }
 
@@ -97,7 +97,7 @@ export function computeReviewTriggers({ state = null, fingerprint = null, delta 
         if (pt !== null && basis !== null && basis > 0) {
             const cutPct = (basis - pt) / basis * 100
             if (cutPct >= PT_CUT_PCT) {
-                triggers.push({ kind: 'coverage', severity: 'medium', label: `${c.symbol}: our price target cut ${Math.round(cutPct)}% since entry (${_round2(basis)} → ${_round2(pt)})` })
+                triggers.push({ kind: 'coverage', severity: 'medium', label: `${c.symbol}: our price target cut ${Math.round(cutPct)}% since entry (${round2(basis)} → ${round2(pt)})` })
             }
         }
     }
@@ -200,9 +200,9 @@ export function computeReviewDelta({ fingerprint = null, state = null, benchmark
         benchmark = {
             ticker: bTicker,
             thenPrice, nowPrice: benchmarkNowPrice,
-            returnPct:       _round2(returnPct),
-            bookDeltaPnlPct: bookDeltaPnlPct != null ? _round2(bookDeltaPnlPct) : null,
-            relativePct:     bookDeltaPnlPct != null ? _round2(bookDeltaPnlPct - returnPct) : null,
+            returnPct:       round2(returnPct),
+            bookDeltaPnlPct: bookDeltaPnlPct != null ? round2(bookDeltaPnlPct) : null,
+            relativePct:     bookDeltaPnlPct != null ? round2(bookDeltaPnlPct - returnPct) : null,
         }
     }
 

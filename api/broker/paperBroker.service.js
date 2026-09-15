@@ -31,6 +31,7 @@
 import { randomUUID } from 'crypto'
 import { getDb }      from '../../providers/mongodb.provider.js'
 import { logger }     from '../../services/logger.service.js'
+import { round2 }     from '../../services/number.util.js'
 
 // The paper venue's four collections. EXPORTED because the paper monitors write the same
 // documents: paperFill drains ORDERS, paperMark marks POSITIONS, paperEquity snapshots EQUITY.
@@ -40,10 +41,6 @@ export const POSITIONS = 'paperPositions'
 export const ORDERS    = 'paperOrders'
 export const EQUITY    = 'paperEquity'
 const LOG       = '[paperBroker.service]'
-
-// Local rather than imported: `round2` lives in paperExecution, which imports THIS file, so taking it
-// from there would close a cycle for the sake of one line of arithmetic.
-const _round2 = v => Number(Number(v).toFixed(2))
 
 /** Modes that share this virtual-account store. Paper = simulated fills; manual = user-reported. */
 export const VIRTUAL_MODES = ['paper', 'manual']
@@ -292,8 +289,8 @@ async function adjustCash(userId, accountId, { amount, reason = null } = {}) {
     const delta = Number(amount)
     if (!Number.isFinite(delta) || delta === 0) throw Object.assign(new Error('a cash movement needs a non-zero amount'), { status: 400 })
 
-    const next = _round2(acct.cashBalance + delta)
-    if (next < 0) throw Object.assign(new Error(`that would overdraw the account (balance ${_round2(acct.cashBalance)})`), { status: 409 })
+    const next = round2(acct.cashBalance + delta)
+    if (next < 0) throw Object.assign(new Error(`that would overdraw the account (balance ${round2(acct.cashBalance)})`), { status: 409 })
 
     await db.collection(ACCOUNTS).updateOne(
         { userId, accountId: aid },
