@@ -5,7 +5,7 @@ import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError } from './toolResult.util.js'
 import { logger } from './logger.service.js'
 import { resolveStreamFn, CHEAP_MODEL } from './llmModels.js'
-import { recordUsage, recordTurn, userCeiling, overCeiling } from './tokenUsage.service.js'
+import { recordUsage, recordTurn, userCeiling, overCeiling, chatSpend } from './tokenUsage.service.js'
 
 const LOG = '[agentUtils]'
 
@@ -24,9 +24,12 @@ const LOG = '[agentUtils]'
  * managed. That is the correct behaviour and it should be deliberate rather than incidental: a cost
  * control must never turn into an unmanaged position.
  *
- * It also means the ceiling only counts CHAT. Monitor spend is not recorded at all today, so the
- * number it compares against is half the truth — see docs; counting the other half is separate work,
- * and when it lands it must be counted without being blocked, for the reason above.
+ * It also means the ceiling only counts CHAT — and since §5 that is enforced rather than incidental.
+ * Monitor spend used to be unrecorded, so the exemption came for free; `bookAssessUsage` then began
+ * booking it into the same `totalCost` the ceiling reads, which silently inverted the rule above: a
+ * trader with several armed setups reached the cheap chat model faster than one with none, for
+ * spending nothing extra on chat. `chatSpend` subtracts it. The spend is still counted in every
+ * report — it is the user's money — it just cannot degrade their conversation.
  *
  * `_recordTurn` / `_ceiling` are injectable for the same reason `_resolve`/`_run` are elsewhere:
  * these are the IO here, and the tests that drive this seam must not need a database.
@@ -43,7 +46,7 @@ export async function resolveAgentStream(requestedModel, userId, agent, _recordT
             _recordTurn(userId, agent).catch(() => null),
             _ceiling(userId).catch(() => null),
         ])
-        if (overCeiling(doc?.totalCost, ceiling)) {
+        if (overCeiling(chatSpend(doc), ceiling)) {
             requested = CHEAP_MODEL
             degraded  = true
         }

@@ -18,7 +18,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { agentKeyFromLog } from '../../services/agentIO.js'
-import { calcCost, ceilingFor, overCeiling } from '../../services/tokenUsage.service.js'
+import { calcCost, ceilingFor, overCeiling, chatSpend } from '../../services/tokenUsage.service.js'
 import { resolveAgentStream } from '../../services/agentUtils.js'
 import { bookAssessUsage } from '../../monitoring/assess.shared.js'
 
@@ -228,4 +228,54 @@ test('a failed booking never reaches the wake', () => {
     // Accounting must never take down a monitor: the position it is watching is real.
     assert.doesNotThrow(() =>
         bookAssessUsage('u1', 'm', { input_tokens: 1 }, 'talosAssess', async () => { throw new Error('mongo down') }))
+})
+
+// ─── The ceiling does not read monitor spend ────────────────────────────────────
+//
+// The ceiling degrades a user's CHAT to the cheap model. Monitor spend is not chat: it is the
+// mechanical cost of watching positions they already opened, it arrives on a clock they do not
+// control, and it is deliberately never blocked (monitors bypass resolveAgentStream and call the
+// provider directly, so an over-ceiling user still has their live position managed).
+//
+// That exemption used to come for free, because monitor spend was not recorded at all —
+// resolveAgentStream's comment said so. bookAssessUsage then started booking it into the same
+// `totalCost` the ceiling reads, and the stated design inverted in silence: a trader with several
+// armed setups reached the cheap chat model faster than one with none, for spending nothing extra
+// on chat. This is the check that the exemption is now a mechanism rather than an accident.
+
+test('chatSpend subtracts what the monitors spent', () => {
+    assert.equal(chatSpend({ totalCost: 20, monitorCost: 8 }), 12)
+})
+
+// Every document written before the fix has no `monitorCost`, so a historical month must compare
+// exactly as it did — no migration, no month reset, no user suddenly un-degraded by accident.
+test('chatSpend reads a document with no monitorCost as all-chat', () => {
+    assert.equal(chatSpend({ totalCost: 20 }), 20)
+    assert.equal(chatSpend({}), 0)
+    assert.equal(chatSpend(null), 0)
+})
+
+// Never negative. A rounding drift or a double-booked monitor row must not produce a NEGATIVE chat
+// spend, which would read as credit and hold a genuinely over-ceiling user under the line forever.
+test('chatSpend floors at zero', () => {
+    assert.equal(chatSpend({ totalCost: 3, monitorCost: 5 }), 0)
+})
+
+// The whole point, stated as the case that was wrong: a user at the ceiling ONLY because their
+// monitors ran is not over it.
+test('monitors alone cannot degrade a user\u2019s chat', () => {
+    const doc = { totalCost: 25, monitorCost: 15 }   // $10 of chat, $15 of watching
+    assert.equal(overCeiling(chatSpend(doc), 20), false)
+    assert.equal(overCeiling(doc.totalCost, 20), true, 'the total WOULD have been over — that was the bug')
+})
+
+// The other half: the exemption is only real if the monitor path actually declares itself one.
+// bookAssessUsage is the ONE function that books monitor spend, so this is where the flag has to
+// be set — a future monitor booking through recordUsage directly would be counted as chat, which
+// is exactly the drift this finding was.
+test('bookAssessUsage marks its spend as a monitor’s', () => {
+    const calls = []
+    bookAssessUsage('u1', 'claude-sonnet-4-6', { input_tokens: 100 }, 'talosAssess', async (...a) => { calls.push(a) })
+    assert.equal(calls.length, 1)
+    assert.deepEqual(calls[0][4], { monitor: true }, 'the 5th argument is what keeps it out of the ceiling')
 })

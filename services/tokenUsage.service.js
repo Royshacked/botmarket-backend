@@ -51,8 +51,12 @@ const _fieldKey = v => String(v ?? 'unknown').replace(/[.$]/g, '_')
  *   indistinguishable from ordinary first-turn cost until it is counted per desk.
  *   `turns` rides along so a desk's cost can be read per call, not just in total — a big prompt
  *   used rarely and a small one used constantly look identical in a token count alone.
+ *
+ * @param {{ monitor?: boolean }} [opts]  `monitor: true` for spend a MONITOR incurred rather than a
+ *   conversation. It is still counted in every total — it is the user's money — but it is also
+ *   accumulated separately, because the spend CEILING must not read it. See `chatSpend`.
  */
-export async function recordUsage(userId, model, usage, agent) {
+export async function recordUsage(userId, model, usage, agent, { monitor = false } = {}) {
     if (!userId || !usage) return
     const db      = await getDb()
     const key     = monthKey()
@@ -74,6 +78,11 @@ export async function recordUsage(userId, model, usage, agent) {
                 cacheReadTokens:   cacheRead,
                 cacheWriteTokens:  cacheWrite,
                 totalCost:         cost,
+                // A SECOND accumulator, not a second total: monitor spend is inside `totalCost` (the
+                // reports show what the user actually cost) and is ALSO summed here so the ceiling
+                // can subtract it. An absent field reads as 0, so documents written before this
+                // behave exactly as they did — no migration, no month reset.
+                ...(monitor ? { monitorCost: cost } : {}),
                 [`byModel.${mKey}.inputTokens`]:  input,
                 [`byModel.${mKey}.outputTokens`]: output,
                 [`byModel.${mKey}.cost`]:         cost,
@@ -150,14 +159,37 @@ export function ceilingFor(user, configured = config.tokenDegradeUsd) {
 }
 
 /**
+ * THE SPEND THE CEILING IS ALLOWED TO READ — everything except what the monitors incurred. Pure.
+ *
+ * The ceiling degrades a user's CHAT to the cheap model. Monitor spend is not chat: it is the
+ * mechanical cost of watching positions the user already opened, it arrives on a clock they do not
+ * control, and it is deliberately never blocked (the monitors call the provider directly and bypass
+ * resolveAgentStream entirely, so an over-ceiling user still has their live position managed).
+ *
+ * Leaving it in the comparison made a user's own monitors degrade their conversation — a trader with
+ * several armed setups reaching the cheap model faster than one with none, for spending nothing
+ * extra on chat. `resolveAgentStream`'s comment said this must not happen and, while monitor spend
+ * was unrecorded, it did not. `bookAssessUsage` started recording it and the exemption was never
+ * written, so the stated design was quietly inverted.
+ *
+ * `monitorCost` is absent on every document written before that fix and reads as 0, so historical
+ * months compare exactly as they did.
+ */
+export function chatSpend(doc) {
+    return Math.max(0, Number(doc?.totalCost ?? 0) - Number(doc?.monitorCost ?? 0))
+}
+
+/**
  * Has this user spent past their ceiling this month? Pure, so the policy is testable without a
  * database and without a model.
+ *
+ * Takes the CHAT spend (see `chatSpend`), not the month's total.
  *
  * DEGRADE, NOT REFUSE: over the line the chat keeps working on the cheap model. A hard block reads
  * as an outage, and the ceiling is a cost control, not a safety one.
  */
-export function overCeiling(totalCost, ceiling) {
-    return ceiling != null && Number(totalCost ?? 0) >= ceiling
+export function overCeiling(spend, ceiling) {
+    return ceiling != null && Number(spend ?? 0) >= ceiling
 }
 
 export async function getMonthlyUsage(userId, month = monthKey()) {

@@ -81,7 +81,9 @@ export function lensLine(tradeMode) {
 
 export function bookAssessUsage(userId, model, usage, agent, _record = recordUsage) {
     if (!userId || !usage) return
-    _record(userId, model, usage, agent).catch(() => {})
+    // `monitor: true` keeps this OUT of the chat spend ceiling — see tokenUsage.chatSpend. It is
+    // still counted in the month's totals and in this agent's own row.
+    _record(userId, model, usage, agent, { monitor: true }).catch(() => {})
 }
 
 export async function assessRouting(userId) {
