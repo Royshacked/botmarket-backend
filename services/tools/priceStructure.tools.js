@@ -51,6 +51,10 @@ export const FB_VISION = {
 }
 
 // kind → vision config, so callers (agent tools, the Hermes monitor loop) can pick by name.
+// NO LIVE CALLER, and kept for the same reason TRADING_TOOLS_FOR_MODE above it is: the archived
+// Hermes assessment imports it (archive/monitoring/hermes.assess.js), so reviving that monitor
+// should be a decision rather than a repair job. A dead-export sweep that skips archive/ reads this
+// as unused — `npm run check:archive` is what catches the deletion.
 export const STRUCTURE_VISIONS = { orderblocks: OB_VISION, false_breaks: FB_VISION }
 
 // Core read: render a PLAIN chart (no overlays) and run the focused vision pass. Returns the raw

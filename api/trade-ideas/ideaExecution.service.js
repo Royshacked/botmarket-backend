@@ -11,7 +11,7 @@ import { exitFields }          from './exitOrders.service.js'
 import { placedStamp }         from './entryStamp.util.js'
 import { entityRepo }          from '../../services/entity/entityRepo.service.js'
 import { ownsEntity }          from '../../services/entity/entityCrud.service.js'
-import { AWAITING_CONFIRM, isRestingEntry } from '../../services/entity/vocabulary.js'
+import { AWAITING_CONFIRM, isRestingEntry, isArmed } from '../../services/entity/vocabulary.js'
 import { coverageService }     from '../analyst/coverage.service.js'
 import { NO_PRICE }            from '../broker/adapters/broker.interface.js'
 import { applyOffset }         from '../broker/brokerPrice.service.js'
@@ -147,7 +147,7 @@ export async function triggerEntryNow(id, userId) {
         const idea = await entityRepo.getById(id)
         if (!idea) return { ok: false, reason: 'not_found' }
         if (!ownsEntity(idea, userId)) return { ok: false, reason: 'forbidden' }
-        if (idea.status !== 'looking') return { ok: false, reason: 'not_looking' }
+        if (!isArmed(idea.status)) return { ok: false, reason: 'not_looking' }
 
         // Explicit user action → not a "triggered while waiting" event.
         const patch = { status: 'hit', entryTriggeredAt: Date.now(), triggeredWhileWaiting: false, triggerEventAt: null }

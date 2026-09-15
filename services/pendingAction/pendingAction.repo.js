@@ -246,7 +246,8 @@ export function transitionFilter(id, userId, from = OPEN_STATES) {
     }
 }
 
-export const pendingActionRepo = {
-    ensurePendingActionIndexes, enqueue, listQueued, listOpen, getById, transition,
-    PENDING_ACTIONS, STATES, ACTIONS,
-}
+// NO SERVICE-OBJECT AGGREGATE HERE, deliberately. One stood at this line and nothing outside the
+// file ever referenced it — every caller imports the named functions directly, which is what the
+// rest of pendingAction/ and monitoring/ already do. §1 deleted paperExecutionService and
+// manualExecutionService for the same reason: an aggregate that exists only to be exported is a
+// second public surface to keep in step with the first.

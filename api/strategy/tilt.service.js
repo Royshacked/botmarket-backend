@@ -24,7 +24,7 @@ import { randomUUID }      from 'crypto'
 import { getDb }           from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { toNum }           from '../../services/format.util.js'
-import { normalizeSector, SECTORS, SECTOR_ETF, BENCHMARK_PROXY } from '../../services/entity/vocabulary.js'
+import { normalizeSector, SECTORS, sectorProxy, BENCHMARK_PROXY } from '../../services/entity/vocabulary.js'
 import { openWindow, HORIZONS, DEFAULT_HORIZON } from '../../services/forecastClock.js'
 import { newRevision, diffFields }  from '../../services/revisionTrail.js'
 
@@ -266,7 +266,7 @@ export async function stampBaselines(rows, benchmark = 'SPX', io = _io) {
 
     const benchPx = bench ? _num(await io.priceFor(bench)) : null
     for (const r of needs) {
-        const proxy = SECTOR_ETF[r.sector] ?? null
+        const proxy = sectorProxy(r.sector)
         if (r.base_px === null && proxy)      r.base_px = _num(await io.priceFor(proxy))
         if (r.base_bench_px === null)         r.base_bench_px = benchPx
     }

@@ -47,8 +47,10 @@ looking at paper.
   logic. Before adding a second copy, look for the existing one and extend it.
   Nuance: share the pipe, not the judgment. Per-domain *decisions* stay owned by
   their agent (see the data-vs-judgment principle) — do NOT merge them into a
-  single "unifier"/router. Example: all agents post notifications through the one
-  `sendBotMessage` transport, but each still builds its own card copy/payload.
+  single "unifier"/router. Example: every notification goes out through the one
+  `postCard` → `postBotCard` transport, but each desk still builds its own card
+  copy/payload. (This example used to name `sendBotMessage`; that is a
+  back-compat alias with no caller outside chat.service.)
 
 # Inner QA Loop (run after every implementation)
 After producing any code, before considering the task done, check:

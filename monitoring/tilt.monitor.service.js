@@ -15,7 +15,7 @@
 
 import { tiltService, COLLECTION } from '../api/strategy/tilt.service.js'
 import { gradeRow, totalContributionBp, reviewDecision } from './tilt.assess.js'
-import { SECTOR_ETF, BENCHMARK_PROXY } from '../services/entity/vocabulary.js'
+import { sectorProxy, BENCHMARK_PROXY } from '../services/entity/vocabulary.js'
 import { fetchMacroCatalystDates } from '../providers/fred.provider.js'
 import { notifyTiltReviewDue } from '../services/tiltNotify.service.js'
 import { fetchLastPrice } from './monitorUtils.js'
@@ -78,7 +78,7 @@ export async function _resolvePrices(rows, benchmark, deps = _deps) {
     const bench   = BENCHMARK_PROXY[benchmark] ?? null
     const [benchPx, ...pxs] = await Promise.all([
         bench ? deps.getPrice(bench) : Promise.resolve(null),
-        ...sectors.map(s => (SECTOR_ETF[s] ? deps.getPrice(SECTOR_ETF[s]) : Promise.resolve(null))),
+        ...sectors.map(s => { const p = sectorProxy(s); return p ? deps.getPrice(p) : Promise.resolve(null) }),
     ])
     return { bySector: new Map(sectors.map((s, i) => [s, pxs[i]])), bench: benchPx }
 }

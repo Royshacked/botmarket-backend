@@ -1,5 +1,5 @@
 import { randomUUID }       from 'crypto'
-import { LIVE_POSITION, statusesFor, isRestingEntry } from '../../services/entity/vocabulary.js'
+import { LIVE_POSITION, statusesFor, isRestingEntry, isArmed } from '../../services/entity/vocabulary.js'
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { preflightEntry }   from '../../monitoring/preflightEntry.js'
@@ -602,7 +602,7 @@ export function normalizeIdeaPatch(body) {
 
     // The stamps a status word implies BY ITSELF. A transition that also depends on where the idea
     // is coming from (resting→waiting, hit→waiting, the in-position clamp) belongs to phase 2.
-    if (patch.status === 'looking') {
+    if (isArmed(patch.status)) {
         patch.monitorPhase     = 'entry'
         patch.entryTriggeredAt = null
         patch.activatedAt      = Date.now()
@@ -729,7 +729,7 @@ async function updateIdea(id, body, userId) {
         // client to prompt the user (Buy now / Edit / Reset). Best-effort — never
         // blocks or fails the update.
         let preEntry
-        if (patch.status === 'looking') {
+        if (isArmed(patch.status)) {
             preEntry = await preflightEntry(result)
         }
 

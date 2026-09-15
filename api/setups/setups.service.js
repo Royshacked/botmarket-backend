@@ -1,5 +1,5 @@
 import { randomUUID }        from 'crypto'
-import { statusesFor, PAST_ENTRY, LIVE_POSITION } from '../../services/entity/vocabulary.js'
+import { statusesFor, PAST_ENTRY, LIVE_POSITION, isArmed } from '../../services/entity/vocabulary.js'
 import { logger }            from '../../services/logger.service.js'
 import { buildEventRisk }    from '../../services/eventRisk.service.js'
 import { makeEntityCrud }    from '../../services/entity/entityCrud.service.js'
@@ -365,7 +365,7 @@ async function patchSetup(id, patch, userId) {
         // Arming is the gate, not Generate: only from here does Talos start spending price fetches
         // and assessments on it, so re-run the full check. A setup that lost its venue (a broker
         // disconnected after Generate) would otherwise be polled forever and never be placeable.
-        if (patch.status === 'looking') {
+        if (isArmed(patch.status)) {
             const gate = validateSetup(cur, cur.broker, cur.accounts)
             if (!gate.ok) return { ok: false, reason: `cannot_arm_${gate.reason}` }
             $set.activatedAt = Date.now()
