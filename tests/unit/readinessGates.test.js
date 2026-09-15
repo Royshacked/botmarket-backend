@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap, gradedGap,
+    isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap,
 } from '../../monitoring/readinessGates.js'
 import { guardFires } from '../../services/setup.schema.js'
 import * as talos from '../../monitoring/talos.monitor.service.js'
@@ -68,27 +68,6 @@ test('a self-chosen gap is clamped into the band', () => {
     assert.equal(clampGap(12, band), 12, 'in band → honoured')
 })
 
-test('cadence tightens toward a zone and relaxes away from it', () => {
-    const band = { min: 5, max: 30, near: 1, far: 8 }
-    assert.equal(gradedGap(0, band), 5, 'inside → floor')
-    assert.equal(gradedGap(1, band), 5, 'at the near band → floor')
-    assert.equal(gradedGap(8, band), 30, 'at the far band → ceiling')
-    assert.equal(gradedGap(20, band), 30, 'beyond → ceiling')
-    const mid = gradedGap(4.5, band)
-    assert.ok(mid > 5 && mid < 30, `graded between: ${mid}`)
-})
-
-test('an unmeasurable distance polls lazily, never flat out', () => {
-    // Polling hard on a broken feed burns quota for nothing.
-    const band = { min: 5, max: 30, near: 1, far: 8 }
-    for (const d of [null, undefined, NaN, Infinity]) assert.equal(gradedGap(d, band), 30, String(d))
-})
-
-test('the gap is monotonic — approaching price never polls lazier', () => {
-    const band = { min: 5, max: 30, near: 1, far: 8 }
-    const gaps = [20, 8, 6, 4, 2, 1, 0].map(d => gradedGap(d, band))
-    for (let i = 1; i < gaps.length; i++) assert.ok(gaps[i] <= gaps[i - 1], `${gaps}`)
-})
 
 // ─── The differences, pinned ──────────────────────────────────────────────────
 // Where the two monitors genuinely disagree the difference is a PARAMETER, not a second copy.

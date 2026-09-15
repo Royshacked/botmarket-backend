@@ -119,22 +119,3 @@ export function clampGap(requestedMin, { min, max, fallback = max }) {
     if (!Number.isFinite(asked)) return fallback
     return Math.min(Math.max(asked, min), max)
 }
-
-/**
- * Graded cadence: poll lazily when price is far from every zone and tighten as it approaches, so a
- * fast run into a zone isn't slept through by a timer set when price was miles away.
- *
- * Takes a DISTANCE ALREADY MEASURED IN ZONE WIDTHS, not the entity — because measuring it is where
- * the monitors legitimately differ (one ignores a zero-width zone, the other treats it as an exact
- * level worth measuring to). Sharing the interpolation without sharing the measurement is the whole
- * point: the fiddly part is common, the judgment stays local.
- *
- * `null` distance (no price, no usable zone) → the lazy end: polling flat-out on a broken feed
- * burns quota for nothing.
- */
-export function gradedGap(distance, { min, max, near, far }) {
-    if (!Number.isFinite(distance)) return max
-    if (distance <= near) return min
-    if (distance >= far)  return max
-    return Math.round(min + ((distance - near) / (far - near)) * (max - min))
-}

@@ -32,7 +32,7 @@ const MAX_RECENT_MESSAGES = 8
 const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 
 /** The dimensions <coverage> may claim. Anything else is dropped. */
-export const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
+const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
 
 // Kairos's kit plus the reasoning sidecar, APPENDED so the shared array is the exact prefix of
 // this one — the tools cache breakpoint sits inside TRADING_TOOLS, and inserting anywhere before it
@@ -50,12 +50,6 @@ export const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
 export const MENTOR_TOOLS = [
     ...TRADING_TOOLS,
     ...toolsFor({
-        // Aether engine reads for setup context. Both return "not yet computed" when the relevant
-        // engine phase has not run; reason qualitatively in that state.
-        //
-        //   exposure confidence scales how much weight to put on the channel thesis.
-        // Confirmed FRED channel moves + short-lag opportunity cards (≤ 3w). Call when the
-        // macro dimension is material — swing/long-term horizon, or any sector-level tailwind
         // The sidecar is contractually last at every desk that declares it
         // (agentToolsRegistry.test.js), and it sits past the tools cache breakpoint — which is
         // inside TRADING_TOOLS, on get_derivatives_context — so declaring it here touches no
@@ -63,10 +57,6 @@ export const MENTOR_TOOLS = [
         consult: consultDescription(`Reach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs the entry; and **placing a zone where the structure is ambiguous** — a level that is both a prior high and a supply shelf, say.`),
     }),
 ]
-
-// Unbound — Aether reads are house-layer broadcasts, no userId.
-const _MENTOR_AETHER_HANDLERS = {
-}
 
 export function emptyMentorState() {
     return { active_asset: '', draft: null, coverage: [] }
@@ -87,7 +77,7 @@ async function chatStream({
     // `consult` is deliberately absent: runAgentStream builds it from the tool declaration, which is
     // also the only place that holds `onReasoning` — wiring it here would swallow the sidecar's
     // thinking silently. See the MENTOR_TOOLS note above.
-    const toolHandlers = { ...buildTradingToolHandlers(onChart, userId), ..._MENTOR_AETHER_HANDLERS }
+    const toolHandlers = buildTradingToolHandlers(onChart, userId)
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, audience, seed)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than

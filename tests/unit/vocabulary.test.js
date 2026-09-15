@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    STATUS, LIVE_POSITION, PAST_ENTRY, PAST_ENTRY_LEGACY, PRE_ENTRY, TERMINAL,
+    STATUS, LIVE_POSITION, PAST_ENTRY, PRE_ENTRY, TERMINAL,
     STATUSES_BY_KIND, statusesFor, isValidStatus, isLivePosition, isPastEntry, isTerminal,
     TRADE_HORIZONS, CALL_HORIZONS, isHorizon,
     ASSET_CLASSES, normalizeAssetClass, isEquityClass,
@@ -42,7 +42,7 @@ test('the pre-P3b call statuses are gone from the language entirely', () => {
 test('pre-entry and past-entry never overlap', () => {
     // An entity is either being watched or has an order out — never both.
     for (const s of PRE_ENTRY) assert.ok(!isPastEntry(s), s)
-    for (const s of PAST_ENTRY_LEGACY) assert.ok(!PRE_ENTRY.includes(s), s)
+    for (const s of PAST_ENTRY) assert.ok(!PRE_ENTRY.includes(s), s)
 })
 
 test('closed is terminal and belongs to no other group', () => {

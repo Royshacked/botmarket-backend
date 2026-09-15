@@ -149,7 +149,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     // cadence on a shut market. The expiry review is exempt: a setup may need to roll or die at
     // the close.
     if (!expiring && !deps.isAssetOpen(setup.asset, setup.asset_class)) {
-        const patch = _reschedule(setup, nowMs, null)
+        const patch = _reschedule(setup, nowMs)
         const openMs = deps.nextOpenMs(setup.asset, setup.asset_class)
         if (Number.isFinite(openMs) && openMs > nowMs) patch['monitor_state.next_check_at'] = new Date(openMs).toISOString()
         await deps.persist(setup.id, patch, _entry('market_closed', { setup, nowMs, nextAt: patch['monitor_state.next_check_at'] }))
@@ -197,7 +197,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     const needsAssessment  = zone || expiring || neverRead || guardFiredPrice
 
     if (!needsAssessment) {
-        const patch = _reschedule(setup, nowMs, price)
+        const patch = _reschedule(setup, nowMs)
         const quiet = wakeReason(woke)
         await deps.persist(setup.id, patch, _entry(quiet, { setup, nowMs, price, woke, nextAt: patch['monitor_state.next_check_at'] }))
         return { reason: quiet }
@@ -207,7 +207,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     const raw    = await deps.assess(setup, hit, { reason, price })
 
     if (!raw || raw._failReason) {
-        const patch = _reschedule(setup, nowMs, price)
+        const patch = _reschedule(setup, nowMs)
         await deps.persist(setup.id, patch, _entry(reason, { setup, nowMs, price, nextAt: patch['monitor_state.next_check_at'], failed: true, failReason: raw?._failReason }))
         return { reason, failed: true }
     }
@@ -717,7 +717,7 @@ async function _checkValidity(setup, price, nowMs, deps) {
         Object.assign(set, projectScenario(setup, survivors[0].id))
         logger.info(LOG, `[${setup.id}] projection moves to ${scenarioLabel(survivors[0])} — the one it was showing is gone`)
     }
-    const patch = { ..._reschedule(setup, nowMs, price), ...set }
+    const patch = { ..._reschedule(setup, nowMs), ...set }
     await deps.persist(setup.id, patch, _entry('invalidation', {
         setup, nowMs, price: events[0].price, nextAt: patch['monitor_state.next_check_at'],
         read: events.map(e => e.reason).join(' · '),

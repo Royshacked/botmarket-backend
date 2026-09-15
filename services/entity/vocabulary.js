@@ -57,8 +57,6 @@ export const LIVE_POSITION = [STATUS.LONG, STATUS.SHORT]
 /** Past entry: an order exists at the broker, or is awaiting the user's confirm. */
 export const PAST_ENTRY = [STATUS.HIT, ...LIVE_POSITION]
 
-/** Alias kept so call sites read as intent. No legacy spellings remain. */
-export const PAST_ENTRY_LEGACY = PAST_ENTRY
 
 /** Before entry — nothing at the broker yet, so the entity is freely editable and deletable. */
 export const PRE_ENTRY = [STATUS.WAITING, STATUS.LOOKING, STATUS.RESTING]
@@ -114,9 +112,8 @@ export const isValidStatus = (kind, status) => statusesFor(kind).includes(status
 /** In a live position right now. */
 export const isLivePosition = (status) => LIVE_POSITION.includes(status)
 
-/** Past entry — `includeLegacy` covers pre-P3b calls. */
-export const isPastEntry = (status, includeLegacy = true) =>
-    (includeLegacy ? PAST_ENTRY_LEGACY : PAST_ENTRY).includes(status)
+/** Past entry: an order exists at the broker, or is awaiting the user's confirm. */
+export const isPastEntry = (status) => PAST_ENTRY.includes(status)
 
 /** Terminal: no further transition is legal. A closed entity must never be resurrected. */
 export const isTerminal = (status) => TERMINAL.includes(status)
