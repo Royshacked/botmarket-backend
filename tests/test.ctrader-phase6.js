@@ -16,7 +16,7 @@
 import 'dotenv/config'
 import { getDb }                 from '../providers/mongodb.provider.js'
 import { CTraderAdapter }        from '../api/broker/adapters/ctrader.adapter.js'
-import { currentReferencePrice } from '../services/protectionPlan.service.js'
+import { fetchLastPrice }        from '../monitoring/monitorUtils.js'
 
 const MODE    = process.argv[2] ?? 'probe'
 const LOTS    = Number(process.argv[3]) || 0.01
@@ -33,7 +33,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 async function refPrice() {
     if (REF_ARG) return REF_ARG
-    const p = await currentReferencePrice(SYMBOL, 'day')
+    const p = await fetchLastPrice(SYMBOL)
     return Number.isFinite(p) ? p : null
 }
 

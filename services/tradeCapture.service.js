@@ -356,10 +356,13 @@ async function capturePartial({ accountId, positionId, orderId, price, quantity,
  *
  * `exit` is written FIELD BY FIELD rather than as a whole object: `exit.realizedPnl` may already
  * carry the sum of earlier partials, and a wholesale `$set` would discard it. price/ts/reason
- * collection stays correct without migration. Exit-fill commission/spread are $inc-accumulated onto
- * the entry-fill costs stored at open, so `commission`/`spread` become the round-trip total.
- * @param {{ accountId, positionId, orderId?, price?, quantity?, reason?, pnl?, commission?, spread?, at? }} opts
+ * describe THIS slice (the last one, which is what the UI shows); realizedPnl is the trade's TOTAL.
+ * For a trade with no partials the two readings coincide, which is why every row already in the
  * collection stays correct without migration.
+ *
+ * Exit-fill commission/spread are $inc-accumulated onto the entry-fill costs stored at open, so
+ * `commission`/`spread` become the round-trip total.
+ * @param {{ accountId, positionId, orderId?, price?, quantity?, reason?, pnl?, commission?, spread?, at? }} opts
  */
 async function captureClose({ accountId, positionId, orderId, price, quantity, reason, pnl, commission, spread, at }) {
     try {

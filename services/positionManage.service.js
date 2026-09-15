@@ -1,7 +1,7 @@
 import { getDb } from '../providers/mongodb.provider.js'
 import { ENTITIES } from './entity/entityCollection.js'
 import { LIVE_POSITION } from './entity/vocabulary.js'
-import { entityRepo, makeEntityRepo } from './entity/entityRepo.service.js'
+import { makeEntityRepo } from './entity/entityRepo.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { deferIfClosed } from './pendingAction/executionGate.js'
 import { kindForDoc } from './entity/envelope.js'
@@ -57,14 +57,21 @@ export const _deps = {
     closePosition:    (broker, userId, acct, positionId, opts)=> brokerService.closePosition(broker, userId, acct, positionId, opts),
     amendOrder:       (broker, userId, acct, orderId, fields) => brokerService.amendOrder(broker, userId, acct, orderId, fields),
     cancelOrder:      (broker, userId, acct, orderId)         => brokerService.cancelOrder(broker, userId, acct, orderId),
-    // Keep the tracked native exit in step with a broker amend/cancel so the reconciler's resize
-    // (on a later partial) doesn't cancel-and-replace it at the STALE price/id.
-    syncExit:         (holderId, accountId, leg, patch) => entityRepo.syncExitOrder(holderId, { accountId, leg }, patch ?? {}),
 }
 
 // Every write goes through the entity repo — the ONE write funnel (P1b) — built over the injected
 // getDb so a caller's fake db (the tests, the desk hand-offs) still sees what was written.
 const _repo = deps => makeEntityRepo({ coll: async () => (await deps.getDb()).collection(ENTITIES) })
+
+// Keep the tracked native exit in step with a broker amend/cancel so the reconciler's resize (on a
+// later partial) doesn't cancel-and-replace it at the STALE price/id.
+//
+// It stays INJECTABLE — two desks and their harnesses observe the sync by name — but the DEFAULT is
+// built from the deps in hand rather than closed over the module-level repo, for the same reason
+// _repo is: a caller that hands us a `getDb` and no `syncExit` would otherwise have the two halves
+// of one move_stop land in different databases.
+const _syncExit = deps => deps.syncExit ?? ((holderId, accountId, leg, patch) =>
+    _repo(deps).syncExitOrder(holderId, { accountId, leg }, patch ?? {}))
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
@@ -147,7 +154,7 @@ export async function executeManage(verb, proposal, holder, link, open, userId, 
         if (!ord) throw new Error(`no working ${leg} order to amend`)
         if (verb === 'let_run' && proposal?.cancel_tp) {
             await deps.cancelOrder(broker, userId, accountId, ord.orderId)
-            await deps.syncExit(holder.id, accountId, leg, { status: 'cancelled' })
+            await _syncExit(deps)(holder.id, accountId, leg, { status: 'cancelled' })
             return {}
         }
         const level  = verb === 'move_stop' ? Number(proposal.new_stop) : Number(proposal.new_tp)
@@ -159,7 +166,7 @@ export async function executeManage(verb, proposal, holder, link, open, userId, 
         const brokerLevel = applyOffset(level, holder?.basisOffset)
         const fields = verb === 'move_stop' ? { stopPrice: brokerLevel } : { limitPrice: brokerLevel }
         const res    = await deps.amendOrder(broker, userId, accountId, ord.orderId, fields)
-        await deps.syncExit(holder.id, accountId, leg, { price: level, orderId: res?.orderId ?? null })
+        await _syncExit(deps)(holder.id, accountId, leg, { price: level, orderId: res?.orderId ?? null })
         return {}
     }
     if (verb === 'take_partial') {

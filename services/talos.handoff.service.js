@@ -98,7 +98,6 @@ const _deps = {
     closePosition:    manage._deps.closePosition,
     amendOrder:       manage._deps.amendOrder,
     cancelOrder:      manage._deps.cancelOrder,
-    syncExit:         manage._deps.syncExit,
     notifyManage:     (setup, card) => notifySetupManage(setup, card),
     notifyDisarm:     (setup, reason) => notifySetupLimitDisarm(setup, reason),
 }

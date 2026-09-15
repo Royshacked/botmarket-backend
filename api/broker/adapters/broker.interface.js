@@ -121,10 +121,11 @@ import { logger }                  from '../../../services/logger.service.js'
  *
  * Normalised execution push event — the shape every broker translates its native
  * fills/updates into, so the unified backend→frontend channel is broker-agnostic.
- * @typedef {Object} BrokerExecution
+ *
  * `position.reduced` is a PARTIAL close (the position is still open) — one slice of
  * a multi-level exit; the reconciler records it and re-syncs the remaining exit
  * orders, but does NOT close the idea. `position.closed` is a full close.
+ * @typedef {Object} BrokerExecution
  * @property {'order.accepted'|'order.filled'|'order.cancelled'|'order.rejected'|'position.opened'|'position.closed'|'position.reduced'|'position.updated'} type
  * @property {string}            broker
  * @property {string}            accountId
