@@ -135,6 +135,8 @@ export function _parseAnalystResponse(raw) {
 }
 
 const QUICKREAD_VERDICTS = new Set(['credible', 'priced_in', 'contradicted', 'unclear'])
+// The direction across every event naming the company, when more than one does.
+const QUICKREAD_NETS = new Set(['helped', 'hurt', 'unclear'])
 
 /**
  * The <quickread> block, checked rather than trusted. A verdict outside the four is `unclear` —
@@ -148,6 +150,7 @@ export function _parseQuickRead(raw) {
     const conf = Number(q.confidence)
     return {
         verdict:    QUICKREAD_VERDICTS.has(q.verdict) ? q.verdict : 'unclear',
+        net:        QUICKREAD_NETS.has(q.net) ? q.net : null,
         confidence: Number.isFinite(conf) ? Math.min(Math.max(conf, 0), 1) : null,
         read:       typeof q.read === 'string' ? q.read.trim() : '',
         evidence:   (Array.isArray(q.evidence) ? q.evidence : [])

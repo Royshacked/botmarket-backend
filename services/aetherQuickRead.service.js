@@ -14,8 +14,15 @@
 //
 // ONE READ PER NAME PER EVENT, and one in flight. A second press while the first is running gets
 // the same promise, not a second model call; a press on a name already read gets the stored read.
-// There is no re-read yet — the day a read goes stale as news develops, `force` is one line here
-// and one button there, and it is left out until someone asks for it.
+//
+// JUDGED AGAINST EVERY LIVE EVENT NAMING THE TICKER, not the one whose row was pressed. A name
+// two events reach in opposite directions is two live claims about one company, and a read that
+// saw only one of them could come back `credible` on both sides. So the opening carries the
+// other appearances — subject, side, mechanism, move — and asks which way the name goes on the
+// whole; the verdict stays a verdict on THIS event's claim, and `net` says the direction across
+// all of them. The read records which runs it considered, and a stored read whose set of other
+// events has since changed is read again rather than served stale: that is the one re-read there
+// is, and it has a reason. Sixty days is the window, the same one the list shows.
 
 import { getDb } from '../providers/mongodb.provider.js'
 import { COLLECTIONS } from '../api/aether/aether.model.js'
@@ -37,12 +44,17 @@ const _key = (runId, ticker) => `${runId}|${ticker}`
 /** Per-user context is neither wanted nor safe in a broadcast read: house venue, no book. */
 const AUDIENCE = null
 
+const SIDE = s => (s === 'hurt' ? 'HURT' : s === 'helped' ? 'HELPED' : 'MIXED')
+
 /**
  * What the user (the desk, really) says to Prometheus. PURE, and every line traces to a stored
  * field — the same discipline as the Mentor seed, framed as a question rather than a lean.
+ *
+ * `others` are the ticker's other live appearances. With any, the question widens: the read is
+ * asked to weigh every mechanism against the record and say which dominates.
  */
-export function quickReadOpening(c, run = {}) {
-    const side = c.side === 'hurt' ? 'HURT' : c.side === 'helped' ? 'HELPED' : 'MIXED'
+export function quickReadOpening(c, run = {}, others = []) {
+    const side = SIDE(c.side)
     const when = (run.event_date || c.event_date || run.created_at || c.created_at || '').slice(0, 10)
     const lines = [
         `Quick read on ${c.ticker}${c.company ? ` (${c.company})` : ''}. Aether named it ${side} by an event — `
@@ -58,9 +70,33 @@ export function quickReadOpening(c, run = {}) {
             ? `Move since the event: ${(c.excess_pct * 100).toFixed(1)}% vs SPY${c.extension != null ? ` (${c.extension.toFixed(1)}σ)` : ''}${c.price_asof ? `, as of ${c.price_asof}` : ''}.`
             : 'No move measured yet.',
         c.expires_at ? `The claim expires ${c.expires_at}${c.next_earnings ? ' at its next report' : ''}.` : '',
-        `Is this exposure credible, already priced in, or contradicted by what ${c.ticker} has said or filed since ${when || 'the event'}?`,
     ]
+    if (others.length) {
+        const sides = new Set([c.side, ...others.map(o => o.side)])
+        lines.push(`Aether has ALSO named ${c.ticker} by ${others.length} other live event${others.length > 1 ? 's' : ''}`
+            + `${sides.size > 1 ? ' — and they pull it in OPPOSITE directions' : ''}:`)
+        for (const o of others) {
+            const d = (o.event_date || o.created_at || '').slice(0, 10)
+            lines.push(`- ${o.subject || o.event || 'an event'}${d ? ` (${d})` : ''}, ${SIDE(o.side)}`
+                + `${o.mechanism ? `: ${o.mechanism}` : ''}`
+                + `${o.excess_pct != null ? ` Move since: ${(o.excess_pct * 100).toFixed(1)}% vs SPY.` : ''}`)
+        }
+        lines.push(`Judge ${c.ticker} against ALL of them. Is THIS event's claim (${side}) credible, already priced in, `
+            + `or contradicted — by the record, or by another event's mechanism that dominates it? `
+            + `And on the whole, across every event naming it, which way does the name go?`)
+    } else {
+        lines.push(`Is this exposure credible, already priced in, or contradicted by what ${c.ticker} has said or filed since ${when || 'the event'}?`)
+    }
     return lines.filter(Boolean).join('\n')
+}
+
+/** The other appearances a read should weigh: live, in the list's window, not this run. */
+const OTHERS_DAYS = 60
+
+/** Two sets of run ids, compared as sets — the order Mongo returns them in is not a fact. */
+function _sameRuns(a = [], b = []) {
+    const A = [...new Set(a)].sort(), B = [...new Set(b)].sort()
+    return A.length === B.length && A.every((x, i) => x === B[i])
 }
 
 /** The stored reads for a set of runs, keyed `${run_id}|${ticker}`. Empty map on a read failure. */
@@ -101,6 +137,16 @@ const _io = {
         const db = await getDb()
         return db.collection(READS).findOne({ run_id: runId, ticker }, { projection: { _id: 0 } })
     },
+    async others(runId, ticker) {
+        const db    = await getDb()
+        const since = new Date(Date.now() - OTHERS_DAYS * 86_400_000).toISOString()
+        return db.collection(COLLECTIONS.EVENT_CANDIDATES)
+            .find({ ticker, run_id: { $ne: runId }, survived: true, created_at: { $gte: since } },
+                  { projection: { _id: 0, run_id: 1, subject: 1, event: 1, side: 1, mechanism: 1,
+                                  event_date: 1, created_at: 1, excess_pct: 1 } })
+            .sort({ created_at: -1 })
+            .toArray()
+    },
     async read({ opening, userId, signal }) {
         const { analystAgentService, MODES } = await import('./agents/analyst.agent.service.js')
         return analystAgentService.chatStream({
@@ -127,9 +173,17 @@ export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _
     const sym = String(ticker ?? '').trim().toUpperCase()
     if (!runId || !/^[A-Z0-9.-]{1,12}$/.test(sym)) throw Object.assign(new Error('a run and a ticker are required'), { status: 400 })
 
-    const existing = await deps.existing(runId, sym)
-    if (existing) return existing
+    // The other live events naming it — read once, used both to decide whether a stored read is
+    // still about the same set of claims and, if not, to write the opening.
+    const others = (await deps.others(runId, sym)) ?? []
+    const otherIds = others.map(o => o.run_id)
 
+    const existing = await deps.existing(runId, sym)
+    if (existing && _sameRuns(existing.considered, otherIds)) return existing
+    if (existing) logger.info(LOG, 're-reading: the set of events naming it changed', { runId, ticker: sym })
+
+    // AFTER the awaits, so two presses that both passed them find one job: the check and the
+    // set below run in the same synchronous stretch.
     const key = _key(runId, sym)
     if (_inflight.has(key)) return _inflight.get(key)
 
@@ -137,7 +191,7 @@ export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _
         const c = await deps.candidate(runId, sym)
         if (!c) throw Object.assign(new Error('no such candidate'), { status: 404 })
         // The event fields are denormalised onto the candidate by the engine, so the row is the run.
-        const opening = quickReadOpening(c, c)
+        const opening = quickReadOpening(c, c, others)
         const t0 = Date.now()
         const out = await deps.read({ opening, userId, signal })
         const q = out?.quickread
@@ -145,6 +199,10 @@ export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _
             run_id: runId, ticker: sym,
             verdict:    q?.verdict ?? 'unclear',
             confidence: q?.confidence ?? null,
+            // Across every event naming it. Null when one event names it — there is no "net"
+            // of one claim, and the verdict already says what it says.
+            net:        others.length ? (q?.net ?? 'unclear') : null,
+            considered: otherIds,
             read:       q?.read || out?.reply || '',
             evidence:   q?.evidence ?? [],
             checked:    q?.checked ?? [],
@@ -154,7 +212,7 @@ export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _
             read_at:    new Date().toISOString(),
             took_ms:    Date.now() - t0,
         }
-        logger.info(LOG, 'quick read', { runId, ticker: sym, verdict: doc.verdict, confidence: doc.confidence, ms: doc.took_ms })
+        logger.info(LOG, 'quick read', { runId, ticker: sym, verdict: doc.verdict, net: doc.net, others: otherIds.length, confidence: doc.confidence, ms: doc.took_ms })
         return deps.store(doc)
     })()
 

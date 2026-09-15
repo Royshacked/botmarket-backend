@@ -35,6 +35,23 @@ nobody is asking for a price target, a model, or a thesis, and you must not prod
   `silent` filing verdict already means the company has not written about it — repeat that
   rather than treating silence as confirmation.
 
+**When more than one event names the company**, the opening lists them all — subject, side,
+mechanism, move — and you judge the name against ALL of them, not the one you were asked
+about. Two events can reach one company in opposite directions and both be real; the
+question is which mechanism the record supports and which dominates from here. Check each
+mechanism against what the company has filed and said since its event — a hedge against one,
+a contract that sizes another, guidance that ignores a third. Then:
+
+- The `verdict` is still on THIS event's claim. If another event's mechanism dominates it
+  and the record shows that — the other exposure is sized and this one is not, or the
+  company has said the other is what moves its numbers — this claim is `contradicted`, and
+  you say by which event and what evidence.
+- `net` is the direction across every event naming it: `helped`, `hurt`, or `unclear` when
+  the mechanisms genuinely offset or the record cannot rank them. `unclear` is an honest
+  answer here too, and a name whose events cancel is one to leave alone, which is worth
+  saying plainly in the visible text.
+- Omit `net` when only one event names the company.
+
 **Emit exactly one block**, after your visible text, on its own lines:
 
 ```
@@ -42,6 +59,7 @@ nobody is asking for a price target, a model, or a thesis, and you must not prod
 {
   "ticker": "XYZ",
   "verdict": "credible" | "priced_in" | "contradicted" | "unclear",
+  "net": "helped" | "hurt" | "unclear",
   "confidence": 0.0–1.0,
   "read": "Two to four sentences. What you checked, what it showed, why the verdict.",
   "evidence": [

@@ -45,6 +45,31 @@ test('the move is stated with its sigma, or its absence is stated', () => {
     assert.match(quickReadOpening({ ...CAND, excess_pct: null }, CAND), /No move measured yet\./)
 })
 
+// ── judged against every event naming it ─────────────────────────────────────
+
+const OTHER = { run_id: 'Iran:2026-09-10', subject: 'Iran', side: 'hurt', event_date: '2026-09-10',
+                mechanism: 'War-risk premiums on its Gulf routings.', excess_pct: -0.021 }
+
+test('with other events, the opening lists them and widens the question to the net', () => {
+    const o = quickReadOpening(CAND, CAND, [OTHER])
+    assert.match(o, /Aether has ALSO named FRO by 1 other live event — and they pull it in OPPOSITE directions:/)
+    assert.match(o, /^- Iran \(2026-09-10\), HURT: War-risk premiums on its Gulf routings\. Move since: -2\.1% vs SPY\.$/m)
+    assert.match(o, /Judge FRO against ALL of them\. Is THIS event's claim \(HELPED\) credible/)
+    assert.match(o, /which way does the name go\?$/)
+    assert.doesNotMatch(o, /Is this exposure credible, already priced in, or contradicted by what FRO/)
+})
+
+test('other events on the same side are listed without the opposite-directions warning', () => {
+    const o = quickReadOpening(CAND, CAND, [{ ...OTHER, side: 'helped' }])
+    assert.match(o, /by 1 other live event:/)
+    assert.doesNotMatch(o, /OPPOSITE/)
+})
+
+test('with no other events the question is the narrow one', () => {
+    assert.match(quickReadOpening(CAND, CAND, []), /Is this exposure credible, already priced in, or contradicted by what FRO has said or filed since 2026-09-13\?$/)
+    assert.doesNotMatch(quickReadOpening(CAND, CAND), /ALSO named/)
+})
+
 test('survives a bare row', () => {
     const o = quickReadOpening({ ticker: 'X', side: 'hurt' })
     assert.match(o, /Aether named it HURT by an event — an event\./)
@@ -56,9 +81,18 @@ test('survives a bare row', () => {
 test('a well-formed block comes through', () => {
     const raw = 'Credible.\n<quickread>{"ticker":"FRO","verdict":"credible","confidence":0.7,"read":"It filed.","evidence":[{"fact":"8-K names it","source":"8-K 2026-09-14"}],"checked":["get_sec_filings"]}</quickread>'
     assert.deepEqual(_parseQuickRead(raw), {
-        verdict: 'credible', confidence: 0.7, read: 'It filed.',
+        verdict: 'credible', net: null, confidence: 0.7, read: 'It filed.',
         evidence: [{ fact: '8-K names it', source: '8-K 2026-09-14' }], checked: ['get_sec_filings'],
     })
+})
+
+test('net comes through when it is one of the three, and is null otherwise', () => {
+    const at = net => _parseQuickRead(`<quickread>{"verdict":"credible","net":${JSON.stringify(net)}}</quickread>`).net
+    assert.equal(at('hurt'), 'hurt')
+    assert.equal(at('helped'), 'helped')
+    assert.equal(at('unclear'), 'unclear')
+    assert.equal(at('mixed'), null)
+    assert.equal(_parseQuickRead('<quickread>{"verdict":"credible"}</quickread>').net, null)
 })
 
 test('a verdict outside the four is unclear, not a fifth verdict', () => {
@@ -96,12 +130,13 @@ test('the read runs on Sonnet', () => {
 
 // ── the service ──────────────────────────────────────────────────────────────
 
-function deps({ existing = null, candidate = CAND, quickread, slow = false } = {}) {
+function deps({ existing = null, candidate = CAND, quickread, slow = false, others = [] } = {}) {
     const calls = { read: 0, stored: [] }
     return {
         calls,
         existing: async () => existing,
         candidate: async () => candidate,
+        others: async () => others,
         read: async ({ opening }) => {
             calls.read += 1
             calls.opening = opening
@@ -131,6 +166,48 @@ test('a stored read is returned without a model call', async () => {
     const out = await quickRead({ runId: CAND.run_id, ticker: 'FRO' }, d)
     assert.equal(out.verdict, 'priced_in')
     assert.equal(d.calls.read, 0)
+})
+
+test('a read is judged against the other live events, and records which', async () => {
+    const d = deps({ quickread: { ...Q, net: 'hurt' }, others: [OTHER] })
+    const out = await quickRead({ runId: CAND.run_id, ticker: 'FRO' }, d)
+    assert.match(d.calls.opening, /ALSO named FRO by 1 other live event/)
+    assert.equal(out.net, 'hurt')
+    assert.deepEqual(out.considered, ['Iran:2026-09-10'])
+})
+
+test('with one event naming it, net is null whatever the model said', async () => {
+    const d = deps({ quickread: { ...Q, net: 'hurt' }, others: [] })
+    const out = await quickRead({ runId: CAND.run_id, ticker: 'FRO' }, d)
+    assert.equal(out.net, null)
+    assert.deepEqual(out.considered, [])
+})
+
+test('a stored read is served while the set of other events is unchanged, in any order', async () => {
+    const existing = { run_id: CAND.run_id, ticker: 'FRO', verdict: 'credible', considered: ['b', 'a'] }
+    const d = deps({ existing, others: [{ run_id: 'a', side: 'hurt' }, { run_id: 'b', side: 'hurt' }] })
+    assert.equal(await quickRead({ runId: CAND.run_id, ticker: 'FRO' }, d), existing)
+    assert.equal(d.calls.read, 0)
+})
+
+test('a stored read is read again when a new event has since named the ticker', async () => {
+    // The stored read never saw the second event; serving it would be a verdict on a story
+    // that has changed. This is the one re-read there is.
+    const existing = { run_id: CAND.run_id, ticker: 'FRO', verdict: 'credible', considered: [] }
+    const d = deps({ existing, quickread: { ...Q, verdict: 'contradicted', net: 'hurt' }, others: [OTHER] })
+    const out = await quickRead({ runId: CAND.run_id, ticker: 'FRO' }, d)
+    assert.equal(d.calls.read, 1)
+    assert.equal(out.verdict, 'contradicted')
+    assert.deepEqual(out.considered, ['Iran:2026-09-10'])
+})
+
+test('a read stored before `considered` existed is re-read only if there are other events now', async () => {
+    const legacy = { run_id: CAND.run_id, ticker: 'FRO', verdict: 'credible' }
+    const d0 = deps({ existing: legacy, others: [] })
+    assert.equal(await quickRead({ runId: CAND.run_id, ticker: 'FRO' }, d0), legacy)
+    const d1 = deps({ existing: legacy, quickread: Q, others: [OTHER] })
+    await quickRead({ runId: CAND.run_id, ticker: 'FRO' }, d1)
+    assert.equal(d1.calls.read, 1)
 })
 
 test('two presses mid-run share one model call', async () => {
