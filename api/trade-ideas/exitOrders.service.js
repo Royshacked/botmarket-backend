@@ -19,7 +19,6 @@ const LOG = '[exitOrders]'
  */
 export async function armExitsInPosition(idea, route) {
     const totalQty       = Number(idea.quantity) || 0
-    const referenceQuote = await basisReferenceQuote(idea)
 
     // Cancel prior working exit orders (we're replacing the setup); keep as history.
     const kept = []
@@ -56,7 +55,7 @@ export async function armExitsInPosition(idea, route) {
             for (const lvl of levels) {
                 if (!(lvl.quantity > 0)) continue
                 const order = buildExitOrder(idea, {
-                    type: spec.leg, level: lvl.level, qty: lvl.quantity, positionId: link.positionId, referenceQuote,
+                    type: spec.leg, level: lvl.level, qty: lvl.quantity, positionId: link.positionId,
                 })
                 try {
                     const res = await brokerService.placeOrder(link.broker, idea.userId, link.accountId, order)
@@ -73,15 +72,20 @@ export async function armExitsInPosition(idea, route) {
             }
         }
     }
-    return { exitOrders: [...kept, ...placed], referenceQuote }
+    return { exitOrders: [...kept, ...placed] }
 }
 
 /**
  * Build the exit-handling $set fields for an idea whose entry order(s) were just placed.
  * Touch levels → stored in nativeExit (placed as positionId closing orders when position opens).
- * Residual monitor tree → stored as {leg}MonitorTree for the software monitor.
+ * Residual monitor tree → stored as {leg}MonitorTree for the software monitor. Pure.
+ *
+ * Basis handling is NOT here: the offset is measured once at fork (`idea.basisOffset`) and applied
+ * at every price boundary by `applyOffset` (buildExitOrder, the resting entry, an amend). This used
+ * to also stamp a `referenceQuote` onto nativeExit for a second, adapter-side shift that had been
+ * neutralised to always-null — two mechanisms for one basis, one of them dead and both wired.
  */
-export async function exitFields(idea, route, referenceQuote) {
+export function exitFields(route) {
     const out = {}
 
     for (const leg of ['stop', 'tp']) {
@@ -93,20 +97,6 @@ export async function exitFields(idea, route, referenceQuote) {
     }
 
     const nativeExit = { stop: route.stop.nativeOrders, tp: route.tp.nativeOrders }
-    if (nativeExit.stop.length || nativeExit.tp.length) {
-        const refQuote = referenceQuote !== undefined ? referenceQuote : await basisReferenceQuote(idea)
-        out.nativeExit = { ...nativeExit, referenceQuote: refQuote ?? null }
-    }
+    if (nativeExit.stop.length || nativeExit.tp.length) out.nativeExit = nativeExit
     return out
-}
-
-/**
- * Broker reference quote for the LEGACY adapter price-shift. NEUTRALISED: the basis is now
- * measured ONCE at fork (idea.basisOffset) and applied to order prices at build time
- * (buildExitOrder / resting entry). Returning null keeps the adapter's referenceQuote shift
- * OFF, so the basis is never applied twice. Kept as an exported no-op so callers that still
- * pass its result see the (correct) null.
- */
-export async function basisReferenceQuote() {
-    return null
 }

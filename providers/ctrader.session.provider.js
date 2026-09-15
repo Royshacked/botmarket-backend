@@ -39,10 +39,8 @@ const PT = {
     SYMBOLS_LIST_REQ:      2114,
     SYMBOL_BY_ID_REQ:      2116,
     RECONCILE_REQ:         2124,   // ProtoOAReconcileReq → open positions/orders
-    SUBSCRIBE_SPOTS_REQ:   2127,   // ProtoOASubscribeSpotsReq   (→ 2128 ack)
-    UNSUBSCRIBE_SPOTS_REQ: 2129,   // ProtoOAUnsubscribeSpotsReq (→ 2130 ack)
     GET_TRENDBARS_REQ:     2137,   // ProtoOAGetTrendbarsReq (→ 2138 res). Standard numbering
-                                   // (cf. 2114/2116/2127/2131 verified); confirm live on demo.
+                                   // (cf. 2114/2116 verified); confirm live on demo.
     GET_ACCOUNTS_REQ:      2149,
     POSITION_PNL_REQ:      2187,   // ProtoOAGetPositionUnrealizedPnLReq (→ 2188)
 }
@@ -54,10 +52,9 @@ const TRADE_SIDE_SELL = 2
 const ORDER_TYPE_LIMIT = 2
 const ORDER_TYPE_STOP  = 3
 
-// ProtoOASpotEvent (2131) bid/ask are integers in 1/100000 of a price unit.
+// ProtoOA prices are integers in 1/100000 of a price unit (the spot-event scale).
 // ProtoOATrendbar low + deltas use the SAME 1/100000 scale.
 const SPOT_PRICE_SCALE = 1e5
-const SPOT_TIMEOUT_MS  = 5_000
 
 // Short dedupe window for repeated trendbar fetches of the same symbol/period within
 // a monitor tick (many ideas can share one instrument). Not a real cache — just avoids
@@ -185,7 +182,6 @@ export class CTraderSession extends EventEmitter {
         this._namesById     = new Map()     // symbolId → name (populated with the light list)
         this._normToId      = new Map()     // normalized name (BTCUSD) → symbolId, for fuzzy lookup
         this._specsById     = new Map()     // symbolId → Promise<specs>
-        this._spotInflight  = new Map()     // symbolId → Promise<Quote> (dedupes concurrent snapshots)
         this._trendCache    = new Map()     // `${symbolId}:${period}` → { at, bars } (short TTL)
 
         // After every (re)connect the app re-authenticates; our account-auth is gone,
@@ -292,64 +288,6 @@ export class CTraderSession extends EventEmitter {
         p.catch(() => { this._specsById.delete(symbolId) })
         this._specsById.set(symbolId, p)
         return p
-    }
-
-    // ── Spot quotes ──────────────────────────────────────────────────────────────
-
-    /**
-     * Snapshot the current spot quote for a symbol: subscribe (2127), capture the
-     * first ProtoOASpotEvent (2131) tick, then unsubscribe (2129). Used at order time
-     * to measure cTrader's live price against the canonical (Massive) feed, so an
-     * absolute order price can be shifted to cTrader's book (the basis offset).
-     *
-     * Concurrent calls for the same symbol share one in-flight subscription. A spot
-     * tick may carry only bid or only ask, so ticks are merged until both are seen or
-     * the timeout elapses (resolves with whatever arrived; throws if nothing did).
-     *
-     * @param {string} symbolName  app/broker symbol name (resolved via the symbol list)
-     * @returns {Promise<{ symbolId:number, bid:number|null, ask:number|null, mid:number, digits:number, at:number }>}
-     */
-    async getSpotPrice(symbolName) {
-        const { symbolId, digits } = await this.resolveSymbol(symbolName)
-        if (this._spotInflight.has(symbolId)) return this._spotInflight.get(symbolId)
-
-        const p = this._snapshotSpot(symbolId, digits)
-        this._spotInflight.set(symbolId, p)
-        p.finally(() => this._spotInflight.delete(symbolId))
-        return p
-    }
-
-    async _snapshotSpot(symbolId, digits) {
-        let bid = null, ask = null
-        let resolveTick
-        const gotFullQuote = new Promise(res => { resolveTick = res })
-
-        const onSpot = payload => {
-            if (Number(payload?.ctidTraderAccountId) !== this.ctid) return
-            if (Number(payload?.symbolId) !== Number(symbolId)) return
-            if (payload.bid != null) bid = Number(payload.bid) / SPOT_PRICE_SCALE
-            if (payload.ask != null) ask = Number(payload.ask) / SPOT_PRICE_SCALE
-            if (bid != null && ask != null) resolveTick()
-        }
-        this._socket.on('spot', onSpot)
-        const timer = setTimeout(resolveTick, SPOT_TIMEOUT_MS)   // settle with whatever we have
-
-        try {
-            await this.send(PT.SUBSCRIBE_SPOTS_REQ, { symbolId: [symbolId] })
-            await gotFullQuote
-        } finally {
-            clearTimeout(timer)
-            this._socket.off('spot', onSpot)
-            // Best-effort unsubscribe so we don't leak a server-side subscription.
-            this.send(PT.UNSUBSCRIBE_SPOTS_REQ, { symbolId: [symbolId] }).catch(() => {})
-        }
-
-        if (bid == null && ask == null) {
-            throw new Error(`[${this.env}:${this.ctid}] no spot quote for symbolId ${symbolId} within ${SPOT_TIMEOUT_MS}ms`)
-        }
-        const mid   = (bid != null && ask != null) ? (bid + ask) / 2 : (bid ?? ask)
-        const round = v => (v == null ? null : roundPrice({ digits }, v))
-        return { symbolId, bid: round(bid), ask: round(ask), mid: round(mid), digits, at: Date.now() }
     }
 
     // ── Trendbars (OHLCV) ──────────────────────────────────────────────────────

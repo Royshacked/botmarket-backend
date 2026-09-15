@@ -7,7 +7,7 @@ import { routeExits, detectNativeEntryLevel } from '../../services/protectionPla
 import { toBrokerSymbol }       from '../../services/brokerSymbol.service.js'
 import { executionReconciler }  from '../../monitoring/execution.reconciler.js'
 import { orderSymbol }          from '../../monitoring/exitOrders.util.js'
-import { exitFields, basisReferenceQuote } from './exitOrders.service.js'
+import { exitFields }          from './exitOrders.service.js'
 import { entityRepo }          from '../../services/entity/entityRepo.service.js'
 import { ownsEntity }          from '../../services/entity/entityCrud.service.js'
 import { AWAITING_CONFIRM, isRestingEntry } from '../../services/entity/vocabulary.js'
@@ -110,7 +110,7 @@ export async function placeOrdersForIdea(id, orders, userId) {
             status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed', brokerOrders,
             brokerSymbol: idea.brokerSymbol,
             ...(basis ? { research_basis: basis } : {}),
-            ...(await exitFields(idea, route)),
+            ...exitFields(route),
         }
         let updated = await entityRepo.patchAndGet(id, set)
 
@@ -196,7 +196,6 @@ export async function placeRestingEntryForIdea(id, userId) {
         if (plan[0]?.broker) idea.brokerSymbol = toBrokerSymbol(plan[0].broker, idea.asset)
 
         const route          = await routeExits(idea)
-        const referenceQuote = await basisReferenceQuote(idea)
 
         const results      = []
         const brokerOrders = []
@@ -211,7 +210,6 @@ export async function placeRestingEntryForIdea(id, userId) {
                 quantity:  order.quantity,
                 type:      idea.entryOrderType,
                 ...restingEntryPrice(idea.entryOrderType, brokerPrice),
-                ...(referenceQuote != null && { referenceQuote }),
             }
             try {
                 const result = await brokerService.placeOrder(order.broker, userId, order.accountId, brokerOrder)
@@ -240,7 +238,7 @@ export async function placeRestingEntryForIdea(id, userId) {
             entryTriggerPrice: triggerPrice,
             brokerOrders,
             brokerSymbol:      idea.brokerSymbol,
-            ...(await exitFields(idea, route, referenceQuote)),
+            ...exitFields(route),
         }
         const updated = await entityRepo.patchAndGet(id, set)
 

@@ -610,7 +610,6 @@ async function _placeOneExit(idea, accountId, broker, leg, level, qty, positionI
         level,
         qty,
         positionId,
-        referenceQuote: idea.nativeExit?.referenceQuote ?? null,
     })
     const res = await _deps.brokerService.placeOrder(broker, idea.userId, accountId, order)
     return { orderId: res?.orderId != null ? String(res.orderId) : null }

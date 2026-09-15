@@ -563,13 +563,12 @@ async function updateIdea(id, rawPatch, userId) {
                 if (broker) { merged.brokerSymbol = toBrokerSymbol(broker, merged.asset); patch.brokerSymbol = merged.brokerSymbol }
 
                 const route = await routeExits(merged)
-                const { exitOrders, referenceQuote } = await armExitsInPosition(merged, route)
+                const { exitOrders } = await armExitsInPosition(merged, route)
 
                 patch.exitOrders = exitOrders
                 patch.nativeExit = {
                     stop: route.stop.nativeOrders,
                     tp:   route.tp.nativeOrders,
-                    referenceQuote: referenceQuote ?? null,
                 }
                 patch.monitorStop     = route.stop.monitorTree != null
                 patch.monitorTp       = route.tp.monitorTree   != null

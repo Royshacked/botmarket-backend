@@ -84,20 +84,16 @@ import { logger }                  from '../../../services/logger.service.js'
  *                                                 adapter converts to the broker's native
  *                                                 units (e.g. cTrader volume = lots × lotSize)
  * @property {'market'|'limit'|'stop'}  type
- * @property {number} [limitPrice]      required for limit orders
- * @property {number} [stopPrice]       required for stop orders
+ * @property {number} [limitPrice]      required for limit orders. Already in the BROKER's price space:
+ *                                      the caller shifts an authored level by the entity's fork-measured
+ *                                      basisOffset (brokerPrice.applyOffset) — adapters round, never shift.
+ * @property {number} [stopPrice]       required for stop orders (same price-space rule)
  * @property {number} [stopLoss]        absolute protective stop price (native SL)
  * @property {number} [takeProfit]      absolute protective take-profit price (native TP)
  * @property {number} [referencePrice]  expected entry price; required to attach native SL/TP
  *                                      to a market order (brokers that take a relative SL/TP
  *                                      distance derive it from here). Ignored for limit/stop
  *                                      orders, where the limit/stop price is the reference.
- * @property {number} [referenceQuote]  the CANONICAL (app/Massive-feed) live price of the
- *                                      instrument at order time. Present only when the broker
- *                                      lists the instrument under an aliased symbol whose price
- *                                      basis differs (e.g. NQ future vs cTrader's US100 cash):
- *                                      the adapter shifts absolute prices (limit/stop entry) onto
- *                                      the broker's book by offset = brokerSpotMid − referenceQuote.
  * @property {string} [clientOrderId]   caller-supplied id for idempotency / correlation
  * @property {string} [positionId]      mark this order a CLOSING order for that position:
  *                                      it must only reduce/close the position, never open an
@@ -122,8 +118,6 @@ import { logger }                  from '../../../services/logger.service.js'
  * @typedef {Object} BrokerProtection
  * @property {number} [stopLoss]    absolute stop-loss price   (omit to leave unchanged)
  * @property {number} [takeProfit]  absolute take-profit price (omit to leave unchanged)
- * @property {number} [referenceQuote]  canonical live price at amend time; see BrokerOrder —
- *                                      the adapter shifts absolute SL/TP onto the broker's book.
  *
  * Normalised execution push event — the shape every broker translates its native
  * fills/updates into, so the unified backend→frontend channel is broker-agnostic.

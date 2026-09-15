@@ -119,7 +119,7 @@ test('open→backfill→placeExits: op sequence + final linkage/exit state', asy
         id: 'idea1', userId: 'u1', asset: 'AAPL', direction: 'long', status: 'long', quantity: 100,
         brokerSymbol: 'AAPL', basisOffset: 0,
         brokerOrders: [{ accountId: 'a1', positionId: null, orderId: 'e1', broker: 'ctrader', quantity: 100 }],
-        nativeExit: { stop: [{ level: 90, quantity: 100 }], tp: [{ level: 110, quantity: 100 }], referenceQuote: null },
+        nativeExit: { stop: [{ level: 90, quantity: 100 }], tp: [{ level: 110, quantity: 100 }] },
         exitPlacedAccounts: [],
     }]
     const { opLog, store, restore } = harness(seed)
@@ -180,7 +180,7 @@ test('resting fill: op sequence + resting→long + positionId stamped', async ()
         id: 'idea1', userId: 'u1', asset: 'AAPL', direction: 'long', status: 'resting', quantity: 100,
         brokerSymbol: 'AAPL', basisOffset: 0,
         brokerOrders: [{ accountId: 'a1', positionId: null, orderId: 'e1', broker: 'ctrader', quantity: 100 }],
-        nativeExit: { stop: [{ level: 90, quantity: 100 }], tp: [{ level: 110, quantity: 100 }], referenceQuote: null },
+        nativeExit: { stop: [{ level: 90, quantity: 100 }], tp: [{ level: 110, quantity: 100 }] },
         exitPlacedAccounts: [],
     }]
     const { opLog, store, restore } = harness(seed)

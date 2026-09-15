@@ -112,8 +112,8 @@ brokers only). Everything else throws "not implemented" until an adapter overrid
 
 Key typedefs to know:
 
-- **`BrokerOrder`** — includes `referencePrice` / `referenceQuote` (canonical prices for
-  basis-shift on aliased instruments), `clientOrderId`, and **`positionId`** (presence ⇒
+- **`BrokerOrder`** — includes `referencePrice` (the market-order reference a relative native
+  SL/TP is measured from), `clientOrderId`, and **`positionId`** (presence ⇒
   the order only reduces/closes that position, never opens an opposite one — the hedging
   requirement).
 - **`BrokerCapabilities`** — the 8 flags above.
@@ -179,7 +179,6 @@ ctrader.ws.provider.js       STATEFUL transport — CTraderSocket (one per envir
         ▼
 ctrader.session.provider.js  CTraderSession — account-scoped view over the shared socket
   account-auth 2102, symbol resolve (2114 light → id, 2116 full specs),
-  spot snapshot (subscribe 2127 / unsubscribe 2129, ticks ÷1e5),
   reconcile 2124 → getOpenPositions()/getWorkingOrders(), unrealized P&L 2187,
   account list 2149.  Exports: normalizeVolume, lotsToVolume, roundPrice, priceToRelative
         ▼
@@ -206,9 +205,12 @@ ctrader.execution.js         pure ProtoOA(2126) → BrokerExecution translator
 ### How orders, protection, and hedging work
 
 - **`placeOrder`** — resolves symbol specs, converts lots → native volume
-  (`lotsToVolume` + `normalizeVolume`), applies a **basis offset** (broker spot mid −
-  canonical `referenceQuote`) to absolute limit/stop prices for aliased instruments
-  (e.g. broker `US100` vs canonical `NQ`). Native SL/TP are sent as **relative distance**
+  (`lotsToVolume` + `normalizeVolume`) and rounds prices to the symbol's digits. Prices arrive
+  ALREADY in the broker's price space: the caller shifts an authored level by the entity's
+  fork-measured `basisOffset` (`brokerPrice.applyOffset`) — one basis mechanism, applied at every
+  price boundary (placement, in-position edit, amend, resting entry). The adapter-side spot-mid
+  shift (`referenceQuote`) it used to carry had been neutralised to always-null and was removed
+  2026-09-15. Native SL/TP are sent as **relative distance**
   (`relativeStopLoss` / `relativeTakeProfit`, in 1/100000 of price) derived from the
   canonical reference price, so they are basis-immune (not shifted). If `order.positionId`
   is set, `payload.positionId` makes it a **closing order** — reduces/closes only, never
