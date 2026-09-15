@@ -77,6 +77,12 @@ export class PaperAdapter extends VirtualAdapter {
         }
     }
 
+    /** The same cap, on the account list: cash × maxLeverage, or null when the cap is off. */
+    _buyingPower(acct) {
+        const maxLeverage = Number(acct.settings?.maxLeverage) || 0
+        return maxLeverage > 0 ? round2(acct.cashBalance * maxLeverage) : null
+    }
+
     // ── Trading ──────────────────────────────────────────────────────────────────
 
     capabilities() {
@@ -219,7 +225,7 @@ export class PaperAdapter extends VirtualAdapter {
             { status: 'working' },
             { status: 'cancelled', cancelledAt: Date.now() },
         )
-        if (!won) throw new Error(`paper: order ${orderId} is not working — nothing to cancel`)
+        if (!won) throw Object.assign(new Error(`paper: order ${orderId} is not working — nothing to cancel`), { status: 409 })
         logger.info(LOG, `Cancelled working order ${orderId}`)
     }
 
@@ -230,7 +236,7 @@ export class PaperAdapter extends VirtualAdapter {
         // `amendedAt` makes the write a modification even when the price is unchanged — claimOrder
         // answers on modifiedCount, and a same-price amend must not read as "not working".
         const won = await paperBrokerService.claimOrder(userId, orderId, { status: 'working' }, { triggerPrice: price, amendedAt: Date.now() })
-        if (!won) throw new Error(`paper: order ${orderId} is not working — nothing to amend`)
+        if (!won) throw Object.assign(new Error(`paper: order ${orderId} is not working — nothing to amend`), { status: 409 })
         return { orderId }
     }
 

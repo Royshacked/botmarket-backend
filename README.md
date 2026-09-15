@@ -736,7 +736,7 @@ onto `broker:'paper'` and the account the user picked in the selector.
   call the non-idempotent `openPosition` and silently double the size.
 - **Marks** are refreshed by their own loop (`monitoring/paperMark.service.js`, ~3s).
 - **Cost model:** spread crossed via `spreadBps` (buy→ask, sell→bid) baked into effective price,
-  plus `commissionPerTrade` debited per fill. Per-user, default ON, set via `PUT /api/paper/settings`.
+  plus `commissionPerTrade` debited per fill. Per account, set via `PATCH /api/paper/accounts/:accountId` (`spreadBps`, `commissionPerTrade`, `maxLeverage`).
 - **Equity curve** snapshotted every 5 min (`monitoring/paperEquity.service.js`) for users with
   open positions.
 - **Trade capture** (`services/tradeCapture.service.js`) writes an append-only `trades` collection

@@ -1,10 +1,9 @@
 /**
  * IBKR TWS API — STATEFUL trading transport (socket to IB Gateway / TWS).
  *
- * Companion to ibkr.provider.js (the older stateless Client Portal REST client,
- * kept only for historical bars until Phase 2 retires it). This file owns the
- * persistent socket used for everything else: account, positions, candles,
- * orders, and the execution feed — all over one connection, via @stoqey/ib.
+ * The ONLY IBKR transport: the persistent socket used for everything — account, positions,
+ * candles, orders, and the execution feed — all over one connection, via @stoqey/ib. (The older
+ * stateless Client Portal REST client, providers/ibkr.provider.js, was deleted 2026-09-15.)
  *
  * SCOPE (Phase 1) — transport + connection lifecycle. It knows nothing about our
  * unified contracts; the adapter layer normalizes. It exposes promise-based

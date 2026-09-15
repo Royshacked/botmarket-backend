@@ -36,7 +36,7 @@ test('cancelOrder REFUSES an order that is no longer working — a filled row st
     fakeClaim(false)
     await assert.rejects(
         () => adapter.cancelOrder('u1', 'paper-u1-a', 'o-filled'),
-        /not working/,
+        err => /not working/.test(err.message) && err.status === 409,
     )
 })
 
@@ -51,7 +51,7 @@ test('amendOrder re-prices under the same guard', async () => {
 
 test('amendOrder refuses a non-working order and still insists on a price', async () => {
     fakeClaim(false)
-    await assert.rejects(() => adapter.amendOrder('u1', 'paper-u1-a', 'o-filled', { limitPrice: 5 }), /not working/)
+    await assert.rejects(() => adapter.amendOrder('u1', 'paper-u1-a', 'o-filled', { limitPrice: 5 }), err => /not working/.test(err.message) && err.status === 409)
     await assert.rejects(() => adapter.amendOrder('u1', 'paper-u1-a', 'o1', {}), /requires a new limitPrice or stopPrice/)
 })
 

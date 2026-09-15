@@ -114,3 +114,11 @@ test('manual guards every trading op; the shared reads still answer', async () =
     assert.equal(manual.capabilities().selfExecuted, true)
     assert.equal(paper.capabilities().selfExecuted, false)
 })
+
+// A stray maxLeverage on a MANUAL account (the settings PATCH is mode-agnostic) must not become
+// leveraged free cash on the account list while the summary says "no leverage".
+test('leveraged buying power is paper\'s alone on the account list too', async () => {
+    stubStore({ accounts: [{ ...ACCTS[0], settings: { maxLeverage: 4 } }, { ...ACCTS[1], settings: { maxLeverage: 4 } }] })
+    assert.equal((await paper.getTradingAccounts('u1'))[0].freeMargin,  4000, 'cash 1000 × 4')
+    assert.equal((await manual.getTradingAccounts('u1'))[0].freeMargin, 500,  'cash, no cap — whatever settings say')
+})

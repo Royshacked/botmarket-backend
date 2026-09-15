@@ -404,6 +404,20 @@ answer arrives with the adapter rather than from a list beside the caller:
 `capabilities()` is an **exhaustive literal** per adapter, never a spread of the base — an omitted
 flag reads `undefined`, which is not `false` at every call site.
 
+**Connection is each adapter's own answer.** `listConnections` asks every registered adapter's
+`isConnected` and never special-cases a venue by name: cTrader = a saved refresh token, IBKR = saved
+gateway coordinates (no dial), **paper = the paper-mode toggle** (`connections.paper` IS the
+workspace switch — owning a paper account with the mode off is not "connected"), manual = owns ≥1
+manual account. Every answer is one cheap read; a venue whose read fails reports not-connected and
+logs it. **Reads never create:** a user with no account in a virtual mode gets an empty list / 404
+from the account routes; the account is created by the toggle (`PUT /api/paper/mode`) or an
+explicit create.
+
+**A missing or expired BROKER session answers `424` (Failed Dependency), never `401`.** 401 is the
+app's own login code and the client treats every 401 as "your session expired". The broker being
+unreachable is a failed dependency, and the message names the broker ("cTrader session expired —
+please reconnect").
+
 ### Off-hours: nothing executes while the venue is shut
 
 **RULE (2026-08-07): nothing executes off-hours, paper included.** A real market order cannot fill

@@ -19,8 +19,8 @@
  * had none, and a comment elsewhere (tradingContext) had to explain why a read with that side
  * effect was "safe despite" running on every chat turn. Every caller gates on `connections.paper`
  * first, which already means an account exists; a user with none gets an empty list, and the
- * account is created where it should be — when the toggle is flipped (setEnabled) or the user
- * creates one.
+ * account is created where it should be — by the toggle surface (`/api/paper/state` and `/mode`,
+ * which resolve the default account) or an explicit create.
  */
 
 import { BrokerAdapter }      from './broker.interface.js'
@@ -99,29 +99,38 @@ export class VirtualAdapter extends BrokerAdapter {
         return { marginLevel: null, leverage: null }
     }
 
+    /**
+     * Leveraged buying power for the trading-account list, or null when the venue has no cap. The
+     * base answers null: manual has no margin model, and `PATCH /api/paper/accounts/:id` is
+     * mode-agnostic, so a manual account CAN carry a stray `maxLeverage` — it must not turn into
+     * leveraged free cash on one read and "no leverage" on the other. Paper overrides.
+     * @returns {number|null}
+     */
+    // eslint-disable-next-line no-unused-vars
+    _buyingPower(acct) {
+        return null
+    }
+
     async getTradingAccounts(userId) {
         const accts     = await paperBrokerService.listAccounts(userId, { mode: this.brokerType })
         // Cash minus what is already committed to open positions. A virtual account's cash does NOT
         // drop when a position opens (see committedByAccount), so balance alone tells an agent it has
         // capital that is in fact invested. One query for all accounts, no quotes.
         const committed = await committedByAccount(userId)
-        return accts.map(acct => {
-            const maxLeverage = Number(acct.settings?.maxLeverage) || 0
-            return {
-                id:       acct.accountId,
-                login:    acct.accountId,
-                name:     acct.name,
-                currency: acct.currency,
-                balance:  round2(acct.cashBalance),
-                freeMargin: deployable({
-                    cashBalance: acct.cashBalance,
-                    marginUsed:  committed.get(String(acct.accountId)) ?? 0,
-                    buyingPower: maxLeverage > 0 ? round2(acct.cashBalance * maxLeverage) : null,
-                }),
-                broker:   this.brokerLabel,
-                isLive:   false,
-            }
-        })
+        return accts.map(acct => ({
+            id:       acct.accountId,
+            login:    acct.accountId,
+            name:     acct.name,
+            currency: acct.currency,
+            balance:  round2(acct.cashBalance),
+            freeMargin: deployable({
+                cashBalance: acct.cashBalance,
+                marginUsed:  committed.get(String(acct.accountId)) ?? 0,
+                buyingPower: this._buyingPower(acct),
+            }),
+            broker:   this.brokerLabel,
+            isLive:   false,
+        }))
     }
 
     // ── Positions ────────────────────────────────────────────────────────────────
