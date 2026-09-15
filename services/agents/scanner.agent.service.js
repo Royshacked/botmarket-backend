@@ -78,8 +78,6 @@ export const TOOLS = toolsFor({
     // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
     // array prefix.
     get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
-    // Appended. Aether shock feed — FRED-confirmed channel moves + opportunity cards. Call once
-    // per scan in Phase 2 to surface channel-validated macro catalysts before discovery.
     // Appended last — contractually. The reasoning sidecar (services/deepThink.service.js): one
     // bounded decision put to a stronger model and handed back as a tool result. The mechanism half
     // of this description is shared with every other desk; the clause below is Argus's own judgment

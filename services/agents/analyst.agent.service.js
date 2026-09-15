@@ -58,11 +58,6 @@ export const TOOLS = [
         // put to a stronger model and handed back as a tool result. The mechanism half of this
         // description is shared with every other desk; the clause below is this desk's own judgment
         // about WHEN, and is the only part that does not transfer.
-        // Aether — channel exposure for the name under research. Returns "not yet computed" when
-        // Phase 3 has not run; reason qualitatively in that state.
-        // Aether shock pipeline — active provisional predictions. Call in Phase 3 to surface
-        // macro channel pressure that confirms or contradicts the variant perception.
-        // Aether signals for the specific ticker under revision — confirmed + provisional.
         // consult is contractually last at every desk that declares it.
         consult: consultDescription(`Reach for it in exactly three situations: **the price target you are about to publish** — our number against the Street IS the edge, so the multiple and the arithmetic behind it have to hold up to someone attacking them; **a variant perception you cannot separate from consensus** — the bull and bear cases read as evenly weighted and you must say which way the evidence actually leans rather than splitting the difference; and **two valuation methods that disagree materially** (a DCF against comps, say) where you have to decide which one governs the target and defend that choice.`),
     }),
