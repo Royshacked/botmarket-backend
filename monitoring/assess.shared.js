@@ -23,40 +23,6 @@ export const ASSESS_MAX_TOKENS          = 2_500
 export const ASSESS_MAX_TOKENS_THINKING = 16_000
 
 /**
- * Resolve the model + reasoning effort for an assessment from the user's synced AI preferences.
- * Falls back to Sonnet / no-thinking when unset, invalid, or unreadable. Every allowed model is
- * vision-capable, so the chart read is always safe.
- *
- * ONE KNOB FOR EVERY MONITOR — "how hard should my monitors think", not one setting per monitor.
- *
- * THE KEY IS STILL CALLED `hermesModel`, and that is a decision rather than an oversight. It is a
- * PERSISTED user-preference field: every existing user document carries it, and the client writes
- * it. Renaming would mean a migration of live preferences for a cosmetic gain — the same trade the
- * setup schema refuses over `lower`/`upper`, and the same category as the Kairos names CLAUDE.md
- * keeps on purpose (a wire field is not a desk). Talos is the only monitor reading it today; Hermes
- * was archived on 2026-08-18.
- */
-/**
- * Book one monitor model call against the user who owns the entity.
- *
- * Monitor spend was invisible to the ledger: only resolveAgentStream recorded anything, and the
- * assessments call the provider directly. So the per-user total counted CHAT only — and the monitors
- * are the half that scales linearly with users, the half in-position management just added a call
- * per open position to.
- *
- * COUNTED, NEVER BLOCKED. The spend ceiling lives in resolveAgentStream, which nothing here goes
- * through, so recording cannot gate a monitor — a cost control that stops a live position being
- * managed is the one failure this must not have. The consequence of a monitor-heavy month therefore
- * lands on the user's CHAT (degraded to the cheap model) and never on their protection. That is the
- * asymmetry working as intended, not a side effect.
- *
- * Called PER ROUND. Both assessments loop over tool calls, so booking only the final reply would
- * under-report a tool-heavy wake exactly the way `turns` once under-reported a tool-heavy turn.
- *
- * Its own agent tag, so the byAgent rollup separates monitor spend from the desk's chat rather than
- * blending the two into one row. Fire-and-forget: accounting must never fail a wake.
- */
-/**
  * How the monitor should VERIFY, given the lens the setup was built through.
  *
  * The lens changes the monitor's voice and where it looks first — never its tool set. Everything is
@@ -79,6 +45,26 @@ export function lensLine(tradeMode) {
     }
 }
 
+/**
+ * Book one monitor model call against the user who owns the entity.
+ *
+ * Monitor spend was invisible to the ledger: only resolveAgentStream recorded anything, and the
+ * assessments call the provider directly. So the per-user total counted CHAT only — and the monitors
+ * are the half that scales linearly with users, the half in-position management just added a call
+ * per open position to.
+ *
+ * COUNTED, NEVER BLOCKED. The spend ceiling lives in resolveAgentStream, which nothing here goes
+ * through, so recording cannot gate a monitor — a cost control that stops a live position being
+ * managed is the one failure this must not have. The consequence of a monitor-heavy month therefore
+ * lands on the user's CHAT (degraded to the cheap model) and never on their protection. That is the
+ * asymmetry working as intended, not a side effect.
+ *
+ * Called PER ROUND. Both assessments loop over tool calls, so booking only the final reply would
+ * under-report a tool-heavy wake exactly the way `turns` once under-reported a tool-heavy turn.
+ *
+ * Its own agent tag, so the byAgent rollup separates monitor spend from the desk's chat rather than
+ * blending the two into one row. Fire-and-forget: accounting must never fail a wake.
+ */
 export function bookAssessUsage(userId, model, usage, agent, _record = recordUsage) {
     if (!userId || !usage) return
     // `monitor: true` keeps this OUT of the chat spend ceiling — see tokenUsage.chatSpend. It is
@@ -86,6 +72,20 @@ export function bookAssessUsage(userId, model, usage, agent, _record = recordUsa
     _record(userId, model, usage, agent, { monitor: true }).catch(() => {})
 }
 
+/**
+ * Resolve the model + reasoning effort for an assessment from the user's synced AI preferences.
+ * Falls back to Sonnet / no-thinking when unset, invalid, or unreadable. Every allowed model is
+ * vision-capable, so the chart read is always safe.
+ *
+ * ONE KNOB FOR EVERY MONITOR — "how hard should my monitors think", not one setting per monitor.
+ *
+ * THE KEY IS STILL CALLED `hermesModel`, and that is a decision rather than an oversight. It is a
+ * PERSISTED user-preference field: every existing user document carries it, and the client writes
+ * it. Renaming would mean a migration of live preferences for a cosmetic gain — the same trade the
+ * setup schema refuses over `lower`/`upper`, and the same category as the Kairos names CLAUDE.md
+ * keeps on purpose (a wire field is not a desk). Talos is the only monitor reading it today; Hermes
+ * was archived on 2026-08-18.
+ */
 export async function assessRouting(userId) {
     if (!userId) return { model: ASSESS_MODEL, reasoningEffort: 'off' }
     try {

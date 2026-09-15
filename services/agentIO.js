@@ -297,22 +297,6 @@ export function makeChartChatPipe(onChart, { log = '[agentIO]' } = {}) {
 }
 
 /**
- * Open a model stream for an agent and return its raw text.
- *
- * Wraps the three lines every agent repeats: resolve the model + usage recorder, log the start,
- * and call the provider's streaming fn with the standard argument bag. `meta` adds agent-specific
- * fields to the start log (asset, account count, edit mode…) without each agent re-deriving
- * `model` and `provider` for its own log line.
- *
- * `onChart` opts the agent into the chart-in-chat protocol above: the instruction is appended to its
- * system prompt, the `<chart>` tag is captured and passed to `onChart` as a live chart row, and the
- * block is stripped from the returned raw so no agent has to add it to its own strip list. It is the
- * SAME callback an agent gives its `get_chart` tool — one chart row, one event, either trigger.
- *
- * Deliberately does NOT parse otherwise: what comes back out of the stream is the agent's own
- * contract.
- */
-/**
  * An agent's log tag → the key its spend is booked under. `'[analystAgent]'` → `'analystAgent'`.
  * PURE, exported for tests.
  *
@@ -343,6 +327,22 @@ export const REASONING_CONSULT = 'consult'
 // agent. It exists because the prelude a chatStream runs before this call is the one stretch of
 // agent code nothing else covers: a bad reference there throws before the first token, and the
 // client only ever sees the generic "Streaming failed".
+/**
+ * Open a model stream for an agent and return its raw text.
+ *
+ * Wraps the three lines every agent repeats: resolve the model + usage recorder, log the start,
+ * and call the provider's streaming fn with the standard argument bag. `meta` adds agent-specific
+ * fields to the start log (asset, account count, edit mode…) without each agent re-deriving
+ * `model` and `provider` for its own log line.
+ *
+ * `onChart` opts the agent into the chart-in-chat protocol above: the instruction is appended to its
+ * system prompt, the `<chart>` tag is captured and passed to `onChart` as a live chart row, and the
+ * block is stripped from the returned raw so no agent has to add it to its own strip list. It is the
+ * SAME callback an agent gives its `get_chart` tool — one chart row, one event, either trigger.
+ *
+ * Deliberately does NOT parse otherwise: what comes back out of the stream is the agent's own
+ * contract.
+ */
 export async function runAgentStream({
     log = '[agentIO]', requestedModel, userId,
     messages, systemPrompt, tools, toolHandlers,

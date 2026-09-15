@@ -927,28 +927,6 @@ export function rangeProblems(setup) {
 // ─── Reward-to-risk ───────────────────────────────────────────────────────────
 
 /**
- * Reward-to-risk from the PESSIMISTIC fill, per docs/desks/mentor-talos.md
- *
- * SCOPED TO ONE PLAN — a scenario (via scenarioView), or the projected document, both of which carry
- * `direction` + the three zone arrays. Pricing a setup's r:r across scenarios would run one
- * premise's entry to another's target and describe a trade nobody planned.
- *
- * For a long: the worst entry is the zone's UPPER edge (you paid up), risk runs to the LOWEST
- * stop edge (the failsafe rests at the far side), reward to the NEAREST target edge. Mirrored
- * for a short. Every leg deliberately takes its unfavourable side — quoting the midpoint, or the
- * furthest target, would flatter the setup, and the whole point of the rule is that the plan
- * advertises the bad fill.
- *
- * Legs are SELECTED by price, never by array position: the model emits zones in whatever order it
- * reasoned about them, so trusting `tp_zones[0]` to be the first target would quietly hand a
- * multi-target setup the rr of its furthest leg.
- *
- * `entryPrice` overrides the zone edge — that's the LIVE rr at the confirm card, computed from
- * the actual price rather than the plan.
- *
- * Returns null when any leg is missing or risk is zero (an entry inside its own stop).
- */
-/**
  * The price a leg is REACHED at, per side. A zone is a band, so which edge counts depends on which
  * way price arrives: a long's stop is hit at the band's `lower`, its target at the band's `lower`
  * too (price rises into the near edge). Mirrored for a short. Pure.
@@ -1100,6 +1078,28 @@ export function targetLevels(setup) {
         .sort((a, b) => (isLong ? a.target - b.target : b.target - a.target))
 }
 
+/**
+ * Reward-to-risk from the PESSIMISTIC fill, per docs/desks/mentor-talos.md
+ *
+ * SCOPED TO ONE PLAN — a scenario (via scenarioView), or the projected document, both of which carry
+ * `direction` + the three zone arrays. Pricing a setup's r:r across scenarios would run one
+ * premise's entry to another's target and describe a trade nobody planned.
+ *
+ * For a long: the worst entry is the zone's UPPER edge (you paid up), risk runs to the LOWEST
+ * stop edge (the failsafe rests at the far side), reward to the NEAREST target edge. Mirrored
+ * for a short. Every leg deliberately takes its unfavourable side — quoting the midpoint, or the
+ * furthest target, would flatter the setup, and the whole point of the rule is that the plan
+ * advertises the bad fill.
+ *
+ * Legs are SELECTED by price, never by array position: the model emits zones in whatever order it
+ * reasoned about them, so trusting `tp_zones[0]` to be the first target would quietly hand a
+ * multi-target setup the rr of its furthest leg.
+ *
+ * `entryPrice` overrides the zone edge — that's the LIVE rr at the confirm card, computed from
+ * the actual price rather than the plan.
+ *
+ * Returns null when any leg is missing or risk is zero (an entry inside its own stop).
+ */
 export function computeRR(setup, entryPrice = null) {
     const isLong = setup?.direction === 'long'
     const entryZone = setup?.entry_zones?.[0]
