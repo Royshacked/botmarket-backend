@@ -17,11 +17,16 @@ import { newsService } from '../../services/news.service.js'
 import { logger } from '../../services/logger.service.js'
 import { extractFirstJSON } from '../../monitoring/parsers/llmReply.parser.js'
 import { _thinkingConfig, advanceToolLoopCache } from '../../providers/anthropic.provider.js'
-// Shared assessment mechanics — routing, token caps, the candle block, the index list. Hermes and
+// Shared assessment mechanics — routing, token caps, the candle block. Hermes and
 // Talos had byte-identical copies; the JUDGMENT (prompts, gather strategy, verdicts) stays local.
-import { assessRouting as _hermesRouting, candlesText as _candlesText, BROAD_INDICES,
+import { assessRouting as _hermesRouting, candlesText as _candlesText,
     ASSESS_MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING, bookAssessUsage } from '../../monitoring/assess.shared.js'
 import { config } from '../../services/config.js'
+
+// Broad-market barometer: index breadth + the risk gauge. Hermes's own — it scored four fixed axes
+// on every wake, so it always pulled the tape; Talos reads only what the setup names, so the
+// constant left assess.shared.js when it went unused there (2026-09-15).
+const BROAD_INDICES = ['SPY', 'QQQ', '^VIX']
 
 const LOG = '[hermes.assess]'
 

@@ -22,9 +22,6 @@ export const ALLOWED_EFFORTS = new Set(['off', 'low', 'high'])
 export const ASSESS_MAX_TOKENS          = 2_500
 export const ASSESS_MAX_TOKENS_THINKING = 16_000
 
-// Broad-market barometer: index breadth + the risk gauge.
-export const BROAD_INDICES = ['SPY', 'QQQ', '^VIX']
-
 /**
  * Resolve the model + reasoning effort for an assessment from the user's synced AI preferences.
  * Falls back to Sonnet / no-thinking when unset, invalid, or unreadable. Every allowed model is
