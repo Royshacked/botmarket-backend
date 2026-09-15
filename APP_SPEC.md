@@ -146,7 +146,7 @@ capability**, and none of them tied to a desk's lifecycle:
 | Capability | Owner | Contract |
 |---|---|---|
 | entry poll | `monitoring/entry.monitor.js` | selects `looking`, evaluates the entry tree, flips to `hit`, builds the order plan, posts the confirm card. Off-hours it parks at `awaiting_market` and lets the market-open sweep own the card (§5) |
-| exit poll | `monitoring/exit.monitor.js` | selects `long`/`short` and calls `positionMonitor.checkPosition` on the residual leg — everything `routeExits` could NOT rest at the broker |
+| exit poll | `monitoring/exit.monitor.js` | selects `long`/`short` and calls `positionMonitor.checkPosition` on the residual leg — everything `routeExits` could NOT rest at the broker. Both idea-tier loops share one persisted cadence (`monitoring/monitorSchedule.util`), so they cannot disagree about when a document is due |
 | deferred-order sweep | `monitoring/marketOpen.monitor.js` | kind-blind; the ONE drain for everything parked while the venue was shut |
 | the invalidation ENVELOPE | **nobody — deleted** | see below |
 
@@ -485,6 +485,28 @@ moment they act, and they execute it from a list at the open. Full design:
   directly (`captureOpenBare`, idealess fallback — mutually exclusive with the idea path, no double
   capture) so every closed paper trade appears in trade history.
 
+### Pulling a resting order back
+
+Two kinds of entry rest AT the broker before they are a position: an idea's stop-market entry
+(`status:'resting'`) and a setup's confirmed LIMIT entry (`status:'hit'`, `orderState:'placed'`).
+Neither is delete-locked — only a live `long`/`short` position is — so **every path that stops an
+entity claiming an order must first cancel it**, or the order fills later with nothing tracking it
+and the reconciler has no entity to match the fill against.
+
+The paths, all of which go through `restingOrders.cancelRestingEntryOrders` (cancel every leg with
+an `orderId` and no `positionId`; a leg that already became a position is never cancelled):
+
+| Trigger | Path |
+|---|---|
+| delete the entity | the crud's `onBeforeDelete`, which runs only once not_found / forbidden / in_position have passed |
+| disarm (`hit`/`resting` → `waiting`) | the status patch itself — this is what the UI's disarm button sends |
+| explicit disarm | `POST /api/setups/:id/disarm` |
+| expiry / validity breach | Talos's own `_disarmLimit` |
+
+A disarmed setup returns to `waiting` with every armed field cleared (`setup.schema.disarmedSetupPatch`
+— one list, so a field added to one path cannot be forgotten by the others). Re-arming is always the
+user's separate act; nothing silently goes back to watching.
+
 ### Venue gate
 
 Every monitored idea must have a venue. If a child resolves to `broker == null` (no account resolved and
@@ -514,10 +536,14 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
 - **Monitor:** the primary instrument's candles come from the broker (`capabilities().ohlcv`) and are shifted by
   `−basisOffset` (O/H/L/C only) into the authored space, so conditions compare unchanged. Cross-asset legs / paper /
   no-broker use the app feed. (Broker-served candles are also cost-free vs the paid app feed.)
-- **Execution:** order prices are shifted by `+basisOffset` into the broker's space (`buildExitOrder`, resting entry).
-  Persisted `entryTriggerPrice` / `exitOrders.price` stay REAL (the app shows real prices; the broker order holds the
-  shifted price — surfaced by a "trades as US100" pill). The legacy `basisReferenceQuote` adapter shift is neutralised
-  (no double-conversion).
+- **Execution:** order prices are shifted by `+basisOffset` into the broker's space, and that happens at EVERY price
+  boundary through the one helper `brokerPrice.applyOffset` — placement (`buildExitOrder`), the resting entry, an
+  in-position stop/target edit (`armExitsInPosition`) and a Talos `move_stop` / `let_run` amend. Persisted
+  `entryTriggerPrice` / `exitOrders.price` stay REAL (the app shows real prices; the broker order holds the shifted
+  price — surfaced by a "trades as US100" pill). **Adapters round, never shift:** a price arriving at an adapter is
+  already in the broker's space. The second, adapter-side mechanism (`referenceQuote`, a spot-mid shift) had been
+  neutralised to always-null and was removed outright on 2026-09-15 — two mechanisms for one basis is exactly where
+  the two unshifted paths above came from.
 
 ---
 

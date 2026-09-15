@@ -15,8 +15,8 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | # | Section | Files | Status |
 |---|---|---|---|
 | 1 | Broker + execution | `api/broker/**`, `api/paper/**`, `monitoring/execution.reconciler.js`, `monitoring/paper*.service.js`, `services/executionBus.js` | ✅ done — 8 commits `59d08b1`..`06d86d9`, suite **2849 / 0** |
-| 2 | Trade tier (`idea`) | `api/trade-ideas/**`, `tradeCapture`, `tradeNotify`, `positionManage`, `protectionPlan`, `monitoring/positionMonitor.js`, `entry.monitor.js` | next |
-| 3 | Mentor / setups + Talos | `api/setups/**`, `setup.schema.js`, `mentor.agent.service`, `talos.*`, `monitoring/evaluators/**`, `parsers/**` | |
+| 2 | Trade tier (`idea`) | `api/trade-ideas/**`, `tradeCapture`, `tradeNotify`, `positionManage`, `protectionPlan`, `monitoring/positionMonitor.js`, `entry.monitor.js`, `exit.monitor.js` | ✅ done — 8 commits `e066101`..`e6c42d0` |
+| 3 | Mentor / setups + Talos | `api/setups/**`, `setup.schema.js`, `mentor.agent.service`, `talos.*`, `monitoring/evaluators/**`, `parsers/**`, `guardSweep`, `readinessGates` | ✅ done — 6 commits `227d711`..`58e7f3d` |
 | 4 | Atlas / portfolio | `api/portfolio/**`, `portfolio.agent.service`, `portfolioState`, `sleeveSource`, `adoptBook` | |
 | 5 | Agent runtime | `agentIO`, `agentUtils`, `agentTools.registry`, `services/tools/**`, `pendingAction/**`, `entity/**`, `axl.agent.service`, `api/chat/**` | |
 | 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | |
@@ -128,3 +128,143 @@ issues**; five lows, three fixed in the cycle commit:
 | 3 | `VirtualAdapter.getTradingAccounts` applied paper's `cash × maxLeverage` to manual accounts too (the settings PATCH is mode-agnostic, so a manual account can carry a stray cap) | `_buyingPower(acct)` hook — base null, paper overrides; pinned by test |
 | 4 | `ibkr.gateway.provider.js` header still named the deleted `ibkr.provider.js` as its companion | Header fixed |
 | 5 | FE `paper.service.remote.js` still defines four client methods for deleted routes | Frontend follow-up (listed above) |
+
+---
+
+## §2 Trade tier (`idea`) — done
+
+**Verdict in one line:** the tier is well-guarded (claims, `ownsEntity`, the hours gate, kind-blind
+loops), and the problems clustered in one place — the futures/CFD basis existed **twice**, one copy
+switched off but wired everywhere, and the gap between them is where two live price bugs lived.
+
+### Bugs
+
+| | Where | What | Sev |
+|---|---|---|---|
+| 1 | `exitOrders.armExitsInPosition` | Editing a stop/target WHILE IN POSITION built the closing order inline with the **raw** authored level. The placement path shifts by `basisOffset`; this one did not — so on a cTrader index CFD the same stop rested ~227 pts apart depending on *when* it was set. | **high** |
+| 2 | `positionManage.executeManage` | Talos's `move_stop` / `let_run` amended at the raw level, same basis, same consequence. | **high** |
+| 3 | `protectionPlan._warnUnmonitored` | Logged `ERROR "nothing evaluates the software monitor"` on every placement with a residual tree. True after Minos was deleted, **false since `exit.monitor` landed** — its own header says so, and the guard said "DELETE WHEN THAT LOOP LANDS". Every structured stop raised a false error that would have buried a real one. | medium |
+| 4 | `tradeIdeas.updateIdea` | The edit whitelist lived in the **controller**, so it governed the HTTP ticket and not Atlas's `update_item`, which hands an agent-authored patch straight to `updateIdea` — any field, `userId` and `brokerOrders` included. Moved to the service as `EDITABLE_FIELDS` / `pickEditable`. | **high** (security-shaped) |
+
+### The lens
+
+**(a) Architecture** — the neutralised basis mechanism removed end to end: `basisReferenceQuote` (a
+documented no-op), the `referenceQuote` plumbing through eight files, a **persisted** `nativeExit`
+field, the `BrokerOrder`/`BrokerProtection` typedefs, cTrader's `_priceOffset` / `_positionSymbol` /
+`setProtection` branch and the session's spot-snapshot machinery (subscribe 2127 → first tick →
+unsubscribe 2129). One mechanism now: the offset is measured once at fork and applied by
+`applyOffset` at every price boundary; adapters round, never shift.
+
+**(b) Conventions** — `tradeIdeas.controller`'s eight hand-rolled catches → `makeHandle`; the three
+manual-confirm and two manual-portfolio handlers folded into two small factories (they differed only
+in which service function they called). Two `tradeCapture` JSDoc blocks were attached to the wrong
+functions.
+
+**(c) Duplications** — `pendingOrderFields` (the "entry fired, park the plan" shape, written out at
+four sites, each carrying the off-hours rule), `placedStamp` (the post-fill stamp, three writers),
+`monitorSchedule.util` (entry/exit monitors each carried the whole cadence: constants, the ISO
+next-check stamp with its one-minute floor, the sleep-until-open arithmetic). Last two `×10000`
+roundings → `round4`.
+
+**(d) Dead code** — the `db` handle threaded through six reconciler functions *and* out into
+`ideaExecution`; `_findActiveByPosition`; `currentReferencePrice`; `routeExits().single` (always
+null, no readers); `persistConditionStates`' two vestigial params; `STALE_HOURS`; `hasVwap`; three
+aggregate objects; `ideaService.buildIdeaChildren`. The four Kairos card builders + their notify
+wrappers moved to `archive/services/kairosNotify.service.js` with their tests — no production caller
+since Hermes was archived, and `notificationCard.test`'s `allCards()` now enumerates the **live**
+builders, four of which it had never covered.
+
+**(e) MVC** — `positionManage` (a `services/` file) held Mongo `$set`/`arrayFilters`; now routed
+through `entityRepo`, which gained `syncExitOrder` beside `markExitOrderFilled`.
+
+**(f) Spaghetti** — `updateIdea` was 185 lines interleaving two jobs: shaping a patch from the body,
+and applying transitions that need the stored status. Split into pure `normalizeIdeaPatch` + a
+PHASE 2 block. **Deliberately not a `(from,to)` table** — several steps aren't keyed on a status pair
+at all, and forcing them into one would invent an abstraction the code does not have.
+
+**(g) Plaster** — bug 3's expired guard; `basisReferenceQuote` "kept as an exported no-op"; the
+`brokerSymbol` re-derivation that overwrites the getTicker-resolved name.
+
+---
+
+## §3 Mentor / setups + Talos — done
+
+**Verdict in one line:** the most carefully *reasoned* code in the repo — the guard design, the
+scenario-as-rival-premise model, the two-step validity gate (tick filters, close decides) — with two
+real holes, both in the **limit-order lifecycle**, and one large duplication block whose stated
+expiry condition had passed.
+
+### Bugs
+
+| | Where | What | Sev |
+|---|---|---|---|
+| 1 | `setups.service.deleteSetup` | A `hit` setup is not delete-locked (only long/short are), and a confirmed limit entry rests at the broker while it waits at `hit`. Deleting the document left the order working with nothing tracking it — it fills later, and the reconciler finds no entity for the fill. The idea path has guarded this since it gained resting entries. | **high** |
+| 2 | `talos.monitor` + `setups.routes` | **No user could cancel a resting limit order.** `disarm_requested` was read by the monitor and written by **nothing**; `POST /:id/disarm` has no client; the UI's disarm sends `PATCH {status:'waiting'}`, which dropped the setup to `waiting` and left the order live. Only expiry and a validity breach could actually disarm. | **high** |
+
+### The lens
+
+**(a) Architecture** — the boxed "DELETE WHEN HERMES SLEEPS" note had expired (Hermes archived
+2026-08-18, imported by nothing) and was instructing readers to maintain parity with dead code.
+`talos.monitor.service.js` at ~1500 lines held four jobs; its ~440 pure lines became
+`monitoring/talos.gates.js` — a strict move, the same split this file has taken three times before.
+
+**(b) Conventions** — `setups.controller`'s five hand-rolled catches → `makeHandle`;
+`_checkPosition`'s JSDoc had drifted onto `_disarmLimit`.
+
+**(c) Duplications** — the resting-order cancel loop existed in **three** copies (ideas, Talos's
+`_disarmLimit`, the handoff's `disarmSetup`) → `services/restingOrders.cancelRestingEntryOrders`
+(the pipe; *when* there is an order stays each caller's judgment). The eight-field disarm reset
+existed in three copies → `setup.schema.disarmedSetupPatch` — one of them had been silently leaving
+`armed_scenario_id` behind since rivals arrived.
+
+**(d) Dead code** — `gradedGap`; `_reschedule`'s ignored third argument at four sites;
+`PAST_ENTRY_LEGACY` and the no-op `includeLegacy` parameter it existed to feed;
+`_MENTOR_AETHER_HANDLERS` (an empty `{}` spread into the handlers) and the orphaned Aether comment
+block above it; `COVERAGE_DIMENSIONS`'s export.
+
+**(e) MVC** — `talos.handoff` reached for `db.collection(ENTITIES)` in five places → `entityRepo`
+built over the injected `getDb`, so a desk test's fake db still sees every write.
+
+**(g) Plaster** — the expired Hermes note; the `disarm_requested` flag as a second mechanism for
+something the synchronous path already does better.
+
+### Judgment calls made against the plan
+
+- **`hermesModel` / `hermesReasoning` were NOT renamed.** They are a *persisted* user-preference
+  field — every user document carries it and the client writes it — so a rename means migrating live
+  preferences for a cosmetic gain. That is the trade `setup.schema` refuses over `lower`/`upper`, and
+  the category CLAUDE.md protects for the surviving Kairos names. Documented as a deliberate survivor.
+- **`disarm_requested` was deleted rather than wired.** Two mechanisms for one user action, differing
+  only by a poll's delay.
+
+### CODE_MAP correction
+
+Its Talos entry documented a **MOMENTUM PULSE** — `shouldPulse`, `monitor_state.pulse_anchor_px` /
+`last_pulse_at`, `nearestZoneWidth` — that exists nowhere in the tree; guards replaced it. Rewritten
+to the cascade that actually runs.
+
+---
+
+## QA / CR cycle on §2–§3 (2026-09-15)
+
+QA: lint + full suite green (**2864 / 0**); all 275 backend modules import cleanly.
+
+A repo-wide scan for the misattached-JSDoc pattern §2 and §3 had each turned up (a doc-block opener
+on the line directly after a doc-block closer — the first block then documents nothing) found five
+more, in `paperExecution`, `entityController.util`, `tilt.service`, `originRegistry` and
+`setups.service`. All moved onto their real functions; the scan is now clean repo-wide.
+
+### Frontend follow-ups (botmarket-frontend — not this repo, carried forward)
+
+| From | What |
+|---|---|
+| §1 | `paper.service.remote.js` still defines `updateSettings` / `reset` / `getTrades` / `getEquityCurve` for deleted routes |
+| §1 | A broker-disconnected error now arrives as **424**, a natural hook for a "reconnect cTrader" affordance |
+| §3 | `isSetupArmed` is `looking`-only, so a `hit` limit setup offers the user no disarm button — the backend is correct whichever call it receives, but the affordance is missing |
+
+### Known flake (for §10)
+
+Mid-§2 the full suite failed four tests with 33s/85s durations; the same file passed alone and the
+suite passed on re-run. The run's logs show `FMP 429` / `finnhub 429` — those "unit" tests make
+**live network calls** (the LLM condition parser, FMP). Load-dependent, pre-existing, and the right
+fix belongs with the tests section.

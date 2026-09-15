@@ -28,7 +28,8 @@ api/
                               brokerSymbol + fork-time basisOffset per child; venue gate
                               (no broker + no paper → reject, reason:'no_venue')
     ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now")
-    exitOrders.service.js     in-position exit (re)arming (basisReferenceQuote now a neutralised no-op)
+    exitOrders.service.js     in-position exit (re)arming — through buildExitOrder, so the basis offset is
+                              applied once, by the one helper, on this path as on placement
   portfolio/              Portfolio Agent + review    /api/portfolio/*
                           A book is NOT a document — it exists as the items carrying its
                           portfolioId — so its CRUD reads are shaped by hand rather than by
@@ -105,6 +106,9 @@ api/
   _shared/                cross-controller helpers:
       sse.util.js             startSseStream() — SSE headers + heartbeat + abort wiring
       parse.util.js           parseChatMessages / parseIdeaAccounts
+      handle.util.js          makeHandle(log) — wrap an async handler so a throw is logged WITH its
+                              route and formatted by the ONE global error handler (server.js). A
+                              controller that hand-rolls `catch → res.status(500)` is re-typing it
       chatState.util.js       makeGetChatState / makeDeleteChatState factories
       reason.util.js          THE reason→HTTP map (in_position=409, forbidden=403 …) + sendReason();
                               route-owned reasons are passed in as `overrides`, never re-mapped locally
@@ -237,6 +241,10 @@ services/
   number.util.js            rounding, once: roundTo/round2/round4/round8 (NaN through), roundOrNull
                             (display: not-reported → null), roundOrZero (quantities). Replaced twelve
                             private `_round2`-style copies; import from here, never redeclare
+  restingOrders.service.js  cancelRestingEntryOrders(entity, userId) — pull an entity's WORKING entry
+                            orders off the broker (an `orderId` with no `positionId`). The pipe for
+                            every path that stops an entity claiming its order: delete, disarm,
+                            expiry. WHEN there is one to pull stays the caller's judgment
   logger.service.js  tokenUsage.service.js
   ohlcv.service.js          getCandles(symbol,timeframe,count) → the compact {t,o,h,l,c,v} the
                             EVALUATORS read. A relabel over priceService, not a fetcher. Was
@@ -406,6 +414,11 @@ monitoring/
                             never enter, because outside every zone nothing is armed: no zone id, no
                             leg size, no fill anchor. Talos NEVER executes — every verdict is a card
                             the user confirms
+  monitorSchedule.util.js   the persisted cadence entry.monitor and exit.monitor SHARE — poll/timeout/
+                            min/idle constants, the ISO next-check stamp (floored at a minute) and the
+                            sleep-until-open arithmetic. Two loops that must agree on when a document
+                            is due; they used to carry a copy each. Talos is NOT a caller (its cadence
+                            is a judgment its model writes down, through the journal)
   talos.gates.js            its PURE tier, split out 2026-09-15: the zone/scenario gates, guard
                             resolution, the in-position arithmetic (rMultiple/metrics/positionGate),
                             the validity + breach machinery, and the condition/cost ledger. No IO, no
