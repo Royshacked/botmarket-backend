@@ -1,54 +1,35 @@
 /**
- * Paper (simulation) broker adapter.
+ * Paper (simulation) broker adapter — the TRADING half of a virtual venue.
  *
  * A broker with no venue: it fills against the LIVE price feed and tracks a virtual
  * per-user account, so the existing monitor + reconciler run unchanged. Paper trades
  * the app's CANONICAL asset symbols directly (no CFD aliasing — there is no paper
  * entry in brokerSymbol.service), so order.symbol is fed straight to the OHLCV feed.
  *
- * Build status (docs/architecture/paper-trading-simulation.md):
- *   Phase 1 — account + adapter skeleton: market fills, close, list/cancel/amend.  DONE
- *   Phase 2 (this) — fill engine triggers resting entries + closing exits; this
- *                    adapter delegates position mutation to paperExecution.service.  DONE
- *   Phase 3 — costs (spread/commission) + margin model.
+ * The reads (account, trading accounts, positions, single-position lookup) are the shared
+ * VirtualAdapter's; this class owns what makes paper PAPER: market orders fill instantly
+ * through paperExecution, limit/stop orders rest in paperOrders for the fill engine
+ * (monitoring/paperFill.service), and the cost model (spread / commission / advisory
+ * leverage cap) lives on the account's settings. See docs/architecture/paper-trading-simulation.md.
  *
- * One simulated account per user; equity = cashBalance + Σ unrealized (open positions
- * marked to the live price). Cash moves only by realized P&L, so equity is always
- * cash + unrealized with no notional bookkeeping.
+ * N user-named accounts per user; equity = cashBalance + Σ unrealized (open positions
+ * marked to the live price). Cash moves only by realized P&L and commission, so equity is
+ * always cash + unrealized with no notional bookkeeping.
  */
 
 import { randomUUID }         from 'crypto'
-import { BrokerAdapter, NO_PRICE } from './broker.interface.js'
+import { NO_PRICE }           from './broker.interface.js'
+import { VirtualAdapter }     from './virtual.adapter.js'
 import { paperBrokerService } from '../paperBroker.service.js'
 import { openPosition,
          reducePosition,
          addToPaperPosition,
-         computeEquity,
-         committedByAccount,
-         deployable,
-         latestMarkPrice,
          exitMarkPrice,
          entryMarkPrice,
-         dirSign, round2 }    from '../paperExecution.service.js'
+         round2 }             from '../paperExecution.service.js'
 import { logger }             from '../../../services/logger.service.js'
-import { config }             from '../../../services/config.js'
 
 const LOG = '[paper.adapter]'
-
-// How old a stored mark may be before a positions READ goes and buys a fresh quote.
-//
-// The mark loop stamps `currentPrice` / `markedAt` on every open position every
-// PAPER_MARK_INTERVAL_MS (3s), in whichever process holds the instance lease. The positions read
-// used to ignore that and re-price every symbol on every call — and the client polls it every 4s,
-// one beat past the 3s quote cache, so every poll refetched every symbol: 13 open symbols was
-// 195 FMP requests a minute from a process that was not even running the mark loop, most of the
-// plan's quota, and the reason candles for a chart came back 429 and the chart fell back to
-// chart-img. A mark a few seconds old is exactly the price this read would have bought.
-//
-// Five intervals, not one: a follower process cannot see the leader's tick, a leader mid-tick has
-// marks up to one interval old by construction, and a leader that has just died should age past
-// this and let the read start pricing again — which is what it always did, and now only then.
-const MARK_FRESH_MS = config.paperMarkIntervalMs * 5
 
 /**
  * The refusal that means "our own price feed had nothing", as opposed to a venue declining the
@@ -63,103 +44,24 @@ function noPriceError(symbol) {
     return err
 }
 
-export class PaperAdapter extends BrokerAdapter {
+export class PaperAdapter extends VirtualAdapter {
 
     brokerType  = 'paper'
     brokerLabel = 'Paper'
 
-    // ── Connection ───────────────────────────────────────────────────────────────
-    // No OAuth / socket — the account IS the connection. It's created on first use.
-
-    async isConnected(userId) {
-        return (await paperBrokerService.listAccounts(userId, { mode: 'paper' })).length > 0
-    }
-
     // ── Account ──────────────────────────────────────────────────────────────────
-    // `accountId` picks a specific paper account; callers that don't carry one (the
-    // generic broker dispatch) resolve the user's DEFAULT paper account.
 
-    async getAccount(userId, accountId) {
-        const acct = accountId
-            ? await paperBrokerService.getAccount(userId, accountId)
-            : await paperBrokerService.getOrCreateDefaultAccount(userId, 'paper')
-        if (!acct) throw Object.assign(new Error(`paper account ${accountId} not found`), { status: 404 })
-        const eq = await computeEquity(userId, acct.accountId)
-
-        // Exposure model: marginUsed = Σ notional. A buying-power cap (settings.maxLeverage)
-        // is ADVISORY — freeMargin/marginLevel reflect it for display, but a fill is never
-        // blocked (see computeEquity).
-        // With leverage OFF this used to report freeMargin = equity, which counts the value of what
-        // the account already holds as though it were spendable. Deployable cash is cash not yet
-        // committed (see `deployable`) — equity is what the account is WORTH, not what it can buy.
+    /**
+     * Exposure model: marginUsed = Σ notional. A buying-power cap (settings.maxLeverage) is
+     * ADVISORY — freeMargin/marginLevel reflect it for display, but a fill is never blocked
+     * (see computeEquity). This is the one venue with a leverage readout; manual has none.
+     */
+    _leverageFields(acct, eq) {
         const maxLeverage = Number(acct.settings?.maxLeverage) || 0
         return {
-            id:          acct.accountId,
-            login:       acct.accountId,
-            broker:      'Paper',
-            currency:    eq.currency,
-            balance:     eq.cashBalance,
-            equity:      eq.equity,
-            margin:      eq.marginUsed,
-            freeMargin:  deployable(eq),
             marginLevel: eq.marginUsed > 0 ? round2((eq.equity / eq.marginUsed) * 100) : null,
             leverage:    maxLeverage || null,
         }
-    }
-
-    async getTradingAccounts(userId) {
-        let accts = await paperBrokerService.listAccounts(userId, { mode: 'paper' })
-        if (!accts.length) accts = [await paperBrokerService.getOrCreateDefaultAccount(userId, 'paper')]
-        // Cash minus what is already committed to open positions. A virtual account's cash does NOT
-        // drop when a position opens (see committedByAccount), so balance alone tells an agent it has
-        // capital that is in fact invested. One query for all accounts, no quotes.
-        const committed = await committedByAccount(userId)
-        return accts.map(acct => ({
-            id:       acct.accountId,
-            login:    acct.accountId,
-            name:     acct.name,
-            currency: acct.currency,
-            balance:  round2(acct.cashBalance),
-            freeMargin: deployable({
-                cashBalance: acct.cashBalance,
-                marginUsed:  committed.get(String(acct.accountId)) ?? 0,
-                buyingPower: Number(acct.settings?.maxLeverage) > 0
-                    ? round2(acct.cashBalance * Number(acct.settings.maxLeverage))
-                    : null,
-            }),
-            broker:   'Paper',
-            isLive:   false,
-        }))
-    }
-
-    // ── Positions ────────────────────────────────────────────────────────────────
-
-    async getPositions(userId, accountId) {
-        return this._getPositionsForMode(userId, accountId, this.brokerType)
-    }
-
-    // Shared getPositions core (paper + manual). Scope to one account when the caller names
-    // it (a user may own several accounts); otherwise return every open position whose account
-    // is in THIS adapter's mode, so paper and manual positions never leak into each other's
-    // view. Prices and per-account currency are each resolved once.
-    async _getPositionsForMode(userId, accountId, mode) {
-        const all        = await paperBrokerService.listPositions(userId, { status: 'open', accountId })
-        const positions  = accountId ? all : all.filter(p => paperBrokerService.accountMode(p.accountId) === mode)
-        const priceBy   = await this._priceMap(positions)
-        const acctBy    = await this._accountMap(userId, positions.map(p => p.accountId))
-        return positions.map(p => this._toBrokerPosition(p, priceBy.get(p.symbol), acctBy.get(p.accountId)))
-    }
-
-    /**
-     * Authoritative single-position lookup (broker-authoritative reconciler contract):
-     * the open position, or null when it's gone. Never throws on "not found".
-     */
-    async findOpenPosition(userId, accountId, positionId) {
-        const pos = await paperBrokerService.getPosition(userId, positionId)
-        if (!pos || pos.status !== 'open') return null
-        const price = await latestMarkPrice(pos.symbol)
-        const acct  = await paperBrokerService.getAccount(userId, pos.accountId)
-        return this._toBrokerPosition(pos, price, acct)
     }
 
     // ── Trading ──────────────────────────────────────────────────────────────────
@@ -178,14 +80,6 @@ export class PaperAdapter extends BrokerAdapter {
             ohlcv:            false,
             selfExecuted:     false,
         }
-    }
-
-    /**
-     * Paper trades the app's canonical asset directly (no CFD aliasing), so the symbol
-     * resolves to itself. found:true = paper is a valid venue for this instrument.
-     */
-    async resolveSymbol(userId, accountId, symbol) {
-        return { symbol, found: true }
     }
 
     /**
@@ -374,73 +268,5 @@ export class PaperAdapter extends BrokerAdapter {
             createdAt:    Date.now(),
             ...(status === 'filled' && { filledAt: Date.now() }),
         }
-    }
-
-    _toBrokerPosition(p, currentPrice = null, account = null) {
-        // Prefer this call's live price; when the fetch missed, fall back to the last
-        // mark stamped by the paperMark loop so P&L doesn't blank out between ticks.
-        const markPrice = currentPrice ?? p.currentPrice ?? null
-        const pnl = markPrice != null
-            ? (markPrice - p.avgPrice) * p.qty * dirSign(p.direction)
-            : null
-        return {
-            id:           p.positionId,
-            symbol:       p.symbol,
-            direction:    p.direction,
-            volume:       p.qty,
-            entryPrice:   p.avgPrice,
-            currentPrice: markPrice,
-            pnl:          pnl != null ? round2(pnl) : null,
-            pnlPips:      null,
-            swap:         null,
-            openedAt:     p.openedAt,
-            accountId:    p.accountId,
-            accountNo:    p.accountId,
-            // A VIRTUAL account is one the user NAMED ("Momentum", "RAZ TEST"), so the name is what
-            // it should be called wherever it is shown — `accountNo` carries the long generated id,
-            // which is a key, not a label. Reported from the desk: the positions view identified a
-            // paper account by 40 characters of uuid. Free to send: the account doc is already read
-            // here for its currency. Live brokers have no equivalent (their accounts carry a login
-            // NUMBER and nothing else), so this field is absent there and the readers fall back.
-            accountName:  account?.name ?? null,
-            currency:     account?.currency ?? 'USD',
-        }
-    }
-
-    /**
-     * Map of symbol → mark price for the positions given. Used to price P&L, not to fill.
-     *
-     * THE STORED MARK FIRST. The mark loop already paid for a price on every open symbol a few
-     * seconds ago and wrote it on the position; a read that buys it again is the request storm
-     * described at MARK_FRESH_MS. Only a symbol with no mark, or a mark older than the window, is
-     * fetched — which is the case the old behaviour was right for (a leader that stopped, a
-     * position opened between ticks) and the only case it now handles.
-     *
-     * Freshest mark per symbol, since several positions can share one: the newest is the one
-     * the loop wrote last, and one stale row among fresh ones must not force a fetch.
-     */
-    async _priceMap(positions, { now = Date.now(), fetch = latestMarkPrice, freshMs = MARK_FRESH_MS } = {}) {
-        const stored = new Map()   // symbol → { price, at }
-        for (const p of positions) {
-            if (p.currentPrice == null || !Number.isFinite(p.markedAt)) continue
-            const cur = stored.get(p.symbol)
-            if (!cur || p.markedAt > cur.at) stored.set(p.symbol, { price: p.currentPrice, at: p.markedAt })
-        }
-        const distinct = [...new Set(positions.map(p => p.symbol))]
-        const entries  = await Promise.all(distinct.map(async s => {
-            const m = stored.get(s)
-            if (m && now - m.at <= freshMs) return [s, m.price]
-            return [s, await fetch(s)]
-        }))
-        return new Map(entries)
-    }
-
-    /** Map of accountId → its account doc for the distinct accounts given, so a position reports
-     *  its OWN account's currency (a user may hold non-USD virtual accounts) and its OWN name. One
-     *  read serves both — it was a currency-only map until the name was needed beside it. */
-    async _accountMap(userId, accountIds) {
-        const distinct = [...new Set(accountIds)]
-        const entries  = await Promise.all(distinct.map(async id => [id, await paperBrokerService.getAccount(userId, id)]))
-        return new Map(entries)
     }
 }

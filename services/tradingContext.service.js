@@ -123,12 +123,10 @@ export async function getTradingContext(userId, deps = {}) {
     // meant paper and manual reported no free cash whatsoever: the one number a desk needs before it
     // sizes anything was silently absent in exactly the mode most users are sitting in.
     //
-    // SAFE DESPITE the paper adapter's getTradingAccounts creating a default account when the user
-    // has none: `connections.paper` is `isEnabled`, which reads the oldest paper account and returns
-    // its `enabled` flag, so a true here already implies one exists. (`connections.manual` is
-    // literally "owns ≥1 manual account".) The guard is that invariant, not a check — worth knowing
-    // if isEnabled ever changes, because this read now runs on every chat turn and a read that
-    // creates an account is not one you want on that path.
+    // Gated on `connections[mode]` so a user with no account in that mode costs no read. The
+    // virtual adapters' reads never create an account (VirtualAdapter), so even an ungated call
+    // here would be harmless — this runs on every chat turn, and it used to lean on the paper
+    // toggle implying an account existed to stay side-effect free.
     for (const mode of ['paper', 'manual']) {
         if (!connections[mode]) continue
         try {

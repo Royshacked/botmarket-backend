@@ -529,7 +529,9 @@ api/broker/
     ctrader.adapter.js             cTrader orchestration (trading payloadTypes)
     ctrader.execution.js           ProtoOA 2126 → BrokerExecution translator + enums
     ibkr.adapter.js                IBKR (data-only; trading Phase 4)
-    paper.adapter.js               virtual broker on the live feed
+    virtual.adapter.js             shared reads of the two virtual venues (mode-scoped)
+    paper.adapter.js               virtual broker on the live feed (trading half)
+    manual.adapter.js              broker-less real money — trading ops throw
     normalize.js                   asList / num / money coercers
   broker.factory.js                registry + getBrokerAdapter(type)
   broker.service.js                orchestration (routes → factory → adapter)

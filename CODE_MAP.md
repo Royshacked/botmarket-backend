@@ -55,7 +55,10 @@ api/
                               than hand-traded. Asked through venue.resolve.isSelfExecuted, never by name
       ctrader.adapter.js      + ctrader.execution.js (ProtoOA→BrokerExecution translator).
                               getCandles now serves trendbars (ohlcv:true); resolveSymbol via symbol list
-      paper.adapter.js        virtual venue (resolveSymbol = identity; ohlcv:false → app feed)
+      virtual.adapter.js      the shared READS of both virtual venues (account · trading accounts · positions
+                              · findOpenPosition · resolveSymbol = identity), scoped by brokerType. Reads never create.
+      paper.adapter.js        extends VirtualAdapter — the TRADING half (fills via paperExecution; ohlcv:false → app feed)
+      manual.adapter.js       extends VirtualAdapter — every trading op THROWS (selfExecuted); no execution feed
       ibkr.adapter.js         data-only, in progress — see APP_SPEC / do not extend casually
       normalize.js
     broker.factory.js         getBrokerAdapter(type); SUPPORTED_BROKERS registry

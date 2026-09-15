@@ -88,17 +88,18 @@ Layer A/B seam, done pragmatically (no refactor of paperExecution).
 ## Components
 
 ### Adapter + routing
-- `adapters/manual.adapter.js` — a **read-only** adapter reusing the shared store reads
-  (`getAccount` via `computeEquity`, `getPositions`, `findOpenPosition`, `getTradingAccounts`,
-  `resolveSymbol` = identity, `isConnected` = has ≥1 manual account). `capabilities()` are all
-  **false** (data-only): the manual lifecycle never calls `placeOrder`/`closePosition`, so
-  trading ops stay unimplemented as a guard, and `ohlcv:false` routes the monitor to the app feed.
+- `adapters/manual.adapter.js` — extends the shared `VirtualAdapter` (every read paper and manual
+  have in common: `getAccount` via `computeEquity`, `getPositions`, `findOpenPosition`,
+  `getTradingAccounts`, `resolveSymbol` = identity, `isConnected` = has ≥1 account of the mode),
+  and adds only the GUARDS: every trading op throws, `listOrders` is `[]`, and `startExecutionFeed`
+  stays at the base `false` — there is no feed. `capabilities()` are all **false** except
+  `selfExecuted`, and `ohlcv:false` routes the monitor to the app feed.
 - Registered in `broker.factory` → `SUPPORTED_BROKERS` includes `manual`, so
   `resolveUserAccounts` resolves manual accounts and an idea/portfolio bound to a manual account
   **forks onto `broker:'manual'`** through the normal path.
 - `broker.service.listConnections` reports `manual` connected when the user owns ≥1 manual account.
 - **Mode-scoped positions:** `getPositions(userId)` with no accountId filters by `accountMode`, so
-  paper and manual positions never leak into each other's view (applied to the paper adapter too).
+  paper and manual positions never leak into each other's view (one implementation in VirtualAdapter).
 
 ### Accounts
 - Created via the existing `paperBroker.createAccount(userId, { mode:'manual' })`, but manual
