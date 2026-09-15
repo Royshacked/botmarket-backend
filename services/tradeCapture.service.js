@@ -231,14 +231,6 @@ async function captureOpen(idea, exec) {
 }
 
 /**
- * Record a trade opening WITHOUT an idea (idealess fallback) — for a paper position
- * that isn't backed by a linked active idea, so it still shows in trade history. Built
- * from the execution event alone; no idea snapshot. Idempotent on (accountId, positionId),
- * so it never conflicts with the idea-based captureOpen (that path returns first when an
- * idea matches — the two are mutually exclusive per position).
- * @param {import('../api/broker/adapters/broker.interface.js').BrokerExecution} exec
- */
-/**
  * Withdraw an ADOPTED open row for a holding the user says was never held (a line already sold, a
  * typo'd ticker — see adoptBook.removeHolding).
  *
@@ -270,6 +262,14 @@ async function dropAdoptedOpen({ accountId, positionId }) {
     }
 }
 
+/**
+ * Record a trade opening WITHOUT an idea (idealess fallback) — for a paper position
+ * that isn't backed by a linked active idea, so it still shows in trade history. Built
+ * from the execution event alone; no idea snapshot. Idempotent on (accountId, positionId),
+ * so it never conflicts with the idea-based captureOpen (that path returns first when an
+ * idea matches — the two are mutually exclusive per position).
+ * @param {import('../api/broker/adapters/broker.interface.js').BrokerExecution} exec
+ */
 async function captureOpenBare(exec) {
     try {
         if (exec?.positionId == null || exec?.accountId == null || exec?.userId == null) return
@@ -308,12 +308,6 @@ async function captureOpenBare(exec) {
     }
 }
 
-/**
- * Patch the open trade for a closed position to closed, with the exit + realized P&L.
- * Exit-fill commission/spread are $inc-accumulated onto the entry-fill costs stored at
- * open, so `commission`/`spread` become the round-trip total.
- * @param {{ accountId, positionId, price?, reason?, pnl?, commission?, spread?, at? }} opts
- */
 /**
  * One exit SLICE on a position that survived it — a scale-out, a partial stop, one leg of a
  * multi-level exit. Appends to `exits[]` and accrues the running total on `exit.realizedPnl`.
@@ -362,8 +356,9 @@ async function capturePartial({ accountId, positionId, orderId, price, quantity,
  *
  * `exit` is written FIELD BY FIELD rather than as a whole object: `exit.realizedPnl` may already
  * carry the sum of earlier partials, and a wholesale `$set` would discard it. price/ts/reason
- * describe THIS slice (the last one, which is what the UI shows); realizedPnl is the trade's TOTAL.
- * For a trade with no partials the two readings coincide, which is why every row already in the
+ * collection stays correct without migration. Exit-fill commission/spread are $inc-accumulated onto
+ * the entry-fill costs stored at open, so `commission`/`spread` become the round-trip total.
+ * @param {{ accountId, positionId, orderId?, price?, quantity?, reason?, pnl?, commission?, spread?, at? }} opts
  * collection stays correct without migration.
  */
 async function captureClose({ accountId, positionId, orderId, price, quantity, reason, pnl, commission, spread, at }) {

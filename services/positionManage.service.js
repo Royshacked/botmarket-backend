@@ -1,5 +1,7 @@
 import { getDb } from '../providers/mongodb.provider.js'
 import { ENTITIES } from './entity/entityCollection.js'
+import { LIVE_POSITION } from './entity/vocabulary.js'
+import { entityRepo, makeEntityRepo } from './entity/entityRepo.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { deferIfClosed } from './pendingAction/executionGate.js'
 import { kindForDoc } from './entity/envelope.js'
@@ -57,17 +59,12 @@ export const _deps = {
     cancelOrder:      (broker, userId, acct, orderId)         => brokerService.cancelOrder(broker, userId, acct, orderId),
     // Keep the tracked native exit in step with a broker amend/cancel so the reconciler's resize
     // (on a later partial) doesn't cancel-and-replace it at the STALE price/id.
-    syncExit:         async (holderId, accountId, leg, patch) => {
-        const set = {}
-        if (patch?.price   != null) set['exitOrders.$[e].price']   = patch.price
-        if (patch?.orderId != null) set['exitOrders.$[e].orderId'] = String(patch.orderId)
-        if (patch?.status  != null) set['exitOrders.$[e].status']  = patch.status
-        if (!Object.keys(set).length) return
-        const db = await getDb()
-        await db.collection(ENTITIES).updateOne({ id: holderId }, { $set: set },
-            { arrayFilters: [{ 'e.accountId': String(accountId), 'e.leg': leg, 'e.status': 'working' }] })
-    },
+    syncExit:         (holderId, accountId, leg, patch) => entityRepo.syncExitOrder(holderId, { accountId, leg }, patch ?? {}),
 }
+
+// Every write goes through the entity repo — the ONE write funnel (P1b) — built over the injected
+// getDb so a caller's fake db (the tests, the desk hand-offs) still sees what was written.
+const _repo = deps => makeEntityRepo({ coll: async () => (await deps.getDb()).collection(ENTITIES) })
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
@@ -218,7 +215,7 @@ export async function applyManage({ entity, holder, verb, proposal, userId, orig
     //     worse of the two failures for an instruction only a human can carry out.
     if (isSelfExecuted(entity?.broker)) return { ok: true, selfExecuted: true, verb }
 
-    const db    = await deps.getDb()
+    const repo  = _repo(deps)
     const ps    = entity.position_state ?? {}
     const links = resolveAllLinks(holder, entity)
     if (!links.length) {
@@ -226,10 +223,7 @@ export async function applyManage({ entity, holder, verb, proposal, userId, orig
         // restart (or the position was never confirmed at the broker), so there is nothing to close
         // at the broker. Force-close the record so it does not stay stuck in 'long'/'short' forever.
         if (verb === 'exit_now' && (entity?.status === 'long' || entity?.status === 'short')) {
-            await db.collection(ENTITIES).findOneAndUpdate(
-                { id: entity.id, status: { $in: ['long', 'short'] } },
-                { $set: { status: 'closed', closedReason: 'orphaned', closedAt: nowMs } },
-            )
+            await repo.claimIf(entity.id, { status: { $in: LIVE_POSITION } }, { status: 'closed', closedReason: 'orphaned', closedAt: nowMs })
             logger.warn(LOG, `${entity.id} force-closed (orphaned — exit_now with no broker position link)`)
             return { ok: true, orphaned: true }
         }
@@ -298,12 +292,12 @@ export async function applyManage({ entity, holder, verb, proposal, userId, orig
 
     if (!anyReachable) return { ok: false, reason: 'broker_unreachable', accounts: perAccount }
     if (!anyOpen) {   // every account already flat → clear the card, let the reconciler close it out
-        await db.collection(ENTITIES).updateOne({ id: entity.id }, { $set: { 'position_state.pending_action': null } })
+        await repo.patch(entity.id, { 'position_state.pending_action': null })
         return { ok: true, alreadyFlat: true }
     }
     if (!anyApplied) return { ok: false, reason: 'execution_failed', accounts: perAccount }   // every open account errored
 
-    await db.collection(ENTITIES).updateOne({ id: entity.id }, manageAppliedUpdate(verb, proposal, ps, { qty: totalQty }, nowMs))
+    await repo.update(entity.id, manageAppliedUpdate(verb, proposal, ps, { qty: totalQty }, nowMs))
     logger.info(LOG, `${entity.id} managed → ${verb} across ${links.length} account(s)`)
     return { ok: true, verb, accounts: perAccount }
 }

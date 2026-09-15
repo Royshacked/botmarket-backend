@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { touchLeaf, routeExits } from '../../services/protectionPlan.service.js'
-import { applyPriceLevels, ideaService } from '../../api/trade-ideas/tradeIdeas.service.js'
+import { applyPriceLevels, pickEditable, ideaService } from '../../api/trade-ideas/tradeIdeas.service.js'
 import { updateTradeIdea } from '../../api/trade-ideas/tradeIdeas.controller.js'
 import { isRestingEntry, RESTING_ENTRY_TYPES } from '../../services/entity/vocabulary.js'
 import { restingEntryPrice } from '../../api/trade-ideas/ideaExecution.service.js'
@@ -235,15 +235,25 @@ test('clearing a leg is an edit too — null must not read as nothing to update'
     assert.equal(sent.patch.stop_price, null)
 })
 
-test('the whitelist still holds — an unknown field is not smuggled in with a price', async () => {
-    const sent = await callUpdate({ tp_price: 210, userId: 'someone-else', status: 'closed' })
-    assert.equal(sent.patch.userId, undefined, 'ownership is not client-editable')
-    assert.equal(sent.patch.status, 'closed', 'a field that IS editable still passes')
+// The whitelist is the SERVICE's now (pickEditable) — it used to be the controller's, which meant
+// it held for the ticket and not for the Atlas update_item path that reaches updateIdea directly.
+test('the whitelist still holds — an unknown field is not smuggled in with a price', () => {
+    const patch = pickEditable({ tp_price: 210, userId: 'someone-else', brokerOrders: [], status: 'closed' })
+    assert.equal(patch.userId, undefined, 'ownership is not client-editable')
+    assert.equal(patch.brokerOrders, undefined, 'broker linkage is not client-editable')
+    assert.equal(patch.status, 'closed', 'a field that IS editable still passes')
+    assert.equal(patch.tp_price, 210)
 })
 
-test('a body with nothing editable in it is still a 400', async () => {
-    const sent = await callUpdate({ nonsense: 1 })
-    assert.equal(sent.code, 400)
+test('a body with nothing editable in it is refused as nothing_to_patch', async () => {
+    assert.deepEqual(pickEditable({ nonsense: 1 }), {})
+    const r = await ideaService.updateIdea('i1', { nonsense: 1 }, 'u1')
+    assert.deepEqual(r, { ok: false, reason: 'nothing_to_patch' })
+})
+
+test('the holding fields Atlas edits are on the list', () => {
+    const patch = pickEditable({ conviction: 'high', allocationRatio: 0.2, notes: 'n' })
+    assert.deepEqual(patch, { conviction: 'high', allocationRatio: 0.2, notes: 'n' })
 })
 
 // ── Resting entry types ───────────────────────────────────────────────────────

@@ -470,15 +470,51 @@ async function deleteIdea(id, userId) {
     })
 }
 
-async function updateIdea(id, rawPatch, userId) {
-    // Bare price levels expand to touch leaves BEFORE anything reads the legs — the in-position
-    // exit-arming branch below keys off `patch.stop_conditions !== undefined`, so a ticket that
-    // sent only `stop_price` would otherwise be seen as touching no exits at all.
-    const patch = applyPriceLevels(rawPatch)
+/**
+ * THE fields a caller may change on an idea after it exists — one list, in the service, so it holds
+ * for every writer. It used to live in the HTTP controller, which meant it held for the ticket and
+ * the edit dialog and NOT for the Atlas `update_item` path, which handed an agent-authored patch
+ * straight to updateIdea: any field, `userId` and `brokerOrders` included. A model whitelist is the
+ * model's, not a transport's.
+ *
+ * Notes on select fields: `invalidation` re-arms the watcher (updateIdea normalizes + resets the
+ * latch); `accounts`/`mainAccountId` attach broker accounts to a re-activated idea; `immediate`
+ * market-enters a pending idea; `resetWindow`/`resetPreEntry` are control flags stripped before the
+ * write. The bare-price legs (`entry_price`/`stop_price`/`tp_price`) are here so a ticket that
+ * states a level as a NUMBER is not refused as "nothing to update" — applyPriceLevels expands them.
+ * `conviction` and `allocationRatio` are the holding fields the portfolio prompt lets Atlas edit.
+ */
+export const EDITABLE_FIELDS = [
+    'status', 'type', 'quantity', 'additional_entries',
+    'timeframe', 'entry_timeframe', 'stop_timeframe', 'tp_timeframe',
+    'chat_state',
+    'entry_conditions', 'entry_logic', 'entry_condition_tree',
+    'stop_conditions',  'stop_logic',  'stop_condition_tree',
+    'tp_conditions',    'tp_logic',    'tp_condition_tree',
+    'entry_price', 'stop_price', 'tp_price',
+    'notes', 'invalidation', 'accounts', 'mainAccountId',
+    'conviction', 'allocationRatio',
+    'immediate', 'resetWindow', 'resetPreEntry',
+]
+
+/** The editable subset of a patch body — `undefined` values are "not sent", `null` is an edit. Pure. */
+export function pickEditable(body = {}) {
+    const patch = {}
+    for (const f of EDITABLE_FIELDS) if (body?.[f] !== undefined) patch[f] = body[f]
+    return patch
+}
+
+async function updateIdea(id, body, userId) {
+    // Whitelist first, then expand bare price levels to touch leaves BEFORE anything reads the legs
+    // — the in-position exit-arming branch below keys off `patch.stop_conditions !== undefined`,
+    // so a ticket that sent only `stop_price` would otherwise be seen as touching no exits at all.
+    const patch = applyPriceLevels(pickEditable(body))
+    if (Object.keys(patch).length === 0) return { ok: false, reason: 'nothing_to_patch' }
 
     if (patch.status !== undefined && !VALID_STATUSES.has(patch.status)) {
         return { ok: false, reason: 'invalid_status' }
     }
+    if (patch.conviction !== undefined) patch.conviction = cleanConviction(patch.conviction)
 
     if (patch.status === 'resting') {
         return placeRestingEntryForIdea(id, userId)

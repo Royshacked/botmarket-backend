@@ -311,6 +311,27 @@ export function makeEntityRepo({ coll = _defaultColl } = {}) {
             )
             return res.modifiedCount === 1
         },
+
+        /**
+         * Keep ONE tracked native exit in step with a broker amend/cancel — the WORKING order for
+         * that account + leg gets the new price / the new order id / the new status. Scoped to
+         * `working` so a stale amend can never rewrite a slice that already filled. Lived in
+         * positionManage as a raw arrayFilters update; it is the same family as
+         * markExitOrderFilled and belongs beside it.
+         * @param {string} id
+         * @param {{ accountId: string, leg: 'stop'|'tp' }} which
+         * @param {{ price?: number, orderId?: string|null, status?: string }} patch
+         */
+        async syncExitOrder(id, { accountId, leg }, patch = {}) {
+            const set = {}
+            if (patch.price   != null) set['exitOrders.$[e].price']   = patch.price
+            if (patch.orderId != null) set['exitOrders.$[e].orderId'] = String(patch.orderId)
+            if (patch.status  != null) set['exitOrders.$[e].status']  = patch.status
+            if (!Object.keys(set).length) return
+            const c = await coll()
+            return c.updateOne({ id }, { $set: set },
+                { arrayFilters: [{ 'e.accountId': String(accountId), 'e.leg': leg, 'e.status': 'working' }] })
+        },
     }
 }
 
