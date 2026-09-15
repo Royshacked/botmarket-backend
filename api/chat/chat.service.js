@@ -22,7 +22,16 @@ export const BOT_USER_ID = 'axl'   // the default + the one conversational bot
 // NB: this list is the GATE, not a label — postBotCard silently falls back to Axl for an id that
 // isn't here, so a missing entry doesn't error, it misattributes. `mentor` was missing while
 // buildSetupEntryConfirm posted under it, which is why Talos's setup cards arrived from Axl.
-// The frontend registry (agentMeta.jsx BOT_IDS) must stay in step with this one.
+//
+// The frontend registry (agentMeta.jsx BOT_IDS) must stay in step with this one, and in §5 it was
+// not: the client carried an extra `aether`. Nothing posts under that id, so the misattribution
+// above was latent — but `aether` is also absent from both ADMIN_BOT_IDS while being admin-only
+// everywhere else (requireAdmin routes, axl's ADMIN_DESKS, Axl's trader prompt), so the first Aether
+// card would have landed in a trader's sidebar, from Axl. The client dropped it; a test there pins
+// this list by value, which fails on a change to THAT side and names this file.
+//
+// A NEW BOT IS TWO ENTRIES, and an admin-only one is four: here, agentMeta BOT_IDS, and — when the
+// desk is admin-only — both ADMIN_BOT_IDS.
 export const BOT_IDS = ['axl', 'portfolio', 'scanner', 'kairos', 'mentor', 'analyst', 'strategy']
 export const isBot = (id) => BOT_IDS.includes(String(id))
 
