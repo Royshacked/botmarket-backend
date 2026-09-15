@@ -504,21 +504,31 @@ export function pickEditable(body = {}) {
     return patch
 }
 
-async function updateIdea(id, body, userId) {
+/**
+ * PHASE 1 of an edit: the patch shaped from the BODY ALONE, before the stored document is read.
+ *
+ * Everything here is a property of what was SENT — the editable subset, bare price levels expanded
+ * into touch leaves, conviction cleaned, an edited invalidation range re-arming its watcher, each
+ * touched leg's condition tree re-resolved, and the stamps a status word implies on its own. None
+ * of it needs to know what the idea currently IS; the rules that do are phase 2, inside updateIdea,
+ * which reads `existing.status`. The split is what makes the shaping assertable without a database
+ * — and makes it visible at a glance which rules depend on the current state and which do not.
+ *
+ * Returns `{ patch }`, or `{ reason }` for a refusal the shaping itself can decide.
+ *
+ * @param {object} body  the raw request / agent body
+ * @returns {{ patch?: object, reason?: 'nothing_to_patch'|'invalid_status' }}
+ */
+export function normalizeIdeaPatch(body) {
     // Whitelist first, then expand bare price levels to touch leaves BEFORE anything reads the legs
-    // — the in-position exit-arming branch below keys off `patch.stop_conditions !== undefined`,
+    // — the in-position exit-arming branch in phase 2 keys off `patch.stop_conditions !== undefined`,
     // so a ticket that sent only `stop_price` would otherwise be seen as touching no exits at all.
     const patch = applyPriceLevels(pickEditable(body))
-    if (Object.keys(patch).length === 0) return { ok: false, reason: 'nothing_to_patch' }
+    if (Object.keys(patch).length === 0) return { reason: 'nothing_to_patch' }
 
-    if (patch.status !== undefined && !VALID_STATUSES.has(patch.status)) {
-        return { ok: false, reason: 'invalid_status' }
-    }
+    if (patch.status !== undefined && !VALID_STATUSES.has(patch.status)) return { reason: 'invalid_status' }
+
     if (patch.conviction !== undefined) patch.conviction = cleanConviction(patch.conviction)
-
-    if (patch.status === 'resting') {
-        return placeRestingEntryForIdea(id, userId)
-    }
 
     if (patch.invalidation !== undefined) {
         patch.invalidation = _normalizeInvalidation(patch.invalidation)
@@ -550,16 +560,29 @@ async function updateIdea(id, body, userId) {
     if (patch.status === 'closed') patch.chat_state = null
     else if (patch.chat_state) patch.chat_state = _trimChatState(patch.chat_state)
 
+    // The stamps a status word implies BY ITSELF. A transition that also depends on where the idea
+    // is coming from (resting→waiting, hit→waiting, the in-position clamp) belongs to phase 2.
     if (patch.status === 'looking') {
         patch.monitorPhase     = 'entry'
         patch.entryTriggeredAt = null
         patch.activatedAt      = Date.now()
     }
+    if (patch.status === 'hit') patch.entryTriggeredAt = Date.now()
 
-    if (patch.status === 'hit') {
-        patch.entryTriggeredAt = Date.now()
-    }
+    return { patch }
+}
 
+async function updateIdea(id, body, userId) {
+    // PHASE 1 — shape the patch from the body alone.
+    const shaped = normalizeIdeaPatch(body)
+    if (shaped.reason) return { ok: false, reason: shaped.reason }
+    const patch = shaped.patch
+
+    // Not an edit at all: 'resting' ARMS a broker-native entry, which is its own operation with its
+    // own refusals. Checked before the read below because that operation does its own.
+    if (patch.status === 'resting') return placeRestingEntryForIdea(id, userId)
+
+    // PHASE 2 — the transitions, every one of which needs to know what the idea currently IS.
     try {
         const db = await getDb()
 

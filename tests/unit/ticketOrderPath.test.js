@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { touchLeaf, routeExits } from '../../services/protectionPlan.service.js'
-import { applyPriceLevels, pickEditable, ideaService } from '../../api/trade-ideas/tradeIdeas.service.js'
+import { applyPriceLevels, pickEditable, normalizeIdeaPatch, ideaService } from '../../api/trade-ideas/tradeIdeas.service.js'
 import { updateTradeIdea } from '../../api/trade-ideas/tradeIdeas.controller.js'
 import { isRestingEntry, RESTING_ENTRY_TYPES } from '../../services/entity/vocabulary.js'
 import { restingEntryPrice } from '../../api/trade-ideas/ideaExecution.service.js'
@@ -380,4 +380,38 @@ test('a leg being SET still resolves its tree as before', () => {
     assert.equal(patch.stop_conditions.length, 2)
     assert.equal(patch.stop_condition_tree.operator, 'OR')
     assert.equal(patch.stop_condition_tree.children.length, 2)
+})
+
+// ── normalizeIdeaPatch: phase 1 of an edit, assertable without a database ─────────────────────
+// updateIdea was ~185 lines mixing patch SHAPING (a property of the body) with TRANSITIONS (which
+// need the stored status). The shaping half is pure and now testable on its own.
+
+test('phase 1 refuses before it shapes: nothing editable, and an unknown status', () => {
+    assert.deepEqual(normalizeIdeaPatch({ nonsense: 1 }), { reason: 'nothing_to_patch' })
+    assert.deepEqual(normalizeIdeaPatch({ status: 'banana' }), { reason: 'invalid_status' })
+})
+
+test('a status word stamps only what it implies BY ITSELF', () => {
+    const looking = normalizeIdeaPatch({ status: 'looking' }).patch
+    assert.equal(looking.monitorPhase, 'entry')
+    assert.equal(looking.entryTriggeredAt, null)
+    assert.ok(looking.activatedAt > 0)
+
+    assert.ok(normalizeIdeaPatch({ status: 'hit' }).patch.entryTriggeredAt > 0)
+    assert.equal(normalizeIdeaPatch({ status: 'closed' }).patch.chat_state, null, 'a closed idea drops its build conversation')
+})
+
+test('editing the invalidation range re-arms the watcher from scratch', () => {
+    const p = normalizeIdeaPatch({ invalidation: { range: { lower: 90, upper: 110 } } }).patch
+    assert.deepEqual(p.invalidation.range.lower, 90)
+    assert.equal(p.invalidation_status, null)
+    assert.equal(p.invalidation_armed, false)
+})
+
+test('a touched leg resolves its tree; a cleared leg clears BOTH list and tree', () => {
+    const set = normalizeIdeaPatch({ stop_conditions: [touchLeaf(95)] }).patch
+    assert.ok(set.stop_condition_tree, 'the tree routeExits reads is rebuilt')
+    const cleared = normalizeIdeaPatch({ stop_conditions: [] }).patch
+    assert.deepEqual(cleared.stop_conditions, [])
+    assert.equal(cleared.stop_condition_tree, null, 'emptying only the list left the old tree standing')
 })
