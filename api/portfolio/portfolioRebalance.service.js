@@ -24,7 +24,7 @@
  */
 
 import { getDb }                    from '../../providers/mongodb.provider.js'
-import { PAST_ENTRY } from '../../services/entity/vocabulary.js'
+import { PAST_ENTRY, LIVE_POSITION } from '../../services/entity/vocabulary.js'
 import { logger }                   from '../../services/logger.service.js'
 import { ideaService }              from '../trade-ideas/tradeIdeas.service.js'
 import { brokerService }            from '../broker/broker.service.js'
@@ -41,7 +41,13 @@ import { notifyRebalanceApplied } from '../../services/rebalanceNotify.service.j
 
 const LOG        = '[portfolio:rebalance]'
 const COLLECTION = ENTITIES
-const LIVE       = new Set(PAST_ENTRY)
+
+// PAST ENTRY, not "live" — it was called LIVE, and a `hit` holding is not live: the order is placed
+// or awaiting the user's confirm, and nothing is held yet. The distinction is what the two readers
+// below actually need, and naming it wrong is what made remove_item send a `hit` holding to a verb
+// that also refuses it (see _applyOne).
+const PAST_ENTRY_SET = new Set(PAST_ENTRY)
+const LIVE_SET       = new Set(LIVE_POSITION)
 
 // The entity facade, built over the db THIS CALL was handed rather than the module singleton — every
 // function here takes its `db` (the queue replays them with one, and the tests hand them a fake), so
@@ -246,7 +252,13 @@ async function _applyOne(portfolioId, userId, change, bookValue = null) {
 
         case 'remove_item': {
             const item = await db.collection(COLLECTION).findOne({ id: itemId }, { projection: { status: 1 } })
-            if (item && LIVE.has(item.status)) return { ok: false, reason: 'live_use_exit_item' }
+            // TWO refusals, not one. Both are past entry and neither may be deleted out from under a
+            // broker, but they need different answers: a LIVE holding is closed with exit_item, while
+            // a `hit` one has an order placed or awaiting confirm and nothing held — exit_item would
+            // refuse it too, with `no_position`, so naming that verb was a dead end. Cancel the order
+            // (or let it fill) and the holding becomes removable or exitable on its own.
+            if (item && LIVE_SET.has(item.status))      return { ok: false, reason: 'live_use_exit_item' }
+            if (item && PAST_ENTRY_SET.has(item.status)) return { ok: false, reason: 'order_pending_cancel_first' }
             return ideaService.deleteIdea(itemId, userId)
         }
 
@@ -280,12 +292,15 @@ async function _applyOne(portfolioId, userId, change, bookValue = null) {
  *
  * @returns {Promise<{item, legs}|{refusal}>}  `refusal` is the caller's own return value
  */
-async function _positionedItem(db, itemId, userId, { requireLive = false } = {}) {
+async function _positionedItem(db, itemId, userId, { requirePastEntry = false } = {}) {
     const item = await db.collection(COLLECTION).findOne({ id: itemId })
     if (!item) return { refusal: { ok: false, reason: 'not_found' } }
     if (item.userId && item.userId !== userId) return { refusal: { ok: false, reason: 'forbidden' } }
     // Only the scale-in asks: growing a holding that is not on is add_item's job, not this one's.
-    if (requireLive && !LIVE.has(item.status)) return { refusal: { ok: false, reason: 'not_live' } }
+    // PAST ENTRY, deliberately, not live. A pre-entry or closed holding is `not_live` — "use
+    // add_item" — while a `hit` one falls through to the legs check below and refuses with the more
+    // precise `no_position`: the order is placed, there is simply nothing yet to grow.
+    if (requirePastEntry && !PAST_ENTRY_SET.has(item.status)) return { refusal: { ok: false, reason: 'not_live' } }
 
     const legs = (item.brokerOrders ?? []).filter(b => b.positionId != null)
     if (legs.length === 0) return { refusal: { ok: false, reason: 'no_position' } }
@@ -641,8 +656,8 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
     const f = Number(change.addFraction)
     if (!(f > 0)) return { ok: false, reason: 'bad_addFraction' }
 
-    // `requireLive`: growing a holding that is not in position is add_item's job, not this one's.
-    const { item, legs, refusal } = await _positionedItem(db, itemId, userId, { requireLive: true })
+    // Past entry only: a pre-entry or closed holding belongs to add_item, not to this verb.
+    const { item, legs, refusal } = await _positionedItem(db, itemId, userId, { requirePastEntry: true })
     if (refusal) return refusal
 
     // Manual: no broker to hit — hand the add back as an entry leg so applyRebalance posts a Fill card.

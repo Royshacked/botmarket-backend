@@ -23,6 +23,23 @@ export const COLLECTION = 'portfolio_chats'
 // SAME cadence truth rather than its own copy of these three numbers.
 export const CADENCE_MS = { weekly: 7 * 86400000, monthly: 30 * 86400000, quarterly: 90 * 86400000 }
 
+/**
+ * What a book with NO stated cadence is reviewed on.
+ *
+ * There were three answers to this in one file. `saveChatState`'s $setOnInsert seeded 'weekly',
+ * `completeReview` and the due readers fell back to 'weekly', and `getPortfolioLifecycle` — the read
+ * Atlas renders its lifecycle block from — fell back to 'monthly'. So a book whose document has no
+ * cadence was TOLD it was monthly and BOOKED in a week. The display has to agree with the clock, and
+ * the clock is what the seed writes, so 'weekly' is the one answer.
+ *
+ * Adoption is not an exception to this: it STATES 'monthly' on the document at commit, because a
+ * bank book is bought to be held, and a stated cadence is never a fallback.
+ */
+export const DEFAULT_CADENCE = 'weekly'
+
+/** The window for a cadence, falling back to the default's for an unrecognised word. */
+export const cadenceMs = (cadence) => CADENCE_MS[cadence] ?? CADENCE_MS[DEFAULT_CADENCE]
+
 export const portfolioChatService = {
     saveChatState,
     getChatState,
@@ -219,8 +236,8 @@ async function saveChatState(portfolioId, messages, userId, mandate = null) {
                 $set: setFields,
                 // Lifecycle defaults — only written when the doc is first created.
                 $setOnInsert: {
-                    reviewCadence: 'weekly',
-                    nextReviewAt:  Date.now() + CADENCE_MS.weekly,
+                    reviewCadence: DEFAULT_CADENCE,
+                    nextReviewAt:  Date.now() + cadenceMs(DEFAULT_CADENCE),
                     lastReviewAt:  null,
                     reviewHistory: [],
                 },
@@ -270,7 +287,7 @@ async function getPortfolioLifecycle(portfolioId, userId) {
         )
         if (!doc) return null
         return {
-            reviewCadence:   doc.reviewCadence ?? 'monthly',
+            reviewCadence:   doc.reviewCadence ?? DEFAULT_CADENCE,
             nextReviewAt:    doc.nextReviewAt  ?? null,
             lastReviewAt:    doc.lastReviewAt  ?? null,
             reviewHistory:   doc.reviewHistory ?? [],
@@ -397,7 +414,7 @@ function _bookRow(doc, meta, nameByAccount) {
         mode,
         account:       _accountLabel(mode, accountId, nameByAccount, meta.broker),
         accountId:     accountId ?? null,
-        reviewCadence: doc.reviewCadence ?? 'weekly',
+        reviewCadence: doc.reviewCadence ?? DEFAULT_CADENCE,
         nextReviewAt:  doc.nextReviewAt ?? null,
         lastReviewAt:  doc.lastReviewAt ?? null,
         notifiedAt:    doc.notifiedAt   ?? null,
@@ -565,9 +582,9 @@ async function completeReview(portfolioId, userId) {
             { portfolioId, userId },
             { projection: { reviewCadence: 1 } }
         )
-        const cadence = doc?.reviewCadence ?? 'weekly'
+        const cadence = doc?.reviewCadence ?? DEFAULT_CADENCE
         const now     = Date.now()
-        const next    = now + (CADENCE_MS[cadence] ?? CADENCE_MS.weekly)
+        const next    = now + cadenceMs(cadence)
         await db.collection(COLLECTION).updateOne(
             { portfolioId, userId },
             { $set: { lastReviewAt: now, nextReviewAt: next, notifiedAt: null } }

@@ -52,106 +52,101 @@ const _rebalanceErr = {
     nothing_applied:     [409, 'None of the proposed changes could be applied'],
 }
 
-function _sendAdopt(res, result, onOk) {
-    if (result.ok) return res.send(onOk(result))
-    return sendReason(res, result.reason, {
-        overrides:       _adoptErr,
-        fallback:        500,
-        fallbackMessage: 'Adoption failed',
-        // The per-row problems / per-leg failures travel WITH the refusal: the confirm grid has to
-        // show the user which line to fix, and a bare 409 can't.
-        extra: {
-            ...(result.problems ? { problems: result.problems } : {}),
-            ...(result.failed   ? { failed:   result.failed }   : {}),
-        },
-    })
+/**
+ * Every adoption handler has the same three moves: read the request, call the one service function,
+ * and answer — `ok` shaped by the handler, a refusal on the SHARED reason vocabulary otherwise.
+ *
+ * Deliberately NOT `makeHandle`. That wrapper forwards a thrown error's message to the global
+ * handler, and these seven keep their own fixed sentence ("Failed to adopt the book") — which is the
+ * §9 decision about what an error may tell the client, made once, for every route, rather than
+ * inherited here by accident.
+ *
+ * @param {string} name     for the log line
+ * @param {string} failMsg  what an UNEXPECTED throw tells the user
+ * @param {Function} call   (req) => Promise<result>   — the service call
+ * @param {Function} onOk   (result) => body           — the success shape
+ * @param {string|null} requireParam  a path param answered 400 before the service is called
+ */
+function makeAdoptHandler(name, failMsg, call, onOk, requireParam = null) {
+    return async (req, res) => {
+        try {
+            if (requireParam && !req.params[requireParam]) {
+                return res.status(400).send({ error: `Missing ${requireParam}` })
+            }
+            const result = await call(req)
+            if (result.ok) return res.send(onOk(result))
+            return sendReason(res, result.reason, {
+                overrides:       _adoptErr,
+                fallback:        500,
+                fallbackMessage: 'Adoption failed',
+                // The per-row problems / per-leg failures travel WITH the refusal: the confirm grid
+                // has to show the user which line to fix, and a bare 409 can't.
+                extra: {
+                    ...(result.problems ? { problems: result.problems } : {}),
+                    ...(result.failed   ? { failed:   result.failed }   : {}),
+                },
+            })
+        } catch (err) {
+            logger.error(LOG, `${name} failed`, err)
+            res.status(500).send({ error: failMsg })
+        }
+    }
 }
 
-export async function refreshAdoptionDraft(req, res) {
-    try {
-        const { draftId } = req.params
-        if (!draftId) return res.status(400).send({ error: 'Missing draftId' })
+export const refreshAdoptionDraft = makeAdoptHandler(
+    'refreshAdoptionDraft', 'Failed to update the staged book',
+    (req) => {
         const { paste, statedTotal, freeCash, currency, mandate } = req.body ?? {}
-        const result = await adoptBookService.refreshDraft({
-            draftId, userId: req.user._id, paste, statedTotal, freeCash, currency, mandate,
-        })
-        _sendAdopt(res, result, r => ({ draft: r.draft }))
-    } catch (err) {
-        logger.error(LOG, 'refreshAdoptionDraft failed', err)
-        res.status(500).send({ error: 'Failed to update the staged book' })
-    }
-}
+        return adoptBookService.refreshDraft({ draftId: req.params.draftId, userId: req.user._id, paste, statedTotal, freeCash, currency, mandate })
+    },
+    r => ({ draft: r.draft }),
+    'draftId',
+)
 
-export async function createAdoptionDraft(req, res) {
-    try {
-        // `paste` is the raw text; `holdings` is the grid handing back edited cells. Either or both.
+export const createAdoptionDraft = makeAdoptHandler(
+    'createAdoptionDraft', 'Failed to stage the adoption',
+    // `paste` is the raw text; `holdings` is the grid handing back edited cells. Either or both.
+    (req) => {
         const { bank, currency, statedTotal, freeCash, holdings, paste, mandate, name } = req.body ?? {}
-        const result = await adoptBookService.createDraft({
-            userId: req.user._id, bank, currency, statedTotal, freeCash, holdings, paste, mandate, name,
-        })
-        _sendAdopt(res, result, r => ({ draft: r.draft }))
-    } catch (err) {
-        logger.error(LOG, 'createAdoptionDraft failed', err)
-        res.status(500).send({ error: 'Failed to stage the adoption' })
-    }
-}
+        return adoptBookService.createDraft({ userId: req.user._id, bank, currency, statedTotal, freeCash, holdings, paste, mandate, name })
+    },
+    r => ({ draft: r.draft }),
+)
 
-export async function commitAdoptionDraft(req, res) {
-    try {
-        const { draftId } = req.params
-        if (!draftId) return res.status(400).send({ error: 'Missing draftId' })
-        const result = await adoptBookService.commitDraft({ draftId, userId: req.user._id })
-        _sendAdopt(res, result, r => ({ portfolioId: r.portfolioId, accountId: r.accountId, legs: r.legs }))
-    } catch (err) {
-        logger.error(LOG, 'commitAdoptionDraft failed', err)
-        res.status(500).send({ error: 'Failed to adopt the book' })
-    }
-}
+export const commitAdoptionDraft = makeAdoptHandler(
+    'commitAdoptionDraft', 'Failed to adopt the book',
+    (req) => adoptBookService.commitDraft({ draftId: req.params.draftId, userId: req.user._id }),
+    r => ({ portfolioId: r.portfolioId, accountId: r.accountId, legs: r.legs }),
+    'draftId',
+)
 
-export async function listAdoptionDrafts(req, res) {
-    try {
-        const result = await adoptBookService.listDrafts({ userId: req.user._id })
-        _sendAdopt(res, result, r => ({ drafts: r.drafts }))
-    } catch (err) {
-        logger.error(LOG, 'listAdoptionDrafts failed', err)
-        res.status(500).send({ error: 'Failed to list staged books' })
-    }
-}
+export const listAdoptionDrafts = makeAdoptHandler(
+    'listAdoptionDrafts', 'Failed to list staged books',
+    (req) => adoptBookService.listDrafts({ userId: req.user._id }),
+    r => ({ drafts: r.drafts }),
+)
 
-export async function discardAdoptionDraft(req, res) {
-    try {
-        const { draftId } = req.params
-        if (!draftId) return res.status(400).send({ error: 'Missing draftId' })
-        const result = await adoptBookService.discardDraft({ draftId, userId: req.user._id })
-        _sendAdopt(res, result, () => ({ ok: true }))
-    } catch (err) {
-        logger.error(LOG, 'discardAdoptionDraft failed', err)
-        res.status(500).send({ error: 'Failed to discard the staged book' })
-    }
-}
+export const discardAdoptionDraft = makeAdoptHandler(
+    'discardAdoptionDraft', 'Failed to discard the staged book',
+    (req) => adoptBookService.discardDraft({ draftId: req.params.draftId, userId: req.user._id }),
+    () => ({ ok: true }),
+    'draftId',
+)
 
-export async function correctAdoptedHolding(req, res) {
-    try {
-        const { id } = req.params
+export const correctAdoptedHolding = makeAdoptHandler(
+    'correctAdoptedHolding', 'Failed to correct the holding',
+    (req) => {
         const { quantity, avgCost } = req.body ?? {}
-        const result = await adoptBookService.correctHolding({ id, userId: req.user._id, quantity, avgCost })
-        _sendAdopt(res, result, r => ({ quantity: r.quantity, avgCost: r.avgCost }))
-    } catch (err) {
-        logger.error(LOG, 'correctAdoptedHolding failed', err)
-        res.status(500).send({ error: 'Failed to correct the holding' })
-    }
-}
+        return adoptBookService.correctHolding({ id: req.params.id, userId: req.user._id, quantity, avgCost })
+    },
+    r => ({ quantity: r.quantity, avgCost: r.avgCost }),
+)
 
-export async function removeAdoptedHolding(req, res) {
-    try {
-        const { id } = req.params
-        const result = await adoptBookService.removeHolding({ id, userId: req.user._id })
-        _sendAdopt(res, result, r => ({ asset: r.asset }))
-    } catch (err) {
-        logger.error(LOG, 'removeAdoptedHolding failed', err)
-        res.status(500).send({ error: 'Failed to remove the holding' })
-    }
-}
+export const removeAdoptedHolding = makeAdoptHandler(
+    'removeAdoptedHolding', 'Failed to remove the holding',
+    (req) => adoptBookService.removeHolding({ id: req.params.id, userId: req.user._id }),
+    r => ({ asset: r.asset }),
+)
 
 export async function streamPortfolio(req, res) {
     // `portfolioIdeas` is still SENT by the client and deliberately not read: the book Atlas sees is
@@ -383,9 +378,8 @@ export async function completeReview(req, res) {
     }
 }
 
-// Apply an accepted portfolio_update (the confirmed review proposal) to the live book.
 // The user's books — id, name, holdings count, per-status tallies, symbols, venue modes. The
-// portfolio's `GET /` , completing the pair every other kind has had; the derivation already
+// portfolio's `GET /`, completing the pair every other kind has had; the derivation already
 // existed for the watchlist and is simply reachable now instead of being re-derived client-side
 // from the ideas list.
 export async function getPortfolios(req, res) {
@@ -420,6 +414,7 @@ export async function getPortfolioItems(req, res) {
     }
 }
 
+// Apply an accepted portfolio_update — the confirmed review proposal — to the live book.
 export async function applyPortfolioRebalance(req, res) {
     try {
         const { portfolioId } = req.params

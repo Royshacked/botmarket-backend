@@ -31,7 +31,7 @@ import { ideaService }           from '../trade-ideas/tradeIdeas.service.js'
 import { entityRepo }            from '../../services/entity/entityRepo.service.js'
 import { ENTITIES }              from '../../services/entity/entityCollection.js'
 import { LIVE_POSITION }         from '../../services/entity/vocabulary.js'
-import { portfolioChatService, CADENCE_MS } from './portfolioChat.service.js'
+import { portfolioChatService, cadenceMs } from './portfolioChat.service.js'
 import { tradeCaptureService }   from '../../services/tradeCapture.service.js'
 import { getDb, stripId }        from '../../providers/mongodb.provider.js'
 import { toNum }                 from '../../services/format.util.js'
@@ -39,9 +39,11 @@ import { logger }                from '../../services/logger.service.js'
 
 const LOG = '[adoptBook]'
 
-// A bank book is bought to be held. Themis falls back to WEEKLY for a book with no cadence, which is
-// the wrong clock for buy-and-hold, so adoption states one explicitly rather than inheriting it.
-const DEFAULT_CADENCE = 'monthly'
+// A bank book is bought to be held, and weekly — the default for a book with no cadence — is the
+// wrong clock for that. So adoption STATES one on the document rather than inheriting it, which is
+// why this is not spelled as an override of portfolioChat's DEFAULT_CADENCE: it is a decision about
+// bank books, not a fallback.
+const ADOPTED_CADENCE = 'monthly'
 
 // Injectable IO, so the branching (refusals, retries, partial writes) is testable without a DB,
 // a price feed or an LLM — the house pattern (coverageRefresh, themis, talos).
@@ -441,7 +443,7 @@ export async function commitDraft({ draftId, userId }) {
             return { ok: false, reason: 'partial_write', failed, portfolioId, accountId, legs: written.length }
         }
 
-        const cadence = draft.mandate?.reviewCadence ?? DEFAULT_CADENCE
+        const cadence = draft.mandate?.reviewCadence ?? ADOPTED_CADENCE
         if (draft.mandate) await _deps.setMandate(portfolioId, userId, draft.mandate)
         // TWO FIELDS THAT USED TO BE WRITTEN HERE ARE GONE, both read by nothing:
         //
@@ -459,7 +461,7 @@ export async function commitDraft({ draftId, userId }) {
         // same stamp.
         await _deps.setLifecycle(portfolioId, userId, {
             reviewCadence: cadence,
-            nextReviewAt:  now + (CADENCE_MS[cadence] ?? CADENCE_MS[DEFAULT_CADENCE]),
+            nextReviewAt:  now + cadenceMs(cadence),
             adoptedAt:     now,
         })
         // LAST: the fingerprint is the "then" baseline every later review diffs against, so it has to

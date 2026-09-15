@@ -621,7 +621,11 @@ function _buildLifecycleSection(lifecycle) {
 
     const lines = [
         `PORTFOLIO LIFECYCLE:`,
-        `Review cadence: ${lifecycle.reviewCadence ?? 'monthly'}`,
+        // NO local default. This used to read `?? 'monthly'` while every clock in portfolioChat fell
+        // back to weekly — so a book with no stated cadence was TOLD monthly and BOOKED in a week.
+        // getPortfolioLifecycle is the only producer of this object and already resolves the field
+        // against DEFAULT_CADENCE, so a second answer here could only ever contradict it.
+        `Review cadence: ${lifecycle.reviewCadence ?? '—'}`,
         `Last review: ${lastReview}`,
         nextDue ? `Next review due: ${nextDue}${overdue ? ' (OVERDUE)' : ''}` : null,
     ].filter(Boolean)
