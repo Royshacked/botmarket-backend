@@ -2,6 +2,7 @@ import { getDb } from '../providers/mongodb.provider.js'
 import { ENTITIES } from './entity/entityCollection.js'
 import { notifySetupManage, notifySetupLimitDisarm } from './tradeNotify.service.js'
 import { ownsEntity } from './entity/entityCrud.service.js'
+import { makeEntityRepo } from './entity/entityRepo.service.js'
 import { isLivePosition } from './entity/vocabulary.js'
 import { disarmedSetupPatch } from './setup.schema.js'
 import { cancelRestingEntryOrders } from './restingOrders.service.js'
@@ -39,7 +40,6 @@ import { logger } from './logger.service.js'
  */
 
 const LOG        = '[talos.handoff]'
-const COLLECTION = ENTITIES   // setups live in entities as kind:'setup'
 
 /** A setup's acceptable actions — see the verb note above. */
 export const SETUP_MANAGE_VERBS = new Set(['move_stop', 'take_partial', 'exit_now', 'let_run'])
@@ -80,6 +80,14 @@ export function toExecutionProposal(verb, raw) {
     return {}
 }
 
+/**
+ * The entity repo over whatever `getDb` this call was handed — every read and write here goes
+ * through it rather than reaching for `db.collection(ENTITIES)` directly, which is the one write
+ * funnel the rest of the execution path already uses (entity-model P1b). Built per call so a test's
+ * fake db is still seen.
+ */
+const repo = (deps) => makeEntityRepo({ coll: async () => (await deps.getDb()).collection(ENTITIES) })
+
 const _deps = {
     getDb,
     // The hours gate the shared executor asks before it touches a broker — see applyManage. Threaded
@@ -95,8 +103,8 @@ const _deps = {
     notifyDisarm:     (setup, reason) => notifySetupLimitDisarm(setup, reason),
 }
 
-async function _loadOwned(db, id, userId) {
-    const setup = await db.collection(COLLECTION).findOne({ id })
+async function _loadOwned(deps, id, userId) {
+    const setup = await repo(deps).getById(id)
     if (!setup) return { err: 'not_found' }
     if (!ownsEntity(setup, userId)) return { err: 'forbidden' }
     return { setup }
@@ -113,8 +121,7 @@ export async function manageSetup(id, userId, verb, deps = _deps) {
     if (verb === 'add_leg') return { ok: false, reason: 'confirm_order' }
     if (!SETUP_MANAGE_VERBS.has(verb)) return { ok: false, reason: 'bad_action' }
 
-    const db = await deps.getDb()
-    const { setup, err } = await _loadOwned(db, id, userId)
+    const { setup, err } = await _loadOwned(deps, id, userId)
     if (err) return { ok: false, reason: err }
     if (!isLivePosition(setup.status)) return { ok: false, reason: 'not_in_position' }
 
@@ -148,13 +155,13 @@ export async function manageSetup(id, userId, verb, deps = _deps) {
     // proposal: its copy is written in its own vocabulary, which is why this stayed at the desk.
     if (res.selfExecuted) {
         await deps.notifyManage(setup, { verdict: verb, proposal: pending?.proposal ?? null, manual: true })
-        await db.collection(COLLECTION).updateOne({ id }, manage.manageAppliedUpdate(verb, proposal, ps, {}, now))
-        await _moveTargetWindow(db, setup, verb, proposal)
+        await repo(deps).update(id, manage.manageAppliedUpdate(verb, proposal, ps, {}, now))
+        await _moveTargetWindow(deps, setup, verb, proposal)
         logger.info(LOG, `setup ${id} manage ${verb} → manual instruction`)
         return { ok: true, manual: true, verb }
     }
 
-    if (res.ok) await _moveTargetWindow(db, setup, verb, proposal)
+    if (res.ok) await _moveTargetWindow(deps, setup, verb, proposal)
     return res
 }
 
@@ -168,11 +175,11 @@ export async function manageSetup(id, userId, verb, deps = _deps) {
  * The rung keeps its authored BREADTH and re-arms at the new level: "let it run to X" is an
  * instruction to have the conversation again at X, not to stop having it.
  */
-async function _moveTargetWindow(db, setup, verb, proposal) {
+async function _moveTargetWindow(deps, setup, verb, proposal) {
     if (verb !== 'let_run' || !Number.isFinite(proposal?.new_tp)) return
     const targets = movedLadder(setup.position_state ?? {}, proposal.new_tp, amendedLevel(setup))
     if (!targets) return
-    await db.collection(COLLECTION).updateOne({ id: setup.id }, { $set: { 'position_state.targets': targets } })
+    await repo(deps).patch(setup.id, { 'position_state.targets': targets })
 }
 
 /**
@@ -224,11 +231,10 @@ export function movedLadder(ps, newTp, restingAt = null) {
  * close one.
  */
 export async function dismissSetupCard(id, userId, deps = _deps) {
-    const db = await deps.getDb()
-    const { setup, err } = await _loadOwned(db, id, userId)
+    const { setup, err } = await _loadOwned(deps, id, userId)
     if (err) return { ok: false, reason: err }
     if (!isLivePosition(setup.status)) return { ok: false, reason: 'not_in_position' }
-    await db.collection(COLLECTION).updateOne({ id }, { $set: { 'position_state.pending_action': null } })
+    await repo(deps).patch(id, { 'position_state.pending_action': null })
     logger.info(LOG, `setup ${id} management card dismissed (position kept)`)
     return { ok: true, dismissed: 'card' }
 }
@@ -242,8 +248,7 @@ export async function dismissSetupCard(id, userId, deps = _deps) {
  * has no broker order to cancel.
  */
 export async function disarmSetup(id, userId, deps = _deps) {
-    const db = await deps.getDb()
-    const { setup, err } = await _loadOwned(db, id, userId)
+    const { setup, err } = await _loadOwned(deps, id, userId)
     if (err) return { ok: false, reason: err }
     if (setup.status !== 'hit' || setup.entry_mode !== 'limit') {
         return { ok: false, reason: 'not_a_pending_limit' }
@@ -256,7 +261,7 @@ export async function disarmSetup(id, userId, deps = _deps) {
         await cancelRestingEntryOrders(setup, userId, { log: LOG, cancelOrder: deps.cancelOrder })
     }
 
-    await db.collection(COLLECTION).updateOne({ id }, { $set: disarmedSetupPatch() })
+    await repo(deps).patch(id, disarmedSetupPatch())
 
     try { await deps.notifyDisarm(setup, 'manual') }
     catch (notifyErr) { logger.warn(LOG, `disarmSetup: notify failed for ${id}: ${notifyErr.message}`) }

@@ -222,24 +222,6 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
 }
 
 /**
- * A setup that is past entry.
- *
- * DELIBERATELY SMALL. The exits now rest at the broker (protectionPlan.routeSetupZones → placeExits),
- * so the position is PROTECTED without anyone watching it — which is exactly why this doesn't need
- * to be a management brain to be worth running. What it does is close the hole that started all of
- * this: the journal used to stop dead at the entry card, so the record went silent at the moment it
- * mattered most.
- *
- *   'hit'         awaiting the user's confirm, or a fill. Nothing to say that the card didn't
- *                 already say — reschedule quietly rather than writing "still waiting" every wake.
- *   long/short    the first wake after the fill writes the fill line and stamps position_state, so
- *                 the timeline reads through the entry. After that it parks on the lazy cadence.
- *
- * The CLOSE line is not written here either, and cannot be: the reconciler flips a closed setup to
- * 'closed', which drops it out of the polled statuses before this ever sees it. It rides the same
- * guarded write as the status flip instead (entityRepo.finalizeClose).
- */
-/**
  * Cancel the pending broker order and return the setup to 'waiting'.
  *
  * A limit order exists only while its setup is armed. When expiry, a validity breach or a manual
@@ -265,6 +247,24 @@ async function _disarmLimit(setup, disarmReason, nowMs, deps) {
     return { reason: 'limit_disarmed', disarmReason }
 }
 
+/**
+ * A setup that is past entry.
+ *
+ * DELIBERATELY SMALL. The exits now rest at the broker (protectionPlan.routeSetupZones → placeExits),
+ * so the position is PROTECTED without anyone watching it — which is exactly why this doesn't need
+ * to be a management brain to be worth running. What it does is close the hole that started all of
+ * this: the journal used to stop dead at the entry card, so the record went silent at the moment it
+ * mattered most.
+ *
+ *   'hit'         awaiting the user's confirm, or a fill. Nothing to say that the card didn't
+ *                 already say — reschedule quietly rather than writing "still waiting" every wake.
+ *   long/short    the first wake after the fill writes the fill line and stamps position_state, so
+ *                 the timeline reads through the entry. After that it parks on the lazy cadence.
+ *
+ * The CLOSE line is not written here either, and cannot be: the reconciler flips a closed setup to
+ * 'closed', which drops it out of the polled statuses before this ever sees it. It rides the same
+ * guarded write as the status flip instead (entityRepo.finalizeClose).
+ */
 async function _checkPosition(setup, nowMs, deps) {
     const ps     = setup.position_state ?? {}
     const inPos  = setup.status === 'long' || setup.status === 'short'

@@ -1,5 +1,5 @@
-import { logger }       from '../../services/logger.service.js'
 import { sendReason }   from '../_shared/reason.util.js'
+import { makeHandle }   from '../_shared/handle.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { setupService } from './setups.service.js'
 import { resolveCardsFor } from '../chat/chat.service.js'
@@ -8,7 +8,8 @@ import { normalizeSetup, setupReadiness, TRADE_MODES, TF_RUNGS, isFetchableRung 
 import { TRADE_HORIZONS } from '../../services/entity/vocabulary.js'
 import { hydrateBlueprint as hydrateDraft, blueprintProblems } from '../../services/setup.blueprint.js'
 
-const LOG = '[setups:controller]'
+const LOG     = '[setups:controller]'
+const _handle = makeHandle(LOG)
 
 // Setup-OWNED reasons. Everything cross-kind (not_found / forbidden / in_position /
 // closed_is_terminal / invalid_status / nothing_to_patch) is answered by the shared table, so this
@@ -64,37 +65,28 @@ export const getSetup    = crud.get
  * confirming the order. Asking for it returns `confirm_order` rather than a flat 400 — the client
  * needs to know it should route, not that it made a bad request.
  */
-export async function actOnSetup(req, res) {
-    try {
-        const { id }     = req.params
-        const { action } = req.body ?? {}
-        const userId     = req.user._id
+export const actOnSetup = _handle('actOnSetup', async (req, res) => {
+    const { id }     = req.params
+    const { action } = req.body ?? {}
+    const userId     = req.user._id
 
-        const result = action === 'dismiss'
-            ? await talosHandoffService.dismissSetupCard(id, userId)
-            : await talosHandoffService.manageSetup(id, userId, action)
+    const result = action === 'dismiss'
+        ? await talosHandoffService.dismissSetupCard(id, userId)
+        : await talosHandoffService.manageSetup(id, userId, action)
 
-        if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallbackMessage: 'action_failed' })
-        res.send(result)
-    } catch (err) {
-        logger.error(LOG, 'actOnSetup failed:', err.message)
-        res.status(500).send({ error: 'action_failed' })
-    }
-}
+    if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallbackMessage: 'action_failed' })
+    res.send(result)
+})
+
 /**
  * Cancel a pending limit order and return the setup to 'waiting'. The fast path for a user who
  * wants to pull the order immediately rather than waiting for the next Talos wake.
  */
-export async function disarmSetupEntry(req, res) {
-    try {
-        const result = await talosHandoffService.disarmSetup(req.params.id, req.user._id)
-        if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallbackMessage: 'action_failed' })
-        res.send(result)
-    } catch (err) {
-        logger.error(LOG, 'disarmSetupEntry failed:', err.message)
-        res.status(500).send({ error: 'action_failed' })
-    }
-}
+export const disarmSetupEntry = _handle('disarmSetupEntry', async (req, res) => {
+    const result = await talosHandoffService.disarmSetup(req.params.id, req.user._id)
+    if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallbackMessage: 'action_failed' })
+    res.send(result)
+})
 
 /** Status transitions (arm / disarm) and chat-state saves. Plan rewrites go through generate. */
 export const patchSetup  = crud.patch
@@ -116,32 +108,27 @@ export const deleteSetup = crud.remove
  * Only on `updateId`. A NEW setup satisfies no outstanding ask — nothing was pending about a
  * document that did not exist a moment ago.
  */
-export async function generateSetup(req, res) {
-    try {
-        const { setup, accounts, mainAccountId, updateId, chat_state } = req.body ?? {}
-        if (!setup || typeof setup !== 'object' || Array.isArray(setup)) {
-            return res.status(400).send({ error: 'setup must be an object' })
-        }
-
-        const result = await setupService.generateSetup(setup, {
-            userId:   req.user._id,
-            accounts: Array.isArray(accounts) ? accounts : [],
-            mainAccountId,
-            updateId: updateId ?? null,
-            chatState: chat_state,
-        })
-        if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallback: 500 })
-
-        // After the write, never before — a refused update has satisfied nothing. Non-fatal by
-        // contract (resolveCardsFor swallows its own failures).
-        if (updateId) await resolveCardsFor({ kind: 'setup', id: updateId }, { outcome: 'completed' })
-
-        res.send(result.doc)
-    } catch (err) {
-        logger.error(LOG, 'Failed to generate setup', err)
-        res.status(500).send({ error: 'generate_failed' })
+export const generateSetup = _handle('generateSetup', async (req, res) => {
+    const { setup, accounts, mainAccountId, updateId, chat_state } = req.body ?? {}
+    if (!setup || typeof setup !== 'object' || Array.isArray(setup)) {
+        return res.status(400).send({ error: 'setup must be an object' })
     }
-}
+
+    const result = await setupService.generateSetup(setup, {
+        userId:   req.user._id,
+        accounts: Array.isArray(accounts) ? accounts : [],
+        mainAccountId,
+        updateId: updateId ?? null,
+        chatState: chat_state,
+    })
+    if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallback: 500 })
+
+    // After the write, never before — a refused update has satisfied nothing. Non-fatal by
+    // contract (resolveCardsFor swallows its own failures).
+    if (updateId) await resolveCardsFor({ kind: 'setup', id: updateId }, { outcome: 'completed' })
+
+    res.send(result.doc)
+})
 
 // ── Blueprint: opening a plan nobody has sized yet ─────────────────────────────
 
@@ -180,36 +167,31 @@ const FORM_VOCABULARY = Object.freeze({
  * did not survive the read (see blueprintProblems). A hydrate NEVER writes; nothing exists until
  * the user sizes it and presses Generate.
  */
-export async function hydrateBlueprint(req, res) {
-    try {
-        const { blueprint = null, accounts } = req.body ?? {}
-        if (blueprint != null && (typeof blueprint !== 'object' || Array.isArray(blueprint))) {
-            return res.status(400).send({ error: 'blueprint must be an object' })
-        }
-
-        const setup    = normalizeSetup(hydrateDraft(blueprint))
-        const problems = blueprintProblems(blueprint, setup)
-        if (!setup) return res.status(400).send({ error: 'invalid_blueprint', problems })
-
-        // `hasAccount` mirrors Generate's own question rather than re-deriving one: the marked
-        // account lives in client state during authoring and is not bound until the save.
-        const readiness = setupReadiness(setup, Array.isArray(accounts) && accounts.length > 0)
-
-        res.send({
-            setup,
-            readiness,
-            problems,
-            // Envelope metadata, never folded into the setup: whose plan this was and when it was
-            // drawn are things the FORM says out loud, not things the monitor watches.
-            drawn_at: blueprint?.drawn_at ?? null,
-            from:     blueprint?.from ?? null,
-            vocabulary: FORM_VOCABULARY,
-        })
-    } catch (err) {
-        logger.error(LOG, 'Failed to hydrate blueprint', err)
-        res.status(500).send({ error: 'hydrate_failed' })
+export const hydrateBlueprint = _handle('hydrateBlueprint', async (req, res) => {
+    const { blueprint = null, accounts } = req.body ?? {}
+    if (blueprint != null && (typeof blueprint !== 'object' || Array.isArray(blueprint))) {
+        return res.status(400).send({ error: 'blueprint must be an object' })
     }
-}
+
+    const setup    = normalizeSetup(hydrateDraft(blueprint))
+    const problems = blueprintProblems(blueprint, setup)
+    if (!setup) return res.status(400).send({ error: 'invalid_blueprint', problems })
+
+    // `hasAccount` mirrors Generate's own question rather than re-deriving one: the marked
+    // account lives in client state during authoring and is not bound until the save.
+    const readiness = setupReadiness(setup, Array.isArray(accounts) && accounts.length > 0)
+
+    res.send({
+        setup,
+        readiness,
+        problems,
+        // Envelope metadata, never folded into the setup: whose plan this was and when it was
+        // drawn are things the FORM says out loud, not things the monitor watches.
+        drawn_at: blueprint?.drawn_at ?? null,
+        from:     blueprint?.from ?? null,
+        vocabulary: FORM_VOCABULARY,
+    })
+})
 
 /**
  * Re-run the readiness gate on a live draft. Reads nothing, writes nothing.
@@ -227,24 +209,19 @@ export async function hydrateBlueprint(req, res) {
  * Returns the normalised setup too, but callers driving it from a keystroke should use only
  * `readiness`: adopting the normalised copy mid-type would re-sort the band under the cursor.
  */
-export async function validateDraft(req, res) {
-    try {
-        const { setup: raw, accounts } = req.body ?? {}
-        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-            return res.status(400).send({ error: 'setup must be an object' })
-        }
-        const setup = normalizeSetup(raw)
-        if (!setup) return res.status(400).send({ error: 'invalid_setup' })
-
-        res.send({
-            setup,
-            readiness:  setupReadiness(setup, Array.isArray(accounts) && accounts.length > 0),
-            // Carried here too so the form can open straight onto a live draft (no blueprint to
-            // hydrate) and still render its dropdowns from the server's vocabulary.
-            vocabulary: FORM_VOCABULARY,
-        })
-    } catch (err) {
-        logger.error(LOG, 'Failed to validate setup', err)
-        res.status(500).send({ error: 'validate_failed' })
+export const validateDraft = _handle('validateDraft', async (req, res) => {
+    const { setup: raw, accounts } = req.body ?? {}
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        return res.status(400).send({ error: 'setup must be an object' })
     }
-}
+    const setup = normalizeSetup(raw)
+    if (!setup) return res.status(400).send({ error: 'invalid_setup' })
+
+    res.send({
+        setup,
+        readiness:  setupReadiness(setup, Array.isArray(accounts) && accounts.length > 0),
+        // Carried here too so the form can open straight onto a live draft (no blueprint to
+        // hydrate) and still render its dropdowns from the server's vocabulary.
+        vocabulary: FORM_VOCABULARY,
+    })
+})
