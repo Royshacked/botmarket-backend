@@ -4,7 +4,7 @@ import { logger }            from '../../services/logger.service.js'
 import { buildEventRisk }    from '../../services/eventRisk.service.js'
 import { makeEntityCrud }    from '../../services/entity/entityCrud.service.js'
 import { resolveVenue, resolveMode, isBindableVenue } from '../../services/venue.resolve.service.js'
-import { normalizeSetup, setupReadiness, projectScenario } from '../../services/setup.schema.js'
+import { normalizeSetup, setupReadiness, projectScenario, disarmedSetupPatch } from '../../services/setup.schema.js'
 import { resolveMainAccountId } from '../../services/agentUtils.js'
 import { cancelRestingEntryOrders } from '../../services/restingOrders.service.js'
 import { getDb }             from '../../providers/mongodb.provider.js'
@@ -372,6 +372,20 @@ async function patchSetup(id, patch, userId) {
             $set['monitor_state.next_check_at'] = null   // check on the very next tick
             $set.armed_zone_id = null
             $set.armed_scenario_id = null
+        }
+        // LEAVING `hit` IS A DISARM, whatever door it came through. At `hit` a confirmed limit entry
+        // is resting at the broker; dropping the setup back to `waiting` without pulling it left the
+        // order working while the document stopped claiming it — the same orphan the delete path
+        // produced, reached by the button the UI actually has. The idea service has mirrored this
+        // for `resting → waiting` since it gained resting entries.
+        //
+        // Guarded on `orderState: 'placed'` because only that state has an order AT the broker;
+        // `awaiting_confirm` / `awaiting_market` are plans nobody has placed yet.
+        if (cur.status === 'hit' && patch.status === 'waiting') {
+            if (cur.orderState === 'placed') {
+                await cancelRestingEntryOrders(cur, cur.userId ?? userId, { log: LOG, cancelOrder: _deps.cancelOrder })
+            }
+            Object.assign($set, disarmedSetupPatch())
         }
         $set.status = patch.status
     }

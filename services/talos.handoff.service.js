@@ -3,6 +3,8 @@ import { ENTITIES } from './entity/entityCollection.js'
 import { notifySetupManage, notifySetupLimitDisarm } from './tradeNotify.service.js'
 import { ownsEntity } from './entity/entityCrud.service.js'
 import { isLivePosition } from './entity/vocabulary.js'
+import { disarmedSetupPatch } from './setup.schema.js'
+import { cancelRestingEntryOrders } from './restingOrders.service.js'
 import * as manage from './positionManage.service.js'
 import { logger } from './logger.service.js'
 
@@ -247,28 +249,14 @@ export async function disarmSetup(id, userId, deps = _deps) {
         return { ok: false, reason: 'not_a_pending_limit' }
     }
 
+    // Only `placed` has an order AT the broker; awaiting_confirm / awaiting_market are plans nobody
+    // placed yet. The cancel and the field reset are both the shared ones — see _disarmLimit, which
+    // is the same disarm reached by a different door.
     if (setup.orderState === 'placed') {
-        for (const link of setup.brokerOrders ?? []) {
-            if (link.orderId && !link.positionId) {
-                try {
-                    await deps.cancelOrder(link.broker, userId, link.accountId, link.orderId)
-                } catch (cancelErr) {
-                    logger.warn(LOG, `disarmSetup: cancel failed for ${link.orderId}: ${cancelErr.message}`)
-                }
-            }
-        }
+        await cancelRestingEntryOrders(setup, userId, { log: LOG, cancelOrder: deps.cancelOrder })
     }
 
-    await db.collection(COLLECTION).updateOne({ id }, { $set: {
-        status:            'waiting',
-        orderState:        null,
-        pendingOrder:      null,
-        brokerOrders:      null,
-        entryTriggeredAt:  null,
-        armed_zone_id:     null,
-        armed_scenario_id: null,
-        ordersPlacedAt:    null,
-    }})
+    await db.collection(COLLECTION).updateOne({ id }, { $set: disarmedSetupPatch() })
 
     try { await deps.notifyDisarm(setup, 'manual') }
     catch (notifyErr) { logger.warn(LOG, `disarmSetup: notify failed for ${id}: ${notifyErr.message}`) }

@@ -13,7 +13,8 @@ import {
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, MANAGEMENT_VERDICTS } from './talos.assess.js'
-import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetLevels, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, clampRung, clampGuards, usableLadder, rungMinutes } from '../services/setup.schema.js'
+import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetLevels, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, clampRung, clampGuards, usableLadder, rungMinutes, disarmedSetupPatch } from '../services/setup.schema.js'
+import { cancelRestingEntryOrders } from '../services/restingOrders.service.js'
 import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage, notifySetupLimitDisarm } from '../services/tradeNotify.service.js'
 import { isSelfExecuted } from '../services/venue.resolve.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
@@ -247,27 +248,15 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
  * cancel; earlier states (awaiting_confirm, awaiting_market) have no order at the broker yet.
  */
 async function _disarmLimit(setup, disarmReason, nowMs, deps) {
+    // WHEN there is an order at the broker is this caller's judgment; the cancel itself is the
+    // shared one (restingOrders.service), and the field reset is the shared one
+    // (setup.schema.disarmedSetupPatch) — three disarm paths used to carry their own copy of that
+    // eight-field literal, which is how one of them came to leave `armed_scenario_id` behind.
     if (setup.orderState === 'placed') {
-        for (const link of setup.brokerOrders ?? []) {
-            if (link.orderId && !link.positionId) {
-                try {
-                    await deps.cancelOrder(link.broker, setup.userId, link.accountId, link.orderId)
-                } catch (err) {
-                    logger.warn(LOG, `[${setup.id}] limit order cancel failed (${link.orderId}): ${err.message}`)
-                }
-            }
-        }
+        await cancelRestingEntryOrders(setup, setup.userId, { log: LOG, cancelOrder: deps.cancelOrder })
     }
     const patch = {
-        status:            'waiting',
-        orderState:        null,
-        pendingOrder:      null,
-        brokerOrders:      null,
-        entryTriggeredAt:  null,
-        armed_zone_id:     null,
-        armed_scenario_id: null,
-        ordersPlacedAt:    null,
-        disarm_requested:  null,
+        ...disarmedSetupPatch(),
         'monitor_state.check_count': (setup.monitor_state?.check_count ?? 0) + 1,
     }
     await deps.persist(setup.id, patch, _entry('limit_disarmed', { setup, nowMs, read: disarmReason }))
@@ -290,11 +279,16 @@ async function _checkPosition(setup, nowMs, deps) {
 
     // Awaiting confirm/fill → check disarm triggers for limit orders, then keep the schedule moving.
     if (!inPos) {
-        // A limit order lives only while the setup is armed. Expiry, a validity breach or a manual
-        // request cancel it at the broker and return the setup to 'waiting' for re-arming.
+        // A limit order lives only while the setup is armed. Expiry or a validity breach cancel it
+        // at the broker and return the setup to 'waiting' for re-arming.
+        //
+        // A MANUAL disarm is NOT one of these. It used to be read off a `disarm_requested` flag that
+        // nothing in the app ever wrote — the user's own path is synchronous and immediate
+        // (talos.handoff.disarmSetup, and the plain status patch), which is what somebody asking to
+        // pull their order actually wants. A flag would have added a second mechanism whose only
+        // difference was a poll's delay.
         if (setup.entry_mode === 'limit') {
             if (_isPastExpiry(setup, nowMs)) return _disarmLimit(setup, 'expired', nowMs, deps)
-            if (setup.disarm_requested)      return _disarmLimit(setup, 'manual',  nowMs, deps)
             if (liveScenarios(setup).some(s => s.validity)) {
                 const price    = await deps.getPrice(setup)
                 const breached = await _checkValidity(setup, price, nowMs, deps)

@@ -745,6 +745,33 @@ export function normalizeSetup(raw) {
     }
 }
 
+/**
+ * What a DISARMED setup looks like: back to `waiting`, with every trace of the entry that was armed
+ * for it cleared. Pure — the caller cancels at the broker and persists in its own way.
+ *
+ * THREE CALLERS, ONE FIELD LIST, and that is the whole reason this is a function. Talos disarms on
+ * expiry or a validity breach; the user disarms explicitly; and leaving `hit` through a plain status
+ * patch is the same event under a third name. Each had its own literal, and a field added to one —
+ * `armed_scenario_id` was, when rivals arrived — is a field the other two go on leaving behind, so
+ * the setup re-arms carrying a dead premise's id.
+ *
+ * `waiting`, never `looking`: re-arming is the user's own act, exactly as it is after a re-draw. A
+ * setup that disarmed itself on expiry and then silently went back to watching would be the one
+ * behaviour nobody asked for.
+ */
+export function disarmedSetupPatch() {
+    return {
+        status:            'waiting',
+        orderState:        null,
+        pendingOrder:      null,
+        brokerOrders:      null,
+        entryTriggeredAt:  null,
+        ordersPlacedAt:    null,
+        armed_zone_id:     null,
+        armed_scenario_id: null,
+    }
+}
+
 // ─── Readiness ────────────────────────────────────────────────────────────────
 
 /**

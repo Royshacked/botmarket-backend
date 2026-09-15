@@ -1257,17 +1257,16 @@ test('a past-expiry limit order is disarmed on the next Talos wake', async () =>
     assert.equal(deps.writes[0].orderState, null)
 })
 
-test('a manual disarm_requested flag disarms the order on the next wake', async () => {
-    const requested = { ...HIT_LIMIT, disarm_requested: true }
-    let disarmed = false
-    const deps = stubDeps({
-        cancelOrder:  async () => {},
-        onDisarmCard: async (_s, reason) => { disarmed = reason },
-    })
-    const res = await _checkSetup(requested, T, deps)
-    assert.equal(res.reason, 'limit_disarmed')
-    assert.equal(disarmed, 'manual')
-    assert.equal(deps.writes[0].disarm_requested, null, 'flag is cleared after handling')
+// The manual disarm is the USER's own path, not a flag the monitor polls. It used to be read off
+// `setup.disarm_requested`, which nothing in the app ever wrote — so the only disarms that could
+// actually happen were expiry and a validity breach. The synchronous paths (the status patch the UI
+// sends, and talos.handoff.disarmSetup behind POST /:id/disarm) are what a user asking to pull their
+// order gets, and they are covered where they live.
+test('the monitor disarms on expiry and a breach — never on a flag nothing sets', async () => {
+    const withFlag = { ...HIT_LIMIT, disarm_requested: true, valid_until: new Date(T + 60 * 60_000).toISOString() }
+    const deps = stubDeps({ cancelOrder: async () => {}, onDisarmCard: async () => {}, getPrice: async () => 250 })
+    const res = await _checkSetup(withFlag, T, deps)
+    assert.notEqual(res.reason, 'limit_disarmed', 'a stray flag on a live setup decides nothing')
 })
 
 test('a validity breach on a hit limit setup disarms the order', async () => {

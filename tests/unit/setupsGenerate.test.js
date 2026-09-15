@@ -263,3 +263,59 @@ test('a broker that refuses the cancel does not block the delete', async () => {
         assert.equal(f.calls.some(c => c[0] === 'deleteOne'), true, 'the user asked to delete it')
     } finally { restore() }
 })
+
+// ── Disarm: leaving `hit` pulls the order too ─────────────────────────────────
+// `PATCH {status:'waiting'}` is the door the UI's disarm button sends through, and at `hit` a
+// confirmed limit entry is resting at the broker. Dropping back to `waiting` without pulling it left
+// the order working while the document stopped claiming it — the same orphan the delete path made,
+// reached by the other button.
+
+function patchColl(doc) {
+    const sets = []
+    return {
+        sets,
+        coll: async () => ({
+            findOne:           async () => doc,
+            findOneAndUpdate:  async (_q, u) => { sets.push(u.$set); return { ...doc, ...u.$set } },
+            updateOne:         async (_q, u) => { sets.push(u.$set); return { modifiedCount: 1 } },
+        }),
+    }
+}
+
+test('disarming a hit limit setup cancels the order and clears every armed field', async () => {
+    const f = patchColl(HIT_LIMIT)
+    const cancelled = []
+    const restore = _setDeps({ coll: f.coll, cancelOrder: async (...a) => { cancelled.push(a) } })
+    try {
+        const res = await setupService.patchSetup('setup_NVDA_a1b2', { status: 'waiting' }, 'u1')
+        assert.equal(res.ok, true)
+        assert.deepEqual(cancelled, [['ctrader', 'u1', 'a1', 'ord-1']], 'the broker was told')
+        const $set = f.sets.at(-1)
+        assert.equal($set.status, 'waiting')
+        for (const k of ['orderState', 'pendingOrder', 'brokerOrders', 'entryTriggeredAt', 'ordersPlacedAt', 'armed_zone_id', 'armed_scenario_id']) {
+            assert.equal($set[k], null, `${k} is cleared`)
+        }
+    } finally { restore() }
+})
+
+test('a setup with no order AT the broker is disarmed without a cancel', async () => {
+    // awaiting_confirm is a plan nobody placed yet — there is nothing to pull.
+    const f = patchColl({ ...HIT_LIMIT, orderState: 'awaiting_confirm' })
+    const cancelled = []
+    const restore = _setDeps({ coll: f.coll, cancelOrder: async (...a) => { cancelled.push(a) } })
+    try {
+        assert.equal((await setupService.patchSetup('setup_NVDA_a1b2', { status: 'waiting' }, 'u1')).ok, true)
+        assert.equal(cancelled.length, 0)
+        assert.equal(f.sets.at(-1).status, 'waiting')
+    } finally { restore() }
+})
+
+test('disarming from `looking` touches no broker — nothing was ever placed', async () => {
+    const f = patchColl({ ...HIT_LIMIT, status: 'looking', orderState: null, brokerOrders: null })
+    const cancelled = []
+    const restore = _setDeps({ coll: f.coll, cancelOrder: async (...a) => { cancelled.push(a) } })
+    try {
+        assert.equal((await setupService.patchSetup('setup_NVDA_a1b2', { status: 'waiting' }, 'u1')).ok, true)
+        assert.equal(cancelled.length, 0)
+    } finally { restore() }
+})
