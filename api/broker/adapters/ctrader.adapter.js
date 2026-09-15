@@ -470,17 +470,6 @@ export class CTraderAdapter extends BrokerAdapter {
         logger.info(LOG, `Cancel requested for order ${orderId}`)
     }
 
-    /**
-     * Snapshot the broker's current spot quote for a symbol — the live cTrader price
-     * used to shift an absolute order price onto cTrader's book (the basis offset vs
-     * the canonical Massive feed). `symbol` is the broker's tradable name (brokerSymbol).
-     * @returns {Promise<{ symbolId:number, bid:number|null, ask:number|null, mid:number, digits:number, at:number }>}
-     */
-    async getSpot(userId, accountId, symbol) {
-        const session = await this._session(userId, accountId)
-        return session.getSpotPrice(symbol)
-    }
-
     // ── Execution feed ─────────────────────────────────────────────────────────
 
     async startExecutionFeed(userId, accountId) {

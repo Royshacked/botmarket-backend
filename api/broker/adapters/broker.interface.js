@@ -402,22 +402,6 @@ export class BrokerAdapter {
     }
 
     /**
-     * Snapshot the broker's live spot quote for a symbol. Used to shift an absolute order
-     * price onto the broker's book when it lists an aliased instrument whose price basis
-     * differs from the canonical feed (see BrokerOrder.referenceQuote). Optional — the
-     * default returns null, meaning "no basis shift": such adapters place at the canonical
-     * price and ignore referenceQuote.
-     * @param {string} userId
-     * @param {string} accountId
-     * @param {string} symbol   the broker's tradable (broker) symbol
-     * @returns {Promise<{ bid:number|null, ask:number|null, mid:number }|null>}
-     */
-    // eslint-disable-next-line no-unused-vars
-    async getSpot(userId, accountId, symbol) {
-        return null   // default: no spot available → no basis shift
-    }
-
-    /**
      * Resolve an app/canonical symbol to this broker's own tradable symbol, confirming
      * the instrument exists on the account ("getTicker"). Used at idea-build time so the
      * persisted brokerSymbol is the broker's real name (e.g. 'US100.cash') rather than a

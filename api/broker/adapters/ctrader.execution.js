@@ -14,13 +14,13 @@ import { toAppAsset } from '../../../services/brokerSymbol.service.js'
 export const TRADE_SIDE = { long: 1, short: 2 }
 
 // Inbound ProtoOA enums for translating ProtoOAExecutionEvent (2126).
-export const EXEC_TYPE = {       // ProtoOAExecutionType
+const EXEC_TYPE = {       // ProtoOAExecutionType
     ORDER_ACCEPTED: 2, ORDER_FILLED: 3, ORDER_CANCELLED: 5,
     ORDER_EXPIRED: 6, ORDER_REJECTED: 7, ORDER_PARTIAL_FILL: 11,
 }
-export const POSITION_STATUS  = { OPEN: 1, CLOSED: 2 }   // ProtoOAPositionStatus
+const POSITION_STATUS  = { OPEN: 1, CLOSED: 2 }   // ProtoOAPositionStatus
 export const PROTO_ORDER_TYPE = { LIMIT: 2, STOP: 3 }    // a TP closes via LIMIT, an SL via STOP
-export const MONEY_SCALE      = 100   // ProtoOA money fields are integer cents (moneyDigits=2)
+const MONEY_SCALE      = 100   // ProtoOA money fields are integer cents (moneyDigits=2)
 
 /**
  * Translate a ProtoOAExecutionEvent (2126) into a normalized BrokerExecution,

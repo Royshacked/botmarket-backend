@@ -139,4 +139,3 @@ export async function addToManualPosition({ userId, positionId, addQty, price })
     return { positionId, qty: newQty, avgPrice: newAvg, addedQty: add }
 }
 
-export const manualExecutionService = { openManualPosition, closeManualPosition, reduceManualPosition, addToManualPosition }

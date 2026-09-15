@@ -1,4 +1,4 @@
-import { getDb, stripId }       from '../../providers/mongodb.provider.js'
+import { stripId }              from '../../providers/mongodb.provider.js'
 import { logger }               from '../../services/logger.service.js'
 import { brokerService }        from '../broker/broker.service.js'
 import { buildOrderPlanForIdea } from '../../services/orderPlan.service.js'
@@ -13,6 +13,7 @@ import { ownsEntity }          from '../../services/entity/entityCrud.service.js
 import { AWAITING_CONFIRM, isRestingEntry } from '../../services/entity/vocabulary.js'
 import { coverageService }     from '../analyst/coverage.service.js'
 import { NO_PRICE }            from '../broker/adapters/broker.interface.js'
+import { applyOffset }         from '../broker/brokerPrice.service.js'
 
 const LOG = '[ideaExecution]'
 
@@ -43,7 +44,6 @@ export function restingEntryPrice(entryOrderType, price) {
  */
 export async function placeOrdersForIdea(id, orders, userId) {
     try {
-        const db   = await getDb()   // retained solely for executionReconciler.placeExits(db, …)
         const idea = await entityRepo.getById(id)
         if (!idea) return { ok: false, reason: 'not_found' }
         if (!ownsEntity(idea, userId)) return { ok: false, reason: 'forbidden' }
@@ -117,7 +117,7 @@ export async function placeOrdersForIdea(id, orders, userId) {
         if (updated?.nativeExit) {
             const exitAccts = [...new Set(brokerOrders.filter(b => b.positionId != null).map(b => String(b.accountId)))]
             for (const acct of exitAccts) {
-                await executionReconciler.placeExits(db, updated, acct)
+                await executionReconciler.placeExits(updated, acct)
             }
             if (exitAccts.length) updated = await entityRepo.getById(id)
         }
@@ -204,7 +204,7 @@ export async function placeRestingEntryForIdea(id, userId) {
             // Shift authored (real) price → broker space by the fork-measured offset (0 for all
             // but aliased index futures). Persisted entryTriggerPrice below stays the real level
             // (app display); only the order carries the shift.
-            const brokerPrice = triggerPrice + (Number(idea.basisOffset) || 0)
+            const brokerPrice = applyOffset(triggerPrice, idea.basisOffset)
             const brokerOrder = {
                 symbol:    orderSymbol(idea),
                 direction: idea.direction,

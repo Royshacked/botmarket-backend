@@ -35,7 +35,6 @@
  * Reversibility: remove `executionReconciler.start()` from server.js.
  */
 
-import { getDb }         from '../providers/mongodb.provider.js'
 import { logger }        from '../services/logger.service.js'
 import { executionBus }  from '../services/executionBus.js'
 import { brokerService } from '../api/broker/broker.service.js'
@@ -52,7 +51,7 @@ const EPS        = 1e-6   // quantity comparison slack
 // singletons, so production behavior is byte-identical — the seam is inert unless a test
 // overrides it. Enables the regression harness to drive the reconciler against fakes without
 // real IO. See docs/architecture/entity-model.md P1b.
-const _deps = { getDb, brokerService, tradeCaptureService, entityRepo }
+const _deps = { brokerService, tradeCaptureService, entityRepo }
 /** Test-only: override IO deps. Returns a restore fn. */
 export function _setDeps(overrides) {
     const prev = { ..._deps }
@@ -117,8 +116,7 @@ async function handleExecution(exec) {
 async function _onClosed(exec) {
     if (exec.positionId == null) return
     await _withLock(exec.accountId, exec.positionId, async () => {
-        const db   = await _deps.getDb()
-        const idea = await _findActiveByPosition(db, exec.accountId, exec.positionId)
+        const idea = await _deps.entityRepo.findActiveByPosition(exec.accountId, exec.positionId)
         if (!idea) {
             logger.info(LOG, `No active idea matched closed position ${exec.accountId}/${exec.positionId}`)
             // A simulated venue's positions still get a trade-history close even without a
@@ -141,7 +139,7 @@ async function _onClosed(exec) {
         const matched = (idea.exitOrders ?? []).find(o => exec.orderId != null && String(o.orderId) === String(exec.orderId))
         const reason  = matched?.leg ?? idea.pendingCloseReason ?? exec.reason ?? 'broker'
 
-        await _finalizeClose(db, idea, {
+        await _finalizeClose(idea, {
             reason, pnl: exec.pnl, at: exec.at, accountId: exec.accountId, positionId: exec.positionId, price: exec.price,
             quantity: exec.quantity, orderId: exec.orderId, commission: exec.commission, spread: exec.spread,
         })
@@ -151,8 +149,7 @@ async function _onClosed(exec) {
 async function _onReduced(exec) {
     if (exec.positionId == null) return
     await _withLock(exec.accountId, exec.positionId, async () => {
-        const db   = await _deps.getDb()
-        const idea = await _findActiveByPosition(db, exec.accountId, exec.positionId)
+        const idea = await _deps.entityRepo.findActiveByPosition(exec.accountId, exec.positionId)
         if (!idea) return
 
         // Record the slice if it matches one of our tracked exit orders (a native resting
@@ -211,7 +208,7 @@ async function _onReduced(exec) {
             // Position is gone → finalize the close and cancel any leftover exits (incl.
             // an untracked panel order that wasn't the one that filled — the orphan case).
             const reason = matched?.leg ?? exec.reason ?? 'broker'
-            await _finalizeClose(db, { ...idea, exitOrders: orders }, {
+            await _finalizeClose({ ...idea, exitOrders: orders }, {
                 reason, pnl: exec.pnl, at: exec.at, accountId: exec.accountId, positionId: exec.positionId, price: exec.price,
                 quantity: exec.quantity, orderId: exec.orderId, commission: exec.commission, spread: exec.spread,
             })
@@ -250,7 +247,7 @@ async function _onReduced(exec) {
             await _syncLegQuantity(idea.id, exec.accountId, exec.positionId, remaining)
         }
         if (position != null || matched) {
-            await _resyncExits(db, { ...idea, exitOrders: orders }, exec.accountId, remaining)
+            await _resyncExits({ ...idea, exitOrders: orders }, exec.accountId, remaining)
         }
     })
 }
@@ -279,7 +276,6 @@ async function _syncLegQuantity(itemId, accountId, positionId, quantity) {
 
 async function _onOpened(exec) {
     if (exec.positionId == null) return
-    const db = await _deps.getDb()
 
     // Resting entry filled: a broker-native stop-market entry the idea was holding
     // as a working order (status 'resting', orderId linked, positionId not yet set).
@@ -297,7 +293,7 @@ async function _onOpened(exec) {
         if (resting) {
             logger.info(LOG, `Resting entry filled → idea ${resting.id} now ${direction} (position ${exec.positionId})`)
             await _deps.tradeCaptureService.captureOpen(resting, exec)
-            await _withLock(exec.accountId, exec.positionId, () => placeExits(db, resting, exec.accountId))
+            await _withLock(exec.accountId, exec.positionId, () => placeExits(resting, exec.accountId))
             return
         }
     }
@@ -343,7 +339,7 @@ async function _onOpened(exec) {
     await _deps.tradeCaptureService.captureOpen(result, exec)
 
     // Position is open — place this account's native exit orders (once).
-    await _withLock(exec.accountId, exec.positionId, () => placeExits(db, result, exec.accountId))
+    await _withLock(exec.accountId, exec.positionId, () => placeExits(result, exec.accountId))
 }
 
 // ─── Native exit orders ───────────────────────────────────────────────────────
@@ -354,7 +350,7 @@ async function _onOpened(exec) {
  * scaled from the idea-unit plan to this account's filled quantity. Idempotent per
  * account via `exitPlacedAccounts`.
  */
-async function placeExits(db, idea, accountId) {
+async function placeExits(idea, accountId) {
     try {
         const acct = String(accountId)
 
@@ -413,7 +409,7 @@ async function placeExits(db, idea, accountId) {
  * smaller) or cancelled if nothing remains — so it can never over-close and flip the
  * netting position. Market orders fill instantly and are never resized.
  */
-async function _resyncExits(db, idea, accountId, remainingOverride) {
+async function _resyncExits(idea, accountId, remainingOverride) {
     const acct      = String(accountId)
     // Prefer the broker's live position size when the caller has it (authoritative even
     // for panel-managed fills); otherwise derive it from our tracked filled slices.
@@ -506,11 +502,6 @@ async function _growStops(idea, accountId, positionId) {
 
 // ─── Close finalisation ───────────────────────────────────────────────────────
 
-/** The active idea (long/short) holding this account+position in its entry linkage. */
-function _findActiveByPosition(db, accountId, positionId) {
-    return _deps.entityRepo.findActiveByPosition(accountId, positionId)
-}
-
 /** The broker that holds this account's orders for an idea (entry linkage, then exits). */
 function _brokerFor(idea, accountId) {
     const acct = String(accountId)
@@ -524,7 +515,7 @@ function _brokerFor(idea, accountId) {
  * cancel EVERY working broker order still bound to the closed position. Shared by the
  * full-close event path and the broker-confirmed full close detected from a reduce.
  */
-async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId, price, quantity, orderId, commission, spread }) {
+async function _finalizeClose(idea, { reason, pnl, at, accountId, positionId, price, quantity, orderId, commission, spread }) {
     const closedAt = at ?? Date.now()
     const patch = { status: 'closed', closedReason: reason, closedAt }
     if (pnl != null) patch.realizedPnl = pnl
@@ -539,7 +530,7 @@ async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId
     logger.info(LOG, `Idea ${result.id} closed by broker (reason=${reason}, pnl=${patch.realizedPnl ?? '·'})`)
 
     await _deps.tradeCaptureService.captureClose({ accountId, positionId, orderId, price, quantity, reason, pnl, commission, spread, at })
-    await _cancelExitsForPosition(db, result, accountId, positionId)
+    await _cancelExitsForPosition(result, accountId, positionId)
     return true
 }
 
@@ -551,7 +542,7 @@ async function _finalizeClose(db, idea, { reason, pnl, at, accountId, positionId
  * whose positionId matches (leaving other ideas' orders untouched). Falls back to the
  * tracked-only cancel when the broker can't be reached or doesn't list orders.
  */
-async function _cancelExitsForPosition(db, idea, accountId, positionId) {
+async function _cancelExitsForPosition(idea, accountId, positionId) {
     const acct   = String(accountId)
     const broker = _brokerFor(idea, acct)
 
@@ -575,7 +566,7 @@ async function _cancelExitsForPosition(db, idea, accountId, positionId) {
     }
 
     if (!brokerCancelled) {
-        await _cancelWorkingExits(db, idea, acct)   // best-effort: cancel only what we tracked
+        await _cancelWorkingExits(idea, acct)   // best-effort: cancel only what we tracked
         return
     }
 
@@ -592,7 +583,7 @@ async function _cancelExitsForPosition(db, idea, accountId, positionId) {
 }
 
 /** Cancel every still-working exit order for an account (tracked-only fallback). */
-async function _cancelWorkingExits(db, idea, accountId) {
+async function _cancelWorkingExits(idea, accountId) {
     const acct   = String(accountId)
     const orders = idea.exitOrders ?? []
     let changed  = false
@@ -688,7 +679,6 @@ async function _resumeFeeds() {
 }
 
 async function _sweepStalePositions() {
-    const db   = await _deps.getDb()
     const live = await _deps.entityRepo.liveWithBrokerLinks()
     let closed = 0
     for (const idea of live) {
@@ -702,7 +692,7 @@ async function _sweepStalePositions() {
                 if (position === null) {
                     logger.warn(LOG, `Stale position: entity ${idea.id} is ${idea.status} but pos ${link.positionId} is gone — closing`)
                     await _withLock(link.accountId, link.positionId, () =>
-                        _finalizeClose(db, idea, {
+                        _finalizeClose(idea, {
                             reason: 'manual', at: Date.now(),
                             accountId: link.accountId, positionId: link.positionId,
                         })

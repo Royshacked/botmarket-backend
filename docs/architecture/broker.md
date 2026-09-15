@@ -20,7 +20,7 @@ Routes / Services / Monitor / Reconciler
                 │
                 ▼
         [BrokerAdapter interface]   ← capabilities() gates every consumer branch
-   read:   getAccount getPositions getCandles getTradingAccounts getSpot findOpenPosition
+   read:   getAccount getPositions getCandles getTradingAccounts findOpenPosition
    trade:  placeOrder closePosition setProtection cancelOrder amendOrder listOrders
    feed:   startExecutionFeed → executionBus
                 │            │            │
@@ -90,7 +90,6 @@ brokers only). Everything else throws "not implemented" until an adapter overrid
 | `getPositions(userId)` | `Promise<BrokerPosition[]>` | Open positions across all accounts |
 | `getTradingAccounts(userId)` | `Promise<TradingAccount[]>` | All accounts for the broker |
 | `getCandles(symbol, tf, count, userId)` | `Promise<OHLCVBar[]\|null>` | `null` = unsupported (default) |
-| `getSpot(userId, accountId, symbol)` | `Promise<number\|null>` | Live spot for basis-shift (default `null`) |
 | `capabilities()` | `BrokerCapabilities` | Default = all false |
 
 **Trading**

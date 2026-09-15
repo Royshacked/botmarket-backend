@@ -105,7 +105,6 @@ function harness(seed, brokerOpts) {
     const opLog = []
     const { db, store } = makeMongoDouble(seed, opLog)
     const restore = _setDeps({
-        getDb: async () => db,
         brokerService: fakeBroker(opLog, brokerOpts),
         tradeCaptureService: fakeCapture(opLog),
         // entityRepo now owns the reconciler's collection access — back it with the same double.

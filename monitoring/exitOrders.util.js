@@ -15,6 +15,8 @@
  * + orderId capture stays with the caller so error handling is unchanged.
  */
 
+import { applyOffset } from '../api/broker/brokerPrice.service.js'
+
 /** Symbol used for broker orders — broker-specific alias falls back to the asset. */
 export const orderSymbol = idea => idea.brokerSymbol ?? idea.asset
 
@@ -39,7 +41,7 @@ export function buildExitOrder(idea, { type, level = null, qty, positionId = nul
     // basis offset — measured once at fork, 0 for everything but aliased index futures, so
     // a no-op elsewhere. The persisted exitOrders record keeps the real level (app display);
     // only the broker order carries the shifted price.
-    const px = level != null ? level + (Number(idea.basisOffset) || 0) : level
+    const px = applyOffset(level, idea.basisOffset)
     const order = {
         symbol:    orderSymbol(idea),
         direction: closeSide(idea.direction),

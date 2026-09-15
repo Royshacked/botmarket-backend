@@ -588,4 +588,3 @@ async function _cancelClosingOrders(userId, positionId, exceptOrderId = null) {
     }
 }
 
-export const paperExecutionService = { openPosition, reducePosition, computeEquity, latestPrice, latestMarkPrice, exitMarkPrice, entryMarkPrice, quoteMapForSymbols, applySpread, dirSign, round2 }

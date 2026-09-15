@@ -16,13 +16,9 @@
  *   GET    /api/paper/accounts/:accountId/equity-curve ?fromMs=
  *   GET    /api/paper/accounts/:accountId/trades       ?status=&limit=
  *
- *   Legacy single-account (TRANSITIONAL — operate on the default paper account):
+ *   Default-account (the paper toggle — the header badge and resolveWorkspace key on it):
  *   GET  /api/paper/state          { enabled, account: {...}, settings }
  *   PUT  /api/paper/mode           { enabled } → turn paper mode on/off
- *   PUT  /api/paper/settings       { spreadBps?, commissionPerTrade? } → cost settings
- *   POST /api/paper/reset          { startingBalance? } → wipe positions/orders, restore balance
- *   GET  /api/paper/trades         ?status=&limit= → trade history (paper)
- *   GET  /api/paper/equity-curve   ?fromMs= → equity points
  */
 
 import { Router }      from 'express'
@@ -43,10 +39,9 @@ paperRoutes.post  ('/accounts/:accountId/cash',       log, ctrl.adjustAccountCas
 paperRoutes.get   ('/accounts/:accountId/equity-curve', log, ctrl.accountEquityCurve)
 paperRoutes.get   ('/accounts/:accountId/trades',     log, ctrl.accountTrades)
 
-// Legacy single-account (transitional)
+// Default-account: the paper toggle. `enabled` on the oldest paper account is the flag
+// resolveWorkspace reads, so these two are load-bearing. The other four single-account routes
+// (settings / reset / trades / equity-curve) had no caller left and were removed — the
+// per-account forms above replaced them.
 paperRoutes.get ('/state',        log, ctrl.getState)
 paperRoutes.put ('/mode',         log, ctrl.setMode)
-paperRoutes.put ('/settings',     log, ctrl.updateSettings)
-paperRoutes.post('/reset',        log, ctrl.resetDefault)
-paperRoutes.get ('/trades',       log, ctrl.getTrades)
-paperRoutes.get ('/equity-curve', log, ctrl.getEquityCurve)

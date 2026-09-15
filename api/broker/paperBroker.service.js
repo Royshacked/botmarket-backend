@@ -109,7 +109,6 @@ export const paperBrokerService = {
     updatePosition,
     // orders
     listOrders,
-    getOrder,
     insertOrder,
     updateOrder,
     claimOrder,
@@ -392,14 +391,6 @@ async function listOrders(userId, { status, accountId } = {}) {
     if (status)    q.status    = status
     if (accountId) q.accountId = String(accountId)
     return db.collection(ORDERS).find(q, { projection: { _id: 0 } }).toArray()
-}
-
-async function getOrder(userId, orderId) {
-    const db = await getDb()
-    return db.collection(ORDERS).findOne(
-        { userId, orderId: String(orderId) },
-        { projection: { _id: 0 } }
-    )
 }
 
 async function insertOrder(doc) {

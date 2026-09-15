@@ -11,9 +11,8 @@ const LOG = '[paper:controller]'
 const _mode = raw => (VIRTUAL_MODES.includes(raw) ? raw : 'paper')
 
 /**
- * Full paper state: mode flag + account config + live mark-to-market.
- * TRANSITIONAL: reports the user's DEFAULT paper account until the per-idea account
- * picker + per-account UI replace these single-account endpoints. Reshapes the shared
+ * Reports the user's DEFAULT (oldest) paper account, because that is where the paper toggle lives:
+ * `enabled` on it is what resolveWorkspace and the header badge read. Reshapes the shared
  * per-account DTO (_accountState) into the legacy `{ enabled, settings, account }` shape.
  */
 async function _state(userId) {
@@ -163,7 +162,7 @@ export async function accountTrades(req, res) {
     } catch (err) { _fail(res, err, 'account trades error') }
 }
 
-// ── Legacy single-account (transitional) ──────────────────────────────────────
+// ── Default-account: the paper toggle ────────────────────────────────────────
 
 export async function getState(req, res) {
     try {
@@ -176,44 +175,4 @@ export async function setMode(req, res) {
         await paperBrokerService.setEnabled(req.user._id, !!req.body?.enabled)
         res.json(await _state(req.user._id))
     } catch (err) { _fail(res, err, 'mode error') }
-}
-
-export async function updateSettings(req, res) {
-    try {
-        const { spreadBps, commissionPerTrade } = req.body ?? {}
-        const acct = await paperBrokerService.getOrCreateDefaultAccount(req.user._id, 'paper')
-        await paperBrokerService.updateSettings(req.user._id, acct.accountId, { spreadBps, commissionPerTrade })
-        res.json(await _state(req.user._id))
-    } catch (err) { _fail(res, err, 'settings error') }
-}
-
-export async function resetDefault(req, res) {
-    try {
-        const startingBalance = req.body?.startingBalance != null ? Number(req.body.startingBalance) : undefined
-        const acct = await paperBrokerService.getOrCreateDefaultAccount(req.user._id, 'paper')
-        await paperBrokerService.resetAccount(req.user._id, acct.accountId, { startingBalance })
-        res.json(await _state(req.user._id))
-    } catch (err) { _fail(res, err, 'reset error') }
-}
-
-export async function getTrades(req, res) {
-    try {
-        const trades = await tradeCaptureService.listTrades(req.user._id, {
-            mode:   'paper',
-            status: req.query.status,
-            limit:  req.query.limit != null ? Number(req.query.limit) : undefined,
-        })
-        res.json({ trades })
-    } catch (err) { _fail(res, err, 'trades error') }
-}
-
-export async function getEquityCurve(req, res) {
-    try {
-        const acct   = await paperBrokerService.getOrCreateDefaultAccount(req.user._id, 'paper')
-        const points = await paperBrokerService.listEquityCurve(req.user._id, {
-            accountId: acct.accountId,
-            fromMs:    req.query.fromMs != null ? Number(req.query.fromMs) : undefined,
-        })
-        res.json({ points })
-    } catch (err) { _fail(res, err, 'equity-curve error') }
 }

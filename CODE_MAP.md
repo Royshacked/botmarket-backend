@@ -48,7 +48,7 @@ api/
   broker/                 broker connections/orders/positions  /api/broker/*
     adapters/
       broker.interface.js     BrokerAdapter base class — THE contract every broker fulfils
-                              (incl. getCandles + capabilities().ohlcv, resolveSymbol "getTicker", getSpot)
+                              (incl. getCandles + capabilities().ohlcv, resolveSymbol "getTicker")
                               capabilities().selfExecuted = the ACCOUNT HOLDER executes (manual): post
                               the card and record the intent, never call a trading method. NOT the same
                               question as trading:false — IBKR is that too, but it is unwired rather
@@ -59,7 +59,7 @@ api/
       ibkr.adapter.js         data-only, in progress — see APP_SPEC / do not extend casually
       normalize.js
     broker.factory.js         getBrokerAdapter(type); SUPPORTED_BROKERS registry
-    broker.service.js         broker-agnostic entry point used everywhere (getCandles/resolveSymbol/getSpot)
+    broker.service.js         broker-agnostic entry point used everywhere (getCandles/resolveSymbol)
     brokerPrice.service.js    basis conversion: computeBasisOffset (cashIndex−future daily closes,
                               index futures only) + applyOffset + real/cash ticker maps
     paperBroker.service.js / paperExecution.service.js
