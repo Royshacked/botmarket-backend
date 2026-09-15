@@ -27,8 +27,14 @@ export const ASSESS_MAX_TOKENS_THINKING = 16_000
  * Falls back to Sonnet / no-thinking when unset, invalid, or unreadable. Every allowed model is
  * vision-capable, so the chart read is always safe.
  *
- * Both monitors read the same `hermesModel` / `hermesReasoning` preference keys — one knob for
- * "how hard should my monitors think", not one per monitor.
+ * ONE KNOB FOR EVERY MONITOR — "how hard should my monitors think", not one setting per monitor.
+ *
+ * THE KEY IS STILL CALLED `hermesModel`, and that is a decision rather than an oversight. It is a
+ * PERSISTED user-preference field: every existing user document carries it, and the client writes
+ * it. Renaming would mean a migration of live preferences for a cosmetic gain — the same trade the
+ * setup schema refuses over `lower`/`upper`, and the same category as the Kairos names CLAUDE.md
+ * keeps on purpose (a wire field is not a desk). Talos is the only monitor reading it today; Hermes
+ * was archived on 2026-08-18.
  */
 /**
  * Book one monitor model call against the user who owns the entity.

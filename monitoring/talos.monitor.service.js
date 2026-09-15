@@ -1011,23 +1011,17 @@ export function scenarioGate(setup, price) {
 // The cheap tier for a LIVE position, mirroring what the zone gate does pre-entry: decide for free
 // whether this wake is worth a model call, so a quiet position costs nothing to hold.
 //
-// ┌ DELIBERATE DUPLICATION — copied from hermes.monitor.service.js, DELETE WHEN HERMES SLEEPS ─────┐
-// │ Hermes owns the original (`_positionGate`, `_computeMetrics`, `_rMultiple`). It is silent but  │
-// │ still managing live calls, so extracting a shared module would refactor code holding real      │
-// │ positions for the benefit of a caller scheduled for retirement. The copy is time-boxed: when   │
-// │ Hermes's last position closes and it is retired, this becomes the only implementation and the  │
-// │ note goes with it.                                                                             │
-// │                                                                                                │
-// │ NOT A VERBATIM COPY, and the differences are the reason a blind copy would have been wrong:    │
-// │   • cadence is `{min,max}` here, `{min_gap_min,max_gap_min}` on a call                         │
-// │   • targets are ZONES, reduced to their NEAR edge by setup.schema.targetEdges — so `scale_out` │
-// │     fires at-or-beyond, and a gap straight through a target still trips it                     │
-// │   • the stop is the widest edge across `stop_zones`, chosen by price, never `stop_zones[0]`    │
-// │                                                                                                │
-// │ THE RISK THIS NOTE EXISTS FOR: Talos already grew one copy of a Hermes mechanism — the journal │
-// │ — and it drifted, dropping every sentence, which is why monitorJournal.js had to be extracted. │
-// │ If this block and Hermes's diverge, extract rather than patch both.                            │
-// └────────────────────────────────────────────────────────────────────────────────────────────────┘
+// THE ONLY IMPLEMENTATION. This block used to carry a note saying it was a time-boxed copy of
+// Hermes's (`_positionGate`, `_computeMetrics`, `_rMultiple`), to be reconciled "when Hermes
+// sleeps". Hermes slept: it was archived on 2026-08-18 and lives in archive/monitoring/, imported by
+// nothing and started by nothing. So there is no second copy to keep in step, and the instruction to
+// keep one in step was the more dangerous half of the note to leave standing.
+//
+// What the note got right and is worth keeping: these read a SETUP, and a setup's shape is not a
+// call's — cadence is `{min,max}`, targets are zones reduced to their near edge (so `scale_out`
+// fires at-or-beyond and a gap straight through still trips), and the stop is the widest edge across
+// `stop_zones` chosen by price, never `stop_zones[0]`. Reviving Kairos means writing its own, or
+// generalising these deliberately; it does not mean restoring a copy.
 
 /** The fill price, falling back to the intended entry until the ledger has the real one. Pure. */
 function _entryPx(ps) { return toNum(ps?.entry?.fill_price) ?? toNum(ps?.entry?.intended) ?? null }
@@ -1395,26 +1389,14 @@ export const _isExpiring   = (setup, nowMs) => isExpiring(setup, nowMs, EXPIRY_T
 const SPARE_PAST_EXPIRY = ['enter']
 export const _effectiveVerdict = (verdict, reason, pastExpiry) =>
     effectiveVerdict(verdict, reason, pastExpiry, SPARE_PAST_EXPIRY)
-
-
 /**
- * Proximity-aware cadence: poll at the setup's max gap when price is far from every zone, and
- * tighten toward the min gap as it approaches, so a fast run into a zone isn't missed by a lazy
- * timer. Within ~1 zone-width → the floor; beyond ~8 → the ceiling; linear in between.
- */
-/**
- * Status transition from the verdict (+ why we were looking) — the Talos twin of
- * hermes._nextStatus, one tier down in the vocabulary:
+ * Status transition from the verdict: `enter` → 'hit', anything else → 'looking'. The shared one
+ * (readinessGates.nextStatus), because a setup and a call are the same shape of thing and run the
+ * same readiness ladder.
  *
-  *   hermes (call):  enter → 'hit' · else → 'looking'
- *   talos  (setup): enter → 'hit' · else → 'looking'
- *
- * Identical now, deliberately: a setup and a call are the same shape of thing, so they run the
- * same readiness ladder. What still differs is what `ready` CARRIES — a call's order plan is built
- * later, at confirm, by the Kairos handoff, whereas a setup's is stamped in this same write. That
- * is why a setup's card routes straight to the order dialog and a call's routes to its pop-out.
- *
- * Unlike Hermes there is no `edit`/`let_expire` branch here: a setup's expiry review is handled
+ * What differs is what 'hit' CARRIES — a setup's order plan is stamped in the same write, where a
+ * call's was built later at confirm — which is why a setup's card routes straight to the order
+ * dialog. No `edit`/`let_expire` branch here: a setup's expiry review is handled
  * ahead of this in _applyVerdict (let_expire closes it, anything else stays alive on cadence), so
  * by the time status is derived the only question left is whether the setup fulfilled.
  */
