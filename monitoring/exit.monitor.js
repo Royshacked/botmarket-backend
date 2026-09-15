@@ -8,7 +8,7 @@
  * `checkPosition` is that monitor. Minos was its only caller, and Minos was deleted on 2026-08-18.
  * Nothing replaced it, so the capability was fully wired except for the part that RUNS it: a leg
  * routed to the monitor was accepted, stored, and shown as protection while nothing ever looked at
- * it. The guard in `routeExits` (`unmonitoredExitLegs`) made that loud. This makes it false.
+ * it. A guard in `routeExits` made that loud until this loop landed; the guard has since been removed.
  *
  * WHY IT IS KIND-BLIND, like marketOpen. The state it drains is written by more than one kind: an
  * `idea`, a `portfolio_item` (a holding IS an idea document carrying a portfolioId) and a manual
