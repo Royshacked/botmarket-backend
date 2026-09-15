@@ -17,7 +17,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 1 | Broker + execution | `api/broker/**`, `api/paper/**`, `monitoring/execution.reconciler.js`, `monitoring/paper*.service.js`, `services/executionBus.js` | ✅ done — 8 commits `59d08b1`..`06d86d9`, suite **2849 / 0** |
 | 2 | Trade tier (`idea`) | `api/trade-ideas/**`, `tradeCapture`, `tradeNotify`, `positionManage`, `protectionPlan`, `monitoring/positionMonitor.js`, `entry.monitor.js`, `exit.monitor.js` | ✅ done — 8 commits `e066101`..`e6c42d0` |
 | 3 | Mentor / setups + Talos | `api/setups/**`, `setup.schema.js`, `mentor.agent.service`, `talos.*`, `monitoring/evaluators/**`, `parsers/**`, `guardSweep`, `readinessGates` | ✅ done — 6 commits `227d711`..`58e7f3d` |
-| 4 | Atlas / portfolio | `api/portfolio/**`, `portfolio.agent.service`, `portfolioState`, `sleeveSource`, `adoptBook` | |
+| 4 | Atlas / portfolio | `api/portfolio/**`, `portfolio.agent.service`, `portfolioState`, `sleeveSource`, `adoptBook` | ✅ done — 8 commits `e3ef6e7`..`26dfe17`, suite **2884 / 0** |
 | 5 | Agent runtime | `agentIO`, `agentUtils`, `agentTools.registry`, `services/tools/**`, `pendingAction/**`, `entity/**`, `axl.agent.service`, `api/chat/**` | |
 | 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | |
 | 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | |
@@ -82,6 +82,8 @@ connection has. `GET /api/paper/accounts/:id/equity-curve` — defined in the FE
 **(e) MVC** — routes → controller → service → adapter is clean. `broker.controller.getPositions`
 joins `ideaService.getAssetClassMap` / `getCallPositionMap` inside the controller — a cross-feature
 enrichment that belongs in a service; **§2 decides where** (it is the trade tier's data).
+*Answered in §4:* `ideaService.enrichPositions` — the trade tier, beside the two maps it reads. It is
+not the portfolio's; `computePortfolioState` does its own position join and wants neither field.
 
 **(f) Spaghetti** — none serious. `_onReduced` is the densest function (100 lines, four decisions)
 and is not split: the sequence *is* the invariant, and every branch says why.
@@ -242,6 +244,107 @@ something the synchronous path already does better.
 Its Talos entry documented a **MOMENTUM PULSE** — `shouldPulse`, `monitor_state.pulse_anchor_px` /
 `last_pulse_at`, `nearestZoneWidth` — that exists nowhere in the tree; guards replaced it. Rewritten
 to the cascade that actually runs.
+
+---
+
+## §4 Atlas / portfolio — done
+
+**Verdict in one line:** the review machinery is elaborate and carefully reasoned, and the damage was
+done by things too small to notice — one missing projection field switched off the review's
+highest-signal trigger, one missing status check let a user's correction vanish, and one duplicated
+block described the same book to the model twice with two different names for the same holding.
+
+### Bugs
+
+| | Where | What | Sev |
+|---|---|---|---|
+| 1 | `portfolioState.STATE_PROJECTION` | Omitted **`conviction_history`**, so `_lastConviction` read `undefined` and **`convictionPrev` was null on every holding of every book**. The `conviction` trigger in `portfolioReview.util` — the one its own comment calls *the highest-signal early warning* — could never fire, and the `(was medium)` trend never rendered. `snapshotConvictions` had been writing the array on every review close the whole time. | **high** |
+| 2 | `adoptBook.refreshDraft` | Checked `COMMITTED` but not `COMMITTING`. `patchDraft` only matches an unspent draft, so a refresh landing mid-commit wrote nothing — and returned the merged table anyway. Adopt mode calls it **every turn**, so a user correcting a row while the commit held its 2-minute lease saw the correction folded into the staged book the model reads, and lost it. Now `in_progress` (already a 409 in `_adoptErr`), with the stored draft riding the refusal so the model is not left blind. | medium |
+| 3 | `portfolio.agent` — two books in one prompt | `_buildPortfolioContext` rendered the book from `portfolioIdeas`, the list the **client** sent, while `_buildPortfolioStateSection` rendered the same holdings from Mongo. Both shipped together, spelling the holding's id `ideaId: <id>` and `[<id>]` — contradicting the state block's own instruction that the bracketed value is the **only** source of an itemId. That instruction exists because an *empty* client list once let Atlas invent ids and every accepted change came back `not_found`; a second client-supplied copy left that door open. Deleted; what it carried (authored size, condition trees) is projected and rendered from the database. | medium |
+
+### The lens
+
+**(a) Architecture** — `portfolioRebalance` reached for `db.collection(ENTITIES)` at eighteen sites,
+the last service in the review path doing its own Mongo. By-id reads/writes now go through
+`entityRepo` built over the **injected** db (the queue replays these functions with one); book-scoped
+reads go through `listPortfolioItems`, which was already "the one query that reads a book's holdings".
+`_addItem`'s sibling read had been a second inline idea of what `{portfolioId, userId}` means — and an
+add is exactly where getting that wrong inherits another user's execution binding onto a new holding.
+`adoptBook._deleteAdoptedEntity` → `entityRepo.deleteGuarded`, whose guard is required and has no
+default. `portfolioMode.util` moved to `services/`: two of its three consumers were already there.
+
+**(b) Conventions** — the cadence default had **three** answers in one file, and two of them were the
+display and the clock disagreeing: `getPortfolioLifecycle` fell back to `monthly` while the seed and
+every clock said `weekly`, so a book with no stated cadence was *told* monthly and *booked* in a week.
+One `DEFAULT_CADENCE` + `cadenceMs()`. Adoption's `monthly` stays as `ADOPTED_CADENCE` — it is
+**stated** on the document, and a stated cadence is not a fallback. `const LIVE = new Set(PAST_ENTRY)`
+was not live (`PAST_ENTRY` includes `hit`), and the misnomer had a consequence: `remove_item` refused a
+`hit` holding with `live_use_exit_item`, and `exit_item` refuses that same holding with `no_position` —
+a verb that also refuses. Seven adoption handlers → `makeAdoptHandler`.
+
+**(c) Duplications** — the two due-book readers shared ~45 lines (`_metaStage` / `_bookMeta` /
+`_bookRow`); the three position-moving verbs shared a five-line guard preamble (`_positionedItem`); the
+leg-quantity `arrayFilters` write existed beside `entityRepo.setLegQuantity`, which was written for it.
+That last one is the CLAUDE.md nuance exactly — **share the pipe, not the judgment**: the reconciler
+writes the broker's own volume and overwrites, a review's trim writes arithmetic and must lose to
+whoever wrote in between, so the guard became an optional `ifQuantity` and the yielding stayed each
+caller's. `_portfolioName` read twice per request.
+
+**(d) Dead code** — `addReviewHistoryEntry` (no caller; the per-book narrative was superseded by the
+fingerprint, so the FIELD stays for books that already carry entries); adoption's `benchmark` (a second
+copy of the mandate's) and `spine_state` (whose comment promised a nag and a Themis behaviour that were
+never built — a field described only by behaviour that does not exist reads as a mechanism nobody may
+break); `AETHER_TOOL_HANDLERS = {}` with its orphaned comment block, two of whose lines begin
+mid-sentence — **the identical §3 finding, in a second agent**; `_parseScreenRequest` (singular);
+`portfolioChat`'s re-export shim, whose only importer was a test.
+
+**(e) MVC** — see (a). `_specAsset`, `_deferred` and the refusal vocabulary were already right.
+
+**(f) Spaghetti** — none. `applyRebalance` is long but linear, and its three-outcome bucketing
+(applied / deferred / failed, with a lost queue write counted as failed) is the invariant.
+**`sleeveSource.service.js` produced no findings at all** — the cleanest file in the section.
+
+**(g) Plaster** — `spine_state`'s comment; the `?? 'monthly'` that contradicted the clock; the
+`refreshDraft` success answer over a write that did not happen.
+
+**(h) Shared helpers** — added `earningsWindow.util`, `entityRepo.listByIds` / `deleteGuarded`,
+`setLegQuantity`'s `ifQuantity`, `makeAdoptHandler`, `_bookRow`, `_positionedItem`.
+
+### §1's open question, answered
+
+`broker.controller.getPositions` joined `getAssetClassMap` + `getCallPositionMap` inside a controller.
+**It is not the portfolio's** — `computePortfolioState` does its own position→holding join off
+`brokerOrders` and wants neither field. It is the **trade tier's**, because both maps are reads of that
+tier's own documents, so the join belongs beside them: `ideaService.enrichPositions`. The two map
+getters come off the service object (they were public only to be joined by that controller), and the
+join is testable without a controller for the first time — seven cases, including the three easy ones
+to get wrong: a null class is the client's fallback signal and must not be invented, a class the
+*broker* stated is not overwritten, and the call key includes the broker.
+
+### Behaviour changes a reader should know
+
+- A book with no stated `reviewCadence` now *reads* as weekly everywhere, matching the clock that was
+  already scheduling it.
+- `remove_item` on a `hit` holding answers `order_pending_cancel_first` instead of pointing at a verb
+  that also refuses.
+- `PATCH /api/portfolio/adopt/draft/:id` can answer **409** while a commit is in flight.
+- Atlas sees the book once, from the database, with its ids in **every** mode rather than review only.
+
+### Frontend follow-ups (botmarket-frontend, untouched)
+
+| From | What |
+|---|---|
+| §4 | The client still SENDS `portfolioIdeas` on every portfolio stream. The controller documents that it is deliberately unread — but it is dead payload carrying a whole book |
+| §4 | `adopt.service.remote.refresh` does `res.draft ?? null` and will now reject on a 409; the confirm grid should say "This book is already being adopted" |
+| §4 | `reviewApply.REASON_COPY` has no entry for `live_use_exit_item` (pre-existing) or the new `order_pending_cancel_first`, so both fall through to the generic line |
+
+### Tests added
+
+`portfolioStateProjection` (the projection must cover every field the mapper reads — the check that
+would also have caught `research_basis`), `portfolioAuthoredLine`, `enrichPositions`, plus cases on
+the adopt commit-lease, the compare-and-set's losing half, and `_addItem`'s ownership scoping. Suite
+2864 → **2884**. Three fake dbs were brought up to the driver's shape (`find().project().toArray()`,
+`updateOne` returning a result) — which is what they should have been.
 
 ---
 

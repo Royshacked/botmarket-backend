@@ -323,7 +323,9 @@ Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/b
   benchmark over the window) and a **regime then→now delta** (rendered into the review-state block by the
   server, not estimated by the model). The scheduled cadence (`reviewCadence`, `nextReviewAt`, 60s monitor)
   **notifies only** — but the notification carries a cheap non-LLM **pre-check** (`computeReviewSignals` →
-  `triggers[]`: conviction fell / regime shift / drift / benchmark lag / imminent earnings); the full memo is
+  `triggers[]`: conviction fell / regime shift / drift / benchmark lag / imminent earnings). *The
+  conviction trigger was dead from the day it was written until §4: `STATE_PROJECTION` did not carry
+  `conviction_history`, so the "then" conviction it compares against was null on every holding.* The full memo is
   generated only when the user opens the review (user-initiated via the bubble, the portfolio-row review
   action, the *Activate all* gate, or simply reopening a book that holds a position — see the next
   bullet). Nothing auto-executes — changes stay Accept-gated. Endpoints:

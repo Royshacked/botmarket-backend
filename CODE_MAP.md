@@ -26,7 +26,11 @@ api/
   trade-ideas/            idea CRUD + order placement /api/trade-ideas/*
     tradeIdeas.service.js     save/get/update/delete, broker forking; getTicker-resolved
                               brokerSymbol + fork-time basisOffset per child; venue gate
-                              (no broker + no paper → reject, reason:'no_venue')
+                              (no broker + no paper → reject, reason:'no_venue').
+                              enrichPositions = what THIS tier knows about a broker's positions:
+                              the authored assetClass (null → the client's symbol heuristic) and
+                              the owning callId. §1 flagged it homeless inside broker.controller;
+                              §4 placed it here, beside the two maps it reads
     ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now")
     exitOrders.service.js     in-position exit (re)arming — through buildExitOrder, so the basis offset is
                               applied once, by the one helper, on this path as on placement
@@ -138,22 +142,38 @@ services/
   portfolio.agent.service.js  scanner.agent.service.js
                           Atlas tools: screen_candidates + get_macro_snapshot + enriched get_fundamentals
                           (FMP Starter); review-state block renders benchmark-relative perf + regime delta
-                          (_formatReviewDelta) from the fingerprint, and in REVIEW ONLY the holding's
-                          `[itemId]` before each ticker — a review's output names which holding each
-                          action acts on, and the ids used to appear only in the CLIENT-supplied EDIT
-                          MODE block, so an empty list left Atlas inventing them and every accepted
-                          change came back not_found
+                          (_formatReviewDelta) from the fingerprint. _buildPortfolioStateSection is the
+                          ONE rendering of the book, in every mode — the holding's `[itemId]` before each
+                          ticker, its authored size + condition trees (authoredLine), and in REVIEW the
+                          frozen thesis. There WAS a second one: an EDIT MODE block built from the ideas
+                          list the CLIENT sent, spelling the same holding's id `ideaId:` — so one prompt
+                          described the book twice while telling the model one of them was the only id
+                          source, and an empty client list left Atlas inventing ids that came back
+                          not_found on every accepted change. Deleted §4; a desk reads its subject from
+                          the database
                           Argus (scanner) systematic-discovery funnel: Phase-2 grounded sources
                           screen_candidates + get_market_movers + get_sector_snapshot + get_analyst_actions
                           (no memory-recall); Phase-3 get_candles/get_indicators baseline + get_chart/
                           get_orderblocks/get_false_breaks vision (KLineCharts, onChart:null = model-only)
   portfolioState.service.js listPortfolioItems = THE query for a book's rows and the one place
-                            ownership is enforced on them; every caller comes through it, with its
-                            own projection (computePortfolioState takes a narrow slice, a client
-                            opening the book takes whole documents). computePortfolioState = actual
-                            weights, drift, unrealized P&L, thesis age, earnings — 5-min TTL snapshot
-                            so review follow-ups reuse one prompt-cacheable block. listPortfolios =
-                            the cheap book enumeration (also the watchlist's)
+                            ownership is enforced on them; every caller comes through it (the
+                            rebalance's sibling + conviction reads included), with its own projection
+                            and an optional injected db. computePortfolioState = actual weights,
+                            drift, unrealized P&L, thesis age, earnings — 5-min TTL snapshot so review
+                            follow-ups reuse one prompt-cacheable block. STATE_PROJECTION is exported
+                            and TESTED against the fields the mapper reads: it omitted
+                            conviction_history, so convictionPrev was null on every holding and the
+                            conviction review trigger could never fire. listPortfolios = the cheap
+                            book enumeration (also the watchlist's)
+  portfolioMode.util.js     mode/broker/account derivation for a book — _deriveMode, _accountLabel,
+                            _virtualAccountNames, formatWorkspaceLine. Lived under api/portfolio (it
+                            was carved out to break a portfolioChat↔portfolioState cycle); moved to
+                            services/ in §4, where two of its three consumers already were
+  earningsWindow.util.js    the two PURE halves of the earnings join shared by computePortfolioState
+                            and upcomingEvents: the window (today +30d, YYYY-MM-DD) and
+                            earningsBySymbol (first row per name = its next report). The FETCH is
+                            deliberately NOT shared — portfolioState swallows a failure, upcomingEvents
+                            must name it in `unavailable`
   portfolioReview.util.js   PURE review-lifecycle helpers (no I/O): benchmarkTicker (mandate text→ETF proxy),
                             buildFingerprint (the "then" snapshot), computeReviewDelta (benchmark return +
                             regime then→now), computeReviewTriggers (the non-LLM pre-check signals)
