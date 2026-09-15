@@ -22,6 +22,7 @@ import { num }                     from './normalize.js'
 import { getIBKRGateway }          from '../../../providers/ibkr.gateway.provider.js'
 import { brokerConnectionService } from '../brokerConnection.service.js'
 import { logger }                  from '../../../services/logger.service.js'
+import { parseTimeframe }          from '../../../services/timeframe.service.js'
 import { config } from '../../../services/config.js'
 
 const LOG = '[ibkr.adapter]'
@@ -43,13 +44,42 @@ const IBKR_CONTRACTS = {
     GC:  { secType: 'FUT', symbol: 'GC',  exchange: 'COMEX', currency: 'USD' },
 }
 
-// Unified timeframe label → IB historical request params.
-const TIMEFRAME_MAP = {
-    minutes: { duration: '1 D', barSize: BarSizeSetting.MINUTES_FIVE },
-    hours:   { duration: '5 D', barSize: BarSizeSetting.HOURS_ONE },
-    daily:   { duration: '1 Y', barSize: BarSizeSetting.DAYS_ONE },
-    weekly:  { duration: '2 Y', barSize: BarSizeSetting.WEEKS_ONE },
-    monthly: { duration: '5 Y', barSize: BarSizeSetting.MONTHS_ONE },
+// App timeframe (via parseTimeframe → {timeSpan, multiplier}) → IB historical request params.
+// Keyed the same way cTrader's TRENDBAR_PERIOD is, so both adapters read the ONE timeframe
+// vocabulary the monitor speaks ('5min' / '1hr' / 'day'). Only bar widths IB serves are listed;
+// any other width yields null → getCandles returns null → the caller falls back to the app feed.
+// `duration` is sized to return a few hundred bars at that width.
+const IB_BAR = {
+    'minute:1':  { duration: '1 D', barSize: BarSizeSetting.MINUTES_ONE },
+    'minute:2':  { duration: '1 D', barSize: BarSizeSetting.MINUTES_TWO },
+    'minute:3':  { duration: '1 D', barSize: BarSizeSetting.MINUTES_THREE },
+    'minute:5':  { duration: '2 D', barSize: BarSizeSetting.MINUTES_FIVE },
+    'minute:10': { duration: '5 D', barSize: BarSizeSetting.MINUTES_TEN },
+    'minute:15': { duration: '5 D', barSize: BarSizeSetting.MINUTES_FIFTEEN },
+    'minute:20': { duration: '1 W', barSize: BarSizeSetting.MINUTES_TWENTY },
+    'minute:30': { duration: '1 W', barSize: BarSizeSetting.MINUTES_THIRTY },
+    'hour:1':    { duration: '1 M', barSize: BarSizeSetting.HOURS_ONE },
+    'hour:2':    { duration: '1 M', barSize: BarSizeSetting.HOURS_TWO },
+    'hour:3':    { duration: '2 M', barSize: BarSizeSetting.HOURS_THREE },
+    'hour:4':    { duration: '2 M', barSize: BarSizeSetting.HOURS_FOUR },
+    'hour:8':    { duration: '6 M', barSize: BarSizeSetting.HOURS_EIGHT },
+    'day:1':     { duration: '1 Y', barSize: BarSizeSetting.DAYS_ONE },
+    'week:1':    { duration: '2 Y', barSize: BarSizeSetting.WEEKS_ONE },
+    'month:1':   { duration: '5 Y', barSize: BarSizeSetting.MONTHS_ONE },
+}
+
+/**
+ * Map an app timeframe string ("5min" / "1hr" / "day"; legacy "minutes" / "daily" too) to IB's
+ * historical-bar request params, or null when IB has no matching bar width. Exported for unit
+ * testing — the sibling of ctrader.adapter's toTrendbarPeriod.
+ * @param {string} timeframe
+ * @returns {{ duration: string, barSize: string }|null}
+ */
+export function toIbBarSize(timeframe) {
+    const opts = parseTimeframe(timeframe)
+    if (!opts) return null
+    const m = Math.max(1, Math.trunc(Number(opts.multiplier) || 1))
+    return IB_BAR[`${opts.timeSpan}:${m}`] ?? null
 }
 
 // Module-level cache of qualified contracts (conId is stable; adapter instances are
@@ -221,9 +251,16 @@ export class IBKRAdapter extends BrokerAdapter {
 
     // ── Candles (over the TWS socket — retires the old REST provider) ─────────────
 
+    /**
+     * OHLCV bars over the TWS socket. An unsupported bar width returns null so the caller falls
+     * back to the app feed — the same contract cTrader honours. This used to substitute DAILY bars
+     * for any timeframe it did not recognise, and it recognised only the legacy vocabulary, so an
+     * intraday idea on IBKR was evaluated against day candles while `ohlcv:true` told the monitor
+     * to prefer them.
+     */
     async getCandles(symbol, timeframe, count = 50, userId) {
-        const tf = TIMEFRAME_MAP[timeframe] ?? TIMEFRAME_MAP.daily
-        if (!TIMEFRAME_MAP[timeframe]) logger.warn(LOG, `Unknown timeframe "${timeframe}" — using daily`)
+        const tf = toIbBarSize(timeframe)
+        if (!tf) return null
 
         const gw       = await this._gateway(userId)
         const contract = await this._qualify(userId, symbol)

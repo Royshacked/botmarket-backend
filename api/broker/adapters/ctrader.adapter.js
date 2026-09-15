@@ -121,28 +121,29 @@ export class CTraderAdapter extends BrokerAdapter {
         // position with the account it lives on. That lets the UI list them all and a
         // close route back to the right account.
         // cTrader exposes open positions only on the ProtoOA WebSocket (not REST).
-        try {
-            const accounts = await this.getTradingAccounts(userId)
-            const lists = await Promise.all(accounts.map(async acct => {
-                try {
-                    const session = await this._session(userId, acct.id)
-                    const rows    = await session.getOpenPositions()
-                    return rows.map(p => ({
-                        ...p,
-                        accountId: acct.id,
-                        accountNo: acct.login ?? null,
-                        currency:  acct.currency ?? null,
-                    }))
-                } catch (err) {
-                    logger.warn(LOG, `getPositions account ${acct.id}: ${err.message}`)
-                    return []
-                }
-            }))
-            return lists.flat()
-        } catch (err) {
-            logger.warn(LOG, `getPositions (ctrader): ${err.message}`)
-            return []
-        }
+        //
+        // A CONNECTION failure (expired session, no accounts) THROWS, like every other read here:
+        // it used to be swallowed into `[]`, so a disconnected broker looked like "no positions"
+        // in the UI and tradingContext's `unavailable` list never learned the venue was down.
+        // One ACCOUNT's session failing is still degraded per-account — a second account's
+        // positions should not vanish because the first one's socket is unhappy.
+        const accounts = await this.getTradingAccounts(userId)
+        const lists = await Promise.all(accounts.map(async acct => {
+            try {
+                const session = await this._session(userId, acct.id)
+                const rows    = await session.getOpenPositions()
+                return rows.map(p => ({
+                    ...p,
+                    accountId: acct.id,
+                    accountNo: acct.login ?? null,
+                    currency:  acct.currency ?? null,
+                }))
+            } catch (err) {
+                logger.warn(LOG, `getPositions account ${acct.id}: ${err.message}`)
+                return []
+            }
+        }))
+        return lists.flat()
     }
 
     /**

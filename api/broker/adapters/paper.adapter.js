@@ -283,8 +283,10 @@ export class PaperAdapter extends BrokerAdapter {
         return { orderId, accountId: acctId }
     }
 
+    // Scoped to the account when the caller names one (a user may own several); the generic
+    // dispatch passes none and gets every working order. It used to ignore accountId entirely.
     async listOrders(userId, accountId) {
-        const orders = await paperBrokerService.listOrders(userId, { status: 'working' })
+        const orders = await paperBrokerService.listOrders(userId, { status: 'working', accountId })
         return orders.map(o => ({
             orderId:    o.orderId,
             symbol:     o.symbol,
@@ -297,15 +299,31 @@ export class PaperAdapter extends BrokerAdapter {
         }))
     }
 
+    /**
+     * Cancel a WORKING order. Guarded on `status:'working'` (claimOrder), not an unconditional
+     * `$set`: a cancel that lands after the fill engine claimed the order — a stale `exitOrders`
+     * record, or the user's ✕ a beat after the fill — used to flip a FILLED row to 'cancelled' in
+     * paperOrders, which is the ledger's source. A real venue rejects a cancel on a filled order
+     * the same way; the throw carries the same message shape as cTrader's "order not found".
+     */
     async cancelOrder(userId, accountId, orderId) {
-        await paperBrokerService.updateOrder(userId, orderId, { status: 'cancelled', cancelledAt: Date.now() })
+        const won = await paperBrokerService.claimOrder(
+            userId, orderId,
+            { status: 'working' },
+            { status: 'cancelled', cancelledAt: Date.now() },
+        )
+        if (!won) throw new Error(`paper: order ${orderId} is not working — nothing to cancel`)
         logger.info(LOG, `Cancelled working order ${orderId}`)
     }
 
+    /** Re-price a WORKING order in place. Same guard as cancelOrder, for the same reason. */
     async amendOrder(userId, accountId, orderId, { limitPrice, stopPrice } = {}) {
         const price = limitPrice ?? stopPrice
         if (price == null) throw new Error('paper: amendOrder requires a new limitPrice or stopPrice')
-        await paperBrokerService.updateOrder(userId, orderId, { triggerPrice: price })
+        // `amendedAt` makes the write a modification even when the price is unchanged — claimOrder
+        // answers on modifiedCount, and a same-price amend must not read as "not working".
+        const won = await paperBrokerService.claimOrder(userId, orderId, { status: 'working' }, { triggerPrice: price, amendedAt: Date.now() })
+        if (!won) throw new Error(`paper: order ${orderId} is not working — nothing to amend`)
         return { orderId }
     }
 
