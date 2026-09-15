@@ -13,6 +13,7 @@ import { paperBrokerService, VIRTUAL_MODES } from '../api/broker/paperBroker.ser
 import { SUPPORTED_BROKERS }  from '../api/broker/broker.factory.js'
 import { logger }             from './logger.service.js'
 import { ideaToEnvelope }     from './entity/toEnvelope.js'
+import { round4 }             from './number.util.js'
 
 const LOG = '[orderPlan]'
 
@@ -121,7 +122,7 @@ export async function buildOrderPlan(envelope, { resolveAccounts = resolveUserAc
             broker:    acct.broker,
             accountId: id,
             accountNo: acct.login ?? id,
-            quantity:  Math.round(baseQty * ratio * 10000) / 10000,
+            quantity:  round4(baseQty * ratio),
             type:      'market',
         })
     }
@@ -136,4 +137,30 @@ export async function buildOrderPlan(envelope, { resolveAccounts = resolveUserAc
  */
 export async function buildOrderPlanForIdea(idea) {
     return buildOrderPlan(ideaToEnvelope(idea))
+}
+
+/**
+ * The fields that PARK a built plan on the entity until the user confirms it — the one shape every
+ * "entry fired, now what" path writes: the immediate save, the "go in now" edit, the pre-flight
+ * "Buy now", and the entry monitor's trigger. Four sites each spelled it out, and the off-hours
+ * rule inside it ("nothing executes while the venue is shut") is exactly the kind of thing that
+ * drifts when it is written four times.
+ *
+ *   plan present → `pendingOrder: { plan, builtAt }` and `orderState`: 'awaiting_confirm' when the
+ *                  venue is open (the confirm dialog surfaces now), 'awaiting_market' when shut (the
+ *                  market-open sweep surfaces it).
+ *   no plan      → `{}`: nothing to confirm (no accounts), so the caller records the trigger alone.
+ *
+ * Pure. The caller supplies `open` because it owns the market read (some inject it for tests).
+ * @param {object[]} plan
+ * @param {boolean}  open
+ * @param {number}   [nowMs]
+ * @returns {{ pendingOrder?: { plan: object[], builtAt: number }, orderState?: 'awaiting_confirm'|'awaiting_market' }}
+ */
+export function pendingOrderFields(plan, open, nowMs = Date.now()) {
+    if (!Array.isArray(plan) || plan.length === 0) return {}
+    return {
+        pendingOrder: { plan, builtAt: nowMs },
+        orderState:   open ? 'awaiting_confirm' : 'awaiting_market',
+    }
 }

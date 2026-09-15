@@ -37,11 +37,12 @@ import { getCheckGap, isIntradayTimeframe } from '../services/timeframe.service.
 import { entityRepo }          from '../services/entity/entityRepo.service.js'
 import { collectSymbols, resolveConditionTree } from '../services/conditionTree.service.js'
 import { entryTimeGate }       from '../services/entryTimeGate.util.js'
-import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
+import { buildOrderPlanForIdea, pendingOrderFields } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { notifyIdeaEntryConfirm } from '../services/tradeNotify.service.js'
 import { isSelfExecuted }        from '../services/venue.resolve.service.js'
 import { createDueLoop }       from './dueLoop.js'
+import { NEXT_CHECK_FIELD, POLL_INTERVAL_MS, CHECK_TIMEOUT_MS, MIN_GAP_MS, IDLE_GAP_MS, nextCheckAt, untilOpenMs } from './monitorSchedule.util.js'
 import { evaluateTree, evaluateConditions, isTimeBlocked } from './monitor.orchestrator.js'
 import {
     fetchCandles, brokerCandleCtx, hasCumulativeVolume, logCheck, persistConditionStates,
@@ -50,17 +51,8 @@ import {
 
 const LOG = '[entry.monitor]'
 
-const POLL_INTERVAL_MS = 60_000
-// Longer than the poll interval, like every other dueLoop caller: the lease horizon IS the check
-// timeout, and a shorter one lets the next tick re-select an entity whose abandoned check is still
-// running. Here that would build a second order plan and post a second confirm card.
-const CHECK_TIMEOUT_MS = 90_000
-
-const MIN_GAP_MS  = 60_000
-// An armed entity we cannot act on — no venue, or nothing to evaluate — still gets re-read, but at
-// a cost that rounds to nothing. It must never be dropped: silently unwatching an armed idea is the
-// exact failure this monitor exists to end.
-const IDLE_GAP_MS = 60 * 60_000
+// Cadence constants + arithmetic are shared with exit.monitor (monitorSchedule.util): the two
+// loops must agree on when a document is next due, and used to carry a copy each.
 
 const _deps = {
     getMarketStatus,
@@ -111,7 +103,7 @@ export const entryMonitor = { start: _loop.start, stop: _loop.stop }
  * thing under another name — the arm-time pre-flight "Reset", and the re-arm path — because it
  * changes which cross would fire, so the old cadence is no longer the right time to look.
  */
-export const ENTRY_SCHEDULE_FIELD = 'monitor_state.next_check_at'
+export const ENTRY_SCHEDULE_FIELD = NEXT_CHECK_FIELD
 
 export function clearsEntrySchedule(patch) {
     return patch?.status === STATUS.LOOKING || patch?.entryFloorAt !== undefined
@@ -184,9 +176,7 @@ export async function _checkArmed(idea, nowMs, deps = _deps) {
     if (plan.needsLiveTape && !gate.allTime) {
         const status = deps.getMarketStatus(asset, idea.asset_class)
         if (!status?.open) {
-            const untilOpen = Number.isFinite(status?.nextOpenMs) && status.nextOpenMs > nowMs
-                ? status.nextOpenMs - nowMs
-                : plan.gap
+            const untilOpen = untilOpenMs(status, nowMs, plan.gap)
             await _reschedule(idea, nowMs, untilOpen, deps)
             return 'market_closed'
         }
@@ -270,16 +260,11 @@ export async function _checkEntry(idea, candles, entryTf, nowMs, deps = _deps) {
     }
 
     const plan = await deps.buildOrderPlan(idea)
-    if (plan?.length > 0) {
-        // NOTHING EXECUTES OFF-HOURS. A trigger on a shut venue parks at `awaiting_market` and the
-        // market-open sweep wakes it with the same confirm the user would have got in hours.
-        const open = deps.getMarketStatus(asset, idea.asset_class)?.open
-        patch.pendingOrder = { plan, builtAt: nowMs }
-        patch.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
-        logger.info(LOG, `✅ Entry triggered for ${id} (${asset}) — orderState → ${patch.orderState}`)
-    } else {
-        logger.info(LOG, `✅ Entry triggered for ${id} (${asset}) — no accounts, alert only`)
-    }
+    // NOTHING EXECUTES OFF-HOURS. A trigger on a shut venue parks at `awaiting_market` and the
+    // market-open sweep wakes it with the same confirm the user would have got in hours.
+    Object.assign(patch, pendingOrderFields(plan, !!deps.getMarketStatus(asset, idea.asset_class)?.open, nowMs))
+    if (patch.orderState) logger.info(LOG, `✅ Entry triggered for ${id} (${asset}) — orderState → ${patch.orderState}`)
+    else                  logger.info(LOG, `✅ Entry triggered for ${id} (${asset}) — no accounts, alert only`)
 
     await deps.patch(id, patch)
 
@@ -302,8 +287,7 @@ export function gateNote(gate, armAt) {
 }
 
 async function _reschedule(idea, nowMs, gapMs, deps) {
-    const at = new Date(nowMs + Math.max(MIN_GAP_MS, Number(gapMs) || 0)).toISOString()
-    await deps.patch(idea.id, { 'monitor_state.next_check_at': at })
+    await deps.patch(idea.id, { [NEXT_CHECK_FIELD]: nextCheckAt(nowMs, gapMs) })
 }
 
 export { _reschedule }

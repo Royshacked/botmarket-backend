@@ -22,6 +22,7 @@ import { tradeCaptureService } from '../../services/tradeCapture.service.js'
 import { entityRepo }          from '../../services/entity/entityRepo.service.js'
 import { ownsEntity }          from '../../services/entity/entityCrud.service.js'
 import { isSelfExecuted }      from '../../services/venue.resolve.service.js'
+import { placedStamp }         from './entryStamp.util.js'
 
 const LOG = '[manualIdea]'
 
@@ -88,15 +89,15 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId) {
         const route     = await routeExits(idea)
         const monitored = !idea.portfolioId
         const now       = Date.now()
-        const status    = idea.direction === 'short' ? 'short' : 'long'
         // Same freeze as broker placement — a manual fill is still a position, and the coverage gate
         // measures every held name against the research it was opened on.
         const basis     = await coverageService.captureResearchBasis({ symbol: idea.asset })
         const set = {
-            status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed',
-            ...(basis ? { research_basis: basis } : {}),
+            ...placedStamp({
+                direction: idea.direction, at: now, researchBasis: basis,
+                brokerOrders: [{ broker: 'manual', accountId, orderId: positionId, positionId, quantity: qty }],
+            }),
             quantity:     qty,   // the confirmed size drives exit sizing
-            brokerOrders: [{ broker: 'manual', accountId, orderId: positionId, positionId, quantity: qty }],
             monitorStop:  monitored && route.stop.hasAny,
             monitorTp:    monitored && route.tp.hasAny,
         }
@@ -110,7 +111,7 @@ export async function confirmManualEntry(id, { price, quantity } = {}, userId) {
             direction: idea.direction, quantity: qty, price: px, at: now,
         })
 
-        logger.info(LOG, `Manual entry confirmed for ${id}: ${status} ${qty} ${idea.asset} @ ${px}`)
+        logger.info(LOG, `Manual entry confirmed for ${id}: ${set.status} ${qty} ${idea.asset} @ ${px}`)
         return { ok: true, idea: stripId(updated) }
     } catch (err) {
         logger.error(LOG, `confirmManualEntry failed (${id})`, err)

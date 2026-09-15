@@ -1,11 +1,11 @@
 import { randomUUID }       from 'crypto'
-import { LIVE_POSITION, STATUS, statusesFor, isRestingEntry } from '../../services/entity/vocabulary.js'
+import { LIVE_POSITION, statusesFor, isRestingEntry } from '../../services/entity/vocabulary.js'
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { logger }          from '../../services/logger.service.js'
 import { preflightEntry }   from '../../monitoring/preflightEntry.js'
 import { clearsEntrySchedule, ENTRY_SCHEDULE_FIELD } from '../../monitoring/entry.monitor.js'
 import { brokerService }   from '../broker/broker.service.js'
-import { buildOrderPlanForIdea, resolveUserAccounts } from '../../services/orderPlan.service.js'
+import { buildOrderPlanForIdea, resolveUserAccounts, pendingOrderFields } from '../../services/orderPlan.service.js'
 import { routeExits, detectNativeEntryLevel, touchLeaf } from '../../services/protectionPlan.service.js'
 import { isAssetOpen } from '../../services/market.service.js'
 import { toBrokerSymbol, normSymbol } from '../../services/brokerSymbol.service.js'
@@ -18,6 +18,7 @@ import { armExitsInPosition } from './exitOrders.service.js'
 import { entityRepo }         from '../../services/entity/entityRepo.service.js'
 import { makeEntityCrud, ownsEntity } from '../../services/entity/entityCrud.service.js'
 import { kindForDoc }         from '../../services/entity/envelope.js'
+import { placedStamp }        from './entryStamp.util.js'
 import { ENTITIES }           from '../../services/entity/entityCollection.js'
 
 const LOG = '[idea]'
@@ -126,23 +127,20 @@ export function isClosedIdeaFrozen(existingStatus, patchStatus) {
 export function bornLiveStamp({ direction, fill }) {
     const at = fill.at
     return {
-        status:           direction === 'short' ? STATUS.SHORT : STATUS.LONG,
+        ...placedStamp({
+            direction, at,
+            brokerOrders: [{
+                broker:     fill.broker,
+                accountId:  String(fill.accountId),
+                // No broker order ever existed, so the position IS the record. Both ids point at it, which
+                // is what every downstream reader (exit routing, capture, the positions join) expects.
+                orderId:    String(fill.positionId),
+                positionId: String(fill.positionId),
+                quantity:   Number(fill.quantity),
+            }],
+        }),
         entryTriggeredAt: at,
-        // Also the double-place guard: `ordersPlacedAt` is what stops anything ever placing an entry
-        // for this leg, which for a position that already exists is the whole point.
-        ordersPlacedAt:   at,
-        activatedAt:      at,
-        orderState:       'placed',
         immediate:        undefined,
-        brokerOrders: [{
-            broker:     fill.broker,
-            accountId:  String(fill.accountId),
-            // No broker order ever existed, so the position IS the record. Both ids point at it, which
-            // is what every downstream reader (exit routing, capture, the positions join) expects.
-            orderId:    String(fill.positionId),
-            positionId: String(fill.positionId),
-            quantity:   Number(fill.quantity),
-        }],
     }
 }
 
@@ -408,11 +406,7 @@ async function saveIdea(tradeIdea, userId, opts = {}) {
 
 async function _attachImmediatePlan(idea) {
     const plan = await buildOrderPlanForIdea(idea)
-    if (plan.length > 0) {
-        const open = isAssetOpen(idea.asset, idea.asset_class)
-        idea.pendingOrder = { plan, builtAt: Date.now() }
-        idea.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
-    }
+    Object.assign(idea, pendingOrderFields(plan, isAssetOpen(idea.asset, idea.asset_class)))
 }
 
 // Crud shape `{ ok, doc }` straight through; the route's `{ idea: … }` envelope is applied at the
@@ -614,11 +608,7 @@ async function updateIdea(id, rawPatch, userId) {
             patch.entryTriggeredAt = Date.now()
             const merged = { ...(await entityRepo.getById(id)), ...patch }
             const plan   = await buildOrderPlanForIdea(merged)
-            if (plan.length > 0) {
-                const open = isAssetOpen(merged.asset, merged.asset_class)
-                patch.pendingOrder = { plan, builtAt: Date.now() }
-                patch.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
-            }
+            Object.assign(patch, pendingOrderFields(plan, isAssetOpen(merged.asset, merged.asset_class)))
         }
 
         // ARM MEANS CHECK IT NOW — the entry monitor's cadence is persisted, so a stale wake-up

@@ -43,6 +43,7 @@ import { getMarketStatus }     from '../services/market.service.js'
 import { getCheckGap, isIntradayTimeframe } from '../services/timeframe.service.js'
 import { entityRepo }          from '../services/entity/entityRepo.service.js'
 import { createDueLoop }       from './dueLoop.js'
+import { NEXT_CHECK_FIELD, POLL_INTERVAL_MS, CHECK_TIMEOUT_MS, MIN_GAP_MS, IDLE_GAP_MS, nextCheckAt, untilOpenMs } from './monitorSchedule.util.js'
 import { checkPosition }       from './positionMonitor.js'
 import {
     fetchCandles, brokerCandleCtx, hasCumulativeVolume, logCheck,
@@ -51,19 +52,8 @@ import {
 
 const LOG = '[exit.monitor]'
 
-const POLL_INTERVAL_MS = 60_000
-// Matches Talos. Deliberately LONGER than the poll interval: dueLoop's lease horizon is the check
-// timeout, so a shorter one would let the next tick re-select an entity whose abandoned check is
-// still in flight — and `withTimeout` abandons a check, it cannot cancel it. Two live evaluations of
-// one stop is how a monitor sends two closing orders.
-const CHECK_TIMEOUT_MS = 90_000
-
-// The floor on how often ONE position is re-read. A 1-minute leg wants a 1-minute cadence and that
-// is as fast as this goes; the poll interval is the same, so nothing is gained by asking for less.
-const MIN_GAP_MS = 60_000
-// A position we cannot act on at all (no venue) still gets re-read, but at a cost that rounds to
-// nothing — the venue can come back, and a stop that silently stopped being watched is the bug.
-const IDLE_GAP_MS = 60 * 60_000
+// Cadence constants + arithmetic are shared with entry.monitor (monitorSchedule.util): the two
+// loops must agree on when a document is next due, and used to carry a copy each.
 
 const _deps = {
     getMarketStatus,
@@ -181,9 +171,7 @@ export async function _checkExit(idea, nowMs, deps = _deps) {
     if (plan.needsLiveTape) {
         const status = deps.getMarketStatus(asset, idea.asset_class)
         if (!status?.open) {
-            const untilOpen = Number.isFinite(status?.nextOpenMs) && status.nextOpenMs > nowMs
-                ? status.nextOpenMs - nowMs
-                : plan.gap
+            const untilOpen = untilOpenMs(status, nowMs, plan.gap)
             await _reschedule(idea, nowMs, untilOpen, deps)
             logger.info(LOG, `[${id}] venue shut — sleeping until it opens (${asset})`)
             return 'market_closed'
@@ -240,8 +228,7 @@ function _noCandles(idea, nowMs, plan, deps) {
  * and a position's cadence was forgotten along with it. Persisted, it survives a deploy.
  */
 async function _reschedule(idea, nowMs, gapMs, deps) {
-    const at = new Date(nowMs + Math.max(MIN_GAP_MS, Number(gapMs) || 0)).toISOString()
-    await deps.patch(idea.id, { 'monitor_state.next_check_at': at })
+    await deps.patch(idea.id, { [NEXT_CHECK_FIELD]: nextCheckAt(nowMs, gapMs) })
 }
 
 // Test seams.

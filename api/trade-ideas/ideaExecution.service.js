@@ -1,13 +1,14 @@
 import { stripId }              from '../../providers/mongodb.provider.js'
 import { logger }               from '../../services/logger.service.js'
 import { brokerService }        from '../broker/broker.service.js'
-import { buildOrderPlanForIdea } from '../../services/orderPlan.service.js'
+import { buildOrderPlanForIdea, pendingOrderFields } from '../../services/orderPlan.service.js'
 import { isAssetOpen }          from '../../services/market.service.js'
 import { routeExits, detectNativeEntryLevel } from '../../services/protectionPlan.service.js'
 import { toBrokerSymbol }       from '../../services/brokerSymbol.service.js'
 import { executionReconciler }  from '../../monitoring/execution.reconciler.js'
 import { orderSymbol }          from '../../monitoring/exitOrders.util.js'
 import { exitFields }          from './exitOrders.service.js'
+import { placedStamp }         from './entryStamp.util.js'
 import { entityRepo }          from '../../services/entity/entityRepo.service.js'
 import { ownsEntity }          from '../../services/entity/entityCrud.service.js'
 import { AWAITING_CONFIRM, isRestingEntry } from '../../services/entity/vocabulary.js'
@@ -102,14 +103,11 @@ export async function placeOrdersForIdea(id, orders, userId) {
             return { ok: false, reason: 'all_failed', results }
         }
 
-        const now    = Date.now()
-        const status = idea.direction === 'short' ? 'short' : 'long'
-        // The research we're opening ON, frozen for the life of the position (see the service doc).
-        const basis  = await coverageService.captureResearchBasis({ symbol: idea.asset })
-        const set    = {
-            status, ordersPlacedAt: now, activatedAt: now, orderState: 'placed', brokerOrders,
+        const now   = Date.now()
+        const basis = await coverageService.captureResearchBasis({ symbol: idea.asset })
+        const set   = {
+            ...placedStamp({ direction: idea.direction, brokerOrders, at: now, researchBasis: basis }),
             brokerSymbol: idea.brokerSymbol,
-            ...(basis ? { research_basis: basis } : {}),
             ...exitFields(route),
         }
         let updated = await entityRepo.patchAndGet(id, set)
@@ -126,7 +124,7 @@ export async function placeOrdersForIdea(id, orders, userId) {
             brokerService.startExecutionFeed(broker, userId, accountId)
                 .catch(err => logger.warn(LOG, `startExecutionFeed failed (${broker}/${accountId}):`, err.message))
         }
-        logger.info(LOG, 'Orders confirmed & placed', { id, status, placed: results.filter(r => r.ok).length })
+        logger.info(LOG, 'Orders confirmed & placed', { id, status: set.status, placed: results.filter(r => r.ok).length })
         return { ok: true, idea: stripId(updated), results }
     } catch (err) {
         logger.error(LOG, 'Failed to place orders for idea', err)
@@ -155,11 +153,7 @@ export async function triggerEntryNow(id, userId) {
         const patch = { status: 'hit', entryTriggeredAt: Date.now(), triggeredWhileWaiting: false, triggerEventAt: null }
 
         const plan = await buildOrderPlanForIdea(idea)
-        if (plan.length > 0) {
-            const open = isAssetOpen(idea.asset, idea.asset_class)
-            patch.pendingOrder = { plan, builtAt: Date.now() }
-            patch.orderState   = open ? 'awaiting_confirm' : 'awaiting_market'
-        }
+        Object.assign(patch, pendingOrderFields(plan, isAssetOpen(idea.asset, idea.asset_class)))
 
         const updated = await entityRepo.patchAndGet(id, patch)
         logger.info(LOG, 'Entry force-triggered (buy now)', { id, orderState: patch.orderState ?? 'none' })

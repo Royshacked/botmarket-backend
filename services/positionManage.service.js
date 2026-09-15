@@ -5,6 +5,7 @@ import { deferIfClosed } from './pendingAction/executionGate.js'
 import { kindForDoc } from './entity/envelope.js'
 import { isSelfExecuted } from './venue.resolve.service.js'
 import { applyOffset } from '../api/broker/brokerPrice.service.js'
+import { round4 } from './number.util.js'
 import { logger } from './logger.service.js'
 
 /**
@@ -95,7 +96,7 @@ export function partialQty(remaining, sizePct) {
     const rem = Number(remaining)
     const pct = Number(sizePct)
     if (!(rem > 0) || !(pct > 0)) return 0
-    return Math.min(rem, Math.round(rem * Math.min(100, pct) / 100 * 10000) / 10000)
+    return Math.min(rem, round4(rem * Math.min(100, pct) / 100))
 }
 
 export function phaseAfterStop(newStop, entry, isLong) {
