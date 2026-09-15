@@ -174,6 +174,34 @@ test('a committed book is not a draft any more', async () => {
     } finally { restore() }
 })
 
+// A commit holds the draft under a lease, and patchDraft only ever matches an UNSPENT one — so a
+// refresh landing mid-commit wrote nothing and then returned the merged table anyway, as though it
+// had. Adopt mode calls refreshDraft on every turn, so the user's correction went into the staged
+// book the model reads and nowhere else.
+test('a commit in flight refuses the merge instead of pretending to write it', async () => {
+    const draft = { draftId: 'd1', status: 'committing', holdings: DRAFT.holdings, statedTotal: 50_000 }
+    const { deps, calls } = stubs(draft)
+    const restore = _setDeps(deps)
+    try {
+        const res = await refreshDraft({ draftId: 'd1', userId: 'u1', paste: 'NVDA 20 800' })
+        assert.equal(res.ok, false)
+        assert.equal(res.reason, 'in_progress')
+        assert.equal(calls.patched.length, 0, 'nothing may be written while the commit holds the draft')
+    } finally { restore() }
+})
+
+// Refused, not hidden: the STORED table still rides back, so adopt mode shows the model the book
+// that really exists rather than dropping the staged-book block for the whole turn.
+test('the refusal still carries the stored draft, so the model is not left blind', async () => {
+    const draft = { draftId: 'd1', status: 'committing', holdings: DRAFT.holdings }
+    const { deps } = stubs(draft)
+    const restore = _setDeps(deps)
+    try {
+        const res = await refreshDraft({ draftId: 'd1', userId: 'u1', paste: 'NVDA 20 800' })
+        assert.equal(res.draft, draft)
+    } finally { restore() }
+})
+
 // ─── Exclusion: only a US-listed holding can be IN the book ──────────────────────
 // Being in the book means being priced, weighted, researched and reviewed. None of that exists for a
 // foreign listing, so it is excluded and NAMED — never carried as a row no gate can read, and never

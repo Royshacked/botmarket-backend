@@ -206,12 +206,22 @@ export async function createDraft({ userId, bank = null, currency = 'USD', state
  * Rows are MERGED by symbol, last write winning, so "actually TSLA is 60 not 50" corrects one line
  * instead of replacing the table. A turn that parses to nothing (ordinary conversation) leaves the
  * draft untouched and simply returns it.
+ *
+ * REFUSES WHILE A COMMIT HOLDS THE DRAFT. `patchDraft` only ever matches an unspent draft (the store
+ * filters on status `draft`), so a refresh landing mid-commit wrote nothing — and then returned the
+ * merged table anyway, as though it had. Adopt mode calls this on EVERY turn, so a user correcting a
+ * row while the commit held its lease saw the correction echoed into the staged book the model
+ * reads, and lost it. Saying `in_progress` is the honest answer, and it is the same reason
+ * `commitDraft` gives a second commit. The STORED draft still rides the refusal, so adopt mode shows
+ * the model the table that really exists rather than no table at all — the merge is refused, the
+ * book is not hidden.
  */
 export async function refreshDraft({ draftId, userId, paste = null, statedTotal = null, freeCash = null, currency = null, mandate = null }) {
     try {
         const draft = await _deps.store.getDraft(draftId, userId)
         if (!draft)                                                  return { ok: false, reason: 'not_found' }
         if (draft.status === adoptDraftStore.DRAFT_STATUS.COMMITTED) return { ok: false, reason: 'already_committed' }
+        if (draft.status === adoptDraftStore.DRAFT_STATUS.COMMITTING) return { ok: false, reason: 'in_progress', draft }
 
         const parsed = paste ? parseHoldings(paste) : null
         const fresh  = (parsed?.rows ?? []).map(normalizeHolding).filter(h => h.symbol)
