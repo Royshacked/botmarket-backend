@@ -647,7 +647,7 @@ test('checkCall: market CLOSED but EXPIRING → expiry review still runs', async
 test('zonesLabel: joins bands and flags multi', () => {
     assert.deepEqual(_zonesLabel(call()), { text: '247.4–248.6, 244.8–245.2', multi: true })
     assert.equal(_zonesLabel(call({ entry_zones: [{ lower: 100, upper: 101 }] })).multi, false)
-    assert.equal(_zonesLabel(call({ entry_zones: [] })).text, '(no zones)')
+    assert.equal(_zonesLabel(call({ entry_zones: [] })).text, '(no levels)')
 })
 
 test('timelineEntry: closed wake → holding note, no price, deterministic at', () => {

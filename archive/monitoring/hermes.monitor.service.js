@@ -1,14 +1,16 @@
 import { getDb } from '../../providers/mongodb.provider.js'
-import { PAST_ENTRY_LEGACY, INVALIDATION } from '../../services/entity/vocabulary.js'
+import { PAST_ENTRY, INVALIDATION } from '../../services/entity/vocabulary.js'
 import { ENTITIES } from '../../services/entity/entityCollection.js'
 import { isAssetOpen, getMarketStatus } from '../../services/market.service.js'
 import { logger } from '../../services/logger.service.js'
-import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../../services/tradeNotify.service.js'
+import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../services/kairosNotify.service.js'
 import { fetchLastPrice } from '../../monitoring/monitorUtils.js'
 import { createDueLoop, makePersist } from '../../monitoring/dueLoop.js'
-import { journalEntry, zonesLabel, failNote } from '../../monitoring/monitorJournal.js'
+// `zonesLabel` was renamed `levelsLabel` upstream when zero-width levels replaced bands; aliased
+// here so the archived body reads as it did, and a revived Hermes gets the current implementation.
+import { journalEntry, levelsLabel as zonesLabel, failNote } from '../../monitoring/monitorJournal.js'
 import {
-    isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap, gradedGap,
+    isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap,
     hasEditProposal,
 } from '../../monitoring/readinessGates.js'
 import { withTimeout } from '../../services/timeout.util.js'
@@ -50,7 +52,7 @@ export const ACTIVE_STATUSES = ['looking']
 // 'confirmed'/'in_position' are the PRE-P3b spellings, kept so any document still carrying them
 // keeps being managed rather than dropping out of the loop; they never collide with idea statuses.
 // Nothing writes them any more — a confirmed call converges to the execution vocab above.
-const POSITION_STATUSES = PAST_ENTRY_LEGACY
+const POSITION_STATUSES = PAST_ENTRY
 const EXPIRY_THRESHOLD_MS = 15 * 60_000   // run the final "expiry review" within 15m of valid_until
 // A single check must never wedge the loop. If any IO inside _checkCall (vision assess / chart /
 // price fetch) hangs with no timeout, the awaited call never returns, `_running` stays true, and
@@ -778,6 +780,17 @@ export function _scheduledPatch(call, nowMs, short = false, price = null) {
 // extra ATR fetch on the cheap (LLM-free) scheduled path. Within NEAR_BANDS of an edge → min cadence
 // (catch a fast approach/break); beyond FAR_BANDS → max cadence; linear in between. Non-finite price,
 // no zones, or no usable band → max cadence (nothing to close in on). Pure.
+// Graded cadence: poll lazily when price is far from every zone and tighten as it approaches, so a
+// fast run into a zone isn't slept through by a timer set when price was miles away. It lived in
+// monitoring/readinessGates.js until 2026-09-15; Hermes was its last caller, so it came here with
+// the desk rather than staying in the live tree as an export nothing reached.
+function gradedGap(distance, { min, max, near, far }) {
+    if (!Number.isFinite(distance)) return max
+    if (distance <= near) return min
+    if (distance >= far)  return max
+    return Math.round(min + ((distance - near) / (far - near)) * (max - min))
+}
+
 const NEAR_BANDS = 2    // ≤ 2 band-widths from an edge → poll at the min cadence
 const FAR_BANDS  = 10   // ≥ 10 band-widths away → poll at the max cadence
 export function _proximityGapMin(call, price, minGap, maxGap) {

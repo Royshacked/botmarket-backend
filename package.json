@@ -7,6 +7,7 @@
     "scripts": {
         "start": "node server.js",
         "lint": "eslint .",
+        "check:archive": "node scripts/check-archive-loads.mjs",
         "test": "npm run lint && node --test --import ./tests/setup.mjs \"tests/unit/*.test.js\"",
         "dev": "node scripts/free-port.mjs && nodemon server.js --ignore data/",
         "server:prod": "set NODE_ENV=production&node server.js",

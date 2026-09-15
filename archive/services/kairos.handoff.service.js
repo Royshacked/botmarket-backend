@@ -3,7 +3,7 @@ import { ENTITIES } from '../../services/entity/entityCollection.js'
 import { ideaService } from '../../api/trade-ideas/tradeIdeas.service.js'
 import { placeOrdersForIdea } from '../../api/trade-ideas/ideaExecution.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../../services/manualNotify.service.js'
-import { notifyCallManage } from '../../services/tradeNotify.service.js'
+import { notifyCallManage } from './kairosNotify.service.js'
 import { brokerService } from '../../api/broker/broker.service.js'
 import { normalizeZones, normalizeReferenceLevels } from '../api/kairos/kairos.service.js'
 import { knownVenue } from '../../services/venue.resolve.service.js'
@@ -313,7 +313,10 @@ const _mdeps = {
     // desk's deps rather than reached for inside, so a test can say "the venue is open" the same way
     // it says everything else here — and so a missing one fails loudly instead of skipping the gate.
     deferIfClosed:    _sharedManage._deps.deferIfClosed,
-    syncIdeaExit:     (ideaId, accountId, leg, patch)         => _sharedManage._deps.syncExit(ideaId, accountId, leg, patch),
+    // Left UNSET so the shared executor resolves its own default off the `getDb` above. It used to
+    // read `_sharedManage._deps.syncExit`, which stopped existing when that default moved inside
+    // positionManage so the write would ride the injected db (2026-09-15).
+    syncIdeaExit:     undefined,
 }
 
 // The shared executor reads `syncExit`; this module's dep is named `syncIdeaExit` and every test

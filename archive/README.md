@@ -49,7 +49,7 @@ Mentor deliberately takes the kit un-subsetted. It is kept for the same reason a
 ## Reviving
 
 The moved files' relative imports were **recomputed for their new depth**, so they resolve as they
-stand — nothing here is half-broken. To bring Kairos back:
+stand, and `npm run check:archive` is what keeps that true (see **Drift** below). To bring Kairos back:
 
 1. Move the files back to their original paths (`git log --follow` has them) and re-run the import
    fix in reverse, or simply import from `archive/` in place.
@@ -67,3 +67,39 @@ stand — nothing here is half-broken. To bring Kairos back:
 `KINDS.CALL` itself was deliberately **left in place** in `services/entity/vocabulary.js` and
 `envelope.js`. The vocabulary describes the DATA, and a `call` document still exists in Mongo;
 removing the kind would make it unreadable rather than merely unauthored.
+
+## Drift: what "kept whole" costs, and how it is checked
+
+The archive imports ~40 symbols from the LIVE tree. Nothing lints it and `npm test` skips it, so a
+dead-code sweep that deletes an export no LIVE caller reaches breaks the archive silently — and the
+sentence above, that the imports "resolve as they stand", quietly stops being true. It had already
+stopped being true twice before anyone looked (2026-09-15).
+
+**`npm run check:archive`** imports every file in here and fails on the first that cannot resolve.
+Run it after any sweep that removes an export. It checks IMPORTS only.
+
+Repointed on 2026-09-15, when the check was written:
+
+| Was | Is now | Why it moved |
+|---|---|---|
+| `vocabulary.PAST_ENTRY_LEGACY` | `vocabulary.PAST_ENTRY` | the two were already identical; the alias was dropped as dead |
+| `readinessGates.gradedGap` | a local copy in `hermes.monitor.service.js` | Hermes was its last caller, so it came here with the desk |
+| `tradeNotify.notifyCall*` | `archive/services/kairosNotify.service.js` | the four `call` cards moved into the archive a month after their caller |
+| `monitorJournal.zonesLabel` | `monitorJournal.levelsLabel`, aliased at the import | renamed upstream when zero-width levels replaced bands |
+
+### Known behavioural drift — a revival TODO, not a broken import
+
+`journalEntry` no longer has a `'scheduled'` branch: the live monitors split that wake into
+`'guard_time'` and `'backstop'` when Talos guards landed. Hermes still passes `'scheduled'`, which
+now falls through to the generic branch — so a revived Hermes writes a verdict-fallback note on its
+heartbeat instead of the "price, levels and gap" line, and `hermesMonitor.test.js` fails on exactly
+that one assertion. Left as-is deliberately: `reason` is PERSISTED on every journal entry, so
+renaming it is a data decision for whoever revives the desk, not a refactor.
+
+### What was deleted rather than repointed
+
+`archive/tests/unit/` held three Aether tests (`aetherExposure`, `aetherShockFeed`,
+`aetherShockPredictions`) stranded here by `c6e6fa8`, which retired eleven Aether tools. Every
+symbol they imported was deleted on purpose and the engine they covered was rebuilt in the Python
+repo — no desk revives through them, so they were not a revival path, only a permanently red suite
+sitting in the archive's test folder. `git log` has them.

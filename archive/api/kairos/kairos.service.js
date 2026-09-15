@@ -1,6 +1,6 @@
 import { randomUUID }               from 'crypto'
 import { normalizeAssetClass } from '../../../services/entity/vocabulary.js'
-import { PAST_ENTRY_LEGACY, CALL_HORIZONS, LIVE_POSITION } from '../../../services/entity/vocabulary.js'
+import { PAST_ENTRY, CALL_HORIZONS, LIVE_POSITION } from '../../../services/entity/vocabulary.js'
 import { getDb }                    from '../../../providers/mongodb.provider.js'
 import { logger }                   from '../../../services/logger.service.js'
 import { buildEventRisk }           from '../../../services/eventRisk.service.js'
@@ -68,7 +68,7 @@ const PLAN_FIELDS = [
 // execution, and NO monitor re-arm. Hermes keeps managing the live position; a stop/target MOVE goes
 // through the manage card, not a plan rewrite. Statuses that mean "past entry" (self-shadow execution
 // vocab hit/long/short + the transitional confirmed/in_position).
-const POSITION_STATUSES = new Set(PAST_ENTRY_LEGACY)
+const POSITION_STATUSES = new Set(PAST_ENTRY)
 const LIGHT_FIELDS = [
     'thesis', 'timeframe_ladder', 'cadence', 'reference_levels', 'patterns',
     'valid_until', 'market_sensitivity', 'rr', 'conviction', 'lens_fit',
