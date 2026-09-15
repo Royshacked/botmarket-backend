@@ -268,3 +268,59 @@ Mid-§2 the full suite failed four tests with 33s/85s durations; the same file p
 suite passed on re-run. The run's logs show `FMP 429` / `finnhub 429` — those "unit" tests make
 **live network calls** (the LLM condition parser, FMP). Load-dependent, pre-existing, and the right
 fix belongs with the tests section.
+
+### CR findings on the §2–§3 range, and what was done (2026-09-15)
+
+A code-review pass over `06d86d9..HEAD` confirmed the three risky deletions as correct — the
+`referenceQuote` removal, the `unmonitoredExitLegs` deletion, the `EDITABLE_FIELDS` move — and
+raised five things. Four are fixed in `ef538c2` and `bc72fc7`; the fifth is a decision, below.
+
+**1. The archive stopped loading — and this review is why, twice over.** Four of the five
+Kairos/Hermes modules failed at module load. `npm test` skips `archive/**` and so does eslint, by
+design, so a dead-code sweep that removes an export no *live* caller reaches breaks it in total
+silence. Three breaks were this review's (`PAST_ENTRY_LEGACY`, `gradedGap`, `notifyCall*`); one
+(`zonesLabel`) predated it, which is the more useful fact: the promise in `archive/README.md` that
+"nothing here is half-broken" had already been false for weeks.
+
+The lesson generalises past the archive — **an invariant no check enforces is a comment**. So
+`npm run check:archive` now imports every file under `archive/` and fails on the first that cannot
+resolve. It is a script, not a test, because running the archive under `npm test` would undo the
+reason its tests were moved out of `tests/unit/`.
+
+One drift is deliberately *left*: `journalEntry` lost its `'scheduled'` branch when Talos guards
+split that wake into `guard_time` / `backstop`, so a revived Hermes writes a fallback note on its
+heartbeat. `reason` is persisted on every journal entry, making the rename a data decision for
+whoever revives the desk. Written into `archive/README.md` rather than fixed here.
+
+Three Aether tests stranded under `archive/tests/unit/` by `c6e6fa8` were **deleted**: every symbol
+they import was retired on purpose and the engine they cover was rebuilt in the Python repo. They
+were not a revival path, only a permanently red suite living in the archive's test folder.
+
+**2. `positionManage._deps.syncExit` bypassed the injected db.** It closed over the module-level
+`entityRepo` two lines above a comment promising every write is built over the caller's `getDb`. A
+caller with an injected db and no `syncExit` override would have the two halves of one `move_stop` —
+the broker amend and the exit-order record — land in different databases. Latent today (both live
+callers inject neither or both). It stays injectable, since two desks and their harnesses observe
+the sync by name, but the default is now resolved from the deps in hand. eslint then proved the
+module-level repo unreachable from the file, which is the check that the fix is complete.
+
+**3. `tests/test.ctrader-phase6.js` imported `currentReferencePrice`**, deleted in `c80c9ef`. Not in
+the `npm test` glob, so it stayed green while being unrunnable — the same blind spot as the archive,
+in a second place. Repointed at `fetchLastPrice`.
+
+**4. Two JSDoc blocks said the wrong thing.** `captureClose`'s lost two sentences to §2's sed-based
+doc reshuffle; restored from `c80c9ef^`. `broker.interface.js` had `BrokerExecution`'s description
+sitting inside `BrokerProtection` (pre-existing, since `3bec8ae`). A repo-wide scan for that shape —
+prose resuming after an `@tag` — found four more, all deliberate and legible; left alone.
+
+### Open decision: `_handle` widens what errors tell the client
+
+`makeHandle` (§1) forwards a thrown error to the one global handler at `server.js:310`, which answers
+`{ error: err.message }`. The routes it replaced in `tradeIdeas` and `setups` answered fixed slugs
+(`'generate_failed'`, `'hydrate_failed'`). So a Mongo or provider message now reaches the client
+where a slug used to. Pre-existing for `broker.controller` / `paper.controller`, which already used
+the wrapper; §2 and §3 widened it to two more surfaces.
+
+Left as a **decision, not a silent inheritance**. The global handler is §9's file, and the choice is
+between leaking internals and losing the diagnostic; either answer should be made once, for every
+route, rather than per-controller. **Carried to §9.**

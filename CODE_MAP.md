@@ -118,7 +118,8 @@ api/
 services/
   agents/                 the 6 LLM desks (analyst · axl · mentor · portfolio · scanner ·
                           strategy). A seventh is archived and lives under archive/, imported by
-                          nothing — see archive/README.md.
+                          nothing — see archive/README.md, and `npm run check:archive`, which
+                          is what keeps "imported by nothing" from meaning "loads no more".
                           Five of the six append LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE to their
                           base prompt; `strategy` takes LANGUAGE + BREVITY only and marketBrief
                           LANGUAGE only — a broadcast has no user whose venue could be read. Moved out of the flat services/ root 2026-08-07 — they are a
@@ -498,6 +499,11 @@ tests/
   unit/                     node:test unit tests — run by `npm test`
   test.*.js                 MANUAL harnesses (hit live broker/DB) — NOT run by npm test
 scripts/                    free-port, migrations, seeds
+  check-archive-loads.mjs   `npm run check:archive` — imports every file under archive/ and fails
+                            on the first that cannot resolve. The archive reaches ~40 symbols in the
+                            LIVE tree and nothing lints or tests it, so a sweep that deletes an
+                            export no live caller uses breaks it silently. Run it after any such
+                            sweep. A script, not a test, so archive/ stays out of `npm test`.
 prompts/                    every prompt loaded at RUNTIME (6 desks + Argus's
                             profile/handoff + market brief + concepts). Hot-reloaded, lazily —
                             so a bad path is an ENOENT on a live turn, not an import error.
