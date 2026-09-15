@@ -3,7 +3,7 @@
  * can I even trade this here?" that EVERY desk needs before it recommends anything.
  *
  * Both handlers are bound to a userId, so unlike the static COMMON_TOOL_HANDLERS they are built
- * per request (the same shape kairos/idea already use for onChart). One factory rather than one
+ * per request — the same shape every desk uses for `onChart`. One factory rather than one
  * per agent: the mechanism is identical everywhere, only the tool DESCRIPTION is tuned per desk —
  * that description is the instruction the model reads, and it legitimately differs between a
  * scanner deciding what is worth surfacing and an execution desk sizing a live order.
@@ -15,6 +15,7 @@ import { getTradingContext, checkBrokerSymbol } from '../tradingContext.service.
 import { makeToolHandler } from '../agentUtils.js'
 import { isToolError } from '../toolResult.util.js'
 import { logger } from '../logger.service.js'
+import { createTtlCache } from '../ttlCache.util.js'
 
 const LOG = '[tradingContext]'
 
@@ -319,8 +320,14 @@ export function formatBrokerSymbol({ ticker, venues = [] } = {}) {
 // Cached per user+ticker because the check rides on get_quote, which is called constantly, while a
 // broker's instrument list changes on the order of days. A miss costs one cached-map lookup plus a
 // selected-account read; a hit costs nothing.
+// THE SHARED CACHE, not a hand-rolled Map. This was `new Map()` with its own TTL arithmetic and no
+// eviction at all: an entry was replaced on a hit and otherwise kept forever, so a key per
+// user × ticker accumulated for the life of the process. createTtlCache does the same TTL check and
+// drops the oldest past `max` — the bound is the part that was missing, and it is the reason ~35
+// other caches in this codebase use it. (price.service documents a deliberate NON-use of it, which
+// is what a justified exception looks like; this had no such note.)
 const _AVAILABILITY_TTL_MS = 5 * 60 * 1000
-const _availabilityCache = new Map()   // `${userId}:${TICKER}` → { at, venues }
+const _availabilityCache = createTtlCache({ ttlMs: _AVAILABILITY_TTL_MS, max: 500 })   // `${userId}:${TICKER}` → venues
 
 /**
  * Attach live-broker availability to a tool payload. Returns the payload UNCHANGED when there is
@@ -335,13 +342,14 @@ export async function withBrokerAvailability(payload, userId, ticker, deps = {})
     try {
         const symbol = String(ticker).trim().toUpperCase()
         const key = `${userId}:${symbol}`
-        const hit = _availabilityCache.get(key)
-        let venues
-        if (hit && (Date.now() - hit.at) < _AVAILABILITY_TTL_MS) {
-            venues = hit.venues
-        } else {
+        // `get` returns undefined for a miss OR a stale entry (which it also evicts), so the two
+        // cases collapse into one branch. An empty venue list is a real answer worth caching —
+        // `?? null` would re-ask the broker on every quote for a user with no live venue — so the
+        // miss is detected with `undefined`, not with falsiness.
+        let venues = _availabilityCache.get(key)
+        if (venues === undefined) {
             ;({ venues } = await checkBrokerSymbol(userId, ticker, deps))
-            _availabilityCache.set(key, { at: Date.now(), venues })
+            _availabilityCache.set(key, venues)
         }
         if (!venues?.length) return payload   // no live venue → nothing to enforce
         // Text in, text out — same renderer as check_broker_symbol, so the two can never drift into

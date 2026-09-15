@@ -9,7 +9,7 @@
 // branches on kind to read a field. ENVELOPE fields do not diverge: `userId` is stored under that
 // one name by every kind (see scripts/migrate-call-userid.mjs) — do not reintroduce a per-kind alias.
 
-import { KINDS, ownerForKind, blankMonitorState } from './envelope.js'
+import { KINDS, ownerForKind, blankMonitorState, kindForDoc } from './envelope.js'
 
 /**
  * A legacy idea doc → Envelope. A portfolio holding is, TODAY, an idea carrying `portfolioId`;
@@ -25,7 +25,11 @@ import { KINDS, ownerForKind, blankMonitorState } from './envelope.js'
  */
 export function ideaToEnvelope(doc) {
     if (!doc) return null
-    const kind = doc.portfolioId != null ? KINDS.PORTFOLIO_ITEM : KINDS.IDEA
+    // `kindForDoc`, not the rule written out again. Its own doc names the three places that must
+    // agree — "the migration, insert-time stamping, and the toEnvelope adapter" — and this was the
+    // one of the three keeping a private copy, which is how a list of places to keep in sync becomes
+    // a list of places to fix.
+    const kind = kindForDoc(doc)
     return {
         id:         doc.id,
         kind,
@@ -114,7 +118,15 @@ export function callToEnvelope(doc) {
     }
 }
 
-/** Dispatch by source collection tag. Extend with portfolioItemToEnvelope at P4. */
+/**
+ * Dispatch by source collection tag. Extend with portfolioItemToEnvelope at P4.
+ *
+ * NO PRODUCTION CALLER TODAY, and neither has `callToEnvelope`: the one live consumer of this module
+ * is orderPlan.service, which calls `ideaToEnvelope` directly. Recorded rather than removed — the
+ * envelope is documented architecture (docs/architecture/entity-model.md) with a stated P4 cutover,
+ * and the call branch is untravelled because Kairos is archived, not because it was wrong. Both are
+ * covered by entityEnvelope.test, so a revival finds them working rather than rotted.
+ */
 export function toEnvelope(doc, source) {
     if (source === 'call') return callToEnvelope(doc)
     return ideaToEnvelope(doc)

@@ -19,8 +19,8 @@ const LOG = '[agentUtils]'
  * ceiling.
  *
  * The ceiling lands here because this is the one seam every chat desk funnels through — and, just as
- * importantly, the one the MONITORS do not. Hermes, Talos, the coverage and tilt monitors and the
- * market brief all call the provider directly, so an over-ceiling user still has their live position
+ * importantly, the one the MONITORS do not. Talos, the coverage and tilt monitors and the market
+ * brief all call the provider directly, so an over-ceiling user still has their live position
  * managed. That is the correct behaviour and it should be deliberate rather than incidental: a cost
  * control must never turn into an unmanaged position.
  *

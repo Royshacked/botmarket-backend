@@ -198,3 +198,42 @@ test('no userId (a monitor, not a chat) leaves the payload alone', async () => {
     assert.deepEqual(out, { price: 1 })
     assert.equal(broker._asked.length, 0)
 })
+
+// THE CACHE IS BOUNDED, which is the half that was missing. It was a hand-rolled Map with its own
+// TTL arithmetic and no eviction at all: an entry was replaced on a hit and otherwise kept for the
+// life of the process, so one key per user × ticker accumulated forever. It rides on get_quote,
+// which every desk calls constantly, so the key space is exactly the one that grows.
+//
+// Now createTtlCache — the same util ~35 other caches use — which drops the oldest past `max`.
+test('the availability cache evicts rather than growing without bound', async () => {
+    _clearAvailabilityCache()
+    const broker = fakeBroker({ connections: { ctrader: true }, resolve: { ctrader: true } })
+
+    // Past the 500-entry bound on ONE user, so the earliest key must have been dropped.
+    for (let i = 0; i < 520; i++) {
+        await withBrokerAvailability({ price: 1 }, 'u1', `T${i}`, { broker, mapSymbol: identity })
+    }
+    const afterFill = broker._asked.length
+    assert.equal(afterFill, 520, 'each new ticker is a real read')
+
+    // The newest is still cached…
+    await withBrokerAvailability({ price: 1 }, 'u1', 'T519', { broker, mapSymbol: identity })
+    assert.equal(broker._asked.length, afterFill, 'a recent entry is still served from cache')
+
+    // …and the oldest has been evicted, so it costs a read rather than living forever.
+    await withBrokerAvailability({ price: 1 }, 'u1', 'T0', { broker, mapSymbol: identity })
+    assert.equal(broker._asked.length, afterFill + 1, 'the oldest entry was evicted past the bound')
+})
+
+// An empty venue list is a real ANSWER — the user has no live broker connected — and must be cached
+// like any other. Treating it as a miss would re-ask on every single quote for exactly the users who
+// can never benefit from the check.
+test('a user with no live venue is cached too, not re-asked on every quote', async () => {
+    _clearAvailabilityCache()
+    const broker = fakeBroker({ connections: {} })   // nothing connected → no venues
+
+    await withBrokerAvailability({ price: 1 }, 'u3', 'AVGO', { broker, mapSymbol: identity })
+    const first = broker._asked.length
+    await withBrokerAvailability({ price: 2 }, 'u3', 'AVGO', { broker, mapSymbol: identity })
+    assert.equal(broker._asked.length, first, 'the empty answer was cached')
+})

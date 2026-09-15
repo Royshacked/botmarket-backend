@@ -15,11 +15,14 @@ import { logger } from '../logger.service.js'
 
 const LOG = '[marketData]'
 
-// Shared market-data toolset for the chart-reading agents (Idea, Kairos, and any
-// future market-data agent like Axl). The provider math is identical across agents;
-// only the per-handler LOG tag, the get_chart "how to read it" sentence, and each
-// agent's extra handlers (get_sec_filings / get_indicators) differ — those stay in
-// the agent modules. See CODE_MAP: "reuse mechanisms, not schemas".
+// Shared market-data toolset for the chart-reading desks. The provider math is identical across
+// agents; only the per-handler LOG tag, the get_chart "how to read it" sentence, and each agent's
+// extra handlers (get_sec_filings / get_indicators) differ — those stay in the agent modules. See
+// CODE_MAP: "reuse mechanisms, not schemas".
+//
+// The consumers today are Mentor (through trading.tools), Atlas, Argus, and the SMC tools that reuse
+// _fetchCandleRows. This header named Idea and Kairos, both archived on 2026-08-18 — a reader
+// chasing who shares this was sent to dead code.
 
 // Per timeframe: Yahoo bar spec + how many candles to return + lookback window.
 // `aggregate` (2hr/4hr) means fetch native 1hr bars and combine N→1 server-side,
@@ -222,9 +225,9 @@ export function makeChartHandler({ log, onChart, readText, renderChart = cachedC
 }
 
 // ─── Indicator readout (reuses the monitor's calc*Series math) ─────────────────
-// Shared by Idea and Kairos — the same math the monitor uses, so an agent's read
-// matches what the monitor will evaluate. Parse "ema(20), rsi(14), atr, macd, vwap"
-// → [{ name, period }].
+// The same math the MONITOR uses, so an agent's read matches what the monitor will
+// evaluate — that agreement is the reason this is shared, not which desks happen to
+// call it. Parse "ema(20), rsi(14), atr, macd, vwap" → [{ name, period }].
 export function _parseIndicatorSpecs(str) {
     return String(str || '').split(',').map(s => s.trim()).filter(Boolean).map(s => {
         const m = s.match(/^([a-zA-Z]+)\s*(?:\(\s*(\d+)\s*\))?/)

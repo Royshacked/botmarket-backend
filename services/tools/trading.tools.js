@@ -30,7 +30,11 @@ import { DEFAULT_MODE } from '../analysisModes.js'
 // chart-img render, the shared indicator math, the sentiment handlers). See
 // docs/desks/kairos-hermes.md "reuse mechanisms, not schemas".
 
-const LOG = '[kairosTools]'
+// The file was renamed from kairos.tools.js when Kairos was archived; this tag was not, so every
+// warning Mentor's tools logged arrived under the name of a desk that no longer exists. Safe to
+// change: makeToolHandler uses it for the warn line only — spend attribution reads the AGENT's tag
+// (agentKeyFromLog), never this one.
+const LOG = '[tradingTools]'
 
 export const TRADING_TOOLS = [
     ...toolsFor({

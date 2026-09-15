@@ -564,10 +564,11 @@ export async function listCardRecipientsSince(type, since) {
     return out
 }
 
-/** Back-compat alias — a plain dismiss (status='dismissed'). Prefer resolveMessage. */
-export async function dismissMessage(conversationId, messageId, userId, outcome = null) {
-    return resolveMessage(conversationId, messageId, userId, { status: 'dismissed', outcome })
-}
+// `dismissMessage` lived here as a back-compat alias for `resolveMessage(…, 'dismissed')`, behind a
+// controller handler and a route of its own. The whole chain was dead: the client posts to /resolve,
+// and its own dismissMessage helper was an alias that did too — four layers, no caller at either
+// end. Removed in §5. A dismiss is `status: 'dismissed'`, which is the vocabulary the lifecycle
+// already speaks.
 
 /**
  * Flip a portfolio_review notification card to a resolved state after the user finishes a

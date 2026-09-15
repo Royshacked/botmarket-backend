@@ -1,7 +1,15 @@
-// Numeric SMC tools (K2) — expose the deterministic smc.engine primitives as agent tools that fetch
-// OHLCV, compute EXACT levels, and hand them back as text. The compute+format is a PURE function
-// (smcReadText) shared by the Kairos build handlers AND Hermes's assessor (DRY) — so the monitor reads
-// SMC calls through the same exact-level lens they were built on. Reusable by Argus too.
+// Numeric SMC tools — expose the deterministic smc.engine primitives as agent tools that fetch
+// OHLCV, compute EXACT levels, and hand them back as text.
+//
+// The compute+format is a PURE function (smcReadText) shared by the BUILD side and the MONITOR side,
+// which is the point: a monitor reads an SMC setup through the same exact-level lens it was built
+// on. Today that means Mentor (via trading.tools) and Argus on the build side, and Talos (via
+// monitoring/assessTools) on the monitor side.
+//
+// This header used to name Kairos and Hermes as the two consumers. Both were archived on 2026-08-18
+// and the arrangement outlived them unchanged — which is the trap: a reader chasing "who shares
+// this" was sent to dead code for the reason live code is shaped this way. smcReadText's only
+// remaining archive caller is hermes.assess, which is why check:archive covers it.
 
 import { makeToolHandler } from '../agentUtils.js'
 import { _fetchCandleRows } from './marketData.tools.js'
@@ -20,7 +28,8 @@ export async function smcBars(ticker, timeframe) {
 }
 
 /**
- * PURE compute + format for one SMC tool from bars. Shared by the build handlers + Hermes's assessor.
+ * PURE compute + format for one SMC tool from bars. Shared by the build handlers and the monitor
+ * side, so both read a setup's structure through the same lens — see the header.
  * @returns {string} the text the model reads.
  */
 export function smcReadText(name, ticker, timeframe, bars) {
