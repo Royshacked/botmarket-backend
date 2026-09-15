@@ -801,6 +801,25 @@ export function _buildPortfolioStateSection(state, isReviewMode = false, reviewD
         return parts.length ? `\n           ↳ ${parts.join(' · ')}` : ''
     }
 
+    /**
+     * WHAT THIS USER HAS ALREADY TURNED DOWN on this holding.
+     *
+     * A review proposes from the book's CURRENT STATE, which has no memory of a change the user
+     * queued and then cancelled — so the same trim came back the next week, identically, and the
+     * desk read as not listening. originRegistry has been recording each refusal on the holding
+     * since the queue shipped; nothing read it back until now.
+     *
+     * Deliberately NOT a prohibition. A name that has moved since is a different argument, and a
+     * desk forbidden from ever re-raising a trim would be worse than one that repeats itself. What
+     * it must not do is re-propose the same thing as though it were new.
+     */
+    const declinedLine = (s) => {
+        const d = s.declinedChanges ?? []
+        if (!d.length) return ''
+        const when = (at) => (at ? new Date(at).toISOString().slice(0, 10) : '?')
+        return `\n           ↳ DECLINED by the user: ${d.map(x => `${x.action} (${when(x.at)})`).join(', ')}`
+    }
+
     const liveLines = live.map(s => {
         const target  = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
         const actual  = `actual ${Math.round(s.actualWeight * 100)}%`
@@ -808,13 +827,13 @@ export function _buildPortfolioStateSection(state, isReviewMode = false, reviewD
         const pnl     = `P&L ${fmtMoney(s.pnl)} (${fmtPct(s.pnlPct)})`
         const age     = s.thesisAgeDays != null ? `${s.thesisAgeDays}d` : ''
         const earn    = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
-        return `  ${idTag(s)}${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${fmtConviction(s)}${earn}${authoredLine(s)}${thesisLine(s)}`
+        return `  ${idTag(s)}${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${fmtConviction(s)}${earn}${authoredLine(s)}${declinedLine(s)}${thesisLine(s)}`
     })
 
     const pendingLines = pending.map(s => {
         const target = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
         const earn   = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
-        return `  ${idTag(s)}${s.asset.padEnd(6)} ${s.direction?.padEnd(6) ?? '      '} ${target}  [${s.status}]${earn}${authoredLine(s)}${thesisLine(s)}`
+        return `  ${idTag(s)}${s.asset.padEnd(6)} ${s.direction?.padEnd(6) ?? '      '} ${target}  [${s.status}]${earn}${authoredLine(s)}${declinedLine(s)}${thesisLine(s)}`
     })
 
     const sections = [header]

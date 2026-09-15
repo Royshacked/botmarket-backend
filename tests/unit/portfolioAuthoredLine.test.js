@@ -66,3 +66,39 @@ test('review mode renders the authored line as well as the thesis', () => {
     assert.match(out, /stop: "close below 120"/)
     assert.match(out, /thesis: Datacenter demand outruns supply/)
 })
+
+// ─── What the user already turned down ──────────────────────────────────────────
+//
+// A review proposes from the book's CURRENT STATE, which has no memory of a change the user queued
+// and then cancelled — so the same trim came back the next week, identically, and the desk read as
+// not listening. originRegistry._cancelPortfolioItem has been recording every refusal on the
+// holding since the off-hours queue shipped, explicitly so the next review could see it, and
+// nothing read it back: the second writer-without-reader found in this collection, after
+// conviction_history.
+
+// The renderer reads the MAPPED field; _declinedChanges (portfolioState) is what turns the stored
+// rebalance_history into it, and has its own tests beside the projection.
+const declined = (...rows) => holding({ declinedChanges: rows })
+
+test('a change the user cancelled is shown to the review', () => {
+    const s = declined({ at: Date.UTC(2026, 8, 10), action: 'trim', outcome: 'cancelled' })
+    const out = _buildPortfolioStateSection(state([s]), true, null)
+    assert.match(out, /DECLINED by the user: trim \(2026-09-10\)/)
+})
+
+// A non-cancel row never reaches the renderer — _declinedChanges filters it out — so the row simply
+// has nothing to render. The filtering itself is asserted at the mapper.
+test('nothing declined → no line, even with a history behind it', () => {
+    const s = holding({ declinedChanges: [] })   // _declinedChanges dropped the non-cancel row
+    assert.doesNotMatch(_buildPortfolioStateSection(state([s]), true, null), /DECLINED/)
+})
+
+test('a holding with no history renders no line', () => {
+    assert.doesNotMatch(_buildPortfolioStateSection(state([holding()]), true, null), /DECLINED/)
+})
+
+// Edit context too: an edit proposes changes exactly as a review does, so it needs the same memory.
+test('the refusal is shown in edit context as well as review', () => {
+    const s = declined({ at: Date.UTC(2026, 8, 10), action: 'exit', outcome: 'cancelled' })
+    assert.match(_buildPortfolioStateSection(state([s]), false, null), /DECLINED by the user: exit/)
+})

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { STATE_PROJECTION } from '../../services/portfolioState.service.js'
+import { STATE_PROJECTION, _declinedChanges } from '../../services/portfolioState.service.js'
 
 // THE PROJECTION MUST COVER EVERY FIELD THE STATE MAPPER READS.
 //
@@ -31,6 +31,7 @@ const READ_BY_THE_MAPPER = {
     activatedAt:        'thesisAgeDays',
     conviction:         'conviction (current)',
     conviction_history: '_lastConviction → convictionPrev → the conviction trigger + the (was …) trend',
+    rebalance_history:  '_declinedChanges → declinedChanges → the DECLINED line, so a refused change is not re-proposed',
     notes:              'the frozen per-holding thesis, rendered in review mode',
     portfolioName:      'the state\'s portfolioName',
     broker:             '_deriveWorkspace → mode + brokerLabel',
@@ -50,4 +51,45 @@ test('STATE_PROJECTION covers every field computePortfolioState reads', () => {
 test('STATE_PROJECTION carries nothing the mapper does not read', () => {
     const extra = Object.keys(STATE_PROJECTION).filter(k => !(k in READ_BY_THE_MAPPER))
     assert.deepEqual(extra, [], `unread field(s) in STATE_PROJECTION: ${extra.join(', ')}`)
+})
+
+// ─── _declinedChanges — the refusals a review must not re-propose ────────────────
+//
+// originRegistry._cancelPortfolioItem appends to `rebalance_history` every time a user cancels a
+// queued change, explicitly so the next review can see it. Nothing read it back until §5, which
+// made this the SECOND writer-without-reader in this collection after conviction_history — and the
+// consequence was the one its own comment predicted: the same trim came back the next week,
+// identically, and the desk read as not listening.
+
+const row = (over = {}) => ({ at: Date.UTC(2026, 8, 10), action: 'trim', outcome: 'cancelled', ...over })
+
+test('_declinedChanges keeps a cancelled change', () => {
+    assert.deepEqual(_declinedChanges({ rebalance_history: [row()] }),
+        [{ action: 'trim', at: Date.UTC(2026, 8, 10) }])
+})
+
+// ONLY a cancel is a preference. A row that expired unexecuted says nothing about what the user
+// wants — the writer records `queued` separately for exactly this reason — and reading it as a
+// refusal would state an opinion to the desk that the user never held.
+test('_declinedChanges drops any outcome that is not a cancel', () => {
+    const rows = [row({ outcome: 'expired' }), row({ outcome: 'done' }), row({ outcome: null })]
+    assert.deepEqual(_declinedChanges({ rebalance_history: rows }), [])
+})
+
+// A row with no verb names no change, so it cannot be re-proposed and has nothing to say.
+test('_declinedChanges drops a row with no action', () => {
+    assert.deepEqual(_declinedChanges({ rebalance_history: [row({ action: null })] }), [])
+})
+
+// The stored array holds 12; this becomes prompt text beside every holding, so it carries the
+// recent refusals rather than a ledger — newest first, because that is the one that still stands.
+test('_declinedChanges takes the newest four, newest first', () => {
+    const rows = Array.from({ length: 6 }, (_, i) => row({ at: Date.UTC(2026, 8, i + 1), action: `a${i}` }))
+    assert.deepEqual(_declinedChanges({ rebalance_history: rows }).map(r => r.action), ['a5', 'a4', 'a3', 'a2'])
+})
+
+test('_declinedChanges is empty for a holding with no history, and never throws on junk', () => {
+    assert.deepEqual(_declinedChanges({}), [])
+    assert.deepEqual(_declinedChanges(null), [])
+    assert.deepEqual(_declinedChanges({ rebalance_history: 'not an array' }), [])
 })

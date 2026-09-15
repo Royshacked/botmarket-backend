@@ -143,10 +143,17 @@ export async function listPortfolioItems(portfolioId, userId, { projection = nul
 // book. It used to have a twin — an EDIT MODE block built from the ideas list the CLIENT sent — and
 // carrying those fields is what let that twin go.
 //
+// `rebalance_history` is the SECOND writer-without-reader found in this collection, and it failed
+// the same way conviction_history did. originRegistry appends to it every time a user cancels a
+// queued change, explicitly so the next review can see the refusal — its comment: "Atlas proposes
+// from the book's current state, so a cancelled trim is invisible to it and comes back next week
+// identically — the user says no, and the desk asks again, which reads as not listening." Nothing
+// read it. Capped at 12 by the writer.
+//
 // EXPORTED so a test can assert it covers every field the mappers below read. That coverage is the
 // invariant this bug broke, and an invariant no check enforces is a comment: a projection that
 // silently omits a field does not fail, it just reads null forever.
-export const STATE_PROJECTION = { id: 1, asset: 1, direction: 1, allocationRatio: 1, quantity: 1, conviction: 1, conviction_history: 1, notes: 1, status: 1, type: 1, activatedAt: 1, entry_conditions: 1, stop_conditions: 1, brokerOrders: 1, portfolioName: 1, broker: 1, mainAccountId: 1, accounts: 1, research_basis: 1 }
+export const STATE_PROJECTION = { id: 1, asset: 1, direction: 1, allocationRatio: 1, quantity: 1, conviction: 1, conviction_history: 1, rebalance_history: 1, notes: 1, status: 1, type: 1, activatedAt: 1, entry_conditions: 1, stop_conditions: 1, brokerOrders: 1, portfolioName: 1, broker: 1, mainAccountId: 1, accounts: 1, research_basis: 1 }
 
 /**
  * Compute the live state of a portfolio: actual weights, drift vs target,
@@ -269,6 +276,8 @@ export async function computePortfolioState(portfolioId, userId) {
             // decides, rather than this file guessing what a caller wants.
             entryConditions: _conditions(idea.entry_conditions),
             stopConditions:  _conditions(idea.stop_conditions),
+            // What the user has already said no to on this name — so the review does not re-propose it.
+            declinedChanges: _declinedChanges(idea),
             upcomingEarnings: null,
         }
     })
@@ -305,6 +314,7 @@ export async function computePortfolioState(portfolioId, userId) {
         notes:           idea.notes ?? null,
         entryConditions: _conditions(idea.entry_conditions),
         stopConditions:  _conditions(idea.stop_conditions),
+        declinedChanges: _declinedChanges(idea),
         upcomingEarnings: null,
     }))
 
@@ -412,6 +422,29 @@ async function _deriveWorkspace(ideas, userId) {
         brokerLabel: mode === 'live' ? (BROKER_LABELS[primaryBroker] ?? primaryBroker ?? 'Live') : null,
         accounts,
     }
+}
+
+/**
+ * CHANGES THIS USER HAS ALREADY TURNED DOWN on this holding, newest first.
+ *
+ * Filtered to `cancelled` because that is the only outcome that is a PREFERENCE. The record also
+ * carries `queued` — why the change was parked in the first place — and the distinction matters:
+ * "you declined it" is the user telling the desk no, while "it expired unexecuted" is the market
+ * never opening in time, which says nothing about what they want.
+ *
+ * Capped at 4. The stored array holds 12, but this is prompt text beside every holding, and a
+ * review needs the recent refusals, not a ledger.
+ *
+ * Exported for its test, like STATE_PROJECTION: the FILTER is the judgment here, and a mapper that
+ * quietly stopped filtering would turn "the market never opened" into "the user said no" — an
+ * opinion they never held, stated to the desk as if they had.
+ */
+export function _declinedChanges(idea) {
+    return (Array.isArray(idea?.rebalance_history) ? idea.rebalance_history : [])
+        .filter(r => r?.outcome === 'cancelled' && r?.action)
+        .slice(-4)
+        .reverse()
+        .map(r => ({ action: r.action, at: r.at ?? null }))
 }
 
 /**
