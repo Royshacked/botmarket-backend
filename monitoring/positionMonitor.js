@@ -33,10 +33,7 @@ const _deps = {
     evaluateConditions,
     buildSymbolMap,
     buildVolumeCtx,
-    // `persistConditionStates` still takes a leading `db` it does not use — the write funnels
-    // through entityRepo. Absorbed here rather than threaded through the call sites so no caller
-    // has to carry a handle for a parameter nobody reads.
-    persistStates:  (idea, phase, states) => persistConditionStates(null, idea, phase, states),
+    persistStates:  persistConditionStates,
     closePosition:  (broker, userId, accountId, positionId) => brokerService.closePosition(broker, userId, accountId, positionId),
     placeOrder:     (broker, userId, accountId, order) => brokerService.placeOrder(broker, userId, accountId, order),
     patch:          (id, fields) => entityRepo.patch(id, fields),

@@ -225,7 +225,6 @@ export async function applyManage({ entity, holder, verb, proposal, userId, orig
         // restart (or the position was never confirmed at the broker), so there is nothing to close
         // at the broker. Force-close the record so it does not stay stuck in 'long'/'short' forever.
         if (verb === 'exit_now' && (entity?.status === 'long' || entity?.status === 'short')) {
-            const db = await deps.getDb()
             await db.collection(ENTITIES).findOneAndUpdate(
                 { id: entity.id, status: { $in: ['long', 'short'] } },
                 { $set: { status: 'closed', closedReason: 'orphaned', closedAt: nowMs } },
@@ -320,4 +319,3 @@ export function resolveProposal(pending, verb, normalize = (p) => p ?? {}) {
     return { err: 'no_pending_action' }
 }
 
-export const positionManageService = { applyManage, executeManage, resolveProposal, resolveAllLinks, workingExit, partialQty, manageAppliedUpdate, MANAGE_VERBS }

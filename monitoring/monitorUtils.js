@@ -137,7 +137,7 @@ export function hasCumulativeVolume(tree, flat) {
     return all.some(l => l && typeof l === 'object' && l.type === 'volume' && l.mode === 'cumulative')
 }
 
-export function hasVwap(tree, flat) {
+function hasVwap(tree, flat) {
     const leaves = extractLeaves(tree)
     const all    = leaves.length ? leaves : (Array.isArray(flat) ? flat : [])
     return all.some(l => {
@@ -240,9 +240,9 @@ export const resolveTpTimeframe    = idea => resolvePhaseTimeframe(idea, 'tp',  
 
 // ─── Condition state persistence ──────────────────────────────────────────────
 
-// `db`/`collection` are vestigial (kept so existing monitor callers need no change); the write
-// now funnels through the kind-blind entityRepo. See docs/architecture/entity-model.md P1b.
-export async function persistConditionStates(db, idea, phase, results, collection) {
+// Persist which leaves passed (and when) for a phase, so the rising-edge check survives a restart.
+// The write funnels through the kind-blind entityRepo (docs/architecture/entity-model.md P1b).
+export async function persistConditionStates(idea, phase, results) {
     if (!Array.isArray(results) || results.length === 0) return
     const prev = idea.conditionStates?.[phase] ?? {}
     const next = { ...prev }

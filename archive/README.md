@@ -13,6 +13,7 @@ Archived 2026-08-18.
 | `services/agents/kairos.agent.service.js` | the Kairos desk |
 | `services/kairos.handoff.service.js` | confirm/edit hand-off, used only by the Kairos controller |
 | `monitoring/hermes.monitor.service.js`, `hermes.assess.js` | Hermes, the monitor that watched `call` |
+| `services/kairosNotify.service.js` | the four `call` social-chat cards (ready / expiry / manage / re-entry) — moved 2026-09-15, a month after their last caller came here |
 | `prompts/kairos_*.md` | the system prompt and the three mode profiles |
 | `tests/` | their unit tests, moved out of `tests/unit/` so `npm test` no longer runs them |
 

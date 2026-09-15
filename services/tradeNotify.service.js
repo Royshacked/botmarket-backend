@@ -1,15 +1,13 @@
 /**
- * Confirm-entry + Kairos-call notifications to social chat.
+ * Idea + setup notifications to social chat.
  *
  * "Major event" cards posted through the same bot-card channel as invalidation_alert /
  * manualNotify (postBotCard → chat_messages → WS). These are NOTIFY-AND-ROUTE cards: the
  * card is the alert + a clickable preview; the existing action UI is where the user actually
- * acts (paper/live entry → OrderConfirmDialog; a Kairos call → its pop-out detail window, which
- * hosts Confirm-entry / Accept-edit / Delete).
+ * acts (a paper/live entry → OrderConfirmDialog; a setup → its own card actions).
  *
- * Manual-mode fills keep their own inline FillCard (manualNotify) — this covers the two gaps:
- * paper/live entry confirmation (was a silent modal) and Kairos readiness/expiry (was a poll
- * card + a silent terminal expiry).
+ * Manual-mode fills keep their own inline FillCard (manualNotify). The Kairos `call` cards that
+ * used to live here moved to archive/services/kairosNotify.service.js with the desk.
  *
  * Shape is split into pure builders (unit-tested — the { userId, content, type, payload, botId,
  * actions } a card sends) and thin async wrappers that hand the builder's output to postBotCard.
@@ -27,7 +25,7 @@ const LOG = '[tradeNotify]'
  * sit in marketOpen.monitor.js, which stopped writing the copy when the per-desk batch card was
  * retired. The OrderConfirmDialog shows the same age against the same threshold.
  */
-export const STALE_HOURS = 12
+const STALE_HOURS = 12
 
 // ── Pure card builders ─────────────────────────────────────────────────────────
 
@@ -219,47 +217,9 @@ export function buildQueueReady({ userId, count, assets = [], staleHours = null 
     }
 }
 
-/** Kairos call READY to enter → open the call to confirm. Proposal comes from the fresh assessment. */
-export function buildCallReady(call, assessment = null) {
-    // Only show the price bits when BOTH numbers finalized — _finalizeProposal returns null for
-    // entry/stop it can't resolve, and "entry null, stop null" must never reach the card copy.
-    const p       = assessment?.proposal
-    // NB: Number.isFinite (no coercion) — Number(null) is 0 (finite), which would leak "stop null".
-    const hasNums = p && Number.isFinite(p.entry) && Number.isFinite(p.stop)
-    const bits    = hasNums ? ` (entry ${p.entry}, stop ${p.stop})` : ''
-    return {
-        userId:  call?.userId ?? null,
-        content: `Kairos — ${call?.asset} is ready to enter${bits}. Open the call to confirm.`,
-        type:    'entry_confirm',
-        payload: { kind: 'call', callId: call?.id, asset: call?.asset, direction: call?.bias ?? null },
-        botId:   'kairos',
-        actions: cardActions('Open the call'),
-    }
-}
-
 /**
- * Kairos call thesis went stale: `kind` is 'edit' (re-map it) or 'expired' (let it go / delete).
- * NB `kind` is this CARD's parameter, not the call's status — a stale thesis is the invalidation
- * axis; the call itself stays 'looking' until the user acts.
- */
-export function buildCallExpiry(call, kind, why = null) {
-    const content = kind === 'expired'
-        ? `Kairos — ${call?.asset} thesis expired. Edit to re-map it or delete the call.`
-        : `Kairos — ${call?.asset} thesis is expiring. Re-map it or let it go.`
-    return {
-        userId:  call?.userId ?? null,
-        content,
-        type:    'call_expiry',
-        payload: { callId: call?.id, asset: call?.asset, kind, why: why ?? null },
-        botId:   'kairos',
-        actions: cardActions('Edit call'),
-    }
-}
-
-/** Kairos in-position MANAGEMENT proposal → open the call to accept/dismiss (Phase 5). */
-/**
- * Talos wants to change something about a LIVE setup position. Its own copy rather than
- * buildCallManage's: that one is branded Kairos, keyed on `callId`, and speaks about a call. Share
+ * Talos wants to change something about a LIVE setup position. Its own copy rather than the
+ * archived buildCallManage's: that one was branded Kairos, keyed on `callId`, and spoke about a call. Share
  * the pipe (`_post`), not the judgment.
  *
  * The proposal is spelled out in the content, not hidden behind "open it to see" — a partial or a
@@ -321,45 +281,6 @@ export function buildSetupManage(setup, card) {
     }
 }
 
-export function buildCallManage(call, card) {
-    const verb  = card?.verdict
-    const asset = call?.asset
-    const verbCopy = {
-        move_stop:    'move the stop',
-        take_partial: 'bank a partial',
-        exit_now:     'exit now',
-        let_run:      'let it run',
-    }[verb] ?? 'manage the trade'
-    return {
-        userId:  call?.userId ?? null,
-        content: `Kairos — ${asset}: I want to ${verbCopy}. Open the call to accept or dismiss.`,
-        type:    'call_manage',
-        payload: { callId: call?.id, asset, verdict: verb ?? null, read: card?.read ?? null },
-        botId:   'kairos',
-        actions: cardActions('Review'),
-    }
-}
-
-/**
- * Kairos position STOPPED OUT but the thesis still looks intact → offer a re-entry. Routes to the
- * call pop-out, where the user picks Re-enter (revive the call, re-arm the plan) or Close (leave it
- * terminal). `read` carries the thesis-check rationale; `outcome` the stop-out (exit price / R).
- */
-export function buildCallReentry(call, read = null, outcome = null) {
-    const asset   = call?.asset
-    const px      = outcome?.exit_price
-    const stopBit = Number.isFinite(px) ? ` at ${px}` : ''
-    const why     = read?.why ? ` ${read.why}` : ''
-    return {
-        userId:  call?.userId ?? null,
-        content: `Kairos — ${asset} stopped out${stopBit}, but the thesis still looks intact.${why} Re-enter or close it out?`,
-        type:    'call_reentry',
-        payload: { callId: call?.id, asset, exit_price: Number.isFinite(px) ? px : null, why: read?.why ?? null },
-        botId:   'kairos',
-        actions: cardActions('Review re-entry'),
-    }
-}
-
 // ── Thin IO wrappers ────────────────────────────────────────────────────────────
 
 // Delegates to the shared poster, which NEVER throws — these cards are posted AFTER the state
@@ -382,13 +303,6 @@ export async function notifySetupInvalidation(setup, info = null) {
     return _post(buildSetupInvalidation(setup, info), `Setup-invalidation card (${info?.card ?? '?'})`)
 }
 
-export async function notifyCallReady(call, assessment = null) {
-    return _post(buildCallReady(call, assessment), 'Call-ready card')
-}
-
-export async function notifyCallExpiry(call, kind, why = null) {
-    return _post(buildCallExpiry(call, kind, why), `Call-expiry card (${kind})`)
-}
 
 export async function notifySetupManage(setup, card) {
     return _post(buildSetupManage(setup, card), `Setup-manage card (${card?.verdict})`)
@@ -425,13 +339,3 @@ export function buildSetupLimitDisarm(setup, reason) {
 export async function notifySetupLimitDisarm(setup, reason) {
     return _post(buildSetupLimitDisarm(setup, reason), `Limit-disarm card (${reason})`)
 }
-
-export async function notifyCallManage(call, card) {
-    return _post(buildCallManage(call, card), `Call-manage card (${card?.verdict})`)
-}
-
-export async function notifyCallReentry(call, read = null, outcome = null) {
-    return _post(buildCallReentry(call, read, outcome), 'Call-reentry card')
-}
-
-export const tradeNotifyService = { notifyIdeaEntryConfirm, notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage, notifyQueueReady, notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry }

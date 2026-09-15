@@ -73,8 +73,7 @@ const _deps = {
     buildVolumeCtx,
     evaluateTree,
     evaluateConditions,
-    // Same absorbed vestigial `db` as positionMonitor's — the write funnels through entityRepo.
-    persistStates: (idea, phase, states) => persistConditionStates(null, idea, phase, states),
+    persistStates: persistConditionStates,
     buildOrderPlan: (idea) => buildOrderPlanForIdea(idea),
     notifyManualEntry,
     notifyIdeaEntryConfirm,

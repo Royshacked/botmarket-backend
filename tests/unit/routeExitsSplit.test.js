@@ -42,7 +42,7 @@ test('the routing shape is the same whatever authored the exits', async () => {
     const tree = await routeExits({ id: 'i', asset: 'SPY', direction: 'long', quantity: 1, stop_conditions: [], tp_conditions: [] })
     const zone = await routeExits({ id: 's', kind: 'setup', asset: 'SPY', direction: 'long', quantity: 1, stop_zones: [], tp_zones: [] })
     for (const r of [tree, zone]) for (const leg of ['stop', 'tp']) {
-        assert.deepEqual(Object.keys(r[leg]).sort(), ['hasAny', 'monitorTree', 'nativeOrders', 'single'])
+        assert.deepEqual(Object.keys(r[leg]).sort(), ['hasAny', 'monitorTree', 'nativeOrders'])
         assert.equal(r[leg].hasAny, false)
     }
 })

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { cardActions, cardLifecycle, cardSubject, normalizeResolveStatus, isBot } from '../../api/chat/chat.service.js'
 import { isScaffoldOnlyPatch } from '../../api/_shared/entityController.util.js'
-import { buildIdeaEntryConfirm, buildSetupEntryConfirm, buildCallReady, buildCallExpiry, buildCallManage, buildCallReentry } from '../../services/tradeNotify.service.js'
+import { buildIdeaEntryConfirm, buildSetupEntryConfirm, buildSetupInvalidation, buildSetupManage, buildSetupLimitDisarm, buildQueueReady } from '../../services/tradeNotify.service.js'
 
 // The unified card contract: "actionable" is a property of the MESSAGE (does it carry `actions`?),
 // not the sender. cardActions() defines the one two-button rule (do-something + dismiss); cardLifecycle()
@@ -78,7 +78,7 @@ test('normalizeResolveStatus: done and pending survive; everything else is dismi
 
 // ── every producer card now carries the standard actions ──────────────────────
 test('trade/coverage builders all emit the do/dismiss actions', () => {
-    // Fixtures live in allCards() — it builds its own idea/setup/call/coverage inputs.
+    // Fixtures live in allCards() — it builds its own idea/setup inputs.
     for (const c of allCards()) {
         assert.ok(c.actions, `${c.type} should carry actions`)
         assert.equal(c.actions.dismiss, true, `${c.type} should offer dismiss`)
@@ -115,14 +115,13 @@ test('an empty patch is not scaffolding-only', () => {
 function allCards() {
     const idea  = { id: 'i1',  userId: 'u1', asset: 'NQ',   direction: 'long' }
     const setup = { id: 's1',  userId: 'u1', asset: 'AVGO', direction: 'long' }
-    const call  = { id: 'c1',  userId: 'u1', asset: 'AAPL', bias: 'long' }
     return [
         buildIdeaEntryConfirm(idea),
         buildSetupEntryConfirm(setup, { verdict: 'enter' }),
-        buildCallReady(call, { proposal: { entry: 190, stop: 187 } }),
-        buildCallExpiry(call, 'expired'),
-        buildCallManage(call, { verdict: 'move_stop' }),
-        buildCallReentry(call),
+        buildSetupInvalidation(setup, { card: 'invalidated', price: 100, edge: 'lower' }),
+        buildSetupManage(setup, { verdict: 'move_stop', proposal: { stop: 99 } }),
+        buildSetupLimitDisarm(setup, 'expired'),
+        buildQueueReady({ userId: 'u1', count: 2, assets: ['NQ', 'AVGO'] }),
     ]
 }
 

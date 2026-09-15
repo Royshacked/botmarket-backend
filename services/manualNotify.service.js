@@ -98,4 +98,3 @@ export async function notifyManualExit(userId, { legs, reason = 'manual', portfo
     }, { tag: `Manual exit card (${legs.map(l => l.asset).join(', ')}, ${reason})`, log: LOG })
 }
 
-export const manualNotifyService = { notifyManualEntry, notifyManualExit, entryLegFromIdea, exitLegFromIdea }

@@ -52,7 +52,6 @@ export function shouldMarketEnterOnUpdate(patch, existingStatus) {
 
 export const ideaService = {
     saveIdea,
-    buildIdeaChildren,
     saveBatchIdeas,
     getIdeas,
     getAssetClassMap,

@@ -18,7 +18,6 @@
 
 import { parseCondition }                       from '../monitoring/parsers/condition.parser.js'
 import { extractLeaves, resolveConditionTree }   from './conditionTree.service.js'
-import { getCandles }                            from './ohlcv.service.js'
 import { toNum }                                 from './format.util.js'
 import { logger }                                from './logger.service.js'
 // The ONE rule for what price a leg acts at — shared with `stopEdge` and the journal, so the
@@ -66,32 +65,9 @@ export async function detectNativeEntryLevel(idea) {
 }
 
 /**
- * Best-effort current price for a symbol — the reference a native SL/TP attached
- * to a MARKET order is measured from. Returns null on any failure, so callers
- * leave that exit on the monitor rather than risk a malformed order.
- *
- * @param {string} asset
- * @param {string} [timeframe]
- * @returns {Promise<number|null>}
- */
-export async function currentReferencePrice(asset, timeframe = 'day') {
-    try {
-        const candles = await getCandles(asset, timeframe, 2)
-        const last = candles?.[candles.length - 1]
-        return Number.isFinite(last?.c) ? last.c : null
-    } catch (err) {
-        logger.warn(LOG, `reference price unavailable for ${asset}/${timeframe}: ${err.message}`)
-        return null
-    }
-}
-
-/**
  * Route an idea's stop and TP exits into buckets per leg:
- *   • single      always null. Retained in the shape for callers; touches no longer
- *                 ride an attached SL/TP (unreliable on a hedging account) — every
- *                 touch is a positionId closing order via nativeOrders.
- *   • nativeOrders[{level, quantity}]  every `touch` level in the leg (single OR
- *                 multi) → each becomes its own broker closing order (LIMIT for tp,
+ *   • nativeOrders[{level, quantity}]  every `touch` level in the leg (one or many) → each
+ *                 becomes its own broker closing order (LIMIT for tp,
  *                 STOP for stop) placed when the position opens. Quantities are in the
  *                 idea's own units (main-account scale); callers scale them per account.
  *   • monitorTree the residual OR-group of leaves that AREN'T touches (structured
@@ -104,7 +80,7 @@ export async function currentReferencePrice(asset, timeframe = 'day') {
  *
  * @param {object} idea
  * @returns {Promise<{ stop: LegRouting, tp: LegRouting }>}
- *   LegRouting = { single:number|null, nativeOrders:{level:number,quantity:number}[],
+ *   LegRouting = { nativeOrders:{level:number,quantity:number}[],
  *                  monitorTree:object|null, hasAny:boolean }
  */
 export async function routeExits(idea) {
@@ -180,7 +156,7 @@ export function routeSetupZones(setup) {
             .filter(o => o.quantity > 0)
 
         const nativeOrders = list.map(({ level, quantity }) => ({ level, quantity }))
-        return { single: null, nativeOrders, monitorTree: null, hasAny: nativeOrders.length > 0 }
+        return { nativeOrders, monitorTree: null, hasAny: nativeOrders.length > 0 }
     }
 
     return { stop: leg(setup?.stop_zones, 'stop'), tp: leg(setup?.tp_zones, 'tp') }
@@ -200,7 +176,7 @@ function _isLeaf(node) {
 /** Route one exit leg (stop or tp). See routeExits() for the bucket semantics. */
 async function _routeLeg(tree, flat, totalQty) {
     const group = resolveConditionTree(tree, flat, 'OR')
-    if (!group) return { single: null, nativeOrders: [], monitorTree: null, hasAny: false }
+    if (!group) return { nativeOrders: [], monitorTree: null, hasAny: false }
 
     const children = group.children
 
@@ -208,9 +184,6 @@ async function _routeLeg(tree, flat, totalQty) {
     // multi, treated identically. Each non-touch leaf/group stays on the software
     // monitor. Each child gets a quantity (its own, or an equal split of the total)
     // so the broker-rested + monitored slices together exit the full position.
-    // `single` is kept in the shape for callers but is always null now: touches no
-    // longer ride an attached SL/TP (unreliable on a hedging account) — they are
-    // always positionId closing orders, like the multi-level case always was.
     const quantities   = _assignSlotQuantities(children, totalQty)
     const nativeOrders = []
     const monitored    = []
@@ -226,7 +199,7 @@ async function _routeLeg(tree, flat, totalQty) {
         }
     }
     const monitorTree = monitored.length ? { operator: group.operator, children: monitored } : null
-    return { single: null, nativeOrders, monitorTree, hasAny: true }
+    return { nativeOrders, monitorTree, hasAny: true }
 }
 
 /**
