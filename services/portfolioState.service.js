@@ -131,7 +131,17 @@ export async function listPortfolioItems(portfolioId, userId, { projection = nul
 }
 
 // What computePortfolioState reads. Narrow on purpose — see listPortfolioItems.
-const STATE_PROJECTION = { id: 1, asset: 1, direction: 1, allocationRatio: 1, conviction: 1, notes: 1, status: 1, type: 1, activatedAt: 1, brokerOrders: 1, portfolioName: 1, broker: 1, mainAccountId: 1, accounts: 1, research_basis: 1 }
+//
+// `conviction_history` earns its place despite the narrowness: `_lastConviction` reads it, and
+// without it `convictionPrev` was null on every holding — which silently switched OFF the
+// conviction trigger (portfolioReview.util, the one it calls the highest-signal early warning) and
+// the "(was medium)" trend in the prompt. snapshotConvictions had been writing the array on every
+// review close the whole time. Capped at 12 entries by the writer, so it is cheap to carry.
+//
+// EXPORTED so a test can assert it covers every field the mappers below read. That coverage is the
+// invariant this bug broke, and an invariant no check enforces is a comment: a projection that
+// silently omits a field does not fail, it just reads null forever.
+export const STATE_PROJECTION = { id: 1, asset: 1, direction: 1, allocationRatio: 1, conviction: 1, conviction_history: 1, notes: 1, status: 1, type: 1, activatedAt: 1, brokerOrders: 1, portfolioName: 1, broker: 1, mainAccountId: 1, accounts: 1, research_basis: 1 }
 
 /**
  * Compute the live state of a portfolio: actual weights, drift vs target,
