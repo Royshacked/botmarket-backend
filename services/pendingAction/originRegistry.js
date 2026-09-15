@@ -230,16 +230,6 @@ const _byWork = (onManage, onExit) => (record) =>
     (MANAGE_VERBS.has(record?.action?.type) ? onManage : onExit)(record)
 
 /**
- * One entry per origin kind.
- *
- * `cancel(record)` must be safe to call twice (the list can double-fire on a slow network) and must
- * never throw for a missing target — the queue transition already happened, and a cancel that
- * half-completes is worse than one that notes nothing.
- *
- * `execute(record)` returns the change's own `{ ok, reason }` shape, so the caller can tell a
- * refusal ("too small", "no position") from a re-deferral (`deferred:true`) from a success.
- */
-/**
  * A holding carries BOTH kinds of queued work: a review's discretionary change AND the monitor's
  * own exits (a portfolio leg has a stop like anything else). They are NOT interchangeable, and the
  * verb alone cannot tell them apart — both spell `exit`.
@@ -252,6 +242,16 @@ const _byWork = (onManage, onExit) => (record) =>
 const _byDecider = (onUser, onMonitor) => (record) =>
     (record?.queuedBy === 'monitor' ? onMonitor : onUser)(record)
 
+/**
+ * One entry per origin kind.
+ *
+ * `cancel(record)` must be safe to call twice (the list can double-fire on a slow network) and must
+ * never throw for a missing target — the queue transition already happened, and a cancel that
+ * half-completes is worse than one that notes nothing.
+ *
+ * `execute(record)` returns the change's own `{ ok, reason }` shape, so the caller can tell a
+ * refusal ("too small", "no position") from a re-deferral (`deferred:true`) from a success.
+ */
 const ORIGINS = Object.freeze({
     portfolio_item: {
         desk:    'portfolio',

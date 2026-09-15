@@ -482,20 +482,6 @@ export async function reducePosition({ userId, positionId, qty, price, reason = 
 }
 
 /**
- * Mark-to-market ONE account: cash + Σ unrealized (its open positions valued at the
- * live price). The single source of truth for equity, used by getAccount and the equity-
- * curve snapshotter. Identity: equity = startingBalance + realizedPnl + unrealized.
- * Returns a zeroed reading when the account is missing (deleted mid-flight).
- *
- * Also reports EXPOSURE: marginUsed = Σ notional (qty × avgPrice, computed live so a
- * partial reduce shrinks it) and, when a buying-power cap is set (settings.maxLeverage),
- * buyingPower = equity × maxLeverage plus an overLeveraged flag. maxLeverage 0 = off →
- * buyingPower null (advisory-only, never blocks a fill).
- * @param {string} userId
- * @param {string} accountId
- * @returns {Promise<{currency,cashBalance,realizedPnl,unrealized,equity,openPositions,marginUsed,buyingPower,overLeveraged}>}
- */
-/**
  * Capital already COMMITTED to open positions, per account — cost basis at entry, the same
  * `|avgPrice × qty|` computeEquity calls `marginUsed`.
  *
@@ -555,6 +541,20 @@ export function rollUpPositions(positions = []) {
     return { unrealized, marginUsed }
 }
 
+/**
+ * Mark-to-market ONE account: cash + Σ unrealized (its open positions valued at the
+ * live price). The single source of truth for equity, used by getAccount and the equity-
+ * curve snapshotter. Identity: equity = startingBalance + realizedPnl + unrealized.
+ * Returns a zeroed reading when the account is missing (deleted mid-flight).
+ *
+ * Also reports EXPOSURE: marginUsed = Σ notional (qty × avgPrice, computed live so a
+ * partial reduce shrinks it) and, when a buying-power cap is set (settings.maxLeverage),
+ * buyingPower = equity × maxLeverage plus an overLeveraged flag. maxLeverage 0 = off →
+ * buyingPower null (advisory-only, never blocks a fill).
+ * @param {string} userId
+ * @param {string} accountId
+ * @returns {Promise<{currency,cashBalance,realizedPnl,unrealized,equity,openPositions,marginUsed,buyingPower,overLeveraged}>}
+ */
 export async function computeEquity(userId, accountId) {
     const acct = await paperBrokerService.getAccount(userId, accountId)
     if (!acct) return {

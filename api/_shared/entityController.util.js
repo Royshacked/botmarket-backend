@@ -25,22 +25,6 @@ import { resolveCardsFor } from '../chat/chat.service.js'
 // aggregate, a place-orders result) is not a CRUD move and keeps its own handler.
 
 /**
- * @param {Object} cfg
- * @param {string} cfg.log                     log tag, so a failure still reads as the caller's
- * @param {string} cfg.noun                    'setup' | 'call' | 'idea' | 'coverage' — fallback
- *                                             message wording, and the card SUBJECT KIND a patch
- *                                             resolves (chat.service cardSubject uses the same
- *                                             vocabulary, deliberately: one word per kind).
- * @param {Object} cfg.service
- * @param {Function} [cfg.service.list]        (userId) => Promise<object[]>
- * @param {Function} [cfg.service.get]         (id, userId) => Promise<{ok, doc}>
- * @param {Function} [cfg.service.patch]       (id, body, userId) => Promise<{ok, doc}>
- * @param {Function} [cfg.service.remove]      (id, userId) => Promise<{ok}>
- * @param {{one?:string, many?:string}} [cfg.envelope]  wrap the body under a key
- * @param {Object|Function} [cfg.overrides]    route-owned reasons (see reason.util)
- * @returns {{list:Function, get:Function, patch:Function, remove:Function}} express handlers
- */
-/**
  * AUTHORING SCAFFOLDING — fields that belong to the conversation that built an entity rather than
  * to the entity itself. A patch that touched only these has changed nothing anyone was asked to
  * change, so it cannot satisfy a card.
@@ -60,6 +44,22 @@ export function isScaffoldOnlyPatch(body) {
     return keys.length > 0 && keys.every(k => SCAFFOLD_FIELDS.has(k))
 }
 
+/**
+ * @param {Object} cfg
+ * @param {string} cfg.log                     log tag, so a failure still reads as the caller's
+ * @param {string} cfg.noun                    'setup' | 'call' | 'idea' | 'coverage' — fallback
+ *                                             message wording, and the card SUBJECT KIND a patch
+ *                                             resolves (chat.service cardSubject uses the same
+ *                                             vocabulary, deliberately: one word per kind).
+ * @param {Object} cfg.service
+ * @param {Function} [cfg.service.list]        (userId) => Promise<object[]>
+ * @param {Function} [cfg.service.get]         (id, userId) => Promise<{ok, doc}>
+ * @param {Function} [cfg.service.patch]       (id, body, userId) => Promise<{ok, doc}>
+ * @param {Function} [cfg.service.remove]      (id, userId) => Promise<{ok}>
+ * @param {{one?:string, many?:string}} [cfg.envelope]  wrap the body under a key
+ * @param {Object|Function} [cfg.overrides]    route-owned reasons (see reason.util)
+ * @returns {{list:Function, get:Function, patch:Function, remove:Function}} express handlers
+ */
 export function makeEntityController({ log, noun, service, envelope = null, overrides = null }) {
     const one  = (doc)  => (envelope?.one  ? { [envelope.one]: doc }   : doc)
     const many = (docs) => (envelope?.many ? { [envelope.many]: docs } : docs)

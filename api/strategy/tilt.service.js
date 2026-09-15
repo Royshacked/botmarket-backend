@@ -152,15 +152,6 @@ function _regime(r) {
 }
 
 /**
- * Defensively normalize a raw tilt into the stored shape. PURE — identity and timestamps stamped
- * here, rows canonicalised and de-duplicated, and the balance check recorded.
- *
- * `balanced: false` is RECORDED rather than rejected, following the same call as `ordered` on
- * coverage's valuation band: an unbalanced table is a construction smell worth seeing, not a
- * contradiction worth destroying the work over. A contradictory row IS worth refusing, and that gate
- * lives in `publishTilt` where the author can still fix it.
- */
-/**
  * DOES THE TABLE NET OUT — the verdict, not the tolerance. Pure.
  *
  * Its own function because two places need the ANSWER and only one of them stores a document: the
@@ -177,6 +168,15 @@ export function balanceOf(tilts = []) {
     return { net_bp: Math.round(sum), balanced: Math.abs(sum) <= BALANCE_TOLERANCE_BP }
 }
 
+/**
+ * Defensively normalize a raw tilt into the stored shape. PURE — identity and timestamps stamped
+ * here, rows canonicalised and de-duplicated, and the balance check recorded.
+ *
+ * `balanced: false` is RECORDED rather than rejected, following the same call as `ordered` on
+ * coverage's valuation band: an unbalanced table is a construction smell worth seeing, not a
+ * contradiction worth destroying the work over. A contradictory row IS worth refusing, and that gate
+ * lives in `publishTilt` where the author can still fix it.
+ */
 export function normalizeTilt(raw, now = new Date().toISOString()) {
     const r = (raw && typeof raw === 'object') ? raw : {}
     const benchmark = _str(r.benchmark) ?? 'SPX'

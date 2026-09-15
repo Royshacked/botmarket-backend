@@ -218,13 +218,6 @@ async function _insert(bound, userId) {
 }
 
 /**
- * Which resolved conditions carry across a re-draw: those whose id AND text are byte-identical.
- * Anything reworded starts unresolved, because the finding was about the old sentence.
- *
- * Returns `undefined` when there is nothing to change (no prior findings, or the conditions weren't
- * touched), so an untouched edit doesn't write a redundant key. Pure.
- */
-/**
  * Every condition on a document — the setup-wide tier plus each scenario's own. The resolved-ledger
  * is ONE map keyed by id, so carrying findings across an edit has to see both tiers: reading only
  * the root would silently drop the latch on a scenario condition that never changed.
@@ -233,6 +226,13 @@ export function allConditions(doc) {
     return [...(doc?.conditions ?? []), ...(doc?.scenarios ?? []).flatMap(sc => sc?.conditions ?? [])]
 }
 
+/**
+ * Which resolved conditions carry across a re-draw: those whose id AND text are byte-identical.
+ * Anything reworded starts unresolved, because the finding was about the old sentence.
+ *
+ * Returns `undefined` when there is nothing to change (no prior findings, or the conditions weren't
+ * touched), so an untouched edit doesn't write a redundant key. Pure.
+ */
 export function carryConditions(resolved, curConditions, nextConditions) {
     if (!resolved || !Object.keys(resolved).length) return undefined
     if (!Array.isArray(nextConditions)) return undefined   // conditions untouched → findings stand
