@@ -1,12 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    zoneGate, _isPreActive, _isExpiring, _nextCheckAt, _checkSetup,
-    _nextStatus, _isPastExpiry, _effectiveVerdict, normalizeConditionResults, latchPatch, costPatch,
+    _isPreActive, _isExpiring, _nextCheckAt, _checkSetup,
+    _nextStatus, _isPastExpiry, _effectiveVerdict,
+} from '../../monitoring/talos.monitor.service.js'
+// The pure tier — the decisions a wake makes before it spends anything. Split out of the monitor
+// (which kept the loop, the scheduling and the writes) when that file passed 1500 lines.
+import {
+    zoneGate, normalizeConditionResults, latchPatch, costPatch,
     validityBreach, breachPatch, awayEdge, adverseEdge,
     scenarioGate, liveScenarios, rollUpBreaches, scenarioState,
     positionGate, reviewDue, computeMetrics, rMultiple,
-} from '../../monitoring/talos.monitor.service.js'
+} from '../../monitoring/talos.gates.js'
 import { normalizeSetup, buildLadder, isFetchableRung, usableLadder, rungMinutes } from '../../services/setup.schema.js'
 import { buildToolsFor, symbolScope, openingRung } from '../../monitoring/talos.assess.js'
 

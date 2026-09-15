@@ -396,17 +396,21 @@ monitoring/
    archive/README.md. Its two shared helpers, _allText and _formatEventRisk, stayed behind in
    assess.shared.js because Talos imports them.)
   talos.monitor.service.js  Talos — the Mentor-setup loop (own tick, kind:'setup'). TWO BRAINS, ONE LOOP:
-                            pre-entry readiness, past-entry management (_managePosition). Pre-entry
-                            cascade, cheapest-first: (1) the arithmetic SCENARIO gate — which PREMISE
-                            price reached, not merely which zone; then out-of-zone, (1.5) the validity
-                            gate (close, not touch — it can only KILL: broke/drifting) and the
-                            MOMENTUM PULSE (shouldPulse: a material, throttled move away from every
-                            live zone — monitor_state.pulse_anchor_px/last_pulse_at, measured in
-                            nearestZoneWidth, throttled by the setup's OWN cadence.max); (3) the full
-                            read. A pulse may only `edit` (re-map) or wait — never enter, because
-                            outside every zone nothing is armed: no zone id, no leg size, no fill
-                            anchor. Every real look re-anchors. Talos NEVER executes — every verdict
-                            is a card the user confirms
+                            pre-entry readiness, past-entry management (_managePosition). THE LOOP ONLY:
+                            wake handlers, scheduling, writes and the injectable IO. Pre-entry cascade,
+                            cheapest-first: (1) the arithmetic SCENARIO gate — which PREMISE price
+                            reached, not merely which zone; (2) the validity gate (close, not touch —
+                            it can only KILL: broke/drifting); (3) the full read, which runs on a zone
+                            hit, a fired price GUARD, near expiry, or a setup never read before. A
+                            guard-woken read with no armed zone may only `edit` (re-map) or wait —
+                            never enter, because outside every zone nothing is armed: no zone id, no
+                            leg size, no fill anchor. Talos NEVER executes — every verdict is a card
+                            the user confirms
+  talos.gates.js            its PURE tier, split out 2026-09-15: the zone/scenario gates, guard
+                            resolution, the in-position arithmetic (rMultiple/metrics/positionGate),
+                            the validity + breach machinery, and the condition/cost ledger. No IO, no
+                            clock beyond an explicit nowMs — which is what makes it free to run on
+                            every wake and decide whether one is worth paying a model for
   talos.assess.js           the setup read (readiness + in-position). Conditions are PROSE with a
                             weight/mode, graded one entry per declared id — the model goes and checks
                             them with the shared assessTools kit rather than being pre-fetched at.

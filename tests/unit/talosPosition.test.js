@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _checkSetup, positionGate } from '../../monitoring/talos.monitor.service.js'
+import { _checkSetup } from '../../monitoring/talos.monitor.service.js'
+import { positionGate } from '../../monitoring/talos.gates.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
 import { buildSetupManage } from '../../services/tradeNotify.service.js'
 
