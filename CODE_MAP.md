@@ -252,9 +252,11 @@ services/
                             weekend (quote still reads Friday) and a feed that already carries today both
                             fabricate nothing. day/week/month at multiplier 1 only — intraday feeds carry
                             their own forming bar, an aggregate's groups would be shifted by an extra one.
-  chartImgCache.service.js  cachedChartImage(symbol,timeframe,studies) — 60s shared chart-PNG cache.
-                            FALLBACK-FIRST: own KLineCharts render first (OWN_CHART_RENDER, default on),
-                            chart-img (TradingView) on any error/timeout. base64-PNG contract unchanged.
+  chartImgCache.service.js  cachedChart(symbol,timeframe,studies) → { png, source } — 60s shared chart-PNG
+                            cache; cachedChartImage() is the png-only view (monitor evaluators, price-
+                            structure tools). FALLBACK-FIRST: own KLineCharts render first (OWN_CHART_RENDER,
+                            default on), chart-img (TradingView) on any error/timeout. `source`
+                            (CHART_SOURCE.OWN | CHART_IMG) lets get_chart label the image honestly to the LLM.
   chartRender/
     klineRender.provider.js   renderChartImage(symbol,timeframe,studies) → base64 PNG via headless
                               Chromium (Playwright). Warm single browser + serialised render chain +

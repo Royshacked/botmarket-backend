@@ -3,7 +3,7 @@ import { getTickerAggregates }  from '../../providers/candles.provider.js'
 import { getEarnings }          from '../../providers/fmp.provider.js'
 import { getFmpQuoteFull }      from '../../providers/fmp.price.provider.js'
 import { buildFormingBar, toMsCandles } from '../candleFetch.service.js'
-import { cachedChartImage } from '../chartImgCache.service.js'
+import { cachedChart, cachedChartImage, CHART_SOURCE } from '../chartImgCache.service.js'
 import { buildStudies } from '../../monitoring/evaluators/chart.evaluator.js'
 import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../../monitoring/evaluators/structured.evaluator.js'
 import { sessionStartMs } from '../market.service.js'
@@ -186,11 +186,12 @@ export function makeEarningsHandler(log) {
     )
 }
 
-// get_chart renders an actual TradingView chart and hands it to the LLM as an image
-// for true visual TA. `onChart` (nullable) surfaces the chart to the user's chat when
+// get_chart renders an actual chart (our own KLineCharts render on our candles, or the
+// chart-img/TradingView fallback) and hands it to the LLM as an image for true visual TA. `onChart` (nullable) surfaces the chart to the user's chat when
 // the agent flags show_to_user. `readText` is the trailing "how to read it" sentence,
 // which differs per agent.
-export function makeChartHandler({ log, onChart, readText }) {
+// `renderChart` is injectable (tests) and defaults to the shared cache, like priceStructure.tools.
+export function makeChartHandler({ log, onChart, readText, renderChart = cachedChart }) {
     return makeToolHandler(
         'get_chart',
         async ({ ticker, timeframe, indicators = '', show_to_user = false }) => {
@@ -199,7 +200,7 @@ export function makeChartHandler({ log, onChart, readText }) {
             // visual read is anchored to price structure (orderblocks, sweeps, false breaks) rather
             // than primed by moving averages / VWAP. The agent adds an overlay only to confirm a read.
             const studies = buildStudies(indicators || '', { fillDefaults: false })
-            const png     = await cachedChartImage(symbol, timeframe, studies)
+            const { png, source } = await renderChart(symbol, timeframe, studies)
 
             if (show_to_user && typeof onChart === 'function') {
                 try { onChart({ symbol, timeframe, imageBase64: png }) }
@@ -207,9 +208,12 @@ export function makeChartHandler({ log, onChart, readText }) {
             }
 
             const studyNames = studies.map(s => s.name).join(', ') || 'price only, no overlays'
+            // Label the source honestly: the own render is drawn from the same candles the user's
+            // chart pane shows; the fallback is TradingView's own data and drawing.
+            const sourceLabel = source === CHART_SOURCE.OWN ? "chart (app render, same candles as the user's chart)" : 'TradingView chart'
             return [
                 { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
-                { type: 'text',  text: `${symbol} ${timeframe} TradingView chart (studies: ${studyNames}). ${readText}` },
+                { type: 'text',  text: `${symbol} ${timeframe} ${sourceLabel} (studies: ${studyNames}). ${readText}` },
             ]
         },
         (err, { ticker }) => `Could not render chart for ${ticker}: ${err.message}. Use get_candles instead.`,

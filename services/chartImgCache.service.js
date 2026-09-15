@@ -16,7 +16,7 @@ import { config } from './config.js'
 // providers, so nothing depends back on it.
 const LOG          = '[chartImgCache]'
 const CHART_TTL_MS = 60 * 1000   // intraday views go stale fast; 60s is plenty within a chat / assessment
-const _chartCache  = createTtlCache({ ttlMs: CHART_TTL_MS, max: 100 })   // key -> base64 png
+const _chartCache  = createTtlCache({ ttlMs: CHART_TTL_MS, max: 100 })   // key -> { png: base64, source }
 
 // ─── Renderer selection (FALLBACK-FIRST rollout) ──────────────────────────────
 // The own-chart headless renderer (KLineCharts + our FMP candles) tries first; ANY failure or a
@@ -31,16 +31,19 @@ const OWN_RENDER_ON     = config.ownChartRender
 // runs isn't abandoned mid-flight and needlessly re-fetched from chart-img.
 const RENDER_TIMEOUT_MS = config.ownChartRenderTimeoutMs
 
-/** Produce a chart PNG: own renderer first, chart-img as fallback. Returns base64 PNG. */
+/** Which renderer produced a PNG — callers that describe the image to an LLM label it from this. */
+export const CHART_SOURCE = Object.freeze({ OWN: 'own', CHART_IMG: 'chart-img' })
+
+/** Produce a chart PNG: own renderer first, chart-img as fallback. Returns { png (base64), source }. */
 async function _renderPng(symbol, timeframe, studies) {
-    if (!OWN_RENDER_ON) return fetchChartImage(symbol, timeframe, studies)
+    if (!OWN_RENDER_ON) return { png: await fetchChartImage(symbol, timeframe, studies), source: CHART_SOURCE.CHART_IMG }
     try {
         const png = await withTimeout(renderChartImage(symbol, timeframe, studies), RENDER_TIMEOUT_MS, 'own-render')
         logger.info(LOG, `served by own-render: ${symbol}/${timeframe}`)
-        return png
+        return { png, source: CHART_SOURCE.OWN }
     } catch (err) {
         logger.warn(LOG, `own-render failed for ${symbol}/${timeframe} (${err.message}) — falling back to chart-img [DEGRADED]`)
-        return fetchChartImage(symbol, timeframe, studies)
+        return { png: await fetchChartImage(symbol, timeframe, studies), source: CHART_SOURCE.CHART_IMG }
     }
 }
 
@@ -51,10 +54,16 @@ function _studyKey(s) {
     return params ? `${s.name}(${params})` : s.name
 }
 
-export async function cachedChartImage(symbol, timeframe, studies) {
+/** Chart PNG plus which renderer served it: { png, source }. Cached 60s per symbol/timeframe/studies. */
+export async function cachedChart(symbol, timeframe, studies) {
     const key = `${symbol}|${timeframe}|${studies.map(_studyKey).join(',')}`
     const hit = _chartCache.get(key)
     if (hit) return hit
-    const png = await _renderPng(symbol, timeframe, studies)
-    return _chartCache.set(key, png)
+    const entry = await _renderPng(symbol, timeframe, studies)
+    return _chartCache.set(key, entry)
+}
+
+/** Base64 PNG only — for callers that just need the image (monitor evaluators, price-structure tools). */
+export async function cachedChartImage(symbol, timeframe, studies) {
+    return (await cachedChart(symbol, timeframe, studies)).png
 }
