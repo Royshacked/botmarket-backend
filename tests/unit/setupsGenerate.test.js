@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateSetup, SETUP_STATUSES, carryConditions, mergeInPositionScenarios, allConditions } from '../../api/setups/setups.service.js'
+import { validateSetup, SETUP_STATUSES, carryConditions, mergeInPositionScenarios, allConditions, setupService, _setDeps } from '../../api/setups/setups.service.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
 import { resolveMode } from '../../services/venue.resolve.service.js'
 
@@ -206,4 +206,60 @@ test('with nothing armed, an in-position merge holds nothing back', () => {
     const next = [{ id: 's1', entry_zones: [{ lower: 1, upper: 2, quantity: 5 }] }]
     assert.deepEqual(mergeInPositionScenarios({ ...RIVALS, armed_scenario_id: null }, next), next)
     assert.equal(mergeInPositionScenarios(RIVALS, undefined), undefined, 'untouched → nothing to write')
+})
+
+// ── Delete: the resting limit order goes with the setup ───────────────────────
+// A `hit` setup is NOT delete-locked (only long/short are), and a confirmed LIMIT entry rests at the
+// broker while the setup waits at `hit`. Deleting the document without pulling that order left it
+// working with nothing tracking it — it would fill later and the reconciler would find no entity for
+// the fill. The idea path has guarded this since it gained resting entries; this one had not.
+
+function fakeColl(doc) {
+    const calls = []
+    return {
+        calls,
+        coll: async () => ({
+            findOne:   async (q) => { calls.push(['findOne', q]); return doc },
+            deleteOne: async (q) => { calls.push(['deleteOne', q]); return { deletedCount: 1 } },
+        }),
+    }
+}
+
+const HIT_LIMIT = {
+    id: 'setup_NVDA_a1b2', userId: 'u1', kind: 'setup', status: 'hit', entry_mode: 'limit',
+    orderState: 'placed',
+    brokerOrders: [{ broker: 'ctrader', accountId: 'a1', orderId: 'ord-1', positionId: null }],
+}
+
+test('deleting a hit limit setup cancels its resting order FIRST, then deletes', async () => {
+    const f = fakeColl(HIT_LIMIT)
+    const cancelled = []
+    const restore = _setDeps({ coll: f.coll, cancelOrder: async (...a) => { cancelled.push(a) } })
+    try {
+        const res = await setupService.deleteSetup('setup_NVDA_a1b2', 'u1')
+        assert.deepEqual(res, { ok: true })
+        assert.deepEqual(cancelled, [['ctrader', 'u1', 'a1', 'ord-1']], 'the broker was told')
+        const order = f.calls.map(c => c[0])
+        assert.ok(order.indexOf('deleteOne') > order.indexOf('findOne'), 'the doc went after the order')
+    } finally { restore() }
+})
+
+test('a LIVE position is still refused, and nothing is cancelled', async () => {
+    const f = fakeColl({ ...HIT_LIMIT, status: 'long', brokerOrders: [{ broker: 'ctrader', accountId: 'a1', orderId: 'ord-1', positionId: 'p1' }] })
+    const cancelled = []
+    const restore = _setDeps({ coll: f.coll, cancelOrder: async (...a) => { cancelled.push(a) } })
+    try {
+        assert.deepEqual(await setupService.deleteSetup('setup_NVDA_a1b2', 'u1'), { ok: false, reason: 'in_position' })
+        assert.equal(cancelled.length, 0, 'a refused delete must not touch the broker')
+        assert.equal(f.calls.some(c => c[0] === 'deleteOne'), false)
+    } finally { restore() }
+})
+
+test('a broker that refuses the cancel does not block the delete', async () => {
+    const f = fakeColl(HIT_LIMIT)
+    const restore = _setDeps({ coll: f.coll, cancelOrder: async () => { throw new Error('broker down') } })
+    try {
+        assert.deepEqual(await setupService.deleteSetup('setup_NVDA_a1b2', 'u1'), { ok: true })
+        assert.equal(f.calls.some(c => c[0] === 'deleteOne'), true, 'the user asked to delete it')
+    } finally { restore() }
 })

@@ -16,6 +16,7 @@ import { cleanConviction } from '../../services/conviction.util.js'
 import { placeOrdersForIdea, placeRestingEntryForIdea, triggerEntryNow } from './ideaExecution.service.js'
 import { armExitsInPosition } from './exitOrders.service.js'
 import { entityRepo }         from '../../services/entity/entityRepo.service.js'
+import { cancelRestingEntryOrders } from '../../services/restingOrders.service.js'
 import { makeEntityCrud, ownsEntity } from '../../services/entity/entityCrud.service.js'
 import { kindForDoc }         from '../../services/entity/envelope.js'
 import { placedStamp }        from './entryStamp.util.js'
@@ -759,17 +760,14 @@ async function saveBatchIdeas(plan, userId, opts = {}) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * WHEN an idea has a working entry order to pull: only while it is `resting`, which is the status
+ * that means exactly that. The cancel itself is the shared one (restingOrders.service) — the loop
+ * was identical here and in the setup's two disarm paths.
+ */
 async function _cancelRestingOrders(idea, userId) {
-    if (idea?.status !== 'resting' || !Array.isArray(idea.brokerOrders)) return
-    for (const link of idea.brokerOrders) {
-        if (!link?.orderId || link.positionId != null) continue
-        try {
-            await brokerService.cancelOrder(link.broker, userId, link.accountId, link.orderId)
-            logger.info(LOG, 'Resting order cancelled', { id: idea.id, broker: link.broker, accountId: link.accountId, orderId: link.orderId })
-        } catch (err) {
-            logger.warn(LOG, 'Resting order cancel failed', { id: idea.id, orderId: link.orderId, error: err.message })
-        }
-    }
+    if (idea?.status !== 'resting') return
+    await cancelRestingEntryOrders(idea, userId, { log: LOG })
 }
 
 /**

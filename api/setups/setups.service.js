@@ -6,6 +6,9 @@ import { makeEntityCrud }    from '../../services/entity/entityCrud.service.js'
 import { resolveVenue, resolveMode, isBindableVenue } from '../../services/venue.resolve.service.js'
 import { normalizeSetup, setupReadiness, projectScenario } from '../../services/setup.schema.js'
 import { resolveMainAccountId } from '../../services/agentUtils.js'
+import { cancelRestingEntryOrders } from '../../services/restingOrders.service.js'
+import { getDb }             from '../../providers/mongodb.provider.js'
+import { ENTITIES }          from '../../services/entity/entityCollection.js'
 
 // Persistence for the `setup` kind — Mentor's artifact (docs/desks/mentor-talos.md).
 //
@@ -26,7 +29,23 @@ const KIND = 'setup'
 // Owner-scoped CRUD (the shared mechanism). A LIVE position is delete-locked — close it at the
 // broker first. Everything below this line is setup JUDGMENT: the Generate gate, the server-owned
 // binding, and which fields an edit may rewrite.
-const crud = makeEntityCrud({ kind: KIND, deleteLock: LIVE_POSITION, log: LOG })
+//
+// `coll` is the crud's own documented test seam, threaded through so this kind's CRUD can be driven
+// without a database — the delete path reaches the BROKER (it cancels a resting entry), and a path
+// that can cancel an order ought to be assertable. `cancelOrder` is here for the same reason.
+const _deps = { coll: null, cancelOrder: undefined }
+/** Test-only: drive the CRUD against a fake collection / broker. Returns a restore fn. */
+export function _setDeps(overrides = {}) {
+    const prev = { ..._deps }
+    Object.assign(_deps, overrides)
+    return () => Object.assign(_deps, prev)
+}
+
+const crud = makeEntityCrud({
+    kind: KIND, deleteLock: LIVE_POSITION, log: LOG,
+    // Indirected so an override registered after module load is still seen.
+    coll: async () => (_deps.coll ? _deps.coll() : (await getDb()).collection(ENTITIES)),
+})
 
 // Statuses this kind moves through: unarmed → waiting → watching → ready → long/short → closed.
 // A setup runs the ONE shared ladder: waiting (generated, unmonitored) → looking (armed) → hit
@@ -363,7 +382,20 @@ async function patchSetup(id, patch, userId) {
     return crud.patchOwned(id, userId, $set)   // `{ ok, doc }` — see getSetup
 }
 
-/** Delete a setup. A live position is delete-locked (deleteLock) — close it at the broker first. */
+/**
+ * Delete a setup. A live position is delete-locked (deleteLock) — close it at the broker first.
+ *
+ * A `hit` setup is NOT locked, and it can still be holding a working order: a confirmed limit entry
+ * rests at the broker until price comes to it, and `hit` is where it waits. Deleting the document
+ * without pulling that order left it working with nothing tracking it — it would fill later, and
+ * the reconciler would find no entity to match the fill against. The idea path has guarded exactly
+ * this since it gained resting entries; the setup path never did.
+ *
+ * The hook runs only once not_found / forbidden / in_position have all passed (see crud.remove), so
+ * it can never cancel an order for a delete that is then refused.
+ */
 async function deleteSetup(id, userId) {
-    return crud.remove(id, userId)
+    return crud.remove(id, userId, {
+        onBeforeDelete: setup => cancelRestingEntryOrders(setup, setup.userId ?? userId, { log: LOG, cancelOrder: _deps.cancelOrder }),
+    })
 }
