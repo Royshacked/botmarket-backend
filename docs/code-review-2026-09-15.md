@@ -17,7 +17,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 1 | Broker + execution | `api/broker/**`, `api/paper/**`, `monitoring/execution.reconciler.js`, `monitoring/paper*.service.js`, `services/executionBus.js` | ✅ done — 8 commits `59d08b1`..`06d86d9`, suite **2849 / 0** |
 | 2 | Trade tier (`idea`) | `api/trade-ideas/**`, `tradeCapture`, `tradeNotify`, `positionManage`, `protectionPlan`, `monitoring/positionMonitor.js`, `entry.monitor.js`, `exit.monitor.js` | ✅ done — 8 commits `e066101`..`e6c42d0` |
 | 3 | Mentor / setups + Talos | `api/setups/**`, `setup.schema.js`, `mentor.agent.service`, `talos.*`, `monitoring/evaluators/**`, `parsers/**`, `guardSweep`, `readinessGates` | ✅ done — 6 commits `227d711`..`58e7f3d` |
-| 4 | Atlas / portfolio | `api/portfolio/**`, `portfolio.agent.service`, `portfolioState`, `sleeveSource`, `adoptBook` | ✅ done — 8 commits `e3ef6e7`..`26dfe17`, suite **2884 / 0** |
+| 4 | Atlas / portfolio | `api/portfolio/**`, `portfolio.agent.service`, `portfolioState`, `sleeveSource`, `adoptBook` | ✅ done — 10 commits `e3ef6e7`..`bc8bd50`, suite **2886 / 0**; FE follow-ups cleared in `a9532a8` |
 | 5 | Agent runtime | `agentIO`, `agentUtils`, `agentTools.registry`, `services/tools/**`, `pendingAction/**`, `entity/**`, `axl.agent.service`, `api/chat/**` | |
 | 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | |
 | 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | |
@@ -105,11 +105,12 @@ that never existed (left — harmless no-op, and the route is generic).
   documents "throws → `execution_failed`", which is what cTrader already did.
 - Broker-disconnected errors reach the client as 424.
 
-### Frontend follow-ups (botmarket-frontend, untouched)
+### Frontend follow-ups
 
-- `services/paper/paper.service.remote.js` still defines `updateSettings`, `reset`, `getTrades`,
-  `getEquityCurve` — their routes are gone.
-- A 424 from a broker route is a natural hook for a "reconnect cTrader" affordance.
+- ~~`services/paper/paper.service.remote.js` still defines `updateSettings`, `reset`, `getTrades`,
+  `getEquityCurve` — their routes are gone.~~ **Done** (`a9532a8`).
+- A 424 from a broker route is a natural hook for a "reconnect cTrader" affordance. **Still open by
+  choice** — this is a new affordance to design, not a fix; see the carried-forward table below.
 
 ### Tests added
 
@@ -298,6 +299,30 @@ break); `AETHER_TOOL_HANDLERS = {}` with its orphaned comment block, two of whos
 mid-sentence — **the identical §3 finding, in a second agent**; `_parseScreenRequest` (singular);
 `portfolioChat`'s re-export shim, whose only importer was a test.
 
+### The Aether block was in four desks, not two (`bc8bd50`)
+
+Finding it twice was worth a sweep of the other five agents, and it turned up twice more: **analyst**
+carried five lines describing three Aether tools, **scanner** two describing a shock feed. None of the
+four tools exists — checked against each desk's declared `TOOLS`, not by reading.
+
+What makes it worth more than four deletions is where the prose ENDS UP. A comment block sits above
+the entry it describes, so removing the entry and keeping the block attaches it to whatever comes
+next — and in analyst and portfolio the survivor was `consult`, the one tool whose description is a
+per-desk judgment about when to spend a stronger model. Four stray Aether sentences read as part of
+that judgment.
+
+`tests/unit/agentToolComments.test.js` now covers the two MECHANICAL halves: a comment naming a tool
+the desk does not declare, and an empty handler map still spread into the live handlers. It does
+**not** catch the Aether comments themselves — they named no tool, they described one in prose, and no
+pattern separates that from any other paragraph. The test says so at length rather than implying
+coverage it does not have. Those four were found by reading, which remains the only way to find the
+next one.
+
+Writing the check surfaced a distinction worth keeping: `screen_request` is an **emit tag** (the model
+writes `<screen_request>` into its answer) and `screen_candidates` is a **tool**. They look alike and
+are not alike, so the check tells them apart by what actually differs — an emit tag appears in angle
+brackets — rather than by a list of names someone must remember to update.
+
 **(e) MVC** — see (a). `_specAsset`, `_deferred` and the refusal vocabulary were already right.
 
 **(f) Spaghetti** — none. `applyRebalance` is long but linear, and its three-outcome bucketing
@@ -330,13 +355,13 @@ to get wrong: a null class is the client's fallback signal and must not be inven
 - `PATCH /api/portfolio/adopt/draft/:id` can answer **409** while a commit is in flight.
 - Atlas sees the book once, from the database, with its ids in **every** mode rather than review only.
 
-### Frontend follow-ups (botmarket-frontend, untouched)
+### Frontend follow-ups — all closed in `a9532a8` (botmarket-frontend)
 
-| From | What |
-|---|---|
-| §4 | The client still SENDS `portfolioIdeas` on every portfolio stream. The controller documents that it is deliberately unread — but it is dead payload carrying a whole book |
-| §4 | `adopt.service.remote.refresh` does `res.draft ?? null` and will now reject on a 409; the confirm grid should say "This book is already being adopted" |
-| §4 | `reviewApply.REASON_COPY` has no entry for `live_use_exit_item` (pre-existing) or the new `order_pending_cancel_first`, so both fall through to the generic line |
+| From | What | Outcome |
+|---|---|---|
+| §4 | The client SENT `portfolioIdeas` on every portfolio stream — dead payload carrying a whole book | Not sent |
+| §4 | `adopt.service.remote.refresh` will now reject on a 409; the grid should name it | **No change needed** — `sendReason`'s body is `{ error, reason }` and the grid's `_message` reads `.error`, so it already says "This book is already being adopted". Checked rather than assumed |
+| §4 | `reviewApply.REASON_COPY` had no entry for `live_use_exit_item` or `order_pending_cancel_first` | Both worded, and deliberately differently: "still held — exit it instead" vs "an order is still working — cancel it first". Saying *still held* for both would send the user to Exit, which refuses a `hit` holding in its turn |
 
 ### Tests added
 
@@ -357,13 +382,13 @@ on the line directly after a doc-block closer — the first block then documents
 more, in `paperExecution`, `entityController.util`, `tilt.service`, `originRegistry` and
 `setups.service`. All moved onto their real functions; the scan is now clean repo-wide.
 
-### Frontend follow-ups (botmarket-frontend — not this repo, carried forward)
+### Frontend follow-ups (botmarket-frontend) — cleared 2026-09-15 in `a9532a8`
 
-| From | What |
-|---|---|
-| §1 | `paper.service.remote.js` still defines `updateSettings` / `reset` / `getTrades` / `getEquityCurve` for deleted routes |
-| §1 | A broker-disconnected error now arrives as **424**, a natural hook for a "reconnect cTrader" affordance |
-| §3 | `isSetupArmed` is `looking`-only, so a `hit` limit setup offers the user no disarm button — the backend is correct whichever call it receives, but the affordance is missing |
+| From | What | Outcome |
+|---|---|---|
+| §1 | `paper.service.remote.js` defined `updateSettings` / `reset` / `getTrades` / `getEquityCurve` for deleted routes | Removed. Each has an account-scoped replacement in the same file; nothing called them, so they sat there as four methods that would 404 on first use |
+| §3 | `isSetupArmed` is `looking`-only, so a `hit` limit setup offered no disarm button | **This was why §3's `POST /:id/disarm` had no caller.** `canToggle` was false on the rung where a real order rests at a broker, so the page offered nothing and the user's only exits were expiry and a validity breach. The toggle now carries three acts — arm / stop watching / **cancel the order** — the third on its own route, since a status patch would leave the order working with nothing tracking it |
+| §1 | A broker-disconnected error arrives as **424**, a natural hook for a "reconnect cTrader" affordance | **Open, by choice.** Unlike the rest of this table it is a new affordance to design, not a client half of a backend change. Left for whoever owns that surface |
 
 ### Known flake (for §10)
 
