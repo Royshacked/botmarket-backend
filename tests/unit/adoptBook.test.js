@@ -112,16 +112,29 @@ test('the ledger records what we paid, and the fingerprint is stamped LAST', asy
     } finally { restore() }
 })
 
-test('the lifecycle carries the mandate cadence, its next review and the spine state', async () => {
+test('the lifecycle carries the mandate cadence and its next review', async () => {
     const { deps, calls } = stubs()
     const restore = _setDeps(deps)
     try {
         await commitDraft({ draftId: 'd1', userId: 'u1' })
         const [patch] = calls.lifecycle
         assert.equal(patch.reviewCadence, 'quarterly')
-        assert.equal(patch.benchmark, 'S&P 500')
-        assert.equal(patch.spine_state, 'adopted')
         assert.ok(patch.nextReviewAt > Date.now(), 'scheduled forward off the shared cadence table')
+        assert.ok(patch.adoptedAt, 'when this book arrived')
+    } finally { restore() }
+})
+
+// `benchmark` and `spine_state` used to ride this patch and were read by nothing: the benchmark
+// that matters is the MANDATE's (setMandate persists it a line earlier, and captureFingerprint
+// reads it there), and spine_state described a nag and a Themis behaviour that were never built.
+test('the lifecycle does NOT carry a second copy of the benchmark, or a spine state nothing reads', async () => {
+    const { deps, calls } = stubs()
+    const restore = _setDeps(deps)
+    try {
+        await commitDraft({ draftId: 'd1', userId: 'u1' })
+        const [patch] = calls.lifecycle
+        assert.equal(patch.benchmark, undefined)
+        assert.equal(patch.spine_state, undefined)
     } finally { restore() }
 })
 

@@ -11,10 +11,8 @@ import { getFmpQuote } from '../../providers/fmp.price.provider.js'
 import { coverageService } from '../analyst/coverage.service.js'
 import { tiltService } from '../strategy/tilt.service.js'
 // Mode/account helpers live in a shared util (portfolioState needs them too, and importing
-// them from here would be circular). Re-exported below so existing importers/tests keep working.
+// them from here would be circular).
 import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames } from './portfolioMode.util.js'
-
-export { _firstAccountId, _deriveMode, _accountLabel }
 
 const LOG        = '[portfolioChat]'
 // Exported: tradeCapture reads a portfolio's chat doc to stamp origin metadata onto a trade,
@@ -31,7 +29,6 @@ export const portfolioChatService = {
     deleteChatState,
     getPortfolioLifecycle,
     setPortfolioLifecycle,
-    addReviewHistoryEntry,
     getPendingReviews,
     getMandate,
     setMandate,
@@ -300,19 +297,14 @@ async function setPortfolioLifecycle(portfolioId, userId, patch) {
     }
 }
 
-async function addReviewHistoryEntry(portfolioId, userId, entry) {
-    try {
-        const db = await getDb()
-        await db.collection(COLLECTION).updateOne(
-            { portfolioId, userId },
-            { $push: { reviewHistory: { $each: [entry], $slice: -50 } } }
-        )
-        return { ok: true }
-    } catch (err) {
-        logger.error(LOG, 'Failed to add review history entry', err)
-        return { ok: false }
-    }
-}
+// `addReviewHistoryEntry` lived here and had no caller anywhere — backend, tests or frontend. The
+// per-book narrative it would have written was superseded by the FINGERPRINT (`lastFingerprint` +
+// computeReviewDelta): a review now diffs the book against a compact "then" snapshot rather than
+// reading back a list of summaries, and the per-holding trajectory is snapshotConvictions'.
+//
+// The FIELD stays. `_buildLifecycleSection` renders the last three entries when a book has any, and
+// documents written before the fingerprint landed may still carry them — so the read degrades to
+// nothing rather than breaking, and no book loses a history it already has. Nothing writes one now.
 
 async function getMandate(portfolioId, userId) {
     try {

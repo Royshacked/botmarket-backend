@@ -443,14 +443,23 @@ export async function commitDraft({ draftId, userId }) {
 
         const cadence = draft.mandate?.reviewCadence ?? DEFAULT_CADENCE
         if (draft.mandate) await _deps.setMandate(portfolioId, userId, draft.mandate)
+        // TWO FIELDS THAT USED TO BE WRITTEN HERE ARE GONE, both read by nothing:
+        //
+        //   `benchmark` — a second copy of draft.mandate.benchmark, which setMandate has just
+        //   persisted one line above. getPortfolioLifecycle does not project it and nothing else
+        //   looked; captureFingerprint reads the MANDATE's, which is the one that moves when the
+        //   user changes it. Two homes for one field is how they drift.
+        //
+        //   `spine_state: 'adopted'` — its comment promised it "drives the nag, and lets Themis ring
+        //   'coverage is ready' instead of waiting out a cadence". Themis never read it and no nag
+        //   exists. A field whose only description is of behaviour that was never built reads, to
+        //   the next person, as a mechanism they must not break.
+        //
+        // `adoptedAt` stays: it is the plain fact of when this book arrived, and the legs carry the
+        // same stamp.
         await _deps.setLifecycle(portfolioId, userId, {
             reviewCadence: cadence,
             nextReviewAt:  now + (CADENCE_MS[cadence] ?? CADENCE_MS[DEFAULT_CADENCE]),
-            benchmark:     draft.mandate?.benchmark ?? null,
-            // Where the book is in acquiring a spine: adopted (prices only) → covered (research in)
-            // → under_mandate (targets + conviction authored). Drives the nag, and lets Themis ring
-            // "coverage is ready" instead of waiting out a cadence.
-            spine_state:   'adopted',
             adoptedAt:     now,
         })
         // LAST: the fingerprint is the "then" baseline every later review diffs against, so it has to

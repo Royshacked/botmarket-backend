@@ -13,7 +13,10 @@ import {
     normalizeAllocation, normalizeSelection, selectionWeights, incoherentCombo, buildSchoolSection,
 } from '../../services/investorSchools.js'
 import { _cleanScore, _normalizeScan } from '../../services/agents/scanner.agent.service.js'
-import { _parseScreenRequest } from '../../services/agents/portfolio.agent.service.js'
+import { _parseScreenRequests } from '../../services/agents/portfolio.agent.service.js'
+
+// One block's worth of the plural parser — see portfolioScreenRequest.test.
+const _first = raw => _parseScreenRequests(raw)[0] ?? null
 
 // ── the vocabulary ────────────────────────────────────────────────────────────
 
@@ -95,7 +98,7 @@ test('_normalizeScan carries the lens onto the list, and only for investing', ()
 })
 
 test('the screen_request carries the selection school across the hop, validated', () => {
-    const req = raw => _parseScreenRequest(`<screen_request>${JSON.stringify(raw)}</screen_request>`)
+    const req = raw => _first(`<screen_request>${JSON.stringify(raw)}</screen_request>`)
     assert.equal(req({ sector: 'Technology', lens: 'quality-value' }).lens, 'quality-value')
     assert.equal(req({ sector: 'Technology', lens: 'conviction-weighted' }).lens, null)  // wrong axis
     assert.equal(req({ sector: 'Technology' }).lens, null)
@@ -173,12 +176,12 @@ test('an edit that forgets the lens inherits it from the list being edited', () 
 // narrowing it is screening mechanics and its job; Atlas naming one is a JUDGMENT, and judgment has
 // to cross as a field. Buried in free-text constraints it is a hint Argus may or may not honour.
 test('an industry view crosses the hop as its own field', () => {
-    const req = raw => _parseScreenRequest(`<screen_request>${JSON.stringify(raw)}</screen_request>`)
+    const req = raw => _first(`<screen_request>${JSON.stringify(raw)}</screen_request>`)
     assert.equal(req({ sector: 'Technology', industry: 'Semiconductors' }).industry, 'Semiconductors')
 })
 
 test('no industry named → null, and Argus narrows the sector itself', () => {
-    const req = raw => _parseScreenRequest(`<screen_request>${JSON.stringify(raw)}</screen_request>`)
+    const req = raw => _first(`<screen_request>${JSON.stringify(raw)}</screen_request>`)
     assert.equal(req({ sector: 'Technology' }).industry, null)
     assert.equal(req({ sector: 'Technology', industry: '   ' }).industry, null)
 })

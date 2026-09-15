@@ -53,15 +53,6 @@ export const TOOLS = toolsFor({
     // broadcast has one text and two readers, not two texts. Advisory: it informs which sectors
     // Atlas sources, and the mandate still wins (see the prompt).
     get_sector_view: SECTOR_VIEW_TOOL_SPEC.get_sector_view,
-    // Aether engine reads for construction and risk. Each returns "not yet computed" when the
-    // relevant engine phase has not run; reason qualitatively in that state.
-    //
-    //   or sizing a position; the elasticity tells you which channels the name amplifies.
-    //   framing and to check whether any channel is near its 30% gross exposure cap.
-    // FRED-confirmed channel moves + long-lag opportunity cards (lag ≥ 4w = Atlas's domain).
-    // Call in Phase 2 alongside the macro reads, or in Phase 3/5 when sizing a sleeve where a
-    // confirmed macro channel is a construction thesis input. Short-lag cards (≤ 3w) belong to
-    // Mentor (swing trades), not portfolio construction — note but do not act on them here.
     consult: consultDescription(`Reach for it in exactly three situations: **the final weights on a real-money book** (live or manual — the capital is at risk, and a weight is the one number here that cannot be walked back cheaply); **two names you cannot tell apart as ONE bet or two** — the correlation number is high but not decisive and the concentration call rests on your read of it; and **a rebalance where cutting the winner and adding to the laggard are both defensible** against the mandate, and you have to pick one.`),
 })
 
@@ -99,10 +90,6 @@ const TOOL_HANDLERS = {
     // Unbound (market hours belong to the instrument, not the user) — so it lives in the
     // static map, unlike the venue handlers that are rebuilt per request around a userId.
     ...makeMarketHoursHandlers(),
-}
-
-// Unbound — all Aether reads are house-layer broadcasts, no userId.
-const AETHER_TOOL_HANDLERS = {
 }
 
 // Coverage the Analyst never classified. Its own bucket, always last: a name with no sector is not a
@@ -276,7 +263,6 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
             ...makeTradingContextHandlers(userId),
             get_coverage: makeCoverageHandler(),
             get_chart:    makeChartHandler({ log: LOG, onChart, readText: 'Read it as a POSITIONING question — where in the range, trend intact or broken, base or breakdown. Weights still come from the numbers.' }),
-            ...AETHER_TOOL_HANDLERS,
         },
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
         meta: { accountCount: ideaAccounts.length, editMode: !!portfolioId },
@@ -336,12 +322,12 @@ export function _parseCoverageRequest(raw) {
 
 // ─── Screen-request extraction (pure) ───────────────────────────────────────────
 // Atlas is the PM — it doesn't run the discovery funnel; it hands a sleeve's MANDATE to Argus's
-// INVESTING profile (the screening desk) to source fundamentally-screened candidates, which the Analyst
-// then researches. This pulls the <screen_request> mandate block. Needs a sector OR a style to constrain
-// (else null). Mirrors Kairos's _parseScanRequest. Exported for tests.
-export function _parseScreenRequest(raw) {
-    return _parseScreenRequests(raw)[0] ?? null
-}
+// INVESTING profile (the screening desk) to source fundamentally-screened candidates, which the
+// Analyst then researches.
+//
+// The singular `_parseScreenRequest` is gone: nothing in production called it (a turn routes EVERY
+// sleeve it decided, which is why the plural exists), and the tests that did now ask for the first
+// of the list — the same thing, without a second exported name to keep in step.
 
 /**
  * EVERY sleeve Atlas routed this turn, in order. A book has three or four, and screening them one

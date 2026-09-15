@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _deriveMode, _firstAccountId, _accountLabel } from '../../api/portfolio/portfolioChat.service.js'
+import { _deriveMode, _firstAccountId, _accountLabel } from '../../api/portfolio/portfolioMode.util.js'
 
 // The portfolio_review notification carries the workspace mode (live/paper/manual) and a
 // friendly account label so the user knows WHICH book Atlas wants reviewed. These pure
