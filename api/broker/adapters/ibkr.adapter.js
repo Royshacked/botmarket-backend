@@ -139,17 +139,16 @@ export class IBKRAdapter extends BrokerAdapter {
         return getIBKRGateway(await this._coords(userId))
     }
 
+    /**
+     * "Connected" = the user has saved gateway coordinates (connectGateway). A stored gateway doc IS
+     * the connection, the same way a refreshToken is for an OAuth broker. Deliberately NOT a dial:
+     * this answers brokerService.listConnections, which runs on every chat turn and every workspace
+     * read, and it must never wait on a socket. Whether the gateway is REACHABLE is a health
+     * question for the read that needs it (getAccount / getPositions throw when it is not).
+     */
     async isConnected(userId) {
         const conn = await brokerConnectionService.getConnection(userId, 'ibkr')
-        if (!conn?.gateway && !config.ibkrGwConfigured) return false
-        try {
-            const gw = await this._gateway(userId)
-            await gw.ready
-            return true
-        } catch (err) {
-            logger.warn(LOG, `Gateway not reachable for user ${userId}: ${err.message}`)
-            return false
-        }
+        return !!conn?.gateway
     }
 
     // ── Account ──────────────────────────────────────────────────────────────────

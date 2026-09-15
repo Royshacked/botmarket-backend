@@ -11,7 +11,6 @@ import jwt                         from 'jsonwebtoken'
 import { getBrokerAdapter,
          SUPPORTED_BROKERS }       from './broker.factory.js'
 import { brokerConnectionService } from './brokerConnection.service.js'
-import { paperBrokerService }      from './paperBroker.service.js'
 import { logger }                  from '../../services/logger.service.js'
 import { config } from '../../services/config.js'
 
@@ -77,25 +76,29 @@ async function handleCallback(brokerType, code, userId) {
 // ─── Connection status ────────────────────────────────────────────────────────
 
 /**
- * Return a map of { brokerType → isConnected } for all supported brokers.
+ * Return a map of { brokerType → isConnected } for all supported brokers, each answered by its
+ * OWN adapter's isConnected — an OAuth broker by its saved refreshToken, IBKR by saved gateway
+ * coordinates, paper by the paper-mode toggle, manual by owning ≥1 manual account. This used to
+ * read the OAuth docs in one query and then special-case paper and manual by name against the
+ * virtual store, which is the one place the broker-agnostic layer knew a concrete venue.
+ *
+ * Every adapter's isConnected is a single cheap read (no dial, no quote): this runs on every chat
+ * turn and every workspace resolve. A broker whose read fails reports NOT connected and says so in
+ * the log — one venue's store hiccup must not 500 the list, but it must not be silent either,
+ * because resolveWorkspace keys on `paper` here.
  * @param {string} userId
- * @returns {Promise<Record<string, boolean>>}  e.g. { ctrader: true, ibkr: false }
+ * @returns {Promise<Record<string, boolean>>}  e.g. { ctrader: true, ibkr: false, paper: true, manual: false }
  */
 async function listConnections(userId) {
-    // Base: all supported types default to false
-    const result = Object.fromEntries(SUPPORTED_BROKERS.map(t => [t, false]))
-
-    // Merge with what's actually in the DB
-    const saved = await brokerConnectionService.listConnections(userId)
-    const merged = { ...result, ...saved }
-
-    // Paper has no brokerConnections doc — it's "connected" when paper mode is enabled,
-    // so resolveUserAccounts / the order-plan builder can resolve the paper account.
-    try { merged.paper = await paperBrokerService.isEnabled(userId) } catch { /* non-fatal */ }
-    // Manual has no toggle — it's "connected" whenever the user owns ≥1 manual account,
-    // so an idea bound to a manual account resolves and its positions surface.
-    try { merged.manual = (await paperBrokerService.listAccounts(userId, { mode: 'manual' })).length > 0 } catch { /* non-fatal */ }
-    return merged
+    const entries = await Promise.all(SUPPORTED_BROKERS.map(async type => {
+        try {
+            return [type, !!(await getBrokerAdapter(type).isConnected(userId))]
+        } catch (err) {
+            logger.warn(LOG, `isConnected(${type}) failed — reporting not connected:`, err.message)
+            return [type, false]
+        }
+    }))
+    return Object.fromEntries(entries)
 }
 
 /**

@@ -49,6 +49,19 @@ export class PaperAdapter extends VirtualAdapter {
     brokerType  = 'paper'
     brokerLabel = 'Paper'
 
+    // ── Connection ───────────────────────────────────────────────────────────────
+
+    /**
+     * Paper is "connected" when paper MODE is on — the toggle on the default paper account — not
+     * merely when an account exists (VirtualAdapter's default, which manual keeps). This is the
+     * flag `connections.paper` carries and resolveWorkspace keys on: paper-connected IS the
+     * workspace switch, so a user who owns a paper account but has the mode off is standing in
+     * live or manual, and this must say so.
+     */
+    async isConnected(userId) {
+        return paperBrokerService.isEnabled(userId)
+    }
+
     // ── Account ──────────────────────────────────────────────────────────────────
 
     /**

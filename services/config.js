@@ -185,8 +185,6 @@ export const config = {
     get ibkrGwHost()       { return _str('IBKR_GW_HOST', '127.0.0.1') },
     get ibkrGwPort()       { return _num('IBKR_GW_PORT', 4002) },
     get ibkrGwClientId()   { return _num('IBKR_GW_CLIENTID', 1) },
-    /** Whether a gateway host was configured at all — the adapter's availability check. */
-    get ibkrGwConfigured() { return Boolean(process.env.IBKR_GW_HOST) },
 
     // ── process / networking ──
     /**

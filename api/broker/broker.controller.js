@@ -6,11 +6,8 @@
  * one uses. Nothing here is new — the handlers are the same, and every one of them still delegates
  * to brokerService, which is the broker-agnostic entry point.
  *
- * ERROR SHAPE. The twelve handlers each closed with a byte-identical
- * `catch (err) { logger.error(...); res.status(err.status ?? 500).json({ error: err.message }) }`,
- * which is the global handler in server.js re-typed twelve times — except for the log line, which
- * is the one part that carried information (`getPositions (ctrader): …`). `_handle` keeps that log
- * and hands the error to `next`, so the RESPONSE is formatted in exactly one place.
+ * ERROR SHAPE. Every data handler is wrapped in `_handle` (api/_shared/handle.util) so a throw is
+ * logged with its route and formatted by the one global error handler in server.js.
  *
  * The two OAuth routes are deliberately NOT wrapped: they answer a browser NAVIGATION, so a failure
  * has to redirect back to the app with a reason in the query string. Handing those to the JSON
@@ -22,26 +19,12 @@ import { brokerService } from './broker.service.js'
 import { ideaService }   from '../trade-ideas/tradeIdeas.service.js'
 import { normSymbol }    from '../../services/brokerSymbol.service.js'
 import { logger }        from '../../services/logger.service.js'
+import { makeHandle }    from '../_shared/handle.util.js'
 import { config } from '../../services/config.js'
 
 const LOG          = '[broker:controller]'
 const FRONTEND_URL = config.clientUrl
-
-/**
- * Wrap a handler so a throw is logged WITH its broker context and then formatted by the one global
- * error handler. `label` names the operation; the broker type is appended when the route carries one.
- */
-function _handle(label, fn) {
-    return async (req, res, next) => {
-        try {
-            await fn(req, res)
-        } catch (err) {
-            const type = req.params?.type
-            logger.error(LOG, `${label}${type ? ` (${type})` : ''}:`, err.message)
-            next(err)
-        }
-    }
-}
+const _handle      = makeHandle(LOG)
 
 /** Fall back to the broker's selected trading account when a caller omits accountId. */
 async function _selectedAccountId(type, userId) {

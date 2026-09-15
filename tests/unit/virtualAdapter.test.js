@@ -14,7 +14,7 @@ const paper  = new PaperAdapter()
 const manual = new ManualAdapter()
 
 const real = {
-    listAccounts: paperBrokerService.listAccounts, getAccount: paperBrokerService.getAccount,
+    listAccounts: paperBrokerService.listAccounts, getAccount: paperBrokerService.getAccount, isEnabled: paperBrokerService.isEnabled,
     listPositions: paperBrokerService.listPositions, createAccount: paperBrokerService.createAccount,
     getOrCreateDefaultAccount: paperBrokerService.getOrCreateDefaultAccount,
 }
@@ -28,6 +28,7 @@ function stubStore({ accounts = ACCTS, positions = [] } = {}) {
     const created = []
     paperBrokerService.listAccounts  = async (userId, { mode } = {}) => accounts.filter(a => !mode || a.mode === mode)
     paperBrokerService.getAccount    = async (userId, id) => accounts.find(a => a.accountId === String(id)) ?? null
+    paperBrokerService.isEnabled     = async () => accounts.some(a => a.mode === 'paper' && a.enabled)
     paperBrokerService.listPositions = async (userId, { status, accountId } = {}) =>
         positions.filter(p => (!status || p.status === status) && (!accountId || p.accountId === String(accountId)))
     paperBrokerService.createAccount = async (...a) => { created.push(a); return ACCTS[0] }
@@ -85,6 +86,17 @@ test('the leverage readout is paper\'s alone', async () => {
     assert.equal(m.marginLevel, null)
     assert.equal(m.leverage, null)
     assert.equal(m.broker, 'Manual')
+})
+
+// `connections.paper` is what resolveWorkspace keys on, and it means paper MODE — the toggle —
+// not "owns a paper account". Manual has no toggle: owning an account is the connection.
+test('paper is connected by the toggle; manual by owning an account', async () => {
+    stubStore({ accounts: [{ ...ACCTS[0], enabled: false }, ACCTS[1]] })
+    assert.equal(await paper.isConnected('u1'),  false, 'a paper account with the mode OFF is not "connected"')
+    assert.equal(await manual.isConnected('u1'), true)
+    stubStore({ accounts: [{ ...ACCTS[0], enabled: true }] })
+    assert.equal(await paper.isConnected('u1'),  true)
+    assert.equal(await manual.isConnected('u1'), false)
 })
 
 test('only paper has an execution feed — manual used to inherit paper\'s "true"', async () => {

@@ -417,11 +417,12 @@ per-user in MongoDB, never in-memory. One user can have several connections at o
   connectedAt }           // NO tokens
 ```
 
-`listConnections` treats a doc as connected when it has a `refreshToken` **or** `gateway`.
-Paper has no document — its state is `paperBrokerService.isEnabled`.
+Each adapter answers its own `isConnected` from this store: cTrader by `refreshToken`, IBKR by
+`gateway`. Paper and manual have no document — paper answers with `paperBrokerService.isEnabled`
+(the mode toggle), manual with "owns ≥1 manual account".
 
 Methods: `getConnection`, `saveConnection`, `saveGatewayConnection`, `updateTokens`,
-`getAccountId`, `setAccountId`, `listConnections`, `deleteConnection`.
+`getAccountId`, `setAccountId`, `deleteConnection`.
 
 ---
 
@@ -485,8 +486,8 @@ export function getBrokerAdapter(type) { ... }   // fresh instance per call; thr
 ```
 
 `broker.service.js` is thin orchestration — every method resolves the adapter via the
-factory and delegates, with no broker-specific logic. `listConnections` merges DB state and
-injects `paper` from `paperBrokerService.isEnabled`. `findOpenPosition` returns `undefined`
+factory and delegates, with no broker-specific logic. `listConnections` asks every registered
+adapter's own `isConnected` (no venue is special-cased by name). `findOpenPosition` returns `undefined`
 when the adapter doesn't implement it.
 
 ---

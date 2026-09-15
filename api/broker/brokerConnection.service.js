@@ -27,7 +27,6 @@ export const brokerConnectionService = {
     updateTokens,
     getAccountId,
     setAccountId,
-    listConnections,
     deleteConnection,
 }
 
@@ -45,27 +44,6 @@ async function getConnection(userId, brokerType) {
         { userId, brokerType },
         { projection: { _id: 0 } }
     )
-}
-
-/**
- * Return a map of { brokerType → connected } for all supported brokers.
- * Only includes broker types that have a saved refreshToken.
- * @param {string} userId
- * @returns {Promise<Record<string, boolean>>}
- */
-async function listConnections(userId) {
-    const db   = await getDb()
-    const docs = await db.collection(COLLECTION)
-        .find({ userId }, { projection: { brokerType: 1, refreshToken: 1, gateway: 1, _id: 0 } })
-        .toArray()
-
-    const result = {}
-    for (const doc of docs) {
-        // OAuth brokers connect via a refreshToken; socket/gateway brokers (IBKR via
-        // IB Gateway) have no tokens — a stored gateway doc IS the connection.
-        result[doc.brokerType] = !!doc.refreshToken || !!doc.gateway
-    }
-    return result
 }
 
 // ─── Write ────────────────────────────────────────────────────────────────────

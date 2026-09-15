@@ -1,9 +1,10 @@
 import { paperBrokerService, VIRTUAL_MODES } from '../broker/paperBroker.service.js'
 import { computeEquity }       from '../broker/paperExecution.service.js'
 import { tradeCaptureService } from '../../services/tradeCapture.service.js'
-import { logger }              from '../../services/logger.service.js'
+import { makeHandle }          from '../_shared/handle.util.js'
 
-const LOG = '[paper:controller]'
+const LOG     = '[paper:controller]'
+const _handle = makeHandle(LOG)
 
 /** The virtual account mode for a list/create request — 'paper' (default) or 'manual'.
  *  The per-account routes are mode-agnostic (the accountId encodes its mode); only
@@ -64,60 +65,44 @@ async function _requireAccount(userId, accountId) {
     return acct
 }
 
-// Shared error responder for these handlers (paper uses status-carrying errors).
-function _fail(res, err, label) {
-    logger.error(LOG, `${label}:`, err.message)
-    res.status(err.status ?? 500).json({ error: err.message })
-}
-
 // ── Per-account (multi-account) ───────────────────────────────────────────────
 
-export async function listAccounts(req, res) {
-    try {
-        const accts    = await paperBrokerService.listAccounts(req.user._id, { mode: _mode(req.query.mode) })
-        const accounts = await Promise.all(accts.map(a => _accountState(req.user._id, a)))
-        res.json({ accounts })
-    } catch (err) { _fail(res, err, 'list accounts error') }
-}
+export const listAccounts = _handle('listAccounts', async (req, res) => {
+    const accts    = await paperBrokerService.listAccounts(req.user._id, { mode: _mode(req.query.mode) })
+    const accounts = await Promise.all(accts.map(a => _accountState(req.user._id, a)))
+    res.json({ accounts })
+})
 
-export async function createAccount(req, res) {
-    try {
-        const { name, startingBalance, currency, mode } = req.body ?? {}
-        const acct = await paperBrokerService.createAccount(req.user._id, { mode: _mode(mode), name, startingBalance, currency })
-        res.status(201).json(await _accountState(req.user._id, acct))
-    } catch (err) { _fail(res, err, 'create account error') }
-}
+export const createAccount = _handle('createAccount', async (req, res) => {
+    const { name, startingBalance, currency, mode } = req.body ?? {}
+    const acct = await paperBrokerService.createAccount(req.user._id, { mode: _mode(mode), name, startingBalance, currency })
+    res.status(201).json(await _accountState(req.user._id, acct))
+})
 
-export async function patchAccount(req, res) {
-    try {
-        const { accountId } = req.params
-        await _requireAccount(req.user._id, accountId)
-        const { name, spreadBps, commissionPerTrade, maxLeverage } = req.body ?? {}
-        if (name != null) await paperBrokerService.renameAccount(req.user._id, accountId, name)
-        if (spreadBps != null || commissionPerTrade != null || maxLeverage != null) {
-            await paperBrokerService.updateSettings(req.user._id, accountId, { spreadBps, commissionPerTrade, maxLeverage })
-        }
-        const acct = await paperBrokerService.getAccount(req.user._id, accountId)
-        res.json(await _accountState(req.user._id, acct))
-    } catch (err) { _fail(res, err, 'patch account error') }
-}
+export const patchAccount = _handle('patchAccount', async (req, res) => {
+    const { accountId } = req.params
+    await _requireAccount(req.user._id, accountId)
+    const { name, spreadBps, commissionPerTrade, maxLeverage } = req.body ?? {}
+    if (name != null) await paperBrokerService.renameAccount(req.user._id, accountId, name)
+    if (spreadBps != null || commissionPerTrade != null || maxLeverage != null) {
+        await paperBrokerService.updateSettings(req.user._id, accountId, { spreadBps, commissionPerTrade, maxLeverage })
+    }
+    const acct = await paperBrokerService.getAccount(req.user._id, accountId)
+    res.json(await _accountState(req.user._id, acct))
+})
 
-export async function deleteAccount(req, res) {
-    try {
-        await paperBrokerService.deleteAccount(req.user._id, req.params.accountId)
-        res.json({ ok: true })
-    } catch (err) { _fail(res, err, 'delete account error') }
-}
+export const deleteAccount = _handle('deleteAccount', async (req, res) => {
+    await paperBrokerService.deleteAccount(req.user._id, req.params.accountId)
+    res.json({ ok: true })
+})
 
-export async function resetAccount(req, res) {
-    try {
-        const { accountId } = req.params
-        const startingBalance = req.body?.startingBalance != null ? Number(req.body.startingBalance) : undefined
-        await paperBrokerService.resetAccount(req.user._id, accountId, { startingBalance })
-        const acct = await paperBrokerService.getAccount(req.user._id, accountId)
-        res.json(await _accountState(req.user._id, acct))
-    } catch (err) { _fail(res, err, 'reset account error') }
-}
+export const resetAccount = _handle('resetAccount', async (req, res) => {
+    const { accountId } = req.params
+    const startingBalance = req.body?.startingBalance != null ? Number(req.body.startingBalance) : undefined
+    await paperBrokerService.resetAccount(req.user._id, accountId, { startingBalance })
+    const acct = await paperBrokerService.getAccount(req.user._id, accountId)
+    res.json(await _accountState(req.user._id, acct))
+})
 
 /**
  * Record a cash movement that happened outside any trade — a dividend, a deposit, a withdrawal, a fee.
@@ -126,53 +111,43 @@ export async function resetAccount(req, res) {
  * dividend, we never see it, and the account's equity drifts a little further from the user's real one
  * every quarter. Signed amount; the store refuses an overdraw and never counts this as P&L.
  */
-export async function adjustAccountCash(req, res) {
-    try {
-        const { accountId } = req.params
-        const { amount, reason } = req.body ?? {}
-        await paperBrokerService.adjustCash(req.user._id, accountId, { amount, reason })
-        const acct = await paperBrokerService.getAccount(req.user._id, accountId)
-        res.json(await _accountState(req.user._id, acct))
-    } catch (err) { _fail(res, err, 'adjust cash error') }
-}
+export const adjustAccountCash = _handle('adjustAccountCash', async (req, res) => {
+    const { accountId } = req.params
+    const { amount, reason } = req.body ?? {}
+    await paperBrokerService.adjustCash(req.user._id, accountId, { amount, reason })
+    const acct = await paperBrokerService.getAccount(req.user._id, accountId)
+    res.json(await _accountState(req.user._id, acct))
+})
 
-export async function accountEquityCurve(req, res) {
-    try {
-        const { accountId } = req.params
-        await _requireAccount(req.user._id, accountId)
-        const points = await paperBrokerService.listEquityCurve(req.user._id, {
-            accountId,
-            fromMs: req.query.fromMs != null ? Number(req.query.fromMs) : undefined,
-        })
-        res.json({ points })
-    } catch (err) { _fail(res, err, 'account equity-curve error') }
-}
+export const accountEquityCurve = _handle('accountEquityCurve', async (req, res) => {
+    const { accountId } = req.params
+    await _requireAccount(req.user._id, accountId)
+    const points = await paperBrokerService.listEquityCurve(req.user._id, {
+        accountId,
+        fromMs: req.query.fromMs != null ? Number(req.query.fromMs) : undefined,
+    })
+    res.json({ points })
+})
 
-export async function accountTrades(req, res) {
-    try {
-        const { accountId } = req.params
-        await _requireAccount(req.user._id, accountId)
-        const trades = await tradeCaptureService.listTrades(req.user._id, {
-            mode:      'paper',
-            accountId,
-            status:    req.query.status,
-            limit:     req.query.limit != null ? Number(req.query.limit) : undefined,
-        })
-        res.json({ trades })
-    } catch (err) { _fail(res, err, 'account trades error') }
-}
+export const accountTrades = _handle('accountTrades', async (req, res) => {
+    const { accountId } = req.params
+    await _requireAccount(req.user._id, accountId)
+    const trades = await tradeCaptureService.listTrades(req.user._id, {
+        mode:      'paper',
+        accountId,
+        status:    req.query.status,
+        limit:     req.query.limit != null ? Number(req.query.limit) : undefined,
+    })
+    res.json({ trades })
+})
 
 // ── Default-account: the paper toggle ────────────────────────────────────────
 
-export async function getState(req, res) {
-    try {
-        res.json(await _state(req.user._id))
-    } catch (err) { _fail(res, err, 'state error') }
-}
+export const getState = _handle('getState', async (req, res) => {
+    res.json(await _state(req.user._id))
+})
 
-export async function setMode(req, res) {
-    try {
-        await paperBrokerService.setEnabled(req.user._id, !!req.body?.enabled)
-        res.json(await _state(req.user._id))
-    } catch (err) { _fail(res, err, 'mode error') }
-}
+export const setMode = _handle('setMode', async (req, res) => {
+    await paperBrokerService.setEnabled(req.user._id, !!req.body?.enabled)
+    res.json(await _state(req.user._id))
+})
