@@ -177,10 +177,7 @@ export const config = {
         return this.isProduction ? _str('CTRADER_REDIRECT_URL_PROD') : _str('CTRADER_REDIRECT_URI')
     },
 
-    // ── IBKR (data-only, in progress) ──
-    get ibkrClientId()     { return _str('IBKR_CLIENT_ID') },
-    get ibkrClientSecret() { return _str('IBKR_CLIENT_SECRET') },
-    get ibkrRedirectUri()  { return _str('IBKR_REDIRECT_URI') },
+    // ── IBKR (data-only, in progress) — gateway coords only ──
     /** Gateway coords. A stored connection's own coords take precedence over these. */
     get ibkrGwHost()       { return _str('IBKR_GW_HOST', '127.0.0.1') },
     get ibkrGwPort()       { return _num('IBKR_GW_PORT', 4002) },
@@ -288,7 +285,6 @@ export const KNOWN_KEYS = new Set([
     'PAPER_QUOTE_TTL_MS', 'PAPER_FAST_QUOTE_TTL_MS',
     'MARKET_BRIEF_TTL_MS', 'MARKET_BRIEF_OFFER_HOUR_UTC', 'MARKET_BRIEF_OFFER',
     'CTRADER_CLIENTID', 'CTRADER_SECRET', 'CTRADER_REDIRECT_URI', 'CTRADER_REDIRECT_URL_PROD',
-    'IBKR_CLIENT_ID', 'IBKR_CLIENT_SECRET', 'IBKR_REDIRECT_URI',
     'IBKR_GW_HOST', 'IBKR_GW_PORT', 'IBKR_GW_CLIENTID',
     'HTTP_METER_MS', 'HTTP_RETRIES', 'HTTP_RETRY_BASE_MS',
     'DNS_SERVERS', 'SHUTDOWN_GRACE_MS', 'UNHANDLED_REJECTION_FATAL', 'TRUST_PROXY_HOPS',

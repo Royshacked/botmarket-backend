@@ -381,7 +381,7 @@ providers/
   chartImg.provider.js          chart-img (TradingView) PNG — now the FALLBACK behind the own-chart
                                 renderer (services/chartRender); still primary when OWN_CHART_RENDER=false
   ctrader.provider.js  ctrader.session.provider.js (getTrendbars + trendbarToOHLCV)  ctrader.ws.provider.js
-  ibkr.provider.js (retired) / ibkr.gateway.provider.js
+  ibkr.gateway.provider.js  TWS-socket client to a local IB Gateway (the Client Portal REST provider was deleted 2026-09-15)
   mongodb.provider.js       getDb(), stripId/stripIds
 monitoring/
   preflightEntry.js         the arm-time "is the entry level ALREADY held?" check. Two evaluations

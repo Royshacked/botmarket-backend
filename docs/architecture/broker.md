@@ -338,11 +338,6 @@ ibkr.adapter.js
            setProtection, execution feed — all trading capability flags false
 ```
 
-> **Dead code:** `providers/ibkr.provider.js` (the old Client Portal REST/OAuth provider —
-> `getAuthUrl`/`exchangeCode`/`refreshTokens`/`resolveConid`/`getHistoricalBars` against
-> `api.ibkr.com/v1/api`) still exists but is **no longer imported by the adapter** — it was
-> superseded by the gateway transport. Ignore it when reasoning about IBKR.
-
 ---
 
 ## Execution reconciler — broker-authoritative status + exit lifecycle
@@ -522,7 +517,6 @@ providers/                         (repo root — transports)
   ctrader.ws.provider.js           CTraderSocket — one WebSocket per environment
   ctrader.session.provider.js      CTraderSession — account-scoped view over the socket
   ibkr.gateway.provider.js         IBKRGateway — @stoqey/ib socket to IB Gateway/TWS
-  ibkr.provider.js                 (dead) old Client Portal REST/OAuth — not imported
 
 api/broker/
   adapters/

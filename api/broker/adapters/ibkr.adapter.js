@@ -6,14 +6,17 @@
  * the "connection" is gateway coordinates { host, port, clientId } — no OAuth.
  * Paper vs live is the port (paper 4002/7497, live 4001/7496).
  *
- * Build status:
- *   Phase 1 (this) — connection lifecycle + account summary.   DONE
- *   Phase 2 — positions, contract qualification, candles over the socket.
- *   Phase 3 — execution feed → executionBus.
- *   Phase 4 — trading (placeOrder/closePosition/cancel/list/protection).
+ * Build status — DATA-ONLY today:
+ *   Phase 1 — connection lifecycle (connectGateway → saved coords) + account summary.   DONE
+ *   Phase 2 — positions, contract qualification (front-month futures / SMART equities),
+ *             candles over the socket (getCandles, ohlcv:true).                        DONE
+ *   Phase 3 — execution feed → executionBus.                                           TODO
+ *   Phase 4 — trading (placeOrder/closePosition/cancel/list/protection).               TODO
  *
- * The older providers/ibkr.provider.js (Client Portal REST/OAuth) is retired in
- * Phase 2 once candles move to reqHistoricalData on the socket.
+ * `trading:false` and NOT `selfExecuted`: an IBKR position waits for Phase 4; it is never
+ * handed to the user to place by hand (see the flag's note in broker.interface.js). No route
+ * reaches connectGateway yet — it is the one entry point an IBKR connection has and stays.
+ * The old Client Portal REST/OAuth provider is gone; the gateway socket is the only transport.
  */
 
 import { BarSizeSetting, WhatToShow } from '@stoqey/ib'

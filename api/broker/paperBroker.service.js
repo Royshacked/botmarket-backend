@@ -22,10 +22,12 @@
  *   paperOrders     virtual working/filled/cancelled orders (carry accountId)
  *   paperEquity     per-account equity-curve points
  *
- * TRANSITIONAL: the routing fork (global paper toggle) and the legacy `/api/paper/*`
- * routes still assume a single account — they resolve `getOrCreateDefaultAccount`
- * until the per-idea account picker replaces the toggle (next step). `setEnabled`/
- * `isEnabled` likewise ride the default account for now.
+ * THE PAPER TOGGLE rides the DEFAULT (oldest) paper account: `setEnabled` / `isEnabled` read and
+ * write `enabled` on it, and that flag is `connections.paper` — the workspace switch
+ * resolveWorkspace keys on (paper-connected WINS over the stored live/manual choice). It is not
+ * transitional: the per-idea account picker chooses WHICH paper account an idea binds to; the
+ * toggle says whether the user is standing in the paper workspace at all. `/api/paper/state` and
+ * `/api/paper/mode` are its surface; everything else under `/api/paper/accounts/*` is per-account.
  */
 
 import { randomUUID } from 'crypto'

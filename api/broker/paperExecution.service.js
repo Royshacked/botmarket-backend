@@ -1,13 +1,16 @@
 /**
  * Paper execution primitives.
  *
- * The two position-mutation operations shared by the paper adapter (market fills /
- * manual closes) and the paper fill engine (working-order triggers), so there is one
- * code path that mutates virtual positions, banks P&L, and emits the normalized
- * execution events the reconciler consumes.
+ * The three position mutations — openPosition, addToPaperPosition (scale-in), reducePosition
+ * (trim / close) — shared by the paper adapter (market fills, the user's ✕) and the paper fill
+ * engine (working-order triggers), so there is ONE code path that mutates virtual positions,
+ * applies the account's cost model, banks P&L, and emits the normalized execution events the
+ * reconciler consumes. Beside them: the price ladders (latestMarkPrice for marking and touch
+ * detection, exitMarkPrice / entryMarkPrice for booking a fill) and the equity roll-up.
  *
- * Cash moves only by realized P&L (Phase 3 adds spread/commission), so equity stays
- * cashBalance + Σ unrealized with no notional bookkeeping.
+ * Cost model: spread is baked into the fill price (applySpread), commission is a cash debit on
+ * every fill. Cash otherwise moves only by realized P&L, so equity stays cashBalance +
+ * Σ unrealized with no notional bookkeeping (committedByAccount derives exposure from cost basis).
  */
 
 import { randomUUID }        from 'crypto'

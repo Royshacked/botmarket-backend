@@ -8,7 +8,8 @@
  * and emits the normalized execution event the reconciler already consumes.
  *
  * Global (not per-account): one loop sweeps every user's working paper orders, like the
- * market-open sweep. Fills use the trigger price (slippage/gaps deferred to Phase 3).
+ * market-open sweep. Fills use the trigger price — no slippage or gap model (the cost model
+ * paperExecution applies is spread + commission only).
  *
  * See docs/architecture/paper-trading-simulation.md (Phase 2).
  */

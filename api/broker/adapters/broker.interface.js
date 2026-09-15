@@ -269,10 +269,16 @@ export class BrokerAdapter {
     }
 
     /**
-     * Return OHLCV bars. Optional — return null if this broker doesn't support it.
-     * When implemented, the monitoring system will prefer this over Massive/Polygon.
-     * @param {string} symbol
-     * @param {'minutes'|'hours'|'daily'|'weekly'|'monthly'} timeframe
+     * Return OHLCV bars. Optional — return null if this broker doesn't support it, AND for any
+     * timeframe it has no bar width for: null means "use the app feed", and the monitor relies on
+     * that fallback. Never substitute a coarser width — an intraday idea evaluated on daily bars
+     * is a wrong answer, not a degraded one. When `capabilities().ohlcv` is true the monitor
+     * prefers this over the app feed (Massive/Yahoo).
+     * @param {string} symbol     the BROKER symbol (brokerSymbol), e.g. 'US100.cash'
+     * @param {string} timeframe  the app timeframe the monitor speaks — '1min' | '5min' | '1hr' |
+     *                            '4hr' | 'day' | 'week' | 'month' (legacy 'minutes' / 'daily'
+     *                            still parse). Resolve it with services/timeframe.parseTimeframe,
+     *                            as cTrader and IBKR do, so every adapter reads the one vocabulary.
      * @param {number} count      number of bars to return
      * @param {string} userId
      * @returns {Promise<OHLCVBar[]|null>}

@@ -1,18 +1,25 @@
 /**
  * Broker Connection Service
  *
- * Persists per-user broker OAuth tokens in MongoDB.
- * Each document represents one user ↔ broker connection.
+ * Persists per-user REAL-broker connections in MongoDB — one document per user ↔ broker. Two
+ * shapes share the collection, by transport; paper and manual have no document at all (the
+ * virtual account IS the connection — see VirtualAdapter.isConnected).
  *
  * Collection: brokerConnections
- * Shape: {
+ * OAuth broker (cTrader): {
  *   userId:       string,
- *   brokerType:   'ctrader' | 'ibkr' | …,
+ *   brokerType:   'ctrader',
  *   accessToken:  string,
- *   refreshToken: string,
- *   expiresAt:    number,   unix ms when access token expires
- *   accountId:    string | null,   cached after first API call
- *   connectedAt:  number,   unix ms
+ *   refreshToken: string,          its presence is what "connected" means
+ *   expiresAt:    number,          unix ms when access token expires
+ *   accountId:    string | null,   the user's SELECTED trading account (cached / chosen)
+ *   connectedAt:  number,          unix ms
+ * }
+ * Gateway broker (IBKR): {
+ *   userId, brokerType: 'ibkr',
+ *   gateway:      true,            its presence is what "connected" means — no tokens
+ *   host, port, clientId,          the local IB Gateway the adapter dials (paper vs live is the port)
+ *   accountId, connectedAt
  * }
  */
 

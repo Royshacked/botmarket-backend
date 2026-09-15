@@ -8,7 +8,7 @@ OHLCV (candle) data flows through two stacked layers:
 Consumers
   ├── Agent tools (services/tools/marketData.tools.js → get_candles / get_indicators)
   ├── Monitoring system (ohlcv.service → priceService)
-  └── Future: IBKR broker adapter (getCandles → ibkr.provider)
+  └── IBKR broker adapter (getCandles → ibkr.gateway.provider reqHistoricalData)
 
         │
         ▼
