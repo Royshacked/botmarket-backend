@@ -45,13 +45,23 @@ test('review mode tells the model the bracketed id is the ONLY source of an item
     assert.match(out, /never compose one from the ticker/)
 })
 
-// Construction/edit context is prompt-cached and does not author a <portfolio_update> off these
-// rows — the EDIT MODE block carries the ids there. Keeping them out holds that tail lean, which is
-// the same reason the frozen thesis is review-only.
-test('non-review context leaves the ids off', () => {
+// Edit context carries the ids TOO, since 2026-09-15. It did not have to before, because the EDIT
+// MODE block rendered the same holdings from the client's ideas list with its own `ideaId:` spelling
+// — two descriptions of one book in one prompt, one of them client-supplied and the other telling
+// the model it was the only id source. That block is gone, so this is the only place an itemId can
+// come from in any mode, and an edit names a holding exactly as a review does.
+test('edit context carries the ids too — it is the only place they come from now', () => {
     const out = _buildPortfolioStateSection(state(), false, null)
-    assert.doesNotMatch(out, /\[708121b6-4e9c-4460-bbf2-21416baeb960\]/)
-    assert.match(out, /NVDA/)
+    assert.match(out, /\[708121b6-4e9c-4460-bbf2-21416baeb960\] NVDA/)
+    assert.match(out, /ONLY description of this book/)
+    assert.match(out, /never compose one from the ticker/)
+})
+
+// The frozen thesis stays review-only: that is about keeping the cached tail lean, and it was never
+// the reason the ids were withheld.
+test('edit context still omits the frozen thesis', () => {
+    const out = _buildPortfolioStateSection(state(), false, null)
+    assert.doesNotMatch(out, /thesis:/)
 })
 
 // A row with no id must not render an empty [] — an id-shaped hole reads as a real handle.

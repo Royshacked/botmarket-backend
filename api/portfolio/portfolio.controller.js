@@ -154,7 +154,10 @@ export async function removeAdoptedHolding(req, res) {
 }
 
 export async function streamPortfolio(req, res) {
-    const { messages, ideaAccounts, mainAccountId, portfolioId, portfolioIdeas, threadId, model, pipeline } = req.body ?? {}
+    // `portfolioIdeas` is still SENT by the client and deliberately not read: the book Atlas sees is
+    // read from the database (portfolioState), not from the list the client happened to be holding.
+    // See _buildPortfolioStateSection — an empty client list is what made Atlas invent item ids.
+    const { messages, ideaAccounts, mainAccountId, portfolioId, threadId, model, pipeline } = req.body ?? {}
 
     const validatedMessages = parseChatMessages(messages)
     if (validatedMessages.error) {
@@ -200,7 +203,6 @@ export async function streamPortfolio(req, res) {
                 ideaAccounts: validatedAccounts,
                 mainAccountId: validatedMainAccountId,
                 portfolioId:   portfolioId   ?? null,
-                portfolioIdeas: Array.isArray(portfolioIdeas) ? portfolioIdeas : [],
                 portfolioState,
                 isReviewMode,
                 reviewDelta,

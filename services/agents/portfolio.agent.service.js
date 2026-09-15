@@ -186,7 +186,7 @@ function makeCoverageHandler() {
 
 export const portfolioAgentService = { chatStream }
 
-async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioIdeas = [], portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, audience = null, adoptDraft = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = null, portfolioId = null, portfolioState = null, isReviewMode = false, reviewDelta = null, lifecycle = null, mandate = null, thesis = null, audience = null, adoptDraft = null, model: requestedModel, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     _venueSection = buildVenueSection,
 }) {
@@ -208,7 +208,6 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     const today = new Date().toISOString().slice(0, 10)
     const dynamicSections = [`CURRENT DATE: ${today}. Resolve relative timeframes (today, next week, this month) against this date — e.g. when calling get_earnings_calendar.`]
     if (ideaAccounts.length > 0) dynamicSections.push(_buildAccountsSection(ideaAccounts, mainAccountId))
-    if (portfolioId && portfolioIdeas.length > 0) dynamicSections.push(_buildPortfolioContext(portfolioId, portfolioIdeas))
     // Who we're talking to comes FIRST: it frames how everything below is said.
     const audienceSection = buildAudienceSection(audience)
     if (audienceSection) dynamicSections.push(audienceSection)
@@ -444,23 +443,18 @@ function _buildMessages(messages) {
     return normalizeMessages(messages, MAX_MESSAGES)
 }
 
-function _buildPortfolioContext(portfolioId, ideas) {
-    const name    = ideas[0]?.portfolioName || 'Portfolio'
-    const header  = `EDIT MODE — CURRENT PORTFOLIO: "${name}" (portfolioId: ${portfolioId})\nThe user wants to modify this portfolio. Here are the current ideas:\n`
-    const ideaLines = ideas.map(idea => {
-        const alloc  = idea.allocationRatio != null ? `${Math.round(idea.allocationRatio * 100)}%` : '—'
-        const qty    = idea.quantity != null ? String(idea.quantity) : 'not set'
-        const entry  = Array.isArray(idea.entry_conditions) && idea.entry_conditions.length
-            ? idea.entry_conditions.map(c => `"${c.condition}"`).join(', ')
-            : 'no entry conditions yet'
-        const stop   = Array.isArray(idea.stop_conditions) && idea.stop_conditions.length
-            ? idea.stop_conditions.map(c => `"${c.condition}"`).join(', ')
-            : 'no stop yet'
-        const accs   = Array.isArray(idea.accounts) && idea.accounts.length ? idea.accounts.join(', ') : 'none'
-        return `  ideaId: ${idea.id}\n  asset: ${idea.asset} | direction: ${idea.direction ?? '?'} | type: ${idea.type ?? '?'} | allocation: ${alloc} | qty: ${qty}\n  entry: ${entry}\n  stop: ${stop}\n  accounts: ${accs}\n  notes: ${idea.notes || '—'}`
-    }).join('\n\n')
-    return `${header}\n${ideaLines}`
-}
+// THE EDIT MODE BLOCK IS GONE (2026-09-15), and what it did is worth recording.
+//
+// It rendered the book a SECOND time, from `portfolioIdeas` — the ideas list the CLIENT sent up with
+// the turn — while _buildPortfolioStateSection rendered the same holdings from Mongo. Both shipped in
+// the same prompt whenever a portfolio was open, and they spelled the holding's id differently:
+// `ideaId: <id>` here, `[<id>]` there. That directly contradicted the state block's own instruction,
+// which tells the model the bracketed value is the ONLY source of an itemId and never to compose one
+// from earlier in the conversation — because a client list arriving EMPTY is what made Atlas invent
+// ids in the first place, and every accepted change came back not_found.
+//
+// What it carried that the state block did not — quantity and the two condition trees — is projected
+// and rendered there now. A desk reads its subject from the database.
 
 export function _buildAccountsSection(accounts, mainAccountId = null) {
     const lines = buildAccountLines(accounts, mainAccountId)
@@ -770,8 +764,10 @@ export function _buildPortfolioStateSection(state, isReviewMode = false, reviewD
         `Total notional: $${Math.round(state.totalNotional)} | Total P&L: ${fmtMoney(state.totalPnl)} (${fmtPct(state.totalPnlPct)})`,
     ].filter(Boolean).join('\n')
 
-    const live    = state.ideas.filter(s => s.actualWeight != null)
-    const pending = state.ideas.filter(s => s.actualWeight == null)
+    // "Live" here means MATCHED TO AN OPEN POSITION, which is what gives a holding a weight at all.
+    const isLive  = (s) => s.actualWeight != null
+    const live    = state.ideas.filter(isLive)
+    const pending = state.ideas.filter(s => !isLive(s))
 
     const fmtConviction = (s) => {
         const cur = s.conviction?.level
@@ -794,13 +790,26 @@ export function _buildPortfolioStateSection(state, isReviewMode = false, reviewD
         return parts.length ? `\n           ↳ ${parts.join(' · ')}` : ''
     }
 
-    // The holding's id, rendered in REVIEW only. A review's whole output is a set of actions naming
-    // WHICH holding each one acts on, and `<portfolio_update>` carries that as `itemId` — so the ids
-    // have to be in the material the review is written from. They only ever appeared in the EDIT
-    // MODE block, which is built from a list the CLIENT sends; when that list arrived empty the
-    // review still read fine (this state block comes from Mongo) and Atlas invented the ids, so
-    // every accepted change came back not_found. These rows already carry the real id.
-    const idTag = (s) => (isReviewMode && s.ideaId ? `[${s.ideaId}] ` : '')
+    // The holding's id. A review's whole output is a set of actions naming WHICH holding each one
+    // acts on, and `<portfolio_update>` carries that as `itemId` — so the ids have to be in the
+    // material the answer is written from. They used to appear in the EDIT MODE block too, built
+    // from a list the CLIENT sent; when that list arrived empty the review still read fine (this
+    // block comes from Mongo) and Atlas invented the ids, so every accepted change came back
+    // not_found. That block is gone and these rows carry the real id, in every mode — an edit that
+    // proposes a change names a holding exactly as a review does.
+    const idTag = (s) => (s.ideaId ? `[${s.ideaId}] ` : '')
+
+    // What the holding is authored AS, rather than what it is worth: the size, and the condition
+    // trees a pending holding is waiting on. This is the content the deleted EDIT MODE block
+    // existed for — rendered from the database now rather than from the client's list.
+    const authoredLine = (s) => {
+        const parts = []
+        if (s.quantity != null) parts.push(`qty ${s.quantity}`)
+        // A live holding is past its entry, so its entry tree is history — only the stop still binds.
+        if (!isLive(s) && s.entryConditions?.length) parts.push(`entry: ${s.entryConditions.map(c => `"${c}"`).join(', ')}`)
+        if (s.stopConditions?.length) parts.push(`stop: ${s.stopConditions.map(c => `"${c}"`).join(', ')}`)
+        return parts.length ? `\n           ↳ ${parts.join(' · ')}` : ''
+    }
 
     const liveLines = live.map(s => {
         const target  = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
@@ -809,13 +818,13 @@ export function _buildPortfolioStateSection(state, isReviewMode = false, reviewD
         const pnl     = `P&L ${fmtMoney(s.pnl)} (${fmtPct(s.pnlPct)})`
         const age     = s.thesisAgeDays != null ? `${s.thesisAgeDays}d` : ''
         const earn    = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
-        return `  ${idTag(s)}${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${fmtConviction(s)}${earn}${thesisLine(s)}`
+        return `  ${idTag(s)}${s.asset.padEnd(6)} ${(s.direction ?? '').padEnd(6)} ${target}  ${actual}  ${drift}  ${pnl}  ${age}${fmtConviction(s)}${earn}${authoredLine(s)}${thesisLine(s)}`
     })
 
     const pendingLines = pending.map(s => {
         const target = s.allocationRatio != null ? `target ${Math.round(s.allocationRatio * 100)}%` : 'target —'
         const earn   = s.upcomingEarnings ? `  ⚠ earnings ${s.upcomingEarnings.date}` : ''
-        return `  ${idTag(s)}${s.asset.padEnd(6)} ${s.direction?.padEnd(6) ?? '      '} ${target}  [${s.status}]${earn}${thesisLine(s)}`
+        return `  ${idTag(s)}${s.asset.padEnd(6)} ${s.direction?.padEnd(6) ?? '      '} ${target}  [${s.status}]${earn}${authoredLine(s)}${thesisLine(s)}`
     })
 
     const sections = [header]
@@ -837,7 +846,7 @@ export function _buildPortfolioStateSection(state, isReviewMode = false, reviewD
 
     sections.push(isReviewMode
         ? 'Use this data as the starting point for the review. The value in [brackets] before each ticker is that holding\'s itemId — it is the ONLY source of itemId for a <portfolio_update>, so copy it exactly and never compose one from the ticker or from earlier in this conversation. Do not call get_quotes for tickers already shown above — prices are current. Judge each holding intact / weakening / broken against the thesis + rationale shown beneath it. Propose specific actions (rebalance, trim, add, exit, swap) where the data warrants it.'
-        : 'This is the live book you are helping with — the workspace, open positions, and per-position + total P&L are current. Do not call get_quotes for tickers already shown above. Ground any answer or proposed edit in these actual positions and P&L; do NOT run a full scheduled review unless the user asks for one.')
+        : 'This is the live book you are helping with — the workspace, holdings and per-position + total P&L are current, and it is the ONLY description of this book you have. The value in [brackets] before each ticker is that holding\'s itemId: copy it exactly when an edit names a holding, and never compose one from the ticker or from earlier in this conversation. Do not call get_quotes for tickers already shown above. Ground any answer or proposed edit in these actual positions and P&L; do NOT run a full scheduled review unless the user asks for one.')
 
     return sections.join('\n\n')
 }

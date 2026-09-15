@@ -138,10 +138,14 @@ export async function listPortfolioItems(portfolioId, userId, { projection = nul
 // the "(was medium)" trend in the prompt. snapshotConvictions had been writing the array on every
 // review close the whole time. Capped at 12 entries by the writer, so it is cheap to carry.
 //
+// `quantity` + the two condition arrays are here because this block is now the ONLY rendering of the
+// book. It used to have a twin — an EDIT MODE block built from the ideas list the CLIENT sent — and
+// carrying those fields is what let that twin go.
+//
 // EXPORTED so a test can assert it covers every field the mappers below read. That coverage is the
 // invariant this bug broke, and an invariant no check enforces is a comment: a projection that
 // silently omits a field does not fail, it just reads null forever.
-export const STATE_PROJECTION = { id: 1, asset: 1, direction: 1, allocationRatio: 1, conviction: 1, conviction_history: 1, notes: 1, status: 1, type: 1, activatedAt: 1, brokerOrders: 1, portfolioName: 1, broker: 1, mainAccountId: 1, accounts: 1, research_basis: 1 }
+export const STATE_PROJECTION = { id: 1, asset: 1, direction: 1, allocationRatio: 1, quantity: 1, conviction: 1, conviction_history: 1, notes: 1, status: 1, type: 1, activatedAt: 1, entry_conditions: 1, stop_conditions: 1, brokerOrders: 1, portfolioName: 1, broker: 1, mainAccountId: 1, accounts: 1, research_basis: 1 }
 
 /**
  * Compute the live state of a portfolio: actual weights, drift vs target,
@@ -244,6 +248,7 @@ export async function computePortfolioState(portfolioId, userId) {
             status:          idea.status,
             type:            idea.type ?? null,
             allocationRatio: idea.allocationRatio ?? null,
+            quantity:        idea.quantity ?? null,
             actualWeight:    null,
             drift:           null,
             pnl:             matched > 0 ? pnlSum : null,
@@ -257,6 +262,12 @@ export async function computePortfolioState(portfolioId, userId) {
             conviction:      idea.conviction ?? null,
             convictionPrev:  _lastConviction(idea),
             notes:           idea.notes ?? null,
+            // The authored condition trees, raw. Rendered by the agent (which owns how a holding
+            // reads), carried here because this is the only read of the book. A live holding is past
+            // its entry, so only the stop still says anything — but both travel, and the renderer
+            // decides, rather than this file guessing what a caller wants.
+            entryConditions: _conditions(idea.entry_conditions),
+            stopConditions:  _conditions(idea.stop_conditions),
             upcomingEarnings: null,
         }
     })
@@ -282,6 +293,7 @@ export async function computePortfolioState(portfolioId, userId) {
         status:          idea.status,
         type:            idea.type ?? null,
         allocationRatio: idea.allocationRatio ?? null,
+        quantity:        idea.quantity ?? null,
         actualWeight:    null,
         drift:           null,
         pnl:             null,
@@ -290,6 +302,8 @@ export async function computePortfolioState(portfolioId, userId) {
         conviction:      idea.conviction ?? null,
         convictionPrev:  _lastConviction(idea),
         notes:           idea.notes ?? null,
+        entryConditions: _conditions(idea.entry_conditions),
+        stopConditions:  _conditions(idea.stop_conditions),
         upcomingEarnings: null,
     }))
 
@@ -404,6 +418,16 @@ async function _deriveWorkspace(ideas, userId) {
         brokerLabel: mode === 'live' ? (BROKER_LABELS[primaryBroker] ?? primaryBroker ?? 'Live') : null,
         accounts,
     }
+}
+
+/**
+ * The condition SENTENCES off an authored tree — what the user wrote, not the parsed structure.
+ * `[]` for a holding with none, so a renderer can say "none set" without re-checking the shape.
+ */
+function _conditions(tree) {
+    return (Array.isArray(tree) ? tree : [])
+        .map(c => (typeof c?.condition === 'string' ? c.condition.trim() : ''))
+        .filter(Boolean)
 }
 
 // Most recent conviction snapshot taken at a prior review (for the trajectory shown
