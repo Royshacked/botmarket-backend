@@ -162,6 +162,13 @@ import { logger }                  from '../../../services/logger.service.js'
  */
 export const NO_PRICE = 'NO_PRICE'
 
+/**
+ * HTTP status a broker read/trade answers with when the BROKER session is missing or cannot be
+ * refreshed: 424 Failed Dependency. Deliberately not 401 — that is the app's own login code, and
+ * the client answers every 401 by clearing the session and leaving the page. See _freshTokens.
+ */
+export const BROKER_DISCONNECTED = 424
+
 export class BrokerAdapter {
     /**
      * Broker type id used for DB lookups (e.g. 'ctrader'). Subclasses MUST set this
@@ -183,10 +190,15 @@ export class BrokerAdapter {
      * @type {{ refreshTokens: (conn: object) => Promise<object> }}
      */
     provider = null
-
     /**
      * Return valid tokens for this user, refreshing if within 60s of expiry.
      * Shared across adapters — relies on `this.brokerType` and `this.provider`.
+     *
+     * A missing or unrefreshable BROKER session throws `status: BROKER_DISCONNECTED` (424), NOT
+     * 401. 401 is the APP's own auth code, and the client treats any 401 as "your login expired"
+     * — clears the session and sends the user to the front page. An expired cTrader token on the
+     * positions poll used to do exactly that (masked, until recently, by getPositions swallowing
+     * the throw). The broker being unreachable is a failed dependency, which is what 424 says.
      * @param {string} userId
      * @returns {Promise<object>} a connection/tokens object
      */
@@ -194,7 +206,7 @@ export class BrokerAdapter {
         const label = this.brokerLabel || this.brokerType
         const conn  = await brokerConnectionService.getConnection(userId, this.brokerType)
         if (!conn) {
-            throw Object.assign(new Error(`${label} not connected`), { status: 401 })
+            throw Object.assign(new Error(`${label} not connected`), { status: BROKER_DISCONNECTED })
         }
 
         const bufferMs = 60_000
@@ -206,12 +218,11 @@ export class BrokerAdapter {
                 return fresh
             } catch (err) {
                 logger.error(`[${this.brokerType}.adapter]`, `Token refresh failed for user ${userId}:`, err.message)
-                throw Object.assign(new Error(`${label} session expired — please reconnect`), { status: 401 })
+                throw Object.assign(new Error(`${label} session expired — please reconnect`), { status: BROKER_DISCONNECTED })
             }
         }
         return conn
     }
-
     /**
      * Return the URL to redirect the user to for OAuth consent.
      * @param {string} state  JWT-signed context token (userId + brokerType)
