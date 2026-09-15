@@ -238,6 +238,32 @@ export function makeEntityRepo({ coll = _defaultColl } = {}) {
             return c.find(filter).toArray()
         },
 
+        /**
+         * Delete ONE entity, matched on the owner AND an extra guard the caller insists on.
+         *
+         * The guard is not optional and has no default, because the only reason to delete an entity
+         * from outside the ordinary CRUD path is that some narrow property makes it safe — and that
+         * property must travel WITH the query rather than being checked a few lines earlier. Today's
+         * caller is adoption's repair path, which passes `{ adopted: true }`: it bypasses the
+         * delete-lock that stops a live position being removed from under a broker order, and is
+         * only entitled to because the position was recorded on the user's word, never placed.
+         *
+         * @returns {Promise<boolean>} whether a document was actually deleted
+         */
+        async deleteGuarded(id, userId, guard) {
+            if (!guard || !Object.keys(guard).length) throw new Error('deleteGuarded needs a guard')
+            const c   = await coll()
+            const res = await c.deleteOne({ id, userId, ...guard })
+            return res.deletedCount > 0
+        },
+
+        /** Several entities by id, in one read. `projection` is the caller's business. Raw docs. */
+        async listByIds(ids, projection = null) {
+            if (!ids?.length) return []
+            const c = await coll()
+            return c.find({ id: { $in: ids } }).project(projection ?? {}).toArray()
+        },
+
         /** Bulk {id ∈ ids} $set. */
         async patchMany(ids, fields) {
             const c = await coll()

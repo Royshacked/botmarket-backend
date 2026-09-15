@@ -29,11 +29,10 @@ import { openManualPosition }    from '../broker/manualExecution.service.js'
 import { quoteMapForSymbols }    from '../broker/paperExecution.service.js'
 import { ideaService }           from '../trade-ideas/tradeIdeas.service.js'
 import { entityRepo }            from '../../services/entity/entityRepo.service.js'
-import { ENTITIES }              from '../../services/entity/entityCollection.js'
 import { LIVE_POSITION }         from '../../services/entity/vocabulary.js'
 import { portfolioChatService, cadenceMs } from './portfolioChat.service.js'
 import { tradeCaptureService }   from '../../services/tradeCapture.service.js'
-import { getDb, stripId }        from '../../providers/mongodb.provider.js'
+import { stripId }              from '../../providers/mongodb.provider.js'
 import { toNum }                 from '../../services/format.util.js'
 import { logger }                from '../../services/logger.service.js'
 
@@ -58,7 +57,9 @@ const _deps = {
     legsFor:        (portfolioId, userId)      => entityRepo.listByPortfolio(portfolioId, userId),
     getEntity:      (id)                       => entityRepo.getById(id),
     patchEntity:    (id, fields)               => entityRepo.patch(id, fields),
-    deleteEntity:   (id, userId)               => _deleteAdoptedEntity(id, userId),
+    // Adopted legs ONLY — the guard rides the query rather than sitting in a check above it. See
+    // entityRepo.deleteGuarded and removeHolding for why this path may bypass the delete-lock.
+    deleteEntity:   (id, userId)               => entityRepo.deleteGuarded(id, userId, { adopted: true }),
     setMandate:     (pid, userId, mandate)     => portfolioChatService.setMandate(pid, userId, mandate),
     setLifecycle:   (pid, userId, patch)       => portfolioChatService.setPortfolioLifecycle(pid, userId, patch),
     fingerprint:    (pid, userId, reason)      => portfolioChatService.captureFingerprint(pid, userId, reason),
@@ -599,13 +600,6 @@ export async function removeHolding({ id, userId }) {
         logger.error(LOG, `removeHolding failed (${id})`, err)
         return { ok: false, error: err }
     }
-}
-
-/** The guarded delete behind `_deps.deleteEntity` — adopted legs only (see removeHolding). */
-async function _deleteAdoptedEntity(id, userId) {
-    const db  = await getDb()
-    const res = await db.collection(ENTITIES).deleteOne({ id, userId, adopted: true })
-    return res.deletedCount > 0
 }
 
 export const adoptBookService = {

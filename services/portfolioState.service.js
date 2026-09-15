@@ -6,7 +6,8 @@ import { getEarningsCalendarRaw, getSectorRaw } from '../providers/fmp.provider.
 import { createTtlCache }                    from './ttlCache.util.js'
 import { logger }                            from './logger.service.js'
 import { resolveMode }                       from './venue.resolve.service.js'
-import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames, BROKER_LABELS } from '../api/portfolio/portfolioMode.util.js'
+import { earningsWindow, earningsBySymbol }  from './earningsWindow.util.js'
+import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames, BROKER_LABELS } from './portfolioMode.util.js'
 
 const LOG = '[portfolioState]'
 
@@ -342,22 +343,15 @@ export async function computePortfolioState(portfolioId, userId) {
                           : null,
     })).sort((a, b) => (b.targetWeight ?? 0) - (a.targetWeight ?? 0))
 
-    // ── Upcoming earnings for all tickers (next 30 days) ──────────────────────
-    const now  = new Date()
-    const from = now.toISOString().slice(0, 10)
-    const to   = new Date(now.getTime() + 30 * 86400000).toISOString().slice(0, 10)
-
+    // ── Upcoming earnings for all tickers ─────────────────────────────────────
+    // The window and the by-symbol indexing are shared with upcomingEvents (earningsWindow.util);
+    // the FETCH is not, because the failure means different things there — see that file's header.
+    // Here it is swallowed: a holding's row is worth rendering without its earnings date.
     try {
-        const rows = await getEarningsCalendarRaw(from, to, tickers)
-        const earningsMap = {}
-        for (const r of rows) {
-            const sym = String(r.symbol ?? '').toUpperCase()
-            if (sym && !earningsMap[sym]) {
-                earningsMap[sym] = { date: r.date, epsEstimate: r.epsEstimated ?? null }
-            }
-        }
+        const { from, to } = earningsWindow()
+        const bySymbol = earningsBySymbol(await getEarningsCalendarRaw(from, to, tickers))
         for (const s of allStates) {
-            s.upcomingEarnings = earningsMap[String(s.asset ?? '').toUpperCase()] ?? null
+            s.upcomingEarnings = bySymbol.get(String(s.asset ?? '').toUpperCase()) ?? null
         }
     } catch (err) {
         logger.warn(LOG, 'earnings fetch failed', err.message)

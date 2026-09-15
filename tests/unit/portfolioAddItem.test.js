@@ -7,14 +7,19 @@ import { _addItem } from '../../api/portfolio/portfolioRebalance.service.js'
 // order the user confirms. These cover the sizing (weight → share count off the book's value),
 // the immediate/market path, the conditional-add arm, and the manual (broker-less) branch.
 
-// Fake db: the sibling holdings for find().toArray(), recording updateOne calls.
+// Fake db, in the driver's shape: the sibling holdings come back through find().project().toArray(),
+// which is what listPortfolioItems calls — _addItem reads the book through that one owner-scoped
+// query rather than writing the find() again. updateOne records, and answers with a result, because
+// the by-id writes go through entityRepo and it reads modifiedCount.
 function fakeDb(siblings = []) {
     const updates = []
+    const queries = []
     return {
         _updates: updates,
+        _queries: queries,
         collection: () => ({
-            find:      () => ({ toArray: async () => siblings }),
-            updateOne: async (q, u) => { updates.push({ q, u }) },
+            find: (filter) => { queries.push(filter); return { project: () => ({ toArray: async () => siblings }) } },
+            updateOne: async (q, u) => { updates.push({ q, u }); return { modifiedCount: 1 } },
         }),
     }
 }
@@ -226,4 +231,15 @@ test('a failed save reports save_failed', async () => {
     const r = await _addItem(fakeDb([sibling()]), 'p1', 'u1', SPEC, 100000,
         { saveItem: fakeSave({ ok: false }), updateItem: fakeUpdate(), quote: quoteAt(200) })
     assert.deepEqual(r, { ok: false, reason: 'save_failed' })
+})
+
+// The sibling read goes through listPortfolioItems — the one query that reads a book's holdings and
+// the one place ownership is enforced on them. Written inline here it was a second idea of what
+// `{ portfolioId, userId }` means, and an add is exactly where getting that wrong would inherit
+// another user's execution binding (accounts, mainAccountId, broker) onto a brand-new holding.
+test('the sibling read is scoped to BOTH the book and the owner', async () => {
+    const db = fakeDb([sibling()])
+    await _addItem(db, 'p1', 'u1', SPEC, 100000,
+        { saveItem: fakeSave(), updateItem: fakeUpdate(), quote: quoteAt(200) })
+    assert.deepEqual(db._queries[0], { portfolioId: 'p1', userId: 'u1' })
 })

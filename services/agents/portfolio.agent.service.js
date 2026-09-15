@@ -7,7 +7,7 @@ import { getQuote, getQuotes, getRiskMetrics, getCorrelations, getNumericQuote, 
 import { getFundamentals, getEarningsCalendar, getEarnings, getMacroSnapshot } from '../../providers/fmp.provider.js'
 import { getSecFilings } from '../../providers/sec.provider.js'
 import { cleanConviction } from '../conviction.util.js'
-import { formatWorkspaceLine } from '../../api/portfolio/portfolioMode.util.js'
+import { formatWorkspaceLine } from '../portfolioMode.util.js'
 import { logger }         from '../logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'

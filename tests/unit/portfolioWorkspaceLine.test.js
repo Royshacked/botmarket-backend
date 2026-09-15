@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatWorkspaceLine } from '../../api/portfolio/portfolioMode.util.js'
+import { formatWorkspaceLine } from '../../services/portfolioMode.util.js'
 
 // formatWorkspaceLine renders the one-line "where this book trades" header injected into
 // Atlas's position/P&L context so the agent knows the workspace mode + broker + account(s).

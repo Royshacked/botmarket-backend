@@ -1,12 +1,16 @@
-import { paperBrokerService } from '../broker/paperBroker.service.js'
-import { resolveMode } from '../../services/venue.resolve.service.js'
+import { paperBrokerService } from '../api/broker/paperBroker.service.js'
+import { resolveMode } from './venue.resolve.service.js'
 
 // ── Workspace mode / broker / account derivation ────────────────────────────────
-// Shared by the review-notification path (portfolioChat.service) and the portfolio
-// state snapshot (portfolioState.service) so Atlas is told WHERE a book trades —
-// paper / live / manual, which broker, and which account(s). Pure logic mirrors the
-// frontend tradeIdea.utils.ideaWorkspace deriver; extracted here to avoid a circular
-// import between portfolioChat and portfolioState.
+// Shared by the review-notification path (api/portfolio/portfolioChat.service), the portfolio state
+// snapshot (portfolioState.service) and Atlas's own workspace line (agents/portfolio.agent.service)
+// so a book is described the same way wherever it is described — paper / live / manual, which
+// broker, which account(s). Pure logic mirrors the frontend tradeIdea.utils.ideaWorkspace deriver.
+//
+// It lived under api/portfolio, carved out to break a circular import between portfolioChat and
+// portfolioState. That reason still holds and is better served here: two of its three consumers are
+// in services/, it holds no route concern of any kind, and a util under api/ that services/ has to
+// import is an arrow pointing the wrong way.
 
 // Display names for the live brokers (raw keys are lowercase).
 export const BROKER_LABELS = { ctrader: 'cTrader', ibkr: 'IBKR' }

@@ -12,7 +12,7 @@ import { coverageService } from '../analyst/coverage.service.js'
 import { tiltService } from '../strategy/tilt.service.js'
 // Mode/account helpers live in a shared util (portfolioState needs them too, and importing
 // them from here would be circular).
-import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames } from './portfolioMode.util.js'
+import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames } from '../../services/portfolioMode.util.js'
 
 const LOG        = '[portfolioChat]'
 // Exported: tradeCapture reads a portfolio's chat doc to stamp origin metadata onto a trade,

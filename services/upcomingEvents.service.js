@@ -15,20 +15,21 @@
  * they come from different providers on different cadences, and only earnings is joinable to a
  * symbol at all — a rate decision is everyone's event.
  *
- * NOTE for later: the earnings-by-symbol join now exists here AND in portfolioState.service.js.
- * Extracting a shared `earningsBySymbol(symbols, {from,to})` is the right consolidation; it is
- * deliberately not done in the same change that introduces the second caller.
+ * The overlap with portfolioState.service was consolidated in §4, and to LESS than the note that
+ * stood here asked for: the WINDOW (today + 30 days, as YYYY-MM-DD) is shared via
+ * earningsWindow.util, and so is the by-symbol indexing that file needs. The FETCH stays here,
+ * because a failed read means something different on each side — this answers "anything coming up?"
+ * and has to name what it could not read in `unavailable`, which a never-throws wrapper would
+ * delete. See that file's header.
  */
 
 import { logger } from './logger.service.js'
 import { getEarningsCalendarRaw } from '../providers/fmp.provider.js'
+import { earningsWindow } from './earningsWindow.util.js'
 import { calendarService } from '../api/calendar/calendar.service.js'
 import { listWatchedItems } from './watchlist.service.js'
 
 const LOG = '[upcomingEvents]'
-const DEFAULT_WINDOW_DAYS = 30
-
-const _iso = (ms) => new Date(ms).toISOString().slice(0, 10)
 
 /**
  * Every name this user has a stake in: the symbol on a call/setup/coverage row, plus the holdings
@@ -59,8 +60,11 @@ export async function getUpcomingEvents(userId, { scope = 'mine', from = null, t
         now = Date.now(),
     } = deps
 
-    const f = from ?? _iso(now)
-    const t = to ?? _iso(now + DEFAULT_WINDOW_DAYS * 864e5)
+    // The default window is the shared one — today + 30 days — so "upcoming" means the same thing
+    // here as it does on a holding's earnings flag. An explicit from/to still wins.
+    const w = earningsWindow(now)
+    const f = from ?? w.from
+    const t = to   ?? w.to
     const mine = scope !== 'market'
 
     // Resolve the user's names FIRST when scoping to them: with an empty symbol set the calendar

@@ -29,7 +29,7 @@ import { logger }                   from '../../services/logger.service.js'
 import { ideaService }              from '../trade-ideas/tradeIdeas.service.js'
 import { brokerService }            from '../broker/broker.service.js'
 import { portfolioChatService }     from './portfolioChat.service.js'
-import { invalidatePortfolioState, computePortfolioState } from '../../services/portfolioState.service.js'
+import { invalidatePortfolioState, computePortfolioState, listPortfolioItems } from '../../services/portfolioState.service.js'
 import { getNumericQuote }          from '../../providers/yahoofinance.provider.js'
 import { notifyManualExit, notifyManualEntry, exitLegFromIdea, entryLegFromIdea } from '../../services/manualNotify.service.js'
 import { ENTITIES }               from '../../services/entity/entityCollection.js'
@@ -52,9 +52,9 @@ const LIVE_SET       = new Set(LIVE_POSITION)
 // The entity facade, built over the db THIS CALL was handed rather than the module singleton — every
 // function here takes its `db` (the queue replays them with one, and the tests hand them a fake), so
 // a repo that reached for getDb() would send half of one trim to a different database. Same shape
-// the desks use. Only the leg-resize goes through it today; the rest of this file's writes are still
-// inline, which is a separate move.
-const _legs = (db) => makeEntityRepo({ coll: async () => db.collection(COLLECTION) })
+// the desks use. Book-SCOPED reads go through listPortfolioItems instead: that is the one query that
+// reads a book’s holdings and the one place ownership is enforced on them.
+const _repo = (db) => makeEntityRepo({ coll: async () => db.collection(COLLECTION) })
 
 /**
  * The hours gate, in the shape this file needs it.
@@ -103,6 +103,8 @@ const _specAsset = change => change.item?.asset ?? null
  * separately: one read per request now, taken once and handed down.
  */
 async function _portfolioName(db, portfolioId, userId) {
+    // A findOne rather than listPortfolioItems: the name is on every row, so reading the whole book
+    // to take the first one's would be a page of documents for one string.
     const sib = await db.collection(COLLECTION).findOne({ portfolioId, userId }, { projection: { portfolioName: 1 } })
     return sib?.portfolioName ?? null
 }
@@ -121,9 +123,7 @@ async function _postReceipt(portfolioId, userId, results, portfolioName) {
     try {
         const db   = await getDb()
         const ids  = [...new Set(results.map(r => r.itemId).filter(Boolean))]
-        const docs = ids.length
-            ? await db.collection(COLLECTION).find({ id: { $in: ids } }, { projection: { id: 1, asset: 1 } }).toArray()
-            : []
+        const docs = await _repo(db).listByIds(ids, { id: 1, asset: 1 })
         const assetById = new Map(docs.map(d => [d.id, d.asset]))
 
         await notifyRebalanceApplied(userId, {
@@ -251,7 +251,7 @@ async function _applyOne(portfolioId, userId, change, bookValue = null) {
             return ideaService.updateIdea(itemId, change.patch ?? {}, userId)
 
         case 'remove_item': {
-            const item = await db.collection(COLLECTION).findOne({ id: itemId }, { projection: { status: 1 } })
+            const item = await _repo(db).getById(itemId)
             // TWO refusals, not one. Both are past entry and neither may be deleted out from under a
             // broker, but they need different answers: a LIVE holding is closed with exit_item, while
             // a `hit` one has an order placed or awaiting confirm and nothing held — exit_item would
@@ -293,7 +293,7 @@ async function _applyOne(portfolioId, userId, change, bookValue = null) {
  * @returns {Promise<{item, legs}|{refusal}>}  `refusal` is the caller's own return value
  */
 async function _positionedItem(db, itemId, userId, { requirePastEntry = false } = {}) {
-    const item = await db.collection(COLLECTION).findOne({ id: itemId })
+    const item = await _repo(db).getById(itemId)
     if (!item) return { refusal: { ok: false, reason: 'not_found' } }
     if (item.userId && item.userId !== userId) return { refusal: { ok: false, reason: 'forbidden' } }
     // Only the scale-in asks: growing a holding that is not on is add_item's job, not this one's.
@@ -322,7 +322,7 @@ export async function _exitItem(db, itemId, userId, reason, gate = _gate) {
     // Manual: can't place a broker close — hand the exit leg back so applyRebalance posts
     // ONE Fill card; the user confirms the real exit price (confirmManualExit finalizes it).
     if (_manualLeg(legs)) {
-        await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingCloseReason: reason } })
+        await _repo(db).patch(itemId, { pendingCloseReason: reason })
         return { ok: true, manual: true, manualExitLeg: exitLegFromIdea(item) }
     }
 
@@ -336,7 +336,7 @@ export async function _exitItem(db, itemId, userId, reason, gate = _gate) {
         await brokerService.closePosition(leg.broker, userId, leg.accountId, leg.positionId)
         closed++
     }
-    await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingCloseReason: reason } })
+    await _repo(db).patch(itemId, { pendingCloseReason: reason })
     // Same unnamed-refusal shape as the scale-in below: every leg sits at a broker that cannot close
     // a position programmatically (IBKR today), so nothing was closed and the user must be told WHY
     // rather than handed a bare "couldn't be applied".
@@ -369,7 +369,7 @@ export async function _trimItem(db, itemId, userId, change, gate = _gate, broker
         const openQty = manualLeg.quantity ?? item.quantity ?? 0
         const trimQty = Math.floor(openQty * f)
         if (trimQty <= 0) return { ok: false, reason: 'trim_too_small' }
-        await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingCloseReason: 'trim', pendingTrimQty: trimQty } })
+        await _repo(db).patch(itemId, { pendingCloseReason: 'trim', pendingTrimQty: trimQty })
         return { ok: true, manual: true, manualExitLeg: {
             ideaId:       item.id,
             asset:        item.asset,
@@ -402,7 +402,7 @@ export async function _trimItem(db, itemId, userId, change, gate = _gate, broker
         // writer simply matches nothing. The write itself is entityRepo's, shared with the
         // reconciler; only the decision to yield is ours.
         const before = Number(leg.quantity) || 0
-        const wrote  = await _legs(db).setLegQuantity(itemId, {
+        const wrote  = await _repo(db).setLegQuantity(itemId, {
             accountId:  leg.accountId,
             positionId: leg.positionId,
             quantity:   Math.max(0, before - qty),
@@ -418,7 +418,7 @@ export async function _trimItem(db, itemId, userId, change, gate = _gate, broker
     if (trimmed) await _syncItemQuantity(db, itemId)
 
     if (change.targetAllocationRatio != null && Number.isFinite(Number(change.targetAllocationRatio))) {
-        await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { allocationRatio: Number(change.targetAllocationRatio) } })
+        await _repo(db).patch(itemId, { allocationRatio: Number(change.targetAllocationRatio) })
     }
     // Every leg rounded to nothing is a REFUSAL, not a quiet success. `floor(qty * fraction)` is 0
     // for any fraction under 1/qty — a 12% trim of an 8-share leg — and reporting ok:false with no
@@ -463,9 +463,9 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
     // Inherit the book's identity + execution binding. Read the whole sibling set rather than one
     // doc: `broker` is what tells us this is a manual book, and one arbitrary sibling could be the
     // wrong partition of a forked (multi-broker) book.
-    const siblings = await db.collection(COLLECTION)
-        .find({ portfolioId, userId }, { projection: { asset: 1, direction: 1, status: 1, portfolioName: 1, accounts: 1, mainAccountId: 1, broker: 1 } })
-        .toArray()
+    const siblings = await listPortfolioItems(portfolioId, userId, {
+        db, projection: { asset: 1, direction: 1, status: 1, portfolioName: 1, accounts: 1, mainAccountId: 1, broker: 1 },
+    })
     const base     = siblings[0] ?? null
     const isManual = siblings.some(s => isSelfExecuted(s.broker))
 
@@ -496,10 +496,7 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
     if (isManual) {
         // A manual book is a single manual partition, so there is exactly one leg to report.
         const item = items[0]
-        await db.collection(COLLECTION).updateOne(
-            { id: item.id },
-            { $set: { status: 'hit', entryTriggeredAt: Date.now(), orderState: 'awaiting_manual_fill' } },
-        )
+        await _repo(db).patch(item.id, { status: 'hit', entryTriggeredAt: Date.now(), orderState: 'awaiting_manual_fill' })
         logger.info(LOG, 'new holding awaiting manual fill', { itemId: item.id, asset: item.asset, quantity: item.quantity ?? null })
         return { ok: true, itemId: item.id, manual: true, unsized: quantity == null && item.quantity == null, manualEntryLeg: entryLegFromIdea(item) }
     }
@@ -568,10 +565,7 @@ function _sameHolding(held, spec) {
  */
 async function _syncItemQuantity(db, itemId) {
     try {
-        const item = await db.collection(COLLECTION).findOne(
-            { id: itemId },
-            { projection: { brokerOrders: 1, mainAccountId: 1 } },
-        )
+        const item = await _repo(db).getById(itemId)
         const legs = (item?.brokerOrders ?? []).filter(b => b.positionId != null)
         if (!legs.length) return
         // No mainAccountId (a book saved before it existed) → the first linked leg's account speaks
@@ -580,7 +574,7 @@ async function _syncItemQuantity(db, itemId) {
         const mine  = legs.filter(l => String(l.accountId) === acct)
         const total = (mine.length ? mine : legs).reduce((s, l) => s + (Number(l.quantity) || 0), 0)
         if (!(total > 0)) return
-        await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { quantity: total } })
+        await _repo(db).patch(itemId, { quantity: total })
     } catch (err) {
         // Advisory: the legs are the load-bearing record, and this is the holding's display size.
         logger.warn(LOG, `quantity resync failed for ${itemId}`, err.message)
@@ -668,7 +662,7 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
     if (manualLeg) {
         const addQty = Math.floor((manualLeg.quantity ?? item.quantity ?? 0) * f)
         if (addQty <= 0) return { ok: false, reason: 'add_too_small' }
-        await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { pendingAddQty: addQty } })
+        await _repo(db).patch(itemId, { pendingAddQty: addQty })
         return { ok: true, manual: true, manualEntryLeg: {
             ideaId:    item.id,
             asset:     item.asset,
@@ -725,7 +719,7 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
         // Link the new legs so the reconciler backfills their positionId on fill (matched by orderId),
         // and make sure we're listening for those fills.
         if (newLegs.length) {
-            await db.collection(COLLECTION).updateOne({ id: itemId }, { $push: { brokerOrders: { $each: newLegs } } })
+            await _repo(db).update(itemId, { $push: { brokerOrders: { $each: newLegs } } })
             for (const l of newLegs) broker.startExecutionFeed?.(l.broker, userId, l.accountId)?.catch?.(() => {})
         }
         // A netted add created no leg — it made one bigger. Raise its recorded size, or every later
@@ -734,7 +728,7 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
         // whoever wrote in between (a reconciler stamping the broker's own volume) knows better than
         // this arithmetic does.
         for (const leg of grown) {
-            const wrote = await _legs(db).setLegQuantity(itemId, {
+            const wrote = await _repo(db).setLegQuantity(itemId, {
                 accountId:  leg.accountId,
                 positionId: leg.positionId,
                 quantity:   leg.quantity,
@@ -745,7 +739,7 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
         await _syncItemQuantity(db, itemId)
         // Record the intended new weight (advisory) only when exposure actually changed.
         if (change.targetAllocationRatio != null && Number.isFinite(Number(change.targetAllocationRatio))) {
-            await db.collection(COLLECTION).updateOne({ id: itemId }, { $set: { allocationRatio: Number(change.targetAllocationRatio) } })
+            await _repo(db).patch(itemId, { allocationRatio: Number(change.targetAllocationRatio) })
         }
     }
     // Same refusal as trim: a scale-in too small to round up to one share did not happen, and must
@@ -765,16 +759,14 @@ export async function _addToItem(db, itemId, userId, change, broker = brokerServ
 export async function snapshotConvictions(portfolioId, userId) {
     try {
         const db = await getDb()
-        const holdings = await db.collection(COLLECTION)
-            .find({ portfolioId, userId }, { projection: { id: 1, conviction: 1 } })
-            .toArray()
-        const now = Date.now()
+        const holdings = await listPortfolioItems(portfolioId, userId, { db, projection: { id: 1, conviction: 1 } })
+        const now  = Date.now()
+        const repo = _repo(db)
         for (const h of holdings) {
             if (!h.conviction) continue
-            await db.collection(COLLECTION).updateOne(
-                { id: h.id },
-                { $push: { conviction_history: { $each: [{ at: now, level: h.conviction.level ?? null, score: h.conviction.score ?? null }], $slice: -12 } } },
-            )
+            await repo.update(h.id, {
+                $push: { conviction_history: { $each: [{ at: now, level: h.conviction.level ?? null, score: h.conviction.score ?? null }], $slice: -12 } },
+            })
         }
         return { ok: true }
     } catch (err) {
