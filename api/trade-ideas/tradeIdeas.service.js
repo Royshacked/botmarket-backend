@@ -56,8 +56,7 @@ export const ideaService = {
     saveIdea,
     saveBatchIdeas,
     getIdeas,
-    getAssetClassMap,
-    getCallPositionMap,
+    enrichPositions: _enrichPositions,
     getIdeaById,
     deleteIdea,
     updateIdea,
@@ -461,6 +460,46 @@ async function getCallPositionMap(userId) {
         logger.warn(LOG, 'getCallPositionMap failed', err.message)
         return {}
     }
+}
+
+/**
+ * WHAT THE TRADE TIER KNOWS ABOUT A BROKER'S POSITIONS.
+ *
+ * A broker hands back positions; it does not know which of them the app authored, what asset class
+ * the author declared, or which desk owns them. Two things the client needs are answers only this
+ * tier can give:
+ *
+ *   • `assetClass` — the AUTHORED one, so the client's market-hours gate is exact rather than
+ *     guessing from the symbol, which cannot tell a forex pair from a stock. Null when no idea
+ *     matches, which is the signal to fall back to the heuristic.
+ *   • `callId` — a call's execution is hidden from the ideas list, so the Positions tab could not
+ *     resolve the owner of a call-originated row and clicking it was a dead no-op.
+ *
+ * This lived in broker.controller, which §1 flagged as a cross-feature enrichment with no home and
+ * handed to a later section to place. It is NOT the portfolio's: computePortfolioState does its own
+ * position→holding join off brokerOrders and wants neither field. It is the trade tier's, because
+ * both maps are reads of this tier's own documents — so the join belongs beside them, where it can
+ * be tested without a controller and where a second caller (a mobile client, a report) can reach it.
+ *
+ * `broker` is the venue whose positions these are; the call map is keyed by broker:account:position.
+ * Pure apart from the two reads, which are injectable (and exported under `_enrichPositions`) so the
+ * join can be asserted without a database. Never throws — each map degrades to {}, and the positions
+ * are the answer here: the enrichment is a bonus that must not fail the call.
+ */
+export async function _enrichPositions(userId, broker, positions, deps = {}) {
+    const { assetClasses = getAssetClassMap, callPositions = getCallPositionMap } = deps
+    const rows = Array.isArray(positions) ? positions : []
+    // An empty list costs no reads: there is nothing to join to.
+    if (!rows.length) return []
+    const [classMap, callMap] = await Promise.all([
+        assetClasses(userId),
+        callPositions(userId),
+    ])
+    return rows.map(p => ({
+        ...p,
+        assetClass: p.assetClass ?? (p.symbol ? classMap[normSymbol(p.symbol)] ?? null : null),
+        callId:     callMap[`${broker}:${p.accountId}:${p.id}`] ?? null,
+    }))
 }
 
 async function deleteIdea(id, userId) {

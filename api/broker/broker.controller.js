@@ -17,7 +17,6 @@
 import jwt               from 'jsonwebtoken'
 import { brokerService } from './broker.service.js'
 import { ideaService }   from '../trade-ideas/tradeIdeas.service.js'
-import { normSymbol }    from '../../services/brokerSymbol.service.js'
 import { logger }        from '../../services/logger.service.js'
 import { makeHandle }    from '../_shared/handle.util.js'
 import { config } from '../../services/config.js'
@@ -118,23 +117,12 @@ export const getAccount = _handle('getAccount', async (req, res) => {
 })
 
 export const getPositions = _handle('getPositions', async (req, res) => {
-    // Stamp each position with the idea-authored asset_class (when one exists for that symbol) so
-    // the client's market-hours gate is exact rather than relying on the symbol heuristic — which
-    // can't tell a forex pair from a stock. Falls back to null (→ heuristic) when no idea matches.
-    // Also stamp the owning callId for call-originated positions (whose execution idea is hidden
-    // from the ideas list) so the client can open the Call pop-out instead of a dead click. Keyed
-    // broker:accountId:positionId — `type` is this broker, matching brokerOrders.
-    const [positions, classMap, callMap] = await Promise.all([
-        brokerService.getPositions(req.params.type, req.user._id),
-        ideaService.getAssetClassMap(req.user._id),
-        ideaService.getCallPositionMap(req.user._id),
-    ])
-    const enriched = positions.map(p => ({
-        ...p,
-        assetClass: p.assetClass ?? (p.symbol ? classMap[normSymbol(p.symbol)] ?? null : null),
-        callId: callMap[`${req.params.type}:${p.accountId}:${p.id}`] ?? null,
-    }))
-    res.json({ positions: enriched })
+    // The broker answers with positions; what the app AUTHORED about them — the declared asset class
+    // and the owning call — is the trade tier's to add, and does it (ideaService.enrichPositions).
+    // This join used to be written out here, which §1 flagged as a cross-feature enrichment sitting
+    // in a controller with no home.
+    const positions = await brokerService.getPositions(req.params.type, req.user._id)
+    res.json({ positions: await ideaService.enrichPositions(req.user._id, req.params.type, positions) })
 })
 
 // Close an open position in full. A position can live on any of the user's trading accounts (an
