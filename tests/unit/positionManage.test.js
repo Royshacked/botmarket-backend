@@ -116,3 +116,34 @@ test('no linkage at a real venue is still the refusal it always was', async () =
     const res  = await applyManage({ entity: bare, holder: bare, verb: 'exit_now', proposal: {}, userId: 'u1', deps })
     assert.deepEqual(res, { ok: false, reason: 'no_position_link' })
 })
+
+// ── The basis boundary ────────────────────────────────────────────────────────
+// An aliased index CFD (cTrader's US100 for NQ) is priced one futures basis away from the level the
+// user authored; the holder carries that offset from the fork (`basisOffset`). The ORDER must carry
+// the shifted level and the RECORD the authored one — exactly what buildExitOrder does for a
+// placement. move_stop / let_run went to amendOrder with the raw level.
+
+const BASIS = { ...LINKED, basisOffset: -227.5 }
+
+test('move_stop amends at the SHIFTED level and records the AUTHORED one', async () => {
+    const { called, deps } = spyDeps()
+    const r = await applyManage({ entity: BASIS, holder: BASIS, verb: 'move_stop', proposal: { new_stop: 20000 }, userId: 'u1', deps })
+    assert.equal(r.ok, true)
+    const amend = called.find(c => c.name === 'amendOrder')
+    assert.deepEqual(amend.args[4], { stopPrice: 19772.5 }, 'broker sees 20000 + (−227.5)')
+    const sync = called.find(c => c.name === 'syncExit')
+    assert.equal(sync.args[3].price, 20000, 'our record keeps the authored level')
+})
+
+test('let_run with a new target shifts the limit the same way', async () => {
+    const holder = { ...BASIS, exitOrders: [{ leg: 'tp', status: 'working', orderId: 'to1', accountId: 'a1', price: 20500 }] }
+    const { called, deps } = spyDeps()
+    await applyManage({ entity: holder, holder, verb: 'let_run', proposal: { new_tp: 21000 }, userId: 'u1', deps })
+    assert.deepEqual(called.find(c => c.name === 'amendOrder').args[4], { limitPrice: 20772.5 })
+})
+
+test('no basisOffset (every non-index instrument) is the identity — nothing changes for them', async () => {
+    const { called, deps } = spyDeps()
+    await applyManage({ entity: LINKED, holder: LINKED, verb: 'move_stop', proposal: { new_stop: 115 }, userId: 'u1', deps })
+    assert.deepEqual(called.find(c => c.name === 'amendOrder').args[4], { stopPrice: 115 })
+})

@@ -4,6 +4,7 @@ import { brokerService } from '../api/broker/broker.service.js'
 import { deferIfClosed } from './pendingAction/executionGate.js'
 import { kindForDoc } from './entity/envelope.js'
 import { isSelfExecuted } from './venue.resolve.service.js'
+import { applyOffset } from '../api/broker/brokerPrice.service.js'
 import { logger } from './logger.service.js'
 
 /**
@@ -152,7 +153,13 @@ export async function executeManage(verb, proposal, holder, link, open, userId, 
             return {}
         }
         const level  = verb === 'move_stop' ? Number(proposal.new_stop) : Number(proposal.new_tp)
-        const fields = verb === 'move_stop' ? { stopPrice: level } : { limitPrice: level }
+        // The ORDER carries the level shifted into the broker's price space by the holder's fork-
+        // measured basisOffset (0 everywhere but an aliased index CFD); the RECORD keeps the authored
+        // level, which is what the app shows. Same boundary rule as buildExitOrder — this used to
+        // send the raw level, so a Talos "move the stop to 20000" on cTrader's US100 rested ~one
+        // futures basis away from 20000.
+        const brokerLevel = applyOffset(level, holder?.basisOffset)
+        const fields = verb === 'move_stop' ? { stopPrice: brokerLevel } : { limitPrice: brokerLevel }
         const res    = await deps.amendOrder(broker, userId, accountId, ord.orderId, fields)
         await deps.syncExit(holder.id, accountId, leg, { price: level, orderId: res?.orderId ?? null })
         return {}

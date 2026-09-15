@@ -1,13 +1,21 @@
 import { brokerService }        from '../broker/broker.service.js'
 import { logger }                from '../../services/logger.service.js'
+import { buildExitOrder, exitOrderRecord } from '../../monitoring/exitOrders.util.js'
+import { round }                from '../../monitoring/monitorUtils.js'
 
 const LOG = '[exitOrders]'
 
 /**
  * Arm an idea's exits against its ALREADY-OPEN position(s) — used when a stop/TP is
- * added or edited while in a position. Each bare-price level is placed as a cTrader
- * CLOSING order (LIMIT for tp / STOP for stop, opposite side, tagged with positionId).
- * Any prior working exit orders are cancelled first. Non-price exits stay on the monitor.
+ * added or edited while in a position. Each bare-price level is placed as a CLOSING order
+ * (LIMIT for tp / STOP for stop, opposite side, tagged with positionId). Any prior working
+ * exit orders are cancelled first. Non-price exits stay on the monitor.
+ *
+ * The order is built by `buildExitOrder` — the same constructor the reconciler's placement path
+ * uses — so the level is shifted into the broker's price space by the idea's `basisOffset`
+ * exactly once, in one place. This used to build the payload inline with the RAW level: a stop
+ * edited while in position on a cTrader index CFD rested ~one futures basis (~227 pts on NQ/US100)
+ * away from where the same stop set at placement would have.
  */
 export async function armExitsInPosition(idea, route) {
     const totalQty       = Number(idea.quantity) || 0
@@ -43,28 +51,21 @@ export async function armExitsInPosition(idea, route) {
         const entryQty = Number(link.quantity) || totalQty
         const factor   = (entryQty > 0 && totalQty > 0) ? entryQty / totalQty : 1
         for (const spec of legSpecs) {
-            const rawLevels = (spec.levels ?? []).map(l => ({ level: l.level, quantity: Math.round((Number(l.quantity) || 0) * factor * 10000) / 10000 }))
+            const rawLevels = (spec.levels ?? []).map(l => ({ level: l.level, quantity: round((Number(l.quantity) || 0) * factor) }))
             const levels = [...new Map(rawLevels.map(l => [l.level, l])).values()]
             for (const lvl of levels) {
                 if (!(lvl.quantity > 0)) continue
-                const order = {
-                    symbol:     idea.brokerSymbol ?? idea.asset,
-                    direction:  idea.direction === 'long' ? 'short' : 'long',
-                    quantity:   lvl.quantity,
-                    type:       spec.type,
-                    positionId: link.positionId,
-                    ...(referenceQuote != null && { referenceQuote }),
-                }
-                if (spec.leg === 'tp') order.limitPrice = lvl.level
-                else                   order.stopPrice  = lvl.level
+                const order = buildExitOrder(idea, {
+                    type: spec.leg, level: lvl.level, qty: lvl.quantity, positionId: link.positionId, referenceQuote,
+                })
                 try {
                     const res = await brokerService.placeOrder(link.broker, idea.userId, link.accountId, order)
-                    placed.push({
+                    // The RECORD keeps the authored level (what the app displays); only the order carried the shift.
+                    placed.push(exitOrderRecord({
                         accountId: String(link.accountId), broker: link.broker, leg: spec.leg,
                         type: spec.type, price: lvl.level, quantity: lvl.quantity, positionId: link.positionId,
                         orderId: res?.orderId != null ? String(res.orderId) : null,
-                        status: 'working', placedAt: Date.now(),
-                    })
+                    }))
                     logger.info(LOG, `In-position exit placed for idea ${idea.id}: ${spec.leg} ${lvl.quantity} @ ${lvl.level} (pos ${link.positionId})`)
                 } catch (err) {
                     logger.error(LOG, `In-position exit place failed (idea ${idea.id}, ${spec.leg} @ ${lvl.level}): ${err.message}`)
