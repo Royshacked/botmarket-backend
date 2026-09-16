@@ -14,9 +14,16 @@ import { runHouseScan }         from '../../services/houseScan.service.js'
 import { streamAgentResponse, sseAgentCallbacks }  from '../_shared/sse.util.js'
 import { parseChatMessages }    from '../_shared/parse.util.js'
 import { sendReason }           from '../_shared/reason.util.js'
+import { makeHandle }           from '../_shared/handle.util.js'
 import { logger }               from '../../services/logger.service.js'
 
 const LOG = '[strategyCtrl]'
+// Every handler below rides makeHandle. None of them caught before — tilt.service answers
+// `{ ok, reason }` for everything it can foresee — so the wrapper changes no answer the client
+// sees; it is the log line and the route to the global handler for the throw nobody foresaw, which
+// Express 4 would otherwise leave as a request that never ends. (streamStrategy is
+// streamAgentResponse's, which has its own error path on an open SSE stream.)
+const _handle = makeHandle(LOG)
 
 // Streaming top-down chat → emits a <tilt> draft (returned for preview; POST /tilt publishes it).
 export async function streamStrategy(req, res) {
@@ -75,21 +82,21 @@ function _fail(res, result, fallback = 'Request failed') {
 }
 
 /** The house view in force. Null is a legitimate answer — the desk may simply not have published yet. */
-export async function getCurrentTilt(req, res) {
+export const getCurrentTilt = _handle('getCurrentTilt', async (req, res) => {
     const doc = await tiltService.getCurrentTilt(req.query?.benchmark || 'SPX')
     res.json(doc)
-}
+})
 
-export async function listTilts(req, res) {
+export const listTilts = _handle('listTilts', async (req, res) => {
     const limit = Math.min(Number(req.query?.limit) || 24, 100)
     res.json(await tiltService.listTilts({ benchmark: req.query?.benchmark || 'SPX', limit }))
-}
+})
 
-export async function getTilt(req, res) {
+export const getTilt = _handle('getTilt', async (req, res) => {
     const result = await tiltService.getTiltById(req.params.id)
     if (!result.ok) return _fail(res, result, 'Could not read the view')
     res.json(result.doc)
-}
+})
 
 /**
  * Publish a new house view, superseding the previous one.
@@ -98,7 +105,7 @@ export async function getTilt(req, res) {
  * reaffirming republish tells nobody anything. Notification is fire-and-forget: the view is already
  * stored by then, and a delivery failure must not report the publish as failed.
  */
-export async function publishTilt(req, res) {
+export const publishTilt = _handle('publishTilt', async (req, res) => {
     const benchmark = req.body?.benchmark || 'SPX'
     const previous  = await tiltService.getCurrentTilt(benchmark)
 
@@ -116,18 +123,18 @@ export async function publishTilt(req, res) {
 
     logger.info(LOG, 'view published', { id: result.doc.id, rows: result.doc.tilts.length, changed: changes.length })
     res.status(201).json({ ...result.doc, changed: changes })
-}
+})
 
 /** Edit a stored view in place — a correction, not a new publication (no supersede, no card). */
-export async function updateTilt(req, res) {
+export const updateTilt = _handle('updateTilt', async (req, res) => {
     const result = await tiltService.updateTilt(req.params.id, req.body ?? {})
     if (!result.ok) return _fail(res, result, 'Could not update the view')
     res.json(result.doc)
-}
+})
 
 /** Stand the desk down for this benchmark. The trail is kept — a retired view is archived, not deleted. */
-export async function retireTilt(req, res) {
+export const retireTilt = _handle('retireTilt', async (req, res) => {
     const result = await tiltService.retireTilt(req.params.id)
     if (!result.ok) return _fail(res, result, 'Could not retire the view')
     res.json(result.doc)
-}
+})
