@@ -95,6 +95,15 @@ async function syncCandles(ticker, options = {}) {
         incomingList = Array.isArray(incoming) ? incoming : []
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
+        // THE FAILED ATTEMPT IS STAMPED. Without this the envelope's lastFetchedAt stayed where it
+        // was, so getCandles's freshness test failed on every subsequent read for as long as the
+        // provider was down — and every monitor tick re-asked a provider that was answering 429,
+        // which is the self-inflicted quota burn fmp.price's own comments describe. Stamping the
+        // attempt puts the series back on its TTL: the bars it holds are still served (a stale
+        // series is usable, see the cache header) and the next fetch waits for the window.
+        // `refresh: true` callers still fetch every time — that is their contract, and their poll
+        // is their retry.
+        _stampAttempt(symbol, barOpts)
         return _result(_formatCandles([], options.format), {
             ingested: 0,
             cacheSize: existingCandles.length,
@@ -135,9 +144,14 @@ async function getCandles(ticker, opts = {}) {
     const barOpts = _normalizeOptions(opts)
     let cache = await _loadEnvelope(symbol, barOpts)
 
+    // Freshness alone decides. A never-fetched envelope has lastFetchedAt 0 and is not fresh, so it
+    // fetches; an envelope fetched inside the window is served as it is — INCLUDING an empty one.
+    // There used to be a `candles.length === 0` clause here, and it meant a symbol the provider does
+    // not carry (or could not answer while it was down) was re-asked on every single read for as
+    // long as it stayed empty: the TTL never applied to precisely the requests most likely to fail.
+    // fmp.price caches its null quotes for the same reason.
     const shouldFetch =
         opts.refresh === true ||
-        cache.candles.length === 0 ||
         !isCacheFresh(cache.lastFetchedAt, CANDLE_CACHE_TTL_MS)
 
     let syncMeta = {}
@@ -230,6 +244,20 @@ async function _saveEnvelope(ticker, barOpts, candles) {
         _envelopes.delete(_envelopes.keys().next().value)
     }
     return envelope
+}
+
+/**
+ * Record that a fetch was ATTEMPTED now, without touching the bars: an existing envelope keeps
+ * them and moves its lastFetchedAt; a series that has never fetched gets an empty envelope, so a
+ * failure on the first read also waits out the window rather than retrying on every call. Bounded
+ * like every other write here (the same eviction as _saveEnvelope). See syncCandles.
+ */
+function _stampAttempt(ticker, barOpts) {
+    const key = _envelopeKey(ticker, barOpts)
+    const cur = _envelopes.get(key)
+    if (cur) { cur.lastFetchedAt = Date.now(); return }
+    _envelopes.set(key, { lastFetchedAt: Date.now(), schema: CANDLE_SCHEMA, candles: [] })
+    while (_envelopes.size > MAX_CACHED_SERIES) _envelopes.delete(_envelopes.keys().next().value)
 }
 
 function _normalizeEnvelope(raw) {

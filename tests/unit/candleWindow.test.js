@@ -182,3 +182,55 @@ test('series are kept apart by ticker AND timeframe', async () => {
         assert.equal(week.candles.at(-1).close, 200, 'the week series must not read the day series')
     } finally { restore() }
 })
+
+// ── a provider that is DOWN is asked once per window, not once per read ───────
+// syncCandles used to leave lastFetchedAt untouched on a failed fetch, so getCandles's freshness
+// test failed on every subsequent read for as long as the outage lasted — and every monitor tick
+// re-asked a provider answering 429, which is the self-inflicted quota burn fmp.price's own comments
+// describe. The attempt is stamped now; the bars already held are served; the TTL applies.
+
+test('a failed fetch is served from what is held, and the provider is not re-asked inside the window', async () => {
+    _resetCandleCache()
+    let fetches = 0
+    const bar = { timestamp: SEC.now - DAY, open: 1, high: 1, low: 1, close: 42, volume: 1 }
+    const restore = mockAggregates(async () => { fetches++; if (fetches === 1) return [bar]; throw new Error('FMP candles 429') })
+    try {
+        await priceService.getCandles('AMD', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        assert.equal(fetches, 1)
+        // Force a refresh so the second call actually reaches the provider — and fails.
+        const failed = await priceService.getCandles('AMD', { timeSpan: 'day', multiplier: 1, format: 'object', refresh: true })
+        assert.equal(fetches, 2)
+        assert.equal(failed.meta.reason, 'fetch_failed')
+        assert.equal(failed.candles.at(-1).close, 42, 'the held series is still the answer')
+        // A plain read inside the window must NOT ask again.
+        const again = await priceService.getCandles('AMD', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        assert.equal(fetches, 2, 'the failed attempt counts as the fetch for this window')
+        assert.equal(again.meta.cached, true)
+        assert.equal(again.candles.at(-1).close, 42)
+    } finally { restore() }
+})
+
+test('a symbol the provider does not carry is asked once per window too — an empty series has a TTL', async () => {
+    _resetCandleCache()
+    let fetches = 0
+    const restore = mockAggregates(async () => { fetches++; return [] })
+    try {
+        await priceService.getCandles('NOPE', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        await priceService.getCandles('NOPE', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        await priceService.getCandles('NOPE', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        assert.equal(fetches, 1, 'three reads, one pull — the empty answer is cached like any other')
+    } finally { restore() }
+})
+
+test('a FIRST fetch that fails also waits out the window', async () => {
+    _resetCandleCache()
+    let fetches = 0
+    const restore = mockAggregates(async () => { fetches++; throw new Error('down') })
+    try {
+        const r1 = await priceService.getCandles('NEW', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        const r2 = await priceService.getCandles('NEW', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        assert.equal(r1.meta.reason, 'fetch_failed')
+        assert.deepEqual(r2.candles, [])
+        assert.equal(fetches, 1)
+    } finally { restore() }
+})

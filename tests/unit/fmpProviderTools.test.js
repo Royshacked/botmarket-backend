@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+    _macroPartsUsable,
     formatScreenerRows,
     formatMacroSnapshot,
     formatAnalystBlock,
@@ -254,4 +255,15 @@ test('analystActions per-symbol: grouped blocks, capped at 4 each; empty → lin
     assert.ok(!out.includes('TSLA'))
     assert.match(out, /2026-07-14\s+▼ downgrade by Keybanc \(Sector Weight→Underweight\)/)
     assert.match(formatAnalystActionsForSymbols({}), /No recent analyst rating actions/)
+})
+
+// ── the macro parts cache holds an ANSWER, never an outage ────────────────────
+// Every leg of _macroParts swallows its own failure into [], and the empty result was then cached
+// for an hour: one 429 on a busy minute and three tools answered "unavailable" for sixty minutes.
+test("_macroPartsUsable: any leg with data is worth caching; all-empty is not", () => {
+    assert.equal(_macroPartsUsable({ treasury: [], sectors: [], indicators: [] }), false)
+    assert.equal(_macroPartsUsable(null), false)
+    assert.equal(_macroPartsUsable({ treasury: [{ date: "2026-09-16" }], sectors: [], indicators: [] }), true)
+    assert.equal(_macroPartsUsable({ treasury: [], sectors: [{ sector: "Energy" }], indicators: [] }), true)
+    assert.equal(_macroPartsUsable({ treasury: [], sectors: [], indicators: [{ label: "CPI" }] }), true)
 })

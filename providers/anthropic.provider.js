@@ -1,7 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createTagSuppressor } from '../services/llmStream.util.js'
 import { isToolError, toolErrorText } from '../services/toolResult.util.js'
+import { logger } from '../services/logger.service.js'
 import { config } from '../services/config.js'
+
+const LOG = '[anthropic]'
 
 const client = new Anthropic({ apiKey: config.anthropicApiKey })
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
@@ -91,8 +94,9 @@ export async function streamAnthropicWithTools({
         }, signal ? { signal } : undefined)
 
         const contentBlocks = []
-        let stopReason = null
-        let turnUsage  = null
+        let stopReason  = null
+        let stopDetails = null
+        let turnUsage   = null
 
         try {
             for await (const event of stream) {
@@ -129,7 +133,8 @@ export async function streamAnthropicWithTools({
                         block.signature = (block.signature || '') + event.delta.signature
                     }
                 } else if (event.type === 'message_delta') {
-                    stopReason = event.delta.stop_reason
+                    stopReason  = event.delta.stop_reason
+                    stopDetails = event.delta.stop_details ?? null
                     if (turnUsage && event.usage?.output_tokens) turnUsage.output_tokens = event.usage.output_tokens
                 }
             }
@@ -171,11 +176,41 @@ export async function streamAnthropicWithTools({
             continue
         }
 
+        // Anything else ends the turn with whatever text arrived — and SAYS SO. `max_tokens` is a
+        // reply cut mid-sentence (or a tool call that never finished forming); `refusal` is the model
+        // declining, with a category on stop_details. Both used to return through this line exactly
+        // like end_turn, and this module had no logger, so a truncated or refused desk reply left no
+        // trace anywhere: the user saw a reply that stopped short and nothing said why.
+        _noteStop(stopReason, stopDetails, model ?? DEFAULT_MODEL, fullText.length)
         suppressor.flush()
         return fullText
     }
 
     throw new Error(`Anthropic stream tool loop exceeded maxContinuations (${maxContinuations})`)
+}
+
+/**
+ * The stop reasons that end a turn WITHOUT being a finished answer. Pure apart from the log line;
+ * exported for tests. Returns the line it logged (null when the stop was ordinary), so a test can
+ * assert what was said without a logger seam.
+ */
+export function _noteStop(stopReason, stopDetails, model, textLength) {
+    if (stopReason === 'max_tokens') {
+        const line = `reply cut by max_tokens on ${model} after ${textLength} chars — raise the budget or the desk is answering with a truncated reply`
+        logger.warn(LOG, line)
+        return line
+    }
+    if (stopReason === 'refusal') {
+        const line = `${model} REFUSED (${stopDetails?.category ?? 'no category'}): ${stopDetails?.explanation ?? 'no explanation'} — ${textLength} chars reached the user`
+        logger.warn(LOG, line)
+        return line
+    }
+    if (stopReason && stopReason !== 'end_turn' && stopReason !== 'stop_sequence') {
+        const line = `unexpected stop_reason ${stopReason} on ${model}`
+        logger.warn(LOG, line)
+        return line
+    }
+    return null
 }
 
 export async function callAnthropic(model, promptOrMessages, systemPrompt, { onUsage } = {}) {

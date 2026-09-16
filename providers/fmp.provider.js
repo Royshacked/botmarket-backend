@@ -611,9 +611,20 @@ async function _macroParts() {
         sectors:   Array.isArray(sectorArr)   ? sectorArr   : [],
         indicators,
     }
-    _macroCache.set('parts', parts)
+    // Cache an ANSWER, never an outage. Every leg above swallows its own failure into [], so a
+    // transient blip — one 429 on a busy minute — used to produce an all-empty parts object that
+    // then sat in the cache for an hour: get_macro_snapshot, get_sector_snapshot and Pythia's macro
+    // read all answered "unavailable" for sixty minutes over a one-second fault. A result with
+    // nothing in it is served this once and asked again on the next call.
+    if (_macroPartsUsable(parts)) _macroCache.set('parts', parts)
+    else logger.warn(LOG, 'macro parts came back empty on every leg — not cached, will retry on the next read')
     logger.info(LOG, 'macro parts', { indicators: indicators.length, hasTreasury: parts.treasury.length > 0 })
     return parts
+}
+
+/** Anything at all came back. Pure — exported for tests. */
+export function _macroPartsUsable(parts) {
+    return (parts?.treasury?.length ?? 0) > 0 || (parts?.sectors?.length ?? 0) > 0 || (parts?.indicators?.length ?? 0) > 0
 }
 
 /** Treasury curve + key economic indicators + today's sector rotation, LLM-ready. Cached 1h. */

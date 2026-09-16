@@ -156,37 +156,24 @@ export class IBKRAdapter extends BrokerAdapter {
 
     // ── Account ──────────────────────────────────────────────────────────────────
 
+    /**
+     * The one account this gateway login trades. A gateway is one IB login, which is USUALLY one
+     * account; an advisor/FA login carries several, and this adapter has no selected-account state
+     * yet — so the first is answered and the rest are logged, never silently merged into it.
+     */
     async getAccount(userId) {
-        const gw   = await this._gateway(userId)
-        const rows = await gw.reqAccountSummary('All')
-        return _normaliseAccount(rows)
+        const gw       = await this._gateway(userId)
+        const accounts = accountsFromSummary(await gw.reqAccountSummary('All'))
+        if (!accounts.length) throw new Error('IBKR: the gateway reported no accounts')
+        if (accounts.length > 1) logger.warn(LOG, `gateway reports ${accounts.length} accounts — answering the first (${accounts[0].id}); the rest: ${accounts.slice(1).map(a => a.id).join(', ')}`)
+        return accounts[0]
     }
 
     async getTradingAccounts(userId) {
         const coords = await this._coords(userId)
         const gw     = getIBKRGateway(coords)
-        const rows   = await gw.reqAccountSummary('All')
         const isLive = !PAPER_PORTS.has(coords.port)
-
-        const byAccount = new Map()
-        for (const [account, tag, value, currency] of rows) {
-            if (!byAccount.has(account)) byAccount.set(account, { currency: null, balance: null, freeMargin: null })
-            const entry = byAccount.get(account)
-            if (tag === 'NetLiquidation') { entry.balance = num(value); entry.currency = currency }
-            // Deployable cash, so a new book isn't sized against capital already in positions.
-            // Same pair the single-account read uses; ExcessLiquidity is the fallback IBKR reports
-            // when AvailableFunds is absent.
-            if (tag === 'AvailableFunds' || (tag === 'ExcessLiquidity' && entry.freeMargin == null)) entry.freeMargin = num(value)
-        }
-        return [...byAccount.entries()].map(([id, { currency, balance, freeMargin }]) => ({
-            id,
-            login:    id,
-            currency,
-            balance,
-            freeMargin,
-            broker:   'Interactive Brokers',
-            isLive,
-        }))
+        return accountsFromSummary(await gw.reqAccountSummary('All')).map(a => ({ ...a, isLive }))
     }
 
     // ── Contract qualification ───────────────────────────────────────────────────
@@ -320,27 +307,36 @@ function _toCanonical(contract) {
 // ─── Normalisers ──────────────────────────────────────────────────────────────
 
 /**
- * Reduce IB accountSummary rows ([account, tag, value, currency]) to a BrokerAccount.
+ * IB accountSummary rows ([account, tag, value, currency]) → one BrokerAccount PER ACCOUNT, in the
+ * order the gateway reported them. Pure — exported for tests.
+ *
+ * ONE parse. The single-account read used to fold every row into one bag of tags — `account` was
+ * overwritten per row and the tags merged across accounts, so a login with two accounts answered
+ * with B's id and a mix of A's and B's balances — while the list read two functions up grouped the
+ * same rows correctly. The two also disagreed on what `balance` meant (cash vs net liquidation);
+ * it is the cTrader shape now: balance = cash, equity = net liquidation, freeMargin = deployable.
  */
-function _normaliseAccount(rows) {
-    const tags = {}
-    let account = null
-    let currency = 'USD'
-    for (const [acct, tag, value, curr] of rows) {
-        account = acct
-        tags[tag] = value
-        if (tag === 'NetLiquidation' && curr) currency = curr
+export function accountsFromSummary(rows) {
+    const byAccount = new Map()
+    for (const [acct, tag, value, curr] of (Array.isArray(rows) ? rows : [])) {
+        if (!acct) continue
+        if (!byAccount.has(acct)) byAccount.set(acct, { tags: {}, currency: null })
+        const entry = byAccount.get(acct)
+        entry.tags[tag] = value
+        if (tag === 'NetLiquidation' && curr) entry.currency = curr
     }
-    return {
-        id:          account,
-        login:       account,
+    return [...byAccount.entries()].map(([id, { tags, currency }]) => ({
+        id,
+        login:       id,
         broker:      'Interactive Brokers',
-        currency,
+        currency:    currency ?? 'USD',
         balance:     num(tags.TotalCashValue),
         equity:      num(tags.NetLiquidation),
         margin:      num(tags.InitMarginReq),
+        // Deployable cash, so a new book isn't sized against capital already in positions.
+        // ExcessLiquidity is the fallback IBKR reports when AvailableFunds is absent.
         freeMargin:  num(tags.AvailableFunds ?? tags.ExcessLiquidity),
         marginLevel: null,    // IBKR doesn't expose a margin level directly
         leverage:    null,
-    }
+    }))
 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _finalizeToolBlocks, _toToolResultContent } from '../../providers/anthropic.provider.js'
+import { _finalizeToolBlocks, _toToolResultContent, _noteStop } from '../../providers/anthropic.provider.js'
 
 // Regression: a no-argument tool (get_macro_snapshot) streams an EMPTY input_json_delta, so the
 // block's scratch `_json` ends up ''. The old truthiness check left `_json: ''` on the block, and
@@ -82,4 +82,17 @@ test('toToolResultContent: a circular object degrades instead of throwing the tu
     const circular = { a: 1 }
     circular.self = circular
     assert.doesNotThrow(() => _toToolResultContent(circular))
+})
+
+// ── a turn that stopped short SAYS SO ─────────────────────────────────────────
+// max_tokens and refusal used to return through the same line as end_turn, and the provider had no
+// logger at all, so a truncated or refused desk reply left no trace anywhere.
+test('_noteStop: max_tokens and refusal are logged with the model; an ordinary end is silent', () => {
+    assert.match(_noteStop('max_tokens', null, 'claude-sonnet-4-6', 812), /cut by max_tokens on claude-sonnet-4-6 after 812 chars/)
+    assert.match(_noteStop('refusal', { category: 'cyber', explanation: 'no' }, 'claude-opus-5', 0), /claude-opus-5 REFUSED \(cyber\): no/)
+    assert.match(_noteStop('refusal', null, 'claude-opus-5', 0), /no category/)
+    assert.equal(_noteStop('end_turn', null, 'm', 10), null)
+    assert.equal(_noteStop('stop_sequence', null, 'm', 10), null)
+    assert.equal(_noteStop(null, null, 'm', 10), null)
+    assert.match(_noteStop('something_new', null, 'm', 10), /unexpected stop_reason something_new/)
 })
