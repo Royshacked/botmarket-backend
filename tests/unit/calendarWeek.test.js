@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _calendarWeek } from '../../api/calendar/calendar.controller.js'
+import { calendarWeek as _calendarWeek } from '../../api/calendar/calendar.service.js'
 
 // Construct at local noon so getDay()/getDate() (local) and toISOString() (UTC)
 // agree on the calendar day — mirrors how the function itself mixes the two.

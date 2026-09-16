@@ -148,12 +148,13 @@ export async function streamPortfolio(req, res) {
     // `portfolioIdeas` is still SENT by the client and deliberately not read: the book Atlas sees is
     // read from the database (portfolioState), not from the list the client happened to be holding.
     // See _buildPortfolioStateSection — an empty client list is what made Atlas invent item ids.
-    const { messages, ideaAccounts, mainAccountId, portfolioId, threadId, model, pipeline } = req.body ?? {}
+    const { messages: rawMessages, ideaAccounts, mainAccountId, portfolioId, threadId, model, pipeline } = req.body ?? {}
 
-    const validatedMessages = parseChatMessages(messages)
+    const validatedMessages = parseChatMessages(rawMessages)
     if (validatedMessages.error) {
         return res.status(400).json({ error: validatedMessages.error })
     }
+    const messages = validatedMessages.messages
 
     const validatedAccounts = parseIdeaAccounts(ideaAccounts)
     // Starred main account (bank icon) → the reference account Atlas sizes the others against.

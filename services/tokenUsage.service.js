@@ -147,9 +147,9 @@ export async function userCeiling(userId) {
 /**
  * The spend ceiling for one user, USD, or `null` for no ceiling. Pure.
  *
- * `exemptFromBudget` is the escape hatch rather than `isAdmin`, which auth.middleware force-sets to
- * false on every request by design — reading it here would mean silently re-enabling a flag that was
- * deliberately switched off. Admin can map onto this whenever that decision is revisited.
+ * `exemptFromBudget` is the escape hatch rather than the admin role: whether the house desk's
+ * operator should be exempt from a budget is a decision nobody has taken, and reading `role` here
+ * would take it by accident. Admin can map onto this whenever it is revisited.
  */
 export function ceilingFor(user, configured = config.tokenDegradeUsd) {
     if (user?.exemptFromBudget) return null

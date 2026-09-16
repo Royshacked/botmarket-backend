@@ -21,7 +21,11 @@ const handle = makeHandle(LOG)
 // answer. THIS LIST IS THE SECOND HALF OF A PAIR — a panel that saves and an agent named here — and a
 // new desk needs both. Neither half fails loudly on its own: a missing name is a silent 400, and a
 // panel that never saves simply has nothing to reject.
-export const AGENTS = new Set(['idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'axl', 'analyst', 'strategy', 'aether'])
+//
+// Live desks only. `idea` (deleted 2026-08-07) and `kairos` (archived 2026-08-18) were still here a
+// month on; the one client path that saved under `idea` is MainPage's own dead `/api/idea` flow.
+// Their old threads still READ — this gates writes, and nothing lists by it.
+export const AGENTS = new Set(['portfolio', 'scanner', 'mentor', 'axl', 'analyst', 'strategy', 'aether'])
 
 // The service answers `{ ok:false }` with no reason when its write failed — a fault, not a refusal.
 // Thrown bare so the global handler answers the one 500 shape and the log names the handler.

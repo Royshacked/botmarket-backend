@@ -12,10 +12,14 @@ export function parseIdeaAccounts(raw) {
 }
 
 /**
- * Validate + normalize a chat `messages` array (the orchestrator's stricter
- * rules, shared across all three stream endpoints): each entry must be an object
- * with role user|assistant and a non-empty string content; content is trimmed.
- * Returns { messages } on success or { error } with a specific message.
+ * Validate + normalize a chat `messages` array, shared across every stream endpoint: each entry
+ * must be an object with role user|assistant and a non-empty string content; content is trimmed
+ * and NOTHING ELSE is kept — the client's own per-message fields (reasoning, charts, streaming
+ * flags) stop here. Returns { messages } on success or { error } with a specific message.
+ *
+ * Callers forward `messages` from the result. Six of seven used to forward the raw body instead,
+ * so the normalized array was computed and thrown away (the desks re-normalize, so nothing leaked
+ * — but the parse existed for its output, not its verdict).
  */
 export function parseChatMessages(messages) {
     if (!Array.isArray(messages)) {

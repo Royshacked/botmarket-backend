@@ -1,10 +1,10 @@
 import { randomUUID } from 'crypto'
 import bcrypt from 'bcryptjs'
 import { getDb } from '../../providers/mongodb.provider.js'
+import { logger } from '../../services/logger.service.js'
 
 export const COLLECTION = 'users'
 
-export const ROLES = ['admin', 'trader']
 export const DEFAULT_ROLE = 'trader'
 
 // What a new account must look like. The password rule is the SAME one the sign-up form enforces
@@ -61,7 +61,7 @@ export async function ensureUserIndexes() {
         await db.collection(COLLECTION).createIndex({ id: 1 }, { unique: true })
         await db.collection(COLLECTION).createIndex({ username: 1 }, { unique: true })
     } catch (err) {
-        console.warn('[users] ensureUserIndexes failed:', err.message)
+        logger.warn('[users]', 'ensureUserIndexes failed:', err.message)
     }
 }
 

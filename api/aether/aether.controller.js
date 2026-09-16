@@ -22,10 +22,12 @@ const LOG    = '[aetherCtrl]'
 const handle = makeHandle(LOG)
 
 export async function streamAether(req, res) {
-    const { messages, model } = req.body ?? {}
-    if (messages !== undefined && messages !== null) {
-        const v = parseChatMessages(messages)
+    const { messages: rawMessages, model } = req.body ?? {}
+    let messages
+    if (rawMessages != null) {
+        const v = parseChatMessages(rawMessages)
         if (v.error) return res.status(400).json({ error: v.error })
+        messages = v.messages
     }
     await streamAgentResponse(req, res, {
         log: LOG,

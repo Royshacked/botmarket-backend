@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _enrichWithProfiles } from '../../api/calendar/calendar.controller.js'
+import { enrichCalendarProfiles as _enrichWithProfiles } from '../../api/calendar/calendar.service.js'
 
 test('enrich: every row gets its name + logo, none skipped or duplicated', async () => {
     const items = ['AAPL', 'MSFT', 'TSLA', 'JPM', 'NVDA', 'AMD', 'INTC']

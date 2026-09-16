@@ -27,10 +27,12 @@ const _handle = makeHandle(LOG)
 
 // Streaming top-down chat → emits a <tilt> draft (returned for preview; POST /tilt publishes it).
 export async function streamStrategy(req, res) {
-    const { messages, userPrompt, model, chatState } = req.body ?? {}
-    if (messages !== undefined && messages !== null) {
-        const v = parseChatMessages(messages)
+    const { messages: rawMessages, userPrompt, model, chatState } = req.body ?? {}
+    let messages
+    if (rawMessages != null) {
+        const v = parseChatMessages(rawMessages)
         if (v.error) return res.status(400).json({ error: v.error })
+        messages = v.messages
     }
     await streamAgentResponse(req, res, {
         log: LOG,

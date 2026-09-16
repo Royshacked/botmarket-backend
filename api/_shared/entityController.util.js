@@ -52,7 +52,8 @@ export function isScaffoldOnlyPatch(body) {
  *                                             resolves (chat.service cardSubject uses the same
  *                                             vocabulary, deliberately: one word per kind).
  * @param {Object} cfg.service
- * @param {Function} [cfg.service.list]        (userId) => Promise<object[]>
+ * @param {Function} [cfg.service.list]        (userId, req) => Promise<object[]> — `req` for a
+ *                                             list that reads a filter off the query (setups)
  * @param {Function} [cfg.service.get]         (id, userId) => Promise<{ok, doc}>
  * @param {Function} [cfg.service.patch]       (id, body, userId) => Promise<{ok, doc}>
  * @param {Function} [cfg.service.remove]      (id, userId) => Promise<{ok}>

@@ -55,11 +55,13 @@ export async function _resolveCoverageContext(chatState, seed) {
 }
 
 export async function streamAnalyst(req, res) {
-    const { messages, userPrompt, model, chatState } = req.body ?? {}
+    const { messages: rawMessages, userPrompt, model, chatState } = req.body ?? {}
     const seed = sanitizeScanSeed(req.body?.seed)
-    if (messages !== undefined && messages !== null) {
-        const v = parseChatMessages(messages)
+    let messages
+    if (rawMessages != null) {
+        const v = parseChatMessages(rawMessages)
         if (v.error) return res.status(400).json({ error: v.error })
+        messages = v.messages
     }
 
     const resolvedState = await _resolveCoverageContext(

@@ -31,6 +31,7 @@
  */
 
 import { getDb } from '../../providers/mongodb.provider.js'
+import { logger } from '../../services/logger.service.js'
 
 export const COLLECTION = 'user_workspace'
 
@@ -62,6 +63,6 @@ export async function ensureWorkspaceIndexes() {
         // One row per user — the record is a current state, not a history.
         await db.collection(COLLECTION).createIndex({ userId: 1 }, { unique: true })
     } catch (err) {
-        console.warn('[workspace] ensureWorkspaceIndexes failed:', err.message)
+        logger.warn('[workspace]', 'ensureWorkspaceIndexes failed:', err.message)
     }
 }

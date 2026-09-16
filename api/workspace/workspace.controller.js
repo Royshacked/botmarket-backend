@@ -8,7 +8,8 @@
 
 import { brokerService } from '../broker/broker.service.js'
 import { getStoredWorkspace, setStoredWorkspace } from '../../services/workspace.service.js'
-import { resolveWorkspace, isValidWorkspace, WORKSPACES } from './workspace.model.js'
+import { isValidWorkspace, WORKSPACES } from './workspace.model.js'
+import { activeWorkspace } from '../../services/venue.resolve.service.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError }  from '../../services/httpError.util.js'
 
@@ -22,7 +23,7 @@ export const getWorkspace = handle('getWorkspace', async (req, res) => {
         brokerService.listConnections(userId).catch(() => ({})),
         getStoredWorkspace(userId),
     ])
-    res.json({ workspace: resolveWorkspace(!!connections?.paper, stored), stored })
+    res.json({ workspace: activeWorkspace(connections, stored), stored })
 })
 
 /**
@@ -45,5 +46,5 @@ export const putWorkspace = handle('putWorkspace', async (req, res) => {
     if (!result.ok) throw new Error(`setStoredWorkspace: ${result.reason}`)
 
     const connections = await brokerService.listConnections(userId).catch(() => ({}))
-    res.json({ workspace: resolveWorkspace(!!connections?.paper, result.workspace), stored: result.workspace })
+    res.json({ workspace: activeWorkspace(connections, result.workspace), stored: result.workspace })
 })

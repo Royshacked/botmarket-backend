@@ -78,7 +78,7 @@ export async function streamAxl(req, res) {
         log: LOG,
         handler: async ({ sendEvent, signal }) => {
             const result = await axlAgentService.chatStream({
-                messages,
+                messages: validated.messages,
                 audience: await getExperienceLevel(req.user._id),
                 isAdmin:  req.user.role === 'admin',
                 model,

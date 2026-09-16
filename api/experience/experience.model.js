@@ -31,6 +31,7 @@
  */
 
 import { getDb } from '../../providers/mongodb.provider.js'
+import { logger } from '../../services/logger.service.js'
 
 export const COLLECTION = 'user_experience'
 
@@ -71,6 +72,6 @@ export async function ensureExperienceIndexes() {
         // One row per user — the record is a current state, not a history.
         await db.collection(COLLECTION).createIndex({ userId: 1 }, { unique: true })
     } catch (err) {
-        console.warn('[experience] ensureExperienceIndexes failed:', err.message)
+        logger.warn('[experience]', 'ensureExperienceIndexes failed:', err.message)
     }
 }

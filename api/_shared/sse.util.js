@@ -32,9 +32,9 @@ export function startSseStream(req, res, { turnId = null, userId = null } = {}) 
     res.flushHeaders()
 
     const ac = new AbortController()
-    let finished   = false
     // The client has gone, but the WORK has not. Writes become no-ops rather than errors on a dead
-    // socket, and the handler carries on to its own completion and persistence.
+    // socket, and the handler carries on to its own completion and persistence. Not exposed: a
+    // handler must never skip persistence because nobody is watching — saving the turn is the point.
     let clientGone = false
 
     function sendEvent(event, data) {
@@ -57,18 +57,11 @@ export function startSseStream(req, res, { turnId = null, userId = null } = {}) 
 
     // Stop the heartbeat once the work is done, and let go of the turn id.
     function finish() {
-        finished = true
         clearInterval(heartbeat)
         release()
     }
 
-    return {
-        sendEvent, signal: ac.signal, finish,
-        get finished()   { return finished },
-        // For a handler that wants to know nobody is watching — to skip a chart render, say. It must
-        // NOT be used to skip persistence: saving the turn is the entire point of finishing it.
-        get clientGone() { return clientGone },
-    }
+    return { sendEvent, signal: ac.signal, finish }
 }
 
 /**

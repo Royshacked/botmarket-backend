@@ -26,7 +26,7 @@ export async function streamScanner(req, res) {
         handler: async ({ sendEvent, signal }) => {
             const result = await scannerAgentService.chatStream({
                 audience:  await getExperienceLevel(req.user._id),
-                messages,
+                messages:  validatedMessages.messages,
                 model,
                 editList:        editList && typeof editList === 'object' ? editList : null,
                 handoff:         handoff === true,
