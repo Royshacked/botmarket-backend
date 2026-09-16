@@ -8,7 +8,6 @@
 import { getDb, closeDb } from '../providers/mongodb.provider.js'
 import { COLLECTION } from '../api/user/user.model.js'
 import { userService } from '../api/user/user.service.js'
-import { seedBotConversation } from '../api/chat/chat.service.js'
 
 const [username, fullname, password] = process.argv.slice(2)
 if (!username || !fullname || !password) {
@@ -30,11 +29,9 @@ try {
 try {
     const db = await getDb()
     await db.collection(COLLECTION).updateOne({ id: user.id }, { $set: { role: 'admin', updatedAt: Date.now() } })
-    // createUser fires seedBotConversation but does not await it — in the server that is fine (the
-    // process lives on), but a script that closes the client and exits would cut the welcome writes
-    // off mid-flight. Awaiting it here makes the welcome the header promises actually land; it is
-    // idempotent, so racing createUser's own call produces exactly one welcome.
-    await seedBotConversation(user.id).catch(() => {})
+    // createUser has already seeded Axl's welcome — and now AWAITS it, so it has landed by the time
+    // we get here. No second call: getOrCreateConversation is a non-atomic find-then-insert, and a
+    // duplicate call could race it into two welcomes.
     console.log(`\nCreated admin user: ${username} (${fullname})\n`)
 } catch (err) {
     console.error(`\nUser "${username}" was created but could NOT be promoted: ${err.message}`)

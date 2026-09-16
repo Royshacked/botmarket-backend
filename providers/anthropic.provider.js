@@ -34,7 +34,9 @@ export function _finalizeServerTools(tools, model) {
     const out = tools.map(t => {
         if (typeof t?.type === 'string' && t.type.startsWith('web_search_')) {
             touched = true
-            return { type: webSearchTypeFor(model), name: t.name, max_uses: WEB_SEARCH_MAX_USES }
+            // Spread, so a field added upstream later (allowed_domains / user_location — the very
+            // filters this seam's comment invites) survives rather than being dropped on the floor.
+            return { ...t, type: webSearchTypeFor(model), max_uses: WEB_SEARCH_MAX_USES }
         }
         return t
     })

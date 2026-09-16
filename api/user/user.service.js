@@ -91,7 +91,11 @@ async function createUser({ username, fullname, password }) {
     const doc = await buildUserDoc({ username, fullname, password })
     await db.collection(COLLECTION).insertOne(doc)
     logger.info(LOG, 'user created', { username })
-    seedBotConversation(doc.id).catch(err => logger.warn(LOG, 'seedBotConversation failed', err.message))
+    // Awaited, not fire-and-forget: the welcome must have landed before this returns, so a caller
+    // that exits right after (scripts/create-admin-user) does not cut the seed's writes off, and
+    // there is ONE seeding call rather than two racing a non-atomic getOrCreateConversation. A seed
+    // failure is still swallowed — it must not fail account creation.
+    await seedBotConversation(doc.id).catch(err => logger.warn(LOG, 'seedBotConversation failed', err.message))
     return stripUser(doc)
 }
 

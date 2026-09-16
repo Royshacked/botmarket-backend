@@ -8,7 +8,7 @@ import { extractFirstJSON }      from './parsers/llmReply.parser.js'
 import { assessRouting, candlesText as _candlesText,
     ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING, bookAssessUsage, lensLine } from './assess.shared.js'
 import { _allText, _formatEventRisk } from './assess.shared.js'
-import { _thinkingConfig, advanceToolLoopCache } from '../providers/anthropic.provider.js'
+import { _thinkingConfig, advanceToolLoopCache, _finalizeServerTools } from '../providers/anthropic.provider.js'
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
 import { declaredConditions, pickScenario, scenarioLabel, usableLadder, clampRung } from '../services/setup.schema.js'
 import { config } from '../services/config.js'
@@ -310,7 +310,11 @@ async function _runRead(setup, systemText, primary) {
         const thinking  = _thinkingConfig(reasoningEffort, model)
         const maxTokens = thinking ? MAX_TOKENS_THINKING : MAX_TOKENS
         const system    = [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
-        const tools     = buildToolsFor(setup)
+        // This loop calls the client DIRECTLY (its own `_client`), so it must finalize the server
+        // tools itself — buildToolsFor pulls web_search from the registry at its modern base, and a
+        // Haiku-routed assess wake would 400 on a variant Haiku does not take. Same one-model
+        // resolution streamAnthropicWithTools does, applied at the one other place tools meet a client.
+        const tools     = _finalizeServerTools(buildToolsFor(setup), model)
         const messages  = [{ role: 'user', content: primary }]
 
         // What this wake actually spent. With no round cap (below) this record IS the cost control:

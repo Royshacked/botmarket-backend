@@ -26,7 +26,7 @@ const COMBINED  = /import\s+(\w+)\s*,\s*\{([^}]*)\}\s*from\s*'(\.\.?\/[^']+)'/g 
 const NAMESPACE = /import\s*\*\s*as\s+\w+\s+from\s*'(\.\.?\/[^']+)'/g              // import * as x from '...'
 const STATIC    = /import\s*\{([^}]*)\}\s*from\s*'(\.\.?\/[^']+)'/g                  // import { a, b } from '...'
 const DYNAMIC   = /const\s*\{([^}]*)\}\s*=\s*await\s+import\('(\.\.?\/[^']+)'\)/g
-const DEFAULT   = /^import\s+(\w+)\s+from\s+'(\.\.?\/[^']+)'/gm                       // import def from '...' (no comma)
+const DEFAULT   = /import\s+(\w+)\s+from\s+'(\.\.?\/[^']+)'/g                          // import def from '...' — COMBINED is blanked first, so this never half-matches it
 const BARE      = /import\s+'(\.\.?\/[^']+)'/g
 
 /** Every relative import a file makes: [{ names: string[], spec }]. A namespace import names
@@ -85,6 +85,7 @@ import { a, b as c } from '../x.js'
 import def from './y.js'
 import defTwo, { f, g } from '../combined.js'
 import * as ns from '../namespace.js'
+  import indented from '../indented.js'
 import './side-effect.js'
 const { d, e } = await import('../z.js')
 `
@@ -95,6 +96,7 @@ const { d, e } = await import('../z.js')
     assert.deepEqual(bySpec['./y.js'], ['default'])
     assert.deepEqual(bySpec['../combined.js'], ['default', 'f', 'g'])
     assert.deepEqual(bySpec['../namespace.js'], [])
+    assert.deepEqual(bySpec['../indented.js'], ['default'], 'an indented default import is still seen')
     assert.deepEqual(bySpec['./side-effect.js'], [])
     assert.deepEqual(bySpec['../z.js'], ['d', 'e'])
     // and the bare npm imports (dotenv) are not ours to resolve
