@@ -54,6 +54,9 @@ const REASON_COPY = {
     not_live:            'not in a position yet',
     already_held_use_add_to_item: 'already held',
     live_use_exit_item:  'already live',
+    // Worded apart from live_use_exit_item on purpose (the client's reviewApply says the same): "still
+    // held" would send the user to Exit, which refuses a `hit` holding in its turn.
+    order_pending_cancel_first: 'an order is still working — cancel it first',
     broker_rejected:     'the venue rejected it',
     broker_cannot_close: "this broker can't close positions",
     queue_failed:        "it couldn't be queued",

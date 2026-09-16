@@ -41,13 +41,11 @@ export function makeHouseArtifactRepo({ collection, getDb = _defaultGetDb }) {
             if ($set && 'revisions' in $set) throw new Error('houseArtifactRepo.revise: the trail is appended, never set — drop `revisions` from $set')
             if (!revision || typeof revision !== 'object') throw new Error('houseArtifactRepo.revise: a revision is required')
             const db  = await getDb()
-            const res = await db.collection(collection).updateOne(
-                { id },
-                {
-                    $set:  $set ?? {},
-                    $push: { revisions: { $each: [revision], $position: 0 } },
-                },
-            )
+            // No `$set` at all when there is nothing to set — an EMPTY `$set: {}` is a no-op on
+            // MongoDB 5+ and a rejected update on anything older.
+            const update = { $push: { revisions: { $each: [revision], $position: 0 } } }
+            if ($set && Object.keys($set).length) update.$set = $set
+            const res = await db.collection(collection).updateOne({ id }, update)
             return { ok: res.matchedCount === 1 }
         },
 

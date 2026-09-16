@@ -50,6 +50,22 @@ export function invalidatePortfolioState(portfolioId, userId) {
 }
 
 /**
+ * The same, keyed off the DOCUMENT that changed: a holding IS an idea carrying a `portfolioId`, so
+ * every write to one is a write to a book. The one call each holding write makes; a doc with no
+ * book is a no-op.
+ *
+ * Until 2026-09-16 only the review paths invalidated, and it did not matter: the client sent the
+ * book's holdings with every Atlas turn, fresh, and the prompt read those. §4 made this snapshot
+ * the ONLY description of the book — which left a holding deleted or resized from the ideas list
+ * (or adopt's correct/remove) standing in Atlas's prompt, itemId and all, for up to five minutes.
+ * The change Atlas then proposed against it came back `not_found` — the very failure §4 set out
+ * to close, reachable through freshness instead of an empty list.
+ */
+export function invalidatePortfolioStateFor(doc) {
+    if (doc?.portfolioId) invalidatePortfolioState(doc.portfolioId, doc.userId)
+}
+
+/**
  * The user's portfolios — just the books, newest first. No prices, no broker calls.
  *
  * Until now only the CLIENT could answer "which portfolios do I have": it derives the list by

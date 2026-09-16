@@ -590,3 +590,32 @@ test('an ordinary turn costs no FX quote', async () => {
         assert.deepEqual(calls.rates, [], 'the stored rate stands when the currency has not changed')
     } finally { restore() }
 })
+
+// ── a corrected or removed holding is a changed BOOK ──────────────────────────
+// §4 made Atlas's cached snapshot the ONLY description of the book it edits (the client stopped
+// sending the holdings). The snapshot lived five minutes and only the review paths dropped it, so a
+// holding corrected or removed here stood in Atlas's next turn as it was — found by the CR pass on
+// §5–§6, 2026-09-16. Every holding write drops the snapshot for its book now.
+
+test('correcting a holding drops its book\'s snapshot', async () => {
+    const dropped = []
+    const { deps } = stubs({ getEntity: async () => ({ ...ADOPTED_LEG, portfolioId: 'p1' }), invalidateBook: (leg) => dropped.push(leg.portfolioId) })
+    const restore = _setDeps(deps)
+    try {
+        assert.equal((await correctHolding({ id: 'e1', userId: 'u1', quantity: 80 })).ok, true)
+        assert.deepEqual(dropped, ['p1'])
+    } finally { restore() }
+})
+
+test('removing a holding drops its book\'s snapshot — after the delete, not before a refusal', async () => {
+    const dropped = []
+    const { deps } = stubs({ getEntity: async () => ({ ...ADOPTED_LEG, portfolioId: 'p1' }), invalidateBook: (leg) => dropped.push(leg.portfolioId) })
+    const restore = _setDeps(deps)
+    try {
+        assert.equal((await removeHolding({ id: 'e1', userId: 'u1' })).ok, true)
+        assert.deepEqual(dropped, ['p1'])
+        dropped.length = 0
+        assert.equal((await removeHolding({ id: 'e1', userId: 'someone-else' })).reason, 'forbidden')
+        assert.deepEqual(dropped, [], 'a refused write changes nothing, so nothing is dropped')
+    } finally { restore() }
+})

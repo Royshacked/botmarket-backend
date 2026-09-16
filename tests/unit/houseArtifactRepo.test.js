@@ -39,6 +39,13 @@ test('revise refuses a $set that carries the trail — the trail is appended, ne
     await assert.rejects(() => repo.revise('id', {}, null), /revision is required/)
 })
 
+test('revise with nothing to set sends only the $push — an empty $set is a rejected update on older Mongo', async () => {
+    const f = fakeDb()
+    const repo = makeHouseArtifactRepo({ collection: 'x', getDb: f.getDb })
+    await repo.revise('id', {}, { kind: 'reaffirm' })
+    assert.deepEqual(Object.keys(f.calls[0].update), ['$push'])
+})
+
 test('revise reports a miss as ok:false, from matchedCount', async () => {
     const db = { collection: () => ({ updateOne: async () => ({ matchedCount: 0 }) }) }
     const repo = makeHouseArtifactRepo({ collection: 'x', getDb: async () => db })

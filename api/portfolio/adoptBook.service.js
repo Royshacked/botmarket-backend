@@ -29,6 +29,7 @@ import { openManualPosition }    from '../broker/manualExecution.service.js'
 import { quoteMapForSymbols }    from '../broker/paperExecution.service.js'
 import { ideaService }           from '../trade-ideas/tradeIdeas.service.js'
 import { entityRepo }            from '../../services/entity/entityRepo.service.js'
+import { invalidatePortfolioStateFor } from '../../services/portfolioState.service.js'
 import { LIVE_POSITION }         from '../../services/entity/vocabulary.js'
 import { portfolioChatService, cadenceMs } from './portfolioChat.service.js'
 import { tradeCaptureService }   from '../../services/tradeCapture.service.js'
@@ -57,6 +58,8 @@ const _deps = {
     legsFor:        (portfolioId, userId)      => entityRepo.listByPortfolio(portfolioId, userId),
     getEntity:      (id)                       => entityRepo.getById(id),
     patchEntity:    (id, fields)               => entityRepo.patch(id, fields),
+    // A corrected or removed holding is a changed BOOK: Atlas's snapshot of it must not outlive it.
+    invalidateBook: (leg)                      => invalidatePortfolioStateFor(leg),
     // Adopted legs ONLY — the guard rides the query rather than sitting in a check above it. See
     // entityRepo.deleteGuarded and removeHolding for why this path may bypass the delete-lock.
     deleteEntity:   (id, userId)               => entityRepo.deleteGuarded(id, userId, { adopted: true }),
@@ -551,6 +554,7 @@ export async function correctHolding({ id, userId, quantity = null, avgCost = nu
                 b.positionId === link.positionId ? { ...b, quantity: qty } : b)
         }
         await _deps.patchEntity(id, legSet)
+        _deps.invalidateBook(leg)
 
         logger.info(LOG, `corrected ${id} (${leg.asset})${qty != null ? ` qty→${qty}` : ''}${cost != null ? ` cost→${cost}` : ''}`)
         return { ok: true, quantity: qty ?? leg.quantity, avgCost: cost ?? null }
@@ -593,6 +597,7 @@ export async function removeHolding({ id, userId }) {
         }
         const deleted = await _deps.deleteEntity(id, userId)
         if (!deleted) return { ok: false, reason: 'not_found' }
+        _deps.invalidateBook(leg)
 
         logger.info(LOG, `removed adopted holding ${id} (${leg.asset})`)
         return { ok: true, asset: leg.asset }

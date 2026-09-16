@@ -16,6 +16,7 @@ import { cleanConviction } from '../../services/conviction.util.js'
 import { placeOrdersForIdea, placeRestingEntryForIdea, triggerEntryNow } from './ideaExecution.service.js'
 import { armExitsInPosition } from './exitOrders.service.js'
 import { entityRepo }         from '../../services/entity/entityRepo.service.js'
+import { invalidatePortfolioStateFor } from '../../services/portfolioState.service.js'
 import { cancelRestingEntryOrders } from '../../services/restingOrders.service.js'
 import { makeEntityCrud, ownsEntity } from '../../services/entity/entityCrud.service.js'
 import { kindForDoc }         from '../../services/entity/envelope.js'
@@ -504,9 +505,14 @@ export async function _enrichPositions(userId, broker, positions, deps = {}) {
 
 async function deleteIdea(id, userId) {
     // Resting broker orders are cancelled only once the guards pass — remove() runs the hook
-    // after not_found / forbidden / in_position have all been cleared.
+    // after not_found / forbidden / in_position have all been cleared. The book's snapshot is
+    // dropped in the same hook: a holding leaving its book is a change to the book, and the next
+    // Atlas turn must read it without this leg.
     return crud.remove(id, userId, {
-        onBeforeDelete: idea => _cancelRestingOrders(idea, idea.userId ?? userId),
+        onBeforeDelete: async (idea) => {
+            await _cancelRestingOrders(idea, idea.userId ?? userId)
+            invalidatePortfolioStateFor(idea)
+        },
     })
 }
 
@@ -722,6 +728,7 @@ async function updateIdea(id, body, userId) {
 
         const result = await entityRepo.patchAndGet(id, patch, ownerGuard)
         if (!result) return { ok: false, reason: 'not_found' }
+        invalidatePortfolioStateFor(result)   // a holding's edit is its book's edit
         logger.info(LOG, 'Idea updated', { id, patch })
 
         // Arm-time pre-flight: if the entry level is already satisfied on the last

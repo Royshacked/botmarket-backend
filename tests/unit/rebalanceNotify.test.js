@@ -136,3 +136,14 @@ test('an unresolved asset degrades to a phrase rather than "undefined"', () => {
     })
     assert.equal(card.content, 'Review applied on your portfolio — I trimmed a holding.')
 })
+
+test('every refusal remove_item can answer has copy — the receipt never prints a raw slug', () => {
+    // §4 taught remove_item to answer order_pending_cancel_first for a `hit` holding; the client's
+    // reviewApply got the words and this card did not (CR pass, 2026-09-16).
+    const card = _buildReceipt('u1', {
+        portfolioId: 'p1',
+        results: [{ action: 'remove_item', asset: 'AVGO', itemId: 'e1', ok: false, reason: 'order_pending_cancel_first' }],
+    })
+    assert.match(card.content, /couldn't remove AVGO \(an order is still working — cancel it first\)/)
+    assert.doesNotMatch(card.content, /order_pending_cancel_first/)
+})
