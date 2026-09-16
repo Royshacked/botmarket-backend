@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildCoverageEvent, notifyCoverageEvent } from '../../services/coverageNotify.service.js'
+import { buildCoverageEvent, notifyCoverageEvent, notifyCoverageRefreshed } from '../../services/coverageNotify.service.js'
 
 // Prometheus's monitor card. House coverage has no owner, so the audience is every ADMIN — derived
 // at delivery time, the join tiltNotify's review offer already uses. Traders never see the feed
@@ -80,4 +80,49 @@ test('an empty roster, or a roster read that fails, posts nothing and never thro
 test('one failed delivery does not stop the others, and is not counted', async () => {
     const d = deps(['a1', 'a2', 'a3'], { post: async (card) => card.userId === 'a2' ? null : { id: 'ok' } })
     assert.equal(await notifyCoverageEvent(cov(), { state: 'validating', reason: 'r' }, d), 2)
+})
+
+// ── the refresh card: one user, or every admin ───────────────────────────────
+// Atlas's refresh-by-hop names the user who asked; the monitor's scheduled re-model has no user
+// (coverage is house-owned) and the same card fans out to the admin roster instead — the audience
+// the verdict card above already uses. Before 2026-09-16 the house half did not exist, which is one
+// of the two reasons a scheduled re-model could never complete.
+
+test('a user\'s refresh → one own-only card to that user, no roster read', async () => {
+    let read = false
+    const d = deps(['a1', 'a2'], { adminUserIds: async () => { read = true; return ['a1', 'a2'] } })
+    const n = await notifyCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', coverageId: 'cov_1', ok: true }, d)
+    assert.equal(n, 1)
+    assert.equal(read, false)
+    assert.equal(d.posted[0].userId, 'u1')
+    assert.equal(d.posted[0].visibility, 'own')
+    assert.equal(d.posted[0].forUserId, 'u1')
+    assert.match(d.posted[0].content, /Resume the review/)
+})
+
+test('a house refresh (no user) → every admin, admin-visible, and the copy stops talking about a review', async () => {
+    const d = deps(['a1', 'a2'])
+    const n = await notifyCoverageRefreshed({ userId: null, ticker: 'NVDA', coverageId: 'cov_1', summary: 'AI capex intact', ok: true }, d)
+    assert.equal(n, 2)
+    assert.deepEqual(d.posted.map(c => c.userId), ['a1', 'a2'])
+    for (const c of d.posted) {
+        assert.equal(c.visibility, 'admin')
+        assert.equal(c.forUserId, undefined)
+        assert.equal(c.payload.house, true)
+        assert.equal(c.type, 'coverage_refreshed')
+        assert.match(c.content, /Scheduled re-model of NVDA is in — AI capex intact/)
+        assert.doesNotMatch(c.content, /review/i)
+    }
+})
+
+test('a house refresh that stored nothing says so, honestly, to the same roster', async () => {
+    const d = deps(['a1'])
+    assert.equal(await notifyCoverageRefreshed({ userId: null, ticker: 'NVDA', ok: false }, d), 1)
+    assert.match(d.posted[0].content, /produced nothing to store — the existing coverage stands/)
+})
+
+test('a house refresh with no roster, or a roster read that fails, posts nothing and never throws', async () => {
+    assert.equal(await notifyCoverageRefreshed({ userId: null, ticker: 'NVDA' }, deps([])), 0)
+    const failing = deps([], { adminUserIds: async () => { throw new Error('mongo down') } })
+    assert.equal(await notifyCoverageRefreshed({ userId: null, ticker: 'NVDA' }, failing), 0)
 })

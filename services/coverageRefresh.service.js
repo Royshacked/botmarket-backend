@@ -48,14 +48,26 @@ export function _buildRefreshPrompt(ticker, question) {
 }
 
 /**
- * Run one async coverage refresh for a held name and ping the user when done. Fire-and-forget from the
- * review controller — NEVER throws (best-effort end to end). Returns a small outcome for tests/logs.
+ * Run one async coverage refresh for a name and say so when done. Fire-and-forget from the review
+ * controller and from the coverage monitor — NEVER throws (best-effort end to end). Returns a small
+ * outcome for tests/logs.
  *
- * @param {{ userId:string, ticker:string, question?:string|null, portfolioId?:string|null, portfolioName?:string|null }} args
+ * TWO CALLERS, ONE `userId` RULE. Atlas's refresh-by-hop names the user who asked, and the card goes
+ * back to them. The monitor's scheduled re-model has NO user — coverage is house-owned — and passes
+ * `userId: null`; the run then goes without a venue or an audience level, and the card fans out to
+ * every admin instead (see coverageNotify.notifyCoverageRefreshed). Refusing a null user here is what
+ * silently disabled every scheduled re-model between the coverage pivot (2026-08-26) and 2026-09-16:
+ * the monitor had already claimed the run and started its cooldown when this returned `bad_args`.
+ *
+ * A house run books no token spend against anyone (resolveAgentStream records usage per user only).
+ * That is a known gap, not a design: the money is real and belongs on the house's own row when one
+ * exists.
+ *
+ * @param {{ userId:string|null, ticker:string, question?:string|null, portfolioId?:string|null, portfolioName?:string|null }} args
  */
-export async function refreshCoverage({ userId, ticker, question = null, portfolioId = null, portfolioName = null }, deps = _deps) {
+export async function refreshCoverage({ userId = null, ticker, question = null, portfolioId = null, portfolioName = null }, deps = _deps) {
     const sym = String(ticker ?? '').toUpperCase().trim()
-    if (!userId || !sym) return { ok: false, reason: 'bad_args' }
+    if (!sym) return { ok: false, reason: 'bad_args' }
 
     logger.info(LOG, 'refresh start', { userId, ticker: sym, portfolioId })
     try {
@@ -64,7 +76,6 @@ export async function refreshCoverage({ userId, ticker, question = null, portfol
         // That mattered little when a refresh was an occasional Atlas request; now that the coverage
         // monitor schedules re-models off earnings dates, every one of them would discard the prior
         // view rather than revise against it, which is exactly what the revision trail exists to show.
-        // It also carries the language of the existing thesis (see _buildRefreshPrompt).
         const existing = await deps.existing(sym)
 
         const result = await withTimeout(deps.research({
@@ -85,7 +96,7 @@ export async function refreshCoverage({ userId, ticker, question = null, portfol
         }
 
         // Persist: initiate a fresh thesis, or update the existing one (appends a revision). initiate
-        // returns already_covered + the id when a thesis already exists for (user, symbol).
+        // returns already_covered + the id when the house already holds a thesis on the symbol.
         let coverageId = null, persisted = false, failReason = 'persist_failed'
         const init = await deps.initiate(draft)
         if (init?.ok) {

@@ -97,37 +97,70 @@ export async function notifyCoverageEvent(coverage, verdict, deps = _deps) {
 }
 
 // ─── Coverage refresh (G1) ──────────────────────────────────────────────────────
-// Prometheus pings the user when an async refresh-by-hop (requested by Atlas mid-review) has rewritten
-// a held name's coverage — so the user can reopen the review and Atlas reads the fresh artifact. When
-// the refresh carries a portfolioId the card routes back to that review; otherwise it opens coverage.
+// Prometheus says when a headless refresh has rewritten a name's coverage. Two askers, two audiences:
+//
+//   • Atlas's refresh-by-hop (mid-review) names the USER who asked. The card is theirs alone — so the
+//     user can reopen the review and Atlas reads the fresh artifact. With a portfolioId it routes
+//     back to that review; otherwise it opens coverage.
+//   • The coverage monitor's SCHEDULED re-model has no user — coverage is house-owned — and the
+//     card fans out to every admin, exactly as the monitor's verdict card above does, because the
+//     revised thesis is theirs to read and revise.
 
 /**
- * Build the "research refreshed" card. Pure → { userId, content, type, payload, botId, actions } or null.
- * `ok:false` = the refresh couldn't produce updated coverage (the existing thesis is left in place).
+ * Build the "research refreshed" card for one recipient. Pure → { userId, content, type, payload,
+ * botId, actions, visibility } or null. `ok:false` = the refresh couldn't produce updated coverage
+ * (the existing thesis is left in place). `house` = a scheduled re-model, not a user's request: the
+ * copy stops talking about "the review" and the card is admin-visible rather than own-only.
  */
-export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, portfolioName = null, coverageId = null, summary = null, ok = true }) {
+export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, portfolioName = null, coverageId = null, summary = null, ok = true, house = false }) {
     const sym = String(ticker ?? '').toUpperCase().trim()
     if (!userId || !sym) return null
     const forBook = portfolioName ? ` for "${portfolioName}"` : ''
     const gist    = (ok && typeof summary === 'string' && summary.trim())
         ? ` — ${summary.trim().length > 140 ? summary.trim().slice(0, 137) + '…' : summary.trim()}`
         : ''
-    const content = ok
-        ? `Fresh research on ${sym} is ready${forBook}${gist}. Resume the review to fold it in.`
-        : `Couldn't refresh research on ${sym} right now — leaving the existing coverage in place. You can resume the review.`
+    const content = house
+        ? (ok
+            ? `Scheduled re-model of ${sym} is in${gist}. Read the revised thesis.`
+            : `Scheduled re-model of ${sym} produced nothing to store — the existing coverage stands.`)
+        : (ok
+            ? `Fresh research on ${sym} is ready${forBook}${gist}. Resume the review to fold it in.`
+            : `Couldn't refresh research on ${sym} right now — leaving the existing coverage in place. You can resume the review.`)
     return {
         userId,
         content,
         type:       'coverage_refreshed',
-        payload:    { kind: 'coverage', symbol: sym, coverageId, portfolioId, ok },
+        payload:    { kind: 'coverage', symbol: sym, coverageId, portfolioId, ok, house },
         botId:      'analyst',
         actions:    portfolioId ? cardActions('Resume review') : cardActions('Open coverage'),
-        visibility: 'own',
-        forUserId:  userId,
+        ...(house
+            ? { visibility: 'admin' }
+            : { visibility: 'own', forUserId: userId }),
     }
 }
 
-/** Post the coverage-refresh card (fire-and-forget; never throws into the refresh hop). */
-export async function notifyCoverageRefreshed(args) {
-    return postCard(buildCoverageRefreshed(args), { tag: 'Coverage-refresh card', log: LOG })
+/**
+ * Post the coverage-refresh card(s). Never throws into the refresh hop. With a `userId` it is one
+ * card to that user; without one it is a house refresh and every admin gets it. Returns the number
+ * of cards posted, so "told nobody" is distinguishable from "told three" in the log.
+ */
+export async function notifyCoverageRefreshed(args, deps = _deps) {
+    if (args?.userId) {
+        return (await deps.post(buildCoverageRefreshed(args), { tag: 'Coverage-refresh card', log: LOG })) ? 1 : 0
+    }
+
+    let userIds
+    try {
+        userIds = await deps.adminUserIds()
+    } catch (err) {
+        logger.warn(LOG, 'house refresh card not delivered — admin roster read failed', err.message)
+        return 0
+    }
+
+    let posted = 0
+    for (const userId of userIds ?? []) {
+        const msg = await deps.post(buildCoverageRefreshed({ ...args, userId, house: true }), { tag: 'Coverage-refresh card (house)', log: LOG })
+        if (msg) posted++
+    }
+    return posted
 }

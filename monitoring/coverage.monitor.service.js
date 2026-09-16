@@ -49,9 +49,13 @@ const _deps = {
     recordMonitorState: coverageService.recordMonitorState,
     claimRemodel:       coverageService.claimRemodel,
     // The expensive tier — the SAME headless-Prometheus hop Atlas triggers mid-review, reused rather
-    // than forked, so a re-model persists and notifies identically however it was asked for.
-    // House coverage has no userId — remodel runs without a notification target (userId: null).
-    // Admin notifications for re-model events are wired in Step 2.
+    // than forked, so a re-model persists identically however it was asked for. House coverage has
+    // no userId, so `userId: null` here means "a house run": no venue, no audience level, and the
+    // "refreshed" card fans out to every admin (coverageNotify) rather than to one user.
+    //
+    // Returns the hop's `{ ok, reason }`, and _runRemodels READS it. Between 2026-08-26 and
+    // 2026-09-16 the hop refused a null user with `bad_args` and nothing here looked, so every
+    // scheduled re-model logged RE-MODEL, stamped its cooldown, and did nothing.
     remodel: (cov, reason) => refreshCoverage({
         userId:   null,
         ticker:   cov.symbol,
@@ -147,8 +151,13 @@ export async function _runRemodels(candidates, deps = _deps) {
             continue
         }
         logger.info(LOG, 'RE-MODEL', { symbol: cov.symbol, held: isHeld({ cov }), reason })
-        try { await deps.remodel(cov, reason) }
-        catch (err) { logger.warn(LOG, `re-model ${cov.symbol} failed:`, err.message) }
+        try {
+            // The hop never throws; it ANSWERS. A `{ ok: false }` left unread is how a whole tier can
+            // be dead and still log as if it ran — the claim above has already stamped the cooldown, so
+            // there is no retry coming, and this line is the only place the failure can be seen.
+            const res = await deps.remodel(cov, reason)
+            if (!res?.ok) logger.warn(LOG, `re-model ${cov.symbol} produced nothing`, { reason: res?.reason ?? 'unknown', trigger: reason })
+        } catch (err) { logger.warn(LOG, `re-model ${cov.symbol} failed:`, err.message) }
     }
 }
 

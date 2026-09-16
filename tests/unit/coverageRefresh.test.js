@@ -124,6 +124,39 @@ test('bad args (no ticker) → no research, no notify', async () => {
     assert.equal(h.calls.notify.length, 0)
 })
 
+// ─── a house run: no user, and NOT bad args ───────────────────────────────────
+// Coverage is house-owned, so the monitor's scheduled re-model has no user to name and passes
+// `userId: null`. From the coverage pivot (2026-08-26) to 2026-09-16 that read as `bad_args` and every
+// scheduled re-model returned before doing anything — after the monitor had already claimed the run
+// and started its 14-day cooldown. The shape below is EXACTLY what coverage.monitor's `remodel` dep
+// builds; this pins the contract between the two files, not the wiring line itself.
+
+test('the monitor\'s shape — userId null, ticker, question — is a house run, not bad args', async () => {
+    const prior = { id: 'covOLD', symbol: 'NVDA', thesis: 'v1', price_target: { value: 200 } }
+    const h = harness({ draft: { symbol: 'NVDA', thesis: 'v2' }, initResult: { ok: false, reason: 'already_covered', id: 'covOLD' }, existing: prior })
+    const r = await refreshCoverage({
+        userId:   null,
+        ticker:   'NVDA',
+        question: 'Scheduled re-model (catalyst passed: 2026-08-01). Re-run the valuation with fresh estimates and restate the variant view.',
+    }, h.deps)
+
+    assert.equal(r.ok, true, `a null user must not be refused: ${JSON.stringify(r)}`)
+    assert.equal(h.calls.research.length, 1)
+    assert.equal(h.calls.research[0].userId, null)                 // no venue, no audience — a house run
+    assert.equal(h.calls.update.length, 1)                         // the existing thesis was revised
+    assert.equal(h.calls.notify.length, 1)
+    assert.equal(h.calls.notify[0].userId, null)                   // the notifier fans this out to admins
+    assert.equal(h.calls.notify[0].ok, true)
+})
+
+test('a house run that produces no draft still reports it — with no user on the card', async () => {
+    const h = harness({ draft: null, initResult: { ok: true } })
+    const r = await refreshCoverage({ userId: null, ticker: 'NVDA' }, h.deps)
+    assert.equal(r.ok, false)
+    assert.equal(r.reason, 'no_draft')
+    assert.deepEqual(h.calls.notify[0], { userId: null, ticker: 'NVDA', portfolioId: null, portfolioName: null, ok: false })
+})
+
 test('_buildRefreshPrompt: includes ticker always, question only when given', () => {
     assert.match(_buildRefreshPrompt('NVDA', 'guide?'), /Re-research NVDA/)
     assert.match(_buildRefreshPrompt('NVDA', 'guide?'), /Focus especially on: guide\?/)
