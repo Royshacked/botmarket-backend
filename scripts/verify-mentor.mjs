@@ -22,7 +22,7 @@
 const { mentorAgentService, emptyMentorState } = await import('../services/agents/mentor.agent.service.js')
 const { normalizeSetup, setupReadiness, computeRR, buildLadder, buildCadence, validityProblems,
     scenarioLabel, scenarioView, declaredConditions } = await import('../services/setup.schema.js')
-const { scenarioGate }   = await import('../monitoring/talos.gates.js')
+const { scenarioGate, liveScenarios } = await import('../monitoring/talos.gates.js')
 const { fetchLastPrice } = await import('../services/lastPrice.service.js')
 
 const args   = process.argv.slice(2)
@@ -242,8 +242,9 @@ function checkGate(setup, price) {
 
     // The zone must be reachable: an entry the market has to travel to is fine, one it has
     // already blown past by a mile is a setup that will never fire. Measured in zone widths of the
-    // nearest live entry zone.
-    const zones = (setup.scenarios ?? []).flatMap(sc => sc.entry_zones ?? []).concat(setup.entry_zones ?? [])
+    // nearest LIVE entry zone — the gate acts only on live scenarios, so a dead premise's zone
+    // must not colour the "may never trigger" warning.
+    const zones = liveScenarios(setup).flatMap(sc => sc.entry_zones ?? []).concat(setup.entry_zones ?? [])
     const dist  = zones.length ? Math.min(...zones.map(z => {
         const width = Math.max(Math.abs(z.upper - z.lower), 1e-9)
         return price < z.lower ? (z.lower - price) / width : price > z.upper ? (price - z.upper) / width : 0
