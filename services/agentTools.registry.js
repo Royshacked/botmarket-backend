@@ -578,7 +578,9 @@ export const TOOL_SCHEMAS = {
             }
         }
     },
-    web_search: { server: "web_search_20250305" },
+    // Base = the modern variant; providers/anthropic.provider finalizes it PER MODEL (Haiku takes
+    // the basic one) and adds max_uses. The registry says only "this desk offers web_search".
+    web_search: { server: "web_search_20260209" },
     get_market_brief: {
         "type": "object",
         "properties": {

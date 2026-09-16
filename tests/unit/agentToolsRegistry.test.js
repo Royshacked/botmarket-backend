@@ -197,7 +197,9 @@ test('cache_control is opt-in per spec entry, because it marks a POSITION not a 
 
 test('a server-side tool passes through by type, with no input_schema', () => {
     const [ws] = toolsFor({ web_search: '' })
-    assert.deepEqual(ws, { type: 'web_search_20250305', name: 'web_search' })
+    // The registry's declared base; the provider downgrades to the basic variant for Haiku and adds
+    // max_uses at request time (see anthropicWebSearch.test).
+    assert.deepEqual(ws, { type: 'web_search_20260209', name: 'web_search' })
 })
 
 test('spec order is preserved — prompt caching keys off the array prefix', () => {

@@ -3,6 +3,7 @@ import { createTagSuppressor } from '../services/llmStream.util.js'
 import { isToolError, toolErrorText } from '../services/toolResult.util.js'
 import { logger } from '../services/logger.service.js'
 import { config } from '../services/config.js'
+import { webSearchTypeFor } from '../services/llmModels.js'
 
 const LOG = '[anthropic]'
 
@@ -12,6 +13,33 @@ const DEFAULT_MAX_TOKENS = 8192
 // model headroom for both the hidden reasoning and the full visible reply.
 const THINKING_MAX_TOKENS = 16000
 const DEFAULT_MAX_CONTINUATIONS = 10
+
+// A ceiling on server-side web searches per turn — the cost knob the basic tool passthrough never
+// set. web_search bills per search, so an uncapped turn is an uncapped line; 5 is generous for a
+// brief or a desk read and bounds a runaway. The 2026-02-09 variant also accepts domain filters;
+// none is imposed here (a research desk should not be walled to a domain list), but the seam is now
+// the one place to add one.
+const WEB_SEARCH_MAX_USES = 5
+
+/**
+ * Resolve server tools against the model, right before the request — the one place that knows both.
+ * The registry emits web_search's MODERN type as a declared base (it cannot know the request's
+ * model, being built once); here it is downgraded to the basic variant on a model that needs it
+ * (Haiku), and given its max_uses cap. Everything else passes through untouched, and the same array
+ * is returned when there is no server tool, so the cacheable tools prefix is undisturbed.
+ */
+export function _finalizeServerTools(tools, model) {
+    if (!Array.isArray(tools) || !tools.length) return tools
+    let touched = false
+    const out = tools.map(t => {
+        if (typeof t?.type === 'string' && t.type.startsWith('web_search_')) {
+            touched = true
+            return { type: webSearchTypeFor(model), name: t.name, max_uses: WEB_SEARCH_MAX_USES }
+        }
+        return t
+    })
+    return touched ? out : tools
+}
 
 // Map the abstract reasoning-effort knob onto adaptive extended thinking. 'off'
 // (or undefined) → no thinking block at all, so we pay for zero reasoning
@@ -79,6 +107,7 @@ export async function streamAnthropicWithTools({
     const suppressor = createTagSuppressor({ onToken, captures: tagCaptures })
     if (!model) throw new Error('streamAnthropicWithTools: model is required — llmModels resolves it')
     const reasoning  = _thinkingConfig(reasoningEffort, model)
+    const finalTools = _finalizeServerTools(tools, model)
 
     for (let i = 0; i < maxContinuations; i++) {
         // Client disconnected (user hit Stop) — end the loop instead of burning
@@ -93,7 +122,7 @@ export async function streamAnthropicWithTools({
             model,
             system:     systemPrompt,
             messages,
-            tools,
+            tools:      finalTools,
             max_tokens: reasoning ? THINKING_MAX_TOKENS : DEFAULT_MAX_TOKENS,
             ...(reasoning ?? {}),
         }, signal ? { signal } : undefined)

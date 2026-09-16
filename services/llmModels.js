@@ -17,6 +17,17 @@ const MODELS = {
     'claude-haiku-4-5-20251001': { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Haiku 4.5' },
 }
 
+// Which web_search server-tool variant a model accepts. The 2026-02-09 variant (dynamic
+// filtering: max_uses, allowed/blocked domains, user_location) is on Opus 5/4.8 and Sonnet 5/4.6;
+// Haiku 4.5 keeps the basic 2025-03-05 variant, and an UNKNOWN model defaults to basic too, because
+// basic is accepted everywhere web_search is. The registry emits the modern type as its base; the
+// provider calls this to downgrade per request (a user, or a spend-degraded turn, on Haiku).
+const WEB_SEARCH_20260209 = new Set(['claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-sonnet-4-6'])
+
+export function webSearchTypeFor(model) {
+    return WEB_SEARCH_20260209.has(model) ? 'web_search_20260209' : 'web_search_20250305'
+}
+
 export function isAllowedModel(model) {
     return typeof model === 'string' && Object.prototype.hasOwnProperty.call(MODELS, model)
 }

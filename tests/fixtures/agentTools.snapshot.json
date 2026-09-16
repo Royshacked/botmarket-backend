@@ -20,7 +20,7 @@
   ],
   "strategy": [
     {
-      "type": "web_search_20250305",
+      "type": "web_search_20260209",
       "name": "web_search"
     },
     {
@@ -79,7 +79,7 @@
   ],
   "portfolio": [
     {
-      "type": "web_search_20250305",
+      "type": "web_search_20260209",
       "name": "web_search"
     },
     {
@@ -434,7 +434,7 @@
   ],
   "scanner": [
     {
-      "type": "web_search_20250305",
+      "type": "web_search_20260209",
       "name": "web_search"
     },
     {
@@ -1032,7 +1032,7 @@
   ],
   "analyst": [
     {
-      "type": "web_search_20250305",
+      "type": "web_search_20260209",
       "name": "web_search"
     },
     {
@@ -1315,7 +1315,7 @@
   ],
   "kairos": [
     {
-      "type": "web_search_20250305",
+      "type": "web_search_20260209",
       "name": "web_search"
     },
     {
@@ -1920,7 +1920,7 @@
   ],
   "mentor": [
     {
-      "type": "web_search_20250305",
+      "type": "web_search_20260209",
       "name": "web_search"
     },
     {
