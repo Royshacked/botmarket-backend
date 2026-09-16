@@ -100,7 +100,7 @@ async function chatStream({
 
     const phase = makePhaseCapture(5, onPhase)
     // Every emit tag is suppressed by default; <tilt> is parsed from `raw` afterward, same as
-    // Kairos parses <call> and Prometheus parses <coverage>.
+    // Prometheus parses <coverage>.
     const tagCaptures = buildTagCaptures({ phase: phase.capture })
 
     const raw = await _run({

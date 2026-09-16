@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { _parseAnalystResponse, _buildSystemPrompt, analystAgentService } from '../../services/agents/analyst.agent.service.js'
-import { _sanitizeAnalystSeed, _resolveCoverageContext } from '../../api/analyst/analyst.controller.js'
+import { _resolveCoverageContext } from '../../api/analyst/analyst.controller.js'
+import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 
 // Analyst P3 — <coverage> extraction from the streamed research turn (pure).
 
@@ -104,7 +105,6 @@ test('chatStream: the turn flows through — messages, system prompt, phase + co
     assert.equal(result.coverage.symbol, 'NVDA')   // draft only — persistence happens at initiate
 })
 
-// ── _sanitizeAnalystSeed (Argus investing candidate → research hand-off, P4b) ──
 // ── _resolveCoverageContext — pre-check before Prometheus stream ──────────────
 
 // Fake coverageService stand-in for unit tests (no DB).
@@ -162,21 +162,21 @@ test('resolveCoverage: spreads original chatState fields through', async () => {
     assert.deepEqual(state.draft, { symbol: 'SPY' })
 })
 
-// ── _sanitizeAnalystSeed (Argus investing candidate → research hand-off, P4b) ──
+// ── sanitizeScanSeed, as the Analyst reads it (Argus investing candidate → research hand-off, P4b) ──
 test('seed: uppercases ticker, keeps sector/thesis/analysis, requires a ticker', () => {
     // One shared parser now serves Kairos, Analyst and Mentor, so it returns the UNION of what a
     // hand-off can carry and each desk reads the fields it has a use for. Analyst reads `sector`
     // and ignores `direction`/`recommended_mode`/`window` — they arrive as nulls, never as absent
     // keys, so a desk cannot tell "not sent" from "not parsed".
-    const s = _sanitizeAnalystSeed({ ticker: 'msft', sector: 'Technology', thesis: 'quality compounder', analysis: 'ROIC 28%, net cash' })
+    const s = sanitizeScanSeed({ ticker: 'msft', sector: 'Technology', thesis: 'quality compounder', analysis: 'ROIC 28%, net cash' })
     assert.equal(s.ticker, 'MSFT')
     assert.equal(s.sector, 'Technology')
     assert.equal(s.thesis, 'quality compounder')
     assert.equal(s.analysis, 'ROIC 28%, net cash')
-    assert.deepEqual(_sanitizeAnalystSeed({ ticker: 'aapl' }),
+    assert.deepEqual(sanitizeScanSeed({ ticker: 'aapl' }),
         { ticker: 'AAPL', direction: null, sector: null, thesis: null, analysis: null, recommended_mode: null, window: null })
-    assert.equal(_sanitizeAnalystSeed({ thesis: 'no ticker' }), null)
-    assert.equal(_sanitizeAnalystSeed({ ticker: '  ' }), null)
-    assert.equal(_sanitizeAnalystSeed(null), null)
-    assert.equal(_sanitizeAnalystSeed('nope'), null)
+    assert.equal(sanitizeScanSeed({ thesis: 'no ticker' }), null)
+    assert.equal(sanitizeScanSeed({ ticker: '  ' }), null)
+    assert.equal(sanitizeScanSeed(null), null)
+    assert.equal(sanitizeScanSeed('nope'), null)
 })

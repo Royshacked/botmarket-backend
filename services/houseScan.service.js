@@ -87,7 +87,7 @@ export async function runHouseScan(tiltDoc, deps = _io) {
             regime, sectors: rows.map(r => `${r.sector}${r.active_bp === null ? '' : ` +${r.active_bp}bp`}`),
         })
 
-        const enqueue = deps.enqueue ?? researchQueueService.enqueue.bind(researchQueueService)
+        const enqueue = deps.enqueue ?? _io.enqueue   // tests inject screenSector alone
         const seen    = new Set()
         let queued    = 0
         let skipped   = 0
@@ -127,22 +127,20 @@ export async function runHouseScan(tiltDoc, deps = _io) {
     }
 }
 
-// Default IO: FMP screener imported lazily so tests can inject stubs without
-// dragging the provider stack in.
+// Default IO: FMP screener imported lazily so tests can inject stubs without dragging the provider
+// stack in. Throws on a failed screen — runHouseScan's loop is the one place that decides what a
+// failed sector means (skip it, scan continues), and catching here as well made that branch
+// unreachable for the real IO.
 const _io = {
     async screenSector(sector, { limit = DEFAULT_HITS } = {}) {
-        try {
-            const { screenCandidatesRaw } = await import('../providers/fmp.provider.js')
-            const rows = await screenCandidatesRaw({
-                sector,
-                volumeMoreThan: MIN_VOLUME,
-                isEtf:          'false',
-                limit,
-            })
-            return rows.map(r => String(r.symbol || '').toUpperCase().trim()).filter(Boolean)
-        } catch (err) {
-            logger.warn(LOG, `sector screen failed: ${sector}`, err.message)
-            return []
-        }
+        const { screenCandidatesRaw } = await import('../providers/fmp.provider.js')
+        const rows = await screenCandidatesRaw({
+            sector,
+            volumeMoreThan: MIN_VOLUME,
+            isEtf:          'false',
+            limit,
+        })
+        return rows.map(r => String(r.symbol || '').toUpperCase().trim()).filter(Boolean)
     },
+    enqueue: (args) => researchQueueService.enqueue(args),
 }

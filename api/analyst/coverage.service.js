@@ -50,7 +50,6 @@ export const coverageService = {
     updateCoverage,
     retireCoverage,
     deleteCoverage,
-    deduplicateCoverage,
     captureResearchBasis,
     recordMonitorState,
     claimRemodel,
@@ -308,9 +307,9 @@ async function _ensureIndexes(db) {
     await db.collection(COLLECTION).createIndex({ id: 1 }, { unique: true })
     // If a non-unique symbol index was created before this constraint was added,
     // MongoDB raises IndexOptionsConflict (code 85). Drop the old index and recreate.
-    // Note: if there are duplicate symbols, the recreate will also fail — run
-    // POST /api/analyst/coverage/deduplicate first to clean up before the unique
-    // index can be enforced.
+    // (The recreate would also fail on duplicate symbols. None can exist once this index
+    // is in place, and the one-off cleanup that preceded it was removed on 2026-09-16 —
+    // a collection that somehow has duplicates again needs a hand, not a route.)
     try {
         await db.collection(COLLECTION).createIndex({ symbol: 1 }, { unique: true })
     } catch (err) {
@@ -481,32 +480,6 @@ async function deleteCoverage(id) {
         return { ok: true }
     } catch (err) {
         logger.error(LOG, 'coverage delete failed', err)
-        return { ok: false, error: err }
-    }
-}
-
-// Remove duplicate coverage documents for the same symbol, keeping the most recently updated one.
-// Runs as an admin-triggered cleanup; safe to call when the unique index is absent.
-async function deduplicateCoverage() {
-    try {
-        const db   = await getDb()
-        const all  = await db.collection(COLLECTION).find({}).sort({ updated_at: -1 }).toArray()
-        const seen = new Set()
-        const obsolete = []
-        for (const doc of all) {
-            const sym = doc.symbol ?? ''
-            if (seen.has(sym)) {
-                obsolete.push(doc._id)
-            } else {
-                seen.add(sym)
-            }
-        }
-        if (!obsolete.length) return { ok: true, removed: 0 }
-        const res = await db.collection(COLLECTION).deleteMany({ _id: { $in: obsolete } })
-        logger.info(LOG, 'coverage dedup complete', { removed: res.deletedCount })
-        return { ok: true, removed: res.deletedCount }
-    } catch (err) {
-        logger.error(LOG, 'deduplicateCoverage failed', err)
         return { ok: false, error: err }
     }
 }

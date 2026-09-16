@@ -1,5 +1,5 @@
-// Coverage monitor (P5) — the slow background loop that keeps the Analyst's theses LIVING. Mirrors the
-// Hermes/Themis pattern (poll loop + due-selection + a two-tier verdict), but at a research cadence:
+// Coverage monitor (P5) — the slow background loop that keeps the Analyst's theses LIVING. The same
+// shape as every monitor here (dueLoop: poll + due-selection + a two-tier verdict), at a research cadence:
 // each coverage is re-checked ~daily. It tracks THE GAP (our view vs the Street) via the pure
 // classifier in coverage.assess.js — is the Street converging to us (thesis playing out, edge closing)
 // or diverging — plus price reaching our target. Material verdicts append a revision + notify; a quiet
@@ -35,7 +35,7 @@ const MAX_REMODELS_PER_TICK = 3
 
 // Injectable IO so tests exercise the branching without real price/consensus/DB writes.
 const _deps = {
-    // The SHARED price read (quote → candle fallback), the same one Hermes and Talos gate on. This
+    // The SHARED price read (quote → candle fallback), the same one Talos gates on. This
     // used to hand-roll a getQuote() lookup — the LLM-display formatter, which returns a STRING — so
     // the price was silently null on every tick and every thesis broke on its first check.
     getPrice:       (sym) => fetchLastPrice(sym).catch(() => null),

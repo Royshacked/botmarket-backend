@@ -1,8 +1,9 @@
 // The Analyst agent (P3) — a buy-side research analyst. Streams a research conversation and emits a
 // <coverage> draft (the variant-perception thesis + our price target vs the Street + kill-criteria).
-// Mirrors the Kairos agent shape: the agent captures the raw <coverage> block and returns it as a
-// DRAFT for preview; normalization + persistence happen at initiate (coverage.service.initiateCoverage),
-// exactly as Kairos parses <call> here and normalizeCall runs at save.
+// The desk shape every artifact-emitting agent shares: the agent captures the raw <coverage> block
+// and returns it as a DRAFT for preview; normalization + persistence happen at initiate
+// (coverage.service.initiateCoverage), exactly as Pythia's <tilt> is normalized at publish and
+// Mentor's <setup> at save.
 
 import { fileURLToPath } from 'url'
 import { makePhaseCapture, runAgentStream } from '../agentIO.js'
@@ -76,8 +77,6 @@ const TOOL_HANDLERS = {
     // Unbound (market hours belong to the instrument, not the user) — so it lives in the
     // static map, unlike the venue handlers that are rebuilt per request around a userId.
     ...makeMarketHoursHandlers(),
-    // Unbound — channel exposure is a house-layer broadcast, no userId.
-    // Unbound — shock pipeline predictions are a house-layer broadcast, no userId.
 }
 
 export const analystAgentService = { chatStream }
@@ -100,7 +99,7 @@ async function chatStream({
 
     const phase = makePhaseCapture(6, onPhase)
     // Suppress every emit tag from the token stream; capture phase live. <coverage> is suppressed and
-    // parsed from `raw` afterward (same as Kairos parses <call>).
+    // parsed from `raw` afterward (same as Pythia parses <tilt>).
     const tagCaptures = buildTagCaptures({ phase: phase.capture })
 
     const raw = await _run({
@@ -173,7 +172,7 @@ function _cleanDraft(c) {
 // instructions: the analyst may defend a leg — arguing a name re-rates outside its own history is a
 // legitimate variant view, which is exactly why these RECORD rather than refuse — but it must now
 // answer instead of stepping over.
-const _withoutFlags = ({ flags, ...rest }) => rest   // eslint-disable-line no-unused-vars
+const _withoutFlags = ({ flags, ...rest }) => rest   // eslint-disable-line no-unused-vars -- `flags` is destructured away on purpose
 function _objectionsBlock(flags) {
     const list = (Array.isArray(flags) ? flags : [])
         .map(f => ({ leg: typeof f?.leg === 'string' ? f.leg.trim() : '', detail: typeof f?.detail === 'string' ? f.detail.trim() : '' }))

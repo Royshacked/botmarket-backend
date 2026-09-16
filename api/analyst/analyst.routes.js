@@ -3,7 +3,7 @@ import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
 import {
     streamAnalyst,
-    listCoverage, getCoverageOne, getCoverageBySymbol, deduplicateCoverage,
+    listCoverage, getCoverageOne, getCoverageBySymbol,
     initiateCoverage, updateCoverage, retireCoverage, deleteCoverage,
     listResearchQueue, enqueueResearch, startResearch, completeResearch, rejectResearch,
     startResearchRun, getResearchRun, stopResearchRun, requeueStalledResearch,
@@ -21,7 +21,6 @@ router.get('/coverage',                         log, listCoverage)
 router.get('/coverage/by-symbol/:symbol',       log, getCoverageBySymbol)
 router.get('/coverage/:id',                     log, getCoverageOne)
 router.post('/coverage',                        log, requireAdmin, initiateCoverage)
-router.post('/coverage/deduplicate',            log, requireAdmin, deduplicateCoverage)
 router.put('/coverage/:id',                     log, requireAdmin, updateCoverage)
 router.post('/coverage/:id/retire',             log, requireAdmin, retireCoverage)
 router.delete('/coverage/:id',                  log, requireAdmin, deleteCoverage)

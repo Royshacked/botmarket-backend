@@ -28,7 +28,7 @@ const POLL_INTERVAL_MS = 60 * 60 * 1000
 const DAY_MS           = 24 * 60 * 60 * 1000
 
 const _deps = {
-    // The SHARED price read — the same one Hermes, Talos and the coverage monitor gate on. Twelve
+    // The SHARED price read — the same one Talos and the coverage monitor gate on. Twelve
     // reads a day at most (eleven sector proxies plus the benchmark), and only for sectors actually
     // carrying an open stance.
     getPrice:  (sym) => fetchLastPrice(sym).catch(() => null),
@@ -40,7 +40,7 @@ const _deps = {
     // The expensive tier — and the monitor does not run it. A top-down re-author is a multi-minute,
     // tool-heavy desk turn that ends in SUPERSEDING the house view every user reads, so waking the
     // desk means ASKING: a card in the social chat, whose confirm takes the user to Pythia and runs
-    // the review in his thread. Same call the daily market brief makes. See tiltNotify.
+    // the review in their thread. Same call the daily market brief makes. See tiltNotify.
     requestReview: async (doc, reason) => notifyTiltReviewDue(doc, { reason }),
     // The dated macro calendar the catalyst trigger reads — the SAME FRED feed behind the Radar Fed
     // tab, narrowed to FOMC decisions and high-impact prints. A low-impact release is not a reason

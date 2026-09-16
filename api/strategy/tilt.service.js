@@ -6,10 +6,10 @@
 // gradeable: `active_bp × relative return = contribution`, which is standard attribution rather than
 // a judgment call. It is the one forecast in this app that both scores cleanly and drives a decision.
 //
-// WHY IT IS NOT `coverage`. Coverage is one doc per (user, symbol) — bottom-up, owner-scoped,
-// per name. A tilt is ONE doc for the whole market: no symbol, and no `userId` at all. It is a
-// BROADCAST, like the Axl brief: one house view serving every user, which Atlas then applies against
-// a particular mandate. Never join it to a user's book.
+// WHY IT IS NOT `coverage`. Coverage is one doc per SYMBOL — bottom-up, per name, house-owned like
+// this is. A tilt is ONE doc for the whole market: no symbol at all. Both are BROADCASTS, like the
+// Axl brief — one house view serving every user, which Atlas then applies against a particular
+// mandate — and neither is ever joined to a user's book. They differ in grain, not in ownership.
 //
 // WHY NOT `makeEntityCrud`. That factory's `_scope(userId)` is not incidental — it is the guarantee
 // that a list is only ever the caller's own. A broadcast doc has no owner, and bolting a

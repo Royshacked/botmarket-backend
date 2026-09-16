@@ -139,7 +139,6 @@ const TOOL_HANDLERS = {
     // Unbound (market hours belong to the instrument, not the user) — so it lives in the
     // static map, unlike the venue handlers that are rebuilt per request around a userId.
     ...makeMarketHoursHandlers(),
-    // Unbound — shock feed is a house-layer broadcast, no userId.
 }
 
 // Wrap the module-level handlers with a per-session grounding recorder. A
@@ -287,8 +286,9 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
 }
 
 // Normalize a captured <kairos_pick> (hand-off mode) — the single ticker Argus recommends back to
-// Kairos. Pure: null when there's no usable ticker, else a clean {ticker, direction, thesis, analysis}
-// (direction defaults long; the analysis seeds Kairos's Phase 2). Exported for tests.
+// the build desk (Mentor; the tag kept the name of the desk it was written for). Pure: null when
+// there's no usable ticker, else a clean {ticker, direction, thesis, analysis} (direction defaults
+// long; the analysis seeds the build desk's read). Exported for tests.
 export function _normalizeKairosPick(p) {
     if (!p || typeof p !== 'object' || typeof p.ticker !== 'string' || !p.ticker.trim()) return null
     return {
@@ -296,8 +296,9 @@ export function _normalizeKairosPick(p) {
         direction: p.direction === 'short' ? 'short' : 'long',
         thesis:    typeof p.thesis === 'string' ? p.thesis : '',
         analysis:  typeof p.analysis === 'string' ? p.analysis : '',
-        // K3: Argus's recommended Kairos lens from the dominant driver (feasibility-filtered). null =
-        // no recommendation → the FE keeps the user's current mode chip. See docs/desks/kairos-hermes.md.
+        // K3: Argus's recommended build lens from the dominant driver (feasibility-filtered). null =
+        // no recommendation → the FE keeps the user's current mode chip. Mentor AUTHORS trade_mode
+        // from it (scanSeed.util); see docs/desks/trade-pipeline.md.
         recommended_mode: isMode(p.recommended_mode) ? p.recommended_mode : null,
     }
 }
@@ -386,12 +387,14 @@ function _normalizeScan(scan, editList = null, ledger = null, profile = 'trading
         // with the list so a handed-off candidate carries its horizon. null when unstated.
         style,
         // P4a: which Argus lens produced this list + where a candidate is built. investing → the Analyst
-        // (research), trading → the trade-idea builder (Kairos).
+        // (research), trading → the trade desk's build step (Mentor).
         profile:     prof,
         // The selection school it was screened under (investing only). Persisted with the list because
         // it is what the ranking MEANS — the same names under a different school are a different list,
         // and a saved list re-read months later has to say which bar it was held to.
         lens,
+        // A WIRE VALUE, like the kairos_pick tag: the client reads only `=== 'analyst'` and the pipeline
+        // decides the trade desk's receiver itself (findReceiver), so this names the tier, not the desk.
         destination: prof === 'investing' ? 'analyst' : 'kairos',
         candidates: clean,
     }
@@ -435,9 +438,9 @@ function _cleanCandidate(c, style = null, profile = 'trading', lens = null) {
         score,
         conviction: cleanConviction(c.conviction),
         sources:   Array.isArray(c.sources) ? c.sources.filter(s => s && s.url) : [],
-        // K3/#4: Argus's recommended Kairos lens — TRADING profile only (an investing candidate goes to
-        // the Analyst for research, not to Kairos, so it carries no build lens). isMode-validated + then
-        // feasibility-guarded against the liquidity axis.
+        // K3/#4: Argus's recommended build lens — TRADING profile only (an investing candidate goes to
+        // the Analyst for research, not to the trade desk, so it carries no build lens). isMode-validated
+        // + then feasibility-guarded against the liquidity axis.
         recommended_mode: profile === 'investing' ? null : _feasibleMode(isMode(c.recommended_mode) ? c.recommended_mode : null, score),
         // Grounding provenance (scanner.grounding.js). null on the no-ledger path;
         // callers stamp 'sourced' | 'validated' | 'kept' when a ledger is present.

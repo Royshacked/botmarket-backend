@@ -1,10 +1,10 @@
 // HTTP handlers for the strategy desk (Pythia): the streaming top-down agent + the tilt publication
 // log.
 //
-// The tilt is a BROADCAST — one house view, no owner — so these routes are deliberately NOT
-// owner-scoped the way coverage's are. `requireAuth` still gates them (you must be signed in to read
-// or publish the view), but nothing here filters by `req.user._id`, and that asymmetry is the point:
-// scoping a house view per user would quietly turn it into eleven private opinions.
+// The tilt is a BROADCAST — one house view, no owner — so nothing here filters by `req.user._id`,
+// and that is the point: scoping a house view per user would quietly turn it into eleven private
+// opinions. (Coverage is house-owned the same way.) The router gates the whole desk `requireAdmin`
+// — see strategy.routes.
 
 import { tiltService, balanceOf } from './tilt.service.js'
 import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'

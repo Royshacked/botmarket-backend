@@ -13,8 +13,6 @@ import { sanitizeScanSeed }       from '../../services/scanSeed.util.js'
 
 const LOG = '[analystCtrl]'
 
-export const _sanitizeAnalystSeed = sanitizeScanSeed
-
 // Enrich chatState with coverage data from the DB so the agent always knows what's already
 // covered — without depending on the frontend to send it. The frontend can still override
 // by pre-populating either field; we only fill what's missing.
@@ -51,7 +49,7 @@ export async function _resolveCoverageContext(chatState, seed) {
 
 export async function streamAnalyst(req, res) {
     const { messages, userPrompt, model, chatState } = req.body ?? {}
-    const seed = _sanitizeAnalystSeed(req.body?.seed)
+    const seed = sanitizeScanSeed(req.body?.seed)
     if (messages !== undefined && messages !== null) {
         const v = parseChatMessages(messages)
         if (v.error) return res.status(400).json({ error: v.error })
@@ -122,17 +120,6 @@ export async function getCoverageBySymbol(req, res) {
     } catch (err) {
         logger.error(LOG, 'getCoverageBySymbol failed', err)
         res.status(500).send({ error: 'Failed to get coverage' })
-    }
-}
-
-export async function deduplicateCoverage(req, res) {
-    try {
-        const result = await coverageService.deduplicateCoverage()
-        logger.info(LOG, 'coverage dedup', { removed: result.removed })
-        res.send(result)
-    } catch (err) {
-        logger.error(LOG, 'deduplicateCoverage failed', err)
-        res.status(500).send({ error: 'Failed to deduplicate coverage' })
     }
 }
 

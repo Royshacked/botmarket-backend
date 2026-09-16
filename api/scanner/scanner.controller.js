@@ -41,7 +41,8 @@ export async function streamScanner(req, res) {
                 onPhase:     (phase)  => sendEvent('phase',     { phase }),
             })
 
-            // `kairos_pick` (hand-off mode) → the single ticker Argus recommends back to Kairos.
+            // `kairos_pick` (hand-off mode) → the single ticker Argus recommends back to the build desk.
+            // The wire name outlived the desk it was written for; the client reads it by this name.
             return { reply: result.reply, scan: result.scan ?? null, phase: result.phase ?? null, ...(result.pick ? { kairos_pick: result.pick } : {}) }
         },
     })
