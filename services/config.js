@@ -153,7 +153,6 @@ export const config = {
     get paperMarkIntervalMs()     { return _num('PAPER_MARK_INTERVAL_MS', 3_000) },
     get paperEquitySnapshotMs()   { return _num('PAPER_EQUITY_SNAPSHOT_MS', 300_000) },
     get paperQuoteTtlMs()         { return _num('PAPER_QUOTE_TTL_MS', 5_000) },
-    get paperFastQuoteTtlMs()     { return _num('PAPER_FAST_QUOTE_TTL_MS', 3_000) },
 
     // ── guard sweep (Talos tier-0) ──
     // How often armed setups' wake guards are evaluated, and therefore the resolution of every price
@@ -282,7 +281,7 @@ export const KNOWN_KEYS = new Set([
     'OWN_CHART_RENDER', 'OWN_CHART_RENDER_TIMEOUT_MS', 'OWN_CHART_RENDER_PAGE_TIMEOUT_MS',
     'OWN_CHART_RENDER_CONCURRENCY',
     'PAPER_FILL_INTERVAL_MS', 'PAPER_MARK_INTERVAL_MS', 'PAPER_EQUITY_SNAPSHOT_MS',
-    'PAPER_QUOTE_TTL_MS', 'PAPER_FAST_QUOTE_TTL_MS',
+    'PAPER_QUOTE_TTL_MS',
     'MARKET_BRIEF_TTL_MS', 'MARKET_BRIEF_OFFER_HOUR_UTC', 'MARKET_BRIEF_OFFER',
     'CTRADER_CLIENTID', 'CTRADER_SECRET', 'CTRADER_REDIRECT_URI', 'CTRADER_REDIRECT_URL_PROD',
     'IBKR_GW_HOST', 'IBKR_GW_PORT', 'IBKR_GW_CLIENTID',

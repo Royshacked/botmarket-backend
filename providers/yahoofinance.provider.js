@@ -20,7 +20,6 @@ import {
 // leaf module, so importing it here is cycle-free — unlike candles.provider, which imports
 // massive → this module. See reference_fmp_pricing.
 import { getFmpQuoteYf, getFmpCandles } from './fmp.price.provider.js'
-import { config } from '../services/config.js'
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] })
 
@@ -48,15 +47,6 @@ async function _quote(ticker) {
  * Get a real-time quote for a ticker.
  * Returns a plain string ready to be fed to the LLM as a tool result.
  */
-export async function getCompanyName(ticker) {
-    try {
-        const q = await _quote(ticker)
-        return q?.shortName || q?.longName || ticker
-    } catch {
-        return ticker
-    }
-}
-
 export async function getQuote(ticker) {
     const q = await _quote(ticker)
     const p = v => (v != null ? `$${Number(v).toFixed(2)}` : 'n/a')
@@ -79,26 +69,6 @@ export async function getQuote(ticker) {
 export async function getNumericQuote(ticker) {
     const q = await _quote(ticker)
     return { symbol: q.symbol, price: q.regularMarketPrice ?? null }
-}
-
-// Fast-refresh quote for the paper touch-fill + mark loops. They sample every ~3s and
-// need a price fresher than the 30s agent cache gives — but lowering that shared cache
-// would multiply yf.quote calls across the WHOLE app (agent tools + sizing) and invite
-// 429s. So this rides a SEPARATE short-TTL cache: the extra load stays scoped to the
-// small set of active paper symbols, deduped to ~one fetch per symbol per TTL.
-const FAST_QUOTE_TTL_MS = config.paperFastQuoteTtlMs
-const _fastQuoteCache   = createTtlCache({ ttlMs: FAST_QUOTE_TTL_MS, max: QUOTE_CACHE_MAX }) // SYMBOL -> data
-
-/**
- * Like getNumericQuote, but on a 3s cache instead of 30s — for the paper loops that
- * need sub-minute freshness. Returns { symbol, price } or throws.
- */
-export async function getNumericQuoteFast(ticker) {
-    const symbol = String(ticker).toUpperCase()
-    const hit = _fastQuoteCache.get(symbol)
-    const data = hit ?? await yf.quote(symbol)
-    if (!hit) _fastQuoteCache.set(symbol, data)
-    return { symbol: data.symbol, price: data.regularMarketPrice ?? null }
 }
 
 /**
@@ -179,17 +149,6 @@ export async function getRiskMetrics(ticker) {
     ].join('\n')
 }
 
-/**
- * Annualized volatility for a ticker as a raw number (for server-side math).
- * Returns null when there is not enough price history.
- */
-export async function getAnnualizedVolRaw(ticker) {
-    const sym = String(ticker).toUpperCase()
-    const candles = await _dailyCandles(sym, 365)
-    if (candles.length < 20) return null
-    return _stdev(_logReturns(candles.map(c => c.close))) * Math.sqrt(TRADING_DAYS)
-}
-
 // Shared core for correlation computation — returns { symbols, matrix } or null.
 async function _computeCorrelationData(tickers) {
     const symbols = [...new Set(tickers.map(t => String(t).toUpperCase()))].filter(Boolean)
@@ -211,17 +170,8 @@ async function _computeCorrelationData(tickers) {
 }
 
 /**
- * Pairwise Pearson correlation matrix as raw numbers — for server-side math.
- * Returns { symbols: string[], matrix: number[][] } or null on failure.
- */
-export async function getCorrelationsRaw(tickers = []) {
-    return _computeCorrelationData(tickers)
-}
-
-/**
  * Fetch daily candles once per ticker and derive both annualized volatilities
- * and the correlation matrix in a single pass — half the Yahoo API calls vs
- * calling getAnnualizedVolRaw + getCorrelationsRaw separately.
+ * and the correlation matrix in a single pass — one fetch per ticker, not two.
  *
  * Returns { vols: Array<number|null>, corrData: {symbols,matrix}|null }
  * where vols[i] corresponds to tickers[i] (order and duplicates preserved).
@@ -571,67 +521,6 @@ export async function getCycleAnalysis(ticker, mode, calendarWindow = null, look
     }
 
     return lines.join('\n')
-}
-
-// --- Earnings -----------------------------------------------------------------
-// Per-ticker earnings snapshot: upcoming date + EPS estimate + last 4 quarterly
-// actuals vs estimates. Uses Yahoo's calendarEvents + earnings modules. The
-// upcoming date is typically a window (earningsDate[0] → earningsDate[1]).
-const EARN_TTL_MS = 6 * 60 * 60 * 1000
-const _earnCache = createTtlCache({ ttlMs: EARN_TTL_MS }) // SYMBOL -> text
-
-export async function getEarnings(ticker) {
-    const sym = String(ticker || '').toUpperCase().trim()
-    if (!sym) return 'No ticker provided.'
-
-    const hit = _earnCache.get(sym)
-    if (hit) return hit
-
-    let cal, chart
-    try {
-        const s = await yf.quoteSummary(sym, { modules: ['calendarEvents', 'earnings'] })
-        cal   = s?.calendarEvents?.earnings ?? {}
-        chart = s?.earnings?.earningsChart   ?? {}
-    } catch (err) {
-        return `No earnings data for ${sym}: ${err.message}`
-    }
-
-    const lines = [`${sym} — earnings:`]
-
-    const dates = cal.earningsDate
-    if (Array.isArray(dates) && dates.length) {
-        const fmt = dates.map(d => (d instanceof Date ? d : new Date(d)).toISOString().slice(0, 10))
-        lines.push(`Next earnings: ${fmt.join(' – ')}`)
-    }
-
-    const epsEst  = cal.earningsAverage
-    const epsLow  = cal.earningsLow
-    const epsHigh = cal.earningsHigh
-    if (epsEst != null) {
-        const range = (epsLow != null && epsHigh != null)
-            ? ` (range ${Number(epsLow).toFixed(2)} – ${Number(epsHigh).toFixed(2)})`
-            : ''
-        lines.push(`EPS estimate: ${Number(epsEst).toFixed(2)}${range}`)
-    }
-
-    const quarterly = chart.quarterly
-    if (Array.isArray(quarterly) && quarterly.length) {
-        lines.push('Recent quarters (actual vs estimate):')
-        for (const q of quarterly.slice(-4)) {
-            const actual = q.actual?.raw   ?? (typeof q.actual   === 'number' ? q.actual   : null)
-            const est    = q.estimate?.raw ?? (typeof q.estimate === 'number' ? q.estimate : null)
-            const actStr = actual != null ? Number(actual).toFixed(2) : 'n/a'
-            const estStr = est    != null ? Number(est).toFixed(2)    : 'n/a'
-            const surp   = (actual != null && est != null && est !== 0)
-                ? ` (${((actual - est) / Math.abs(est) * 100).toFixed(1)}% surprise)`
-                : ''
-            lines.push(`  ${q.date ?? '?'}: actual ${actStr} vs est ${estStr}${surp}`)
-        }
-    }
-
-    const text = lines.join('\n')
-    _earnCache.set(sym, text)
-    return text
 }
 
 // --- Short interest -----------------------------------------------------------

@@ -3,41 +3,6 @@ import path from 'path'
 import { logger } from './logger.service.js'
 
 
-export function getStartOfTodayUTC() {
-    const now = new Date()
-    return Date.UTC(
-        now.getUTCFullYear(),
-        now.getUTCMonth(),
-        now.getUTCDate()
-    ) / 1000
-}
-
-
-export function oneMonthAgoToTodayRange() {
-    const to = new Date()
-    const from = new Date(to)
-    from.setMonth(from.getMonth() - 1)
-    return { from: _formatYyyyMmDd(from), to: _formatYyyyMmDd(to) }
-}
-
-
-export function filterTodaysItems(data) {
-    const startOfTodayUTC = getStartOfTodayUTC()
-    return data.filter(item => item.datetime >= startOfTodayUTC)
-}
-
-
-export async function deduplicateItems(type = '', name, data) {
-    const loaded = await loadItemsFromFile(type, name)
-    const news = itemsArrayFromLoaded(loaded)
-    const today = filterTodaysItems(news)
-    if (today.length === 0) return data
-
-    const unique = data.filter(item => !today.some(todayItem => todayItem.datetime === item.datetime && todayItem.headline === item.headline))
-    return unique
-}
-
-
 // NOTE: parsing JSON out of an LLM reply lives in ONE place —
 // monitoring/monitorUtils.js `extractFirstJSON`. Don't add a second parser here.
 
@@ -82,20 +47,6 @@ export async function loadItemsFromFile(type = '', name) {
 }
 
 
-export function itemsArrayFromLoaded(loaded) {
-    if (!loaded?.ok) return []
-    const raw = loaded.data
-    if (Array.isArray(raw)) return raw
-    if (raw && typeof raw === 'object' && Array.isArray(raw.items)) return raw.items
-    return []
-}
-
-
 function _itemsFilePath(type, name) {
     return path.join(path.resolve(`./data/${type}`), `${name}.json`)
-}
-
-
-function _formatYyyyMmDd(date) {
-    return date.toISOString().slice(0, 10)
 }

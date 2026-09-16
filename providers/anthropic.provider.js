@@ -7,7 +7,6 @@ import { config } from '../services/config.js'
 const LOG = '[anthropic]'
 
 const client = new Anthropic({ apiKey: config.anthropicApiKey })
-const DEFAULT_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_MAX_TOKENS = 8192
 // When thinking is on, reasoning tokens count toward max_tokens, so give the
 // model headroom for both the hidden reasoning and the full visible reply.
@@ -51,9 +50,13 @@ export function _thinkingConfig(reasoningEffort, model) {
         : null
 }
 
-// ─── Streaming tool loop ──────────────────────────────────────────────────────
-// Like callAnthropicWithTools but calls onToken(text) for each streamed chunk,
-// suppressing <state>/<trade_idea> blocks.  Returns the full accumulated text.
+// ─── The tool loop ────────────────────────────────────────────────────────────
+// THE ONE Anthropic call path: every desk and every monitor streams. Runs the request → tool →
+// request cycle until the model ends its turn, calling onToken(text) for each streamed chunk with
+// the emit tags suppressed, and returns the full accumulated text. A non-streaming twin
+// (callAnthropicWithTools) lived beside this until 2026-09-16 with no caller, "kept in step" by
+// hand — a promise that decays. One loop, so there is one place the cache walking, the compaction
+// and the stop-reason handling can be right.
 
 export async function streamAnthropicWithTools({
     model,
@@ -73,7 +76,8 @@ export async function streamAnthropicWithTools({
     const messages   = _normalizeMessages(promptOrMessages)
     const historyLen = messages.length
     const suppressor = createTagSuppressor({ onToken, captures: tagCaptures })
-    const reasoning  = _thinkingConfig(reasoningEffort, model ?? DEFAULT_MODEL)
+    if (!model) throw new Error('streamAnthropicWithTools: model is required — llmModels resolves it')
+    const reasoning  = _thinkingConfig(reasoningEffort, model)
 
     for (let i = 0; i < maxContinuations; i++) {
         // Client disconnected (user hit Stop) — end the loop instead of burning
@@ -85,7 +89,7 @@ export async function streamAnthropicWithTools({
         advanceToolLoopCache(messages, historyLen)
 
         const stream = client.messages.stream({
-            model:      model ?? DEFAULT_MODEL,
+            model,
             system:     systemPrompt,
             messages,
             tools,
@@ -181,7 +185,7 @@ export async function streamAnthropicWithTools({
         // declining, with a category on stop_details. Both used to return through this line exactly
         // like end_turn, and this module had no logger, so a truncated or refused desk reply left no
         // trace anywhere: the user saw a reply that stopped short and nothing said why.
-        _noteStop(stopReason, stopDetails, model ?? DEFAULT_MODEL, fullText.length)
+        _noteStop(stopReason, stopDetails, model, fullText.length)
         suppressor.flush()
         return fullText
     }
@@ -211,72 +215,6 @@ export function _noteStop(stopReason, stopDetails, model, textLength) {
         return line
     }
     return null
-}
-
-export async function callAnthropic(model, promptOrMessages, systemPrompt, { onUsage } = {}) {
-    const messages = _normalizeMessages(promptOrMessages)
-    const response = await client.messages.create({
-        model: model ?? DEFAULT_MODEL,
-        system: systemPrompt,
-        messages,
-        max_tokens: DEFAULT_MAX_TOKENS,
-    })
-    onUsage?.(response.usage)
-    return _extractText(response.content)
-}
-
-// The non-streaming twin of streamAnthropicWithTools. Currently has NO callers — every desk and
-// monitor streams — but it is kept in step with the streaming loop rather than left behind: the
-// two differ only in transport, and a copy that silently lacks the tool-loop cache handling is
-// how the next caller gets the expensive behaviour back without anyone noticing.
-export async function callAnthropicWithTools({
-    model,
-    promptOrMessages,
-    systemPrompt,
-    tools = [],
-    toolHandlers = {},
-    maxContinuations = DEFAULT_MAX_CONTINUATIONS,
-    onUsage,
-}) {
-    const messages   = _normalizeMessages(promptOrMessages)
-    const historyLen = messages.length
-
-    for (let i = 0; i < maxContinuations; i++) {
-        advanceToolLoopCache(messages, historyLen)
-
-        const response = await client.messages.create({
-            model: model ?? DEFAULT_MODEL,
-            system: systemPrompt,
-            messages,
-            tools,
-            max_tokens: DEFAULT_MAX_TOKENS,
-        })
-
-        onUsage?.(response.usage)
-
-        if (response.stop_reason === 'end_turn') {
-            return _extractText(response.content)
-        }
-
-        if (response.stop_reason === 'pause_turn') {
-            _compactPriorToolResults(messages)
-            messages.push({ role: 'assistant', content: _compactServerResults(response.content) })
-            continue
-        }
-
-        if (response.stop_reason === 'tool_use') {
-            const toolUseBlocks = response.content.filter((b) => b.type === 'tool_use')
-            _compactPriorToolResults(messages)
-            messages.push({ role: 'assistant', content: response.content })
-            const results = await Promise.all(toolUseBlocks.map(b => _runTool(toolHandlers, b)))
-            messages.push({ role: 'user', content: results })
-            continue
-        }
-
-        return _extractText(response.content)
-    }
-
-    throw new Error(`Anthropic tool loop exceeded maxContinuations (${maxContinuations})`)
 }
 
 // Allow tool handlers to return either a plain string or rich content blocks
@@ -459,17 +397,6 @@ export function _restampToolLoopCache(messages, targetIdx) {
     return true
 }
 
-function _extractText(content) {
-    return content
-        .filter((b) => b.type === 'text')
-        .map((b) => b.text)
-        .join('')
-}
-
-// Cap web search result text carried into subsequent continuations. The model
-// already read the full content on the turn it arrived; we only truncate what
-// goes back into the messages array for later turns, where verbatim raw results
-// add input tokens without adding new information.
 const _SEARCH_RESULT_CHARS = 3000
 function _compactServerResults(blocks) {
     return blocks.map(block => {
