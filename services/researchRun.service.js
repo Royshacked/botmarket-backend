@@ -14,6 +14,8 @@
 //   · a name the house already covers is SKIPPED (rejected, reason already_covered). Argus screens a
 //     sector, not the book; whether the standing thesis needs a look under the new regime is a
 //     judgment the pencil exists for, not something to overwrite by machine.
+//   · a name whose row is no longer `queued` when the run reaches it is SKIPPED too (reason
+//     not_queued, the row untouched) — someone opened it by hand, or another run claimed it.
 //   · a name Prometheus researched and emitted no <coverage> for is a PASS (rejected, reason
 //     no_edge) — "no edge here" is a research outcome, and the row should say it was reached.
 //   · a name whose coverage failed to save (an incoherent draft, a Mongo hiccup) stays in_research
@@ -33,7 +35,12 @@ const LOG = '[researchRun]'
 
 // The singleton. `run` is the live one or the last one — a finished run stays readable until the
 // next one replaces it, so the UI can show "done: 22 covered, 4 skipped" after the fact.
-const state = { run: null, abort: null }
+//
+// `starting` covers the gap between "is one running?" and `state.run = run`: startRun reads the
+// queue and the coverage book first, and two Starts pressed together both passed the running check
+// during those reads, both became `state.run`, and both loops walked the same queue. Set
+// synchronously before the first await, cleared on every way out.
+const state = { run: null, abort: null, starting: false }
 
 // Who wants to know when a run settles. The sleeve orchestrator (sleeveSource.service) listens so
 // it can tell Atlas its names are researched — and start the next run when the one that just ended
@@ -59,15 +66,20 @@ export function getRun() {
  * passed through untouched: absent, the agent's own default (the same one the desk uses).
  */
 export async function startRun({ userId, audience = null, model = null } = {}, deps = _io) {
-    if (state.run?.status === 'running') return { ok: false, reason: 'already_running', run: getRun() }
+    if (state.run?.status === 'running' || state.starting) return { ok: false, reason: 'already_running', run: getRun() }
+    state.starting = true
 
-    const queued = await deps.listQueue({ status: 'queued' })
-    if (queued === null) return { ok: false, reason: 'queue_unavailable' }   // a failed read, not an empty queue
-    if (!queued.length)  return { ok: false, reason: 'nothing_queued' }
+    let queued, covered
+    try {
+        queued = await deps.listQueue({ status: 'queued' })
+        if (queued === null) return { ok: false, reason: 'queue_unavailable' }   // a failed read, not an empty queue
+        if (!queued.length)  return { ok: false, reason: 'nothing_queued' }
 
-    let covered
-    try { covered = await deps.coveredSymbols() }
-    catch (err) { logger.error(LOG, 'could not read the coverage book — run not started', err); return { ok: false, reason: 'coverage_unavailable' } }
+        try { covered = await deps.coveredSymbols() }
+        catch (err) { logger.error(LOG, 'could not read the coverage book — run not started', err); return { ok: false, reason: 'coverage_unavailable' } }
+    } finally {
+        state.starting = false
+    }
     const run = {
         id:         `run_${randomUUID().slice(0, 8)}`,
         status:     'running',   // running → done | stopped | failed (the account, not a name — see isRunFatal)
@@ -142,8 +154,18 @@ async function _loop(run, queued, covered, { userId, audience, model, signal }, 
             continue
         }
 
+        // CLAIM the row, and read the answer. startResearch only moves queued → in_research, so a
+        // refusal means the row is no longer ours to research: an admin opened it by hand between the
+        // queue read and now, or another process took it. Researching it anyway paid for a four-minute
+        // turn whose save could only answer already_covered — and a guard whose result nobody reads is
+        // a guard in name only.
+        const claim = await deps.startResearch(item.id)
+        if (!claim?.ok) {
+            _settle(run, { symbol, outcome: 'skipped', reason: 'not_queued' })
+            run.skipped++
+            continue
+        }
         run.current = symbol
-        await deps.startResearch(item.id)
         try {
             const { coverage } = await deps.research({ item, symbol, opening: researchOpening(item), covered, userId, audience, model, signal })
             if (run.stop) { _settle(run, { symbol, outcome: 'stopped' }); break }   // aborted mid-turn: row stays in_research

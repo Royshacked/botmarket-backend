@@ -202,3 +202,41 @@ test('researchRun: getRun is a snapshot, not the live object', async () => {
     assert.equal(getRun().results.length, 1)
     assert.equal('stop' in getRun(), false)
 })
+
+// ─── the claim is read, and the start is single-flight ─────────────────────────
+// startResearch is a guarded transition (queued → in_research). Its answer used to be discarded, so
+// a row someone else had already claimed was researched anyway — a four-minute turn whose save could
+// only answer already_covered. And the "one run at a time" check ran BEFORE two awaits, so two Starts
+// pressed together both became the run.
+
+test('researchRun: a row that is no longer queued is skipped, not researched — the claim is read', async () => {
+    const d = makeDeps({ queued: [q('UNH'), q('LLY')], answers: { UNH: draft('UNH'), LLY: draft('LLY') } })
+    d.startResearch = async (id) => { d.calls.started.push(id); return id === 'rq_UNH' ? { ok: false, reason: 'not_found_or_wrong_status' } : { ok: true } }
+    assert.equal((await startRun({ userId: 'u1' }, d)).ok, true)
+    const run = await settled()
+
+    assert.deepEqual(d.calls.researched.map(r => r.symbol), ['LLY'], 'the unclaimed row is never researched')
+    assert.deepEqual(d.calls.rejected, [], 'and its row is left exactly as it was — it is not ours')
+    assert.deepEqual(run.results.map(r => [r.outcome, r.reason ?? null]), [['skipped', 'not_queued'], ['covered', null]])
+    assert.equal(run.skipped, 1); assert.equal(run.covered, 1); assert.equal(run.position, 2)
+})
+
+test('researchRun: two Starts pressed together → one run, the other answers already_running', async () => {
+    let releaseQueue
+    const d = makeDeps({ queued: [q('Z')], answers: { Z: draft('Z') } })
+    d.listQueue = () => new Promise(r => { releaseQueue = () => r([q('Z')]) })   // the first Start is mid-read
+    const first  = startRun({ userId: 'u1' }, d)
+    const second = await startRun({ userId: 'u2' }, d)                            // arrives before the read resolves
+    assert.equal(second.reason, 'already_running')
+    releaseQueue()
+    assert.equal((await first).ok, true)
+    await settled()
+    assert.deepEqual(d.calls.researched.map(r => r.symbol), ['Z'], 'researched once, not twice')
+})
+
+test('researchRun: a Start that refuses (empty queue) does not leave the next one locked out', async () => {
+    assert.equal((await startRun({}, makeDeps({ queued: [] }))).reason, 'nothing_queued')
+    const d = makeDeps({ queued: [q('Z')], answers: { Z: draft('Z') } })
+    assert.equal((await startRun({ userId: 'u1' }, d)).ok, true)
+    await settled()
+})
