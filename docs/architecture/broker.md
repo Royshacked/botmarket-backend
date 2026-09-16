@@ -381,8 +381,9 @@ exitOrders:   [{ accountId, broker, leg, type, price, quantity, orderId, status 
 ```
 A per-`(account, position)` promise-chain lock (`_withLock`) serializes exit-array
 mutations. `_resumeFeeds` restarts execution feeds for active/resting ideas after a server
-restart. Helpers come from `monitoring/exitOrders.util.js` (`buildExitOrder`,
-`exitOrderRecord`) and `monitoring/monitorUtils.js` (`round`, `remainingForAccount`).
+restart. Helpers come from `services/exitOrders.util.js` (`buildExitOrder`,
+`exitOrderRecord` — moved out of `monitoring/` 2026-09-16, since api services share it) and
+`monitoring/monitorUtils.js` (`round`, `remainingForAccount`).
 
 > This is the "broker-authoritative" design: on a partial/close the reconciler asks the
 > broker whether the position actually survived rather than trusting local state, and a
@@ -542,7 +543,7 @@ paper engine
 
 reconciler
   monitoring/execution.reconciler.js   executionBus → idea status + exit lifecycle
-  monitoring/exitOrders.util.js        buildExitOrder / exitOrderRecord
+  services/exitOrders.util.js          buildExitOrder / exitOrderRecord
   monitoring/monitorUtils.js           round / remainingForAccount
 
 src/services/broker/

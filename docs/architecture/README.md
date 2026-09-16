@@ -10,7 +10,8 @@ what exists.
 External APIs
   GNews      → news.service (per-symbol news for the monitor's news evaluator)
   Massive    → massive.provider → priceService → ohlcv.service (monitoring)
-  Anthropic  → monitor.claude (Haiku) / services/agents/*.agent.service (Sonnet/Opus)
+  Anthropic  → providers/anthropic.provider — ONE client: the desks' tool loop (streamAnthropicWithTools)
+               and the monitor tier's one-shot reads (callAnthropicOnce, via monitor.claude); model ids in llmModels
   cTrader    → ctrader.{provider,ws.provider,session.provider} → CTraderAdapter → broker.service   (live trading)
   IBKR       → ibkr.gateway.provider (IB Gateway socket) → IBKRAdapter → broker.service            (data-only)
   paper      → paperExecution/paperBroker (live-price sim) → PaperAdapter → broker.service

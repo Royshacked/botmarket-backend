@@ -604,8 +604,13 @@ Unknown types default to cost 0.
 
 ## Claude usage
 
-All LLM calls in the monitoring system use `claude-haiku-4-5-20251001` (fast, cheap).
-Isolated in `monitor.claude.js` — separate from the trade agent's Anthropic client.
+The monitor's reads are cheap one-shot calls: the condition parse and the YES/NO verdicts on
+`llmModels.CHEAP_MODEL` (Haiku), the chart look on `llmModels.DEFAULT_MODEL` (a vision read the cheap
+model's eyes are not good enough for). `monitor.claude.js` holds those three readings and nothing
+else — since 2026-09-16 they ride `anthropic.provider.callAnthropicOnce`, the SAME client the desks
+use, with the stop-reason log and an `onUsage` seam. (It was a second client with hardcoded model
+ids and no usage hook, and its spend went to nobody.) The one shape the app writes itself —
+`price touches <level>` — never reaches a model at all (`parseTouchLiteral`).
 
 | Function | Used by | max_tokens | Purpose |
 |---|---|---|---|
@@ -625,7 +630,8 @@ monitoring/
   preflightEntry.js           arm-time "is the entry level already held?" check — the one piece of
                               the deleted `idea` loop that was real behaviour and had to survive
   monitor.orchestrator.js     AND/OR logic, condition routing, context injection, legacy normalisation
-  monitor.claude.js           Claude Haiku client (claudeJSON, claudeText, claudeVision)
+  monitor.claude.js           the three one-shot reads (claudeJSON, claudeText, claudeVision) over the one
+                              Anthropic client; model ids from llmModels
 
   parsers/
     condition.parser.js       NL → ParsedCondition: the self-authored touch literal by reading it, everything

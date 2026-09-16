@@ -21,7 +21,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 5 | Agent runtime | `agentIO`, `agentUtils`, `agentTools.registry`, `services/tools/**`, `pendingAction/**`, `entity/**`, `axl.agent.service`, `api/chat/**` | ✅ done — 8 commits `13a323f`..`1b78b99` (+ `7c37bcd`, `7307e76` frontend), suite **2910 / 0** |
 | 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | ✅ done — 7 commits `2a957e8`..`b3c36b9` (+ `researchQueue.service`, read in scope), suite **2932 / 0**; CR cycle → `98b8994`, **2936 / 0** |
 | 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | ✅ done — 8 commits `d8d7fab`..`15b562a` (+ `candleFetch`, `priceFeed`, `http.util`, the two adapters' carried items), suite **2965 / 0 in 63s**; CR cycle → `9798baa`, **2968 / 0** |
-| 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | |
+| 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | ✅ done — 4 commits `005c9c8`..`953e522`, suite **2967 / 0** |
 | 9 | Platform | `server.js`, `middleware/**`, `config.js`, `api/authentication`, `api/user`, `api/workspace`, `api/_shared`, `api/health` | |
 | 10 | Tests + scripts | coverage gaps vs. §1–9, `scripts/**` hygiene | |
 
@@ -798,6 +798,110 @@ error body), `candleWindow` (three reads of a failing or empty provider cost one
 `anthropicToolBlocks` (the stop lines), `fmpProviderTools` (the usable-parts gate); the two outage
 tests re-aimed at user-worded leaves; the two news tests off `fs`. Suite 2936 → **2965**, and
 10 minutes → 63 seconds.
+
+---
+
+## §8 Aether + scheduling + remaining monitoring — done
+
+**Verdict in one line:** the Aether tier that survived the channel-engine removal is small and
+unusually well argued — `aether.service`'s shaping, `aetherQuickRead`'s one-in-flight and
+re-read-when-the-set-changed rules, the scheduler's refusal to spawn against a database it cannot
+name — and the removal left one live wire dangling: a change stream that had been watching a
+collection literally named `"undefined"` for a week, with the whole Aether → coverage re-model
+trigger dead behind it. The monitoring leftovers were the layering debts the earlier sections
+carried here, plus a second Anthropic client whose spend was booked to nobody.
+
+*Scope note:* `api/aether/**`, `aetherScheduler`, `aetherQuickRead`, `aether.changeStream`,
+`aether.agent`, and the twelve `monitoring/**` files no section had owned (`monitor.orchestrator`,
+`monitor.claude`, `monitorJournal`, `monitorUtils`, `monitorSchedule.util`, `pollLoop`, `dueLoop`,
+`marketOpen.monitor`, `marketBrief.notify`, `assessTools`, `exitOrders.util`, `preflightEntry`).
+
+### Bugs
+
+| | Where | What | Sev |
+|---|---|---|---|
+| 1 | `monitoring/aether.changeStream.js` | `WATCHED = [COLLECTIONS.OPPORTUNITIES, COLLECTIONS.PREDICTED_SIGNALS]` — both keys deleted from `aether.model` in `2821532` (2026-09-09). `WATCHED` became `[undefined, undefined]` and the driver opened **two real Atlas change streams on a collection named `"undefined"`** that errored forever — `logs/backend.log`: `change stream error on undefined: read ECONNRESET`, repeating. Two open oplog tails for nothing, and downstream of them `scheduleAetherRemodel`, `pending_aether_remodel` and the `aether signal:` re-model override had no writer. **Deleted, by decision** — the engine that produced opportunities is archived, and event candidates are a different pipeline; the coverage monitor says so where the override was, so the absence reads as a decision. | **high** |
+| 2 | `aether.service.getEventCandidates` | `.find(query).limit(200)` with no sort; the newest-first ordering happened in memory on whatever Mongo's insertion order let through. Five forty-name runs in a thirty-day window exceed the limit and the run that fell off was the newest. Sorted on `created_at` before the limit — the index is declared for exactly this read. | medium |
+| 3 | `aether.controller.startDiscovery` | Chose 409 vs 503 by **regexing the error message** — the anti-pattern `http.util`'s own comment names. `runDiscovery` stamps `status` on each refusal; the controller answers off it; a throw with no status is a 500 that keeps its sentence inside. | low |
+
+### The lens
+
+**(a) Architecture** — three helpers lived in `monitoring/` and were imported UPWARD by `api/` and
+`services/`. Two moved: `fetchLastPrice` → `services/lastPrice.service.js` (it is the input to every
+zone gate, baseline stamp and coherence check; `coverage.service` and `tilt.service` had reached up
+into the monitor tier for it through a dynamic import — §6's carried item, closed; seven importers
+repointed incl. one archived monitor), and `exitOrders.util` → `services/` (the closing-order shape
+three api services and two monitors share, which as a monitor file had imported `api/broker` to
+serve `api/`). **`preflightEntry` stays**, deliberately: it looks like the same case but it IS the
+monitor's evaluator run at arm time (`evaluateTree` over the tree to ask "is the level already
+held?"), and moving it would drag the orchestrator into `services/`. Recorded rather than changed:
+services import several PURE monitor modules (`tilt.assess.diffStances`, the evaluators' indicator
+math, the condition parser, `monitorJournal.withJournal`). The layer diagram's arrow is one-way; the
+code's is two-way for pure math. CODE_MAP's Layers note now says when the arrow may run upward and
+when it must not (a fetch, a client).
+
+**(c) Duplications** — **`monitor.claude` was a second Anthropic client**, "isolated from the main
+provider intentionally", with hardcoded model ids (the same Haiku id `llmModels` names `CHEAP_MODEL`,
+the same Sonnet id it names `DEFAULT_MODEL`) and **no usage hook** — every condition parse, YES/NO
+verdict and chart-vision read was billed to nobody with no seam to book it. §7's "the one Anthropic
+call path" was one of two. `anthropic.provider.callAnthropicOnce` is the one-shot call on the one
+client (an optional image ahead of the text, the stop-reason log, `onUsage`); `monitor.claude` keeps
+what was its own — which model reads what, how many tokens each read needs — as three thin readings.
+`TICKER_RE` was written identically in `aether.service` and `aetherQuickRead` → `aether.model`.
+
+**(d) Dead code** — `monitorJournal.readReason`: documented as "read-side only, applied when
+rendering a stored timeline", and nothing on the server renders a journal — the client's
+`MonitorJournal.jsx` carries the same legacy map. Gone with its two tests. `aetherQuickReadService`
+aggregate export, no importer. Three stray blank lines in `aether.controller`.
+
+**(e) Error handling** — `aether.controller` hand-rolls try/catch answering fixed slugs — the §9
+shape. **Stays for §9** with the coverage handlers; converting it would answer the decision per
+controller. It joins the eight.
+
+**(g) Plaster** — archived desks as live collaborators, the §5 class, in the monitoring leftovers:
+`assessTools` ("Talos uses it now, Hermes at the merge (Phase 5)" — a merge that will not come),
+`marketOpen.monitor` ("the same shape Hermes and Talos use"), `monitorJournal` ("(Hermes) passes its
+own"), `dueLoop`'s two present-tense Hermes sentences on why `kind` and `db` are optional.
+`monitor.claude`'s fifteen-line header explained its lazy client in terms of a dotenv import-ordering
+hazard `config.js` has since closed for every module. `evaluateTree`'s JSDoc listed seven params in
+another order than the eight the signature takes; `out` — the one callers most need — was the one
+missing.
+
+**Docs** — **CODE_MAP had no Aether entries at all**: not `api/aether`, not the scheduler, not the
+quick read — a whole tier, the same gap §6 found for `api/strategy`. All three are in, plus
+`lastPrice.service`, `exitOrders.util`, `monitor.claude` and `monitor.orchestrator`, which had none.
+
+### Judgment calls made against the plan
+
+- **The change stream was deleted, not re-pointed.** Re-pointing it at `aether_event_candidates`
+  inserts would make Aether's survivors trigger Prometheus re-models — a product decision about spend,
+  taken as "no" here and written into the monitor so it reads as a decision.
+- **`preflightEntry` stays in `monitoring/`** (above). An api service calling the monitor's evaluator
+  at arm time is the feature, not a layering slip.
+- **`callAnthropicOnce` has an `onUsage` seam and no caller passes one.** The monitor tier's spend is
+  still unbooked — but for the first time there is a place to book it, which is what the house usage
+  row (§9) needs to exist.
+- **One commit went out incomplete and was amended** (`85c9b02`): `git add` aborted on the moved
+  file's old path and the layering commit was made with only the rename staged. Caught from
+  `git status`, staged and amended within seconds, local and unpushed. Recorded because the review's
+  rule is new commits over amends; a broken intermediate commit was the worse outcome.
+- `ensureAetherIndexes` uses `{ background: true }`, a no-op since MongoDB 4.2. Left; cosmetic.
+
+### Behaviour changes a reader should know
+
+- Two Atlas change streams that errored every few seconds are gone; the log is quieter.
+- The Aether candidate list is newest-first at the database, so a busy window keeps its newest run.
+- A discovery double-click answers 409 by status, not by sentence.
+- The monitor tier's LLM reads go through the same client as the desks; nothing the models see changed.
+
+### Frontend follow-ups (botmarket-frontend)
+
+None. No wire shape changed.
+
+### Tests added / changed
+
+`aetherDiscoveryTrigger` re-aimed at the status contract (+ a no-status throw is a 500 with its
+sentence kept inside). The two `readReason` tests went with the function. Suite 2965 → **2967**.
 
 ---
 
