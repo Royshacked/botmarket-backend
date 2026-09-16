@@ -699,7 +699,7 @@
     },
     {
       "name": "get_chart",
-      "description": "Render an actual candlestick chart IMAGE (KLineCharts, optional indicator overlays) and look at it directly for VISUAL / structural analysis — chart patterns, trend, where price sits vs moving averages / VWAP, base/breakout geometry. Use it to CONFIRM the named setup on the strongest names. EXPENSIVE (image render + vision) — reserve it for the top shortlist and the Kairos single-pick, NOT every candidate. For exact numeric levels prefer get_candles.",
+      "description": "Render an actual candlestick chart IMAGE (KLineCharts, optional indicator overlays) and look at it directly for VISUAL / structural analysis — chart patterns, trend, where price sits vs moving averages / VWAP, base/breakout geometry. Use it to CONFIRM the named setup on the strongest names. EXPENSIVE (image render + vision) — reserve it for the top shortlist and the hand-off single-pick, NOT every candidate. For exact numeric levels prefer get_candles.",
       "input_schema": {
         "type": "object",
         "properties": {

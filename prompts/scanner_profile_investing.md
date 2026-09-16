@@ -156,5 +156,5 @@ Rules:
   number in `signals`/`analysis` traces to a `get_fundamentals`/`get_earnings`/filing call.
 - Score the four **investing** axes only (quality/valuation/growth/balance_sheet) — NOT trade axes. The
   server computes `total` from them.
-- These candidates carry NO trade setup and NO Kairos lens — they are research candidates for the Analyst.
+- These candidates carry NO trade setup and NO trade lens — they are research candidates for the Analyst.
 - Target 4–8 names. More than 8 = not selective. "Nothing worth owning" is a valid, honest outcome.
