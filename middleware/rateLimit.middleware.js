@@ -35,7 +35,7 @@ function _reject(message) {
  * single subscriber is handed a whole /64, so keying on the raw address gives one person ~10^19
  * buckets and no limit at all. The helper collapses the prefix.
  */
-const _byIp = (req) => ipKeyGenerator(req.ip)
+export const _byIp = (req) => ipKeyGenerator(req.ip)
 
 /**
  * Session key, for the surfaces behind `requireAuth`.
@@ -49,7 +49,7 @@ const _byIp = (req) => ipKeyGenerator(req.ip)
  * that apply `requireAuth`, so `req.user` does not exist yet. Keying on the IP instead would put
  * every user behind one office NAT — or one mobile carrier — into a single shared bucket.
  */
-const _bySession = (req) => {
+export const _bySession = (req) => {
     const token = req.cookies?.token
     if (!token) return _byIp(req)
     // HASHED, not the token itself. The store holds every active key for the whole window, so
