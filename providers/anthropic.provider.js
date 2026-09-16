@@ -51,12 +51,13 @@ export function _thinkingConfig(reasoningEffort, model) {
 }
 
 // ─── The tool loop ────────────────────────────────────────────────────────────
-// THE ONE Anthropic call path: every desk and every monitor streams. Runs the request → tool →
-// request cycle until the model ends its turn, calling onToken(text) for each streamed chunk with
-// the emit tags suppressed, and returns the full accumulated text. A non-streaming twin
-// (callAnthropicWithTools) lived beside this until 2026-09-16 with no caller, "kept in step" by
-// hand — a promise that decays. One loop, so there is one place the cache walking, the compaction
-// and the stop-reason handling can be right.
+// ONE client, two ways to ask it. This is the desks' way: the request → tool → request cycle until
+// the model ends its turn, calling onToken(text) for each streamed chunk with the emit tags
+// suppressed, returning the full accumulated text. callAnthropicOnce below is the monitor tier's:
+// one request, no tools, no stream. A non-streaming TOOL-LOOP twin (callAnthropicWithTools) lived
+// beside this until 2026-09-16 with no caller, "kept in step" by hand — a promise that decays. One
+// loop, so there is one place the cache walking, the compaction and the stop-reason handling can
+// be right.
 
 export async function streamAnthropicWithTools({
     model,
@@ -191,6 +192,36 @@ export async function streamAnthropicWithTools({
     }
 
     throw new Error(`Anthropic stream tool loop exceeded maxContinuations (${maxContinuations})`)
+}
+
+// ─── The one-shot call ────────────────────────────────────────────────────────
+// The monitor tier's read: a condition parse, a YES/NO evaluator, a chart-vision verdict. One
+// request, no tools, no stream. It rode a SECOND Anthropic client in monitoring/monitor.claude
+// until 2026-09-16 — "isolated from the main provider intentionally" — with its own hardcoded model
+// ids and no usage hook, so every parse and every vision read was billed to nobody and nothing
+// could book it. Same client as the loop now; the model is the caller's (llmModels names them);
+// `onUsage` is the seam the house row will hang off when it exists.
+
+/**
+ * @param {{ model: string, systemPrompt: string, user: string, image?: string|null, maxTokens?: number,
+ *           onUsage?: (usage: object) => void }} args   `image` is base64 PNG bytes, sent ahead of the text.
+ * @returns {Promise<string>} the reply's text ('' when the model returned none)
+ */
+export async function callAnthropicOnce({ model, systemPrompt, user, image = null, maxTokens = 512, onUsage }) {
+    if (!model) throw new Error('callAnthropicOnce: model is required — llmModels names it')
+    const content = image
+        ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: image } }, { type: 'text', text: user }]
+        : user
+    const msg = await client.messages.create({
+        model,
+        max_tokens: maxTokens,
+        system:     systemPrompt,
+        messages:   [{ role: 'user', content }],
+    })
+    onUsage?.(msg.usage)
+    const text = msg.content.filter(b => b.type === 'text').map(b => b.text).join('')
+    _noteStop(msg.stop_reason, msg.stop_details ?? null, model, text.length)
+    return text
 }
 
 /**

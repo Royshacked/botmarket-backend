@@ -1,49 +1,32 @@
 /**
- * Thin Claude helper for monitoring calls.
- * Uses Haiku — fast and cheap for condition parsing / evaluation.
- * Isolated from the main trade-agent provider intentionally.
+ * The monitor tier's three one-shot reads — a JSON parse, a YES/NO answer, a look at a chart — as
+ * thin readings of the ONE Anthropic call path (providers/anthropic.provider.callAnthropicOnce).
+ *
+ * This module used to hold a second Anthropic client, "isolated from the main trade-agent provider
+ * intentionally", with its own hardcoded model ids and no usage hook: every condition parse, every
+ * evaluator verdict and every chart-vision read went through a client nothing else could see and was
+ * billed to nobody. What was its own — which model reads what, and how many tokens each read needs —
+ * is still here. The client, the request shape and the stop-reason log are the provider's.
+ *
+ * The MODEL IDS come from llmModels, where the desks' do, so a model change is one edit.
  */
 
-import Anthropic from '@anthropic-ai/sdk'
+import { callAnthropicOnce } from '../providers/anthropic.provider.js'
+import { CHEAP_MODEL, DEFAULT_MODEL } from '../services/llmModels.js'
 import { extractFirstJSON } from './parsers/llmReply.parser.js'
-import { config } from '../services/config.js'
 
-const MODEL = 'claude-haiku-4-5-20251001'
-
-// LAZY, and deliberately so. This used to be `const client = new Anthropic({ apiKey:
-// process.env.ANTHROPIC_API_KEY })` at module scope, which reads the environment at IMPORT time —
-// and nothing in this file guaranteed the environment was loaded by then. It worked only because
-// the module next door (monitorUtils) pulled in a chain that eventually did `import 'dotenv/config'`,
-// so .env was populated as a side effect of an unrelated import that happened to be evaluated first.
-//
-// That is invisible until it moves. Swapping one import for a leaf module with no dependencies of
-// its own removed the accidental ordering, and every condition parse started failing with "Could not
-// resolve authentication method" — a key that WAS in .env, read one tick too early. The parse
-// failure is then silent (parseCondition catches and returns an unknown), so a `touch` leaf that
-// should rest at the broker quietly reads back as level 0.
-//
-// Constructing on first CALL removes the ordering question: by the time anything parses a condition,
-// server.js has long since loaded dotenv. It also means importing this module — which the pure
-// parser tests do transitively — no longer needs an API key to exist.
-let _client = null
-function client() {
-    if (!_client) _client = new Anthropic({ apiKey: config.anthropicApiKey })
-    return _client
-}
+// A condition parse and a YES/NO verdict are reading, not modelling — the cheap model, as before.
+// A chart is a VISION read, and the cheap model's eyes are not good enough for structure; the
+// desks' default model reads the picture.
+const PARSE_MODEL  = CHEAP_MODEL
+const VISION_MODEL = DEFAULT_MODEL
 
 /**
  * Call Claude and extract the first JSON object from the response.
  * @returns {Promise<object>}
  */
 export async function claudeJSON(systemPrompt, userMessage) {
-    const msg = await client().messages.create({
-        model:      MODEL,
-        max_tokens: 512,
-        system:     systemPrompt,
-        messages:   [{ role: 'user', content: userMessage }],
-    })
-    const text  = msg.content[0]?.text ?? ''
-    return extractFirstJSON(text)
+    return extractFirstJSON(await callAnthropicOnce({ model: PARSE_MODEL, systemPrompt, user: userMessage, maxTokens: 512 }))
 }
 
 /**
@@ -52,19 +35,13 @@ export async function claudeJSON(systemPrompt, userMessage) {
  * @returns {Promise<string>}
  */
 export async function claudeText(systemPrompt, userMessage) {
-    const msg = await client().messages.create({
-        model:    MODEL,
-        max_tokens: 64,
-        system:   systemPrompt,
-        messages: [{ role: 'user', content: userMessage }],
-    })
-    return msg.content[0]?.text ?? ''
+    return callAnthropicOnce({ model: PARSE_MODEL, systemPrompt, user: userMessage, maxTokens: 64 })
 }
 
 /**
- * Call Claude Sonnet with a chart image + text prompt.
- * Used by the chart evaluator for visual pattern recognition (YES/NO, default 64 tokens)
- * and by the price-structure tools for a richer structured read (pass a larger maxTokens).
+ * A chart image + a question → the model's read of the picture. Used by the chart evaluator for
+ * visual pattern recognition (YES/NO, default 64 tokens) and by the price-structure tools for a
+ * richer structured read (pass a larger maxTokens).
  * @param {string} systemPrompt
  * @param {string} userMessage
  * @param {string} imageBase64  base64-encoded PNG bytes of the chart
@@ -72,20 +49,5 @@ export async function claudeText(systemPrompt, userMessage) {
  * @returns {Promise<string>}
  */
 export async function claudeVision(systemPrompt, userMessage, imageBase64, { maxTokens = 64 } = {}) {
-    const msg = await client().messages.create({
-        model:      'claude-sonnet-4-6',
-        max_tokens: maxTokens,
-        system:     systemPrompt,
-        messages:   [{
-            role:    'user',
-            content: [
-                {
-                    type:   'image',
-                    source: { type: 'base64', media_type: 'image/png', data: imageBase64 },
-                },
-                { type: 'text', text: userMessage },
-            ],
-        }],
-    })
-    return msg.content[0]?.text ?? ''
+    return callAnthropicOnce({ model: VISION_MODEL, systemPrompt, user: userMessage, image: imageBase64, maxTokens })
 }
