@@ -4,7 +4,7 @@ import { ENTITIES } from '../../services/entity/entityCollection.js'
 import { isAssetOpen, getMarketStatus } from '../../services/market.service.js'
 import { logger } from '../../services/logger.service.js'
 import { notifyCallReady, notifyCallExpiry, notifyCallManage, notifyCallReentry } from '../services/kairosNotify.service.js'
-import { fetchLastPrice } from '../../monitoring/monitorUtils.js'
+import { fetchLastPrice } from '../../services/lastPrice.service.js'
 import { createDueLoop, makePersist } from '../../monitoring/dueLoop.js'
 // `zonesLabel` was renamed `levelsLabel` upstream when zero-width levels replaced bands; aliased
 // here so the archived body reads as it did, and a revived Hermes gets the current implementation.

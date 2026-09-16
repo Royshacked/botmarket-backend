@@ -6,7 +6,7 @@
 
 import { getAnalystEstimates, getPriceTargetConsensus, getGradesConsensus, getGradesHistorical, getHistoricalMultiples } from '../../providers/fmp.provider.js'
 import { computeValuation, VALUATION_METHODS } from '../valuation.engine.js'
-import { fetchLastPrice } from '../../monitoring/monitorUtils.js'
+import { fetchLastPrice } from '../lastPrice.service.js'
 import { makeToolHandler } from '../agentUtils.js'
 
 const LOG = '[valuationTools]'

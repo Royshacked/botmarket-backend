@@ -1,9 +1,6 @@
 import { getCandles }          from '../services/ohlcv.service.js'
-import { getNumericQuote }     from '../providers/yahoofinance.provider.js'
-import { getTickerAggregates } from '../providers/candles.provider.js'
 import { extractLeaves }       from '../services/conditionTree.service.js'
 import { logger }              from '../services/logger.service.js'
-import { toNum }               from '../services/format.util.js'
 import { sessionStartMs }      from '../services/market.service.js'
 import { brokerService }       from '../api/broker/broker.service.js'
 import { normSymbol }          from '../services/brokerSymbol.service.js'
@@ -12,41 +9,6 @@ import { roundOrZero }         from '../services/number.util.js'
 
 const LOG        = '[monitorUtils]'
 const CANDLE_COUNT = 300
-
-// ─── Last price ───────────────────────────────────────────────────────────────
-
-/**
- * The last traded price for a symbol — the input to every zone gate.
- *
- * Quote first, then a 1-minute-candle fallback when the quote is missing or throws. Both layers
- * matter: providers vary in which field carries the price (`price` / `regularMarketPrice` /
- * `last` / `c`), and a monitor that reads `null` here simply never fires, silently and forever.
- *
- * Reads getNumericQuote, NOT getQuote — the latter is the LLM-display formatter and returns a
- * human-readable STRING, off which every `q?.price` lookup is undefined. That mistake cost the
- * coverage monitor its price feed entirely; here the candle fallback was quietly masking it.
- *
- * A non-positive price is treated as NO price: zero is never a real print, and letting it through
- * hands every downstream gate a number that compares below any stop, target or bear case.
- *
- * Shared by Hermes, Talos and the coverage monitor so a fix to the quote-shape fallback chain
- * reaches every gate. Returns null only when BOTH sources fail.
- */
-export async function fetchLastPrice(asset) {
-    const symbol = String(asset ?? '').toUpperCase()
-    if (!symbol) return null
-    try {
-        const q = await getNumericQuote(asset)
-        const p = toNum(q?.price ?? q?.regularMarketPrice ?? q?.last ?? q?.c)
-        if (p !== null && p > 0) return p
-    } catch { /* fall through to candles */ }
-    try {
-        const rows = await getTickerAggregates(symbol, { timeSpan: 'minute', multiplier: 1, from: Date.now() - 3 * 24 * 60 * 60 * 1000 })
-        const last = rows?.at(-1)
-        if (Number.isFinite(last?.close)) return last.close
-    } catch { /* give up */ }
-    return null
-}
 
 // ─── Candle fetching ──────────────────────────────────────────────────────────
 

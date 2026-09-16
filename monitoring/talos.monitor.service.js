@@ -3,7 +3,8 @@ import { INVALIDATION, isInvalidated, PAST_ENTRY } from '../services/entity/voca
 import { isAssetOpen, getMarketStatus } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { toNum } from '../services/format.util.js'
-import { fetchLastPrice, fetchCandles } from './monitorUtils.js'
+import { fetchCandles } from './monitorUtils.js'
+import { fetchLastPrice } from '../services/lastPrice.service.js'
 import { createDueLoop, makePersist } from './dueLoop.js'
 import { journalEntry, failNote } from './monitorJournal.js'
 import {

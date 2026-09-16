@@ -23,6 +23,7 @@
 import { randomUUID }      from 'crypto'
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { makeHouseArtifactRepo } from '../../services/houseArtifact.repo.js'
+import { fetchLastPrice }  from '../../services/lastPrice.service.js'
 import { logger }          from '../../services/logger.service.js'
 import { toNum }           from '../../services/format.util.js'
 import { normalizeSector, SECTORS, sectorProxy, BENCHMARK_PROXY } from '../../services/entity/vocabulary.js'
@@ -228,17 +229,10 @@ export const tiltService = { publishTilt, getCurrentTilt, getTiltById, listTilts
 function recordMonitorState(id, opts) { return _repo.recordMonitorState(id, opts) }
 export { HORIZONS, DEFAULT_HORIZON, SECTORS }
 
-/**
- * The price read used to stamp a stance's baseline. Injected so tests exercise the stamping, and
- * imported LAZILY for the same reason coverage does it: importing this service must not drag the
- * whole monitor/provider stack in behind the pure normalizer.
- */
+/** The price read used to stamp a stance's baseline. Injected so tests exercise the stamping. */
 const _io = {
     priceFor: async (symbol) => {
-        try {
-            const { fetchLastPrice } = await import('../../monitoring/monitorUtils.js')
-            return await fetchLastPrice(symbol)
-        } catch { return null }
+        try { return await fetchLastPrice(symbol) } catch { return null }
     },
 }
 export function _setTiltIO(io) { Object.assign(_io, io) }

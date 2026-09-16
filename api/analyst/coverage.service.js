@@ -14,6 +14,7 @@
 import { randomUUID }      from 'crypto'
 import { getDb, stripId }  from '../../providers/mongodb.provider.js'
 import { makeHouseArtifactRepo } from '../../services/houseArtifact.repo.js'
+import { fetchLastPrice }  from '../../services/lastPrice.service.js'
 import { logger }          from '../../services/logger.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
 import { toNum }           from '../../services/format.util.js'
@@ -148,10 +149,7 @@ export function multipleStretch({ multiple, history, leg = 'base' } = {}) {
 
 const _io = {
     getPrice: async (symbol) => {
-        try {
-            const { fetchLastPrice } = await import('../../monitoring/monitorUtils.js')
-            return await fetchLastPrice(symbol)
-        } catch { return null }
+        try { return await fetchLastPrice(symbol) } catch { return null }
     },
     getMultipleHistory: async (symbol) => {
         try {

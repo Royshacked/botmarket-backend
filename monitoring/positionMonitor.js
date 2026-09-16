@@ -6,7 +6,7 @@ import {
     buildSymbolMap, buildVolumeCtx, brokerCandleCtx, persistConditionStates,
     round, remainingForAccount, resolveEntryTimeframe, resolveStopTimeframe, resolveTpTimeframe,
 } from './monitorUtils.js'
-import { buildExitOrder, exitOrderRecord } from './exitOrders.util.js'
+import { buildExitOrder, exitOrderRecord } from '../services/exitOrders.util.js'
 import { notifyManualExit, exitLegFromIdea } from '../services/manualNotify.service.js'
 import { entityRepo }                       from '../services/entity/entityRepo.service.js'
 import { kindForDoc }                       from '../services/entity/envelope.js'

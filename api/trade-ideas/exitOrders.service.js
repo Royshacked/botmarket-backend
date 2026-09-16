@@ -1,6 +1,6 @@
 import { brokerService }        from '../broker/broker.service.js'
 import { logger }                from '../../services/logger.service.js'
-import { buildExitOrder, exitOrderRecord } from '../../monitoring/exitOrders.util.js'
+import { buildExitOrder, exitOrderRecord } from '../../services/exitOrders.util.js'
 import { round }                from '../../monitoring/monitorUtils.js'
 
 const LOG = '[exitOrders]'

@@ -40,7 +40,7 @@ import { executionBus }  from '../services/executionBus.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { tradeCaptureService } from '../services/tradeCapture.service.js'
 import { round, remainingForAccount } from './monitorUtils.js'
-import { buildExitOrder, exitOrderRecord } from './exitOrders.util.js'
+import { buildExitOrder, exitOrderRecord } from '../services/exitOrders.util.js'
 import { entityRepo }    from '../services/entity/entityRepo.service.js'
 import { journalEntry }  from './monitorJournal.js'
 

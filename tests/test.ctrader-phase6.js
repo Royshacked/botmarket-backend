@@ -16,7 +16,7 @@
 import 'dotenv/config'
 import { getDb }                 from '../providers/mongodb.provider.js'
 import { CTraderAdapter }        from '../api/broker/adapters/ctrader.adapter.js'
-import { fetchLastPrice }        from '../monitoring/monitorUtils.js'
+import { fetchLastPrice }        from '../services/lastPrice.service.js'
 
 const MODE    = process.argv[2] ?? 'probe'
 const LOTS    = Number(process.argv[3]) || 0.01

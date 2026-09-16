@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { candleMs, round } from '../../monitoring/monitorUtils.js'
 import { parseYesNo } from '../../monitoring/parsers/llmReply.parser.js'
 import { parseIndicators } from '../../monitoring/parsers/indicators.parser.js'
-import { buildExitOrder, exitOrderRecord, closeSide, orderSymbol } from '../../monitoring/exitOrders.util.js'
+import { buildExitOrder, exitOrderRecord, closeSide, orderSymbol } from '../../services/exitOrders.util.js'
 
 test('candleMs: seconds are scaled to ms, ms pass through', () => {
     assert.equal(candleMs(1_600_000_000),     1_600_000_000_000)   // < 1e12 → seconds

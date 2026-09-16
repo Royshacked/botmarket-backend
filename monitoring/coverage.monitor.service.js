@@ -21,7 +21,7 @@ import { refreshCoverage }        from '../services/coverageRefresh.service.js'
 import { notifyCoverageEvent }    from '../services/coverageNotify.service.js'
 import { entityRepo }             from '../services/entity/entityRepo.service.js'
 import { LIVE_POSITION }          from '../services/entity/vocabulary.js'
-import { fetchLastPrice } from './monitorUtils.js'
+import { fetchLastPrice } from '../services/lastPrice.service.js'
 import { createDueLoop }   from './dueLoop.js'
 import { logger }                 from '../services/logger.service.js'
 

@@ -18,7 +18,7 @@ import { gradeRow, totalContributionBp, reviewDecision } from './tilt.assess.js'
 import { sectorProxy, BENCHMARK_PROXY } from '../services/entity/vocabulary.js'
 import { fetchMacroCatalystDates } from '../providers/fred.provider.js'
 import { notifyTiltReviewDue } from '../services/tiltNotify.service.js'
-import { fetchLastPrice } from './monitorUtils.js'
+import { fetchLastPrice } from '../services/lastPrice.service.js'
 import { createDueLoop }   from './dueLoop.js'
 import { logger }               from '../services/logger.service.js'
 

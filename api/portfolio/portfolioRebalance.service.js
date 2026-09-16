@@ -34,7 +34,7 @@ import { getNumericQuote }          from '../../providers/yahoofinance.provider.
 import { notifyManualExit, notifyManualEntry, exitLegFromIdea, entryLegFromIdea } from '../../services/manualNotify.service.js'
 import { ENTITIES }               from '../../services/entity/entityCollection.js'
 import { makeEntityRepo }         from '../../services/entity/entityRepo.service.js'
-import { orderSymbol }            from '../../monitoring/exitOrders.util.js'
+import { orderSymbol }            from '../../services/exitOrders.util.js'
 import { deferIfClosed }          from '../../services/pendingAction/executionGate.js'
 import { isSelfExecuted }         from '../../services/venue.resolve.service.js'
 import { notifyRebalanceApplied } from '../../services/rebalanceNotify.service.js'
