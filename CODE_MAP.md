@@ -451,7 +451,13 @@ services/
                           is `linked` to its artifact (idea/portfolio/scan) on generate.
                           Generalizes portfolio_chats; migrating agents off per-agent chat-state.
 providers/
-  anthropic.provider.js         LLM chat/streaming (OpenAI SDK is used directly, transcribe only)
+  anthropic.provider.js         THE ONE Anthropic call path: streamAnthropicWithTools — the request → tool
+                                → request loop, adaptive thinking + effort per model (_thinkingConfig, with
+                                THINKS_BY_DEFAULT for Opus 5 / Sonnet 5), the cache-breakpoint walk, and
+                                _noteStop, which logs a max_tokens or refusal stop with the model and the
+                                stop_details category. The model is the caller's (llmModels resolves it);
+                                there is no second default here. The non-streaming twins were deleted
+                                2026-09-16 with no caller. (OpenAI SDK is used directly, transcribe only)
   yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / usaspending
                             EVERY JSON call rides services/http.util.getJson — timeout per attempt, the
                             request meter, typed err.status + err.body, a jittered retry on 429/5xx.
@@ -714,7 +720,10 @@ unreachable). Both unauthenticated and mounted ahead of the rate limiters.
 
 ## Testing
 
-- `npm test` → `node --test "tests/unit/*.test.js"` (Node's built-in runner, zero deps).
+- `npm test` → `node --test "tests/unit/*.test.js"` (Node's built-in runner, zero deps). About a
+  minute, and OFFLINE: config.js does not load .env under the runner, and since 2026-09-16 no
+  provider loads it either. A test that needs a value sets it itself. (It took ten minutes and made
+  live LLM and provider calls until four providers' own dotenv.config() calls were removed — §7.)
 - Only files under `tests/unit/` matching `*.test.js` run. The `tests/*.js` manual harnesses are
   hand-run probes that connect to live broker/Mongo — they are deliberately excluded.
 - Favor unit tests on **pure** functions (utils, parsers, builders). Modules that hit Mongo/providers

@@ -20,7 +20,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 4 | Atlas / portfolio | `api/portfolio/**`, `portfolio.agent.service`, `portfolioState`, `sleeveSource`, `adoptBook` | ✅ done — 10 commits `e3ef6e7`..`bc8bd50`, suite **2886 / 0**; FE follow-ups cleared in `a9532a8` |
 | 5 | Agent runtime | `agentIO`, `agentUtils`, `agentTools.registry`, `services/tools/**`, `pendingAction/**`, `entity/**`, `axl.agent.service`, `api/chat/**` | ✅ done — 8 commits `13a323f`..`1b78b99` (+ `7c37bcd`, `7307e76` frontend), suite **2910 / 0** |
 | 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | ✅ done — 7 commits `2a957e8`..`b3c36b9` (+ `researchQueue.service`, read in scope), suite **2932 / 0**; CR cycle → `98b8994`, **2936 / 0** |
-| 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | |
+| 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | ✅ done — 8 commits `d8d7fab`..`15b562a` (+ `candleFetch`, `priceFeed`, `http.util`, the two adapters' carried items), suite **2965 / 0 in 63s** |
 | 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | |
 | 9 | Platform | `server.js`, `middleware/**`, `config.js`, `api/authentication`, `api/user`, `api/workspace`, `api/_shared`, `api/health` | |
 | 10 | Tests + scripts | coverage gaps vs. §1–9, `scripts/**` hygiene | |
@@ -660,6 +660,147 @@ read claim and the single-flight Start (`researchRun`), the bookkeeping-free pro
 
 ---
 
+## §7 Providers + market data — done
+
+**Verdict in one line:** the price stack is the most carefully argued code in the repo — `fmp.price`,
+`candles.provider`, `candleFetch`, `priceFeed`, `http.util` each state a hard-won rule and hold to it —
+and the shared pipes they built were bypassed by half the other providers: eleven HTTP calls went
+around the metered, timed-out `getJson` (five with no timeout at all), the news cache lived on the
+disk tier the candle cache had been moved off for being unsafe, and the Yahoo provider carried 450
+lines of analytics that were never Yahoo's, with a third private copy of the FMP-first router. The
+biggest find was incidental: four providers' stray `dotenv.config()` calls had been loading the real
+API keys into the test runner, and the "unit" suite had been making live LLM calls for months.
+
+*Scope note:* `candleFetch`, `priceFeed`, `util.service`, `http.util` and `candleInterval.util` are
+the pipes the stack runs through and were read in full; the two adapters' carried items
+(`ctrader.adapter`, `ibkr.adapter`) were read for those items. `usaspending.provider` (274 lines,
+18 tests, no production importer — scaffolding for `docs/design/opportunist-money-flow.md`) is
+**kept, by decision**.
+
+### Bugs
+
+| | Where | What | Sev |
+|---|---|---|---|
+| 1 | `ibkr.adapter._normaliseAccount` | Folded EVERY account's summary rows into one object — `account` overwritten per row, the tags merged — so a login with two accounts answered `getAccount` with B's id and a mix of A's and B's balances, while `getTradingAccounts` two functions up grouped the same rows correctly. The two also disagreed on what `balance` was (cash vs net liquidation). `accountsFromSummary` parses once, per account, in the cTrader shape; `getAccount` answers the first and logs the rest. | medium |
+| 2 | `fmp.provider._macroParts` | Every leg swallows its failure into `[]`, and the all-empty result was cached for an hour — one 429 and `get_macro_snapshot`, `get_sector_snapshot` and Pythia's macro read answered "unavailable" for sixty minutes. §5's "cache the miss as the answer" in the other direction; a result with nothing in it is served once and asked again. | medium-low |
+| 3 | `anthropic.provider.streamAnthropicWithTools` | `stop_reason` `max_tokens` and `refusal` returned through the same line as `end_turn`, and the provider had **no logger** — a truncated or refused desk reply left no trace anywhere. `_noteStop` logs the model, the stop, the `stop_details` category and how much text reached the user. Checked against the API reference: the thinking config (`adaptive` + `output_config.effort`) and the `THINKS_BY_DEFAULT` set are right. | medium-low |
+| 4 | `price.service.syncCandles` / `getCandles` | A failed fetch left `lastFetchedAt` untouched, so every subsequent read re-asked a provider answering 429 for as long as it was down — the self-inflicted quota burn `fmp.price`'s own comments describe. And a `candles.length === 0` clause re-fetched an empty series on every read regardless of TTL, so a symbol the provider does not carry was asked forever. The attempt is stamped, the bars held are served, freshness alone decides. | low-medium |
+
+### The suite was never offline (`c1227c4`)
+
+`config.js`'s header says it OWNS dotenv, and it deliberately refuses to load `.env` under the test
+runner — the safety gate that keeps the unit suite off the production cluster and the shared FMP
+quota. `finnhub`, `fred`, `gnews` and `massive` each called `dotenv.config()` themselves, in every
+test process that imported them. So the tests around the condition parser were reaching the **real
+Anthropic API with the real key on every run**: the flake §1 carried to §10, and the reason
+`npm test` took ten minutes. Removing the four calls made eleven tests in `ticketOrderPath` fail
+honestly for the first time.
+
+The fix was not a stub. Those tests parse `price touches 21500` — a sentence
+`protectionPlan.touchLeaf` wrote one line earlier — and `routeExits` sent it to a model to get the
+number back out: in the **order path**, and in the monitor on every tick until its cache warmed. A
+parse the app can do by reading its own sentence must not cost an LLM call, a network round-trip or
+an API key; with the key absent it "failed", the leaf read as `unknown`, and a stop that should have
+rested at the broker fell to the monitor. `condition.parser.parseTouchLiteral` reads the one shape
+the app authors deterministically; a user-worded condition still goes to the model. Two outage tests
+that had used that exact sentence now use a user-worded one, plus a contrast case: same blank key,
+the self-authored leaf routes.
+
+**`npm test`: 10 minutes → 63 seconds**, 2965 tests, every one of them offline.
+
+### The lens
+
+**(a) Architecture** — `yahoofinance.provider` was 794 lines, ~450 of them analytics
+(`getRiskMetrics`, `getPriceAction`, correlations, `getCycleAnalysis`) — arithmetic over candles from
+ANY source, living in a provider by history. They fetched through a private `_candles` (FMP → Yahoo),
+the **third copy of the source decision** `candleFetch`'s header says is made once in
+`candles.provider`: it skipped Massive and ignored `USE_FMP_CANDLES`, and it could not be fixed in
+place because a provider cannot import the router without a cycle (`candles → massive → yahoo`) —
+which is the tell that the analytics were in the wrong tier. `services/priceAnalytics.service.js` is
+that tier; the functions moved as they were, `_candles` is the router through a `_deps` seam, six
+importers rewired (one in the archive — its import line changed so the archive keeps loading), and
+the analytics are unit-tested offline for the first time. The provider keeps what is Yahoo's: the
+quote fallback, the chart feed, short interest, options context (257 lines).
+
+**(c) Duplications** —
+- **The HTTP pipe.** `getJson` is the one metered, timed-out, retry-with-jitter pipe and its header
+  says requests are "counted where they all pass through". Eleven did not: `finnhub` (5× bare
+  `axios.get`, **no timeout**), `fred` (2×, no timeout), `usaspending` (POST + GET), `gnews` (bare
+  `fetch` with its own one-retry-after-1.4s), `ctrader.provider` (two ~30-line hand-rolled
+  `https.request` promises). All ride `getJson`, which learned a JSON body with its method and the
+  provider's error body (`err.body` — cTrader's `description`, GNews's `errors`). `axios` is gone
+  from `package.json`. `chartImg` (a POST for a PNG) is the one exception.
+- **The two-layer Mongo-backed cache** — `fmp._readCache/_writeCache` and
+  `finnhub._readProfileCache/_writeProfileCache`, identical but for names → `mongoCache.util`, with
+  `getDb` injectable so both layers are asserted against a fake collection; the document shape
+  spreads the value so the existing collections keep reading.
+- `fmp.price.aggregateOhlc` was "a mirror of marketData.tools.aggregateCandles (inlined … cycle-proof)"
+  and had already drifted on `groupSize 1` and empty input → `candleInterval.util.aggregateCandles`.
+  Two FMP files carried `BASE`/`API_KEY`/the key check → `fmp.price.fmpGet`. `_etOffsetMs` and
+  `market.service._tzOffsetMs` → one. `DEFAULT_MODEL` in the provider AND `llmModels` → the
+  provider refuses a missing model rather than quietly picking one.
+- **cTrader (carried from §1):** `/tradingaccounts` at four sites and a ProtoOA socket round-trip in
+  `_session` before EVERY operation → a per-user 60s cache and a 10-minute ctid cache, both dropped on
+  a reconnect (the one moment they are known wrong).
+
+**(d) Dead code** — Yahoo: `getCompanyName`, `getNumericQuoteFast` (the paper loops moved to FMP;
+its comment described callers that no longer existed) with its config knob, `getAnnualizedVolRaw`,
+`getCorrelationsRaw`, and Yahoo's `getEarnings` (FMP's superseded it; the same surprise-% block
+twice). `anthropic.provider.callAnthropic` + `callAnthropicWithTools` — no callers, the second
+self-declared so and "kept in step" by hand, a promise that decays. `util.service`: five of eight
+exports dead; then the file, once the news shelf stopped reading its store.
+
+**(h) Efficiency / (e)** — the news cache was on disk (`data/news/*.json`) — exactly the tier
+`price.service`'s header argued out of: no lock on read-modify-write, no temp-and-rename, machine-local
+and ephemeral on Render, and the tests wrote real files into the repo. A bounded in-process map now,
+the same shape as the candle envelopes, with three test seams instead of `fs`.
+
+**(g) Plaster / (b)** — four providers' `dotenv.config()` (above); `massive`'s 2-space `try` block,
+untagged `logger.error` and "the Hermes monitor's candle read"; `finnhub`/`fred`/`util.service`
+logging without a `LOG` tag; `getQuote`'s doc block stranded above `getCompanyName`; the streaming
+loop's header describing itself as "like callAnthropicWithTools".
+
+### Judgment calls made against the plan
+
+- **`getJson` gained `method`/`body` and `err.body`** rather than a second `postJson`: one pipe with
+  two more options is one place to keep the meter, the timeout and the retry right.
+- **The parser fast path is a behaviour change on the order path**, deliberately: a self-authored
+  touch leaf now routes with no model and no key. It was always what the code claimed to do.
+- **The `candles.length === 0` re-fetch clause is gone** — an empty series has a TTL now, as an FMP
+  null quote does. An uncovered symbol answers `[]` for an hour instead of being re-asked per read.
+- **Yahoo's `getNumericQuoteFast` config knob** (`PAPER_FAST_QUOTE_TTL_MS`) went with its one
+  consumer — one line in `config.js`, §9's file, touched for that alone.
+- **Not changed, recorded for the model/prompt review:** the tool registry declares
+  `web_search_20250305`; the `_20260209` variant is supported on every model in `llmModels` except
+  Haiku 4.5, so it is a per-model choice. `DEFAULT_MODEL` is Sonnet 4.6 — a product/cost decision.
+- **The cTrader ctid cache has no test seam** (the session provider is named imports; ESM namespaces
+  are frozen). The REST half is asserted through a method seam; the test says which half it covers.
+
+### Behaviour changes a reader should know
+
+- Every third-party JSON call now has a 10s timeout, a metered line, and a retry on 429/5xx —
+  including Finnhub and FRED, which had neither.
+- A self-authored stop/target/ladder rung routes to the broker without a model call.
+- A truncated or refused model reply is logged with the model and the reason.
+- A down or uncovered symbol is asked for candles once per hour.
+- The news shelf and the candle envelopes reset on restart (one fetch each to warm).
+- IBKR `getAccount` reports `balance` as cash and `equity` as net liquidation, like cTrader.
+
+### Frontend follow-ups (botmarket-frontend)
+
+None. No wire shape changed.
+
+### Tests added
+
+`ibkrAccounts`, `priceAnalytics` (the lifted functions, offline through the router seam),
+`mongoCache.util`, `conditionParserLiteral`, `ctraderAccountsCache`, `httpRetry` (POST body,
+error body), `candleWindow` (three reads of a failing or empty provider cost one fetch),
+`anthropicToolBlocks` (the stop lines), `fmpProviderTools` (the usable-parts gate); the two outage
+tests re-aimed at user-worded leaves; the two news tests off `fs`. Suite 2936 → **2965**, and
+10 minutes → 63 seconds.
+
+---
+
 ## QA / CR cycle on §5–§6 (2026-09-16)
 
 QA: lint clean repo-wide; full suite green (**2932 / 0** at the last §6 code commit, then **2936 / 0**
@@ -739,6 +880,11 @@ Mid-§2 the full suite failed four tests with 33s/85s durations; the same file p
 suite passed on re-run. The run's logs show `FMP 429` / `finnhub 429` — those "unit" tests make
 **live network calls** (the LLM condition parser, FMP). Load-dependent, pre-existing, and the right
 fix belongs with the tests section.
+
+**Resolved in §7 (`c1227c4`), and the cause was not in the tests.** Four providers called
+`dotenv.config()` themselves, past `config.js`'s test-runner gate, so every test process that
+imported them had the real keys — the parser tests were live Anthropic calls, the FMP/Finnhub ones
+live quota. With the calls gone the suite is offline and runs in about a minute. See §7.
 
 ### CR findings on the §2–§3 range, and what was done (2026-09-15)
 

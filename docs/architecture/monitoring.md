@@ -327,8 +327,9 @@ A leaf with no `type` (or a bare string) defaults to `structured`.
 conditionText  (natural language string)
     │
     ▼
-condition.parser.js  →  claudeJSON (Claude Haiku)
-    │                   In-memory cache: same text → same result, no repeat LLM call
+condition.parser.js  →  parseTouchLiteral for `price touches <level>` (the one shape the app
+    │                   writes itself — no model, no key, no network; since 2026-09-16)
+    │                →  else claudeJSON (Claude Haiku), in-memory cache: same text → same result
     ▼
 ParsedCondition:
   { operator, subject, value, value2, confirmation }
@@ -627,7 +628,8 @@ monitoring/
   monitor.claude.js           Claude Haiku client (claudeJSON, claudeText, claudeVision)
 
   parsers/
-    condition.parser.js       NL → ParsedCondition via Claude; in-memory cache
+    condition.parser.js       NL → ParsedCondition: the self-authored touch literal by reading it, everything
+                              else via Claude; in-memory cache
 
   evaluators/
     structured.evaluator.js   Pure math evaluation + all indicator calcs + VWAP series
