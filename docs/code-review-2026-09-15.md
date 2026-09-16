@@ -22,7 +22,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | ✅ done — 7 commits `2a957e8`..`b3c36b9` (+ `researchQueue.service`, read in scope), suite **2932 / 0**; CR cycle → `98b8994`, **2936 / 0** |
 | 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | ✅ done — 8 commits `d8d7fab`..`15b562a` (+ `candleFetch`, `priceFeed`, `http.util`, the two adapters' carried items), suite **2965 / 0 in 63s**; CR cycle → `9798baa`, **2968 / 0** |
 | 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | ✅ done — 4 commits `005c9c8`..`953e522`, write-up `97e716f`, CR cycle → `f9da64a`, suite **2968 / 0** |
-| 9 | Platform | `server.js`, `middleware/**`, `config.js`, `api/authentication`, `api/user`, `api/workspace`, `api/_shared`, `api/health` (+ `threads`, `turns`, `calendar`, `transcribe`, `experience`, the lifecycle/lease/logger services, read in scope) | ✅ done — 6 commits `63a9518`..`08ebf13`, suite **2991 / 0** |
+| 9 | Platform | `server.js`, `middleware/**`, `config.js`, `api/authentication`, `api/user`, `api/workspace`, `api/_shared`, `api/health` (+ `threads`, `turns`, `calendar`, `transcribe`, `experience`, the lifecycle/lease/logger services, read in scope) | ✅ done — 6 commits `63a9518`..`08ebf13`, write-up `38107db`, CR cycle → `dfe1d52`, suite **2993 / 0** |
 | 10 | Tests + scripts | coverage gaps vs. §1–9, `scripts/**` hygiene | |
 
 ---
@@ -1034,6 +1034,56 @@ keys are known in both environments; `KNOWN_KEYS` → `knownKeys()`), `threadAge
 only), `aetherDiscoveryTrigger` + `aetherCandidateByTicker` (drive the controller through the real
 pipe, not a bare `(req, res)`), `calendarWeek` / `calendarEnrich` (import the service). Suite
 2968 → **2991**.
+
+---
+
+## QA / CR cycle on §9 (2026-09-16)
+
+QA: lint clean repo-wide; full suite **2991 / 0** at the §9 write-up, **2993 / 0** with this cycle's
+fixes (68s alone, 144s with the reviewer agent running alongside — the same load effect as §8);
+all **279** backend modules import cleanly; 16/16 archived modules load.
+
+Docs: §9 written up. CODE_MAP gained real lines for nine api tiers (five of which had been a single
+word), the whole `middleware/` directory, `lifecycle` / `instanceLock` / `logger` / `timeout.util`,
+the `getDb` singleton note, and the rewritten error-handling convention; README's users line and
+`knownKeys()` mention caught up.
+
+### CR findings on the §9 range, and what was done
+
+A high-effort review over `8fa727e..HEAD` (7 commits) confirmed the derived key set equals the old
+list plus the one it was missing, no caller of anything removed, every stream controller's
+validated variable exists, the `/api` 404 sits after every router and before the SPA fallback, and
+the frontend reaches only the three self-scoped user routes — and found three things, **all
+children of the new error rule**, one of them high.
+
+| | Where | What | Done |
+|---|---|---|---|
+| 1 | `broker.interface._freshTokens` | Threw `{ status: BROKER_DISCONNECTED }` with no marker — the one `status` in the adapter tier that IS for the client, and my grep for minting sites looked for literal numbers, not constants. Under the expose-only handler every positions poll on an expired cTrader token answered **500 "Internal server error"** in production, the "please reconnect" hint gone, and logged a server fault on every poll. `brokerDisconnectedStatus.test` passed throughout: it asserted the adapter's throw, not what the client receives. | Minted with `httpError(424, …)`; the test now drives the throw through `errorHandler` in production mode and asserts the 424 and its sentence. **High** — a regression the sweep introduced |
+| 2 | `handle.util.makeHandle` | Logged every throw at `error`. The sweep turned `return res.status(4xx)` (no log) into `throw httpError(4xx)`, so a wrong password, a 404 poll, a trader on another user's id each became an error-level line — a credential-stuffing burst would read as a log full of faults. | A minted refusal logs at `info`; a fault still at `error`. Low |
+| 3 | `mongodb.provider.closeDb` | Ignored `_connecting`: a teardown racing an un-awaited `ensure*Indexes()` saw no client, the connect then resolved onto `_client`, and nothing closed it — the orphan the function exists to prevent, one step removed. | Awaits the in-flight connect first; pinned with a `getDb()` left un-awaited across `closeDb()`. Low |
+
+The lesson: when a rule changes what a marker means, grep for the marker's *every* spelling. I
+searched `status: 4`/`status: 5` and converted 28 sites; the 29th spelled its status as a named
+constant and was the only one whose status the client actually acts on. The test that should have
+caught it asserted one layer too low — on the throw, not on the answer — which is the same shape as
+§8's finding 2 (a test whose premise stops being true keeps passing).
+
+### Carried forward
+
+- **§10 (tests + scripts):** coverage vs §1–§9 — in particular, every controller test that drives a
+  handler with a bare `(req, res)` (there are more than the two converted here) asserts one layer
+  below the client; a shared `runThroughPipe(handler, req)` helper in the tests would make the
+  pattern the default. Three scripts still name `data/news/lanes`; the cTrader ctid cache's missing
+  socket-half seam; the 8.8s `pendingActionExecute` timeout test.
+- **Frontend (from the §9 write-up):** `user.service.remote.js` template leftover; MainPage's dead
+  `/api/idea` draft saves.
+- **House usage row** — `callAnthropicOnce` and `refreshCoverage` carry `onUsage` seams, nothing
+  books to them; `sleeveSource` has the same gap. Not a §10 item; a feature.
+- **README's layer diagram** still draws the monitoring → services arrow one-way (CODE_MAP's Layers
+  note has the nuance).
+- **Model / prompt review:** the four items gathered after §7, unchanged.
+- **`logger.service`'s `toLocaleString('he')` timestamp** — non-ISO and unsortable; left as Roy's
+  reading format, noted in CODE_MAP.
 
 ---
 
