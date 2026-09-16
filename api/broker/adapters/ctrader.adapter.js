@@ -20,6 +20,7 @@ import * as ctrader                from '../../../providers/ctrader.provider.js'
 import { brokerConnectionService } from '../brokerConnection.service.js'
 import { logger }                  from '../../../services/logger.service.js'
 import { parseTimeframe }          from '../../../services/timeframe.service.js'
+import { createTtlCache }          from '../../../services/ttlCache.util.js'
 import { executionBus }            from '../../../services/executionBus.js'
 import { toExecution, TRADE_SIDE, PROTO_ORDER_TYPE } from './ctrader.execution.js'
 import {
@@ -33,6 +34,37 @@ import {
 } from '../../../providers/ctrader.session.provider.js'
 
 const LOG = '[ctrader.adapter]'
+
+// TWO READS THAT HAPPENED ON EVERY OPERATION, cached for as long as their answer can be trusted.
+//
+// • REST /tradingaccounts — the accounts on a connection. Fetched at three sites in this file
+//   (getAccount, getTradingAccounts, _resolveAccountId) and once more in the session provider, each
+//   a full REST round-trip for a list that changes when the user opens or closes an account at the
+//   broker, i.e. almost never. One minute is long enough to collapse a burst (a workspace read asks
+//   for accounts, then the balance, then the positions) and short enough that a new account shows
+//   up before the user has finished looking for it. Keyed by user, since the token is the user's.
+// • ctid for (user, accountId) — what _session resolves before EVERY adapter call: a ProtoOA socket
+//   round-trip (listCTraderAccounts, ProtoOA 2149) plus a possible REST lookup, to map the account
+//   id an idea persisted onto the ctidTraderAccountId the socket speaks. The positions poll, every
+//   order, every candle read paid it. The mapping is a fact about the account and does not move;
+//   ten minutes bounds how long a re-granted connection could hand back a ctid the socket then
+//   refuses — which surfaces as the auth error it is, not as a wrong account.
+const ACCOUNTS_TTL_MS = 60_000
+const CTID_TTL_MS     = 10 * 60_000
+const _restAccounts   = createTtlCache({ ttlMs: ACCOUNTS_TTL_MS, max: 200 })   // userId → REST rows
+const _ctidFor        = createTtlCache({ ttlMs: CTID_TTL_MS, max: 500 })       // `${userId}:${accountId}` → { ctid, isLive }
+/** Exported for tests — nothing in production clears everything. */
+export function _resetCTraderAdapterCaches() { _restAccounts.clear(); _ctidFor.clear() }
+/**
+ * Drop the cached answers on a (re)connect, when the account set may have changed. The user's REST
+ * rows go by key; the ctid map is cleared WHOLE — it is keyed by user AND account, a TTL cache has
+ * no prefix scan, and a reconnect is rare enough that every other user re-resolving once is cheaper
+ * than a stale ctid being handed to the socket for ten minutes.
+ */
+function _forgetUser(userId) {
+    _restAccounts.delete(String(userId))
+    _ctidFor.clear()
+}
 
 // ProtoOA enums (sent as integers in JSON).
 // TRADE_SIDE / PROTO_ORDER_TYPE (and the inbound execution enums) live in
@@ -88,8 +120,11 @@ export class CTraderAdapter extends BrokerAdapter {
     }
 
     async handleCallback(code, userId) {
-        const tokens = await ctrader.exchangeCode(code)
+        const tokens = await this._exchangeCode(code)
         await brokerConnectionService.saveConnection(userId, 'ctrader', tokens)
+        // A (re)connect is the one moment the cached account answers are KNOWN to be wrong — a new
+        // grant can carry a different account set — so they are dropped here rather than aged out.
+        _forgetUser(userId)
         logger.info(LOG, `Connection saved for user ${userId}`)
     }
 
@@ -105,8 +140,7 @@ export class CTraderAdapter extends BrokerAdapter {
     async getAccount(userId) {
         const tokens    = await this._freshTokens(userId)
         const accountId = await this._resolveAccountId(userId, tokens)
-        const raw  = await ctrader.get('/tradingaccounts', tokens)
-        const list = asList(raw)
+        const list      = await this._tradingAccounts(userId, tokens)
         const account = list.find(a => String(a.id ?? a.accountId) === String(accountId))
         if (!account) throw new Error(`cTrader account ${accountId} not found in accounts list`)
         return _normaliseAccount(account)
@@ -164,8 +198,7 @@ export class CTraderAdapter extends BrokerAdapter {
 
     async getTradingAccounts(userId) {
         const tokens = await this._freshTokens(userId)
-        const raw    = await ctrader.get('/tradingaccounts', tokens)
-        const list   = asList(raw)
+        const list   = await this._tradingAccounts(userId, tokens)
         return list.map(_normaliseTradingAccount)
     }
 
@@ -494,11 +527,16 @@ export class CTraderAdapter extends BrokerAdapter {
      * session a token-getter so it can re-account-auth after a socket reconnect.
      */
     async _session(userId, accountId) {
-        const tokens   = await this._freshTokens(userId)
-        const accounts = await listCTraderAccounts(tokens.accessToken)
-        if (accounts.length === 0) throw new Error('cTrader: no trading accounts on this connection')
-
-        const acct = await matchCTraderAccount(userId, accountId, accounts, tokens)
+        const key = `${userId}:${accountId ?? ''}`
+        let acct = _ctidFor.get(key)
+        if (!acct) {
+            const tokens   = await this._freshTokens(userId)
+            const accounts = await listCTraderAccounts(tokens.accessToken)
+            if (accounts.length === 0) throw new Error('cTrader: no trading accounts on this connection')
+            const matched = await matchCTraderAccount(userId, accountId, accounts, tokens)
+            acct = { ctid: matched.ctid, isLive: matched.isLive }
+            _ctidFor.set(key, acct)
+        }
         return getCTraderSession({
             ctid:           acct.ctid,
             isLive:         acct.isLive,
@@ -506,14 +544,27 @@ export class CTraderAdapter extends BrokerAdapter {
         })
     }
 
+    /** The REST /tradingaccounts rows for this user, cached a minute. See the caches at the top. */
+    async _tradingAccounts(userId, tokens) {
+        const hit = _restAccounts.get(String(userId))
+        if (hit) return hit
+        const list = asList(await this._restGet('/tradingaccounts', tokens))
+        _restAccounts.set(String(userId), list)
+        return list
+    }
+
+    // The two provider calls a test stands in for, as methods — the same seam shape as _session
+    // above (ESM namespaces are frozen, so a provider cannot be stubbed at the import).
+    _restGet(path, tokens)  { return ctrader.get(path, tokens) }
+    _exchangeCode(code)     { return ctrader.exchangeCode(code) }
+
 
     /** Resolve the user's primary trading account ID, caching in DB. */
     async _resolveAccountId(userId, tokens) {
         const cached = await brokerConnectionService.getAccountId(userId, 'ctrader')
         if (cached) return cached
 
-        const raw  = await ctrader.get('/tradingaccounts', tokens)
-        const list = asList(raw)
+        const list = await this._tradingAccounts(userId, tokens)
         if (list.length === 0) throw new Error('No cTrader trading accounts found')
 
         const accountId = String(list[0].id ?? list[0].accountId)
