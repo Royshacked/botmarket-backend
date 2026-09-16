@@ -21,7 +21,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 5 | Agent runtime | `agentIO`, `agentUtils`, `agentTools.registry`, `services/tools/**`, `pendingAction/**`, `entity/**`, `axl.agent.service`, `api/chat/**` | ✅ done — 8 commits `13a323f`..`1b78b99` (+ `7c37bcd`, `7307e76` frontend), suite **2910 / 0** |
 | 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | ✅ done — 7 commits `2a957e8`..`b3c36b9` (+ `researchQueue.service`, read in scope), suite **2932 / 0**; CR cycle → `98b8994`, **2936 / 0** |
 | 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | ✅ done — 8 commits `d8d7fab`..`15b562a` (+ `candleFetch`, `priceFeed`, `http.util`, the two adapters' carried items), suite **2965 / 0 in 63s**; CR cycle → `9798baa`, **2968 / 0** |
-| 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | ✅ done — 4 commits `005c9c8`..`953e522`, suite **2967 / 0** |
+| 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | ✅ done — 4 commits `005c9c8`..`953e522`, write-up `97e716f`, CR cycle → `f9da64a`, suite **2968 / 0** |
 | 9 | Platform | `server.js`, `middleware/**`, `config.js`, `api/authentication`, `api/user`, `api/workspace`, `api/_shared`, `api/health` | |
 | 10 | Tests + scripts | coverage gaps vs. §1–9, `scripts/**` hygiene | |
 
@@ -902,6 +902,54 @@ None. No wire shape changed.
 
 `aetherDiscoveryTrigger` re-aimed at the status contract (+ a no-status throw is a 500 with its
 sentence kept inside). The two `readReason` tests went with the function. Suite 2965 → **2967**.
+
+---
+
+## QA / CR cycle on §8 (2026-09-16)
+
+QA: lint clean repo-wide; full suite **2967 / 0** at the §8 write-up, **2968 / 0** with this cycle's
+fixes (about 1½–2 minutes under load — the reviewer agent and the lint ran alongside; nothing
+reached a network, the "Parse failed" lines are the outage tests' injected failure); all **278**
+backend modules import cleanly; 16/16 archived modules load.
+
+Docs: §8 written up. CODE_MAP gained the whole Aether tier (it had none), `lastPrice.service`,
+`exitOrders.util`, `monitor.claude`, `monitor.orchestrator`, and a Layers note on when the
+monitoring ↔ services arrow may run upward. The monitoring doc's "Claude usage" section stopped
+claiming the monitor's calls were isolated from the desks' client; the architecture README's
+external-API line and broker.md's `exitOrders.util` paths caught up with the moves.
+
+### CR findings on the §8 range, and what was done
+
+A high-effort review over `029de6a..HEAD` (5 commits, 38 files) confirmed every moved and removed
+symbol has no stale importer, the import chains have no cycle, the sort-before-limit is served by
+the declared index, and the `callAnthropicOnce` text extraction is a superset of the old — and
+found two things, **both consequences of collapsing the monitor's client onto the provider's**.
+
+| | Where | What | Done |
+|---|---|---|---|
+| 1 | `anthropic.provider.callAnthropicOnce` | Skipped the loop's thinking rule. `monitor.claude` aliases its vision model to `llmModels.DEFAULT_MODEL` with the promise "a model change is one edit"; the day that default moved to a `THINKS_BY_DEFAULT` model, every 64-token chart YES/NO would spend its budget on hidden reasoning and answer `''` as `max_tokens`. | `_oneShotRequest` applies the loop's rule (effort floored, `THINKING_MAX_TOKENS` as the ceiling when thinking is on), pure and pinned on both kinds of model. Low → would have been high the day it fired |
+| 2 | `protectionPlanParseFail`, `routeExitsSplit` | Blanked `ANTHROPIC_API_KEY` at the top of the file on the premise that `monitor.claude` built its client lazily. The client is the provider's now, built at import; ESM hoists imports above assignments, so the blanking reached nothing — they passed only because `config.js` keeps the key out of the runner. With the key exported in a shell, three "outage" tests would make real Haiku calls, the parse would SUCCEED, and every assertion fail while spending tokens. | `monitor.claude._setOneShot` — the outage is injected at the seam; both files' headers say what is true. Verified green with a fake key exported. Low |
+
+The lesson, which is §7's in a mirror: §7 found four providers loading `.env` into the test runner
+and closed it; §8 then moved a client to module scope and two tests that had quietly depended on
+the *old* env-ordering kept passing for the wrong reason. A test that controls its collaborator
+through the environment is a test whose premise can silently stop being true; a seam cannot.
+
+### Carried forward
+
+- **§9 decision:** what an error may tell the client — `aether.controller` joins the seven
+  controllers converted only where they never caught.
+- **§9 (`_shared` / platform):** `parseChatMessages` trims and the raw body ships (five controllers);
+  the house usage row — `callAnthropicOnce` and `refreshCoverage` both have the `onUsage` seam now,
+  and nothing books to it; `sleeveSource`'s run has the same gap.
+- **§9 docs:** the layer diagram's monitoring → services arrow is one-way on paper and two-way for
+  pure math in the code (CODE_MAP's Layers note says so; the README's diagram does not yet).
+- **§10:** coverage vs §1–§9; three scripts naming `data/news/lanes`; the cTrader ctid cache's
+  missing seam; the 8.8s `pendingActionExecute` timeout test is the suite's slowest by an order of
+  magnitude.
+- **Model / prompt review:** the four items gathered after §7, unchanged.
+- **Product, not code:** whether Aether's event candidates should ever trigger a Prometheus re-model
+  (the deleted wire's successor, if there is one).
 
 ---
 
