@@ -1,5 +1,5 @@
 import { getTickerAggregates } from '../providers/candles.provider.js'
-import { isCacheFresh } from './util.service.js'
+import { isCacheFresh } from './ttlCache.util.js'
 import { barDurationSeconds } from './timeframe.service.js'
 
 const DEFAULT_RANGE_DAYS = 30

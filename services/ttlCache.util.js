@@ -5,6 +5,17 @@
 // get() returns the stored value when fresh (Date.now() - storedAt < ttlMs),
 // otherwise deletes the stale entry and returns undefined.
 
+/**
+ * Is a timestamp still inside its window? The freshness test for the two envelope caches (candles,
+ * news) that KEEP a stale value — for them staleness decides whether to REFRESH, never whether the
+ * data is usable, which is why they are not createTtlCache (it deletes on expiry). A missing
+ * timestamp is never fresh.
+ */
+export function isCacheFresh(lastFetchedAt, cacheTimeMs = 5 * 60 * 1000) {
+    if (!lastFetchedAt) return false
+    return Date.now() - lastFetchedAt < cacheTimeMs
+}
+
 export function createTtlCache({ ttlMs, max = 500 } = {}) {
     const store = new Map() // key -> { value, at: epochMs }
 

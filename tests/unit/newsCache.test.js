@@ -1,9 +1,7 @@
 import { test, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import fs from 'fs'
-import path from 'path'
 
-import { newsService, CACHE_TTL_MS, NEWS_CATEGORIES, _fetchArticles } from '../../services/news.service.js'
+import { newsService, CACHE_TTL_MS, _fetchArticles, _resetNewsCache, _ageShelf, _readShelf } from '../../services/news.service.js'
 
 // THE CACHE IS THE FEATURE HERE, not an optimization around it.
 //
@@ -13,32 +11,18 @@ import { newsService, CACHE_TTL_MS, NEWS_CATEGORIES, _fetchArticles } from '../.
 // name in the same hour costs ONE call, and so that a provider having a bad minute never costs us
 // news we already hold.
 //
-// These tests hit the REAL file cache under a throwaway subject rather than a stubbed IO layer:
-// the disk round-trip (envelope written, envelope read back, timestamp honoured) is the half that
-// would silently regress, so it is the half worth exercising. Providers are injected via the
-// `_providers` seam so nothing here touches a network.
+// These tests hit the REAL in-process shelf rather than a stubbed store: the round-trip (envelope
+// saved, envelope read back, timestamp honoured) is the half that would silently regress, so it is
+// the half worth exercising. Providers are injected via the `_providers` seam so nothing here
+// touches a network. (The shelf used to be a file under data/news, and these tests wrote real files
+// into the repo; the store moved to memory on 2026-09-16 — see the service header.)
 
-// No leading/trailing underscores: the store sanitizer strips them, so a subject wrapped in them
-// writes to one path and this file's cleanup deletes another — leaking a warm shelf into the next
-// test, which then reads as "the cache worked" when nothing was fetched at all.
 const SUBJECT = 'zz-test-news-cache'
-const dataFile = (category, subject) =>
-    path.join(process.cwd(), 'data', 'news', category, `${subject}.json`)
 
-/**
- * Remove every shelf a test in this file may have written — and ONLY those.
- *
- * The front page (`headlines`) is deliberately not touched here. It caches under one fixed key, so
- * it is the one shelf two test files would share, and node runs test files in parallel: a cleanup
- * of it here deletes another file's warm cache mid-assertion. newsSource.test.js owns that shelf;
- * everything in this file lives under a subject nothing else uses.
- */
-function cleanup() {
-    for (const cat of NEWS_CATEGORIES) {
-        try { fs.rmSync(dataFile(cat, SUBJECT), { force: true }) } catch { /* nothing to remove */ }
-    }
-}
-afterEach(cleanup)
+// Each test file is its own process, so clearing the whole map here cannot reach another file's
+// warm shelf. Aging a shelf is what an hour passing would do.
+afterEach(_resetNewsCache)
+const age = (category, ms) => _ageShelf(category, SUBJECT, ms)
 
 const secs = (iso) => Math.floor(Date.parse(iso) / 1000)
 
@@ -118,12 +102,9 @@ test('a refetch is INCREMENTAL — it asks from the last fetch, not from a month
     await newsService.getOrFetch({ category: 'companies', subject: SUBJECT, _providers: providers })
     const coldFrom = Date.parse(calls.lastCompany.from)
 
-    // Age the shelf past its TTL by rewriting the stored timestamp — the same thing an hour would do.
-    const file = dataFile('companies', SUBJECT)
-    const envelope = JSON.parse(fs.readFileSync(file, 'utf8'))
+    // Age the shelf past its TTL — the same thing an hour would do.
     const anHourAgo = Date.now() - CACHE_TTL_MS.companies - 1000
-    envelope.lastFetchedAt = anHourAgo
-    fs.writeFileSync(file, JSON.stringify(envelope))
+    age('companies', anHourAgo)
 
     await newsService.getOrFetch({ category: 'companies', subject: SUBJECT, _providers: providers })
 
@@ -138,10 +119,7 @@ test('new articles MERGE into the shelf instead of replacing it', async () => {
     const { providers } = spyProviders({ company: [first] })
     await newsService.getOrFetch({ category: 'companies', subject: SUBJECT, _providers: providers })
 
-    const file = dataFile('companies', SUBJECT)
-    const envelope = JSON.parse(fs.readFileSync(file, 'utf8'))
-    envelope.lastFetchedAt = Date.now() - CACHE_TTL_MS.companies - 1000
-    fs.writeFileSync(file, JSON.stringify(envelope))
+    age('companies', Date.now() - CACHE_TTL_MS.companies - 1000)
 
     // The provider now returns only what is NEW (that is what the incremental window asks for) plus
     // one it already gave us. The old story must survive and the duplicate must not double.
@@ -159,10 +137,7 @@ test('a provider failure serves the warm shelf STALE rather than an error', asyn
     const { providers } = spyProviders({ company: [finnhubRow()] })
     await newsService.getOrFetch({ category: 'companies', subject: SUBJECT, _providers: providers })
 
-    const file = dataFile('companies', SUBJECT)
-    const envelope = JSON.parse(fs.readFileSync(file, 'utf8'))
-    envelope.lastFetchedAt = Date.now() - CACHE_TTL_MS.companies - 1000
-    fs.writeFileSync(file, JSON.stringify(envelope))
+    age('companies', Date.now() - CACHE_TTL_MS.companies - 1000)
 
     const broken = {
         companyNews: async () => { throw new Error('Finnhub 429') },
@@ -182,16 +157,13 @@ test('a stale serve does NOT bump the timestamp — the next call retries', asyn
     const { providers } = spyProviders({ company: [finnhubRow()] })
     await newsService.getOrFetch({ category: 'companies', subject: SUBJECT, _providers: providers })
 
-    const file = dataFile('companies', SUBJECT)
-    const envelope = JSON.parse(fs.readFileSync(file, 'utf8'))
     const aged = Date.now() - CACHE_TTL_MS.companies - 1000
-    envelope.lastFetchedAt = aged
-    fs.writeFileSync(file, JSON.stringify(envelope))
+    age('companies', aged)
 
     const broken = { companyNews: async () => { throw new Error('down') }, generalNews: async () => { throw new Error('down') }, search: async () => { throw new Error('down') } }
     await newsService.getOrFetch({ category: 'companies', subject: SUBJECT, _providers: broken })
 
-    const after = JSON.parse(fs.readFileSync(file, 'utf8'))
+    const after = _readShelf('companies', SUBJECT)
     assert.equal(after.lastFetchedAt, aged, 'a failed fetch must leave the shelf cold')
 
     // ...and the very next call does try again.

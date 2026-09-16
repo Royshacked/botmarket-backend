@@ -13,11 +13,21 @@
  * ── A FAILED FETCH DOES NOT DISCARD A WARM CACHE ─────────────────────────────
  * If the provider errors and we hold articles, those are served with `meta.stale`. An hour-old
  * headline is a far better answer than an error, and the digest dates every item anyway.
+ *
+ * ── THE SHELF IS IN THIS PROCESS, NOT ON THE DISK ────────────────────────────
+ * It was a JSON file per shelf under `data/news`, and it had every hazard the candle cache was
+ * moved off the disk for (price.service, same reasoning): a read-modify-write with no lock, so two
+ * readers of one subject could interleave and the later write drop what the earlier one had
+ * merged; a write with no temp-and-rename, so a restart mid-write left truncated JSON that parses
+ * as nothing; and `data/` is gitignored and machine-local — ephemeral on Render — so the file
+ * bought nothing in production and only survived nodemon restarts in dev. The tests wrote real
+ * files into the repo's data directory. Memory is the honest tier: the app is one process, the
+ * cost of a restart is one fetch per warm shelf, and the map is bounded.
  */
 import { fetchGNews } from '../providers/gnews.provider.js'
 import { fetchCompanyNews, fetchGeneralNews } from '../providers/finnhub.provider.js'
 import { logger } from './logger.service.js'
-import { isCacheFresh, loadItemsFromFile, saveItemsToFile } from './util.service.js'
+import { isCacheFresh } from './ttlCache.util.js'
 import { mapGNewsArticle, mapFinnhubArticle, isValidArticle, mergeDedupedArticles } from './newsArticle.service.js'
 
 /**
@@ -68,16 +78,34 @@ export const newsService = {
     getOrFetch,
 }
 
+// One envelope per (category, subject). Bounded so a long-lived process cannot hold a shelf for
+// every ticker anyone ever asked about; re-inserted on write so eviction drops the least recently
+// WRITTEN shelf (Map keeps insertion order).
+const MAX_SHELVES = 300
+const _shelves = new Map()   // `${category}|${subject}` → envelope
+
+/** The shelf key. The subject is normalised the way the old file name was, so a case or
+ *  punctuation variant of the same subject reads the same shelf. */
+function storeKey(category, subject) {
+    return `${category}|${_sanitizeSubject(subject)}`
+}
+
+/** Drop every shelf. Exported for tests — nothing in production clears this. */
+export function _resetNewsCache() { _shelves.clear() }
+
+/** Read a shelf as stored (or null). Exported for tests, which used to read the file back. */
+export function _readShelf(category, subject) {
+    return _shelves.get(storeKey(_normalizeCategory(category), subject)) ?? null
+}
+
 /**
- * @param {string} category
- * @param {string} subject
- * @returns {{ type: string, name: string }}
+ * Move a shelf's lastFetchedAt — what an hour passing would do. Exported for tests, which used to
+ * rewrite the file's timestamp; nothing in production ages a shelf by hand.
  */
-function storePath(category, subject) {
-    return {
-        type: `news/${category}`,
-        name: _sanitizeFileSegment(subject),
-    }
+export function _ageShelf(category, subject, lastFetchedAt) {
+    const shelf = _readShelf(category, subject)
+    if (shelf) shelf.lastFetchedAt = lastFetchedAt
+    return shelf
 }
 
 /**
@@ -94,8 +122,8 @@ async function getOrFetch({ category, subject, query, refresh = false, _provider
     // would let one phrasing fill a cache entry another phrasing then reads back as its own.
     const searchQuery = cat === 'headlines' ? HEADLINES_SUBJECT : (query?.trim() || subj)
 
-    const store = storePath(cat, subj)
-    const cache = await _loadEnvelope(store)
+    const store = storeKey(cat, subj)
+    const cache = _loadEnvelope(store)
     const ttl = _ttlFor(cat)
     const fresh =
         !refresh && isCacheFresh(cache.lastFetchedAt, ttl)
@@ -154,7 +182,7 @@ async function getOrFetch({ category, subject, query, refresh = false, _provider
         lastFetchedAt: Date.now(),
         items: merged,
     }
-    await _saveEnvelope(store, envelope)
+    _saveEnvelope(store, envelope)
 
     return _result(_sortByDatetimeDesc(merged), {
         category: cat,
@@ -239,55 +267,21 @@ async function fetchFromGNews({ query, from, to, limit = FETCH_LIMIT }, provider
 // ─── Cache helpers ────────────────────────────────────────────────────────────
 
 /** @param {{ type: string, name: string }} store @returns {Promise<NewsEnvelope>} */
-async function _loadEnvelope(store) {
-    const loaded = await loadItemsFromFile(store.type, store.name)
-    return _normalizeEnvelope(loaded.ok ? loaded.data : null)
+function _loadEnvelope(key) {
+    return _shelves.get(key) ?? { category: '', subject: '', query: '', lastFetchedAt: 0, items: [] }
 }
 
-/** @param {{ type: string, name: string }} store @param {NewsEnvelope} envelope */
-async function _saveEnvelope(store, envelope) {
+/** @param {string} key @param {NewsEnvelope} envelope */
+function _saveEnvelope(key, envelope) {
     const payload = {
         ...envelope,
-        items: (Array.isArray(envelope.items) ? envelope.items : []).filter(
-            isValidArticle
-        ),
+        items: (Array.isArray(envelope.items) ? envelope.items : []).filter(isValidArticle),
         lastFetchedAt: envelope.lastFetchedAt ?? Date.now(),
     }
-    const saved = await saveItemsToFile(store.type, store.name, payload)
-    if (!saved.ok) {
-        throw new Error(
-            `Failed to save ${store.type}/${store.name}: ${saved.error?.message}`
-        )
-    }
+    _shelves.delete(key)
+    _shelves.set(key, payload)
+    while (_shelves.size > MAX_SHELVES) _shelves.delete(_shelves.keys().next().value)
     return payload
-}
-
-/** @param {unknown} raw @returns {NewsEnvelope} */
-function _normalizeEnvelope(raw) {
-    const empty = {
-        category: '',
-        subject: '',
-        query: '',
-        lastFetchedAt: 0,
-        items: [],
-    }
-    if (raw == null) return empty
-    if (raw && typeof raw === 'object' && Array.isArray(raw.items)) {
-        let category = ''
-        if (typeof raw.category === 'string') {
-            category = raw.category
-        } else if (typeof raw.kind === 'string') {
-            category = raw.kind === 'company' ? 'companies' : raw.kind
-        }
-        return {
-            category,
-            subject: typeof raw.subject === 'string' ? raw.subject : '',
-            query: typeof raw.query === 'string' ? raw.query : '',
-            lastFetchedAt: Number(raw.lastFetchedAt) || 0,
-            items: raw.items.filter(isValidArticle),
-        }
-    }
-    return empty
 }
 
 function _sortByDatetimeDesc(items) {
@@ -300,7 +294,7 @@ function _oneMonthAgoISO() {
     return d.toISOString()
 }
 
-function _sanitizeFileSegment(value) {
+function _sanitizeSubject(value) {
     return (
         String(value)
             .trim()

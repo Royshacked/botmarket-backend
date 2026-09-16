@@ -259,7 +259,16 @@ services/
   modelRouter.service.js  resolveModel(); REASONING_EFFORT enum
   conditionTree.service.js  resolve/collect/normalize condition trees
   orderPlan.service.js  protectionPlan.service.js
-  price.service.js  timeframe.service.js  brokerSymbol.service.js
+  price.service.js        THE candle cache for the monitors + agent tools: an in-process envelope per
+                          ticker × timeframe (bounded), fetched incrementally (the tail, or one backfill)
+                          through candles.provider. Freshness alone decides a refetch, and a FAILED or
+                          EMPTY fetch is stamped too — a down or uncovered symbol is asked once per hour,
+                          not once per read. Was a JSON file per series under data/ (unsafe, machine-local)
+  news.service.js         THE ONE NEWS PIPE: Finnhub for a ticker or the front page, GNews for words;
+                          one in-process shelf per (category, subject), 1h (15m for headlines), fetched
+                          incrementally and merged; a provider failure serves the warm shelf STALE and
+                          does not re-stamp it. The shelf was a file under data/news until 2026-09-16
+  timeframe.service.js  brokerSymbol.service.js
   market.service.js       THE market-hours engine: one class-aware gate (isAssetOpen), one status
                           read (getMarketStatus → open/nextOpenMs/session/phase), sessionPhase +
                           sessionStartMs. Four calendars — crypto 24/7 · forex 24/5 · CME index
@@ -434,7 +443,10 @@ services/
                           Generalizes portfolio_chats; migrating agents off per-agent chat-state.
 providers/
   anthropic.provider.js         LLM chat/streaming (OpenAI SDK is used directly, transcribe only)
-  yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance
+  yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / usaspending
+                            EVERY JSON call rides services/http.util.getJson — timeout per attempt, the
+                            request meter, typed err.status + err.body, a jittered retry on 429/5xx.
+                            chartImg (a POST for a PNG) is the one exception. Nothing imports axios
   fmp.provider.js               Starter plan: getFundamentals (valuation+analyst+ETF look-through), getEarnings(Calendar),
                                 screenCandidates (company-screener), getMacroSnapshot + getMacroRaw (treasury/econ/sector);
                                 getSectorSnapshot / getMarketMovers / getAnalystActions (Argus discovery feeds);

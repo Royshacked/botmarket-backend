@@ -57,15 +57,15 @@ Cache-first with automatic sync:
 ```
 getCandles(ticker, opts)
     │
-    ├── load file cache
+    ├── load the in-process envelope (per ticker × timeframe; bounded)
     │
     ├── shouldFetch?
     │   ├── opts.refresh === true
-    │   ├── cache is empty
-    │   └── cache is stale (> 1h old)
+    │   └── envelope is stale (> 1h since the last ATTEMPT — a failed or empty
+    │       fetch is stamped too, so a down or uncovered symbol is asked once per hour)
     │           │
     │           ▼
-    │       syncCandles()   ← fetch from Massive, merge into cache
+    │       syncCandles()   ← fetch via candles.provider (FMP-first), merge into the envelope
     │
     └── queryCandles()     ← filter cache by date range, return
 ```
@@ -81,11 +81,11 @@ syncCandles(ticker, opts)
     │       from = latestCachedTimestamp + 1 bar
     │       (or now - 30 days if cache empty)
     │
-    ├── getTickerAggregates()   ← Massive API call
+    ├── getTickerAggregates()   ← candles.provider: FMP, else Massive/Yahoo
     │
     ├── mergeDeduped(existing, incoming)   ← dedup by timestamp
     │
-    └── save to file cache
+    └── save the envelope (in memory — the disk tier was retired; see price.service's cache header)
 ```
 
 #### `queryCandles(ticker, opts)` — read-only from cache
@@ -226,8 +226,10 @@ providers/
   massive.provider.js           Massive REST client: getTickerAggregates()
 
 services/
-  price.service.js              Core: syncCandles, queryCandles, getCandles, toCompactRow
-  util.service.js               loadCandlesFromFile / saveCandlesToFile / isCacheFresh
+  price.service.js              Core: syncCandles, queryCandles, getCandles, toCompactRow — the envelope
+                                cache lives in this module, in memory
+  ttlCache.util.js              createTtlCache (delete-on-expiry) + isCacheFresh (the envelope caches'
+                                refresh test — they KEEP a stale value)
 
 monitoring/
   services/ohlcv.service.js   Monitoring adapter: timeframe label → priceService → {t,o,h,l,c,v}

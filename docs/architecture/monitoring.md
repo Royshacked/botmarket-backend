@@ -434,7 +434,7 @@ symbol         (e.g. "AAPL")
     │
     ▼
 newsService.getOrFetch({ category: 'companies', subject: symbol, query: symbol })
-    │   (uses GNews file cache — 1h TTL)
+    │   (the news shelf: in-process, 1h TTL; Finnhub for a ticker, GNews for words)
     ▼
 Top 20 headlines for the symbol
     │

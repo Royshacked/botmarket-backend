@@ -1,8 +1,7 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
-import fs from 'fs'
 
-import { newsService, _fetchArticles, NEWS_CATEGORIES, HEADLINES_SUBJECT } from '../../services/news.service.js'
+import { newsService, _fetchArticles, NEWS_CATEGORIES, HEADLINES_SUBJECT, _resetNewsCache, _readShelf } from '../../services/news.service.js'
 import { mapFinnhubArticle, mapGNewsArticle, isValidArticle } from '../../services/newsArticle.service.js'
 
 // WHICH SOURCE ANSWERS WHICH QUESTION. Finnhub is keyed — a ticker or the front page — and GNews is
@@ -132,23 +131,20 @@ test('the vocabulary names exactly the three kinds of read', () => {
 })
 
 // ── The warm-cache guarantee ──────────────────────────────────────────────────
-// These touch the real file cache under data/news (gitignored) and clean up after themselves.
+// These use the real in-process shelf (a file under data/news until 2026-09-16) under a subject
+// nothing else reads, and clear it after.
 
-// No leading underscore: the cache sanitizer strips those, and the test would then look for a file
-// the service never wrote.
 const TEST_SUBJECT = 'zz-news-source-test'
-const TEST_FILE = `data/news/companies/${TEST_SUBJECT}.json`
-const cleanup = () => { try { fs.unlinkSync(TEST_FILE) } catch { /* never existed */ } }
-after(cleanup)
+after(_resetNewsCache)
 
 test('a provider failure serves the warm cache stale instead of throwing it away', async () => {
-    cleanup()
+    _resetNewsCache()
     const first = await newsService.getOrFetch({
         category: 'companies', subject: TEST_SUBJECT, refresh: true,
         _providers: fakeProviders({ company: [finnhubRow()] }).providers,
     })
     assert.equal(first.articles.length, 1)
-    const warmAt = JSON.parse(fs.readFileSync(TEST_FILE, 'utf8')).lastFetchedAt
+    const warmAt = _readShelf('companies', TEST_SUBJECT).lastFetchedAt
 
     const second = await newsService.getOrFetch({
         category: 'companies', subject: TEST_SUBJECT, refresh: true, _providers: brokenProviders(),
@@ -160,7 +156,7 @@ test('a provider failure serves the warm cache stale instead of throwing it away
 
     // The failure must not touch the cache: bumping the timestamp would silence the subject for a
     // full TTL after the provider recovered, and overwriting it would lose the articles.
-    const afterFailure = JSON.parse(fs.readFileSync(TEST_FILE, 'utf8'))
+    const afterFailure = _readShelf('companies', TEST_SUBJECT)
     assert.equal(afterFailure.lastFetchedAt, warmAt, 'a failed fetch does not re-stamp the cache')
     assert.equal(afterFailure.items.length, 1)
 })
