@@ -212,16 +212,30 @@ export async function callAnthropicOnce({ model, systemPrompt, user, image = nul
     const content = image
         ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: image } }, { type: 'text', text: user }]
         : user
-    const msg = await client.messages.create({
-        model,
-        max_tokens: maxTokens,
-        system:     systemPrompt,
-        messages:   [{ role: 'user', content }],
-    })
+    // THE LOOP'S RULE, APPLIED HERE TOO. A model in THINKS_BY_DEFAULT reasons whether or not we ask,
+    // and those tokens count against max_tokens — so a 64-token YES/NO read on such a model would
+    // spend its whole budget on hidden reasoning and answer '' with stop_reason max_tokens, every
+    // time, while the log said only "raise the budget". The one-shot floors the effort exactly as
+    // the loop does and takes the loop's ceiling when it did, so the reply still fits. (CR on §8:
+    // monitor.claude aliases VISION_MODEL to DEFAULT_MODEL, and a default that moves to Sonnet 5
+    // would have silently broken every chart verdict.)
+    const msg = await client.messages.create(_oneShotRequest({ model, systemPrompt, content, maxTokens }))
     onUsage?.(msg.usage)
     const text = msg.content.filter(b => b.type === 'text').map(b => b.text).join('')
     _noteStop(msg.stop_reason, msg.stop_details ?? null, model, text.length)
     return text
+}
+
+/** The one-shot request body — pure, so the thinking rule above is testable without a client. */
+export function _oneShotRequest({ model, systemPrompt, content, maxTokens }) {
+    const reasoning = _thinkingConfig(undefined, model)
+    return {
+        model,
+        max_tokens: reasoning ? Math.max(maxTokens, THINKING_MAX_TOKENS) : maxTokens,
+        system:     systemPrompt,
+        messages:   [{ role: 'user', content }],
+        ...(reasoning ?? {}),
+    }
 }
 
 /**

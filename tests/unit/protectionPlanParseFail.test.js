@@ -1,13 +1,18 @@
 // What a leg does when the CONDITION PARSER cannot answer.
 //
-// node --test gives each file its own process, so blanking the key here is isolated — and because
-// monitor.claude builds its client lazily (on first call, not at import), setting it before the
-// first parse is enough to make every parse in this file fail the way an outage would.
-process.env.ANTHROPIC_API_KEY = ''
+// The outage is INJECTED at monitor.claude's one-shot seam — every model call in this file throws
+// the way an unreachable API would. It used to be simulated by blanking ANTHROPIC_API_KEY before a
+// lazily-built client read it; the client is the provider's now, built at import, and ESM hoists
+// imports above assignments, so that blanking reached nothing (CR on §8).
 
-import { test } from 'node:test'
+import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { touchLeaf, routeExits, detectNativeEntryLevel } from '../../services/protectionPlan.service.js'
+import { _setOneShot } from '../../monitoring/monitor.claude.js'
+
+let restore
+before(() => { restore = _setOneShot(async () => { throw new Error('Could not resolve authentication method') }) })
+after(() => restore())
 
 // THE BUG THIS LOCKS. `_leafBareLevel` ended with `const level = Number(parsed.value)` guarded by
 // `Number.isFinite(level)`. On a failed parse `parseCondition` catches its own error and returns
@@ -59,8 +64,8 @@ test('a leg whose touch rung the parser cannot read keeps the WHOLE leg on the m
     assert.notEqual(route.stop.monitorTree, null)
 })
 
-test('the sentence the app writes itself is NOT an outage — it rests at the broker with no key at all', async () => {
-    // The contrast that makes the file honest: same blank key, the self-authored leaf still routes.
+test('the sentence the app writes itself is NOT an outage — it rests at the broker with no model at all', async () => {
+    // The contrast that makes the file honest: same unreachable model, the self-authored leaf still routes.
     const route = await routeExits({
         direction: 'long', quantity: 10,
         stop_conditions: [touchLeaf(21500)],

@@ -15,6 +15,19 @@ import { callAnthropicOnce } from '../providers/anthropic.provider.js'
 import { CHEAP_MODEL, DEFAULT_MODEL } from '../services/llmModels.js'
 import { extractFirstJSON } from './parsers/llmReply.parser.js'
 
+// The one call, behind a seam. The outage tests used to simulate "no model" by blanking
+// ANTHROPIC_API_KEY before this module's lazily-built client read it; the client lives in the
+// provider now, at module scope, and ESM hoists the import above the assignment — so the blanking
+// reached nothing, and in a shell with the key exported those tests would have made real Haiku
+// calls and failed while spending tokens. A test that wants the model unreachable says so HERE.
+let _once = callAnthropicOnce
+/** Swap the one-shot call (tests). Returns a restore function; `null` restores the real one. */
+export function _setOneShot(fn) {
+    const prev = _once
+    _once = fn ?? callAnthropicOnce
+    return () => { _once = prev }
+}
+
 // A condition parse and a YES/NO verdict are reading, not modelling — the cheap model, as before.
 // A chart is a VISION read, and the cheap model's eyes are not good enough for structure; the
 // desks' default model reads the picture.
@@ -26,7 +39,7 @@ const VISION_MODEL = DEFAULT_MODEL
  * @returns {Promise<object>}
  */
 export async function claudeJSON(systemPrompt, userMessage) {
-    return extractFirstJSON(await callAnthropicOnce({ model: PARSE_MODEL, systemPrompt, user: userMessage, maxTokens: 512 }))
+    return extractFirstJSON(await _once({ model: PARSE_MODEL, systemPrompt, user: userMessage, maxTokens: 512 }))
 }
 
 /**
@@ -35,7 +48,7 @@ export async function claudeJSON(systemPrompt, userMessage) {
  * @returns {Promise<string>}
  */
 export async function claudeText(systemPrompt, userMessage) {
-    return callAnthropicOnce({ model: PARSE_MODEL, systemPrompt, user: userMessage, maxTokens: 64 })
+    return _once({ model: PARSE_MODEL, systemPrompt, user: userMessage, maxTokens: 64 })
 }
 
 /**
@@ -49,5 +62,5 @@ export async function claudeText(systemPrompt, userMessage) {
  * @returns {Promise<string>}
  */
 export async function claudeVision(systemPrompt, userMessage, imageBase64, { maxTokens = 64 } = {}) {
-    return callAnthropicOnce({ model: VISION_MODEL, systemPrompt, user: userMessage, image: imageBase64, maxTokens })
+    return _once({ model: VISION_MODEL, systemPrompt, user: userMessage, image: imageBase64, maxTokens })
 }

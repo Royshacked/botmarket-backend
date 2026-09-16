@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _finalizeToolBlocks, _toToolResultContent, _noteStop } from '../../providers/anthropic.provider.js'
+import { _finalizeToolBlocks, _toToolResultContent, _noteStop, _oneShotRequest } from '../../providers/anthropic.provider.js'
 
 // Regression: a no-argument tool (get_macro_snapshot) streams an EMPTY input_json_delta, so the
 // block's scratch `_json` ends up ''. The old truthiness check left `_json: ''` on the block, and
@@ -95,4 +95,22 @@ test('_noteStop: max_tokens and refusal are logged with the model; an ordinary e
     assert.equal(_noteStop('stop_sequence', null, 'm', 10), null)
     assert.equal(_noteStop(null, null, 'm', 10), null)
     assert.match(_noteStop('something_new', null, 'm', 10), /unexpected stop_reason something_new/)
+})
+
+// ── the one-shot read follows the loop's thinking rule ────────────────────────
+// A model in THINKS_BY_DEFAULT reasons whether or not it is asked, and those tokens count against
+// max_tokens — so a 64-token YES/NO on such a model would spend its budget on hidden reasoning and
+// answer ''. monitor.claude aliases its vision model to llmModels.DEFAULT_MODEL; the day that
+// default moves to a reasoning model, this is what keeps the chart verdicts readable (CR on §8).
+test('_oneShotRequest: a reasoning model gets the thinking block and the loop\'s ceiling; a plain one gets neither', () => {
+    const think = _oneShotRequest({ model: 'claude-sonnet-5', systemPrompt: 's', content: 'q', maxTokens: 64 })
+    assert.equal(think.thinking?.type, 'adaptive')
+    assert.equal(think.output_config?.effort, 'low', 'floored, not left at the model\'s own high')
+    assert.equal(think.max_tokens, 16000, 'the loop\'s THINKING_MAX_TOKENS, not the caller\'s 64')
+
+    const plain = _oneShotRequest({ model: 'claude-haiku-4-5-20251001', systemPrompt: 's', content: 'q', maxTokens: 64 })
+    assert.equal(plain.thinking, undefined)
+    assert.equal(plain.output_config, undefined)
+    assert.equal(plain.max_tokens, 64)
+    assert.deepEqual(plain.messages, [{ role: 'user', content: 'q' }])
 })

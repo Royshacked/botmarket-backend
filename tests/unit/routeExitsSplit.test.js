@@ -6,17 +6,24 @@
 // placement with a residual tree because `checkPosition` had no caller after Minos was deleted.
 // exit.monitor.js (b1faf4c) became that caller; the guard kept firing on a false premise and was
 // removed. What is worth keeping is the routing contract underneath it.
-process.env.ANTHROPIC_API_KEY = ''   // parses fail → every leaf falls to the monitor, like an outage
 
-import { test } from 'node:test'
+import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { routeExits } from '../../services/protectionPlan.service.js'
+import { _setOneShot } from '../../monitoring/monitor.claude.js'
+
+// The model is UNREACHABLE for this whole file, injected at monitor.claude's one-shot seam: a
+// user-worded parse fails the way an outage would and the leaf falls to the monitor. (Blanking the
+// key used to do this; the client is built at import now, so an env assignment reaches nothing.)
+let restore
+before(() => { restore = _setOneShot(async () => { throw new Error('Could not resolve authentication method') }) })
+after(() => restore())
 
 test('a leaf the parser cannot read falls to the monitor, never to a nonsense broker order', async () => {
     const route = await routeExits({
         id: 'e9', asset: 'SPY', direction: 'long', quantity: 10, broker: 'ctrader',
-        // Worded the way a USER might, so it needs the model — and the key is blank here, so it
-        // cannot be read. (touchLeaf's own sentence no longer needs a model; see condition.parser.)
+        // Worded the way a USER might, so it needs the model — which this file makes unreachable
+        // (see the seam below). touchLeaf's own sentence no longer needs a model; see condition.parser.
         stop_conditions: [{ condition: 'price reaches 400', type: 'touch', timeframe: null }],
         tp_conditions:   [],
     })
