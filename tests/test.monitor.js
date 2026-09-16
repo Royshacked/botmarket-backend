@@ -2,13 +2,12 @@
  * Monitoring system smoke test.
  * Run from the backend root:
  *
- *   node monitoring/test.monitor.js
+ *   node tests/test.monitor.js
  *
  * Tests each layer in order, printing pass/fail for each.
  * No DB connection needed — only Massive (OHLCV) + Anthropic (Claude) + GNews APIs.
  */
 
-import 'dotenv/config'
 import { getCandles }         from '../services/ohlcv.service.js'
 import { parseCondition }     from '../monitoring/parsers/condition.parser.js'
 import { evaluate }           from '../monitoring/evaluators/structured.evaluator.js'

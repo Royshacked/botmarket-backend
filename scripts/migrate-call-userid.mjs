@@ -15,7 +15,6 @@
 //
 // The `kairos_calls` backup collection is left alone; it is a snapshot of the pre-move shape.
 
-import 'dotenv/config'
 import { getDb } from '../providers/mongodb.provider.js'
 import { logger } from '../services/logger.service.js'
 import { ENTITIES } from '../services/entity/entityCollection.js'

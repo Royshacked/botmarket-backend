@@ -14,7 +14,6 @@
  * Safe to delete anytime.
  */
 
-import 'dotenv/config'
 import { getDb }          from '../providers/mongodb.provider.js'
 import { CTraderAdapter } from '../api/broker/adapters/ctrader.adapter.js'
 import { toBrokerSymbol } from '../services/brokerSymbol.service.js'

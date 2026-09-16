@@ -7,7 +7,6 @@
  *
  * Usage:  node scripts/run-house-scan-now.mjs [--dry]
  */
-import 'dotenv/config'
 import { getDb, closeDb }  from '../providers/mongodb.provider.js'
 import { COLLECTION as TILT } from '../api/strategy/tilt.service.js'
 import { COLLECTION as QUEUE } from '../services/researchQueue.service.js'

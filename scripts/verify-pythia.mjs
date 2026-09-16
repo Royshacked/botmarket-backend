@@ -10,8 +10,6 @@
  *
  * Needs ANTHROPIC_API_KEY, FMP_API_KEY and FRED_API_KEY in .env. --persist additionally needs Mongo.
  */
-import dotenv from 'dotenv'
-dotenv.config()
 
 const persist = process.argv.includes('--persist')
 

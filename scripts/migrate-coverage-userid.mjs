@@ -16,7 +16,6 @@
 // key and abort updateMany PART-WAY THROUGH — a half-migrated collection. So: drop first, rename,
 // then rebuild. The rebuild can only succeed because the rename is 1:1 on a previously-unique pair.
 
-import 'dotenv/config'
 import { getDb } from '../providers/mongodb.provider.js'
 import { logger } from '../services/logger.service.js'
 

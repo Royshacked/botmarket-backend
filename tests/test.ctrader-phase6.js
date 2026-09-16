@@ -13,7 +13,6 @@
  * Safe to delete anytime. `place` cleans up after itself (closes what it opened).
  */
 
-import 'dotenv/config'
 import { getDb }                 from '../providers/mongodb.provider.js'
 import { CTraderAdapter }        from '../api/broker/adapters/ctrader.adapter.js'
 import { fetchLastPrice }        from '../services/lastPrice.service.js'

@@ -16,7 +16,6 @@
 // Only PENDING cards are touched. A card the user already dismissed is settled, and re-stamping a
 // settled card would rewrite history to claim a policy it was never resolved under.
 
-import 'dotenv/config'
 import { getDb } from '../providers/mongodb.provider.js'
 import { logger } from '../services/logger.service.js'
 import { MSGS } from '../api/chat/chat.service.js'

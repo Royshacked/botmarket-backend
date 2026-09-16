@@ -37,7 +37,6 @@
 // NO PRICE, NO REPAIR. When spot can't be fetched the gate abstains and so does this: market data
 // being unreachable must never be the reason research gets rewritten.
 
-import 'dotenv/config'
 import { getDb } from '../providers/mongodb.provider.js'
 import { coverageService, ratingCoherence } from '../api/analyst/coverage.service.js'
 import { fetchLastPrice } from '../services/lastPrice.service.js'

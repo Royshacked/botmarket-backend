@@ -22,7 +22,6 @@
 // `ready` → `hit` is unconditional: they are the same rung, and `ordersPlacedAt` — not the status —
 // is what says an order reached the broker, so nothing can be double-placed by this rename.
 
-import 'dotenv/config'
 import { getDb } from '../providers/mongodb.provider.js'
 import { logger } from '../services/logger.service.js'
 import { ENTITIES } from '../services/entity/entityCollection.js'

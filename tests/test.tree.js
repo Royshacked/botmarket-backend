@@ -2,18 +2,17 @@
  * Condition tree smoke tests.
  * Run from the backend root:
  *
- *   node monitoring/test.tree.js
+ *   node tests/test.tree.js
  *
  * Tests:
  *   A.  evaluateTree — leaf, AND, OR, nested structures, edge cases
  *   C.  conditionTree.service — resolveConditionTree / extractLeaves
  *   D.  conditionTree.service — normalizeTreeNode
  *
- * Requires: dotenv-compatible env, Massive (OHLCV) API key (or warm cache),
+ * Requires: a .env (config.js loads it), Massive (OHLCV) API key (or warm cache),
  *           Anthropic key (condition parser — 2 calls, cached within process).
  */
 
-import 'dotenv/config'
 import { getCandles }    from '../services/ohlcv.service.js'
 import { evaluateTree, evaluateConditions } from '../monitoring/monitor.orchestrator.js'
 import {

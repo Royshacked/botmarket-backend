@@ -30,7 +30,6 @@
 // nothing to gain by rewriting history. It also never invents a size: a position the broker cannot be
 // asked about (an unreachable venue) is reported and skipped, never zeroed.
 
-import 'dotenv/config'
 import { getDb } from '../providers/mongodb.provider.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { ENTITIES } from '../services/entity/entityCollection.js'

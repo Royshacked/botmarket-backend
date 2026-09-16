@@ -15,12 +15,10 @@
  * prompt can be judged against real output. Contract violations are reported as WARN/FAIL lines
  * but the run continues, because the point is to see the whole picture in one go.
  */
-import dotenv from 'dotenv'
-dotenv.config()
 
-// App modules are imported DYNAMICALLY, below, on purpose: ESM hoists every static `import` above
-// module-level code, so a static import here would construct the Anthropic client (and its
-// apiKey) before dotenv.config() had run — "Could not resolve authentication method".
+// App modules are imported dynamically so each section can pull what it needs where it needs it;
+// the dotenv-ordering reason this used to give is gone — services/config.js owns .env and loads it
+// on import, before any module that reads it.
 const { mentorAgentService, emptyMentorState } = await import('../services/agents/mentor.agent.service.js')
 const { normalizeSetup, setupReadiness, computeRR, buildLadder, buildCadence, validityProblems,
     scenarioLabel, scenarioView, declaredConditions } = await import('../services/setup.schema.js')

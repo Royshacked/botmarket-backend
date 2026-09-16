@@ -6,7 +6,6 @@
  *
  * Usage:  node scripts/check-house-pipeline.mjs
  */
-import 'dotenv/config'
 import { getDb, closeDb } from '../providers/mongodb.provider.js'
 import { COLLECTION as TILT }  from '../api/strategy/tilt.service.js'
 import { COLLECTION as QUEUE } from '../services/researchQueue.service.js'

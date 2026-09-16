@@ -10,8 +10,6 @@
  *
  * Needs ANTHROPIC_API_KEY (+ the data keys the brief reads). Read-only: nothing is written.
  */
-import dotenv from 'dotenv'
-dotenv.config()
 
 const { axlAgentService } = await import('../services/agents/axl.agent.service.js')
 

@@ -7,7 +7,6 @@
 // P2). Only `kind:'call'` + `parentId:null` are added. The idea-shadow execution mechanism is
 // UNCHANGED. See ENTITY_MODEL.md P3.
 
-import 'dotenv/config'
 import { getDb } from '../providers/mongodb.provider.js'
 import { logger } from '../services/logger.service.js'
 import { ENTITIES } from '../services/entity/entityCollection.js'

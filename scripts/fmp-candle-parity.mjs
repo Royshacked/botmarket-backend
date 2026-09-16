@@ -8,7 +8,6 @@
 // Run:  node scripts/fmp-candle-parity.mjs [SYM ...]
 // Read-only, no writes. Exercises real provider quotas — keep the symbol set small.
 
-import 'dotenv/config'
 import { getFmpCandles } from '../providers/fmp.price.provider.js'
 import { getTickerAggregates } from '../providers/massive.provider.js'
 

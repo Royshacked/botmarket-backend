@@ -4,7 +4,6 @@
  *
  * Usage: node scripts/seed-bot-conversations.mjs
  */
-import 'dotenv/config'
 import { getDb }              from '../providers/mongodb.provider.js'
 import { seedBotConversation } from '../api/chat/chat.service.js'
 

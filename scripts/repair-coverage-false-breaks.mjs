@@ -26,7 +26,6 @@
 // `retired` docs are SKIPPED unless --include-retired: retiring is a user decision, and this script
 // does not get to overturn one silently — even one taken on a false signal.
 
-import 'dotenv/config'
 import { getDb } from '../providers/mongodb.provider.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
 import { logger } from '../services/logger.service.js'

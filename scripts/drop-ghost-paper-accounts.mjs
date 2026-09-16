@@ -26,7 +26,6 @@
 // thing this must not do (see planAccountRebind): an empty binding is never an improvement on a
 // stale one. They are listed at the end so the reference is on the record.
 
-import 'dotenv/config'
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { getDb } from '../providers/mongodb.provider.js'
 

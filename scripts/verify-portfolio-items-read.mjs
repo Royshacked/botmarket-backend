@@ -6,8 +6,6 @@
  * Read-only. Asserts the two things the review depends on: that the rows come back at all, and that
  * each one carries the `id` the accepted <portfolio_update> will name as itemId.
  */
-import dotenv from 'dotenv'
-dotenv.config()
 
 const { listPortfolioItems } = await import('../services/portfolioState.service.js')
 

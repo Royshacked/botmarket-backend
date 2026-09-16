@@ -17,7 +17,6 @@
  * Safe to delete this file at any time — it imports nothing of ours except getDb.
  */
 
-import 'dotenv/config'
 import { getDb } from '../providers/mongodb.provider.js'
 
 // ─── Verified constants (from cTrader docs, June 2026) ──────────────────────────

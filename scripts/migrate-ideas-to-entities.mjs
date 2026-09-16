@@ -13,7 +13,6 @@
 //
 // Shape is UNCHANGED (flat + two new fields) — see ENTITY_MODEL.md P2 (decision: flat + kind).
 
-import 'dotenv/config'   // standalone script — load .env (MONGODB_URI) itself
 import { getDb } from '../providers/mongodb.provider.js'
 import { logger } from '../services/logger.service.js'
 import { ENTITIES } from '../services/entity/entityCollection.js'

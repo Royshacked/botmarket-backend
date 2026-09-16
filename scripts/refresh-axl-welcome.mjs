@@ -6,7 +6,6 @@
  *
  * Run: node scripts/refresh-axl-welcome.mjs
  */
-import 'dotenv/config'
 import { getDb } from '../providers/mongodb.provider.js'
 
 const NEW_WELCOME = "Hi, I'm Axl — your trading assistant. I'll notify you here about portfolio reviews, position alerts, and anything that needs your attention, and you can ask me how the app works. Just message me."

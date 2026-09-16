@@ -3,7 +3,6 @@
  * indicators via the headless klinecharts renderer. Writes PNGs to scripts/.render-<tag>.png.
  * Usage: node scripts/render-spike.mjs [SYMBOL] [interval]
  */
-import 'dotenv/config'
 import { writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'

@@ -608,7 +608,7 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
 
 - JWT in an httpOnly cookie; `requireAuth` guards most routes. `req.user._id` is the custom string id.
 - **Two roles, `trader` (default) and `admin`** (`users.role`, minted into the token at sign-in;
-  `scripts/promote-admin.js`). `requireAdmin` (403) is router-wide on `/api/strategy`, on the
+  `scripts/set-admin-role.mjs <username> --apply`). `requireAdmin` (403) is router-wide on `/api/strategy`, on the
   coverage writes + the research queue under `/api/analyst`, and on Aether's chat + discovery.
   Scanner, mentor, setups and trade-ideas routes are never role-gated (`tests/unit/adminGate.test.js`
   pins both facts). Social-chat feeds of the admin desks (`ADMIN_BOT_IDS`: `strategy`, `analyst`)

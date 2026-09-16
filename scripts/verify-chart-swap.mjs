@@ -3,7 +3,6 @@
  * routes through the own-chart renderer, caches, and would fall back to chart-img on failure.
  * Also checks the concurrency pool: N charts render overlapping (wall-clock << sum of each).
  */
-import 'dotenv/config'
 import { buildStudies } from '../monitoring/evaluators/chart.evaluator.js'
 import { cachedChartImage } from '../services/chartImgCache.service.js'
 import { renderChartImage, closeRenderer } from '../services/chartRender/klineRender.provider.js'

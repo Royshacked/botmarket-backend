@@ -13,15 +13,14 @@
  * Copies every collection AND its indexes. Refuses to overwrite a non-empty target unless --force,
  * and refuses to write to the source. Read-only against the source throughout.
  */
-import dotenv from 'dotenv'
-dotenv.config()
 
 import { MongoClient, ServerApiVersion } from 'mongodb'
+import { config } from '../services/config.js'
 
 // slice(2) — argv[0] is the node binary's own path, which is not a database name.
 const TARGET = process.argv.slice(2).find(a => !a.startsWith('-')) ?? 'botmarket_dev'
 const FORCE  = process.argv.includes('--force')
-const URI    = process.env.MONGODB_URI
+const URI    = config.mongoUri
 if (!URI) { console.error('MONGODB_URI is not set'); process.exit(1) }
 
 const client = new MongoClient(URI, {

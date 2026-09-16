@@ -22,7 +22,6 @@
 //   node scripts/repair-stuck-setup-status.mjs
 //   node scripts/repair-stuck-setup-status.mjs --apply
 
-import 'dotenv/config'
 import { getDb }         from '../providers/mongodb.provider.js'
 import { paperBrokerService } from '../api/broker/paperBroker.service.js'
 import { ENTITIES }      from '../services/entity/entityCollection.js'

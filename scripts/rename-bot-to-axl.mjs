@@ -5,7 +5,6 @@
  *
  * Run: node scripts/rename-bot-to-axl.mjs
  */
-import 'dotenv/config'
 import { getDb } from '../providers/mongodb.provider.js'
 
 const OLD   = 'ar2trade_bot'

@@ -10,7 +10,6 @@
  * Requires a connected cTrader DEMO account (token in brokerConnections).
  */
 
-import 'dotenv/config'
 import { getDb }             from '../providers/mongodb.provider.js'
 import { getCTraderSocket }  from '../providers/ctrader.ws.provider.js'
 
