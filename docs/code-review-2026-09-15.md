@@ -19,7 +19,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 3 | Mentor / setups + Talos | `api/setups/**`, `setup.schema.js`, `mentor.agent.service`, `talos.*`, `monitoring/evaluators/**`, `parsers/**`, `guardSweep`, `readinessGates` | ✅ done — 6 commits `227d711`..`58e7f3d` |
 | 4 | Atlas / portfolio | `api/portfolio/**`, `portfolio.agent.service`, `portfolioState`, `sleeveSource`, `adoptBook` | ✅ done — 10 commits `e3ef6e7`..`bc8bd50`, suite **2886 / 0**; FE follow-ups cleared in `a9532a8` |
 | 5 | Agent runtime | `agentIO`, `agentUtils`, `agentTools.registry`, `services/tools/**`, `pendingAction/**`, `entity/**`, `axl.agent.service`, `api/chat/**` | ✅ done — 8 commits `13a323f`..`1b78b99` (+ `7c37bcd`, `7307e76` frontend), suite **2910 / 0** |
-| 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | ✅ done — 7 commits `2a957e8`..`b3c36b9` (+ `researchQueue.service`, read in scope), suite **2932 / 0** |
+| 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | ✅ done — 7 commits `2a957e8`..`b3c36b9` (+ `researchQueue.service`, read in scope), suite **2932 / 0**; CR cycle → `98b8994`, **2936 / 0** |
 | 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | |
 | 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | |
 | 9 | Platform | `server.js`, `middleware/**`, `config.js`, `api/authentication`, `api/user`, `api/workspace`, `api/_shared`, `api/health` | |
@@ -657,6 +657,62 @@ the monitor's exact shape (`coverageRefresh`), the refresh card's two audiences 
 tilt fan-out rebuilt over the seams that exist (`tiltNotify` — 4 dead-join tests out, 6 in), the
 read claim and the single-flight Start (`researchRun`), the bookkeeping-free prompt dumps
 (`coverageObjections`, `strategyAgent`). Suite 2910 → **2932**.
+
+---
+
+## QA / CR cycle on §5–§6 (2026-09-16)
+
+QA: lint clean repo-wide; full suite green (**2932 / 0** at the last §6 code commit, then **2936 / 0**
+with this cycle's fixes); all **277** backend modules import cleanly; 16/16 archived modules load.
+
+Docs: §5 and §6 written up. CODE_MAP gained entries it never had — `api/strategy` (a whole desk), the
+coverage monitor and its two pure modules, `tilt.assess`, `houseArtifact.repo`, `tiltNotify` — and
+corrected the coverage entry ("one doc per user+symbol" → house-owned), the chat entry's transport
+(`sendBotMessage` → `postCard → postBotCard`), `tokenUsage`'s bare filename, and `sleeveSource`'s
+"house spend" (unbooked). APP_SPEC's card table gained the four cards it was missing (`tilt_event`,
+`coverage_event`, `coverage_refreshed`, `sleeve_sourced`), the review offer's roster
+(`listAllUserIds` → `listAdminUserIds`, true since 2026-09-14), and the rule the two §6 HIGH bugs
+broke: a house card's audience is the admin roster, every time. `roles-and-sourcing` says the
+scheduled re-model runs with no user and books nothing.
+
+### CR findings on the §5–§6 range, and what was done
+
+A high-effort review over `dc7f8a1..HEAD` (26 commits, 83 files) confirmed the mechanics — the
+entity-repo migration's filter shapes, `houseArtifact.revise`'s atomicity, `startRun`'s single-flight
+window, the null-user degrade path, every removed export's callers in both repos — and surfaced two
+findings. **Both are in §4's range, and both are consequences of §4's own fixes**, which is what a CR
+pass after a section is for.
+
+| | Where | What | Done |
+|---|---|---|---|
+| 1 | `portfolio.controller` / `portfolioState.getPortfolioStateCached` | **§4 made the 5-minute snapshot the ONLY description of the book Atlas edits** (`4aa9b61` stopped the client sending `portfolioIdeas`), and only the review paths invalidated it. A holding deleted or resized from the ideas list, or corrected/removed in adopt, stood in Atlas's next turn as it was — itemId and all — so the change Atlas proposed against it came back `not_found`: the very failure §4 closed, reachable through freshness instead of an empty list. The client list had been masking the gap by being fresh every turn. | `invalidatePortfolioStateFor(doc)` — keyed off the document, a no-op without a `portfolioId` — called from `tradeIdeas.updateIdea` and `deleteIdea` and from adopt's `correctHolding` / `removeHolding` (as an injected dep, so the tests assert it). Medium |
+| 2 | `rebalanceNotify.REASON_COPY` | §4's new `remove_item` refusal (`order_pending_cancel_first`) got copy on the CLIENT (`reviewApply`) and not on the receipt card, which printed the raw slug. | Worded, and deliberately apart from `live_use_exit_item` for the reason the §4 write-up gave. Low |
+
+One more came out of re-reading the range myself: `houseArtifact.repo.revise` sent `$set: {}` when a
+caller had nothing to set — a no-op on MongoDB 5+, a rejected update on anything older. Every caller
+sends `updated_at`, so it never fired; the pipe no longer depends on that.
+
+Two things the CR checked and deliberately did not file, kept here so they are not re-found:
+`coverage._updateSet` skips a `flags` key that arrives without any of `FLAG_INPUTS` (no caller patches
+flags directly), and `adoptBook.commitDraft` now books an unrecognised cadence word on the weekly clock
+rather than monthly — consistent with `completeReview`, so a pre-existing inconsistency got smaller.
+
+### Carried forward
+
+- **§9 decision** still open: what an error may tell the client (`makeHandle` → `{ error: err.message }`
+  vs fixed slugs). §5 and §6 each converted only handlers that never caught, so the question is
+  undecided rather than answered piecemeal — now across seven controllers.
+- **§7/§8:** `coverage.service` and `tilt.service` dynamic-import `monitoring/monitorUtils.fetchLastPrice`
+  (a service into the monitor tier); `cTrader` `/tradingaccounts` ×3 and the uncached `_session`;
+  `ibkr.adapter` parses account-summary rows twice; `aether.controller` still hand-rolls try/catch.
+- **§8 (Aether):** the house run's token spend is unbooked (`resolveAgentStream` records per user).
+  A house row is the fix; `sleeveSource`'s run has the same gap.
+- **Prompt review, not code review:** `get_chart`'s description names "the Kairos single-pick"; the
+  revision trail rides every Prometheus update-mode turn uncapped.
+- **§9 (`_shared`):** five controllers validate and TRIM the messages with `parseChatMessages`, then
+  pass the RAW body array to the agent.
+- **§10:** `tests/unit/agentToolsRegistry` pins tool descriptions verbatim — good, and it means a
+  prompt-review change to a description is a snapshot update, not a drift.
 
 ---
 
