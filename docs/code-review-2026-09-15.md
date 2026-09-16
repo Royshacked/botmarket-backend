@@ -23,7 +23,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | ✅ done — 8 commits `d8d7fab`..`15b562a` (+ `candleFetch`, `priceFeed`, `http.util`, the two adapters' carried items), suite **2965 / 0 in 63s**; CR cycle → `9798baa`, **2968 / 0** |
 | 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | ✅ done — 4 commits `005c9c8`..`953e522`, write-up `97e716f`, CR cycle → `f9da64a`, suite **2968 / 0** |
 | 9 | Platform | `server.js`, `middleware/**`, `config.js`, `api/authentication`, `api/user`, `api/workspace`, `api/_shared`, `api/health` (+ `threads`, `turns`, `calendar`, `transcribe`, `experience`, the lifecycle/lease/logger services, read in scope) | ✅ done — 6 commits `63a9518`..`08ebf13`, write-up `38107db`, CR cycle → `dfe1d52`, suite **2993 / 0** |
-| 10 | Tests + scripts | coverage gaps vs. §1–9, `scripts/**` hygiene | |
+| 10 | Tests + scripts | coverage gaps vs. §1–9, `scripts/**` hygiene | ✅ done — 6 commits `ca132c0`..`d704642`, suite **3039 / 0** |
 
 ---
 
@@ -1034,6 +1034,121 @@ keys are known in both environments; `KNOWN_KEYS` → `knownKeys()`), `threadAge
 only), `aetherDiscoveryTrigger` + `aetherCandidateByTicker` (drive the controller through the real
 pipe, not a bare `(req, res)`), `calendarWeek` / `calendarEnrich` (import the service). Suite
 2968 → **2991**.
+
+---
+
+## §10 Tests + scripts — done
+
+**Verdict in one line:** the unit suite is offline, fast and honest, but the one corner nothing
+checks — `scripts/` and the manual harnesses — had four scripts that no longer loaded (a repair
+tool, the Mentor diagnostic, two naming a July-deleted orchestrator), a third of the substantive
+monitor code had no unit test, and the admin-account write was authored three times. Closed, plus a
+static loader so the script rot cannot recur.
+
+*Scope note:* all 32 `scripts/**`, `tests/setup.mjs`, the 8 `tests/test.*.js` manual harnesses,
+`package.json`, `eslint.config.js`, and a structural pass over the 235 unit files — module
+coverage, the `fakeRes` duplication, the drive-through-the-pipe pattern, the slow tests.
+
+### Bugs
+
+| | Where | What | Sev |
+|---|---|---|---|
+| 1 | `scripts/repair-coverage-incoherent-ratings.mjs` | imported `fetchLastPrice` from `monitoring/monitorUtils` — moved to `services/lastPrice.service` in §8. A repair tool that throws on load the day it is reached for. Repointed. | **high** |
+| 2 | `scripts/verify-mentor.mjs` | the Mentor prompt's live diagnostic imported three zone-gate helpers (`liveEntryZones`/`proximityGapMin`/`zoneDistance`) that went with the zone gate when the guard sweep replaced it (`70a6039`), and `scenarioGate` from the wrong module. Did not load for weeks. Gate section rewritten to the scenario gate + a locally-computed distance; pacing dropped (it is the guard sweep's now). | **high** |
+| 3 | `verify-phase-a/b.mjs`, `migrate-news-lanes.mjs` | named the orchestrator deleted 2026-07-29 and the `data/news` file store §7 replaced — the three scripts that still said `data/news/lanes`. Deleted. | medium |
+| 4 | `promote-admin.js` / `create-admin-user.mjs` | the admin write authored three times: `promote-admin.js` ≡ `set-admin-role.mjs` (deleted `.js`, APP_SPEC repointed), and `create-admin-user` re-implemented the account insert against a raw `'users'` string with no field validation and no welcome (now rides `userService.createUser`). | medium |
+| 5 | 30 scripts + harnesses | a second `.env` loader (`import 'dotenv/config'`) after `config.js` took ownership of dotenv in §7 — two still carrying comments that explain the ordering hazard it closed. Removed; `clone-db-for-dev` reads `config.mongoUri`. | low |
+| 6 | **the class** | nothing loaded a script — `check:archive` covers `archive/`, `npm test` and eslint skip execution. `tests/unit/scriptsImport.test.js` now parses every `scripts/**` and `tests/test.*.js` import STATICALLY (a script runs on import, so it is never imported) and asserts each named export exists. It reproduces bugs 1–4 at the commit that would introduce them. | the fix for 1–4's class |
+
+### The lens
+
+**(c) Duplications** — the admin write ×3 (above). **Five** unit files had each grown their own
+`fakeRes` Express-response double, subtly divergent (`statusCode` vs `code`, `json` vs `send`,
+`headersSent` present or not), and two hand-rolled the `makeHandle → errorHandler` glue inline.
+`tests/helpers/http.js` is the one double plus `runHandler` — the drive that runs a handler through
+the whole pipe, so a test asserts what the client receives. Adopted where it is a clean win; left
+where a test answers through its own narrow double on purpose (see the judgment calls).
+
+**(d) Dead code** — `verify-phase-a/b` and `migrate-news-lanes` (whole files). No dead export the
+prior sections had not already caught (`check:archive` + the new script test now bound both ends).
+
+**(b) Conventions** — the 30 stray dotenv loads; two harness headers pointing at `monitoring/`
+where the files live in `tests/`; `package.json` still `"description": "production ready server"`,
+`"author": "Me"`.
+
+**Coverage vs §1–§9** — 60 of 279 modules are named by no test; most are routes/controllers on
+`makeHandle` (their behaviour is the handler's, tested there). The substantive gaps closed:
+`monitor.orchestrator.evaluateTree` — **the evaluator every monitor runs**, tested for the first
+time (AND/OR/nesting/short-circuit/cost-ordering via the `out` map, floorAt, triggerAt,
+isTimeBlocked); the touch/time/volume evaluators; `preflightEntry`'s scope predicate and
+never-throws contract; `timeframe.service` end to end; `rateLimit`'s key generators (the cost
+ceiling's identity — hashed cookie, IPv6 subnet collapse, IP fallback). Carried, because they need
+repo/deps seams a test-only change should not bolt on mid-review: `guardSweep._tick`,
+`researchQueue.service`, `manualIdea`/`manualExecution`, `adoptBook.store`, `monitor.orchestrator`'s
+DB-touching siblings.
+
+### Judgment calls made against the plan
+
+- **The sweep of `fakeRes` stopped short of adminGate / reasonStatus / ticketOrderPath.** Each
+  answers through its own minimal double (`requireAdmin`, `sendReason`, a `sendReason` route with no
+  throw pipe) — routing them through the shared helper would obscure, not clarify. The "three bare
+  controller drives" from the plan were false positives: `axlRoute` tests pure exported helpers,
+  `marketBrief` is an SSE `EventEmitter`, `ticketOrderPath` drives a `sendReason` route.
+- **`engines: "node": "22"` left as is.** Dev runs 24; which one Render pins is a deployment
+  question, not a code-review edit, and guessing it wrong breaks a deploy.
+- **`guardSweep` and the DB-bound services were not given seams for a test this section.** Adding a
+  deps seam to production code purely to test it is a change §10 should propose, not smuggle; listed.
+- **The "8.8s timeout test" carried since §7 was retired, not fixed.** Measured: the three slowest
+  tests (7s `agentToolComments`, 7s `pendingActionExecute`, 3s `entityController`) are module-import
+  cost under parallel load — 585ms for the same graph alone — not timeouts. Nothing to fix.
+
+### Behaviour changes a reader should know
+
+None in the running app — every change is to `scripts/` and `tests/`, except the two
+cosmetic `package.json` fields. `create-admin-user` now seeds the welcome (it rides `createUser`),
+which only matters the next time an admin is created from the CLI.
+
+### Frontend follow-ups (botmarket-frontend)
+
+Unchanged from §9: `user.service.remote.js` is a template leftover; MainPage's dead `/api/idea`
+draft save. Neither is a §10 item.
+
+### Tests added / changed
+
+New: `scriptsImport` (3), `evaluateTree` (17), `monitorEvaluators` (13), `preflightEntry` (6),
+`timeframeService` (9), `rateLimitKeys` (5). Changed: the four `fakeRes` adopters onto
+`tests/helpers/http.js`; the two aether files through `runHandler`. Suite 2993 → **3039**.
+
+---
+
+## The review, end to end (2026-09-15 → 2026-09-16)
+
+Ten sections, ~86 commits, suite **2849 → 3039 / 0**, offline in ~65s (it had been ten minutes of
+live LLM calls). Every section: read in full, cross-checked against callers in the backend, the
+tests and `botmarket-frontend/src`, fixed as one commit per finding-group with the suite green and
+the archive loading before each, written up here, and closed with a QA + `/code-review high` cycle
+whose own findings were acted on. The through-lines:
+
+- **One mechanism, one home.** The Anthropic client (§8), the HTTP pipe and market-data fetch (§7),
+  the notification transport (§5), the error pipe (§9), the config surface and its now-derived key
+  set (§9) — each had been two or more copies, and each is one, with the per-desk *judgment* left
+  where it belongs.
+- **The offline suite** — §7 found four providers loading `.env` into the runner; §8 and §9 each
+  then found a test whose premise had quietly stopped being true (an env-blanked client that ESM
+  hoisted past, an adapter status asserted below the client). A seam cannot go stale the way an
+  ambient premise can, and the review moved tests onto seams each time.
+- **Archived desks as live collaborators** — Kairos/Hermes/Minos left comments, list entries and
+  imports across every tier; removed where dead, pinned where a name is a deliberate contract.
+- **What the review would not touch:** prompt content (the agent tools' descriptions are the prompt
+  review's, pinned by snapshot), Roy's reading formats (the Hebrew-locale log timestamp), and
+  product decisions surfaced but not taken (Aether → Prometheus re-model, the house usage row).
+
+**Still open, by owner.** *Model / prompt review (a separate pass):* the `web_search` tool version
+per model, the Sonnet 4.6 default, "Kairos single-pick" in `get_chart`, the uncapped revision trail
+in Prometheus's update-mode prompt. *Product, not code:* the house usage row (the `onUsage` seams
+exist, nothing books to them), whether Aether's event candidates should trigger a re-model.
+*Frontend:* the two follow-ups above. *Tests (carried from §10):* seams for `guardSweep` and the
+DB-bound services. *Deploy:* the Node 22-vs-24 pin.
 
 ---
 
