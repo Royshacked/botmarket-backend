@@ -1,7 +1,7 @@
 // Provider-agnostic cycle / seasonality primitives. Pure functions over plain
 // arrays and dates — no Yahoo, no fetching. Extracted from
-// yahoofinance.provider.js; getCycleAnalysis() stays in the provider because it
-// fetches candles, but the extrema/cycle/calendar math lives here.
+// yahoofinance.provider.js; getCycleAnalysis() lives in priceAnalytics.service (it
+// fetches candles), but the extrema/cycle/calendar math lives here.
 //
 //  - findExtrema(closes, lookback) → { peaks: idx[], troughs: idx[] }
 //  - cycleStats(indices)           → { mean, std, consistency, count } | null

@@ -6,7 +6,8 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { _allText, _formatEventRisk } from '../../monitoring/assess.shared.js'
-import { getQuotes, getCycleAnalysis, getShortInterest, getOptionsContext } from '../../providers/yahoofinance.provider.js'
+import { getQuotes, getShortInterest, getOptionsContext } from '../../providers/yahoofinance.provider.js'
+import { getCycleAnalysis } from '../../services/priceAnalytics.service.js'
 import { getDerivativesContext }       from '../../providers/binance.provider.js'
 import { buildStudies } from '../../monitoring/evaluators/chart.evaluator.js'
 import { sessionPhase } from '../../services/market.service.js'

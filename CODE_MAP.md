@@ -285,7 +285,16 @@ services/
                           depend on the database being unreachable. server.js fails fast on a
                           MISSING required value AND on a MALFORMED one (set but unparseable —
                           previously a silent fallback), and warns on .env keys nothing reads
+  priceAnalytics.service.js  risk (annualised vol + ATR), correlations, price action, cycles — the
+                            desks' get_risk_metrics / get_price_action / get_correlations /
+                            get_cycle_analysis and Atlas's raw vols+matrix read. Arithmetic over a
+                            candle series from WHICHEVER source candles.provider picks; lived in the
+                            Yahoo provider until 2026-09-16 with a private FMP→Yahoo fetch that bypassed
+                            the router. The pure math is priceStats.util + cycleAnalysis.service
   format.util.js  http.util.js  ttlCache.util.js  priceStats.util.js  cycleAnalysis.service.js
+  mongoCache.util.js      makeMongoBackedCache({ collection, ttlMs }) → { read, write }: an in-process TTL
+                          map over a Mongo collection, best-effort on both sides. FMP fundamentals and
+                          Finnhub profiles ride it (each had written the pair by hand)
   number.util.js            rounding, once: roundTo/round2/round4/round8 (NaN through), roundOrNull
                             (display: not-reported → null), roundOrZero (quantities). Replaced twelve
                             private `_round2`-style copies; import from here, never redeclare

@@ -10,7 +10,7 @@
 // Mentor deliberately takes the kit un-subsetted because its lens is per-SETUP rather than
 // per-build. Kept because the archived desk imports it and reviving that desk should be a
 // decision, not a repair job.
-import { getPriceAction, getCycleAnalysis, getCorrelations } from '../../providers/yahoofinance.provider.js'
+import { getPriceAction, getCycleAnalysis, getCorrelations } from '../priceAnalytics.service.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { getEarningsCalendar, getFundamentals, getStockPeers, getMacroSnapshot, getSectorSnapshot } from '../../providers/fmp.provider.js'
 import { makeTradingContextHandlers, TRADING_CONTEXT_TOOL_SPEC } from './tradingContext.tools.js'
