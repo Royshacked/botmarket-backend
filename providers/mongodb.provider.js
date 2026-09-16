@@ -3,17 +3,40 @@ import { logger } from '../services/logger.service.js'
 import { config } from '../services/config.js'
 
 const LOG = '[mongodb]'
-const URI = config.mongoUri
 
 let _client = null
 let _db = null
+// The connect IN FLIGHT, so concurrent first callers share one client. Cleared once it settles.
+let _connecting = null
 
+const _defaultClientFactory = (uri, options) => new MongoClient(uri, options)
+let _createClient = _defaultClientFactory
+
+/**
+ * THE database handle — one client per process.
+ *
+ * "One" has to be enforced against the boot sequence, not assumed. server.js fires ten
+ * `ensure*Indexes()` calls without awaiting them, so ten callers reach here before the first
+ * connect has resolved. Until 2026-09-16 each of them built its own MongoClient: `_db` was set only
+ * AFTER `await connect()`, so every caller that arrived in that window passed the `if (_db)` check.
+ * backend.log showed ten "Connected to MongoDB" lines in one second at every boot — nine clients
+ * that nothing could ever close (`_client` kept only the last), each holding a pool and a topology
+ * monitor against Atlas for the life of the process. The fix is the in-flight promise: the first
+ * caller starts the connect, everyone else awaits the same one.
+ */
 export async function getDb() {
     if (_db) return _db
+    if (!_connecting) {
+        _connecting = _connect().finally(() => { _connecting = null })
+    }
+    return _connecting
+}
 
-    if (!URI) throw new Error('MONGODB_URI is not set in environment variables')
+async function _connect() {
+    const uri = config.mongoUri
+    if (!uri) throw new Error('MONGODB_URI is not set in environment variables')
 
-    _client = new MongoClient(URI, {
+    const client = _createClient(uri, {
         serverApi: {
             version: ServerApiVersion.v1,
             strict: true,
@@ -24,15 +47,23 @@ export async function getDb() {
         family: 4, // force IPv4 — fixes TLS handshake failures on Render
     })
 
-    await _client.connect()
+    await client.connect()
     // `db(undefined)` is the driver's own "use the name in the URI" — so an unset DB_NAME keeps the
     // historical behaviour EXACTLY, and the deployed environment does not have to be told anything.
     // Set locally, it is what stops a laptop and the deployed instance from being the same database
     // (and therefore contending for the one background-loops lease). See config.dbName.
-    _db = _client.db(config.dbName ?? undefined)
+    _client = client
+    _db = client.db(config.dbName ?? undefined)
 
     logger.info(LOG, `Connected to MongoDB — db "${_db.databaseName}"`)
     return _db
+}
+
+/** Test seam — swap the MongoClient constructor. Returns a restore function; `null` restores the driver's. */
+export function _setClientFactory(fn) {
+    const prev = _createClient
+    _createClient = fn ?? _defaultClientFactory
+    return () => { _createClient = prev }
 }
 
 /**

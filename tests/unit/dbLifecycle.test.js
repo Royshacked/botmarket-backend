@@ -13,9 +13,13 @@
 //      itself, which config.js explicitly invites ("a test that needs a value sets it itself").
 //   2. TEARDOWN (tests/setup.mjs → closeDb) — for the test that does connect. Costs nothing when
 //      nothing connected, which is the normal case.
+//
+// And a third thing, about the SERVER rather than the suite: getDb() must build ONE client however
+// many callers arrive before the first connect resolves. The boot fires ten un-awaited index
+// ensures, and until 2026-09-16 that meant ten clients, nine of them orphaned for the process life.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { closeDb } from '../../providers/mongodb.provider.js'
+import { getDb, closeDb, _setClientFactory } from '../../providers/mongodb.provider.js'
 import { config } from '../../services/config.js'
 
 // ── the teardown half ────────────────────────────────────────────────────────
@@ -28,6 +32,64 @@ test('closing without ever connecting is a no-op, not an error', async () => {
 test('closing twice is a no-op — the hook must not care if something already closed', async () => {
     await closeDb()
     await assert.doesNotReject(() => closeDb())
+})
+
+// ── one client, however many arrive at once ─────────────────────────────────
+
+/** A MongoClient stand-in: counts constructions and closes, connects on the next tick. */
+function _fakeDriver({ failConnect = false } = {}) {
+    const stats = { built: 0, closed: 0 }
+    const factory = () => {
+        stats.built++
+        return {
+            connect: () => new Promise((resolve, reject) =>
+                setImmediate(() => failConnect ? reject(new Error('no route to cluster')) : resolve())),
+            db:      () => ({ databaseName: 'fake' }),
+            close:   async () => { stats.closed++ },
+        }
+    }
+    return { stats, factory }
+}
+
+test('ten concurrent first callers share ONE client — the boot sequence, in miniature', async () => {
+    const { stats, factory } = _fakeDriver()
+    const restore = _setClientFactory(factory)
+    process.env.MONGODB_URI = 'mongodb://fake.invalid/test'
+    try {
+        const dbs = await Promise.all(Array.from({ length: 10 }, () => getDb()))
+        assert.equal(stats.built, 1, 'one MongoClient for ten callers')
+        assert.ok(dbs.every(d => d === dbs[0]), 'and they all hold the same handle')
+        // Settled: a later caller gets the cached handle, not a new connect.
+        await getDb()
+        assert.equal(stats.built, 1)
+        // closeDb closes THAT client — there is no orphan for it to miss.
+        await closeDb()
+        assert.equal(stats.closed, 1)
+        // And a fresh connect after close is a fresh client, exactly once again.
+        await Promise.all([getDb(), getDb()])
+        assert.equal(stats.built, 2)
+    } finally {
+        await closeDb()
+        delete process.env.MONGODB_URI
+        restore()
+    }
+})
+
+test('a failed connect rejects every waiting caller and leaves nothing cached — the next call retries', async () => {
+    const { stats, factory } = _fakeDriver({ failConnect: true })
+    const restore = _setClientFactory(factory)
+    process.env.MONGODB_URI = 'mongodb://fake.invalid/test'
+    try {
+        const results = await Promise.allSettled([getDb(), getDb(), getDb()])
+        assert.ok(results.every(r => r.status === 'rejected'), 'all three see the failure')
+        assert.equal(stats.built, 1, 'one attempt served all three')
+        await assert.rejects(() => getDb(), /no route to cluster/)
+        assert.equal(stats.built, 2, 'a stale in-flight promise did not pin the failure')
+    } finally {
+        await closeDb()
+        delete process.env.MONGODB_URI
+        restore()
+    }
 })
 
 // ── the starvation half ──────────────────────────────────────────────────────
