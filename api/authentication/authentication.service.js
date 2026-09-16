@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { getDb } from '../../providers/mongodb.provider.js'
-import { COLLECTION, stripUser, buildUserDoc } from '../user/user.model.js'
+import { COLLECTION } from '../user/user.model.js'
+import { userService } from '../user/user.service.js'
 import { logger } from '../../services/logger.service.js'
 import { config } from '../../services/config.js'
 import { httpError } from '../../services/httpError.util.js'
@@ -13,16 +14,16 @@ export const authService = {
     signin,
 }
 
+/**
+ * Self sign-up IS account creation — the one path in user.service, which validates the fields,
+ * refuses a taken name and seeds Axl's welcome. This module used to carry its own copy of the
+ * insert, minus the welcome, so the only users who were ever welcomed were the ones an admin
+ * created by hand — and nothing in the client did that.
+ */
 async function signup(username, fullname, password) {
-    const db = await getDb()
-
-    const existing = await db.collection(COLLECTION).findOne({ username })
-    if (existing) throw httpError(409, 'Username already exists')
-
-    const doc = await buildUserDoc({ username, fullname, password })
-    await db.collection(COLLECTION).insertOne(doc)
+    const user = await userService.createUser({ username, fullname, password })
     logger.info(LOG, 'user signed up', { username })
-    return stripUser(doc)
+    return user
 }
 
 async function signin(username, password) {

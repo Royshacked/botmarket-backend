@@ -1,5 +1,5 @@
 import { getDb } from '../../providers/mongodb.provider.js'
-import { COLLECTION, stripUser, buildUserDoc } from './user.model.js'
+import { COLLECTION, stripUser, buildUserDoc, invalidUserFields } from './user.model.js'
 import { logger } from '../../services/logger.service.js'
 import { seedBotConversation } from '../chat/chat.service.js'
 import { getMonthlyUsage } from '../../services/tokenUsage.service.js'
@@ -74,9 +74,17 @@ async function getUserById(id) {
     return stripUser(user)
 }
 
+/**
+ * THE way an account comes to exist — self sign-up (authentication.service) and the admin's
+ * POST /api/users both land here. It used to be written twice, and the copies had drifted: only
+ * this one seeded Axl's welcome conversation, and this one had no live caller, so no real user
+ * had ever been welcomed.
+ */
 async function createUser({ username, fullname, password }) {
-    const db = await getDb()
+    const invalid = invalidUserFields({ username, fullname, password })
+    if (invalid) throw httpError(400, invalid)
 
+    const db = await getDb()
     const existing = await db.collection(COLLECTION).findOne({ username })
     if (existing) throw httpError(409, 'Username already exists')
 
@@ -88,6 +96,12 @@ async function createUser({ username, fullname, password }) {
 }
 
 async function updateUser(id, { username, fullname }) {
+    const invalid = invalidUserFields({ username, fullname }, [
+        ...(username !== undefined ? ['username'] : []),
+        ...(fullname !== undefined ? ['fullname'] : []),
+    ])
+    if (invalid) throw httpError(400, invalid)
+
     const db = await getDb()
 
     const set = { updatedAt: Date.now() }
