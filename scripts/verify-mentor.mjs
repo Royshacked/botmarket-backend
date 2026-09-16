@@ -24,8 +24,8 @@ dotenv.config()
 const { mentorAgentService, emptyMentorState } = await import('../services/agents/mentor.agent.service.js')
 const { normalizeSetup, setupReadiness, computeRR, buildLadder, buildCadence, validityProblems,
     scenarioLabel, scenarioView, declaredConditions } = await import('../services/setup.schema.js')
-const { scenarioGate, liveEntryZones, proximityGapMin, zoneDistance } = await import('../monitoring/talos.monitor.service.js')
-const { fetchLastPrice } = await import('../monitoring/monitorUtils.js')
+const { scenarioGate }   = await import('../monitoring/talos.gates.js')
+const { fetchLastPrice } = await import('../services/lastPrice.service.js')
 
 const args   = process.argv.slice(2)
 const argOf  = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt }
@@ -225,25 +225,32 @@ function checkSetup(setup, price) {
 }
 
 // ── Talos's gate at the live price ────────────────────────────────────────────
+//
+// The gate is the scenario gate alone now. This section used to grade the distance to the nearest
+// zone and derive the next check from it (`zoneDistance` / `proximityGapMin`) — the zone gate that
+// the guard sweep replaced (70a6039): pacing is the guard sweep's, and a setup is woken by a guard
+// firing, not by a distance-graded timer. Those helpers are gone, and this script did not load for
+// as long as it named them.
 
 function checkGate(setup, price) {
-    head('Talos zone gate (live price)')
+    head('Talos scenario gate (live price)')
     if (!Number.isFinite(price)) { fail('no live price — the gate can never trip'); return }
 
     console.log(`   live ${setup.asset} = ${price}`)
     // Across every LIVE premise — the gate answers which one price reached, not merely that it did.
-    const hit  = scenarioGate(setup, price)
-    const dist = zoneDistance(liveEntryZones(setup), price)
-    const gap  = proximityGapMin(setup, price)
-
-    console.log(`   distance to the nearest premise: ${dist?.toFixed(2)} zone-widths`)
-    console.log(`   next check in: ${gap} min  (cadence ${setup.cadence.min}–${setup.cadence.max})`)
-
+    const hit = scenarioGate(setup, price)
     if (hit) ok(`price is INSIDE ${scenarioLabel(hit.scenario)} (${hit.zone.id}) — this would trigger an assessment + confirm card right now`)
     else     ok('price is outside every premise\'s zone — the cheap gate holds, no LLM spend this wake')
 
     // The zone must be reachable: an entry the market has to travel to is fine, one it has
-    // already blown past by a mile is a setup that will never fire.
+    // already blown past by a mile is a setup that will never fire. Measured in zone widths of the
+    // nearest live entry zone.
+    const zones = (setup.scenarios ?? []).flatMap(sc => sc.entry_zones ?? []).concat(setup.entry_zones ?? [])
+    const dist  = zones.length ? Math.min(...zones.map(z => {
+        const width = Math.max(Math.abs(z.upper - z.lower), 1e-9)
+        return price < z.lower ? (z.lower - price) / width : price > z.upper ? (price - z.upper) / width : 0
+    })) : null
+    if (dist != null) console.log(`   distance to the nearest premise: ${dist.toFixed(2)} zone-widths`)
     if (dist != null && dist > 40) warn(`price is ${dist.toFixed(0)} zone-widths away — this may never trigger`)
 }
 

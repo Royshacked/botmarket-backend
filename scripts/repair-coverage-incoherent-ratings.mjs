@@ -40,7 +40,7 @@
 import 'dotenv/config'
 import { getDb } from '../providers/mongodb.provider.js'
 import { coverageService, ratingCoherence } from '../api/analyst/coverage.service.js'
-import { fetchLastPrice } from '../monitoring/monitorUtils.js'
+import { fetchLastPrice } from '../services/lastPrice.service.js'
 import { logger } from '../services/logger.service.js'
 
 const LOG = '[repair:coverage-incoherent-ratings]'
