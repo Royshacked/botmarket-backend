@@ -20,7 +20,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 4 | Atlas / portfolio | `api/portfolio/**`, `portfolio.agent.service`, `portfolioState`, `sleeveSource`, `adoptBook` | ✅ done — 10 commits `e3ef6e7`..`bc8bd50`, suite **2886 / 0**; FE follow-ups cleared in `a9532a8` |
 | 5 | Agent runtime | `agentIO`, `agentUtils`, `agentTools.registry`, `services/tools/**`, `pendingAction/**`, `entity/**`, `axl.agent.service`, `api/chat/**` | ✅ done — 8 commits `13a323f`..`1b78b99` (+ `7c37bcd`, `7307e76` frontend), suite **2910 / 0** |
 | 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | ✅ done — 7 commits `2a957e8`..`b3c36b9` (+ `researchQueue.service`, read in scope), suite **2932 / 0**; CR cycle → `98b8994`, **2936 / 0** |
-| 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | ✅ done — 8 commits `d8d7fab`..`15b562a` (+ `candleFetch`, `priceFeed`, `http.util`, the two adapters' carried items), suite **2965 / 0 in 63s** |
+| 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | ✅ done — 8 commits `d8d7fab`..`15b562a` (+ `candleFetch`, `priceFeed`, `http.util`, the two adapters' carried items), suite **2965 / 0 in 63s**; CR cycle → `9798baa`, **2968 / 0** |
 | 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | |
 | 9 | Platform | `server.js`, `middleware/**`, `config.js`, `api/authentication`, `api/user`, `api/workspace`, `api/_shared`, `api/health` | |
 | 10 | Tests + scripts | coverage gaps vs. §1–9, `scripts/**` hygiene | |
@@ -798,6 +798,62 @@ error body), `candleWindow` (three reads of a failing or empty provider cost one
 `anthropicToolBlocks` (the stop lines), `fmpProviderTools` (the usable-parts gate); the two outage
 tests re-aimed at user-worded leaves; the two news tests off `fs`. Suite 2936 → **2965**, and
 10 minutes → 63 seconds.
+
+---
+
+## QA / CR cycle on §7 (2026-09-16)
+
+QA: lint clean repo-wide; full suite **2965 / 0 in 65 seconds** at the §7 write-up, **2968 / 0** with
+this cycle's fixes; all **278** backend modules import cleanly; 16/16 archived modules load.
+
+Docs: §7 written up; the §2 "known flake" note points at its resolution. CODE_MAP's
+`anthropic.provider` line said "LLM chat/streaming" and now says what the one call path does; the
+Testing section says the suite is a minute and offline, and why it was not; `price.service` and
+`news.service` have entries; `priceAnalytics.service` and `mongoCache.util` are new entries. The
+monitoring doc's parser diagram gains the deterministic first step; the OHLCV doc stops drawing a
+file cache.
+
+### CR findings on the §7 range, and what was done
+
+A high-effort review over `48a0422..HEAD` (9 commits) confirmed the Anthropic loop consolidation,
+`parseTouchLiteral`'s shape against both readers, the Mongo-cache document compatibility, the
+`aggregateCandles` unification, the IBKR parse and the analytics move (diffed line-for-line) — and
+found five things, **every one of them in this section's own commits**. The two caches I added to
+the cTrader adapter were both wrong in a way that matters, and the failure hold I added to the
+candle cache overshot.
+
+| | Where | What | Done |
+|---|---|---|---|
+| 1 | `ctrader.adapter` accounts cache | The 60s `/tradingaccounts` cache was reasoned as "the account set almost never changes" — true of the IDENTITY, false of the same rows' balance/equity/margin/freeMargin, which move on every fill. The next sizing read after a fill saw pre-fill free margin for up to a minute. | 5 seconds — a burst collapser, not a cache. Medium |
+| 2 | `ctrader.adapter._session` | A cached ctid bypassed `_freshTokens`, the read that throws `BROKER_DISCONNECTED` once a connection is deleted. A just-disconnected broker would keep placing and closing over the still-authenticated socket for up to ten minutes. | `_freshTokens` first, on every call, ahead of the cache. Medium |
+| 3 | `price.service` failure hold | Stamping a failed fetch like a success met the quota goal and overshot: one transient failure on a first read left every chart, indicator and daily condition on that symbol reading `[]` as `cached: true` with no reason for the hour. | `lastFailure { at, error }` on its own field; a two-minute hold; `reason: 'fetch_failed'` on every read inside it; cleared by the next success. An empty SUCCESS still holds the hour. Medium |
+| 4 | `http.util.getJson` | `clearTimeout` ran before the body was read — a 5xx status with a stalled body held the caller forever, the one case "timeoutMs bounds each attempt" exists for. | Body reads inside the timer. Low |
+| 5 | `gnews.provider` | GNews limits per SECOND; the old fixed 1.4s retry was the right number and the pipe's 0–300ms jitter is not. | `retryMinMs` — a floor in the one pipe, GNews passes 1.1s. Low |
+
+The lesson the three medium ones share: a cache is a claim about what does not change, and the
+claim has to be made about the FIELDS, not the endpoint. `/tradingaccounts` is two facts in one
+row; the ctid cache saved a socket round-trip and, unasked, a Mongo read that was doing a different
+job.
+
+### Carried forward
+
+- **§9 decision:** what an error may tell the client — now across seven controllers converted
+  only where they never caught.
+- **§8 (Aether):** `aether.controller` still hand-rolls try/catch; the house run's token spend is
+  unbooked (two paths: the scheduled re-model, `sleeveSource`'s run); `aetherQuickRead` reads
+  Prometheus's quick-read mode.
+- **§9 (`_shared`):** five controllers validate and TRIM messages with `parseChatMessages`, then
+  pass the RAW body to the agent.
+- **Model / prompt review, not code:** `web_search_20250305` where the `_20260209` variant serves
+  every model in `llmModels` except Haiku 4.5 (a per-model choice); `DEFAULT_MODEL` is Sonnet 4.6;
+  `get_chart`'s description names "the Kairos single-pick"; the revision trail rides every
+  Prometheus update-mode turn uncapped.
+- **§10:** the suite is offline and a minute long — the flake list §1 opened is closed. What remains
+  for the tests section is coverage vs §1–§9, and `scripts/**` hygiene (three scripts still name
+  `data/news/lanes`).
+- **`usaspending.provider`** is kept by decision; it has no production importer and rides the pipe.
+- **The cTrader ctid cache has no test seam** for its socket half (named imports); the REST half is
+  asserted. A method seam on the session provider would close it.
 
 ---
 
