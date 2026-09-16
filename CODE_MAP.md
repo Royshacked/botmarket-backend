@@ -742,7 +742,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | New evaluator / leaf type | `evaluators/<type>.evaluator.js` + wire into `monitor.orchestrator._evalOne` + `condition.parser` |
 | New pure utility | add a `tests/unit/<name>.test.js` (that's the "write tests after a feature" rule in practice) |
 | New background loop | `startLoop('name', svc)` in `server.js` — and the service MUST export both `start` and `stop`. `startLoop` refuses one without a `stop()` with a log line and returns false, so a missing `stop` means the loop silently never runs (this happened to `execution.reconciler`). `tests/unit/loopContract.test.js` is the guard |
-| New env var | one getter in `services/config.js` AND its key in `KNOWN_KEYS` — an unregistered key is reported at boot as a typo |
+| New env var | one getter in `services/config.js`, reading through `_raw` / `_str` / `_num` / `_bool` — the known-key set is derived from the readers (`knownKeys()`), and `config.test` fails on a getter that reads `process.env` directly |
 | New Axl tool | APPEND to `TOOLS` in `axl.agent.service.js` (never insert — the snapshot compares by index and the prompt cache keys off the array prefix) + append the built entry to the `axl` array in `tests/fixtures/agentTools.snapshot.json` in the same commit |
 | New agent tool that is a FACT about the venue/instrument | ride it on `get_quote` (`makeQuoteHandler`) as well as giving it a tool — a desk cannot then be unaware of it |
 | New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince` |

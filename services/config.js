@@ -27,7 +27,11 @@
  *    and both are checked by `validateConfig()`: a required value missing, and a value that is SET
  *    but malformed (`CANDLE_CACHE_INTRADAY_MS=abc` → NaN → silently the default). The typo case is
  *    covered from the other side: `unknownConfigKeys()` reports keys present in .env that no schema
- *    entry claims, which is exactly what a typo looks like.
+ *    entry claims, which is exactly what a typo looks like. The set of claimed keys is DERIVED — each
+ *    reader records the key it read — so a getter cannot be added without its key being known. (It
+ *    was a hand-kept list beside the getters, guarded by a test that could only catch the eight it
+ *    named — and it was already one short: GUARD_SWEEP_INTERVAL_MS had a getter and no entry, so
+ *    setting it in .env would have been reported as a typo at every boot.)
  */
 
 import dotenv from 'dotenv'
@@ -59,15 +63,22 @@ const _dotenvParsed = _underTest ? {} : (dotenv.config().parsed ?? {})
 // did, and is reported separately. Startup fails on `validateConfig`, not on an import.
 
 const _malformed = new Map()   // key → the offending raw string
+const _known     = new Set()   // every key any reader has read — the schema, derived
+
+/** The one read of process.env. Every reader goes through it, so the key is known from the read. */
+function _raw(key) {
+    _known.add(key)
+    return process.env[key]
+}
 
 function _str(key, fallback = '') {
-    const raw = process.env[key]
+    const raw = _raw(key)
     return (typeof raw === 'string' && raw !== '') ? raw : fallback
 }
 
 /** A number, falling back when absent OR unparseable — and remembering which of the two it was. */
 function _num(key, fallback) {
-    const raw = process.env[key]
+    const raw = _raw(key)
     if (raw === undefined || raw === '') { _malformed.delete(key); return fallback }
     const n = Number(raw)
     if (!Number.isFinite(n)) { _malformed.set(key, raw); return fallback }
@@ -83,8 +94,9 @@ function _num(key, fallback) {
  *   'opt-in'      only 'true' / '1' / 'yes' turn it ON          (USE_FMP_CANDLES)
  */
 function _bool(key, mode) {
-    const raw = String(process.env[key] ?? '').toLowerCase()
-    if (mode === 'off-switch') return process.env[key] !== 'off'
+    const value = _raw(key)
+    const raw = String(value ?? '').toLowerCase()
+    if (mode === 'off-switch') return value !== 'off'
     if (mode === 'false-0')    return raw !== 'false' && raw !== '0'
     return ['true', '1', 'yes'].includes(raw)
 }
@@ -94,16 +106,16 @@ function _bool(key, mode) {
 export const config = {
     // ── core ──
     /** Mongo connection string. REQUIRED — the app cannot serve a request without it. */
-    get mongoUri()  { return process.env.MONGODB_URI },
+    get mongoUri()  { return _raw('MONGODB_URI') },
     // Which database on that cluster. UNSET is the historical behaviour — the name comes from the
     // URI path, and an `mongodb+srv://host/` with no path lands on `test`. It exists so a developer
     // can point a laptop at its OWN database on the shared cluster: sharing one meant local dev and
     // the deployed instance contended for the SAME background-loops lease, the laptop always lost,
     // and every paper fill it executed went onto an in-process executionBus with no reconciler on
     // it (2026-08-20). Leave it unset in the deployed environment.
-    get dbName()    { return process.env.DB_NAME || null },
+    get dbName()    { return _raw('DB_NAME') || null },
     /** Signing secret for the session JWT and the broker OAuth `state`. REQUIRED. */
-    get jwtSecret() { return process.env.JWT_SECRET },
+    get jwtSecret() { return _raw('JWT_SECRET') },
     get port()      { return _num('PORT', 3030) },
     get nodeEnv()   { return _str('NODE_ENV', 'development') },
     get isProduction() { return this.nodeEnv === 'production' },
@@ -111,8 +123,8 @@ export const config = {
     get clientUrl() { return _str('CLIENT_URL', 'http://localhost:5173') },
 
     // ── LLM ──
-    get anthropicApiKey() { return process.env.ANTHROPIC_API_KEY },
-    get openaiApiKey()    { return process.env.OPENAI_API_KEY },        // transcription only
+    get anthropicApiKey() { return _raw('ANTHROPIC_API_KEY') },
+    get openaiApiKey()    { return _raw('OPENAI_API_KEY') },        // transcription only
     /** Monthly spend per user shown as a percentage in the profile, USD — see tokenUsage.service. */
     get tokenBudgetUsd()  { return _num('TOKEN_BUDGET_USD', 20) },
     /**
@@ -124,12 +136,12 @@ export const config = {
     get tokenDegradeUsd() { const n = _num('TOKEN_DEGRADE_USD', 0); return n > 0 ? n : null },
 
     // ── market data providers ──
-    get fmpApiKey()     { return process.env.FMP_API_KEY },
-    get massiveApiKey() { return process.env.MASSIVE_API_KEY },
-    get finnhubApiKey() { return process.env.FINNHUB_API_KEY },
-    get fredApiKey()    { return process.env.FRED_API_KEY },
-    get gnewsApiKey()   { return process.env.GNEWS_API_KEY },
-    get chartImgApiKey() { return process.env.CHART_IMG_API_KEY },
+    get fmpApiKey()     { return _raw('FMP_API_KEY') },
+    get massiveApiKey() { return _raw('MASSIVE_API_KEY') },
+    get finnhubApiKey() { return _raw('FINNHUB_API_KEY') },
+    get fredApiKey()    { return _raw('FRED_API_KEY') },
+    get gnewsApiKey()   { return _raw('GNEWS_API_KEY') },
+    get chartImgApiKey() { return _raw('CHART_IMG_API_KEY') },
     /** SEC demands a contactable UA string on every request or it blocks the caller. */
     get secUserAgent()  { return _str('SEC_USER_AGENT', 'ar2trade scanner roy.shacked@mail.huji.ac.il') },
     /** FMP-first candle sourcing, with Massive/Yahoo as fallback. Opt-IN. */
@@ -171,9 +183,14 @@ export const config = {
     // ── cTrader ──
     get ctraderClientId()  { return _str('CTRADER_CLIENTID') },
     get ctraderSecret()    { return _str('CTRADER_SECRET') },
-    /** The redirect URI differs by deployment, so it is chosen by NODE_ENV rather than set twice. */
+    /**
+     * The redirect URI differs by deployment, so it is chosen by NODE_ENV rather than set twice.
+     * BOTH are read, so both keys are known whichever environment this is — a dev .env carrying the
+     * production URI must not read as a typo.
+     */
     get ctraderRedirectUri() {
-        return this.isProduction ? _str('CTRADER_REDIRECT_URL_PROD') : _str('CTRADER_REDIRECT_URI')
+        const prod = _str('CTRADER_REDIRECT_URL_PROD'), dev = _str('CTRADER_REDIRECT_URI')
+        return this.isProduction ? prod : dev
     },
 
     // ── IBKR (data-only, in progress) — gateway coords only ──
@@ -199,7 +216,7 @@ export const config = {
      * opt a deployment in.
      */
     get dnsServers() {
-        const raw = process.env.DNS_SERVERS ?? (this.isProduction ? '' : '8.8.8.8,1.1.1.1')
+        const raw = _raw('DNS_SERVERS') ?? (this.isProduction ? '' : '8.8.8.8,1.1.1.1')
         return raw.split(',').map(s => s.trim()).filter(Boolean)
     },
     /**
@@ -237,7 +254,7 @@ export const config = {
      * permissive form lets a caller forge `X-Forwarded-For` and mint themselves a fresh bucket
      * per request, and express-rate-limit rejects it for exactly that reason.
      */
-    get trustProxyHops() { return this.isProduction ? _num('TRUST_PROXY_HOPS', 1) : 0 },
+    get trustProxyHops() { const hops = _num('TRUST_PROXY_HOPS', 1); return this.isProduction ? hops : 0 },
 
     // ── rate limiting ──
     /** Blanket ceiling per IP across /api. Generous — this is a runaway backstop, not a quota. */
@@ -271,27 +288,23 @@ export const config = {
 /** Values without which the process cannot do its job at all. */
 const REQUIRED = ['MONGODB_URI', 'JWT_SECRET']
 
-/** Every key the schema above claims — the basis for the unknown-key (typo) report. */
-export const KNOWN_KEYS = new Set([
-    'MONGODB_URI', 'JWT_SECRET', 'PORT', 'NODE_ENV', 'CLIENT_URL',
-    'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'TOKEN_BUDGET_USD', 'TOKEN_DEGRADE_USD',
-    'FMP_API_KEY', 'MASSIVE_API_KEY', 'FINNHUB_API_KEY', 'FRED_API_KEY', 'GNEWS_API_KEY',
-    'CHART_IMG_API_KEY', 'SEC_USER_AGENT', 'USE_FMP_CANDLES', 'FMP_QUOTE_TTL_MS',
-    'CANDLE_CACHE_INTRADAY_MS', 'CANDLE_CACHE_DAILY_MS', 'QUOTE_FEED_MAX_AGE_MS',
-    'OWN_CHART_RENDER', 'OWN_CHART_RENDER_TIMEOUT_MS', 'OWN_CHART_RENDER_PAGE_TIMEOUT_MS',
-    'OWN_CHART_RENDER_CONCURRENCY',
-    'PAPER_FILL_INTERVAL_MS', 'PAPER_MARK_INTERVAL_MS', 'PAPER_EQUITY_SNAPSHOT_MS',
-    'PAPER_QUOTE_TTL_MS',
-    'MARKET_BRIEF_TTL_MS', 'MARKET_BRIEF_OFFER_HOUR_UTC', 'MARKET_BRIEF_OFFER',
-    'CTRADER_CLIENTID', 'CTRADER_SECRET', 'CTRADER_REDIRECT_URI', 'CTRADER_REDIRECT_URL_PROD',
-    'IBKR_GW_HOST', 'IBKR_GW_PORT', 'IBKR_GW_CLIENTID',
-    'HTTP_METER_MS', 'HTTP_RETRIES', 'HTTP_RETRY_BASE_MS',
-    'DNS_SERVERS', 'SHUTDOWN_GRACE_MS', 'UNHANDLED_REJECTION_FATAL', 'TRUST_PROXY_HOPS',
-    'INSTANCE_LEASE_TTL_MS', 'INSTANCE_LEASE_RENEW_MS', 'DB_NAME',
-    'RATE_LIMIT_API_PER_MIN', 'RATE_LIMIT_AUTH_PER_15M', 'RATE_LIMIT_AGENT_PER_15M',
-    'RATE_LIMIT_DISABLED',
-    'AETHER_ENGINE_PATH',
-])
+/** Touch every getter: fills the malformed-value ledger AND the known-key set as the readers go. */
+function _readAll() {
+    for (const key of Object.keys(Object.getOwnPropertyDescriptors(config))) {
+        try { void config[key] } catch { /* a getter that throws is not a config problem */ }
+    }
+}
+
+/**
+ * Every key the schema reads — DERIVED from the readers, never typed. A getter that reads a key
+ * through `_raw` / `_str` / `_num` / `_bool` has registered it; a getter that reads `process.env`
+ * directly has not, and the test that pins this set's size will say so.
+ * @returns {Set<string>}
+ */
+export function knownKeys() {
+    _readAll()
+    return new Set(_known)
+}
 
 /**
  * Read every value once so the malformed-value ledger is populated, then report.
@@ -299,10 +312,7 @@ export const KNOWN_KEYS = new Set([
  * @returns {{ missing: string[], malformed: {key: string, value: string}[] }}
  */
 export function validateConfig() {
-    // Touching every getter is what fills `_malformed` — the readers record as they parse.
-    for (const key of Object.keys(Object.getOwnPropertyDescriptors(config))) {
-        try { void config[key] } catch { /* a getter that throws is not a config problem */ }
-    }
+    _readAll()
     return {
         missing:   REQUIRED.filter(k => !process.env[k]),
         malformed: [..._malformed].map(([key, value]) => ({ key, value })),
@@ -315,5 +325,6 @@ export function validateConfig() {
  * this side. Empty on a platform deploy, where there is no .env to compare against.
  */
 export function unknownConfigKeys() {
-    return Object.keys(_dotenvParsed).filter(k => !KNOWN_KEYS.has(k)).sort()
+    const known = knownKeys()
+    return Object.keys(_dotenvParsed).filter(k => !known.has(k)).sort()
 }

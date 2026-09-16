@@ -52,7 +52,7 @@ FMP candles), with chart-img (TradingView) as the fallback.
 ### Configuration
 
 **`services/config.js` is the single home for every environment variable** — all 56 of them named
-once (`KNOWN_KEYS`), each with its type, default and purpose. Read the file rather than a list here; it is the
+once (`knownKeys()` derives the full set from the readers), each with its type, default and purpose. Read the file rather than a list here; it is the
 answer to "what configures this system?". Three properties of it are load-bearing:
 
 - **It owns dotenv.** Importing config loads `.env`, so no module depends on having been imported

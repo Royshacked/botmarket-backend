@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { config, KNOWN_KEYS, validateConfig, unknownConfigKeys } from '../../services/config.js'
+import { readFileSync } from 'fs'
+import { config, knownKeys, validateConfig, unknownConfigKeys } from '../../services/config.js'
 
 // The config module replaced 43 environment variables read as inline expressions at ~70 sites.
 // These hold the two properties that make that worth having: it does not lie about what it reads,
@@ -21,12 +22,37 @@ test('config does NOT load .env under the test runner', () => {
 
 // ── the schema ────────────────────────────────────────────────────────────────
 
-test('every documented key is registered, so the typo detector cannot cry wolf', () => {
-    // unknownConfigKeys reports .env keys that KNOWN_KEYS does not claim. A getter added without
-    // its key registered turns a legitimate setting into a "typo" warning at every boot.
+test('every key a getter reads is known — the set is derived, not typed', () => {
+    // unknownConfigKeys reports .env keys the schema does not claim. The claimed set used to be a
+    // hand-kept list beside the getters, so a getter added without its entry turned a legitimate
+    // setting into a "typo" warning at every boot; now each reader records what it read.
+    const known = knownKeys()
     for (const key of ['MONGODB_URI', 'JWT_SECRET', 'ANTHROPIC_API_KEY', 'FMP_API_KEY',
         'CANDLE_CACHE_INTRADAY_MS', 'PAPER_FILL_INTERVAL_MS', 'CTRADER_CLIENTID', 'IBKR_GW_HOST']) {
-        assert.ok(KNOWN_KEYS.has(key), `${key} missing from KNOWN_KEYS`)
+        assert.ok(known.has(key), `${key} is not read by any getter`)
+    }
+})
+
+test('every UPPER_CASE key named in config.js is read through a registering reader', () => {
+    // The one way the derived set can lie: a getter reading `process.env.X` directly, which the
+    // readers never see. So every env-looking name in the source must be in the derived set.
+    const src   = readFileSync(new URL('../../services/config.js', import.meta.url), 'utf8')
+    const named = new Set([...src.matchAll(/'([A-Z][A-Z0-9_]{3,})'/g)].map(m => m[1]))
+    const known = knownKeys()
+    for (const key of named) assert.ok(known.has(key), `${key} is named in config.js but no reader registers it`)
+    // The runner's own NODE_TEST_CONTEXT is the one direct read allowed: it is not a setting.
+    const direct = [...src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '').matchAll(/process\.env\.([A-Z_]+)/g)]
+        .map(m => m[1]).filter(k => k !== 'NODE_TEST_CONTEXT')
+    assert.deepEqual(direct, [], 'a getter reads process.env directly — route it through _raw so the key is known')
+    assert.ok(known.size >= 50, `only ${known.size} keys — the readers stopped registering`)
+})
+
+test('the keys that depend on NODE_ENV are known in BOTH environments', () => {
+    // ctraderRedirectUri and trustProxyHops pick a value by NODE_ENV; if they read only the branch
+    // they take, a dev .env holding the production redirect URI would be reported as a typo.
+    const known = knownKeys()
+    for (const key of ['CTRADER_REDIRECT_URI', 'CTRADER_REDIRECT_URL_PROD', 'TRUST_PROXY_HOPS']) {
+        assert.ok(known.has(key), `${key} is read only in one environment`)
     }
 })
 
@@ -182,10 +208,11 @@ test('trustProxyHops is 0 outside production — a dev box has no proxy to trust
     }
 })
 
-test('the new hardening keys are all registered, so none reads as a typo at boot', () => {
+test('the hardening keys are all known, so none reads as a typo at boot', () => {
+    const known = knownKeys()
     for (const key of ['DNS_SERVERS', 'SHUTDOWN_GRACE_MS', 'UNHANDLED_REJECTION_FATAL',
         'TRUST_PROXY_HOPS', 'RATE_LIMIT_API_PER_MIN', 'RATE_LIMIT_AUTH_PER_15M',
         'RATE_LIMIT_AGENT_PER_15M', 'RATE_LIMIT_DISABLED']) {
-        assert.ok(KNOWN_KEYS.has(key), `${key} missing from KNOWN_KEYS`)
+        assert.ok(known.has(key), `${key} is not read by any getter`)
     }
 })
