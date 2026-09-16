@@ -23,6 +23,7 @@ import { EventEmitter }          from 'node:events'
 import { IBApi, EventName, ErrorCode, WhatToShow, MarketDataType } from '@stoqey/ib'
 import { logger }                from '../services/logger.service.js'
 import { config } from '../services/config.js'
+import { httpError } from '../services/httpError.util.js'
 
 const LOG = '[ibkr.gateway]'
 
@@ -149,7 +150,7 @@ export class IBKRGateway extends EventEmitter {
         if (_isInfo(code)) { logger.info(LOG, `info ${code}: ${err?.message ?? ''}`); return }
 
         logger.error(LOG, `connection error ${code}: ${err?.message ?? err}`)
-        if (this._rejectReady) this._rejectReady(Object.assign(new Error(`IBKR gateway: ${err?.message ?? err}`), { status: 502 }))
+        if (this._rejectReady) this._rejectReady(httpError(502, `IBKR gateway: ${err?.message ?? err}`))
         this._scheduleReconnect()
     }
 

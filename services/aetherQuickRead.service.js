@@ -27,6 +27,7 @@
 import { getDb } from '../providers/mongodb.provider.js'
 import { COLLECTIONS, TICKER_RE } from '../api/aether/aether.model.js'
 import { logger } from './logger.service.js'
+import { httpError } from './httpError.util.js'
 
 const LOG = '[aetherQuickRead]'
 
@@ -171,7 +172,7 @@ const _io = {
  */
 export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _io) {
     const sym = String(ticker ?? '').trim().toUpperCase()
-    if (!runId || !TICKER_RE.test(sym)) throw Object.assign(new Error('a run and a ticker are required'), { status: 400 })
+    if (!runId || !TICKER_RE.test(sym)) throw httpError(400, 'a run and a ticker are required')
 
     // The other live events naming it — read once, used both to decide whether a stored read is
     // still about the same set of claims and, if not, to write the opening.
@@ -189,7 +190,7 @@ export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _
 
     const job = (async () => {
         const c = await deps.candidate(runId, sym)
-        if (!c) throw Object.assign(new Error('no such candidate'), { status: 404 })
+        if (!c) throw httpError(404, 'no such candidate')
         // The event fields are denormalised onto the candidate by the engine, so the row is the run.
         const opening = quickReadOpening(c, c, others)
         const t0 = Date.now()

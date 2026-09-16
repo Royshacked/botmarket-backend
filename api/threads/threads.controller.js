@@ -6,9 +6,11 @@
 
 import { threadService } from '../../services/thread.service.js'
 import { isSubstantive } from '../../services/thread.util.js'
-import { logger }        from '../../services/logger.service.js'
+import { makeHandle }    from '../_shared/handle.util.js'
+import { httpError }     from '../../services/httpError.util.js'
 
 const LOG    = '[threads:controller]'
+const handle = makeHandle(LOG)
 // Every agent whose panel drives its own draft persistence. `mentor` was missing, so every Mentor
 // save was rejected 400 and a setup the user walked out of mid-build vanished — the desk badge had
 // nothing to read, the lock had nothing to close, and returning to the trade desk resumed the Argus
@@ -21,117 +23,80 @@ const LOG    = '[threads:controller]'
 // panel that never saves simply has nothing to reject.
 export const AGENTS = new Set(['idea', 'portfolio', 'scanner', 'kairos', 'mentor', 'axl', 'analyst', 'strategy', 'aether'])
 
-export async function saveDraftThread(req, res) {
-    try {
-        const { threadId, agent, messages, phase = null, subjectType = null, state = null, mandate = null, pipeline = null } = req.body ?? {}
-        if (!threadId || typeof threadId !== 'string') return res.status(400).json({ error: 'threadId is required' })
-        if (!AGENTS.has(agent))    return res.status(400).json({ error: 'invalid agent' })
-        if (!Array.isArray(messages)) return res.status(400).json({ error: 'messages must be an array' })
+// The service answers `{ ok:false }` with no reason when its write failed — a fault, not a refusal.
+// Thrown bare so the global handler answers the one 500 shape and the log names the handler.
+const _failed = (what) => new Error(`threadService.${what} answered ok:false`)
 
-        // Server-side floor (defense in depth — the client also gates): only persist once
-        // the agent has emitted something substantive. Below it, silently no-op.
-        const mandateReady = agent === 'portfolio' && !!(state?.mandate ?? mandate)
-        if (!isSubstantive({ agent, phase, mandateReady })) {
-            return res.json({ ok: true, skipped: true })
-        }
+export const saveDraftThread = handle('saveDraftThread', async (req, res) => {
+    const { threadId, agent, messages, phase = null, subjectType = null, state = null, mandate = null, pipeline = null } = req.body ?? {}
+    if (!threadId || typeof threadId !== 'string') throw httpError(400, 'threadId is required')
+    if (!AGENTS.has(agent))       throw httpError(400, 'invalid agent')
+    if (!Array.isArray(messages)) throw httpError(400, 'messages must be an array')
 
-        const result = await threadService.saveDraft({
-            threadId, userId: req.user._id, agent, messages, phase, subjectType, state, mandate,
-            // The desk this conversation belongs to — validated as a string, never trusted as a key.
-            pipeline: typeof pipeline === 'string' && pipeline.trim() ? pipeline.trim() : null,
-        })
-        if (!result.ok) return res.status(500).json({ error: 'Failed to save draft' })
-        res.json({ ok: true, threadId: result.threadId })
-    } catch (err) {
-        logger.error(LOG, 'saveDraftThread failed', err)
-        res.status(500).json({ error: 'Failed to save draft' })
+    // Server-side floor (defense in depth — the client also gates): only persist once
+    // the agent has emitted something substantive. Below it, silently no-op.
+    const mandateReady = agent === 'portfolio' && !!(state?.mandate ?? mandate)
+    if (!isSubstantive({ agent, phase, mandateReady })) {
+        return res.json({ ok: true, skipped: true })
     }
-}
 
-export async function linkThread(req, res) {
-    try {
-        const { threadId } = req.params
-        const { subjectType = null, subjectId, artifactName = null } = req.body ?? {}
-        if (!subjectId) return res.status(400).json({ error: 'subjectId is required' })
-        const result = await threadService.linkToArtifact({ threadId, userId: req.user._id, subjectType, subjectId, artifactName })
-        if (!result.ok) return res.status(500).json({ error: 'Failed to link thread' })
-        res.json({ ok: true })
-    } catch (err) {
-        logger.error(LOG, 'linkThread failed', err)
-        res.status(500).json({ error: 'Failed to link thread' })
-    }
-}
+    const result = await threadService.saveDraft({
+        threadId, userId: req.user._id, agent, messages, phase, subjectType, state, mandate,
+        // The desk this conversation belongs to — validated as a string, never trusted as a key.
+        pipeline: typeof pipeline === 'string' && pipeline.trim() ? pipeline.trim() : null,
+    })
+    if (!result.ok) throw _failed('saveDraft')
+    res.json({ ok: true, threadId: result.threadId })
+})
 
-export async function pinThread(req, res) {
-    try {
-        const result = await threadService.pinThread({ threadId: req.params.threadId, userId: req.user._id })
-        if (!result.ok) return res.status(500).json({ error: 'Failed to pin thread' })
-        res.json({ ok: true })
-    } catch (err) {
-        logger.error(LOG, 'pinThread failed', err)
-        res.status(500).json({ error: 'Failed to pin thread' })
-    }
-}
+export const linkThread = handle('linkThread', async (req, res) => {
+    const { threadId } = req.params
+    const { subjectType = null, subjectId, artifactName = null } = req.body ?? {}
+    if (!subjectId) throw httpError(400, 'subjectId is required')
+    const result = await threadService.linkToArtifact({ threadId, userId: req.user._id, subjectType, subjectId, artifactName })
+    if (!result.ok) throw _failed('linkToArtifact')
+    res.json({ ok: true })
+})
+
+export const pinThread = handle('pinThread', async (req, res) => {
+    const result = await threadService.pinThread({ threadId: req.params.threadId, userId: req.user._id })
+    if (!result.ok) throw _failed('pinThread')
+    res.json({ ok: true })
+})
 
 /**
  * Unfinished work across every desk — what the route badges read. Drafts only, each saying whether
  * it is waiting on the user.
  */
-export async function listUnfinishedThreads(req, res) {
-    try {
-        res.json({ threads: await threadService.listUnfinished({ userId: req.user._id }) })
-    } catch (err) {
-        logger.error(LOG, 'listUnfinishedThreads failed', err)
-        res.status(500).send({ error: 'Failed to list unfinished threads' })
-    }
-}
+export const listUnfinishedThreads = handle('listUnfinishedThreads', async (req, res) => {
+    res.json({ threads: await threadService.listUnfinished({ userId: req.user._id }) })
+})
 
-export async function listThreads(req, res) {
-    try {
-        const agent = typeof req.query.agent === 'string' ? req.query.agent : null
-        const threads = await threadService.listThreads({ userId: req.user._id, agent })
-        res.json({ threads })
-    } catch (err) {
-        logger.error(LOG, 'listThreads failed', err)
-        res.status(500).json({ error: 'Failed to list threads' })
-    }
-}
+export const listThreads = handle('listThreads', async (req, res) => {
+    const agent = typeof req.query.agent === 'string' ? req.query.agent : null
+    res.json({ threads: await threadService.listThreads({ userId: req.user._id, agent }) })
+})
 
-export async function getThread(req, res) {
-    try {
-        const thread = await threadService.getThread({ threadId: req.params.threadId, userId: req.user._id })
-        if (!thread) return res.status(404).json({ error: 'Thread not found' })
-        res.json({ thread })
-    } catch (err) {
-        logger.error(LOG, 'getThread failed', err)
-        res.status(500).json({ error: 'Failed to get thread' })
-    }
-}
+export const getThread = handle('getThread', async (req, res) => {
+    const thread = await threadService.getThread({ threadId: req.params.threadId, userId: req.user._id })
+    if (!thread) throw httpError(404, 'Thread not found')
+    res.json({ thread })
+})
 
 /**
  * The desk finished: its artifact exists, so the drafts that fed the run go with it. Drafts only —
  * the thread that AUTHORED the artifact was linked to it and is reached by editing that artifact.
  */
-export async function discardPipelineDrafts(req, res) {
-    try {
-        const { pipeline } = req.params
-        if (!pipeline || typeof pipeline !== 'string') return res.status(400).json({ error: 'pipeline is required' })
-        const result = await threadService.discardPipelineDrafts({ userId: req.user._id, pipeline })
-        if (!result.ok) return res.status(500).json({ error: 'Failed to discard pipeline drafts' })
-        res.json({ ok: true, deleted: result.deleted })
-    } catch (err) {
-        logger.error(LOG, 'discardPipelineDrafts failed', err)
-        res.status(500).json({ error: 'Failed to discard pipeline drafts' })
-    }
-}
+export const discardPipelineDrafts = handle('discardPipelineDrafts', async (req, res) => {
+    const { pipeline } = req.params
+    if (!pipeline || typeof pipeline !== 'string') throw httpError(400, 'pipeline is required')
+    const result = await threadService.discardPipelineDrafts({ userId: req.user._id, pipeline })
+    if (!result.ok) throw _failed('discardPipelineDrafts')
+    res.json({ ok: true, deleted: result.deleted })
+})
 
-export async function discardThread(req, res) {
-    try {
-        const result = await threadService.discardThread({ threadId: req.params.threadId, userId: req.user._id })
-        if (!result.ok) return res.status(500).json({ error: 'Failed to discard thread' })
-        res.json({ ok: true })
-    } catch (err) {
-        logger.error(LOG, 'discardThread failed', err)
-        res.status(500).json({ error: 'Failed to discard thread' })
-    }
-}
+export const discardThread = handle('discardThread', async (req, res) => {
+    const result = await threadService.discardThread({ threadId: req.params.threadId, userId: req.user._id })
+    if (!result.ok) throw _failed('discardThread')
+    res.json({ ok: true })
+})

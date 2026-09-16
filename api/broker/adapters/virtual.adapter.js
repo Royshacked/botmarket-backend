@@ -32,6 +32,7 @@ import { computeEquity,
          dirSign }            from '../paperExecution.service.js'
 import { round2 }             from '../../../services/number.util.js'
 import { config }             from '../../../services/config.js'
+import { httpError }          from '../../../services/httpError.util.js'
 
 // How old a stored mark may be before a positions READ goes and buys a fresh quote.
 //
@@ -69,7 +70,7 @@ export class VirtualAdapter extends BrokerAdapter {
         const acct = accountId
             ? await paperBrokerService.getAccount(userId, accountId)
             : (await paperBrokerService.listAccounts(userId, { mode: this.brokerType }))[0]
-        if (!acct) throw Object.assign(new Error(`${this.brokerType} account ${accountId ?? ''} not found`), { status: 404 })
+        if (!acct) throw httpError(404, `${this.brokerType} account ${accountId ?? ''} not found`)
         const eq = await computeEquity(userId, acct.accountId)
 
         // Free margin is cash NOT yet committed to open positions, not equity: equity is what the

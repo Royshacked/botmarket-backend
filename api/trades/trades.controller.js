@@ -8,9 +8,10 @@
  */
 
 import { tradeCaptureService } from '../../services/tradeCapture.service.js'
-import { logger }              from '../../services/logger.service.js'
+import { makeHandle }          from '../_shared/handle.util.js'
 
-const LOG = '[trades:controller]'
+const LOG    = '[trades:controller]'
+const handle = makeHandle(LOG)
 
 /**
  * Map the query string to a listTrades/tradeStats filter. Only keys actually present are set, so an
@@ -32,22 +33,10 @@ export function _filter(q = {}) {
     return f
 }
 
-export async function listTrades(req, res, next) {
-    try {
-        const trades = await tradeCaptureService.listTrades(req.user._id, _filter(req.query))
-        res.json({ trades })
-    } catch (err) {
-        logger.error(LOG, 'list trades error:', err.message)
-        next(err)
-    }
-}
+export const listTrades = handle('listTrades', async (req, res) => {
+    res.json({ trades: await tradeCaptureService.listTrades(req.user._id, _filter(req.query)) })
+})
 
-export async function tradeStats(req, res, next) {
-    try {
-        const stats = await tradeCaptureService.tradeStats(req.user._id, _filter(req.query))
-        res.json({ stats })
-    } catch (err) {
-        logger.error(LOG, 'trade stats error:', err.message)
-        next(err)
-    }
-}
+export const tradeStats = handle('tradeStats', async (req, res) => {
+    res.json({ stats: await tradeCaptureService.tradeStats(req.user._id, _filter(req.query)) })
+})

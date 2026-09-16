@@ -4,6 +4,7 @@ import { getDb } from '../../providers/mongodb.provider.js'
 import { COLLECTION, stripUser, buildUserDoc } from '../user/user.model.js'
 import { logger } from '../../services/logger.service.js'
 import { config } from '../../services/config.js'
+import { httpError } from '../../services/httpError.util.js'
 
 const LOG = '[authService]'
 
@@ -16,11 +17,7 @@ async function signup(username, fullname, password) {
     const db = await getDb()
 
     const existing = await db.collection(COLLECTION).findOne({ username })
-    if (existing) {
-        const err = new Error('Username already exists')
-        err.status = 409
-        throw err
-    }
+    if (existing) throw httpError(409, 'Username already exists')
 
     const doc = await buildUserDoc({ username, fullname, password })
     await db.collection(COLLECTION).insertOne(doc)
@@ -31,19 +28,12 @@ async function signup(username, fullname, password) {
 async function signin(username, password) {
     const db = await getDb()
 
+    // One sentence for both misses, so the answer never says which half was wrong.
     const user = await db.collection(COLLECTION).findOne({ username })
-    if (!user) {
-        const err = new Error('Invalid credentials')
-        err.status = 401
-        throw err
-    }
+    if (!user) throw httpError(401, 'Invalid credentials')
 
     const match = await bcrypt.compare(password, user.passwordHash)
-    if (!match) {
-        const err = new Error('Invalid credentials')
-        err.status = 401
-        throw err
-    }
+    if (!match) throw httpError(401, 'Invalid credentials')
 
     const role    = user.role ?? (user.isAdmin ? 'admin' : 'trader')
     const payload = { _id: user.id, username: user.username, fullname: user.fullname, role }

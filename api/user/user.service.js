@@ -3,6 +3,7 @@ import { COLLECTION, stripUser, buildUserDoc } from './user.model.js'
 import { logger } from '../../services/logger.service.js'
 import { seedBotConversation } from '../chat/chat.service.js'
 import { getMonthlyUsage } from '../../services/tokenUsage.service.js'
+import { httpError } from '../../services/httpError.util.js'
 
 const LOG = '[userService]'
 
@@ -23,19 +24,13 @@ export const userService = {
 async function getPreferences(id) {
     const db = await getDb()
     const user = await db.collection(COLLECTION).findOne({ id }, { projection: { preferences: 1 } })
-    if (!user) {
-        const err = new Error('User not found')
-        err.status = 404
-        throw err
-    }
+    if (!user) throw httpError(404, 'User not found')
     return user.preferences ?? {}
 }
 
 async function savePreferences(id, preferences) {
     if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) {
-        const err = new Error('preferences must be an object')
-        err.status = 400
-        throw err
+        throw httpError(400, 'preferences must be an object')
     }
     const db = await getDb()
     const updated = await db.collection(COLLECTION).findOneAndUpdate(
@@ -43,11 +38,7 @@ async function savePreferences(id, preferences) {
         { $set: { preferences, updatedAt: Date.now() } },
         { returnDocument: 'after', projection: { preferences: 1 } }
     )
-    if (!updated) {
-        const err = new Error('User not found')
-        err.status = 404
-        throw err
-    }
+    if (!updated) throw httpError(404, 'User not found')
     return updated.preferences ?? {}
 }
 
@@ -79,11 +70,7 @@ async function listUsers({ search, page = 1, limit = 20 } = {}) {
 async function getUserById(id) {
     const db = await getDb()
     const user = await db.collection(COLLECTION).findOne({ id })
-    if (!user) {
-        const err = new Error('User not found')
-        err.status = 404
-        throw err
-    }
+    if (!user) throw httpError(404, 'User not found')
     return stripUser(user)
 }
 
@@ -91,11 +78,7 @@ async function createUser({ username, fullname, password }) {
     const db = await getDb()
 
     const existing = await db.collection(COLLECTION).findOne({ username })
-    if (existing) {
-        const err = new Error('Username already exists')
-        err.status = 409
-        throw err
-    }
+    if (existing) throw httpError(409, 'Username already exists')
 
     const doc = await buildUserDoc({ username, fullname, password })
     await db.collection(COLLECTION).insertOne(doc)
@@ -115,12 +98,13 @@ async function updateUser(id, { username, fullname }) {
         { id },
         { $set: set },
         { returnDocument: 'after' }
-    )
-    if (!updated) {
-        const err = new Error('User not found')
-        err.status = 404
+    ).catch(err => {
+        // The unique index on `username` is the check; its refusal is the same 409 create answers,
+        // not a 500 carrying the index name.
+        if (err?.code === 11000) throw httpError(409, 'Username already exists')
         throw err
-    }
+    })
+    if (!updated) throw httpError(404, 'User not found')
 
     logger.info(LOG, 'user updated', { id })
     return stripUser(updated)
@@ -129,11 +113,7 @@ async function updateUser(id, { username, fullname }) {
 async function deleteUser(id) {
     const db = await getDb()
     const result = await db.collection(COLLECTION).deleteOne({ id })
-    if (result.deletedCount === 0) {
-        const err = new Error('User not found')
-        err.status = 404
-        throw err
-    }
+    if (result.deletedCount === 0) throw httpError(404, 'User not found')
     logger.info(LOG, 'user deleted', { id })
     return { message: 'User deleted' }
 }

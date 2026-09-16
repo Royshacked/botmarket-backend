@@ -34,6 +34,7 @@ import { randomUUID } from 'crypto'
 import { getDb }      from '../../providers/mongodb.provider.js'
 import { logger }     from '../../services/logger.service.js'
 import { round2 }     from '../../services/number.util.js'
+import { httpError }  from '../../services/httpError.util.js'
 
 // The paper venue's four collections. EXPORTED because the paper monitors write the same
 // documents: paperFill drains ORDERS, paperMark marks POSITIONS, paperEquity snapshots EQUITY.
@@ -227,7 +228,7 @@ async function deleteAccount(userId, accountId) {
     ])
     if (open > 0 || working > 0) {
         const what = open > 0 ? 'open positions' : 'resting orders'
-        throw Object.assign(new Error(`account has ${what} — close them before deleting`), { status: 409 })
+        throw httpError(409, `account has ${what} — close them before deleting`)
     }
     await Promise.all([
         db.collection(ACCOUNTS).deleteOne({ userId, accountId: aid }),
@@ -286,13 +287,13 @@ async function adjustCash(userId, accountId, { amount, reason = null } = {}) {
     const db   = await getDb()
     const aid  = String(accountId)
     const acct = await getAccount(userId, aid)
-    if (!acct) throw Object.assign(new Error(`account ${aid} not found`), { status: 404 })
+    if (!acct) throw httpError(404, `account ${aid} not found`)
 
     const delta = Number(amount)
-    if (!Number.isFinite(delta) || delta === 0) throw Object.assign(new Error('a cash movement needs a non-zero amount'), { status: 400 })
+    if (!Number.isFinite(delta) || delta === 0) throw httpError(400, 'a cash movement needs a non-zero amount')
 
     const next = round2(acct.cashBalance + delta)
-    if (next < 0) throw Object.assign(new Error(`that would overdraw the account (balance ${round2(acct.cashBalance)})`), { status: 409 })
+    if (next < 0) throw httpError(409, `that would overdraw the account (balance ${round2(acct.cashBalance)})`)
 
     await db.collection(ACCOUNTS).updateOne(
         { userId, accountId: aid },
@@ -313,7 +314,7 @@ async function resetAccount(userId, accountId, { startingBalance } = {}) {
     const db   = await getDb()
     const aid  = String(accountId)
     const acct = await getAccount(userId, aid)
-    if (!acct) throw Object.assign(new Error(`account ${aid} not found`), { status: 404 })
+    if (!acct) throw httpError(404, `account ${aid} not found`)
     const base = startingBalance != null ? Number(startingBalance) : acct.startingBalance
     await Promise.all([
         db.collection(POSITIONS).deleteMany({ userId, accountId: aid }),

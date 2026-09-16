@@ -1,15 +1,17 @@
 import { scannerAgentService } from '../../services/agents/scanner.agent.service.js'
 import { scannerChatService }  from './scannerChat.service.js'
 import { scanService }         from './scan.service.js'
-import { logger }              from '../../services/logger.service.js'
 import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
 import { parseChatMessages }   from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { sendReason }          from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
+import { makeHandle }          from '../_shared/handle.util.js'
+import { httpError }           from '../../services/httpError.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
 
-const LOG = '[scanner:controller]'
+const LOG    = '[scanner:controller]'
+const handle = makeHandle(LOG)
 
 export async function streamScanner(req, res) {
     const { messages, model, editList, handoff, handoffTo, profile } = req.body ?? {}
@@ -49,20 +51,15 @@ export async function streamScanner(req, res) {
 }
 
 // ─── Scan CRUD ────────────────────────────────────────────────────────────────
-export async function createScan(req, res) {
-    try {
-        const { scan } = req.body ?? {}
-        if (!scan || !Array.isArray(scan.candidates) || scan.candidates.length === 0) {
-            return res.status(400).json({ error: 'scan with candidates is required' })
-        }
-        const result = await scanService.saveScan(scan, req.user._id)
-        if (!result.ok) return res.status(500).json({ error: 'Failed to save scan' })
-        res.json({ scan: result.doc })
-    } catch (err) {
-        logger.error(LOG, 'createScan failed', err)
-        res.status(500).json({ error: 'Failed to save scan' })
+export const createScan = handle('createScan', async (req, res) => {
+    const { scan } = req.body ?? {}
+    if (!scan || !Array.isArray(scan.candidates) || scan.candidates.length === 0) {
+        throw httpError(400, 'scan with candidates is required')
     }
-}
+    const result = await scanService.saveScan(scan, req.user._id)
+    if (!result.ok) return res.status(500).json({ error: 'Failed to save scan' })
+    res.json({ scan: result.doc })
+})
 
 // A scan is an owner-scoped kind like any other (it moved onto makeEntityCrud in b863a03), so
 // list, get and delete are the shared HTTP tier. The `{scans}` / `{scan}` envelope is this route's
@@ -80,42 +77,32 @@ export const listScans  = crud.list
 export const getScan    = crud.get
 export const removeScan = crud.remove
 
-export async function updateScan(req, res) {
-    try {
-        const { id }   = req.params
-        const { scan } = req.body ?? {}
-        if (!scan || typeof scan !== 'object') return res.status(400).json({ error: 'scan patch is required' })
-        const result = await scanService.updateScan(id, scan, req.user._id)
-        if (!result.ok) return sendReason(res, result.reason, { fallback: 500, fallbackMessage: 'Failed to update scan' })
-        res.json({ scan: result.doc })
-    } catch (err) {
-        logger.error(LOG, 'updateScan failed', err)
-        res.status(500).json({ error: 'Failed to update scan' })
-    }
-}
+export const updateScan = handle('updateScan', async (req, res) => {
+    const { id }   = req.params
+    const { scan } = req.body ?? {}
+    if (!scan || typeof scan !== 'object') throw httpError(400, 'scan patch is required')
+    const result = await scanService.updateScan(id, scan, req.user._id)
+    if (!result.ok) return sendReason(res, result.reason, { fallback: 500, fallbackMessage: 'Failed to update scan' })
+    res.json({ scan: result.doc })
+})
 
 // ─── Chat state ───────────────────────────────────────────────────────────────
-export async function saveScannerChatState(req, res) {
-    try {
-        const { messages } = req.body ?? {}
-        if (!Array.isArray(messages)) return res.status(400).json({ error: 'messages must be an array' })
-        const result = await scannerChatService.saveChatState(req.user._id, messages)
-        if (!result.ok) return res.status(500).json({ error: 'Failed to save' })
-        res.json({ ok: true })
-    } catch (err) {
-        logger.error(LOG, 'saveScannerChatState failed', err)
-        res.status(500).json({ error: 'Failed to save chat state' })
-    }
-}
+export const saveScannerChatState = handle('saveScannerChatState', async (req, res) => {
+    const { messages } = req.body ?? {}
+    if (!Array.isArray(messages)) throw httpError(400, 'messages must be an array')
+    const result = await scannerChatService.saveChatState(req.user._id, messages)
+    if (!result.ok) return res.status(500).json({ error: 'Failed to save chat state' })
+    res.json({ ok: true })
+})
 
 export const getScannerChatState = makeGetChatState({
     service: scannerChatService,
     keyArgs: (req) => [req.user._id],
-    logger, log: LOG, failMsg: 'getScannerChatState failed',
+    log: LOG,
 })
 
 export const deleteScannerChatState = makeDeleteChatState({
     service: scannerChatService,
     keyArgs: (req) => [req.user._id],
-    logger, log: LOG, failMsg: 'deleteScannerChatState failed',
+    log: LOG,
 })

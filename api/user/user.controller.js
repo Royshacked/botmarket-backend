@@ -1,61 +1,30 @@
 import { userService } from './user.service.js'
+import { makeHandle }  from '../_shared/handle.util.js'
+import { httpError }   from '../../services/httpError.util.js'
 
-export async function list(req, res, next) {
-    try {
-        const { search, page, limit } = req.query
-        const result = await userService.listUsers({ search, page, limit })
-        res.json(result)
-    } catch (err) {
-        next(err)
-    }
-}
+const LOG    = '[user:controller]'
+const handle = makeHandle(LOG)
 
-export async function getOne(req, res, next) {
-    try {
-        const user = await userService.getUserById(req.params.id)
-        res.json(user)
-    } catch (err) {
-        next(err)
-    }
-}
+export const list = handle('list', async (req, res) => {
+    const { search, page, limit } = req.query
+    res.json(await userService.listUsers({ search, page, limit }))
+})
 
-export async function create(req, res, next) {
-    try {
-        const user = await userService.createUser(req.body ?? {})
-        res.status(201).json(user)
-    } catch (err) {
-        next(err)
-    }
-}
+export const getOne = handle('getOne', async (req, res) => {
+    res.json(await userService.getUserById(req.params.id))
+})
 
-export async function update(req, res, next) {
-    try {
-        const user = await userService.updateUser(req.params.id, req.body ?? {})
-        res.json(user)
-    } catch (err) {
-        next(err)
-    }
-}
+export const create = handle('create', async (req, res) => {
+    res.status(201).json(await userService.createUser(req.body ?? {}))
+})
 
-export async function remove(req, res, next) {
-    try {
-        const result = await userService.deleteUser(req.params.id)
-        res.json(result)
-    } catch (err) {
-        next(err)
-    }
-}
+export const update = handle('update', async (req, res) => {
+    res.json(await userService.updateUser(req.params.id, req.body ?? {}))
+})
 
-export async function getTokenUsage(req, res, next) {
-    try {
-        assertOwnOrAdmin(req)
-        const { month } = req.query
-        const usage = await userService.getTokenUsage(req.params.id, month)
-        res.json(usage)
-    } catch (err) {
-        next(err)
-    }
-}
+export const remove = handle('remove', async (req, res) => {
+    res.json(await userService.deleteUser(req.params.id))
+})
 
 /**
  * The per-user reads a trader may make about THEMSELVES — usage and preferences — and an admin
@@ -64,29 +33,20 @@ export async function getTokenUsage(req, res, next) {
  * `req.user.isAdmin`, a field no token has ever had, so the admin branch never fired.
  */
 export function assertOwnOrAdmin(req) {
-    if (req.params.id !== req.user?._id && req.user?.role !== 'admin') {
-        const err = new Error('Forbidden')
-        err.status = 403
-        throw err
-    }
+    if (req.params.id !== req.user?._id && req.user?.role !== 'admin') throw httpError(403, 'Forbidden')
 }
 
-export async function getPreferences(req, res, next) {
-    try {
-        assertOwnOrAdmin(req)
-        const prefs = await userService.getPreferences(req.params.id)
-        res.json(prefs)
-    } catch (err) {
-        next(err)
-    }
-}
+export const getTokenUsage = handle('getTokenUsage', async (req, res) => {
+    assertOwnOrAdmin(req)
+    res.json(await userService.getTokenUsage(req.params.id, req.query.month))
+})
 
-export async function updatePreferences(req, res, next) {
-    try {
-        assertOwnOrAdmin(req)
-        const prefs = await userService.savePreferences(req.params.id, req.body ?? {})
-        res.json(prefs)
-    } catch (err) {
-        next(err)
-    }
-}
+export const getPreferences = handle('getPreferences', async (req, res) => {
+    assertOwnOrAdmin(req)
+    res.json(await userService.getPreferences(req.params.id))
+})
+
+export const updatePreferences = handle('updatePreferences', async (req, res) => {
+    assertOwnOrAdmin(req)
+    res.json(await userService.savePreferences(req.params.id, req.body ?? {}))
+})

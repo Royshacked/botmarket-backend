@@ -29,6 +29,7 @@ import path     from 'path'
 import { getDbName } from '../providers/mongodb.provider.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
+import { httpError } from './httpError.util.js'
 
 const LOG = '[aetherScheduler]'
 
@@ -237,13 +238,13 @@ function runDiscovery({ maxRuns = 2, hours = 168, top = 5 } = {}) {
     // The refusals carry a STATUS — 409 for "already going", 503 for "this host cannot" — so the
     // controller answers off `err.status` rather than regexing the sentence back out of the message
     // (the anti-pattern http.util's own comment names).
-    if (_discovery) throw Object.assign(new Error('a discovery run is already in flight'), { status: 409 })
+    if (_discovery) throw httpError(409, 'a discovery run is already in flight')
 
     // ONE ANSWER TO "CAN THIS HOST RUN IT", asked here and by the status endpoint the
     // button polls. Two copies of this check is how the button ends up offering a run the
     // server will refuse.
     const cap = discoveryCapability()
-    if (!cap.available) throw Object.assign(new Error(cap.reason), { status: 503 })
+    if (!cap.available) throw httpError(503, cap.reason)
 
     const engineDir = config.aetherEnginePath
     const script = path.join(engineDir, 'scripts', 'select_events.py')
@@ -252,7 +253,7 @@ function runDiscovery({ maxRuns = 2, hours = 168, top = 5 } = {}) {
     // Same resolution as the scheduler: the engine must reach the database this process is
     // actually connected to, not one inherited from the shell. See the note at the top.
     const env = _buildEnv()
-    if (!env) throw Object.assign(new Error('cannot resolve the database name'), { status: 503 })
+    if (!env) throw httpError(503, 'cannot resolve the database name')
 
     const args = [script, '--run',
         '--max-runs', String(maxRuns), '--hours', String(hours), '--top', String(top)]

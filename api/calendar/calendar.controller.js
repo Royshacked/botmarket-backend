@@ -1,35 +1,15 @@
 import { calendarService, calendarWeek, enrichCalendarProfiles } from './calendar.service.js'
-import { logger } from '../../services/logger.service.js'
+import { makeHandle } from '../_shared/handle.util.js'
 
-const LOG = '[calendar:controller]'
+const LOG    = '[calendar:controller]'
+const handle = makeHandle(LOG)
 
 // Re-exported for unit tests (the logic now lives in calendar.service).
 export const _calendarWeek = calendarWeek
 export const _enrichWithProfiles = enrichCalendarProfiles
 
-export async function getEarnings(req, res) {
-    try {
-        res.json(await calendarService.getEarnings())
-    } catch (err) {
-        logger.error(LOG, 'getEarnings failed', err)
-        res.status(500).json({ error: 'Failed to fetch earnings calendar' })
-    }
-}
-
-export async function getFed(req, res) {
-    try {
-        res.json(await calendarService.getFed())
-    } catch (err) {
-        logger.error(LOG, 'getFed failed', err)
-        res.status(500).json({ error: 'Failed to fetch Fed calendar' })
-    }
-}
-
-export async function getIpo(req, res) {
-    try {
-        res.json(await calendarService.getIpo())
-    } catch (err) {
-        logger.error(LOG, 'getIpo failed', err)
-        res.status(500).json({ error: 'Failed to fetch IPO calendar' })
-    }
-}
+// Three reads over paid providers. A provider's failure (a Finnhub 429 rides on `err.status`) is
+// OUR 500, not the client's 429 — the global handler answers only a status we minted.
+export const getEarnings = handle('getEarnings', async (req, res) => { res.json(await calendarService.getEarnings()) })
+export const getFed      = handle('getFed',      async (req, res) => { res.json(await calendarService.getFed()) })
+export const getIpo      = handle('getIpo',      async (req, res) => { res.json(await calendarService.getIpo()) })

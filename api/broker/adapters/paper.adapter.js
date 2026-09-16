@@ -28,6 +28,7 @@ import { openPosition,
          entryMarkPrice }     from '../paperExecution.service.js'
 import { round2 }             from '../../../services/number.util.js'
 import { logger }             from '../../../services/logger.service.js'
+import { httpError }          from '../../../services/httpError.util.js'
 
 const LOG = '[paper.adapter]'
 
@@ -225,7 +226,7 @@ export class PaperAdapter extends VirtualAdapter {
             { status: 'working' },
             { status: 'cancelled', cancelledAt: Date.now() },
         )
-        if (!won) throw Object.assign(new Error(`paper: order ${orderId} is not working — nothing to cancel`), { status: 409 })
+        if (!won) throw httpError(409, `paper: order ${orderId} is not working — nothing to cancel`)
         logger.info(LOG, `Cancelled working order ${orderId}`)
     }
 
@@ -236,7 +237,7 @@ export class PaperAdapter extends VirtualAdapter {
         // `amendedAt` makes the write a modification even when the price is unchanged — claimOrder
         // answers on modifiedCount, and a same-price amend must not read as "not working".
         const won = await paperBrokerService.claimOrder(userId, orderId, { status: 'working' }, { triggerPrice: price, amendedAt: Date.now() })
-        if (!won) throw Object.assign(new Error(`paper: order ${orderId} is not working — nothing to amend`), { status: 409 })
+        if (!won) throw httpError(409, `paper: order ${orderId} is not working — nothing to amend`)
         return { orderId }
     }
 

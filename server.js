@@ -93,6 +93,7 @@ import { closeRenderer }    from './services/chartRender/klineRender.provider.js
 import { closeDb, getDb }   from './providers/mongodb.provider.js'
 import { healthRoutes }     from './api/health/health.routes.js'
 import { securityHeaders }  from './middleware/securityHeaders.middleware.js'
+import { errorHandler }     from './api/_shared/handle.util.js'
 import { apiLimiter, authLimiter, agentLimiter } from './middleware/rateLimit.middleware.js'
 import { startLoop, stopLoops, markDraining } from './services/lifecycle.service.js'
 import { createInstanceLock, LOCK_COLLECTION } from './services/instanceLock.service.js'
@@ -294,6 +295,11 @@ const loopsLock = createInstanceLock({
 // retries on its own interval, so the loops start whenever the lease becomes winnable.
 loopsLock.start().catch(err => logger.error('[server]', 'loop lease failed to start', err))
 
+// An API path nothing claimed is a 404 in JSON — ahead of the SPA fallback, which would otherwise
+// answer an unknown `GET /api/…` with index.html and a 200 in production. (Outside production it
+// replaces Express's HTML "Cannot GET" page with the shape the client already reads.)
+app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }))
+
 // SPA fallback: only in production when static assets live in public/
 if (config.isProduction) {
     app.get('/**', (req, res) => {
@@ -301,12 +307,9 @@ if (config.isProduction) {
     })
 }
 
-// Global error handler — must be last
-// eslint-disable-next-line no-unused-vars
-app.use((err, req, res, next) => {
-    logger.error('Unhandled error', err)
-    res.status(err.status || 500).json({ error: err.message || 'Internal server error' })
-})
+// The one global error handler — must be last. What it may tell the client is decided in
+// api/_shared/handle.util.js, beside the wrapper every controller reaches it through.
+app.use(errorHandler)
 
 const port = config.port
 

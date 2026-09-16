@@ -14,8 +14,11 @@ import { resolvePortfolioReviewCard } from '../chat/chat.service.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
 import { adoptBookService }  from './adoptBook.service.js'
 import { sendReason }        from '../_shared/reason.util.js'
+import { makeHandle }        from '../_shared/handle.util.js'
+import { httpError }         from '../../services/httpError.util.js'
 
-const LOG = '[portfolio:controller]'
+const LOG    = '[portfolio:controller]'
+const handle = makeHandle(LOG)
 
 // ─── Adopting a book the app didn't build (docs/design/adopted-book.md) ────────
 //
@@ -67,34 +70,27 @@ const _rebalanceErr = {
  * @param {Function} onOk   (result) => body           — the success shape
  * @param {string|null} requireParam  a path param answered 400 before the service is called
  */
-function makeAdoptHandler(name, failMsg, call, onOk, requireParam = null) {
-    return async (req, res) => {
-        try {
-            if (requireParam && !req.params[requireParam]) {
-                return res.status(400).send({ error: `Missing ${requireParam}` })
-            }
-            const result = await call(req)
-            if (result.ok) return res.send(onOk(result))
-            return sendReason(res, result.reason, {
-                overrides:       _adoptErr,
-                fallback:        500,
-                fallbackMessage: 'Adoption failed',
-                // The per-row problems / per-leg failures travel WITH the refusal: the confirm grid
-                // has to show the user which line to fix, and a bare 409 can't.
-                extra: {
-                    ...(result.problems ? { problems: result.problems } : {}),
-                    ...(result.failed   ? { failed:   result.failed }   : {}),
-                },
-            })
-        } catch (err) {
-            logger.error(LOG, `${name} failed`, err)
-            res.status(500).send({ error: failMsg })
-        }
-    }
+function makeAdoptHandler(name, call, onOk, requireParam = null) {
+    return handle(name, async (req, res) => {
+        if (requireParam && !req.params[requireParam]) throw httpError(400, `Missing ${requireParam}`)
+        const result = await call(req)
+        if (result.ok) return res.send(onOk(result))
+        return sendReason(res, result.reason, {
+            overrides:       _adoptErr,
+            fallback:        500,
+            fallbackMessage: 'Adoption failed',
+            // The per-row problems / per-leg failures travel WITH the refusal: the confirm grid
+            // has to show the user which line to fix, and a bare 409 can't.
+            extra: {
+                ...(result.problems ? { problems: result.problems } : {}),
+                ...(result.failed   ? { failed:   result.failed }   : {}),
+            },
+        })
+    })
 }
 
 export const refreshAdoptionDraft = makeAdoptHandler(
-    'refreshAdoptionDraft', 'Failed to update the staged book',
+    'refreshAdoptionDraft',
     (req) => {
         const { paste, statedTotal, freeCash, currency, mandate } = req.body ?? {}
         return adoptBookService.refreshDraft({ draftId: req.params.draftId, userId: req.user._id, paste, statedTotal, freeCash, currency, mandate })
@@ -104,7 +100,7 @@ export const refreshAdoptionDraft = makeAdoptHandler(
 )
 
 export const createAdoptionDraft = makeAdoptHandler(
-    'createAdoptionDraft', 'Failed to stage the adoption',
+    'createAdoptionDraft',
     // `paste` is the raw text; `holdings` is the grid handing back edited cells. Either or both.
     (req) => {
         const { bank, currency, statedTotal, freeCash, holdings, paste, mandate, name } = req.body ?? {}
@@ -114,27 +110,27 @@ export const createAdoptionDraft = makeAdoptHandler(
 )
 
 export const commitAdoptionDraft = makeAdoptHandler(
-    'commitAdoptionDraft', 'Failed to adopt the book',
+    'commitAdoptionDraft',
     (req) => adoptBookService.commitDraft({ draftId: req.params.draftId, userId: req.user._id }),
     r => ({ portfolioId: r.portfolioId, accountId: r.accountId, legs: r.legs }),
     'draftId',
 )
 
 export const listAdoptionDrafts = makeAdoptHandler(
-    'listAdoptionDrafts', 'Failed to list staged books',
+    'listAdoptionDrafts',
     (req) => adoptBookService.listDrafts({ userId: req.user._id }),
     r => ({ drafts: r.drafts }),
 )
 
 export const discardAdoptionDraft = makeAdoptHandler(
-    'discardAdoptionDraft', 'Failed to discard the staged book',
+    'discardAdoptionDraft',
     (req) => adoptBookService.discardDraft({ draftId: req.params.draftId, userId: req.user._id }),
     () => ({ ok: true }),
     'draftId',
 )
 
 export const correctAdoptedHolding = makeAdoptHandler(
-    'correctAdoptedHolding', 'Failed to correct the holding',
+    'correctAdoptedHolding',
     (req) => {
         const { quantity, avgCost } = req.body ?? {}
         return adoptBookService.correctHolding({ id: req.params.id, userId: req.user._id, quantity, avgCost })
@@ -143,7 +139,7 @@ export const correctAdoptedHolding = makeAdoptHandler(
 )
 
 export const removeAdoptedHolding = makeAdoptHandler(
-    'removeAdoptedHolding', 'Failed to remove the holding',
+    'removeAdoptedHolding',
     (req) => adoptBookService.removeHolding({ id: req.params.id, userId: req.user._id }),
     r => ({ asset: r.asset }),
 )
@@ -295,101 +291,78 @@ export async function streamPortfolio(req, res) {
     })
 }
 
-export async function savePortfolioChatState(req, res) {
-    try {
-        const { portfolioId, messages, mandate, thesis, threadId, portfolioName } = req.body ?? {}
-        if (!portfolioId || !Array.isArray(messages)) {
-            return res.status(400).json({ error: 'Missing portfolioId or messages' })
-        }
-        const result = await portfolioChatService.saveChatState(portfolioId, messages, req.user._id, mandate ?? null)
-        if (!result.ok) return res.status(500).json({ error: 'Failed to save' })
-        // Persist the portfolio thesis captured during construction (portfolioId now exists).
-        if (thesis && typeof thesis === 'object') {
-            await portfolioChatService.setThesis(portfolioId, req.user._id, thesis, 'construction').catch(() => {})
-        }
-        // Link the construction draft thread to the now-created portfolio: stamps subjectId,
-        // promotes it to 'linked' and clears its TTL so the conversation lives with the book.
-        if (threadId) {
-            threadService.linkToArtifact({
-                threadId, userId: req.user._id,
-                subjectType: 'portfolio', subjectId: portfolioId, artifactName: portfolioName ?? null,
-            }).catch(err => logger.warn(LOG, 'linkToArtifact failed', err))
-        }
-        res.json({ ok: true })
-    } catch (err) {
-        logger.error(LOG, 'savePortfolioChatState failed', err)
-        res.status(500).json({ error: 'Failed to save chat state' })
+export const savePortfolioChatState = handle('savePortfolioChatState', async (req, res) => {
+    const { portfolioId, messages, mandate, thesis, threadId, portfolioName } = req.body ?? {}
+    if (!portfolioId || !Array.isArray(messages)) throw httpError(400, 'Missing portfolioId or messages')
+    const result = await portfolioChatService.saveChatState(portfolioId, messages, req.user._id, mandate ?? null)
+    if (!result.ok) return res.status(500).json({ error: 'Failed to save chat state' })
+    // Persist the portfolio thesis captured during construction (portfolioId now exists).
+    if (thesis && typeof thesis === 'object') {
+        await portfolioChatService.setThesis(portfolioId, req.user._id, thesis, 'construction').catch(() => {})
     }
-}
+    // Link the construction draft thread to the now-created portfolio: stamps subjectId,
+    // promotes it to 'linked' and clears its TTL so the conversation lives with the book.
+    if (threadId) {
+        threadService.linkToArtifact({
+            threadId, userId: req.user._id,
+            subjectType: 'portfolio', subjectId: portfolioId, artifactName: portfolioName ?? null,
+        }).catch(err => logger.warn(LOG, 'linkToArtifact failed', err))
+    }
+    res.json({ ok: true })
+})
 
 export const getPortfolioChatState = makeGetChatState({
     service: portfolioChatService,
     keyArgs: (req) => [req.params.portfolioId, req.user._id],
-    logger, log: LOG, failMsg: 'getPortfolioChatState failed',
+    log: LOG,
 })
 
 export const deletePortfolioChatState = makeDeleteChatState({
     service: portfolioChatService,
     keyArgs: (req) => [req.params.portfolioId, req.user._id],
     requireKey: (req) => req.params.portfolioId ? null : 'Missing portfolioId',
-    logger, log: LOG, failMsg: 'deletePortfolioChatState failed',
+    log: LOG,
 })
 
-export async function getPendingReviews(req, res) {
-    try {
-        const reviews = await portfolioChatService.getPendingReviews(req.user._id)
-        res.json({ reviews })
-    } catch (err) {
-        logger.error(LOG, 'getPendingReviews failed', err)
-        res.status(500).json({ error: 'Failed to get pending reviews' })
+export const getPendingReviews = handle('getPendingReviews', async (req, res) => {
+    res.json({ reviews: await portfolioChatService.getPendingReviews(req.user._id) })
+})
+
+export const completeReview = handle('completeReview', async (req, res) => {
+    const { portfolioId } = req.params
+    if (!portfolioId) throw httpError(400, 'Missing portfolioId')
+
+    // Optional cadence change carried on the body (e.g. user switched weekly→monthly).
+    const bodyCadence = req.body?.reviewCadence
+    if (bodyCadence) {
+        await portfolioChatService.setPortfolioLifecycle(portfolioId, req.user._id, { reviewCadence: bodyCadence })
     }
-}
 
-export async function completeReview(req, res) {
-    try {
-        const { portfolioId } = req.params
-        if (!portfolioId) return res.status(400).json({ error: 'Missing portfolioId' })
+    // Record a conviction-trajectory point, then advance the (cadence-aware) clock.
+    await snapshotConvictions(portfolioId, req.user._id)
+    const result = await portfolioChatService.completeReview(portfolioId, req.user._id)
 
-        // Optional cadence change carried on the body (e.g. user switched weekly→monthly).
-        const bodyCadence = req.body?.reviewCadence
-        if (bodyCadence) {
-            await portfolioChatService.setPortfolioLifecycle(portfolioId, req.user._id, { reviewCadence: bodyCadence })
-        }
+    // Flip the Atlas notification card to a resolved state: 'reviewed' (user accepted a
+    // hold with no changes) or 'dismissed' (skipped). Defaults to dismissed.
+    const outcome = req.body?.outcome === 'reviewed' ? 'reviewed' : 'dismissed'
+    await resolvePortfolioReviewCard(req.user._id, portfolioId, {
+        nextReviewAt: result?.nextReviewAt ?? null,
+        outcome,
+    })
 
-        // Record a conviction-trajectory point, then advance the (cadence-aware) clock.
-        await snapshotConvictions(portfolioId, req.user._id)
-        const result = await portfolioChatService.completeReview(portfolioId, req.user._id)
+    // Review done — drop the snapshot so the next review computes fresh.
+    invalidatePortfolioState(portfolioId, req.user._id)
 
-        // Flip the Atlas notification card to a resolved state: 'reviewed' (user accepted a
-        // hold with no changes) or 'dismissed' (skipped). Defaults to dismissed.
-        const outcome = req.body?.outcome === 'reviewed' ? 'reviewed' : 'dismissed'
-        await resolvePortfolioReviewCard(req.user._id, portfolioId, {
-            nextReviewAt: result?.nextReviewAt ?? null,
-            outcome,
-        })
-
-        // Review done — drop the snapshot so the next review computes fresh.
-        invalidatePortfolioState(portfolioId, req.user._id)
-
-        res.json({ ok: true, nextReviewAt: result?.nextReviewAt ?? null })
-    } catch (err) {
-        logger.error(LOG, 'completeReview failed', err)
-        res.status(500).json({ error: 'Failed to complete review' })
-    }
-}
+    res.json({ ok: true, nextReviewAt: result?.nextReviewAt ?? null })
+})
 
 // The user's books — id, name, holdings count, per-status tallies, symbols, venue modes. The
 // portfolio's `GET /`, completing the pair every other kind has had; the derivation already
 // existed for the watchlist and is simply reachable now instead of being re-derived client-side
 // from the ideas list.
-export async function getPortfolios(req, res) {
-    try {
-        res.json({ portfolios: await listPortfolios(req.user._id) })
-    } catch (err) {
-        logger.error(LOG, 'getPortfolios failed', err)
-        res.status(500).json({ error: 'Failed to load portfolios' })
-    }
-}
+export const getPortfolios = handle('getPortfolios', async (req, res) => {
+    res.json({ portfolios: await listPortfolios(req.user._id) })
+})
 
 // GET a book's holdings. The portfolio's answer to the `GET /:id` every other kind already has —
 // a book is not a document, so its "read one" is the rows carrying its id, owner-scoped in the
@@ -399,52 +372,40 @@ export async function getPortfolios(req, res) {
 // list happened to hold. When that list was empty (a card click landing before it loaded), Atlas
 // was handed a book with no item ids, invented them, and every accepted change came back
 // not_found. A desk reads its subject from the database, like every other desk does.
-export async function getPortfolioItems(req, res) {
-    try {
-        const { portfolioId } = req.params
-        if (!portfolioId) return res.status(400).json({ error: 'Missing portfolioId' })
-        const items = await listPortfolioItems(portfolioId, req.user._id)
-        // An empty book is not an error — an adopted draft or a deleted book both read as zero rows,
-        // and the caller decides what that means. What must never happen is answering 200 with rows
-        // the caller can't tell apart from "we didn't look".
-        res.json({ items })
-    } catch (err) {
-        logger.error(LOG, 'getPortfolioItems failed', err)
-        res.status(500).json({ error: 'Failed to load portfolio holdings' })
-    }
-}
+export const getPortfolioItems = handle('getPortfolioItems', async (req, res) => {
+    const { portfolioId } = req.params
+    if (!portfolioId) throw httpError(400, 'Missing portfolioId')
+    const items = await listPortfolioItems(portfolioId, req.user._id)
+    // An empty book is not an error — an adopted draft or a deleted book both read as zero rows,
+    // and the caller decides what that means. What must never happen is answering 200 with rows
+    // the caller can't tell apart from "we didn't look".
+    res.json({ items })
+})
 
 // Apply an accepted portfolio_update — the confirmed review proposal — to the live book.
-export async function applyPortfolioRebalance(req, res) {
-    try {
-        const { portfolioId } = req.params
-        const { update }      = req.body ?? {}
-        if (!portfolioId) return res.status(400).json({ error: 'Missing portfolioId' })
-        if (!update || !Array.isArray(update.changes)) {
-            return res.status(400).json({ error: 'Missing update.changes' })
-        }
-        const result = await applyRebalance(portfolioId, req.user._id, update)
-        // Answer with the reason, on the shared vocabulary, like every other refusal in the app.
-        // This used to be a bare 400 carrying the result object, so a book whose ids didn't resolve,
-        // one whose holdings were already closed, and one the user doesn't own were the same red
-        // banner — and diagnosing which took reading the server log. `results`/`failed` ride along
-        // in `extra` so the client can still say WHICH changes fell over.
-        if (!result.ok) {
-            return sendReason(res, result.reason, {
-                overrides: _rebalanceErr,
-                fallbackMessage: 'Could not apply the changes',
-                extra: { results: result.results ?? null, failed: result.failed ?? null },
-            })
-        }
-
-        // Flip the Atlas notification card to "Updated · next review <date>".
-        await resolvePortfolioReviewCard(req.user._id, portfolioId, {
-            nextReviewAt: result.nextReviewAt ?? null,
-            outcome: 'updated',
+export const applyPortfolioRebalance = handle('applyPortfolioRebalance', async (req, res) => {
+    const { portfolioId } = req.params
+    const { update }      = req.body ?? {}
+    if (!portfolioId) throw httpError(400, 'Missing portfolioId')
+    if (!update || !Array.isArray(update.changes)) throw httpError(400, 'Missing update.changes')
+    const result = await applyRebalance(portfolioId, req.user._id, update)
+    // Answer with the reason, on the shared vocabulary, like every other refusal in the app.
+    // This used to be a bare 400 carrying the result object, so a book whose ids didn't resolve,
+    // one whose holdings were already closed, and one the user doesn't own were the same red
+    // banner — and diagnosing which took reading the server log. `results`/`failed` ride along
+    // in `extra` so the client can still say WHICH changes fell over.
+    if (!result.ok) {
+        return sendReason(res, result.reason, {
+            overrides: _rebalanceErr,
+            fallbackMessage: 'Could not apply the changes',
+            extra: { results: result.results ?? null, failed: result.failed ?? null },
         })
-        res.json(result)
-    } catch (err) {
-        logger.error(LOG, 'applyPortfolioRebalance failed', err)
-        res.status(500).json({ error: 'Failed to apply rebalance' })
     }
-}
+
+    // Flip the Atlas notification card to "Updated · next review <date>".
+    await resolvePortfolioReviewCard(req.user._id, portfolioId, {
+        nextReviewAt: result.nextReviewAt ?? null,
+        outcome: 'updated',
+    })
+    res.json(result)
+})

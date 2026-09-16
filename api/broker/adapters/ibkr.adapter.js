@@ -27,6 +27,7 @@ import { brokerConnectionService } from '../brokerConnection.service.js'
 import { logger }                  from '../../../services/logger.service.js'
 import { parseTimeframe }          from '../../../services/timeframe.service.js'
 import { config } from '../../../services/config.js'
+import { httpError } from '../../../services/httpError.util.js'
 
 const LOG = '[ibkr.adapter]'
 
@@ -116,9 +117,7 @@ export class IBKRAdapter extends BrokerAdapter {
 
     getAuthUrl() {
         // IBKR connects via a local gateway, not an OAuth redirect.
-        throw Object.assign(
-            new Error('IBKR uses IB Gateway — call connectGateway() instead of OAuth'),
-            { status: 400 }
+        throw httpError(400, 'IBKR uses IB Gateway — call connectGateway() instead of OAuth'
         )
     }
 
@@ -194,7 +193,7 @@ export class IBKRAdapter extends BrokerAdapter {
         const gw      = await this._gateway(userId)
         const spec    = IBKR_CONTRACTS[key] ?? { secType: 'STK', symbol: key, exchange: 'SMART', currency: 'USD' }
         const details = await gw.reqContractDetails(spec)
-        if (!details.length) throw Object.assign(new Error(`IBKR: no contract for "${canonicalAsset}"`), { status: 404 })
+        if (!details.length) throw httpError(404, `IBKR: no contract for "${canonicalAsset}"`)
 
         const chosen = spec.secType === 'FUT'
             ? _pickFrontMonth(details)

@@ -12,6 +12,7 @@ import { CTraderAdapter } from './adapters/ctrader.adapter.js'
 import { IBKRAdapter }    from './adapters/ibkr.adapter.js'
 import { PaperAdapter }   from './adapters/paper.adapter.js'
 import { ManualAdapter }  from './adapters/manual.adapter.js'
+import { httpError }      from '../../services/httpError.util.js'
 
 const ADAPTERS = {
     ctrader: CTraderAdapter,
@@ -31,10 +32,6 @@ export const SUPPORTED_BROKERS = Object.keys(ADAPTERS)
  */
 export function getBrokerAdapter(brokerType) {
     const Adapter = ADAPTERS[brokerType]
-    if (!Adapter) {
-        const err = new Error(`Unknown broker type: "${brokerType}". Supported: ${SUPPORTED_BROKERS.join(', ')}`)
-        err.status = 400
-        throw err
-    }
+    if (!Adapter) throw httpError(400, `Unknown broker type: "${brokerType}". Supported: ${SUPPORTED_BROKERS.join(', ')}`)
     return new Adapter()
 }

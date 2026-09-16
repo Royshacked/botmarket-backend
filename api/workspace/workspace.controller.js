@@ -9,24 +9,21 @@
 import { brokerService } from '../broker/broker.service.js'
 import { getStoredWorkspace, setStoredWorkspace } from '../../services/workspace.service.js'
 import { resolveWorkspace, isValidWorkspace, WORKSPACES } from './workspace.model.js'
-import { logger } from '../../services/logger.service.js'
+import { makeHandle } from '../_shared/handle.util.js'
+import { httpError }  from '../../services/httpError.util.js'
 
-const LOG = '[workspace:controller]'
+const LOG    = '[workspace:controller]'
+const handle = makeHandle(LOG)
 
 /** GET /api/workspace → { workspace, stored } */
-export async function getWorkspace(req, res) {
-    try {
-        const userId = req.user._id
-        const [connections, stored] = await Promise.all([
-            brokerService.listConnections(userId).catch(() => ({})),
-            getStoredWorkspace(userId),
-        ])
-        res.json({ workspace: resolveWorkspace(!!connections?.paper, stored), stored })
-    } catch (err) {
-        logger.error(LOG, 'getWorkspace failed', err.message)
-        res.status(500).json({ error: 'could not read workspace' })
-    }
-}
+export const getWorkspace = handle('getWorkspace', async (req, res) => {
+    const userId = req.user._id
+    const [connections, stored] = await Promise.all([
+        brokerService.listConnections(userId).catch(() => ({})),
+        getStoredWorkspace(userId),
+    ])
+    res.json({ workspace: resolveWorkspace(!!connections?.paper, stored), stored })
+})
 
 /**
  * PUT /api/workspace { workspace } → { workspace, stored }
@@ -38,20 +35,15 @@ export async function getWorkspace(req, res) {
  * write that silently flips another subsystem's toggle is the kind of hidden coupling that makes the
  * two disagree later.
  */
-export async function putWorkspace(req, res) {
+export const putWorkspace = handle('putWorkspace', async (req, res) => {
     const workspace = req.body?.workspace
-    if (!isValidWorkspace(workspace)) {
-        return res.status(400).json({ error: `workspace must be one of: ${WORKSPACES.join(', ')}` })
-    }
-    try {
-        const userId = req.user._id
-        const result = await setStoredWorkspace(userId, workspace)
-        if (!result.ok) return res.status(500).json({ error: result.reason })
+    if (!isValidWorkspace(workspace)) throw httpError(400, `workspace must be one of: ${WORKSPACES.join(', ')}`)
 
-        const connections = await brokerService.listConnections(userId).catch(() => ({}))
-        res.json({ workspace: resolveWorkspace(!!connections?.paper, result.workspace), stored: result.workspace })
-    } catch (err) {
-        logger.error(LOG, 'putWorkspace failed', err.message)
-        res.status(500).json({ error: 'could not save workspace' })
-    }
-}
+    const userId = req.user._id
+    const result = await setStoredWorkspace(userId, workspace)
+    // The service's reason is the driver's sentence, not one written for the user — a 500.
+    if (!result.ok) throw new Error(`setStoredWorkspace: ${result.reason}`)
+
+    const connections = await brokerService.listConnections(userId).catch(() => ({}))
+    res.json({ workspace: resolveWorkspace(!!connections?.paper, result.workspace), stored: result.workspace })
+})

@@ -6,35 +6,25 @@
 //
 // `service`      — the chat service ({ getChatState, deleteChatState, ... }).
 // `keyArgs(req)` — returns the argument array passed to the service methods.
-// `logger`/`log` — logger + tag for the failure line.
-// `failMsg`      — exact log message prefix (so each controller keeps its wording).
+// `log`          — the controller's log tag, so a failure still reads as the caller's.
 // `requireKey(req)` (delete only, optional) — returns an error string when a
 //                  required key is missing (portfolio guards a missing portfolioId).
 
-export function makeGetChatState({ service, keyArgs, logger, log, failMsg = 'getChatState failed' }) {
-    return async function getChatState(req, res) {
-        try {
-            const chatState = await service.getChatState(...keyArgs(req))
-            res.json({ chatState: chatState ?? null })
-        } catch (err) {
-            logger.error(log, failMsg, err)
-            res.status(500).json({ error: 'Failed to get chat state' })
-        }
-    }
+import { makeHandle } from './handle.util.js'
+import { httpError }  from '../../services/httpError.util.js'
+
+export function makeGetChatState({ service, keyArgs, log }) {
+    return makeHandle(log)('getChatState', async (req, res) => {
+        const chatState = await service.getChatState(...keyArgs(req))
+        res.json({ chatState: chatState ?? null })
+    })
 }
 
-export function makeDeleteChatState({ service, keyArgs, logger, log, failMsg = 'deleteChatState failed', requireKey = null }) {
-    return async function deleteChatState(req, res) {
-        try {
-            if (requireKey) {
-                const missing = requireKey(req)
-                if (missing) return res.status(400).json({ error: missing })
-            }
-            await service.deleteChatState(...keyArgs(req))
-            res.json({ ok: true })
-        } catch (err) {
-            logger.error(log, failMsg, err)
-            res.status(500).json({ error: 'Failed to delete chat state' })
-        }
-    }
+export function makeDeleteChatState({ service, keyArgs, log, requireKey = null }) {
+    return makeHandle(log)('deleteChatState', async (req, res) => {
+        const missing = requireKey?.(req)
+        if (missing) throw httpError(400, missing)
+        await service.deleteChatState(...keyArgs(req))
+        res.json({ ok: true })
+    })
 }

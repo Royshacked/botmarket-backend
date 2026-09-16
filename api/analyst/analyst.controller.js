@@ -8,16 +8,17 @@ import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
 import { parseChatMessages }      from '../_shared/parse.util.js'
 import { sendReason }             from '../_shared/reason.util.js'
 import { makeHandle }             from '../_shared/handle.util.js'
+import { httpError }              from '../../services/httpError.util.js'
 import { logger }                 from '../../services/logger.service.js'
 import { getExperienceLevel }     from '../../services/experience.service.js'
 import { sanitizeScanSeed }       from '../../services/scanSeed.util.js'
 
 const LOG = '[analystCtrl]'
-// The queue and run handlers below ride makeHandle. They used to have no try/catch at all and
-// leaned on every service catching internally — true today, and one thrown read away from a hung
-// request (Express 4 does not see an async rejection). Unlike the coverage handlers above them,
-// which answer fixed slugs and wait on the §9 error-shape decision, these never caught, so the
-// wrapper changes nothing the client sees; it adds the log line and the route to the global handler.
+// Every handler here rides makeHandle. The queue and run handlers moved first (§6): they had no
+// try/catch at all and were one thrown read away from a hung request (Express 4 does not see an
+// async rejection). The coverage handlers followed in §9, once the global handler stopped shipping
+// a 500's message in production — until then their fixed slugs were the only thing keeping a Mongo
+// sentence out of a toast.
 const _handle = makeHandle(LOG)
 
 // Enrich chatState with coverage data from the DB so the agent always knows what's already
@@ -94,101 +95,61 @@ const COVERAGE_REASONS = {
     rating_contradicts_target: [422, 'The rating and the price target point in opposite directions'],
 }
 
-export async function listCoverage(req, res) {
-    try {
-        const docs = await coverageService.getCoverage({
-            sector: req.query?.sector ?? null,
-            status: req.query?.status ?? null,
+export const listCoverage = _handle('listCoverage', async (req, res) => {
+    res.send(await coverageService.getCoverage({
+        sector: req.query?.sector ?? null,
+        status: req.query?.status ?? null,
+    }))
+})
+
+export const getCoverageOne = _handle('getCoverageOne', async (req, res) => {
+    const result = await coverageService.getCoverageById(req.params.id)
+    if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 404, fallbackMessage: 'Not found' })
+    res.send(result.doc)
+})
+
+export const getCoverageBySymbol = _handle('getCoverageBySymbol', async (req, res) => {
+    const doc = await coverageService.getCoverageBySymbol(req.params.symbol)
+    if (!doc) throw httpError(404, 'Coverage not found')
+    res.send(doc)
+})
+
+export const initiateCoverage = _handle('initiateCoverage', async (req, res) => {
+    const { coverage } = req.body ?? {}
+    if (!coverage || typeof coverage !== 'object' || Array.isArray(coverage)) throw httpError(400, 'coverage must be an object')
+    const result = await coverageService.initiateCoverage(coverage)
+    if (!result.ok) {
+        return sendReason(res, result.reason, {
+            overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to initiate coverage',
+            extra: { ...(result.id ? { id: result.id } : {}), ...(result.detail ? { detail: result.detail } : {}) },
         })
-        res.send(docs)
-    } catch (err) {
-        logger.error(LOG, 'listCoverage failed', err)
-        res.status(500).send({ error: 'Failed to list coverage' })
     }
-}
+    res.send(result.doc)
+})
 
-export async function getCoverageOne(req, res) {
-    try {
-        const result = await coverageService.getCoverageById(req.params.id)
-        if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 404, fallbackMessage: 'Not found' })
-        res.send(result.doc)
-    } catch (err) {
-        logger.error(LOG, 'getCoverageOne failed', err)
-        res.status(500).send({ error: 'Failed to get coverage' })
-    }
-}
+export const updateCoverage = _handle('updateCoverage', async (req, res) => {
+    const patch = req.body?.patch ?? req.body
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw httpError(400, 'patch must be an object')
+    const result = await coverageService.updateCoverage(req.params.id, patch)
+    if (!result.ok) return sendReason(res, result.reason, {
+        overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to update coverage',
+        extra: result.detail ? { detail: result.detail } : null,
+    })
+    res.send(result.doc)
+})
 
-export async function getCoverageBySymbol(req, res) {
-    try {
-        const doc = await coverageService.getCoverageBySymbol(req.params.symbol)
-        if (!doc) return res.status(404).send({ error: 'Coverage not found' })
-        res.send(doc)
-    } catch (err) {
-        logger.error(LOG, 'getCoverageBySymbol failed', err)
-        res.status(500).send({ error: 'Failed to get coverage' })
-    }
-}
+export const retireCoverage = _handle('retireCoverage', async (req, res) => {
+    const result = await coverageService.retireCoverage(req.params.id)
+    if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to retire coverage' })
+    res.send(result.doc)
+})
 
-export async function initiateCoverage(req, res) {
-    try {
-        const { coverage } = req.body ?? {}
-        if (!coverage || typeof coverage !== 'object' || Array.isArray(coverage)) {
-            return res.status(400).send({ error: 'coverage must be an object' })
-        }
-        const result = await coverageService.initiateCoverage(coverage)
-        if (!result.ok) {
-            return sendReason(res, result.reason, {
-                overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to initiate coverage',
-                extra: { ...(result.id ? { id: result.id } : {}), ...(result.detail ? { detail: result.detail } : {}) },
-            })
-        }
-        res.send(result.doc)
-    } catch (err) {
-        logger.error(LOG, 'initiateCoverage failed', err)
-        res.status(500).send({ error: 'Failed to initiate coverage' })
-    }
-}
-
-export async function updateCoverage(req, res) {
-    try {
-        const patch = req.body?.patch ?? req.body
-        if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
-            return res.status(400).send({ error: 'patch must be an object' })
-        }
-        const result = await coverageService.updateCoverage(req.params.id, patch)
-        if (!result.ok) return sendReason(res, result.reason, {
-            overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to update coverage',
-            extra: result.detail ? { detail: result.detail } : null,
-        })
-        res.send(result.doc)
-    } catch (err) {
-        logger.error(LOG, 'updateCoverage failed', err)
-        res.status(500).send({ error: 'Failed to update coverage' })
-    }
-}
-
-export async function retireCoverage(req, res) {
-    try {
-        const result = await coverageService.retireCoverage(req.params.id)
-        if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to retire coverage' })
-        res.send(result.doc)
-    } catch (err) {
-        logger.error(LOG, 'retireCoverage failed', err)
-        res.status(500).send({ error: 'Failed to retire coverage' })
-    }
-}
-
-export async function deleteCoverage(req, res) {
-    try {
-        const result = await coverageService.deleteCoverage(req.params.id)
-        if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to delete coverage' })
-        logger.info(LOG, 'coverage deleted', { id: req.params.id })
-        res.send({ ok: true })
-    } catch (err) {
-        logger.error(LOG, 'deleteCoverage failed', err)
-        res.status(500).send({ error: 'Failed to delete coverage' })
-    }
-}
+export const deleteCoverage = _handle('deleteCoverage', async (req, res) => {
+    const result = await coverageService.deleteCoverage(req.params.id)
+    if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to delete coverage' })
+    logger.info(LOG, 'coverage deleted', { id: req.params.id })
+    res.send({ ok: true })
+})
 
 // ─── Research queue (Argus→Prometheus admin pipeline) ─────────────────────────
 

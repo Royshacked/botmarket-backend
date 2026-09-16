@@ -1,45 +1,38 @@
 import { authService } from './authentication.service.js'
-import { config } from '../../services/config.js'
+import { config }      from '../../services/config.js'
+import { makeHandle }  from '../_shared/handle.util.js'
+import { httpError }   from '../../services/httpError.util.js'
+
+const LOG    = '[auth:controller]'
+const handle = makeHandle(LOG)
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
-export async function signup(req, res, next) {
-    try {
-        const { username, fullname, password } = req.body ?? {}
-        if (!username || !fullname || !password) {
-            return res.status(400).json({ error: 'username, fullname and password are required' })
-        }
-        const user = await authService.signup(username, fullname, password)
-        res.status(201).json({ message: 'User created', user })
-    } catch (err) {
-        next(err)
-    }
-}
+export const signup = handle('signup', async (req, res) => {
+    const { username, fullname, password } = req.body ?? {}
+    if (!username || !fullname || !password) throw httpError(400, 'username, fullname and password are required')
+    const user = await authService.signup(username, fullname, password)
+    res.status(201).json({ message: 'User created', user })
+})
 
-export async function signin(req, res, next) {
-    try {
-        const { username, password } = req.body ?? {}
-        if (!username || !password) {
-            return res.status(400).json({ error: 'username and password are required' })
-        }
-        const { token, user } = await authService.signin(username, password)
-        res.cookie('token', token, {
-            httpOnly: true,
-            sameSite: 'strict',
-            secure: config.isProduction,
-            maxAge: SEVEN_DAYS_MS,
-        })
-        res.json(user)
-    } catch (err) {
-        next(err)
-    }
-}
+export const signin = handle('signin', async (req, res) => {
+    const { username, password } = req.body ?? {}
+    if (!username || !password) throw httpError(400, 'username and password are required')
+    const { token, user } = await authService.signin(username, password)
+    res.cookie('token', token, {
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: config.isProduction,
+        maxAge: SEVEN_DAYS_MS,
+    })
+    res.json(user)
+})
 
-export async function signout(req, res) {
+export function signout(req, res) {
     res.clearCookie('token')
     res.json({ message: 'Signed out successfully' })
 }
 
-export async function me(req, res) {
+export function me(req, res) {
     res.json(req.user)
 }

@@ -147,9 +147,11 @@ api/
       sse.util.js             startSseStream() — SSE headers + heartbeat + abort wiring
       parse.util.js           parseChatMessages / parseIdeaAccounts
       handle.util.js          makeHandle(log) — wrap an async handler so a throw is logged WITH its
-                              route and formatted by the ONE global error handler (server.js). A
-                              controller that hand-rolls `catch → res.status(500)` is re-typing it
-      chatState.util.js       makeGetChatState / makeDeleteChatState factories
+                              route and forwarded; errorHandler — THE global error handler (mounted
+                              last in server.js): a minted `httpError` answers with its status +
+                              sentence, anything else is a 500 (generic body in production). Every
+                              controller rides the pair; none hand-rolls `catch → res.status(500)`
+      chatState.util.js       makeGetChatState / makeDeleteChatState factories (over makeHandle)
       reason.util.js          THE reason→HTTP map (in_position=409, forbidden=403 …) + sendReason();
                               route-owned reasons are passed in as `overrides`, never re-mapped locally
       entityController.util.js  makeEntityController() — list/get/patch/delete for any owner-scoped
@@ -313,6 +315,9 @@ services/
   mongoCache.util.js      makeMongoBackedCache({ collection, ttlMs }) → { read, write }: an in-process TTL
                           map over a Mongo collection, best-effort on both sides. FMP fundamentals and
                           Finnhub profiles ride it (each had written the pair by hand)
+  httpError.util.js         httpError(status, message, extra?) — THE way to throw an error the client
+                            may see (sets `expose`; errorHandler trusts nothing else). Replaced 28
+                            `const err = new Error(msg); err.status = 404; throw err` blocks
   number.util.js            rounding, once: roundTo/round2/round4/round8 (NaN through), roundOrNull
                             (display: not-reported → null), roundOrZero (quantities). Replaced twelve
                             private `_round2`-style copies; import from here, never redeclare
@@ -699,11 +704,18 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
   `resolveMode` / `knownVenue` / `workspace.model` — those DEFINE the workspace vocabulary rather
   than dispatch on it, and routing them through a capability would make the vocabulary depend on
   the table it is supposed to be independent of. They carry a comment saying so.
-- **Error handling:** the global handler in `server.js` formats every error as
-  `res.status(err.status || 500).json({ error: err.message })`. Two controller styles exist and are
-  both fine because they yield the *same* `{ error }` shape:
-  - **Preferred (new controllers):** let the service throw a typed error (`Object.assign(new Error(msg), { status })`)
-    and `catch (err) { next(err) }` — no per-handler status/message duplication (see `user`/`chat`/`authentication`).
+- **Error handling:** ONE pipe. Every handler is wrapped in `makeHandle(LOG)` (`api/_shared/handle.util.js`),
+  which logs a throw with its label + route and forwards it; `errorHandler` (same file, mounted last in
+  `server.js`) is the only place a thrown error becomes `{ error }`. **What an error may tell the client
+  (§9, 2026-09-16):** an error minted with `httpError(status, message)` (`services/httpError.util.js`,
+  sets `expose`) answers with its status and sentence — a 404 "User not found", a 409 "Username already
+  exists". Anything else is a 500 whose body is `'Internal server error'` in production and the message in
+  development. A PROVIDER's status (`http.util.getJson` stamps `err.status`) is not ours and is never
+  answered as such. No controller hand-rolls `catch → res.status(500)`; the one inner try/catch left
+  (pendingAction's execute) unwinds a claimed row and RETHROWS. OAuth redirect handlers keep their own
+  try/catch because they answer a browser navigation.
+  - **Preferred:** `export const x = handle('x', async (req, res) => { … throw httpError(400, 'why') … })`
+    — the service throws `httpError(404/409, …)` for what the user did, and a bare `Error` for what broke.
   - **Result-shaped (`{ok, reason}`) services:** never hand-roll the ladder — `sendReason()` from
     `api/_shared/reason.util.js` owns it. A reason that more than one kind can raise (`in_position`,
     `already_placed`, `not_found`…) lives in that file's SHARED table so two routes cannot answer the

@@ -12,14 +12,20 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { aetherSchedulerService } from '../../services/aetherScheduler.service.js'
-import { startDiscovery, getDiscoveryStatus } from '../../api/aether/aether.controller.js'
+import { startDiscovery as _startDiscovery, getDiscoveryStatus } from '../../api/aether/aether.controller.js'
+import { errorHandler } from '../../api/_shared/handle.util.js'
+import { httpError } from '../../services/httpError.util.js'
 
 function fakeRes() {
-    const res = { statusCode: 200, body: null }
+    const res = { statusCode: 200, body: null, headersSent: false }
     res.status = code => { res.statusCode = code; return res }
     res.json = payload => { res.body = payload; return res }
     return res
 }
+
+// The controller rides makeHandle: a throw goes to next(err), and the global handler answers. The
+// test runs the same pipe the server does, so what it asserts is what the client gets.
+const startDiscovery = (req, res) => _startDiscovery(req, res, err => errorHandler(err, { method: 'POST', originalUrl: '/api/aether/discover' }, res, () => {}))
 
 /** Swap runDiscovery for a spy, restore afterwards. */
 async function withRunner(impl, fn) {
@@ -51,13 +57,12 @@ test('a second press while one is in flight is 409, not a second run', async () 
     // The selector reads recently-run subjects from Mongo at start-up, so a concurrent
     // run would re-pick the first one's events before it had written any of them — and
     // pay for each of them twice.
-    // The STATUS rides on the error (runDiscovery stamps it); the controller no longer regexes the
-    // sentence to decide between 409 and 503.
-    await withRunner(() => { throw Object.assign(new Error('a discovery run is already in flight'), { status: 409 }) }, async () => {
+    // The STATUS rides on the error (runDiscovery mints it with httpError); the controller no longer
+    // regexes the sentence to decide between 409 and 503.
+    await withRunner(() => { throw httpError(409, 'a discovery run is already in flight') }, async () => {
         const res = fakeRes()
         await startDiscovery({ body: {}, user: {} }, res)
         assert.equal(res.statusCode, 409)
-        assert.equal(res.body.started, false)
         assert.match(res.body.error, /already in flight/)
     })
 })
@@ -65,7 +70,7 @@ test('a second press while one is in flight is 409, not a second run', async () 
 test('no engine on this host is 503, not 409', async () => {
     // Different problem, different answer: "already going" invites a retry in a minute,
     // "no engine here" never will be.
-    await withRunner(() => { throw Object.assign(new Error('AETHER_ENGINE_PATH not set — no engine on this host'), { status: 503 }) },
+    await withRunner(() => { throw httpError(503, 'AETHER_ENGINE_PATH not set — no engine on this host') },
         async () => {
             const res = fakeRes()
             await startDiscovery({ body: {}, user: {} }, res)
@@ -73,13 +78,19 @@ test('no engine on this host is 503, not 409', async () => {
         })
 })
 
-test('a throw with NO status is a real fault — 500, and the sentence stays inside', async () => {
-    await withRunner(() => { throw new Error('ENOMEM: spawn failed with internals in the message') }, async () => {
-        const res = fakeRes()
-        await startDiscovery({ body: {}, user: {} }, res)
-        assert.equal(res.statusCode, 500)
-        assert.equal(res.body.error, 'Could not start discovery')
-    })
+test('a throw with NO minted status is a real fault — 500, and in production the sentence stays inside', async () => {
+    const saved = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    try {
+        await withRunner(() => { throw new Error('ENOMEM: spawn failed with internals in the message') }, async () => {
+            const res = fakeRes()
+            await startDiscovery({ body: {}, user: {} }, res)
+            assert.equal(res.statusCode, 500)
+            assert.equal(res.body.error, 'Internal server error')
+        })
+    } finally {
+        if (saved === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = saved
+    }
 })
 
 test('maxRuns is clamped — it is the spend dial, not a preference', async () => {
@@ -169,7 +180,7 @@ test('an unavailable host says why, in words worth reading', async () => {
 test('the server still refuses on its own — the button is only a courtesy', async () => {
     // Hiding the button is politeness. A request that arrives anyway, from a stale tab or
     // curl, must still be refused by the same check.
-    await withRunner(() => { throw Object.assign(new Error('no engine on this host — AETHER_ENGINE_PATH is not set'), { status: 503 }) },
+    await withRunner(() => { throw httpError(503, 'no engine on this host — AETHER_ENGINE_PATH is not set') },
         async () => {
             const res = fakeRes()
             await startDiscovery({ body: {}, user: {} }, res)

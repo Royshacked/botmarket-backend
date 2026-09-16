@@ -9,55 +9,41 @@
 
 import { getMarketStatus }    from '../../services/market.service.js'
 import { parseChartInterval } from '../../services/candleInterval.util.js'
-import { logger }             from '../../services/logger.service.js'
+import { makeHandle }         from '../_shared/handle.util.js'
+import { httpError }          from '../../services/httpError.util.js'
 import * as marketService     from './market.service.js'
 
-const LOG = '[market:controller]'
+const LOG    = '[market:controller]'
+const handle = makeHandle(LOG)
 
 /** The symbol every route here takes, normalized. Empty string when absent — the caller 400s. */
 const _symbol = req => String(req.query.symbol ?? '').toUpperCase().trim()
 
-export async function getStatus(req, res, next) {
-    try {
-        const assetClass = req.query.assetClass ?? req.query.asset_class ?? undefined
-        res.send(getMarketStatus(req.query.symbol ?? '', assetClass))
-    } catch (err) {
-        logger.error(LOG, 'getStatus failed', err)
-        next(err)
-    }
-}
+export const getStatus = handle('getStatus', async (req, res) => {
+    const assetClass = req.query.assetClass ?? req.query.asset_class ?? undefined
+    res.send(getMarketStatus(req.query.symbol ?? '', assetClass))
+})
 
 // GET /api/market/quote?symbol=AAPL
 // Never throws for an unpriceable symbol — see market.service.getQuote for why a blip is a skipped
 // tick rather than a 500.
-export async function getQuote(req, res, next) {
+export const getQuote = handle('getQuote', async (req, res) => {
     const symbol = _symbol(req)
-    if (!symbol) return res.status(400).send({ error: 'symbol is required' })
-    try {
-        res.send(await marketService.getQuote(symbol))
-    } catch (err) {
-        logger.error(LOG, 'getQuote failed', err)
-        next(err)
-    }
-}
+    if (!symbol) throw httpError(400, 'symbol is required')
+    res.send(await marketService.getQuote(symbol))
+})
 
 // GET /api/market/candles?symbol=AAPL&interval=5min[&from=<ms>&to=<ms>]
-export async function getCandles(req, res, next) {
+export const getCandles = handle('getCandles', async (req, res) => {
     const symbol = _symbol(req)
-    if (!symbol) return res.status(400).send({ error: 'symbol is required' })
+    if (!symbol) throw httpError(400, 'symbol is required')
 
     const intervalRaw = String(req.query.interval ?? 'day')
     const spec = parseChartInterval(intervalRaw)
-    if (!spec) return res.status(400).send({ error: `unsupported interval: ${intervalRaw}` })
+    if (!spec) throw httpError(400, `unsupported interval: ${intervalRaw}`)
 
-    try {
-        const payload = await marketService.getCandles(symbol, intervalRaw, spec, {
-            fromMs: marketService.parseWhenMs(req.query.from),
-            toMs:   marketService.parseWhenMs(req.query.to),
-        })
-        res.send(payload)
-    } catch (err) {
-        logger.error(LOG, 'getCandles failed', err)
-        next(err)
-    }
-}
+    res.send(await marketService.getCandles(symbol, intervalRaw, spec, {
+        fromMs: marketService.parseWhenMs(req.query.from),
+        toMs:   marketService.parseWhenMs(req.query.to),
+    }))
+})

@@ -16,7 +16,11 @@ import { readFileSync } from 'node:fs'
 import {
     getCandidatesForTicker, shapeTickerResult, tickerWindowDays,
 } from '../../api/aether/aether.service.js'
-import { getCandidatesByTicker } from '../../api/aether/aether.controller.js'
+import { getCandidatesByTicker as _getCandidatesByTicker } from '../../api/aether/aether.controller.js'
+import { errorHandler } from '../../api/_shared/handle.util.js'
+
+// The controller rides makeHandle; run the same pipe the server does.
+const getCandidatesByTicker = (req, res) => _getCandidatesByTicker(req, res, err => errorHandler(err, { method: 'GET', originalUrl: '/api/aether/candidates/x' }, res, () => {}))
 
 function fakeRes() {
     const res = { statusCode: 200, body: null }
@@ -122,9 +126,10 @@ test('a ticker the engine never named is 404', async () => {
 
 test('“no such candidate” and “the read failed” are different answers', () => {
     // 404 is a claim about the world; 500 is a claim about the connection. The candidate
-    // list learnt this distinction the hard way on 2026-09-10 and it holds here too.
+    // list learnt this distinction the hard way on 2026-09-10 and it holds here too: the 404 is
+    // minted in the handler, and a failed read is left to throw — the global handler's 500.
     const body = readFileSync(new URL('../../api/aether/aether.controller.js', import.meta.url), 'utf8')
-    const fn = body.slice(body.indexOf('export async function getCandidatesByTicker'))
-    assert.match(fn.slice(0, 900), /status\(404\)/)
-    assert.match(fn.slice(0, 900), /status\(500\)/)
+    const fn = body.slice(body.indexOf('export const getCandidatesByTicker'))
+    assert.match(fn.slice(0, 900), /httpError\(404,/)
+    assert.doesNotMatch(fn.slice(0, 900), /status\(500\)/, 'no hand-rolled 500 — the pipe answers it')
 })

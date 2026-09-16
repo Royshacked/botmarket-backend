@@ -2,6 +2,7 @@ import { paperBrokerService, VIRTUAL_MODES } from '../broker/paperBroker.service
 import { computeEquity }       from '../broker/paperExecution.service.js'
 import { tradeCaptureService } from '../../services/tradeCapture.service.js'
 import { makeHandle }          from '../_shared/handle.util.js'
+import { httpError }           from '../../services/httpError.util.js'
 
 const LOG     = '[paper:controller]'
 const _handle = makeHandle(LOG)
@@ -61,7 +62,7 @@ async function _accountState(userId, acct) {
 /** Resolve an owned account or throw 404 (guards the :accountId routes). */
 async function _requireAccount(userId, accountId) {
     const acct = await paperBrokerService.getAccount(userId, accountId)
-    if (!acct) throw Object.assign(new Error(`account ${accountId} not found`), { status: 404 })
+    if (!acct) throw httpError(404, `account ${accountId} not found`)
     return acct
 }
 
