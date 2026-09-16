@@ -175,7 +175,19 @@ function _cleanDraft(c) {
 // `flags` come out to be NAMED below; `monitor` comes out because it is the monitor's bookkeeping
 // (next check, check count, edge category, cooldown stamps) and says nothing about the thesis —
 // tokens on every update-mode turn for a reader that has no use for them.
-const _forPrompt = ({ flags, monitor, ...rest }) => rest   // eslint-disable-line no-unused-vars -- destructured away on purpose
+//
+// `revisions` is CAPPED, not dropped: it is the append-only trail (newest first), and the monitor
+// re-models a name off every earnings date, so an old thesis carries dozens of entries — each one
+// re-shipped whole into every future update-mode prompt, unbounded token creep for a reader that
+// needs the recent arc, not the archaeology. The stored trail stays complete; only the prompt is
+// trimmed. The most recent PROMPT_REVISIONS are what "reference what's changed since the prior
+// view" actually reads.
+const PROMPT_REVISIONS = 5
+const _forPrompt = ({ flags, monitor, revisions, ...rest }) => (   // eslint-disable-line no-unused-vars -- flags/monitor destructured away on purpose
+    Array.isArray(revisions) && revisions.length > PROMPT_REVISIONS
+        ? { ...rest, revisions: revisions.slice(0, PROMPT_REVISIONS) }
+        : { ...rest, ...(revisions !== undefined ? { revisions } : {}) }
+)
 function _objectionsBlock(flags) {
     const list = (Array.isArray(flags) ? flags : [])
         .map(f => ({ leg: typeof f?.leg === 'string' ? f.leg.trim() : '', detail: typeof f?.detail === 'string' ? f.detail.trim() : '' }))

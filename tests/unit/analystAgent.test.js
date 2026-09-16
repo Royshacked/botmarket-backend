@@ -180,3 +180,29 @@ test('seed: uppercases ticker, keeps sector/thesis/analysis, requires a ticker',
     assert.equal(sanitizeScanSeed(null), null)
     assert.equal(sanitizeScanSeed('nope'), null)
 })
+
+// ── update-mode prompt caps the revision trail ────────────────────────────────
+// The monitor re-models a name off every earnings date, appending a revision each time (newest
+// first). The whole stored doc goes into the update-mode prompt, so an uncapped trail is re-shipped
+// in full on every future update — token creep for a reader that needs the recent arc, not years of
+// it. _buildSystemPrompt renders only the most recent few; the stored doc is untouched.
+test('system prompt: a long revision trail is capped in the prompt, newest kept', () => {
+    const revisions = Array.from({ length: 12 }, (_, i) => ({ at: `2026-0${(i % 9) + 1}-01`, kind: 'remodel', note: `rev-${i}` }))
+    // newest-first: rev-0 is the most recent, rev-11 the oldest.
+    const prompt = _buildSystemPrompt({
+        active_symbol: 'SPGI',
+        existing_coverage: { symbol: 'SPGI', rating: 'buy', thesis: 't', revisions },
+    })
+    const text = prompt[1].text
+    assert.ok(text.includes('rev-0'), 'the newest revision is present')
+    assert.ok(text.includes('rev-4'), 'the 5th-newest is present')
+    assert.ok(!text.includes('rev-5'), 'the 6th-newest and older are dropped from the prompt')
+    assert.ok(!text.includes('rev-11'), 'the oldest is dropped')
+})
+
+test('system prompt: a short revision trail is shown whole', () => {
+    const revisions = [{ at: '2026-05-01', kind: 'remodel', note: 'only-recent' }, { at: '2026-01-01', kind: 'initiate', note: 'first' }]
+    const prompt = _buildSystemPrompt({ active_symbol: 'X', existing_coverage: { symbol: 'X', rating: 'buy', thesis: 't', revisions } })
+    const text = prompt[1].text
+    assert.ok(text.includes('only-recent') && text.includes('first'))
+})
