@@ -64,7 +64,9 @@ Atlas turn: get_coverage(sector, school) → empty
 their monthly ceiling is degraded to the cheap model (`agentUtils.resolveAgentStream`). Coverage
 is a house artifact every book builds from: it must not be researched on the cheap model because
 the asker was over budget, and an hour of Prometheus is the house's spend, not the price of asking
-Atlas a question. The coverage monitor's re-model already runs the same way.
+Atlas a question. The coverage monitor's scheduled re-model goes one step further — it runs with
+NO user at all (`userId: null`): no venue, no audience level, no ceiling, and — a known gap — no
+spend booked to anyone, because usage is recorded per user and there is no house row yet.
 
 **What a trader's `<coverage_request>` still does:** queues the one named ticker (`source: manual`)
 for the next run — no card. Sourcing a whole sleeve is `<screen_request>`; the prompt says which is

@@ -53,6 +53,19 @@ api/
                               pipe it shares with tilt.service: revise = `$set` of ONLY the patched fields +
                               `$push` of the revision at position 0, in one update (`_updateSet` is the pure
                               half). Own collection — NOT the execution-tier entities (P1 of the Analyst)
+  strategy/               Pythia — the house SECTOR VIEW  /api/strategy/*. THE WHOLE DESK IS ADMIN-ONLY
+                          (router-wide requireAdmin, 2026-09-14). strategy.controller streams the desk +
+                          the tilt publication log (current · list · publish · update · retire — no
+                          delete: a desk that can erase its calls has no track record). Every handler
+                          rides makeHandle. Publish diffs against the view in force (tilt.assess.
+                          diffStances) → tiltNotify.notifyTiltChanged to every admin → runHouseScan
+    tilt.service.js           `tilt` collection = ONE active house view per benchmark, superseded on
+                              publish, never overwritten; house-owned like coverage (no userId). Each
+                              ROW owns its clock (forecastClock.openWindow: reaffirm keeps set_at,
+                              re-author restarts) and its FROZEN baseline (base_px / base_bench_px —
+                              stampBaselines at publish). stanceCoherence refuses a row whose words and
+                              number disagree; balanceOf records an unbalanced table rather than losing
+                              it. Writes ride houseArtifact.repo (`_updateSet` = only the patched fields)
   broker/                 broker connections/orders/positions  /api/broker/*
     adapters/
       broker.interface.js     BrokerAdapter base class — THE contract every broker fulfils
@@ -347,7 +360,7 @@ services/
                             = one sleeve: FMP screen under the school's pond (SCHOOL_SCREEN, a proxy —
                             Prometheus applies the real bar) → drop covered → research_queue rows
                             (source 'argus', context.sleeve) → researchRun.startRun AS THE HOUSE
-                            (userId null: no budget degrade, house spend) → onRunSettled → an Atlas
+                            (userId null: no budget degrade — and no spend booked to anyone, a known gap) → onRunSettled → an Atlas
                             card `sleeve_sourced` to the requester. Pending sleeves are in-process
                             memory, like the run. See docs/desks/roles-and-sourcing.md
   researchRun.service.js    headless Prometheus over the research queue, one name at a time, writes
@@ -530,6 +543,39 @@ monitoring/
                             the view everyone reads, so it takes a confirm. Both clocks anchor on
                             reviewAnchorMs (last publish/reauthor off the revision trail), NEVER on
                             updated_at — the loop's own maturity write moves that
+  coverage.monitor.service.js  Prometheus's slow loop (dueLoop, hourly tick, ~daily per name, every
+                            status but retired). Cheap tier: price + the Street's PT distribution →
+                            coverage.assess.classifyGapState (target_hit / target_hit_early /
+                            validating / diverging / stable) → a revision + a coverage_event card to
+                            every admin on a material verdict, bookkeeping only on a quiet one. The
+                            early-hit ratchet is scoped to the TARGET it silenced (early_hit_at vs
+                            price_target.set_at). Expensive tier = a RE-MODEL: coverage.remodel.
+                            remodelDecision (catalyst passed / edge changed category / 90-day floor /
+                            early hit, under a 14-day cooldown; an Aether signal can pull it in) →
+                            _runRemodels after the tick, held names first, MAX 3 → claimRemodel (a
+                            compare-and-swap on last_remodel_at, so a second process stands down) →
+                            coverageRefresh.refreshCoverage({ userId: null }) — a HOUSE run: no venue,
+                            no audience level, the refreshed card to every admin. That call answered
+                            bad_args from the coverage pivot (2026-08-26) to 2026-09-16 and the
+                            tier did nothing; _runRemodels reads its answer now
+  coverage.assess.js        the PURE gap classifier + recomputeGap (our PT's percentile in the Street's
+                            low–high range, not a % off the mean) + statusForState (only target_hit
+                            moves status) + nextCheckAt (ALWAYS a next check — a thesis lives until
+                            retired). No price-based thesis_broken, deliberately: research is not a
+                            position, a cheaper name is not a wrong one
+  coverage.remodel.js       PURE: when is a thesis worth the expensive tier. classifyEdge (contrarian /
+                            variant / contained, vs the Street's range), parseCatalystDates (strict
+                            YYYY-MM-DD only — fuzzy dates are prose for the analyst), remodelDecision.
+                            Not a trigger: price, raw consensus drift, sector rotation (declined
+                            2026-07-30 — Atlas's question, not Prometheus's)
+  tilt.assess.js            PURE grading for the house view: relativeReturnPct / contributionBp
+                            (active_bp × relative return — attribution, not opinion; null, never 0,
+                            when unpriceable), gradeRow (a row MATURES when its own window closes),
+                            diffStances (what moved between two views), reviewAnchorMs (off the
+                            revision trail, NEVER updated_at — the monitor's own maturity write moves
+                            that), reviewDecision (matured / macro catalyst / 30-day floor, 7-day
+                            cooldown). The same cooldown → triggers → floor shape as remodelDecision,
+                            deliberately NOT collapsed — the constants ARE the judgment
   paperFill.service.js  paperEquity.service.js
   exitOrders.util.js        buildExitOrder (applies +basisOffset → broker price space) / exitOrderRecord / closeSide / orderSymbol
   monitorUtils.js           candleMs, parseYesNo, round, remainingForAccount, timeframe resolvers;

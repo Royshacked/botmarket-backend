@@ -212,13 +212,24 @@ Dismiss/handled state persists per-message.
 | `queue_ready` | The venue opened and something is waiting (`marketOpen.monitor`) | Open the queue → the Floor's **Queued** desk. ONE card per USER, from Axl (see §5). The one card **completed by opening** (`resolvesOn: 'open'`): it points at a batch, so it carries no `subject` a write could resolve it through, and the list itself is the live record of what is still owed |
 | `market_brief_offer` | Daily broadcast offer, one per user per weekday (`marketBrief.notify.js`) | Get the brief → routes to **Axl**, who writes it in his thread · Dismiss |
 | `tilt_review` | The house view is past its clock — a stance matured, a macro catalyst landed, or the monthly floor expired (`tilt.monitor` → `reviewDecision`) | Run the review → routes to **Pythia**, who runs it in his thread · Dismiss |
+| `tilt_event` | A publish MOVED a sector (`tilt.assess.diffStances` against the view in force; a reaffirming republish tells nobody) | Open sector view — a READ, so it completes on open (`resolvesOn: 'open'`). Every admin, the whole change |
+| `coverage_event` | The coverage monitor's material verdict on a name — `target_hit` · `target_hit_early` (reads as a MISS: the number was too low, so it re-opens the call) · `validating` · `diverging` (`coverage.assess.classifyGapState`) | Open coverage. Every admin — the card asks for a revision only an admin can make |
+| `coverage_refreshed` | A headless Prometheus run rewrote a name's coverage — Atlas's `<coverage_refresh>` hop mid-review, or the monitor's scheduled re-model | Resume review (→ Atlas, when a portfolioId rides along) or Open coverage. The hop's card goes to the ONE user who asked; the scheduled re-model has no user and goes to every admin |
+| `sleeve_sourced` | The research run finished the names a `<screen_request>` queued for a book's sleeve (`sleeveSource.service`) | Resume → Atlas, for the requester |
 
 Two cards are **not about the user** — `market_brief_offer` and `tilt_review`. Both announce a
-BROADCAST (the daily brief, the house sector view), so the same text goes to everyone and neither
-mentions a position, account or holding; both fan out over `listAllUserIds`, and both dedupe by
-reading the cards already posted rather than by a flag, so a restart mid-fan-out resumes instead of
-double-posting. Both are also **offers**: posted with no tokens spent, the work only runs when
-someone confirms. Axl relays that same brief in chat via `get_market_brief`.
+BROADCAST (the daily brief, the house sector view), so the same text goes to everyone in their
+audience and neither mentions a position, account or holding — the brief fans out over
+`listAllUserIds`, the review offer over `listAdminUserIds` (the desk is admin-only) — and both
+dedupe by reading the cards already posted rather than by a flag, so a restart mid-fan-out resumes
+instead of double-posting. Both are also **offers**: posted with no tokens spent, the work only
+runs when someone confirms. Axl relays that same brief in chat via `get_market_brief`.
+
+The three HOUSE cards — `tilt_event`, `coverage_event`, the scheduled half of
+`coverage_refreshed` — describe an artifact with no owner, so their audience is derived at
+delivery: the admin roster, every time. There is no narrower audience left in the data (coverage
+carries no `userId` since 2026-08-26), and the one card that tried to derive one from it went to
+nobody for three weeks.
 
 `tilt_review` is the strategy desk's wake, and the reason it asks rather than acts is that a
 re-author SUPERSEDES the view every user reads — see §monitors. Its dedupe window opens at the last

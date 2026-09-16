@@ -19,7 +19,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 3 | Mentor / setups + Talos | `api/setups/**`, `setup.schema.js`, `mentor.agent.service`, `talos.*`, `monitoring/evaluators/**`, `parsers/**`, `guardSweep`, `readinessGates` | ✅ done — 6 commits `227d711`..`58e7f3d` |
 | 4 | Atlas / portfolio | `api/portfolio/**`, `portfolio.agent.service`, `portfolioState`, `sleeveSource`, `adoptBook` | ✅ done — 10 commits `e3ef6e7`..`bc8bd50`, suite **2886 / 0**; FE follow-ups cleared in `a9532a8` |
 | 5 | Agent runtime | `agentIO`, `agentUtils`, `agentTools.registry`, `services/tools/**`, `pendingAction/**`, `entity/**`, `axl.agent.service`, `api/chat/**` | ✅ done — 8 commits `13a323f`..`1b78b99` (+ `7c37bcd`, `7307e76` frontend), suite **2910 / 0** |
-| 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | |
+| 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | ✅ done — 7 commits `2a957e8`..`b3c36b9` (+ `researchQueue.service`, read in scope), suite **2932 / 0** |
 | 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | |
 | 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | |
 | 9 | Platform | `server.js`, `middleware/**`, `config.js`, `api/authentication`, `api/user`, `api/workspace`, `api/_shared`, `api/health` | |
@@ -526,6 +526,137 @@ header and correct.
 `tokenUsageByAgent` on `{ monitor: true }` / `chatSpend` (including the absent-field and floor cases),
 `tradingContextSymbol` on the cache bound evicting and the empty-venue answer being cached, the
 `BOT_IDS` ↔ `ADMIN_BOT_IDS` pin. Suite 2886 → **2910**, eslint clean, 16/16 archived modules load.
+
+---
+
+## §6 Argus / Prometheus / Pythia — done
+
+**Verdict in one line:** the pure tiers — the grounding ledger, the gap classifier, the forecast
+clock, the tilt arithmetic — are the best-written code in the repo so far, and two whole mechanisms
+around them had been dead since the coverage pivot (`5c12b8c`, 2026-08-26): the scheduled re-model
+never ran, and the tilt-change card reached nobody. Both were left running against a `userId` the
+data no longer has, and both were masked by fixtures shaped like the data used to be.
+
+*Scope note:* the section table's file list omitted `services/researchQueue.service.js`, which both
+desks depend on; it was read in full and is in scope. `services/aetherQuickRead.service.js` was read
+as the one caller of Prometheus's quick-read mode and left to §8.
+
+### Bugs
+
+| | Where | What | Sev |
+|---|---|---|---|
+| 1 | `coverage.monitor._deps.remodel` → `coverageRefresh.refreshCoverage` | **Every scheduled re-model was a no-op.** The monitor passed `userId: null` (coverage is house-owned) and the hop's first line was `if (!userId \|\| !sym) return { ok: false, reason: 'bad_args' }`. `_runRemodels` did not read the answer. Worse, `claimRemodel` had already stamped `last_remodel_at` and started the 14-day cooldown, so the name was not retried either — and the Aether trigger cleared its `pending_aether_remodel` on the same tick. The whole expensive tier: catalyst, edge change, quarterly floor, early hit, Aether. The comment beside it said *"Admin notifications for re-model events are wired in Step 2"*; Step 2 never came. Now a null user IS the house run — no venue, no audience level — and the "refreshed" card fans out to every admin (`notifyCoverageRefreshed` reads the roster when there is no user, the same fan-out its verdict card uses). `_runRemodels` logs a `{ ok: false }`, because the claim above it means there is no retry coming and that line is the only place the failure can be seen. | **high** |
+| 2 | `tiltNotify.audienceBySector` vs `coverage.listActiveBySector` | **The tilt-change card was posted to nobody for three weeks.** The audience was "whoever RESEARCHES the moved sector", a join on coverage's `userId`; the pivot changed the sweep's projection to `{ symbol, sector }` and the join matched nobody. **Confirmed in `logs/backend.log`** (12.9, a publish that moved two sectors: `{"sectors":2,"users":0,"posted":0}`). The 60-line header defending the join described a world that no longer existed, and `tiltNotify.test.js` still gave its coverage rows a `userId`. There is no per-user sector audience left in the data; the card goes to the admin roster, the same fan-out the review offer two functions below already used, and `audienceBySector` is gone. | **high** |
+| 3 | `researchRun._loop` / `startRun` | `await deps.startResearch(item.id)` — a guarded claim (queued → in_research) whose result was discarded, so a row someone else had already claimed was researched anyway: a four-minute turn whose save could only answer `already_covered`. And the "one run at a time" check ran before two awaits, so two Starts pressed together both became `state.run` and both loops walked the same queue. The claim is read (a refusal is a `skipped / not_queued`, the row untouched) and a `starting` flag set synchronously closes the race, cleared on every way out. | medium |
+| 4 | `coverage.updateCoverage` / `tilt.updateTilt` | Read-merge-write with a full-document `$set` built from the stale read: `revisions` rewritten as a whole array, and every plan field written back from `cur`. Two writers in one window — the monitor's verdict against an admin's edit, a refresh against either — and the second landed a stale copy: a revision lost, or a price target the other had just moved written back. Now `houseArtifact.repo.revise`: `$push` at position 0 for the trail and `$set` of ONLY the patched keys (`_updateSet`, pure, in each service), in one update. | medium-low |
+
+### The lens
+
+**(a) Architecture** — `analyst.controller` answered errors three ways in one file: the coverage
+handlers hand-roll `try/catch` with fixed slugs (kept — that is the §9 question); the research-queue
+and run handlers, and every handler in `strategy.controller`, had **no `try/catch` at all** and leaned
+on every service catching — true today, one thrown read from a hung request (Express 4 does not see an
+async rejection). Those ride `makeHandle` now: like §5's `chat.controller` they never caught, so
+nothing the client sees changes, and it stays clear of §9. The three queue transitions were one
+handler written three times. **Left:** `coverage.service` and `tilt.service` both dynamic-import
+`monitoring/monitorUtils.fetchLastPrice` — a service reaching into the monitor tier, hidden by the
+import being lazy. For §7/§8, where the price read's home is decided.
+
+**(b) Conventions** — `SCANNER_TOOLS_FOR_PROFILE` was a function in SCREAMING_CASE →
+`scannerToolsForProfile`. `_sanitizeAnalystSeed = sanitizeScanSeed` was an alias export for one test.
+`res.send` vs `res.json` in `analyst.controller` is split along the same line as the error postures
+and goes with §9.
+
+**(c) Duplications** — `coverage.service` and `tilt.service` are the two publication logs of house
+artifacts and had written the same mechanics twice: `recordMonitorState` byte-for-byte, a private
+`_strip` beside `mongodb.provider.stripId` (a third in `researchQueue`; the tilt spelled it
+`delete doc._id` inline three times), and the revise-write above. `houseArtifact.repo` is the pipe —
+`revise` and `recordMonitorState`, over an injectable `getDb` so the update's shape is testable — and
+each service keeps its schema, its gates and what counts as a revision. Share the pipe, not the
+judgment: `remodelDecision` and `reviewDecision` have the same cooldown → triggers → floor shape with
+different constants, and are deliberately NOT collapsed; the constants are the judgment.
+`houseScan._io.screenSector` caught what its caller already catches, making the loop's "skip this
+sector, scan continues" branch unreachable for the real IO.
+
+**(d) Dead code** — `POST /coverage/deduplicate` + `deduplicateCoverage` + a test that checked it
+returned an object: the one-off cleanup for the day the unique symbol index went in. No client calls
+it, the index exists, and `_ensureIndexes`'s comment sent a reader to it. **Noted, not proposed:**
+`HANDOFF_DESKS.kairos`, the controller's `'kairos'` whitelist and `_normalizeKairosPick` are reachable
+only if the client sends `handoffTo: 'kairos'`, which `findReceiver` cannot produce with the desk
+archived — but they are tested, cheap, and are the hand-off a premium build mode needs. The
+`destination: 'kairos'` wire value stays too, now with a note: the client reads only `=== 'analyst'`
+and the pipeline picks the receiver itself, so it names the tier, not the desk.
+
+**(e) MVC** — see (a). `researchQueue.service` is the cleanest write layer in the section: every
+transition guarded, every reason on the row.
+
+**(f) Spaghetti** — none. `tilt.monitor._checkTilt`'s `if (matured) … else … ; if (matured) …` is two
+branches written as three and was left: it reads, and the tests pin it.
+
+**(g) Plaster** — three more orphaned Aether comments that `bc8bd50`'s sweep missed, in TOOL_HANDLERS
+rather than TOOLS: `// Unbound — X is a house-layer broadcast, no userId.` under `makeMarketHoursHandlers`
+in analyst (×2) and scanner (×1), each describing a spread that no longer exists — the class the §4
+write-up said the test cannot catch. **Two files described coverage as owner-scoped** in the reasoning a
+reader uses: `tilt.service`'s header (*"one doc per (user, symbol) — bottom-up, owner-scoped"*) and
+`strategy.controller`'s (*"NOT owner-scoped the way coverage's are … `requireAuth` still gates them"*;
+the router is `requireAdmin`). `coverageRefresh` said the language rule rode the existing thesis, two
+paragraphs after the comment explaining why it was removed. Archived desks as live templates (§5's
+class): `analyst.agent`'s header ("Mirrors the Kairos agent shape"), "the Hermes/Themis pattern", "the
+same one Hermes … gate[s] on" in both monitors, and Argus's hand-off comments naming Kairos as the
+RECEIVER of the pick ("recommends back to Kairos", "seeds Kairos's Phase 2") — the receiver is Mentor.
+A `no-unused-vars` pragma on a function that is used.
+
+**(h) Efficiency** — `_resolveCoverageContext` loaded every coverage document — thesis, evidence, the
+whole revision trail — on every Prometheus turn to read `symbol`; the research run and the sleeve
+orchestrator did the same for their skip lists. `coverageService.listSymbols` projects the one field
+and the three use it. `existing_coverage` and `current_tilt` were JSON-dumped whole into the prompt,
+`monitor.*` included — bookkeeping on every turn for a reader with no use for it; both strip it now.
+
+### Judgment calls made against the plan
+
+- **A house run books no token spend.** `resolveAgentStream` records usage per user only, so the
+  scheduled re-model — real money — lands on nobody's row. Stated in the commit as a known gap rather
+  than hidden; it wants a house row, which does not exist. Not invented here.
+- **One word changed and put back.** The (g) sweep touched `get_chart`'s tool DESCRIPTION ("the Kairos
+  single-pick"). That is prompt content the model reads, and `agentToolsRegistry` pins every description
+  verbatim so a refactor never rewrites judgment. The snapshot said no; reverted; left for the prompt
+  review, where a change to what the model is told belongs.
+- **The revision trail still rides every prompt turn, uncapped.** `revisions[]` grows forever and is
+  shown whole in update mode. Whether to cap it is a prompt-content question (the prompt says
+  "reference what's changed since the prior view", and the trail's `changed` diffs are exactly that).
+  Left for the prompt review.
+- The `parseChatMessages` gate: five controllers validate and TRIM the messages, then pass the RAW body
+  array to the agent. Repo-wide, not this section's — `_shared` is §9's — and possibly deliberate
+  (extra fields the agent's own normaliser reads). Carried.
+
+### Behaviour changes a reader should know
+
+- The coverage monitor's re-models RUN. Catalyst, edge-change, floor, early-hit and Aether-triggered
+  re-models rewrite the thesis and post a `coverage_refreshed` card to every admin (copy: "Scheduled
+  re-model of X is in — …"). Expect Prometheus spend from the monitor tier for the first time since
+  2026-08-26; `MAX_REMODELS_PER_TICK = 3` bounds it.
+- Publishing a tilt that moved a sector posts a `tilt_event` card to every admin, with the whole change.
+- The research run reports a new outcome: `skipped / not_queued`. A second Start during the first's
+  reads answers `already_running`.
+- `POST /api/analyst/coverage/deduplicate` is gone.
+- A coverage or tilt revision is appended in the database; concurrent writers can no longer lose one.
+
+### Frontend follow-ups (botmarket-frontend)
+
+None required. The client renders `coverage_refreshed` through the same bubble (the added
+`payload.house` flag is ignored); it never called `/coverage/deduplicate`; it does not map run-result
+reasons to copy, so `not_queued` renders as the others do.
+
+### Tests added
+
+`houseArtifactRepo` (the update's shape against a fake collection; each service's `_updateSet` on the
+patches that actually happen — a rating change does not write the target, the monitor's verdict writes
+gap and status and nothing else, a re-model draft writes every plan field), `deskControllersHandle` (a
+throw reaches `next`, induced with a malformed request rather than a stub), the house-run contract in
+the monitor's exact shape (`coverageRefresh`), the refresh card's two audiences (`coverageNotify`), the
+tilt fan-out rebuilt over the seams that exist (`tiltNotify` — 4 dead-join tests out, 6 in), the
+read claim and the single-flight Start (`researchRun`), the bookkeeping-free prompt dumps
+(`coverageObjections`, `strategyAgent`). Suite 2910 → **2932**.
 
 ---
 
