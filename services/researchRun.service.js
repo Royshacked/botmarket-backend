@@ -285,8 +285,7 @@ const _io = {
     // save told it so. Better to not start.
     async coveredSymbols() {
         const { coverageService } = await import('../api/analyst/coverage.service.js')
-        const all = await coverageService.getCoverage({ onError: 'throw' })
-        return new Set(all.map(d => _sym(d.symbol)))
+        return new Set(await coverageService.listSymbols({ onError: 'throw' }))
     },
 
     // One headless research turn: no messages before it, no stream to anyone. The coverage book

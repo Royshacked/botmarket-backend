@@ -307,8 +307,7 @@ const _io = {
     },
     async coveredSymbols() {
         const { coverageService } = await import('../api/analyst/coverage.service.js')
-        const all = await coverageService.getCoverage({ onError: 'throw' })
-        return new Set(all.map(d => _sym(d.symbol)))
+        return new Set(await coverageService.listSymbols({ onError: 'throw' }))
     },
     enqueue:      (args) => researchQueueService.enqueue(args),
     listQueue:    (q)    => researchQueueService.listQueue(q),

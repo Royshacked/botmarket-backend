@@ -50,6 +50,7 @@ export const coverageService = {
     getCoverage,
     getCoverageBySymbol,
     getCoverageById,
+    listSymbols,
     listActiveBySector,
     updateCoverage,
     retireCoverage,
@@ -366,6 +367,25 @@ async function getCoverage({ sector = null, status = null, school = null, onErro
         return (await db.collection(COLLECTION).find(filter).sort({ updated_at: -1 }).toArray()).map(stripId)
     } catch (err) {
         logger.error(LOG, 'getCoverage failed', err)
+        if (onError === 'throw') throw err
+        return []
+    }
+}
+
+/**
+ * Every covered symbol, uppercased → `string[]`. The read for "which names are taken": Prometheus's
+ * chat context, the research run's skip list, the sleeve orchestrator. Those used to call getCoverage
+ * and map `.symbol` off full documents — the thesis, the evidence, the whole revision trail — on
+ * every turn, to learn a ticker. Projects the one field. `onError: 'throw'` as getCoverage: the run
+ * must not mistake an unreadable book for an empty one.
+ */
+async function listSymbols({ onError } = {}) {
+    try {
+        const db   = await getDb()
+        const rows = await db.collection(COLLECTION).find({}).project({ _id: 0, symbol: 1 }).toArray()
+        return rows.map(r => String(r.symbol ?? '').toUpperCase().trim()).filter(Boolean)
+    } catch (err) {
+        logger.error(LOG, 'listSymbols failed', err)
         if (onError === 'throw') throw err
         return []
     }

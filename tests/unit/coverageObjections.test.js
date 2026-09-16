@@ -57,3 +57,20 @@ test('fresh research (no existing coverage) is untouched by any of this', () => 
     assert.doesNotMatch(out, /STANDING OBJECTIONS/)
     assert.match(out, /Active name: NVDA/)
 })
+
+// ── the monitor's bookkeeping stays out of the prompt ────────────────────────
+// `monitor.*` (next check, check count, edge category, cooldown stamps) is the monitor's record of its
+// own work. It rode into update mode inside the JSON dump on every turn, for a reader with no use for
+// it; the thesis, the trail and the evidence still go.
+
+test('update mode shows the thesis and its trail, not the monitor\'s bookkeeping', () => {
+    const existing = {
+        symbol: 'NVDA', thesis: 'v1', revisions: [{ kind: 'initiate', at: '2026-01-01T00:00:00.000Z' }],
+        monitor: { next_check_at: '2026-09-17T00:00:00.000Z', checks: 41, edge_category: 'variant_bull' },
+        flags: [],
+    }
+    const text = _buildSystemPrompt({ existing_coverage: existing }).at(-1).text
+    assert.match(text, /"thesis": "v1"/)
+    assert.match(text, /"kind": "initiate"/)
+    assert.doesNotMatch(text, /"checks"|edge_category|next_check_at/)
+})

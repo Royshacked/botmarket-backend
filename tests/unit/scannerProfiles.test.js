@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _cleanScore, _normalizeScan, SCANNER_TOOLS_FOR_PROFILE } from '../../services/agents/scanner.agent.service.js'
+import { _cleanScore, _normalizeScan, scannerToolsForProfile } from '../../services/agents/scanner.agent.service.js'
 
 // Argus P4a — trading vs investing profiles (scoring axes, tool subset, scan_list profile/destination).
 
@@ -50,11 +50,11 @@ test('_normalizeScan trading (default): profile=trading, destination=kairos', ()
 })
 
 // ── tool subset ──────────────────────────────────────────────────────────────
-test('SCANNER_TOOLS_FOR_PROFILE: investing keeps the fundamental kit, drops technical/vision', () => {
-    const inv = SCANNER_TOOLS_FOR_PROFILE('investing').map(t => t.name)
+test('scannerToolsForProfile: investing keeps the fundamental kit, drops technical/vision', () => {
+    const inv = scannerToolsForProfile('investing').map(t => t.name)
     for (const k of ['screen_candidates', 'get_fundamentals', 'get_sec_filings', 'get_earnings']) assert.ok(inv.includes(k), `investing missing ${k}`)
     for (const k of ['get_candles', 'get_indicators', 'get_chart', 'get_orderblocks', 'get_market_movers']) assert.ok(!inv.includes(k), `investing should drop ${k}`)
 
-    const trd = SCANNER_TOOLS_FOR_PROFILE('trading').map(t => t.name)
+    const trd = scannerToolsForProfile('trading').map(t => t.name)
     assert.ok(trd.includes('get_candles') && trd.includes('get_indicators') && trd.includes('get_orderblocks'))  // full kit
 })

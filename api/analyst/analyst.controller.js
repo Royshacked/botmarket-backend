@@ -28,10 +28,9 @@ export async function _resolveCoverageContext(chatState, seed) {
 
     if (!state.coverage_symbols?.length) {
         try {
-            const all = await coverageService.getCoverage()
-            state.coverage_symbols = all.map(d => d.symbol)
+            state.coverage_symbols = await coverageService.listSymbols({ onError: 'throw' })
         } catch (err) {
-            logger.warn(LOG, '_resolveCoverageContext: getCoverage failed (non-fatal)', err.message)
+            logger.warn(LOG, '_resolveCoverageContext: listSymbols failed (non-fatal)', err.message)
         }
     }
 

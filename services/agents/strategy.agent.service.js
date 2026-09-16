@@ -155,9 +155,11 @@ function _buildSystemPrompt() {
 export function _buildTurnContext(chatState) {
     const current = chatState?.current_tilt
     if (!current) return null
+    // The monitor's bookkeeping (`monitor.*`) is not part of the view and is not shown to the desk.
+    const { monitor, ...view } = current   // eslint-disable-line no-unused-vars -- destructured away on purpose
     return `CURRENT PUBLISHED VIEW — this is the house view in force. Reaffirm what still holds (a `
         + `reaffirmed stance keeps its original clock and entry prices) and re-author only what has `
-        + `actually moved.\n${JSON.stringify(current, null, 2)}`
+        + `actually moved.\n${JSON.stringify(view, null, 2)}`
 }
 
 // A continuing conversation is trimmed + coalesced; a first turn is just the prompt. normalizeMessages

@@ -18,7 +18,7 @@ import { dirname, join } from 'path'
 import { TOOLS as PORTFOLIO_TOOLS } from '../../services/agents/portfolio.agent.service.js'
 import { TOOLS as ANALYST_TOOLS }   from '../../services/agents/analyst.agent.service.js'
 import { TOOLS as AXL_TOOLS }       from '../../services/agents/axl.agent.service.js'
-import { TOOLS as SCANNER_TOOLS, SCANNER_TOOLS_FOR_PROFILE } from '../../services/agents/scanner.agent.service.js'
+import { TOOLS as SCANNER_TOOLS, scannerToolsForProfile } from '../../services/agents/scanner.agent.service.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/')
 
@@ -32,7 +32,7 @@ const DESKS = [
     { prompt: 'scanner_system_prompt.md',         tools: SCANNER_TOOLS },
     // The investing profile runs a SUBSET — checking it against the full kit would wave through a
     // tool Argus loses the moment it screens for a portfolio.
-    { prompt: 'scanner_profile_investing.md',     tools: SCANNER_TOOLS_FOR_PROFILE('investing') },
+    { prompt: 'scanner_profile_investing.md',     tools: scannerToolsForProfile('investing') },
 ]
 
 for (const { prompt, tools } of DESKS) {
@@ -49,7 +49,7 @@ for (const { prompt, tools } of DESKS) {
 
 test('the investing profile is a real subset — the check above is not tautological', () => {
     const full = new Set(SCANNER_TOOLS.map(t => t.name))
-    const inv  = SCANNER_TOOLS_FOR_PROFILE('investing').map(t => t.name)
+    const inv  = scannerToolsForProfile('investing').map(t => t.name)
     assert.ok(inv.length < full.size, 'investing should drop the technical kit')
     assert.ok(!inv.includes('get_candles'), 'investing screens fundamentals, not charts')
 })

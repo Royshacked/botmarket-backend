@@ -121,3 +121,12 @@ test('a continuing conversation is trimmed and coalesced, not replaced by the pr
 test('nothing to say yields an empty array rather than a phantom turn', () => {
     assert.deepEqual(_buildMessages({}), [])
 })
+
+test('the current view rides the turn without the monitor\'s bookkeeping', () => {
+    const text = _buildTurnContext({ current_tilt: {
+        id: 'tilt_1', regime: { name: 'r' }, tilts: [{ sector: 'Energy', stance: 'over', active_bp: 150 }],
+        monitor: { next_check_at: 't', checks: 12, total_bp: 4.5 },
+    } })
+    assert.match(text, /"sector": "Energy"/)
+    assert.doesNotMatch(text, /"checks"|total_bp|next_check_at/)
+})

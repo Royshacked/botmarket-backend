@@ -168,7 +168,7 @@ function _wrapForGrounding(handlers, ledger) {
 export const scannerAgentService = { chatStream }
 
 // Exported for unit tests (scanner scorecard normalization + ranking).
-export { _normalizeScan, _cleanScore, SCANNER_TOOLS_FOR_PROFILE }
+export { _normalizeScan, _cleanScore, scannerToolsForProfile }
 
 // Tool subset per profile (P4a). Investing drops the technical/momentum/vision kit (candles, indicators,
 // chart, orderblocks, movers, positioning, cycles) and keeps the fundamental screen. Trading = full kit.
@@ -177,7 +177,7 @@ const INVESTING_TOOL_NAMES = new Set([
     'get_earnings', 'get_earnings_calendar', 'get_analyst_actions', 'get_sec_filings',
     'get_quotes', 'get_price_action',
 ])
-function SCANNER_TOOLS_FOR_PROFILE(profile) {
+function scannerToolsForProfile(profile) {
     return profile === 'investing' ? TOOLS.filter(t => INVESTING_TOOL_NAMES.has(t.name)) : TOOLS
 }
 
@@ -263,7 +263,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     const raw = await _run({
         log: LOG, requestedModel, userId,
         messages: normalized, systemPrompt,
-        tools: SCANNER_TOOLS_FOR_PROFILE(prof),
+        tools: scannerToolsForProfile(prof),
         toolHandlers,
         // onChart here is the <chart> TAG only — the user asking to see a chart. The scanner's
         // vision TOOLS stay wired to onChart:null (see TOOL_HANDLERS): its own renders remain

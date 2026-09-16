@@ -172,7 +172,10 @@ function _cleanDraft(c) {
 // instructions: the analyst may defend a leg — arguing a name re-rates outside its own history is a
 // legitimate variant view, which is exactly why these RECORD rather than refuse — but it must now
 // answer instead of stepping over.
-const _withoutFlags = ({ flags, ...rest }) => rest   // eslint-disable-line no-unused-vars -- `flags` is destructured away on purpose
+// `flags` come out to be NAMED below; `monitor` comes out because it is the monitor's bookkeeping
+// (next check, check count, edge category, cooldown stamps) and says nothing about the thesis —
+// tokens on every update-mode turn for a reader that has no use for them.
+const _forPrompt = ({ flags, monitor, ...rest }) => rest   // eslint-disable-line no-unused-vars -- destructured away on purpose
 function _objectionsBlock(flags) {
     const list = (Array.isArray(flags) ? flags : [])
         .map(f => ({ leg: typeof f?.leg === 'string' ? f.leg.trim() : '', detail: typeof f?.detail === 'string' ? f.detail.trim() : '' }))
@@ -197,7 +200,7 @@ export function _buildSystemPrompt(chatState, seed = null, audience = null, mode
     const active = chatState?.active_symbol || 'none'
     const existingBlock = chatState?.existing_coverage
         ? `\nEXISTING COVERAGE — update mode: this name is already in the book. Revise the thesis rather than starting from scratch. Reference what's changed since the prior view.\n`
-            + `${JSON.stringify(_withoutFlags(chatState.existing_coverage), null, 2)}`
+            + `${JSON.stringify(_forPrompt(chatState.existing_coverage), null, 2)}`
             + _objectionsBlock(chatState.existing_coverage?.flags)
         : ''
     const coverageListBlock = chatState?.coverage_symbols?.length && !chatState?.existing_coverage
