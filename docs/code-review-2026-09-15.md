@@ -23,7 +23,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | ✅ done — 8 commits `d8d7fab`..`15b562a` (+ `candleFetch`, `priceFeed`, `http.util`, the two adapters' carried items), suite **2965 / 0 in 63s**; CR cycle → `9798baa`, **2968 / 0** |
 | 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | ✅ done — 4 commits `005c9c8`..`953e522`, write-up `97e716f`, CR cycle → `f9da64a`, suite **2968 / 0** |
 | 9 | Platform | `server.js`, `middleware/**`, `config.js`, `api/authentication`, `api/user`, `api/workspace`, `api/_shared`, `api/health` (+ `threads`, `turns`, `calendar`, `transcribe`, `experience`, the lifecycle/lease/logger services, read in scope) | ✅ done — 6 commits `63a9518`..`08ebf13`, write-up `38107db`, CR cycle → `dfe1d52`, suite **2993 / 0** |
-| 10 | Tests + scripts | coverage gaps vs. §1–9, `scripts/**` hygiene | ✅ done — 6 commits `ca132c0`..`d704642`, suite **3039 / 0** |
+| 10 | Tests + scripts | coverage gaps vs. §1–9, `scripts/**` hygiene | ✅ done — 6 commits `ca132c0`..`d704642`, CR cycle → `d95514e`, suite **3039 / 0** |
 
 ---
 
@@ -1118,6 +1118,49 @@ draft save. Neither is a §10 item.
 New: `scriptsImport` (3), `evaluateTree` (17), `monitorEvaluators` (13), `preflightEntry` (6),
 `timeframeService` (9), `rateLimitKeys` (5). Changed: the four `fakeRes` adopters onto
 `tests/helpers/http.js`; the two aether files through `runHandler`. Suite 2993 → **3039**.
+
+---
+
+## QA / CR cycle on §10 (2026-09-16)
+
+QA: lint clean repo-wide; full suite **3039 / 0** (unchanged by this cycle's fixes — they touch two
+scripts and one test's parser, adding no assertions); all **279** backend modules import cleanly;
+**28** scripts' imports resolve (the new static guard, run standalone); 16/16 archived modules load.
+
+Docs: §10 written up, and the whole review summarised end to end. CODE_MAP's `scripts/` line now
+describes the five kinds and names the static loader; `package.json`'s template fields fixed.
+
+### CR findings on the §10 range, and what was done
+
+A high-effort review over `32db3e8..HEAD` confirmed every moved import resolves, the shared
+`runHandler`/`fakeRes` and the dotenv removal are clean, and the new unit tests match their
+sources — and found four things, two in the rewritten admin script and two guard/diagnostic gaps.
+
+| | Where | What | Done |
+|---|---|---|---|
+| 1 | `create-admin-user.mjs` | `createUser` fires `seedBotConversation` un-awaited (fine in the server, which lives on); the script then closed the client and exited, cutting the welcome writes off mid-flight — the welcome the header promises never landed. | Awaits `seedBotConversation` after `createUser` — idempotent, so one welcome even racing createUser's own call. medium |
+| 2 | `create-admin-user.mjs` | A promotion that threw after the insert left a TRADER the operator could not retry through this script (`createUser` 409s on the name the second time). | The insert and the promotion are separate try-blocks; a failed promotion says to run `set-admin-role`. low |
+| 3 | `scriptsImport.test.js` | The parser matched only named / default / dynamic / bare imports — `import * as x` and `import def, { named }` were skipped, so an export moved out from under those shapes would pass the very guard meant to catch it. | Both shapes covered (combined matched and blanked first so default/named do not half-match it); the parser test asserts all six shapes. low |
+| 4 | `verify-mentor.mjs` | The new inline zone-distance flatMapped ALL scenarios including dead ones, so a triggered premise's zone could colour the "may never trigger" warning. | Reads `liveScenarios(setup)`, as the gate does. low |
+
+The lesson is the one this whole section is about, turned on my own change: I replaced
+`liveEntryZones` with an inline flatMap and dropped its live-filter, and I wrote a guard that was
+itself blind to two import shapes. A test that checks "does it still load" is only as good as the
+shapes its parser knows — so the parser now has its own test, listing every shape.
+
+### Carried forward (the review's open list, by owner)
+
+- **Model / prompt review** (a separate pass): `web_search` tool version per model, the Sonnet 4.6
+  default, "Kairos single-pick" in `get_chart`, the uncapped revision trail in Prometheus's
+  update-mode prompt.
+- **Product, not code:** the house usage row (the `onUsage` seams exist, nothing books to them);
+  whether Aether's event candidates should trigger a Prometheus re-model.
+- **Frontend:** `user.service.remote.js` template leftover; MainPage's dead `/api/idea` draft save.
+- **Tests (carried from §10):** deps/repo seams for `guardSweep._tick`, `researchQueue.service`,
+  `manualIdea`/`manualExecution`, `adoptBook.store`, and `monitor.orchestrator`'s DB-touching siblings.
+- **Deploy:** `engines: "node": "22"` while dev runs 24 — a Render-pin question.
+
+The ten-section review is complete: §1–§10 fixed, written up, and each closed with a QA + CR cycle.
 
 ---
 
