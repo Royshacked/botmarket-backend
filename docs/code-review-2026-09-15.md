@@ -18,7 +18,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 2 | Trade tier (`idea`) | `api/trade-ideas/**`, `tradeCapture`, `tradeNotify`, `positionManage`, `protectionPlan`, `monitoring/positionMonitor.js`, `entry.monitor.js`, `exit.monitor.js` | ✅ done — 8 commits `e066101`..`e6c42d0` |
 | 3 | Mentor / setups + Talos | `api/setups/**`, `setup.schema.js`, `mentor.agent.service`, `talos.*`, `monitoring/evaluators/**`, `parsers/**`, `guardSweep`, `readinessGates` | ✅ done — 6 commits `227d711`..`58e7f3d` |
 | 4 | Atlas / portfolio | `api/portfolio/**`, `portfolio.agent.service`, `portfolioState`, `sleeveSource`, `adoptBook` | ✅ done — 10 commits `e3ef6e7`..`bc8bd50`, suite **2886 / 0**; FE follow-ups cleared in `a9532a8` |
-| 5 | Agent runtime | `agentIO`, `agentUtils`, `agentTools.registry`, `services/tools/**`, `pendingAction/**`, `entity/**`, `axl.agent.service`, `api/chat/**` | |
+| 5 | Agent runtime | `agentIO`, `agentUtils`, `agentTools.registry`, `services/tools/**`, `pendingAction/**`, `entity/**`, `axl.agent.service`, `api/chat/**` | ✅ done — 8 commits `13a323f`..`1b78b99` (+ `7c37bcd`, `7307e76` frontend), suite **2910 / 0** |
 | 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | |
 | 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | |
 | 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | |
@@ -370,6 +370,162 @@ would also have caught `research_basis`), `portfolioAuthoredLine`, `enrichPositi
 the adopt commit-lease, the compare-and-set's losing half, and `_addItem`'s ownership scoping. Suite
 2864 → **2884**. Three fake dbs were brought up to the driver's shape (`find().project().toArray()`,
 `updateOne` returning a result) — which is what they should have been.
+
+---
+
+## §5 Agent runtime — done
+
+**Verdict in one line:** the runtime is well-argued at its core — the pending-action state machine and
+the tool registry produced no findings — and the damage was again in things built and never wired: a
+history written for a review that could not see it, a spend accumulator that inverted the rule its own
+comment states, and a helper written to stop a drift that had zero callers while five sites still read
+the literal.
+
+*Scope note:* `services/tools/**` (14 files), `toEnvelope`, `toWatchRow`, `vocabulary`, `chatWs` and
+`chat.controller` were read in full in a second pass after the core; the first report went out before
+they were finished and said so. Two of the frontend's files were read as callers (`agentMeta.jsx`,
+`chat.service.remote.js`), and the two changes they needed landed there (`7c37bcd`, `7307e76`).
+
+### Bugs
+
+| | Where | What | Sev |
+|---|---|---|---|
+| 1 | `originRegistry._cancelPortfolioItem` | Appended to **`rebalance_history`** on every cancelled queue item, and its comment said why: *"a cancelled trim is invisible to it and comes back next week identically — the user says no, and the desk asks again, which reads as not listening."* **Nothing read it** — not `STATE_PROJECTION`, not the prompt, not the triggers — while `APP_SPEC.md` and `docs/architecture/off-hours-queue.md` both described the mechanism as working. The identical shape to §4's `conviction_history`: a history written on a user action, for a review that cannot see it. Now projected, mapped (`_declinedChanges`) and rendered as a DECLINED line beside the holding in review AND edit context. Filtered to `cancelled` — `queued` ("the market never opened in time") is not a refusal, and reading it as one would state an opinion the user never held. Deliberately **not** a prohibition: a desk forbidden from ever re-raising a trim would be worse than one that repeats itself. | **high** |
+| 2 | `agentUtils.resolveAgentStream` vs `tokenUsage.recordUsage` | The comment states the rule — *"a cost control must never turn into an unmanaged position"* — and that the ceiling counts CHAT only, which held because *"monitor spend is not recorded at all today"*. It is recorded: `talos.assess` → `bookAssessUsage` → `recordUsage`, into the one `totalCost` the ceiling reads. So a trader with several armed setups reached the cheap chat model faster than one with none, for spending nothing extra on chat. Monitors were never *blocked* (they bypass this seam) — the other half broke. `recordUsage` takes `{ monitor: true }` and accumulates `monitorCost`; `chatSpend` subtracts it, floored at zero; the ceiling compares that. Monitor spend stays in `totalCost` and its own `byAgent` row — it IS the user's money. **No migration, by design**: a separate `chatCost` would read 0 on every existing document and un-degrade every user for the rest of the month; subtracting an ABSENT `monitorCost` reads as 0 and historical months compare exactly as before. | medium |
+| 3 | `chat.service.BOT_IDS` vs frontend `agentMeta.jsx` | The client carried `aether`; the server did not, and both files say they must stay in step. Latent (nothing posts under it) but the backend comment names the exact failure — *"a missing entry doesn't error, it misattributes"* — and `aether` was in neither `ADMIN_BOT_IDS` while being admin-only everywhere else (`requireAdmin` routes, Axl's `ADMIN_DESKS`, the trader prompt's "does not exist"). The first Aether card would have put an admin desk's feed in a trader's sidebar, branded as Axl. **Removed from the client rather than added to the server** — building the server half for a feed with no producer is the shape this review keeps deleting. The comment now says what a real Aether notifier would need: four entries, not one. | medium |
+
+On 3 — checked whether `ADMIN_DESKS` and `ADMIN_BOT_IDS` disagreeing is itself a bug. It is not:
+`analyst` is legitimately an admin *feed* (its cards ask for revisions only admins can make) and a
+trader-routable *desk* (coverage is readable). Two lists, two questions; `aether` was the only drift.
+
+### The lens
+
+**(a) Architecture** — `chat.controller` was the last controller here writing `try { … } catch (err)
+{ next(err) }` by hand after §1–§4 moved five onto `makeHandle`. Unlike those it was NOT losing
+information to the global handler — it already forwarded — so the error shape is unchanged and this
+**stays clear of the open §9 decision**; what it gained is the LOG line a failed chat read never left.
+`toEnvelope` re-derived `kindForDoc`'s rule (`portfolioId != null ? PORTFOLIO_ITEM : IDEA`) while that
+helper's own doc names "the toEnvelope adapter" as one of the three places that must agree — the one
+of the three keeping a private copy, which is how a list of places to keep in sync becomes a list of
+places to fix.
+
+**(b) Conventions** — `isArmed` had **zero callers**. Its doc: *"shared code must still ask THIS rather
+than the literal… what stopped `setups.filter(s => s.status === 'looking')` from silently counting
+zero."* Five live sites read the literal; the four READS now ask the helper (`setups.service`,
+`ideaExecution`, `tradeIdeas` ×2) and the fifth is a WRITE (`{ status: 'looking' }`), correctly a
+literal — you set a status, you do not ask it. Not cosmetic: three of the four test an incoming PATCH's
+status word, so if ARMED ever gains a second spelling a literal comparison skips the readiness gate for
+it. `sectorProxy` the same at the two sites indexing `SECTOR_ETF` directly — neither a bug (tilt
+normalises on the way in) but the lookup should not depend on every caller having done that first.
+`trading.tools.js` still logged as `[kairosTools]` from before its rename; safe to change because
+spend attribution reads the agent's tag, never a tool module's.
+
+**(c) Duplications** — `tradingContext._availabilityCache` was a hand-rolled Map with its own TTL
+arithmetic and **no eviction**, on the `get_quote` path every desk hits constantly: one entry per user ×
+ticker for the life of the process. Now `createTtlCache({ ttlMs, max })`, the util ~35 other caches
+use (`price.service` documents a deliberate non-use of it, which is what a justified exception looks
+like; this had no such note). Two behaviours pinned while it changed: the bound evicts, and an **empty
+venue list is cached as the real answer it is** — a miss detected by falsiness (`?? null`) would have
+re-asked the broker on every quote for precisely the users with no live venue to check.
+
+**(d) Dead code** — the `/dismiss` chain was dead **end to end across two repos**: route → controller
+handler → service alias on the backend, and the client's own `dismissMessage` was an unused alias that
+posted to `/resolve`. Four layers, no caller at either end; each looked reasonable next to the one
+below it and the emptiness was only visible whole. `pendingActionRepo` and `pendingWorkService` were
+service-object aggregates referenced nowhere outside their own files (§1 deleted two for the same
+reason). Of eight "unreferenced" exports the scan proposed, **two are imported by the archive** —
+`STRUCTURE_VISIONS` and `TRADING_TOOLS_FOR_MODE` — which the scan skips; deleting them is precisely
+the failure that bit §2 and §3 three times. Both now carry the note. `INVALIDATION_EDGES` stays: nothing
+validates against it, but it documents a persisted field's allowed values beside the enum it belongs
+to. Four internal-only exports (`formatEventCandidates`, `readStructure`, `SMC_TOOL_NAMES`, `smcBars`)
+left as they are — dropping a keyword is churn on working code.
+
+**(e) MVC** — see (a). `pendingAction.repo` + `executionGate` are the best-argued pair in the section:
+`transitionFilter` is pure, and the `from` parameter's refusal to default to "any open state" is right.
+
+**(f) Spaghetti** — none. `agentTools.registry` has **no dead schemas** — all 42 checked against every
+desk's declared `TOOLS`.
+
+**(g) Plaster** — five headers described archived desks as live collaborators, and none is a
+CLAUDE.md-protected name (not branding, not `kairos_pick`, not `KINDS.CALL`): `smc.tools` "shared by
+the Kairos build handlers AND Hermes's assessor" (live consumers: Talos, Mentor, Argus);
+`marketData.tools` ×2 "Shared by Idea and Kairos" (both archived); `tradingContext.tools` "the same
+shape kairos/idea already use"; `agentUtils` listing **Hermes** among the monitors that bypass the
+ceiling. The same class as §3's expired "DELETE WHEN HERMES SLEEPS": a reader sent to dead code for the
+reason live code is shaped this way. The "Kairos calls" *data* references in `userData.tools` stayed —
+a `call` document still exists in Mongo. Also `CLAUDE.md`'s shared-mechanism example named
+`sendBotMessage` as the one transport; the real one is `postCard` (29 sites) → `postBotCard` (14), and
+`sendBotMessage` is a back-compat alias with no caller outside `chat.service`. The principle was sound;
+the example was stale. Corrected in the file.
+
+**(h) Shared helpers** — `isArmed` and `sectorProxy` adopted; `createTtlCache` adopted; `kindForDoc`
+adopted in `toEnvelope`; `chatSpend` added beside `overCeiling`.
+
+### The stranded-JSDoc sweep was a memory, not a check (`6f35c99`)
+
+The §2–§3 QA cycle scanned the repo for a JSDoc block sitting above the wrong function, moved five,
+and reported it *"clean repo-wide"*. Three survived: `runAgentStream`'s block above `agentKeyFromLog`,
+**two** stacked above `lensLine` in `assess.shared` (`assessRouting`'s and `bookAssessUsage`'s, in
+inverted order), `computeRR`'s above `_edge`. The sweep commit landed AFTER the commits that created
+two of them — it ran and missed them. A one-off grep is correct on the day it runs and silent the day
+after: the same lesson as the archive loader and `STATE_PROJECTION`'s coverage test, learned a third
+time.
+
+So it is `tests/unit/jsdocAttachment.test.js` now, and writing it turned up three shapes that are NOT
+findings, each understood rather than excluded by name: the **module header** (a file-describing block
+with the first declaration's own block directly beneath — five files open this way, discriminated by
+"has any code appeared above it", not "is it line 1", so a header under an eslint pragma still
+reads as one); **stacked `@typedef`s** (`price.service`'s four document TYPES, not the code beneath);
+and `/* c8 ignore */` pragmas. Two of the detector's own first fixtures were wrong in a way that proves
+the point — they put the stranded block at the top of the file, the one position where it is a module
+header and correct.
+
+### Judgment calls made against the plan
+
+- **§1's carried "three spellings of one guarded update" are five** — `claimOrder`, `claimIf`,
+  `dueLoop._claim`, `pendingAction.transition`, `adoptDraftStore.claimDraft`. **Verdict: do not
+  collapse them.** The idiom is three lines, each targets a different collection with a different
+  natural key, and the guard IS the load-bearing part — a shared wrapper would hide it. The narrower
+  defect: `entityRepo.claimIf` is the only one returning a **document** (the pre-image) where the
+  other four return a boolean, and its name reads like a boolean. No caller is wrong today (all three
+  use it as a truthiness test). Left; noted here so the next reader does not "fix" the five into one.
+- `entityCrud.patchOwned` / `remove` read-then-write with the owner absent from the write filter,
+  while §4's `deleteGuarded` puts the guard IN the query. Documented as deliberate ("every caller is a
+  user-initiated edit, not a monitor race") and practically safe; the two postures differ and that is
+  recorded, not changed.
+- `resolveMessage`'s terminal branch writes with no status guard, while the `pending` branch guards
+  `status: 'pending'` ("never re-open a settled card"). A stale client can flip a `done` card to
+  `dismissed`. **Low, left** — both are settled states and the card is closed either way; worth a
+  guard if the two ever diverge in what they show.
+- `toEnvelope` / `callToEnvelope` have **no production caller** — only `ideaToEnvelope` is used
+  (`orderPlan.service`). Expected with Kairos archived; the envelope model is documented architecture
+  with a stated P4 plan. Flagged, not deleted.
+- `chat.service` exports 19 symbols, 4 used only inside the file (`sendBotMessage`, `triggerAxlReply`,
+  `isAdminBot`, `RESOLVES_ON`). Internal helpers with a public keyword; left.
+
+### Behaviour changes a reader should know
+
+- Atlas now sees, beside each holding, the changes the user declined in earlier reviews — and is told
+  not to re-propose them as though new.
+- A user's chat model is degraded by their **chat** spend only. Monitor spend still shows in every
+  usage report and in `totalCost`.
+- `POST /api/chat/.../dismiss` is gone; `/resolve` with `status: 'dismissed'` was always the call.
+- Failed chat reads now leave a log line naming the route.
+
+### Frontend follow-ups — closed in botmarket-frontend
+
+| From | What | Outcome |
+|---|---|---|
+| §5 | `BOT_IDS` carried `aether`, which the server never posts and does not admin-gate | Removed (`7c37bcd`); the client pins its list by value against the server file — a PIN, not a live cross-check, and the test says so |
+| §5 | `chatService.dismissMessage` — unused alias for a route the backend deleted | Removed (`7307e76`) |
+
+### Tests added
+
+`jsdocAttachment` (the sweep as a check, with the three non-finding shapes as fixtures),
+`portfolioStateProjection` extended to `rebalance_history` + the `cancelled`-only filter,
+`tokenUsageByAgent` on `{ monitor: true }` / `chatSpend` (including the absent-field and floor cases),
+`tradingContextSymbol` on the cache bound evicting and the empty-venue answer being cached, the
+`BOT_IDS` ↔ `ADMIN_BOT_IDS` pin. Suite 2886 → **2910**, eslint clean, 16/16 archived modules load.
 
 ---
 

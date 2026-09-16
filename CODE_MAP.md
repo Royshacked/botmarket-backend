@@ -96,7 +96,9 @@ api/
   chat/                   social DM + bot notifications (chatWs.js = WebSocket, userId → SET of
                           sockets: every tab is a reader of the same inbox, and one socket per user
                           meant a second tab displaced the first WITHOUT closing it — that browser
-                          never reconnected and its unread badge silently froze); sendBotMessage funnel,
+                          never reconnected and its unread badge silently froze); postCard → postBotCard is
+                          the ONE notification transport (sendBotMessage is a back-compat alias with
+                          no caller outside this file),
                           BOT_IDS (one notify bot per agent — it also keeps an ARCHIVED desk's id,
                           so the cards already in a user's thread still render with the brand that
                           sent them) + botForKind (kind → sender) and RETIRED_BOT_IDS (`idea`:
@@ -266,7 +268,12 @@ services/
                             orders off the broker (an `orderId` with no `positionId`). The pipe for
                             every path that stops an entity claiming its order: delete, disarm,
                             expiry. WHEN there is one to pull stays the caller's judgment
-  logger.service.js  tokenUsage.service.js
+  logger.service.js
+  tokenUsage.service.js     recordUsage(userId, model, usage, agent, { monitor }) books every LLM
+                            call into the month document; `monitor: true` (Talos assessments) also
+                            accumulates `monitorCost`, and chatSpend(doc) = totalCost − monitorCost is
+                            what overCeiling compares — a user's own monitors must never degrade
+                            their chat model, and are never blocked by it (they bypass the seam)
   ohlcv.service.js          getCandles(symbol,timeframe,count) → the compact {t,o,h,l,c,v} the
                             EVALUATORS read. A relabel over priceService, not a fetcher. Was
                             providers/ohlcv.provider.js until 2026-08-07 — it reaches nothing
@@ -630,3 +637,8 @@ unreachable). Both unauthenticated and mounted ahead of the rate limiters.
   hand-run probes that connect to live broker/Mongo — they are deliberately excluded.
 - Favor unit tests on **pure** functions (utils, parsers, builders). Modules that hit Mongo/providers
   aren't unit-tested here; verify those via the import-smoke pattern or a running stack.
+- Some tests are repo-wide CHECKS, not unit tests — they exist because a one-off sweep was found
+  to be a memory, not a guard: `jsdocAttachment` (a JSDoc block stranded above the wrong function),
+  `agentToolComments` (a tool comment naming a tool the desk does not declare), and
+  `npm run check:archive` (the archive still loads after an export is deleted). Add to this list
+  rather than re-running the grep.
