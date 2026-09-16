@@ -112,8 +112,13 @@ export async function getEventCandidates({ days = 30, includeDropped = false, li
         const query = { created_at: { $gte: since } }
         if (!includeDropped) query.survived = true
 
+        // SORTED BEFORE THE LIMIT. Without the sort, Mongo hands back an arbitrary `limit` rows —
+        // insertion order in practice — and the newest-first ordering happened in memory on whatever
+        // survived the cut. Five forty-name runs in a thirty-day window exceed 200, and the run that
+        // fell off was the newest. The `created_at: -1` index is declared for exactly this read.
         const rows = await db.collection(COLLECTIONS.EVENT_CANDIDATES)
             .find(query, { projection: { _id: 0 } })
+            .sort({ created_at: -1 })
             .limit(limit)
             .toArray()
 

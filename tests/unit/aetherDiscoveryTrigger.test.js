@@ -51,23 +51,35 @@ test('a second press while one is in flight is 409, not a second run', async () 
     // The selector reads recently-run subjects from Mongo at start-up, so a concurrent
     // run would re-pick the first one's events before it had written any of them — and
     // pay for each of them twice.
-    await withRunner(() => { throw new Error('a discovery run is already in flight') }, async () => {
+    // The STATUS rides on the error (runDiscovery stamps it); the controller no longer regexes the
+    // sentence to decide between 409 and 503.
+    await withRunner(() => { throw Object.assign(new Error('a discovery run is already in flight'), { status: 409 }) }, async () => {
         const res = fakeRes()
         await startDiscovery({ body: {}, user: {} }, res)
         assert.equal(res.statusCode, 409)
         assert.equal(res.body.started, false)
+        assert.match(res.body.error, /already in flight/)
     })
 })
 
 test('no engine on this host is 503, not 409', async () => {
     // Different problem, different answer: "already going" invites a retry in a minute,
     // "no engine here" never will be.
-    await withRunner(() => { throw new Error('AETHER_ENGINE_PATH not set — no engine on this host') },
+    await withRunner(() => { throw Object.assign(new Error('AETHER_ENGINE_PATH not set — no engine on this host'), { status: 503 }) },
         async () => {
             const res = fakeRes()
             await startDiscovery({ body: {}, user: {} }, res)
             assert.equal(res.statusCode, 503)
         })
+})
+
+test('a throw with NO status is a real fault — 500, and the sentence stays inside', async () => {
+    await withRunner(() => { throw new Error('ENOMEM: spawn failed with internals in the message') }, async () => {
+        const res = fakeRes()
+        await startDiscovery({ body: {}, user: {} }, res)
+        assert.equal(res.statusCode, 500)
+        assert.equal(res.body.error, 'Could not start discovery')
+    })
 })
 
 test('maxRuns is clamped — it is the spend dial, not a preference', async () => {
@@ -157,7 +169,7 @@ test('an unavailable host says why, in words worth reading', async () => {
 test('the server still refuses on its own — the button is only a courtesy', async () => {
     // Hiding the button is politeness. A request that arrives anyway, from a stale tab or
     // curl, must still be refused by the same check.
-    await withRunner(() => { throw new Error('no engine on this host — AETHER_ENGINE_PATH is not set') },
+    await withRunner(() => { throw Object.assign(new Error('no engine on this host — AETHER_ENGINE_PATH is not set'), { status: 503 }) },
         async () => {
             const res = fakeRes()
             await startDiscovery({ body: {}, user: {} }, res)

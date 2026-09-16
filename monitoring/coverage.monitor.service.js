@@ -175,30 +175,26 @@ export async function _checkCoverage(cov, nowMs, deps = _deps) {
     // earned?". `edge_category` is persisted on every tick precisely so the next one can spot a
     // CHANGE; recording it is what makes that trigger possible at all.
     const remodel = remodelDecision(cov, { street, nowMs, gapState: verdict.state })
-
-    // Aether-triggered re-model: a new shock signal landed for this covered ticker.
-    // Overrides the standard `remodelDecision` when due=false; the cooldown still applies (remodelDecision
-    // returns quiet when inside the 14-day window, so this only fires outside the cooldown too).
-    const pendingAether = cov.monitor?.pending_aether_remodel ?? null
-    const remodelFinal  = (pendingAether && !remodel.due)
-        ? { ...remodel, due: true, reason: `aether signal: ${pendingAether}` }
-        : remodel
+    // (An Aether-triggered override rode here until 2026-09-16 — a `pending_aether_remodel` flag
+    // set by a change stream on the channel engine's opportunity collections. Those collections
+    // went with the engine on 2026-09-09 and the stream had been watching a collection named
+    // "undefined" since; the flag had no writer. Event candidates are a different pipeline and
+    // do not trigger a re-model — a decision, not an omission.)
 
     const bookkeeping = {
         $set: {
             'monitor.next_check_at':   nextAt,
             'monitor.last_checked':    new Date(nowMs).toISOString(),
-            'monitor.edge_category':   remodelFinal.edge_category,
-            'monitor.next_remodel_at': remodelFinal.next_remodel_at,
+            'monitor.edge_category':   remodel.edge_category,
+            'monitor.next_remodel_at': remodel.next_remodel_at,
             // What that date is waiting for ("Q3 earnings" / 'catalyst' / 'quarterly floor'). Stored
             // beside the date rather than re-derived by every reader: the branch that produced it is
             // known here and nowhere else, and a UI re-deriving it would be a second copy of the rule.
-            'monitor.next_remodel_reason': remodelFinal.next_remodel_reason,
+            'monitor.next_remodel_reason': remodel.next_remodel_reason,
             // The early-hit ratchet (see `alreadyRecorded`). Written on the material path only —
             // stamping it on the quiet path would be a no-op, since the quiet path for this state is
             // reached only when the stamp already exists.
             ...(verdict.state === 'target_hit_early' ? { 'monitor.early_hit_at': new Date(nowMs).toISOString() } : {}),
-            ...(pendingAether ? { 'monitor.pending_aether_remodel': null } : {}),
         },
         $inc: { 'monitor.checks': 1 },
     }
@@ -231,7 +227,7 @@ export async function _checkCoverage(cov, nowMs, deps = _deps) {
         // A quiet DAY is not a quiet QUARTER: the re-model decision still stands, since a catalyst
         // landing or the floor expiring has nothing to do with whether today's tape moved.
         await deps.recordMonitorState(cov.id, { set: { ...bookkeeping.$set, gap }, inc: bookkeeping.$inc })
-        return { ...verdict, applied: false, remodel: remodelFinal }
+        return { ...verdict, applied: false, remodel }
     }
 
     // Material verdict → update the thesis (status + gap + an appended revision) then notify.
@@ -256,5 +252,5 @@ export async function _checkCoverage(cov, nowMs, deps = _deps) {
     // now go through coverageService, which is the only module that knows this collection's shape.
     await deps.recordMonitorState(cov.id, { set: bookkeeping.$set, inc: bookkeeping.$inc })
     deps.notify(cov, verdict)
-    return { ...verdict, remodel: remodelFinal }
+    return { ...verdict, remodel }
 }

@@ -41,8 +41,6 @@ export async function streamAether(req, res) {
 
 // ─── The candidate list — a house-layer broadcast ─────────────────────────────
 
-
-
 export async function getCandidates(req, res) {
     try {
         const days           = Math.min(Number(req.query.days) || 30, 180)
@@ -142,10 +140,10 @@ export async function startDiscovery(req, res) {
         res.status(202).json({ started: true, ...started })
     } catch (err) {
         // A run already in flight is the caller's answer, not a server fault — 409 so a
-        // double-click reads as "already going" rather than as a failure.
-        const conflict = /already in flight/.test(err.message)
+        // double-click reads as "already going" rather than as a failure. The status is the
+        // service's (runDiscovery stamps it); a throw with none is a real fault.
         logger.warn(LOG, 'startDiscovery refused', err.message)
-        res.status(conflict ? 409 : 503).json({ started: false, error: err.message })
+        res.status(err.status ?? 500).json({ started: false, error: err.status ? err.message : 'Could not start discovery' })
     }
 }
 
