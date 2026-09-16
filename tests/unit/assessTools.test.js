@@ -23,7 +23,7 @@ test('the kit is the shared registry kit, and its reads take a ticker', () => {
             `${n} must take a ticker — without it, a condition about another symbol is unverifiable`)
     }
     // The one condition-about-the-world tool. Server-side: no input_schema, run by Anthropic.
-    assert.equal(byName.web_search.type, 'web_search_20250305')
+    assert.equal(byName.web_search.type, 'web_search_20260209')  // the registry's declared base; the provider finalizes per model
 })
 
 test('every mounted tool can actually be executed', () => {
