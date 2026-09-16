@@ -12,7 +12,8 @@
 // never by an execution-tier monitor.
 
 import { randomUUID }      from 'crypto'
-import { getDb }           from '../../providers/mongodb.provider.js'
+import { getDb, stripId }  from '../../providers/mongodb.provider.js'
+import { makeHouseArtifactRepo } from '../../services/houseArtifact.repo.js'
 import { logger }          from '../../services/logger.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
 import { toNum }           from '../../services/format.util.js'
@@ -22,6 +23,9 @@ import { newRevision, diffFields } from '../../services/revisionTrail.js'
 
 const LOG = '[coverage]'
 export const COLLECTION = 'coverage'
+// The write pipe shared with the tilt (houseArtifact.repo): the atomic revise, the monitor's
+// bookkeeping. The schema, the gates and what counts as a revision stay here.
+const _repo = makeHouseArtifactRepo({ collection: COLLECTION })
 
 // ─── vocabulary ───────────────────────────────────────────────────────────────
 
@@ -58,13 +62,8 @@ export const coverageService = {
 
 // ─── monitor.* namespace ─────────────────────────────────────────────────────
 
-async function recordMonitorState(id, { set = {}, inc = null } = {}) {
-    const db = await getDb()
-    const update = { $set: set }
-    if (inc) update.$inc = inc
-    const res = await db.collection(COLLECTION).updateOne({ id }, update)
-    return { ok: res.matchedCount === 1 }
-}
+/** The monitor's bookkeeping under `monitor.*` — no revision. See houseArtifact.repo. */
+function recordMonitorState(id, opts) { return _repo.recordMonitorState(id, opts) }
 
 async function claimRemodel(id, { previousAt = null, reason, at = new Date().toISOString() } = {}) {
     const db  = await getDb()
@@ -346,7 +345,7 @@ async function initiateCoverage(raw) {
         doc.revisions = [newRevision({ kind: 'initiate', note: _str(raw?.init_note) ?? `Initiated coverage on ${symbol}` })]
         await db.collection(COLLECTION).insertOne({ ...doc })
         logger.info(LOG, 'coverage initiated', { id: doc.id, symbol, sector: doc.sector })
-        return { ok: true, doc: _strip(doc) }
+        return { ok: true, doc: stripId(doc) }
     } catch (err) {
         if (err?.code === 11000) return { ok: false, reason: 'already_covered' }
         logger.error(LOG, 'Failed to initiate coverage', err)
@@ -364,7 +363,7 @@ async function getCoverage({ sector = null, status = null, school = null, onErro
         // Atlas mandate-build pre-filter: `schools` is an array field; MongoDB's scalar equality
         // on an array field matches documents where the value appears as an element (implicit $elemMatch).
         if (typeof school === 'string' && SCHOOLS.includes(school)) filter.schools = school
-        return (await db.collection(COLLECTION).find(filter).sort({ updated_at: -1 }).toArray()).map(_strip)
+        return (await db.collection(COLLECTION).find(filter).sort({ updated_at: -1 }).toArray()).map(stripId)
     } catch (err) {
         logger.error(LOG, 'getCoverage failed', err)
         if (onError === 'throw') throw err
@@ -378,7 +377,7 @@ async function getCoverageBySymbol(symbol) {
         if (!sym) return null
         const db  = await getDb()
         const doc = await db.collection(COLLECTION).findOne({ symbol: sym })
-        return doc ? _strip(doc) : null
+        return doc ? stripId(doc) : null
     } catch (err) {
         logger.warn(LOG, 'getCoverageBySymbol failed', err.message)
         return null
@@ -390,7 +389,7 @@ async function getCoverageById(id) {
         const db  = await getDb()
         const doc = await db.collection(COLLECTION).findOne({ id })
         if (!doc) return { ok: false, reason: 'not_found' }
-        return { ok: true, doc: _strip(doc) }
+        return { ok: true, doc: stripId(doc) }
     } catch (err) {
         logger.error(LOG, 'getCoverageById failed', err)
         return { ok: false, error: err }
@@ -415,6 +414,25 @@ async function listActiveBySector(sectors) {
 const LOGGED_FIELDS = ['rating', 'status', 'price_target', 'thesis', 'schools']
 const _diffPlan = (prev, next) => diffFields(prev, next, LOGGED_FIELDS)
 
+// Which plausibility inputs re-run the flags when patched.
+const FLAG_INPUTS = ['rating', 'price_target', 'risk_reward', 'conviction']
+
+/**
+ * The `$set` an update writes: ONLY the plan fields the patch touched (as normalised), plus `flags`
+ * when the patch re-ran them, plus `updated_at`. Pure — exported for tests.
+ *
+ * Not the whole merged document. The merged doc is built from a READ, and writing every field of it
+ * back is how a second writer's work vanished: the monitor's verdict landing a minute after a
+ * re-model set the target wrote the OLD target back over the new one, because its merged copy still
+ * carried it. A field the patch did not name is not this write's to touch.
+ */
+export function _updateSet(patch, merged, { flagsRecomputed = false } = {}) {
+    const $set = { updated_at: merged.updated_at }
+    for (const k of PLAN_FIELDS) if (k in patch && k !== 'flags') $set[k] = merged[k]
+    if (flagsRecomputed) $set.flags = merged.flags
+    return $set
+}
+
 async function updateCoverage(id, patch = {}) {
     const found = await getCoverageById(id)
     if (!found.ok) return found
@@ -431,23 +449,20 @@ async function updateCoverage(id, patch = {}) {
         }
     }
 
-    if (['rating', 'price_target', 'risk_reward', 'conviction'].some(k => k in p)) {
+    const flagsRecomputed = FLAG_INPUTS.some(k => k in p)
+    if (flagsRecomputed) {
         merged.flags = await _plausibilityFlags(merged)
         if (merged.flags.length) logger.warn(LOG, 'coverage FLAGGED — implausible, stored anyway', { id, symbol: merged.symbol, codes: merged.flags.map(f => f.code) })
     }
 
-    const revision  = newRevision({ kind: _str(p.revision_kind) ?? 'update', note: _str(p.revision_note), changed: _diffPlan(cur, merged) })
-    const revisions = [revision, ..._arr(cur.revisions)]
-
-    const $set = { updated_at: merged.updated_at, revisions }
-    for (const k of PLAN_FIELDS) $set[k] = merged[k]
+    const revision = newRevision({ kind: _str(p.revision_kind) ?? 'update', note: _str(p.revision_note), changed: _diffPlan(cur, merged) })
 
     try {
-        const db  = await getDb()
-        const res = await db.collection(COLLECTION).updateOne({ id }, { $set })
-        if (!res.matchedCount) return { ok: false, reason: 'not_found' }
+        const res = await _repo.revise(id, _updateSet(p, merged, { flagsRecomputed }), revision)
+        if (!res.ok) return { ok: false, reason: 'not_found' }
         logger.info(LOG, 'coverage updated', { id, kind: revision.kind })
-        return { ok: true, doc: { ..._strip(merged), revisions } }
+        // The caller's view of the result — merged in memory, the trail as it now reads.
+        return { ok: true, doc: { ...stripId(merged), revisions: [revision, ..._arr(cur.revisions)] } }
     } catch (err) {
         logger.error(LOG, 'coverage update failed', err)
         return { ok: false, error: err }
@@ -482,11 +497,4 @@ async function deleteCoverage(id) {
         logger.error(LOG, 'coverage delete failed', err)
         return { ok: false, error: err }
     }
-}
-
-// Strip Mongo's _id before returning to callers.
-function _strip(doc) {
-    if (!doc) return doc
-    const { _id, ...rest } = doc
-    return rest
 }

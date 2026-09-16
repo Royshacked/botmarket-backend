@@ -46,10 +46,13 @@ api/
                           long before, wired 2026-08-14 when the frontend needed to open a
                           scan by id rather than find it in a list
   analyst/                Analyst coverage (research/valuation)  /api/analyst/*
-    coverage.service.js       `coverage` collection = living per-name thesis (one doc per user+symbol):
-                              variant-perception + our PT vs Street (the gap) + monitorable kill-criteria +
-                              append-only revisions[]. normalizeCoverage + CRUD (initiate/update-w-revision/
-                              retire). Own collection — NOT the execution-tier entities (P1 of the Analyst)
+    coverage.service.js       `coverage` collection = living per-name thesis, HOUSE-OWNED (one doc per
+                              symbol, no userId — since 5c12b8c): variant-perception + our PT vs Street (the
+                              gap) + monitorable kill-criteria + append-only revisions[]. normalizeCoverage +
+                              CRUD (initiate/update-w-revision/retire). Writes ride houseArtifact.repo, the
+                              pipe it shares with tilt.service: revise = `$set` of ONLY the patched fields +
+                              `$push` of the revision at position 0, in one update (`_updateSet` is the pure
+                              half). Own collection — NOT the execution-tier entities (P1 of the Analyst)
   broker/                 broker connections/orders/positions  /api/broker/*
     adapters/
       broker.interface.js     BrokerAdapter base class — THE contract every broker fulfils
@@ -352,6 +355,12 @@ services/
                             learns a run ended (and chains the next when its names were queued after
                             the run listed the queue). The abort controller is cleared only if still
                             ours — a run chained from a listener must stay stoppable
+  houseArtifact.repo.js     The write pipe under the two HOUSE ARTIFACTS (coverage, tilt) — a standing
+                            view with no owner, kept as a publication log. revise(id, $set, revision)
+                            prepends the revision and sets the patched fields atomically; a $set carrying
+                            `revisions` is refused. recordMonitorState = the monitor's quiet bookkeeping,
+                            no revision. The schema, the gates and what counts as a revision stay in each
+                            service; injectable getDb so the update's shape is testable
   houseScan.service.js      Argus's admin-pipeline mode: on tilt publish, FMP-screen each overweight
                             sector and queue the hits. Same screener as sleeveSource, own inline call
   coverageNotify.service.js Prometheus's cards. coverage_event = the monitor's material verdict,

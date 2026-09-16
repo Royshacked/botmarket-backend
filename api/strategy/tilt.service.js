@@ -21,7 +21,8 @@
 // entity/vocabulary and revisionTrail.
 
 import { randomUUID }      from 'crypto'
-import { getDb }           from '../../providers/mongodb.provider.js'
+import { getDb, stripId }  from '../../providers/mongodb.provider.js'
+import { makeHouseArtifactRepo } from '../../services/houseArtifact.repo.js'
 import { logger }          from '../../services/logger.service.js'
 import { toNum }           from '../../services/format.util.js'
 import { normalizeSector, SECTORS, sectorProxy, BENCHMARK_PROXY } from '../../services/entity/vocabulary.js'
@@ -32,6 +33,9 @@ const LOG        = '[tilt]'
 // Exported for the tilt monitor, which reads these documents on the background path. One name,
 // owned by the service that owns the schema.
 export const COLLECTION = 'tilt'
+// The write pipe shared with coverage (houseArtifact.repo): the atomic revise, the monitor's
+// bookkeeping. The schema, the gates and what counts as a revision stay here.
+const _repo = makeHouseArtifactRepo({ collection: COLLECTION })
 
 // ─── vocabulary ───────────────────────────────────────────────────────────────
 
@@ -217,19 +221,11 @@ export const tiltService = { publishTilt, getCurrentTilt, getTiltById, listTilts
  *
  * `updateTilt` is the PUBLICATION path: it appends a revision, which is right for a state change a
  * reader should see (a stance maturing) and wrong for a routine grade refresh — eleven revisions a
- * day would bury the trail that makes the view auditable. So the monitor had two paths and used a
- * raw `updateOne` for the quiet one, which put this collection's shape in a second file.
- *
- * The split stays; only the write moves here. `set` is a flat map (dotted `monitor.*` paths and/or
- * top-level fields), `inc` the counters.
+ * day would bury the trail that makes the view auditable. The split stays; the write is the shared
+ * pipe's (houseArtifact.repo). `set` is a flat map (dotted `monitor.*` paths and/or top-level
+ * fields), `inc` the counters.
  */
-async function recordMonitorState(id, { set = {}, inc = null } = {}) {
-    const db = await getDb()
-    const update = { $set: set }
-    if (inc) update.$inc = inc
-    const res = await db.collection(COLLECTION).updateOne({ id }, update)
-    return { ok: res.matchedCount === 1 }
-}
+function recordMonitorState(id, opts) { return _repo.recordMonitorState(id, opts) }
 export { HORIZONS, DEFAULT_HORIZON, SECTORS }
 
 /**
@@ -352,9 +348,7 @@ async function getCurrentTilt(benchmark = 'SPX') {
         const db = await getDb()
         const doc = await db.collection(COLLECTION)
             .find({ benchmark, status: 'active' }).sort({ created_at: -1 }).limit(1).next()
-        if (!doc) return null
-        delete doc._id
-        return doc
+        return doc ? stripId(doc) : null
     } catch (err) {
         logger.warn(LOG, 'current tilt read failed (caller unaffected)', err.message)
         return null
@@ -366,8 +360,7 @@ async function getTiltById(id) {
         const db  = await getDb()
         const doc = await db.collection(COLLECTION).findOne({ id })
         if (!doc) return { ok: false, reason: 'not_found' }
-        delete doc._id
-        return { ok: true, doc }
+        return { ok: true, doc: stripId(doc) }
     } catch (err) {
         logger.error(LOG, 'tilt read failed', err)
         return { ok: false, error: err }
@@ -380,11 +373,29 @@ async function listTilts({ benchmark = 'SPX', limit = 24 } = {}) {
         const db = await getDb()
         return (await db.collection(COLLECTION)
             .find({ benchmark }).sort({ created_at: -1 }).limit(limit).toArray())
-            .map(d => { delete d._id; return d })
+            .map(stripId)
     } catch (err) {
         logger.error(LOG, 'tilt list failed', err)
         return []
     }
+}
+
+// The fields a patch may write, and the two the table derives whenever its rows change.
+const PATCHABLE = ['regime', 'tilts', 'status', 'evidence']
+
+/**
+ * The `$set` an update writes: ONLY the fields the patch touched (as normalised), the balance
+ * verdict when the rows moved, and `updated_at`. Pure — exported for tests.
+ *
+ * Not the whole merged document — see coverage.service._updateSet for why: a merged copy is built
+ * from a READ, and writing it back whole lands a stale value on any field another writer moved in
+ * between. A field the patch did not name is not this write's to touch.
+ */
+export function _updateSet(patch, merged) {
+    const $set = { updated_at: merged.updated_at }
+    for (const k of PATCHABLE) if (k in patch) $set[k] = merged[k]
+    if ('tilts' in patch) { $set.net_bp = merged.net_bp; $set.balanced = merged.balanced }
+    return $set
 }
 
 /**
@@ -419,16 +430,10 @@ async function updateTilt(id, patch = {}) {
     })
 
     try {
-        const db = await getDb()
-        const $set = {
-            regime: merged.regime, tilts: merged.tilts, net_bp: merged.net_bp,
-            balanced: merged.balanced, status: merged.status, evidence: merged.evidence,
-            updated_at: merged.updated_at, revisions: [revision, ..._arr(cur.revisions)],
-        }
-        const res = await db.collection(COLLECTION).updateOne({ id }, { $set })
-        if (!res.matchedCount) return { ok: false, reason: 'not_found' }
+        const res = await _repo.revise(id, _updateSet(p, merged), revision)
+        if (!res.ok) return { ok: false, reason: 'not_found' }
         logger.info(LOG, 'tilt updated', { id, kind: revision.kind })
-        return { ok: true, doc: { ...merged, revisions: $set.revisions } }
+        return { ok: true, doc: { ...merged, revisions: [revision, ..._arr(cur.revisions)] } }
     } catch (err) {
         logger.error(LOG, 'tilt update failed', err)
         return { ok: false, error: err }

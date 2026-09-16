@@ -13,7 +13,7 @@
 // Idempotent enqueue: a symbol already queued or in_research is not duplicated.
 
 import { randomUUID } from 'crypto'
-import { getDb }      from '../providers/mongodb.provider.js'
+import { getDb, stripId } from '../providers/mongodb.provider.js'
 import { logger }     from './logger.service.js'
 
 const LOG = '[researchQueue]'
@@ -27,8 +27,6 @@ async function _ensureIndexes(db) {
     await col.createIndex({ symbol: 1, status: 1 })
     await col.createIndex({ status: 1, created_at: 1 })
 }
-
-function _strip(doc) { const d = { ...doc }; delete d._id; return d }
 
 /**
  * Add a symbol to the queue. Idempotent — if the symbol is already queued or
@@ -70,7 +68,7 @@ async function enqueue({ symbol, source, requestedBy = 'house', context = null }
         }
         await db.collection(COLLECTION).insertOne(doc)
         logger.info(LOG, 'queued', { symbol: sym, source: src, sector: doc.context?.sector ?? null })
-        return { ok: true, id: doc.id, doc: _strip(doc) }
+        return { ok: true, id: doc.id, doc: stripId(doc) }
     } catch (err) {
         logger.error(LOG, 'enqueue failed', err)
         return { ok: false, error: err }
@@ -93,7 +91,7 @@ async function listQueue({ status, limit = 200 } = {}) {
         if (status) q.status = Array.isArray(status) ? { $in: status } : status
         const docs = await db.collection(COLLECTION)
             .find(q).sort({ created_at: 1 }).limit(limit).toArray()
-        return docs.map(_strip)
+        return docs.map(stripId)
     } catch (err) {
         logger.error(LOG, 'listQueue failed', err)
         return null
@@ -170,7 +168,7 @@ async function _transition(id, to, from, extra = {}) {
         )
         if (!res) return { ok: false, reason: 'not_found_or_wrong_status' }
         logger.info(LOG, to, { id, ...extra })
-        return { ok: true, doc: _strip(res) }
+        return { ok: true, doc: stripId(res) }
     } catch (err) {
         logger.error(LOG, `transition → ${to} failed`, err)
         return { ok: false, error: err }
