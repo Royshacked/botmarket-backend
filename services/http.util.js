@@ -142,11 +142,13 @@ async function _errorBody(res) {
  *   `timeoutMs` bounds EACH attempt, not the total — a retry gets a full budget or it isn't one.
  *   `retries: 0` opts a caller out (polling loops: the next tick is already the retry).
  *   `method` / `body`: a JSON body is serialised and sent with its content type; the default is GET.
+ *   `retryMinMs`: a floor under the jittered wait — for a provider that limits per SECOND (GNews),
+ *   where a 0–300ms retry lands inside the same second and earns the same 429 again.
  *   A non-2xx answer throws with `err.status` AND `err.body` — the parsed error body when the
  *   provider sent JSON (cTrader's `description`, GNews's `errors`), else its text — so a caller
  *   that wants the provider's own words in its message has them without a second request.
  */
-export async function getJson(url, { headers, timeoutMs = 10000, label, retries = RETRIES, retryBaseMs = RETRY_BASE_MS, method = 'GET', body } = {}) {
+export async function getJson(url, { headers, timeoutMs = 10000, label, retries = RETRIES, retryBaseMs = RETRY_BASE_MS, retryMinMs = 0, method = 'GET', body } = {}) {
     const attempts = Math.max(0, retries) + 1
     const init = { method, headers: { ...(headers ?? {}) } }
     if (body !== undefined) {
@@ -154,18 +156,24 @@ export async function getJson(url, { headers, timeoutMs = 10000, label, retries 
         init.headers['Content-Type'] ??= 'application/json'
     }
     for (let attempt = 0; ; attempt++) {
+        // The timer covers the BODY too, not just the status line: a provider that answers a 5xx
+        // header and then stalls the body would otherwise hold the caller forever, and "timeoutMs
+        // bounds each attempt" would be false in exactly the case it is for. fetch's body reads
+        // honour the same signal.
         const ac = new AbortController()
         const timer = setTimeout(() => ac.abort(), timeoutMs)
-        let res
+        let res, data, errBody
         try {
             res = await fetch(url, { ...init, signal: ac.signal })
+            if (res.ok) data = await res.json()
+            else errBody = await _errorBody(res)
         } finally {
             clearTimeout(timer)
         }
 
         if (res.ok) {
             _count(label)
-            return await res.json()
+            return data
         }
 
         // Counted per ATTEMPT — each one really did spend a request against the quota, and a meter
@@ -177,10 +185,10 @@ export async function getJson(url, { headers, timeoutMs = 10000, label, retries 
         // number back out to tell them apart — or, worse, treat them the same.
         const err = new Error(`${label || 'http'} ${res.status}`)
         err.status = res.status
-        err.body   = await _errorBody(res)
+        err.body   = errBody
         if (attempt >= attempts - 1 || !isRetryableStatus(res.status)) throw err
 
-        const wait = _retryDelayMs(attempt, parseRetryAfterMs(res.headers?.get?.('retry-after')), retryBaseMs)
+        const wait = Math.max(retryMinMs, _retryDelayMs(attempt, parseRetryAfterMs(res.headers?.get?.('retry-after')), retryBaseMs))
         logger.info(LOG, `${label || 'http'} ${res.status} — retrying in ${wait}ms (attempt ${attempt + 2}/${attempts})`)
         await _sleep(wait)
     }

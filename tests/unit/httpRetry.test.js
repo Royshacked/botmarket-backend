@@ -154,3 +154,12 @@ test('a refusal carries the provider\'s body — parsed when JSON, text otherwis
     stubFetch(withText(404, ''))
     await assert.rejects(() => getJson('https://x/y', FAST), (err) => err.body === null)
 })
+
+test('retryMinMs floors the jittered wait — a per-second limiter is not re-asked inside the same second', async () => {
+    // retryBaseMs 0 makes the jitter 0, so the floor is the whole wait; measure that it was honoured.
+    stubFetch(reply(429), reply(200, [{ v: 1 }]))
+    const t0 = Date.now()
+    await getJson('https://x/y', { retryBaseMs: 0, retryMinMs: 120, label: 'TEST /x' })
+    assert.ok(Date.now() - t0 >= 100, 'waited at least the floor')
+    assert.equal(calls.length, 2)
+})

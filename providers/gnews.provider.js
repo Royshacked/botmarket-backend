@@ -62,9 +62,11 @@ export function sanitizeGNewsQuery(query) {
 // GNews rate-limits per SECOND, not only per day. Two reads in one agent turn — "what's the news on
 // the Fed, and anything on Nvidia" — is enough to earn a 429 on the second, which reached the model
 // as "could not fetch the news" while the quota was fine. The shared pipe's retry (429 is retryable,
-// jittered, Retry-After honoured) is what clears that now; this file used to carry its own
-// one-retry-after-1.4s around a bare fetch, which was the same mechanism written a second time and
-// without a timeout.
+// Retry-After honoured) clears that — with a FLOOR under the jittered wait, because the default
+// 0–300ms retry lands inside the same second and earns the same 429 again. This file used to carry
+// its own fixed 1.4s one-retry around a bare fetch: the same mechanism a second time, without a
+// timeout, and the number was right.
+const RETRY_MIN_MS = 1_100
 
 /**
  * @param {{ query: string, from?: string, to?: string, max?: number }} opts
@@ -91,7 +93,7 @@ export async function fetchGNews({ query, from, to, max = 20, lang = 'en' } = {}
     const url = `${GNEWS_API_URL}/search?${params.toString()}`
 
     try {
-        return await getJson(url, { label: 'GNews /search' })
+        return await getJson(url, { label: 'GNews /search', retryMinMs: RETRY_MIN_MS })
     } catch (error) {
         // GNews's own words ride on the error body; the message the tool reads should carry them.
         if (error?.status) {

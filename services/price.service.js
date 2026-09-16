@@ -4,6 +4,11 @@ import { barDurationSeconds } from './timeframe.service.js'
 
 const DEFAULT_RANGE_DAYS = 30
 const CANDLE_CACHE_TTL_MS = 60 * 60 * 1000
+// How long a FAILED fetch holds the series back from asking again. Minutes, not the hour: the quota
+// goal (a monitor tick must not re-ask a 429ing provider on every read) is met by two minutes, and
+// an hour turned one transient failure on a first read into sixty minutes of `[]` for every desk
+// chart, indicator and daily condition on that symbol, reported as `cached: true` with no reason.
+const FETCH_FAIL_TTL_MS = 2 * 60 * 1000
 const CANDLE_SCHEMA = 'ohlcv6'
 
 /** @typedef {[number, number, number, number, number, number]} CandleRow */
@@ -95,15 +100,15 @@ async function syncCandles(ticker, options = {}) {
         incomingList = Array.isArray(incoming) ? incoming : []
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        // THE FAILED ATTEMPT IS STAMPED. Without this the envelope's lastFetchedAt stayed where it
-        // was, so getCandles's freshness test failed on every subsequent read for as long as the
-        // provider was down — and every monitor tick re-asked a provider that was answering 429,
-        // which is the self-inflicted quota burn fmp.price's own comments describe. Stamping the
-        // attempt puts the series back on its TTL: the bars it holds are still served (a stale
-        // series is usable, see the cache header) and the next fetch waits for the window.
-        // `refresh: true` callers still fetch every time — that is their contract, and their poll
-        // is their retry.
-        _stampAttempt(symbol, barOpts)
+        // THE FAILED ATTEMPT IS RECORDED — on its own field, with its error. Without this the
+        // envelope's lastFetchedAt stayed where it was, so getCandles's freshness test failed on every
+        // subsequent read for as long as the provider was down — and every monitor tick re-asked a
+        // provider that was answering 429, which is the self-inflicted quota burn fmp.price's own
+        // comments describe. A failure holds the series back for FETCH_FAIL_TTL_MS (minutes), the bars
+        // it holds are still served, and every read inside that window carries the reason — a
+        // success is stamped on lastFetchedAt and holds for the hour. `refresh: true` callers still
+        // fetch every time — that is their contract, and their poll is their retry.
+        _recordFailure(symbol, barOpts, message)
         return _result(_formatCandles([], options.format), {
             ingested: 0,
             cacheSize: existingCandles.length,
@@ -144,15 +149,16 @@ async function getCandles(ticker, opts = {}) {
     const barOpts = _normalizeOptions(opts)
     let cache = await _loadEnvelope(symbol, barOpts)
 
-    // Freshness alone decides. A never-fetched envelope has lastFetchedAt 0 and is not fresh, so it
-    // fetches; an envelope fetched inside the window is served as it is — INCLUDING an empty one.
-    // There used to be a `candles.length === 0` clause here, and it meant a symbol the provider does
-    // not carry (or could not answer while it was down) was re-asked on every single read for as
-    // long as it stayed empty: the TTL never applied to precisely the requests most likely to fail.
-    // fmp.price caches its null quotes for the same reason.
+    // Freshness decides, on two clocks. A never-fetched envelope has lastFetchedAt 0 and is not
+    // fresh, so it fetches; a successful fetch holds for the hour — INCLUDING an empty one (a symbol
+    // the provider does not carry is a real answer; fmp.price caches its null quotes the same way);
+    // a FAILED fetch holds for FETCH_FAIL_TTL_MS only, and the read says so. There used to be a
+    // `candles.length === 0` clause here that re-asked an empty series on every read regardless of
+    // either clock — the TTL never applied to precisely the requests most likely to fail.
+    const heldByFailure = isCacheFresh(cache.lastFailure?.at, FETCH_FAIL_TTL_MS)
     const shouldFetch =
         opts.refresh === true ||
-        !isCacheFresh(cache.lastFetchedAt, CANDLE_CACHE_TTL_MS)
+        (!isCacheFresh(cache.lastFetchedAt, CANDLE_CACHE_TTL_MS) && !heldByFailure)
 
     let syncMeta = {}
     if (shouldFetch) {
@@ -169,6 +175,11 @@ async function getCandles(ticker, opts = {}) {
             resultMeta.reason = syncMeta.reason
             resultMeta.error = syncMeta.error
         }
+    } else if (heldByFailure && !isCacheFresh(cache.lastFetchedAt, CANDLE_CACHE_TTL_MS)) {
+        // Served without asking BECAUSE the last ask failed — the reader is told, every time, rather
+        // than reading a quiet `cached: true` over a series that may be empty.
+        resultMeta.reason = 'fetch_failed'
+        resultMeta.error  = cache.lastFailure.error
     }
     return _result(candles, resultMeta)
 }
@@ -232,6 +243,7 @@ async function _saveEnvelope(ticker, barOpts, candles) {
 
     const envelope = {
         lastFetchedAt: Date.now(),
+        lastFailure:   null,      // a success clears the failure hold
         schema: CANDLE_SCHEMA,
         candles: rows,
     }
@@ -247,16 +259,18 @@ async function _saveEnvelope(ticker, barOpts, candles) {
 }
 
 /**
- * Record that a fetch was ATTEMPTED now, without touching the bars: an existing envelope keeps
- * them and moves its lastFetchedAt; a series that has never fetched gets an empty envelope, so a
- * failure on the first read also waits out the window rather than retrying on every call. Bounded
- * like every other write here (the same eviction as _saveEnvelope). See syncCandles.
+ * Record a FAILED fetch on the envelope — `lastFailure: { at, error }` — without touching the bars
+ * or lastFetchedAt: an existing envelope keeps what it holds; a series that has never fetched gets
+ * an empty envelope so a failure on the first read also waits out FETCH_FAIL_TTL_MS rather than
+ * retrying on every call. A later success clears it (see _saveEnvelope). Bounded like every other
+ * write here. See syncCandles.
  */
-function _stampAttempt(ticker, barOpts) {
+function _recordFailure(ticker, barOpts, error) {
     const key = _envelopeKey(ticker, barOpts)
     const cur = _envelopes.get(key)
-    if (cur) { cur.lastFetchedAt = Date.now(); return }
-    _envelopes.set(key, { lastFetchedAt: Date.now(), schema: CANDLE_SCHEMA, candles: [] })
+    const lastFailure = { at: Date.now(), error }
+    if (cur) { cur.lastFailure = lastFailure; return }
+    _envelopes.set(key, { lastFetchedAt: 0, lastFailure, schema: CANDLE_SCHEMA, candles: [] })
     while (_envelopes.size > MAX_CACHED_SERIES) _envelopes.delete(_envelopes.keys().next().value)
 }
 
@@ -267,6 +281,7 @@ function _normalizeEnvelope(raw) {
     if (raw && typeof raw === 'object' && Array.isArray(raw.candles)) {
         return {
             lastFetchedAt: Number(raw.lastFetchedAt) || 0,
+            lastFailure:   raw.lastFailure ?? null,
             schema: raw.schema || CANDLE_SCHEMA,
             candles: raw.candles.map(toCompactRow).filter(Boolean),
         }

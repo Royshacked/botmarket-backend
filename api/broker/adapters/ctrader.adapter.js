@@ -37,19 +37,23 @@ const LOG = '[ctrader.adapter]'
 
 // TWO READS THAT HAPPENED ON EVERY OPERATION, cached for as long as their answer can be trusted.
 //
-// • REST /tradingaccounts — the accounts on a connection. Fetched at three sites in this file
-//   (getAccount, getTradingAccounts, _resolveAccountId) and once more in the session provider, each
-//   a full REST round-trip for a list that changes when the user opens or closes an account at the
-//   broker, i.e. almost never. One minute is long enough to collapse a burst (a workspace read asks
-//   for accounts, then the balance, then the positions) and short enough that a new account shows
-//   up before the user has finished looking for it. Keyed by user, since the token is the user's.
+// • REST /tradingaccounts — the accounts on a connection, fetched at three sites in this file
+//   (getAccount, getTradingAccounts, _resolveAccountId) and once more in the session provider. The
+//   rows carry the account IDENTITY, which does not move — and the MONEY (balance, equity, margin,
+//   freeMargin), which moves on every fill. So this is a burst collapser, not a cache: a workspace
+//   read asks for the accounts, then the balance, then the positions inside one request, and those
+//   should be one round-trip. Five seconds. A minute here served a pre-fill free margin to the next
+//   sizing for up to sixty seconds — the same money deployable twice (CR on §7).
 // • ctid for (user, accountId) — what _session resolves before EVERY adapter call: a ProtoOA socket
 //   round-trip (listCTraderAccounts, ProtoOA 2149) plus a possible REST lookup, to map the account
 //   id an idea persisted onto the ctidTraderAccountId the socket speaks. The positions poll, every
 //   order, every candle read paid it. The mapping is a fact about the account and does not move;
 //   ten minutes bounds how long a re-granted connection could hand back a ctid the socket then
-//   refuses — which surfaces as the auth error it is, not as a wrong account.
-const ACCOUNTS_TTL_MS = 60_000
+//   refuses — which surfaces as the auth error it is, not as a wrong account. What the cache MUST
+//   NOT skip is _freshTokens: that read is the disconnect gate (a deleted connection throws
+//   BROKER_DISCONNECTED), and a cached ctid that bypassed it would keep a disconnected broker
+//   trading over the still-authenticated socket until the entry aged out (CR on §7).
+const ACCOUNTS_TTL_MS = 5_000
 const CTID_TTL_MS     = 10 * 60_000
 const _restAccounts   = createTtlCache({ ttlMs: ACCOUNTS_TTL_MS, max: 200 })   // userId → REST rows
 const _ctidFor        = createTtlCache({ ttlMs: CTID_TTL_MS, max: 500 })       // `${userId}:${accountId}` → { ctid, isLive }
@@ -527,10 +531,11 @@ export class CTraderAdapter extends BrokerAdapter {
      * session a token-getter so it can re-account-auth after a socket reconnect.
      */
     async _session(userId, accountId) {
+        // The gate first, on EVERY call — never behind the cache. See the note at the top.
+        const tokens = await this._freshTokens(userId)
         const key = `${userId}:${accountId ?? ''}`
         let acct = _ctidFor.get(key)
         if (!acct) {
-            const tokens   = await this._freshTokens(userId)
             const accounts = await listCTraderAccounts(tokens.accessToken)
             if (accounts.length === 0) throw new Error('cTrader: no trading accounts on this connection')
             const matched = await matchCTraderAccount(userId, accountId, accounts, tokens)

@@ -234,3 +234,40 @@ test('a FIRST fetch that fails also waits out the window', async () => {
         assert.equal(fetches, 1)
     } finally { restore() }
 })
+
+// ── the failure hold is MINUTES, and every read inside it says why ────────────
+// The CR pass on §7 caught the first cut of this: a failed fetch was stamped like a success, so one
+// transient failure on a first read blacked a series out for the full hour, reported as `cached: true`
+// with no reason. A failure now holds for its own short window, carries its error on every read inside
+// it, and is cleared by the next success.
+
+test('a read held back by a failure carries the reason — never a quiet cached:true over nothing', async () => {
+    _resetCandleCache()
+    let fetches = 0
+    const restore = mockAggregates(async () => { fetches++; throw new Error('FMP candles 429') })
+    try {
+        const first  = await priceService.getCandles('HELD', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        const second = await priceService.getCandles('HELD', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        assert.equal(fetches, 1)
+        assert.equal(first.meta.reason, 'fetch_failed')
+        assert.equal(second.meta.reason, 'fetch_failed', 'the held read says why it did not ask')
+        assert.match(second.meta.error, /429/)
+        assert.equal(second.meta.cached, true)
+    } finally { restore() }
+})
+
+test('a success clears the failure hold, and the series is then fresh for the hour', async () => {
+    _resetCandleCache()
+    let fetches = 0
+    const bar = { timestamp: SEC.now - DAY, open: 1, high: 1, low: 1, close: 7, volume: 1 }
+    const restore = mockAggregates(async () => { fetches++; if (fetches === 1) throw new Error('down'); return [bar] })
+    try {
+        await priceService.getCandles('REC', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        const ok = await priceService.getCandles('REC', { timeSpan: 'day', multiplier: 1, format: 'object', refresh: true })
+        assert.equal(ok.meta.reason, undefined)
+        const again = await priceService.getCandles('REC', { timeSpan: 'day', multiplier: 1, format: 'object' })
+        assert.equal(fetches, 2)
+        assert.equal(again.meta.reason, undefined, 'no stale failure rides a healthy series')
+        assert.equal(again.candles.at(-1).close, 7)
+    } finally { restore() }
+})
