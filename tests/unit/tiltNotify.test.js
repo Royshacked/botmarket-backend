@@ -2,12 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-    buildTiltEvent, audienceBySector, notifyTiltChanged,
+    buildTiltEvent, notifyTiltChanged,
     buildTiltReviewOffer, notifyTiltReviewDue, REVIEW_CARD_TYPE,
 } from '../../services/tiltNotify.service.js'
 import { diffStances } from '../../monitoring/tilt.assess.js'
 
-// Pythia's cards. A pure builder + the audience join, mirroring coverageNotify. The desk posts
+// Pythia's cards. A pure builder + the admin fan-out, mirroring coverageNotify. The desk posts
 // through the ONE shared transport and owns only its own copy — never a router.
 
 const tilt = (over = {}) => ({
@@ -61,75 +61,60 @@ test('a regime with no name simply drops the clause', () => {
     assert.equal(c.content, 'Sector view changed: Energy neutral → underweight (-150bp).')
 })
 
-// ── the audience join ────────────────────────────────────────────────────────
-const COVERAGE = [
-    { userId: 'u1', symbol: 'XOM',  sector: 'Energy' },
-    { userId: 'u1', symbol: 'NVDA', sector: 'Technology' },
-    { userId: 'u2', symbol: 'CVX',  sector: 'Energy' },
-]
-const deps = { listActiveBySector: async () => COVERAGE }
+// ── the fan-out ──────────────────────────────────────────────────────────────
+// The change card goes to every admin. It used to be narrowed to "whoever researches the moved
+// sector" by joining on coverage's `userId` — a field coverage stopped carrying at the pivot to house
+// ownership (5c12b8c, 2026-08-26). The join then matched nobody and every publish posted zero cards,
+// while this file's fixture still gave its coverage rows a `userId` — a fixture shaped like the data
+// USED to be is how a dead path stays green. The fan-out now reads only the roster, so there is no
+// coverage shape left to get wrong.
 
-test('the audience is whoever RESEARCHES the moved sector', async () => {
-    const by = await audienceBySector(['Energy'], deps)
-    assert.deepEqual([...by.keys()].sort(), ['u1', 'u2'])
-    assert.deepEqual([...by.get('u1')], ['Energy'], 'only the sector that moved')
+test('the change card reaches every admin — the roster is the audience, not a coverage join', async () => {
+    const posted = []
+    const n = await notifyTiltChanged(tilt(), [change()], {
+        adminUserIds: async () => ['a1', 'a2'],
+        post:         async (card) => { posted.push(card); return card },
+    })
+    assert.equal(n, 2)
+    assert.deepEqual(posted.map(c => c.userId), ['a1', 'a2'])
 })
 
-test('each user hears about THEIR sectors and no one else’s', async () => {
-    // u2 covers no Technology, so a Technology move is not their news.
-    const by = await audienceBySector(['Technology'], deps)
-    assert.deepEqual([...by.keys()], ['u1'])
-})
-
-test('nobody covering the sector → nobody told', async () => {
-    const by = await audienceBySector(['Utilities'], deps)
-    assert.equal(by.size, 0)
-})
-
-// ── posting ──────────────────────────────────────────────────────────────────
-test('a user covering two moved sectors gets ONE card naming both', async () => {
+test('every admin hears the WHOLE change — one card each, naming every moved sector', async () => {
     const changes = [change(), change({ sector: 'Technology', from: 'over', to: 'neutral', to_bp: 0 })]
     const posted = []
-    const spy = { listActiveBySector: async () => COVERAGE.filter(c => c.userId === 'u1'), _posted: posted }
-    // buildTiltEvent is pure and already covered; here we only assert the narrowing per user.
-    const by = await audienceBySector(changes.map(c => c.sector), spy)
-    const card = buildTiltEvent(tilt(), changes.filter(c => by.get('u1').has(c.sector)), 'u1')
-    assert.deepEqual(card.payload.sectors, ['Energy', 'Technology'])
+    await notifyTiltChanged(tilt(), changes, {
+        adminUserIds: async () => ['a1'],
+        post:         async (card) => { posted.push(card); return card },
+    })
+    assert.equal(posted.length, 1)
+    assert.deepEqual(posted[0].payload.sectors, ['Energy', 'Technology'])
+    assert.equal(posted[0].visibility, 'admin')
 })
 
-test('nothing moved → no lookup, no cards, and 0 returned', async () => {
-    let looked = false
-    const n = await notifyTiltChanged(tilt(), [], { listActiveBySector: async () => { looked = true; return [] } })
+test('nothing moved → no roster read, no cards, and 0 returned', async () => {
+    let read = false
+    const n = await notifyTiltChanged(tilt(), [], { adminUserIds: async () => { read = true; return ['a1'] } })
     assert.equal(n, 0)
-    assert.equal(looked, false, 'a reaffirming republish must not even query')
-})
-
-test('an audience lookup that fails degrades to "nobody told", never a throw', async () => {
-    const n = await notifyTiltChanged(tilt(), [change()], {
-        listActiveBySector: async () => { throw new Error('mongo down') },
-        adminUserIds:       async () => ['u1', 'u2'],
-    })
-    assert.equal(n, 0)   // the view is already published; delivery failing must not undo that
-})
-
-// The desk is hidden from traders, so covering the moved sector is necessary and not sufficient.
-test('a trader who covers the moved sector is NOT told — they cannot see this desk', async () => {
-    const posted = []
-    const n = await notifyTiltChanged(tilt(), [change()], {
-        listActiveBySector: async () => COVERAGE,   // u1 and u2 both cover Energy
-        adminUserIds:       async () => ['u1'],     // ...but only u1 is an admin
-        post:               async (card) => { if (!card) return null; posted.push(card); return card },
-    })
-    assert.equal(n, 1)
-    assert.deepEqual(posted.map(c => c.userId), ['u1'])
+    assert.equal(read, false, 'a reaffirming republish must not even query')
 })
 
 test('a roster read that fails costs the cards, never the publish', async () => {
     const n = await notifyTiltChanged(tilt(), [change()], {
-        listActiveBySector: async () => COVERAGE,
-        adminUserIds:       async () => { throw new Error('mongo down') },
+        adminUserIds: async () => { throw new Error('mongo down') },
     })
-    assert.equal(n, 0)
+    assert.equal(n, 0)   // the view is already published; delivery failing must not undo that
+})
+
+test('an empty roster → nobody told, and that is 0, not a throw', async () => {
+    assert.equal(await notifyTiltChanged(tilt(), [change()], { adminUserIds: async () => [] }), 0)
+})
+
+test('one failed delivery does not stop the others, and is not counted', async () => {
+    const n = await notifyTiltChanged(tilt(), [change()], {
+        adminUserIds: async () => ['a1', 'a2', 'a3'],
+        post:         async (card) => card.userId === 'a2' ? null : card,
+    })
+    assert.equal(n, 2)
 })
 
 // ── the review OFFER ─────────────────────────────────────────────────────────

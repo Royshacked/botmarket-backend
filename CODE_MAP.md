@@ -357,8 +357,14 @@ services/
   coverageNotify.service.js Prometheus's cards. coverage_event = the monitor's material verdict,
                             fanned out to EVERY ADMIN (listAdminUserIds, visibility 'admin') — house
                             coverage has no owner, so the audience is derived at delivery, as
-                            tiltNotify's review offer does. coverage_refreshed = the per-user ping
-                            after an admin's <coverage_refresh> hop
+                            tiltNotify's review offer does. coverage_refreshed = the ping after a
+                            headless refresh: to the ONE user whose <coverage_refresh> hop asked, or
+                            — for the monitor's scheduled re-model, which has no user — to every admin
+  tiltNotify.service.js     Pythia's cards, both to the ADMIN ROSTER: tilt_event on publish (what
+                            moved, via tilt.assess.diffStances) and tilt_review when the monitor finds
+                            the view due. The change card used to be narrowed by a coverage.userId join;
+                            coverage lost that field at the house pivot and the card went to nobody for
+                            three weeks — there is no per-user sector audience left in the data
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
   tradeNotify.service.js    notify+route cards → social chat: entry_confirm (paper/live idea entry)
                             + queue_ready (the market-open nudge, from Axl) + setup_invalidation /
@@ -510,7 +516,7 @@ monitoring/
                             FROZEN baseline, mature the ones whose window closed — tilt.assess, pure).
                             Expensive tier is an OFFER, not a run: reviewDecision says due (stance
                             matured / macro catalyst / 30-day floor, under a 7-day cooldown) →
-                            tiltNotify.notifyTiltReviewDue posts a `tilt_review` card to every user,
+                            tiltNotify.notifyTiltReviewDue posts a `tilt_review` card to every admin,
                             and the confirm runs the review at PYTHIA'S DESK — a re-author supersedes
                             the view everyone reads, so it takes a confirm. Both clocks anchor on
                             reviewAnchorMs (last publish/reauthor off the revision trail), NEVER on
