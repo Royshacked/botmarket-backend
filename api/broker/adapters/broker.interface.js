@@ -1,5 +1,6 @@
 import { brokerConnectionService } from '../brokerConnection.service.js'
 import { logger }                  from '../../../services/logger.service.js'
+import { httpError }               from '../../../services/httpError.util.js'
 
 /**
  * Broker Adapter Interface
@@ -194,6 +195,11 @@ export class BrokerAdapter {
      * — clears the session and sends the user to the front page. An expired cTrader token on the
      * positions poll used to do exactly that (masked, until recently, by getPositions swallowing
      * the throw). The broker being unreachable is a failed dependency, which is what 424 says.
+     *
+     * MINTED with httpError, because this status is FOR the client — the one `status` in the
+     * adapter tier that is. The error handler answers only a minted status; a bare
+     * `{ status: 424 }` would have reached the user as a 500 "Internal server error" on every
+     * positions poll, with the "reconnect" hint gone (caught by the CR on §9).
      * @param {string} userId
      * @returns {Promise<object>} a connection/tokens object
      */
@@ -201,7 +207,7 @@ export class BrokerAdapter {
         const label = this.brokerLabel || this.brokerType
         const conn  = await brokerConnectionService.getConnection(userId, this.brokerType)
         if (!conn) {
-            throw Object.assign(new Error(`${label} not connected`), { status: BROKER_DISCONNECTED })
+            throw httpError(BROKER_DISCONNECTED, `${label} not connected`)
         }
 
         const bufferMs = 60_000
@@ -213,7 +219,7 @@ export class BrokerAdapter {
                 return fresh
             } catch (err) {
                 logger.error(`[${this.brokerType}.adapter]`, `Token refresh failed for user ${userId}:`, err.message)
-                throw Object.assign(new Error(`${label} session expired — please reconnect`), { status: BROKER_DISCONNECTED })
+                throw httpError(BROKER_DISCONNECTED, `${label} session expired — please reconnect`)
             }
         }
         return conn

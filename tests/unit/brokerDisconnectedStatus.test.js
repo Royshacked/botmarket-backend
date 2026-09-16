@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { CTraderAdapter } from '../../api/broker/adapters/ctrader.adapter.js'
 import { BROKER_DISCONNECTED } from '../../api/broker/adapters/broker.interface.js'
 import { brokerConnectionService } from '../../api/broker/brokerConnection.service.js'
+import { errorHandler } from '../../api/_shared/handle.util.js'
 
 // A missing or unrefreshable BROKER session used to throw `status: 401`. 401 is the APP's login
 // code: the client clears the session and leaves the page on any 401, so an expired cTrader token
@@ -23,6 +24,26 @@ test('no saved connection → 424, never 401', async () => {
         () => new CTraderAdapter()._freshTokens('u1'),
         err => err.status === BROKER_DISCONNECTED && /not connected/.test(err.message),
     )
+})
+
+test('the 424 REACHES the client as 424 with its sentence — in production too', async () => {
+    // The adapter asserting its own status is not the same as the user seeing it: the error handler
+    // answers only a MINTED status, and a bare `{ status: 424 }` would have been a 500 "Internal
+    // server error" on every positions poll, the "reconnect" hint gone (CR on §9).
+    brokerConnectionService.getConnection = async () => null
+    const saved = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    try {
+        const err = await new CTraderAdapter()._freshTokens('u1').then(() => null, e => e)
+        const res = { statusCode: 200, body: null, headersSent: false }
+        res.status = c => { res.statusCode = c; return res }
+        res.json   = b => { res.body = b; return res }
+        errorHandler(err, { method: 'GET', originalUrl: '/api/broker/ctrader/positions' }, res, () => {})
+        assert.equal(res.statusCode, 424)
+        assert.match(res.body.error, /not connected/)
+    } finally {
+        if (saved === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = saved
+    }
 })
 
 test('a refresh that fails → 424, never 401', async () => {

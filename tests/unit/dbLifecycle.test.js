@@ -75,6 +75,29 @@ test('ten concurrent first callers share ONE client — the boot sequence, in mi
     }
 })
 
+test('closeDb during a connect in flight closes the client that connect produces', async () => {
+    // The teardown racing an un-awaited ensure*Indexes(): without waiting, closeDb saw no client,
+    // the connect then resolved onto `_client`, and nothing ever closed it — the hang this file's
+    // header describes, one step removed.
+    const { stats, factory } = _fakeDriver()
+    const restore = _setClientFactory(factory)
+    process.env.MONGODB_URI = 'mongodb://fake.invalid/test'
+    try {
+        const pending = getDb()          // not awaited — the connect is in flight
+        await closeDb()
+        await pending.catch(() => {})
+        assert.equal(stats.built, 1)
+        assert.equal(stats.closed, 1, 'the in-flight client was the one closed')
+        // And the module holds nothing: a fresh getDb builds anew rather than handing back the closed one.
+        await getDb()
+        assert.equal(stats.built, 2)
+    } finally {
+        await closeDb()
+        delete process.env.MONGODB_URI
+        restore()
+    }
+})
+
 test('a failed connect rejects every waiting caller and leaves nothing cached — the next call retries', async () => {
     const { stats, factory } = _fakeDriver({ failConnect: true })
     const restore = _setClientFactory(factory)

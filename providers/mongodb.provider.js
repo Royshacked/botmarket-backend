@@ -98,6 +98,10 @@ export function getDbName() {
  * adding a server shutdown path later) should be able to call it blind.
  */
 export async function closeDb() {
+    // A connect still in flight will resolve to a client somebody has to close. Wait for it (a
+    // failed connect is nothing to close), THEN take the handle — otherwise a teardown that races
+    // an un-awaited ensure*Indexes() leaves exactly the orphan this function exists to prevent.
+    if (_connecting) await _connecting.catch(() => {})
     const client = _client
     // Cleared BEFORE the await, so a getDb() racing this one builds a fresh client rather than
     // handing back the connection being torn down.

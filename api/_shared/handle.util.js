@@ -32,7 +32,13 @@ export function makeHandle(log) {
             try {
                 await fn(req, res)
             } catch (err) {
-                logger.error(log, `${label} ${req.method} ${req.originalUrl}:`, err.message)
+                // A MINTED refusal (a 404, a wrong password, another user's id) is the request
+                // being answered, not the server failing — so it is a line, not an alarm. Before
+                // the sweep those paths were `return res.status(4xx)` and logged nothing at all;
+                // an error-level line per wrong password would turn a credential-stuffing burst
+                // into a log full of "faults". Real faults still log at error.
+                const refusal = err?.expose === true && err.status < 500
+                logger[refusal ? 'info' : 'error'](log, `${label} ${req.method} ${req.originalUrl}:`, err.message)
                 next(err)
             }
         }
