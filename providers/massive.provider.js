@@ -1,14 +1,11 @@
-import dotenv from 'dotenv'
 import { restClient } from '@massive.com/client-js'
 import { getTickerAggregates as getYahooAggregates } from './yahoofinance.provider.js'
 import { logger } from '../services/logger.service.js'
 import { config } from '../services/config.js'
 
-dotenv.config()
+const LOG = '[massive]'
 const MASSIVE_API_KEY = config.massiveApiKey
 const rest = restClient(MASSIVE_API_KEY, 'https://api.massive.com')
-
-
 
 function _toDateStr(ms) {
     return new Date(ms).toISOString().slice(0, 10)
@@ -69,28 +66,25 @@ export async function getTickerAggregates(ticker, options = {}) {
     // Default the window bounds so a caller that omits `to` (or `from`) can't crash
     // `_toDateStr(undefined)` with "Invalid time value". Callers on the FMP-first router
     // reach here only for symbols FMP doesn't serve (futures / index / broker), and some
-    // (the Hermes monitor's candle read) pass `from` only — cover them all.
+    // (a monitor's candle read) pass `from` only — cover them all.
     const toMs   = Number.isFinite(to)   ? to   : Date.now()
     const fromMs = Number.isFinite(from) ? from : toMs - 60 * 24 * 60 * 60 * 1000
 
-  try {
-        const response = await rest.getStocksAggregates(
-        {
+    try {
+        const response = await rest.getStocksAggregates({
             stocksTicker: ticker,
-            multiplier: multiplier,
-            timespan: timeSpan,
-            from: _toDateStr(fromMs),
-            to: _toDateStr(toMs),
-            adjusted: "true",
-            sort: "desc",
-            limit: "50000"
-        }
-        );
+            multiplier:   multiplier ?? 1,
+            timespan:     timeSpan,
+            from:         _toDateStr(fromMs),
+            to:           _toDateStr(toMs),
+            adjusted:     'true',
+            sort:         'desc',
+            limit:        '50000',
+        })
         return normalizeAggregateRows(response?.results)
-
-  } catch (e) {
-    logger.error(`couldn't get stocks aggregates for ${ticker}`, e);
-    throw e
-  }
+    } catch (e) {
+        logger.error(LOG, `couldn't get stocks aggregates for ${ticker}`, e)
+        throw e
+    }
 }
 

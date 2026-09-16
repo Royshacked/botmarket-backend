@@ -10,12 +10,14 @@ process.env.ANTHROPIC_API_KEY = ''   // parses fail → every leaf falls to the 
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { routeExits, touchLeaf } from '../../services/protectionPlan.service.js'
+import { routeExits } from '../../services/protectionPlan.service.js'
 
 test('a leaf the parser cannot read falls to the monitor, never to a nonsense broker order', async () => {
     const route = await routeExits({
         id: 'e9', asset: 'SPY', direction: 'long', quantity: 10, broker: 'ctrader',
-        stop_conditions: [touchLeaf(400)],   // unparseable here (blank key) → falls to the monitor
+        // Worded the way a USER might, so it needs the model — and the key is blank here, so it
+        // cannot be read. (touchLeaf's own sentence no longer needs a model; see condition.parser.)
+        stop_conditions: [{ condition: 'price reaches 400', type: 'touch', timeframe: null }],
         tp_conditions:   [],
     })
     assert.notEqual(route.stop.monitorTree, null, 'the leg is on the monitor')

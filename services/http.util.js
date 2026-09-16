@@ -121,23 +121,44 @@ export function _retryDelayMs(attempt, retryAfterMs, baseMs = RETRY_BASE_MS, ran
 
 const _sleep = ms => new Promise(r => setTimeout(r, ms))
 
+/** The provider's own words on a refusal: parsed JSON when it is JSON, else the text, else null. */
+async function _errorBody(res) {
+    try {
+        const text = await res.text()
+        if (!text) return null
+        try { return JSON.parse(text) } catch { return text }
+    } catch { return null }
+}
+
 /**
  * JSON over HTTP with a per-attempt timeout, the request meter, and a bounded retry on transient
- * failures.
+ * failures. THE one pipe every third-party JSON call goes through — the meter's whole premise is
+ * that requests are counted where they all pass, and until 2026-09-16 eleven of them did not
+ * (five of those with no timeout at all).
  *
  * @param {string} url
- * @param {{ headers?: object, timeoutMs?: number, label?: string, retries?: number, retryBaseMs?: number }} [opts]
+ * @param {{ headers?: object, timeoutMs?: number, label?: string, retries?: number, retryBaseMs?: number,
+ *           method?: string, body?: unknown }} [opts]
  *   `timeoutMs` bounds EACH attempt, not the total — a retry gets a full budget or it isn't one.
  *   `retries: 0` opts a caller out (polling loops: the next tick is already the retry).
+ *   `method` / `body`: a JSON body is serialised and sent with its content type; the default is GET.
+ *   A non-2xx answer throws with `err.status` AND `err.body` — the parsed error body when the
+ *   provider sent JSON (cTrader's `description`, GNews's `errors`), else its text — so a caller
+ *   that wants the provider's own words in its message has them without a second request.
  */
-export async function getJson(url, { headers, timeoutMs = 10000, label, retries = RETRIES, retryBaseMs = RETRY_BASE_MS } = {}) {
+export async function getJson(url, { headers, timeoutMs = 10000, label, retries = RETRIES, retryBaseMs = RETRY_BASE_MS, method = 'GET', body } = {}) {
     const attempts = Math.max(0, retries) + 1
+    const init = { method, headers: { ...(headers ?? {}) } }
+    if (body !== undefined) {
+        init.body = JSON.stringify(body)
+        init.headers['Content-Type'] ??= 'application/json'
+    }
     for (let attempt = 0; ; attempt++) {
         const ac = new AbortController()
         const timer = setTimeout(() => ac.abort(), timeoutMs)
         let res
         try {
-            res = await fetch(url, { headers, signal: ac.signal })
+            res = await fetch(url, { ...init, signal: ac.signal })
         } finally {
             clearTimeout(timer)
         }
@@ -156,6 +177,7 @@ export async function getJson(url, { headers, timeoutMs = 10000, label, retries 
         // number back out to tell them apart — or, worse, treat them the same.
         const err = new Error(`${label || 'http'} ${res.status}`)
         err.status = res.status
+        err.body   = await _errorBody(res)
         if (attempt >= attempts - 1 || !isRetryableStatus(res.status)) throw err
 
         const wait = _retryDelayMs(attempt, parseRetryAfterMs(res.headers?.get?.('retry-after')), retryBaseMs)

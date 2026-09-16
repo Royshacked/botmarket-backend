@@ -35,8 +35,8 @@
 // is the enrichment — PSC/NAICS, period of performance, and the obligated-vs-ceiling pair — and it
 // costs one request PER AWARD, so it runs only on what already cleared the materiality gate.
 
-import axios from 'axios'
 import { logger } from '../services/logger.service.js'
+import { getJson } from '../services/http.util.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
 
 const LOG  = '[usaspending]'
@@ -175,7 +175,7 @@ async function fetchTransactions({ from, to, floorUsd = PREFILTER_FLOOR_USD, max
     try {
         for (let page = 1; page <= maxPages; page++) {
             const body = _buildTransactionBody({ from, to, floorUsd, page })
-            const { data } = await axios.post(`${BASE}/search/spending_by_transaction/`, body, { timeout: TIMEOUT_MS })
+            const data = await getJson(`${BASE}/search/spending_by_transaction/`, { method: 'POST', body, timeoutMs: TIMEOUT_MS, label: 'USAspending /search/spending_by_transaction' })
 
             const rows = Array.isArray(data?.results) ? data.results : []
             for (const r of rows) {
@@ -193,7 +193,7 @@ async function fetchTransactions({ from, to, floorUsd = PREFILTER_FLOOR_USD, max
         }
         return out
     } catch (err) {
-        logger.error(LOG, 'transaction fetch failed', { from, to, message: err.message, status: err.response?.status })
+        logger.error(LOG, 'transaction fetch failed', { from, to, message: err.message, status: err.status })
         return []
     }
 }
@@ -220,7 +220,7 @@ async function fetchAwardDetail(awardRef) {
     if (hit !== undefined) return hit
 
     try {
-        const { data } = await axios.get(`${BASE}/awards/${encodeURIComponent(ref)}/`, { timeout: TIMEOUT_MS })
+        const data = await getJson(`${BASE}/awards/${encodeURIComponent(ref)}/`, { timeoutMs: TIMEOUT_MS, label: 'USAspending /awards' })
         const detail = normalizeAwardDetail(data)
         // Only a real answer is cached. Pinning a null for twelve hours would turn one malformed
         // response into a whole day of "this award cannot be enriched", and the row would be dropped
@@ -228,7 +228,7 @@ async function fetchAwardDetail(awardRef) {
         if (detail) _detailCache.set(ref, detail)
         return detail
     } catch (err) {
-        logger.warn(LOG, 'award detail fetch failed', { ref, message: err.message, status: err.response?.status })
+        logger.warn(LOG, 'award detail fetch failed', { ref, message: err.message, status: err.status })
         return null
     }
 }

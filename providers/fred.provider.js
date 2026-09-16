@@ -10,14 +10,12 @@
 //    NOT in FRED's release feed (release 101 reports every calendar day), so
 //    meeting dates come from the static schedule — update it annually.
 
-import dotenv from 'dotenv'
-import axios from 'axios'
 import { logger } from '../services/logger.service.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
+import { getJson } from '../services/http.util.js'
 import { config } from '../services/config.js'
 
-dotenv.config()
-
+const LOG  = '[fred]'
 const FRED_API_KEY = config.fredApiKey
 const BASE = 'https://api.stlouisfed.org/fred'
 
@@ -54,8 +52,8 @@ async function _releaseDates(releaseId, from, to) {
     const url = `${BASE}/release/dates?release_id=${releaseId}&api_key=${FRED_API_KEY}`
               + `&file_type=json&realtime_start=${from}&realtime_end=${to}`
               + `&include_release_dates_with_no_data=true&sort_order=asc&limit=40`
-    const res = await axios.get(url)
-    return Array.isArray(res.data?.release_dates) ? res.data.release_dates.map(d => d.date) : []
+    const data = await getJson(url, { label: 'FRED /release/dates' })
+    return Array.isArray(data?.release_dates) ? data.release_dates.map(d => d.date) : []
 }
 
 // Merge curated data-release entries with the in-window FOMC decision dates,
@@ -77,7 +75,7 @@ export function _assembleFedEvents(releaseEntries, from, to, fomcDates = FOMC_DA
  */
 export async function fetchFedEvents({ days = 45, backDays = 0 } = {}) {
     if (!FRED_API_KEY) {
-        logger.warn('FRED_API_KEY is not set — Fed calendar unavailable')
+        logger.warn(LOG, 'FRED_API_KEY is not set — Fed calendar unavailable')
         return []
     }
 
@@ -98,7 +96,7 @@ export async function fetchFedEvents({ days = 45, backDays = 0 } = {}) {
                 const dates = await _releaseDates(id, from, to)
                 return dates.map(date => ({ date, ...MACRO_RELEASES[id], kind: 'data' }))
             } catch (err) {
-                logger.warn('FRED release fetch failed', id, err.message)
+                logger.warn(LOG, 'FRED release fetch failed', id, err.message)
                 return []
             }
         }))
@@ -108,7 +106,7 @@ export async function fetchFedEvents({ days = 45, backDays = 0 } = {}) {
         _cache.set(key, events)
         return events
     } catch (err) {
-        logger.error('Error getting Fed events', err)
+        logger.error(LOG, 'Error getting Fed events', err)
         return []
     }
 }
@@ -139,8 +137,8 @@ const _pricedInCache = createTtlCache({ ttlMs: 60 * 60 * 1000, max: 4 })
 async function _latest(seriesId) {
     const url = `${BASE}/series/observations?series_id=${seriesId}&api_key=${FRED_API_KEY}`
               + `&file_type=json&sort_order=desc&limit=1`
-    const res = await axios.get(url)
-    const o   = res.data?.observations?.[0]
+    const data = await getJson(url, { label: 'FRED /series/observations' })
+    const o    = data?.observations?.[0]
     const v   = Number(o?.value)
     return (o?.date && Number.isFinite(v)) ? { value: v, date: o.date } : null
 }
@@ -155,7 +153,7 @@ async function _latest(seriesId) {
  */
 export async function getPricedInRaw() {
     if (!FRED_API_KEY) {
-        logger.warn('FRED_API_KEY is not set — priced-in levels unavailable')
+        logger.warn(LOG, 'FRED_API_KEY is not set — priced-in levels unavailable')
         return null
     }
     const hit = _pricedInCache.get('latest')
@@ -163,7 +161,7 @@ export async function getPricedInRaw() {
 
     const legs = await Promise.all(PRICED_IN_SERIES.map(async ([key, id]) => {
         try { return [key, await _latest(id)] }
-        catch (err) { logger.warn('FRED priced-in leg failed', id, err.message); return [key, null] }
+        catch (err) { logger.warn(LOG, 'FRED priced-in leg failed', id, err.message); return [key, null] }
     }))
     const out = Object.fromEntries(legs)
     if (Object.values(out).every(v => v === null)) return null   // nothing read → say so, don't ship an empty shell

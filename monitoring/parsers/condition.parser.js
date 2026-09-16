@@ -43,6 +43,29 @@ Examples:
 
 Unknown conditions: set operator "unknown", subject/value null.`
 
+// THE ONE SHAPE THIS APP WRITES ITSELF. protectionPlan.touchLeaf authors `price touches <level>` for
+// every ticket stop, target and ladder rung, and until 2026-09-16 that string went to the model to
+// get the number back out — in routeExits, which is the ORDER PATH, and in the monitor on every tick
+// until the per-process cache warmed. A parse the app can do by reading its own sentence must not
+// cost an LLM call, a network round-trip, or an API key: with the key absent the parse "failed",
+// the leaf read as `unknown`, and a stop that should have rested at the broker fell to the monitor
+// (or, before the toNum guard in _leafBareLevel, rested at zero). Anything the app did not author
+// still goes to the model.
+const TOUCH_LITERAL = /^\s*price\s+touches\s+(-?\d+(?:\.\d+)?)\s*$/i
+
+/**
+ * The deterministic parse of a self-authored touch leaf → ParsedCondition, or null when the text
+ * is not that shape. Pure; exported for tests. `eq` on `close` is what the touch evaluator and
+ * the broker router both read: they take the LEVEL from `value` and check the subject is a price.
+ */
+export function parseTouchLiteral(conditionText) {
+    const m = typeof conditionText === 'string' ? conditionText.match(TOUCH_LITERAL) : null
+    if (!m) return null
+    const level = Number(m[1])
+    if (!Number.isFinite(level)) return null
+    return { operator: 'eq', subject: 'close', value: level, value2: null, confirmation: 0 }
+}
+
 /**
  * Parse a natural-language condition string.
  * Cached — subsequent calls with the same text return immediately.
@@ -54,6 +77,9 @@ export async function parseCondition(conditionText) {
     if (!conditionText || typeof conditionText !== 'string' || !conditionText.trim()) {
         return { operator: 'unknown', subject: null, value: null, value2: null, confirmation: 0 }
     }
+    const literal = parseTouchLiteral(conditionText)
+    if (literal) return literal
+
     const key = conditionText.trim().toLowerCase()
     if (_cache.has(key)) return _cache.get(key)
 

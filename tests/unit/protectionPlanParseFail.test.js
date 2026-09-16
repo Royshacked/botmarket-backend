@@ -22,11 +22,18 @@ import { touchLeaf, routeExits, detectNativeEntryLevel } from '../../services/pr
 //
 // The trigger needs no bug of its own: a missing key, a rate limit, a timeout. parseCondition
 // reports all of them as `unknown`, exactly like a sentence nobody could interpret.
+//
+// THE SENTENCE UNDER TEST IS NOT touchLeaf's. Since 2026-09-16 `price touches <level>` — the one
+// shape the app authors — is parsed by reading it (condition.parser.parseTouchLiteral) and never
+// reaches the model, so it cannot fail the way an outage does. These tests used to use exactly that
+// sentence and passed only because the key was blank; the outage they simulate is now simulated on
+// a touch leaf worded the way a USER might word one, which still goes to the model.
+const USER_WORDED = (level) => ({ condition: `price reaches ${level}`, type: 'touch', timeframe: null })
 
 test('an unparseable stop does NOT become a broker order at level 0', async () => {
     const route = await routeExits({
         direction: 'long', quantity: 10,
-        stop_conditions: [{ condition: 'price touches 21500', type: 'touch', timeframe: null }],
+        stop_conditions: [USER_WORDED(21500)],
         tp_conditions:   [],
     })
     assert.deepEqual(route.stop.nativeOrders, [], 'nothing may rest at the broker from a failed parse')
@@ -36,18 +43,29 @@ test('an unparseable stop does NOT become a broker order at level 0', async () =
 test('the entry trigger is null rather than 0 when the parse fails', async () => {
     // Same value, worse consequence: this one is the trigger price of a stop-market ENTRY.
     const level = await detectNativeEntryLevel({
-        entry_conditions: [touchLeaf(21500)],
+        entry_conditions: [USER_WORDED(21500)],
         entry_condition_tree: null,
     })
     assert.equal(level, null)
 })
 
-test('a leg with several conditions is unaffected — it was never offloadable', async () => {
+test('a leg whose touch rung the parser cannot read keeps the WHOLE leg on the monitor', async () => {
     const route = await routeExits({
         direction: 'long', quantity: 10,
-        stop_conditions: [touchLeaf(21500), { condition: 'RSI(14) below 30', type: 'structured' }],
+        stop_conditions: [USER_WORDED(21500), { condition: 'RSI(14) below 30', type: 'structured' }],
         tp_conditions:   [],
     })
     assert.deepEqual(route.stop.nativeOrders, [])
     assert.notEqual(route.stop.monitorTree, null)
+})
+
+test('the sentence the app writes itself is NOT an outage — it rests at the broker with no key at all', async () => {
+    // The contrast that makes the file honest: same blank key, the self-authored leaf still routes.
+    const route = await routeExits({
+        direction: 'long', quantity: 10,
+        stop_conditions: [touchLeaf(21500)],
+        tp_conditions:   [],
+    })
+    assert.deepEqual(route.stop.nativeOrders, [{ level: 21500, quantity: 10 }])
+    assert.equal(route.stop.monitorTree, null)
 })

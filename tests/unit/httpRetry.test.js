@@ -115,3 +115,42 @@ test('a Retry-After header is honoured (clamped) rather than ignored', async () 
     assert.deepEqual(out, [{ v: 1 }])
     assert.equal(calls.length, 2)
 })
+
+// ── the one pipe: POST bodies and the provider's own words ───────────────────
+// Eleven third-party calls used to bypass getJson (axios, bare fetch, two hand-rolled https
+// promises) — five with no timeout, none metered. Two things they needed that the pipe lacked:
+// a JSON body (USAspending searches by POST) and the error body (cTrader's `description`, GNews's
+// `errors` — the words a tool result should carry).
+
+test('a JSON body is serialised, typed, and sent with the method asked for', async () => {
+    let seen
+    globalThis.fetch = async (url, init) => { seen = init; return reply(200, { ok: 1 }) }
+    await getJson('https://x/search', { ...FAST, method: 'POST', body: { page: 2, filters: { a: 1 } } })
+    assert.equal(seen.method, 'POST')
+    assert.equal(seen.body, JSON.stringify({ page: 2, filters: { a: 1 } }))
+    assert.equal(seen.headers['Content-Type'], 'application/json')
+})
+
+test('a GET carries no body and no content type, and caller headers survive', async () => {
+    let seen
+    globalThis.fetch = async (url, init) => { seen = init; return reply(200, []) }
+    await getJson('https://x/y', { ...FAST, headers: { Authorization: 'Bearer t' } })
+    assert.equal(seen.method, 'GET')
+    assert.equal(seen.body, undefined)
+    assert.equal(seen.headers.Authorization, 'Bearer t')
+    assert.equal(seen.headers['Content-Type'], undefined)
+})
+
+test('a refusal carries the provider\'s body — parsed when JSON, text otherwise, null when empty', async () => {
+    const withText = (status, text) => ({ ...reply(status), text: async () => text })
+    stubFetch(withText(403, '{"description":"account not authorised"}'))
+    await assert.rejects(() => getJson('https://x/y', FAST), (err) => {
+        assert.equal(err.status, 403)
+        assert.deepEqual(err.body, { description: 'account not authorised' })
+        return true
+    })
+    stubFetch(withText(402, 'Plan does not include this'))
+    await assert.rejects(() => getJson('https://x/y', FAST), (err) => err.body === 'Plan does not include this')
+    stubFetch(withText(404, ''))
+    await assert.rejects(() => getJson('https://x/y', FAST), (err) => err.body === null)
+})

@@ -1,9 +1,8 @@
-import dotenv from 'dotenv'
 import { logger } from '../services/logger.service.js'
+import { getJson } from '../services/http.util.js'
 import { config } from '../services/config.js'
 
-dotenv.config()
-
+const LOG = '[gnews]'
 const GNEWS_API_KEY = config.gnewsApiKey
 const GNEWS_API_URL = 'https://gnews.io/api/v4'
 const GNEWS_QUERY_MAX = 200
@@ -60,15 +59,12 @@ export function sanitizeGNewsQuery(query) {
     return sanitized.join(' ').slice(0, GNEWS_QUERY_MAX)
 }
 
-/**
- * GNews rate-limits per SECOND, not only per day. Two reads in one agent turn — "what's the news on
- * the Fed, and anything on Nvidia" — is enough to earn a 429 on the second, which reached the model
- * as "could not fetch the news" while the quota was fine. One retry after a pause clears that; a
- * quota that is genuinely spent still fails on the second try, which is the answer we want to give.
- */
-const RETRY_STATUS = new Set([429])
-const RETRY_DELAY_MS = 1_400
-const _sleep = (ms) => new Promise(r => setTimeout(r, ms))
+// GNews rate-limits per SECOND, not only per day. Two reads in one agent turn — "what's the news on
+// the Fed, and anything on Nvidia" — is enough to earn a 429 on the second, which reached the model
+// as "could not fetch the news" while the quota was fine. The shared pipe's retry (429 is retryable,
+// jittered, Retry-After honoured) is what clears that now; this file used to carry its own
+// one-retry-after-1.4s around a bare fetch, which was the same mechanism written a second time and
+// without a timeout.
 
 /**
  * @param {{ query: string, from?: string, to?: string, max?: number }} opts
@@ -95,33 +91,17 @@ export async function fetchGNews({ query, from, to, max = 20, lang = 'en' } = {}
     const url = `${GNEWS_API_URL}/search?${params.toString()}`
 
     try {
-        let data = await _get(url)
-        if (data.status !== null && RETRY_STATUS.has(data.status)) {
-            logger.warn('GNews rate-limited — one retry', { status: data.status })
-            await _sleep(RETRY_DELAY_MS)
-            data = await _get(url)
-        }
-        if (data.status !== null) {
-            throw new Error(`GNews API error ${data.status}: ${data.detail}`)
-        }
-        return data.body
+        return await getJson(url, { label: 'GNews /search' })
     } catch (error) {
-        logger.error('Error getting GNews', error)
+        // GNews's own words ride on the error body; the message the tool reads should carry them.
+        if (error?.status) {
+            const detail = typeof error.body?.errors === 'string' ? error.body.errors : JSON.stringify(error.body?.errors ?? error.body ?? '')
+            const err = new Error(`GNews API error ${error.status}: ${detail}`)
+            err.status = error.status
+            logger.error(LOG, 'Error getting GNews', err.message)
+            throw err
+        }
+        logger.error(LOG, 'Error getting GNews', error)
         throw error
     }
-}
-
-/**
- * One request. Returns `{ status: null, body }` on success and `{ status, detail }` on an HTTP
- * error, so the retry decision is made on a status rather than by re-parsing a thrown message.
- */
-async function _get(url) {
-    const response = await fetch(url)
-    const body = await response.json()
-    if (response.ok) return { status: null, body }
-
-    const detail = typeof body?.errors === 'string'
-        ? body.errors
-        : JSON.stringify(body?.errors ?? body)
-    return { status: response.status, detail }
 }

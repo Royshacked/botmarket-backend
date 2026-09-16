@@ -1,13 +1,17 @@
-import dotenv from 'dotenv'
-import axios from 'axios'
 import { logger } from '../services/logger.service.js'
 import { getDb } from './mongodb.provider.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
+import { getJson } from '../services/http.util.js'
 import { config } from '../services/config.js'
 
-dotenv.config()
-
+const LOG  = '[finnhub]'
+const BASE = 'https://finnhub.io/api/v1'
 const FINNHUB_API_KEY = config.finnhubApiKey
+
+// Every Finnhub read goes through the shared pipe: timeout, meter, typed status, retry on 429/5xx.
+// These were bare axios.get calls with NO timeout — a stalled connection held the caller forever —
+// and none of them was counted, so the minute-summary never saw Finnhub at all.
+const _get = (path, label) => getJson(`${BASE}${path}&token=${FINNHUB_API_KEY}`, { label: `Finnhub ${label}` })
 
 function toFinnhubDate(value) {
     if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
@@ -23,11 +27,9 @@ export async function fetchEarningsCalendarByDate(from, to) {
     try {
         const f = toFinnhubDate(from || new Date())
         const t = toFinnhubDate(to   || new Date())
-        const url = `https://finnhub.io/api/v1/calendar/earnings?from=${f}&to=${t}&token=${FINNHUB_API_KEY}`
-        const res = await axios.get(url)
-        return res.data
+        return await _get(`/calendar/earnings?from=${f}&to=${t}`, '/calendar/earnings')
     } catch (error) {
-        logger.error('Error getting earnings calendar by date', error)
+        logger.error(LOG, 'Error getting earnings calendar by date', error)
         return { earningsCalendar: [] }
     }
 }
@@ -38,11 +40,10 @@ export async function fetchIpoCalendar(from, to) {
     try {
         const f = toFinnhubDate(from || new Date())
         const t = toFinnhubDate(to   || new Date())
-        const url = `https://finnhub.io/api/v1/calendar/ipo?from=${f}&to=${t}&token=${FINNHUB_API_KEY}`
-        const res = await axios.get(url)
-        return Array.isArray(res.data?.ipoCalendar) ? res.data.ipoCalendar : []
+        const data = await _get(`/calendar/ipo?from=${f}&to=${t}`, '/calendar/ipo')
+        return Array.isArray(data?.ipoCalendar) ? data.ipoCalendar : []
     } catch (error) {
-        logger.error('Error getting IPO calendar', error)
+        logger.error(LOG, 'Error getting IPO calendar', error)
         return []
     }
 }
@@ -68,7 +69,7 @@ async function _readProfileCache(symbol) {
             return entry
         }
     } catch (err) {
-        logger.warn('Finnhub profile cache read failed', err.message)
+        logger.warn(LOG, 'profile cache read failed', err.message)
     }
     return null
 }
@@ -83,7 +84,7 @@ async function _writeProfileCache(symbol, entry) {
             { upsert: true }
         )
     } catch (err) {
-        logger.warn('Finnhub profile cache write failed', err.message)
+        logger.warn(LOG, 'profile cache write failed', err.message)
     }
 }
 
@@ -94,16 +95,15 @@ export async function fetchCompanyProfile(symbol) {
     if (cached) return cached
 
     try {
-        const url = `https://finnhub.io/api/v1/stock/profile2?symbol=${encodeURIComponent(symbol)}&token=${FINNHUB_API_KEY}`
-        const res = await axios.get(url)
+        const data = await _get(`/stock/profile2?symbol=${encodeURIComponent(symbol)}`, '/stock/profile2')
         // A 200 (even an empty body for an unknown ticker) is authoritative and
         // stable, so cache it. Network / rate-limit errors throw → caught below,
         // NOT cached, so a later refresh retries them.
-        const entry = { name: res.data?.name || null, logo: res.data?.logo || null }
+        const entry = { name: data?.name || null, logo: data?.logo || null }
         await _writeProfileCache(symbol, entry)
         return entry
     } catch (error) {
-        logger.error('Error getting company profile', symbol, error?.message)
+        logger.error(LOG, `Error getting company profile ${symbol}`, error?.message)
         return { name: null, logo: null }
     }
 }
@@ -127,10 +127,8 @@ export async function fetchCompanyNews({ symbol, from, to } = {}) {
     if (!symbol) throw new Error('symbol is required')
     const f = toFinnhubDate(from || new Date(Date.now() - 30 * 86_400_000))
     const t = toFinnhubDate(to   || new Date())
-    const url = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(symbol)}`
-        + `&from=${f}&to=${t}&token=${FINNHUB_API_KEY}`
-    const res = await axios.get(url)
-    return Array.isArray(res.data) ? res.data : []
+    const data = await _get(`/company-news?symbol=${encodeURIComponent(symbol)}&from=${f}&to=${t}`, '/company-news')
+    return Array.isArray(data) ? data : []
 }
 
 /**
@@ -138,7 +136,6 @@ export async function fetchCompanyNews({ symbol, from, to } = {}) {
  * right now, newest first, which is exactly what "what's the news today" asks for.
  */
 export async function fetchGeneralNews({ category = 'general' } = {}) {
-    const url = `https://finnhub.io/api/v1/news?category=${encodeURIComponent(category)}&token=${FINNHUB_API_KEY}`
-    const res = await axios.get(url)
-    return Array.isArray(res.data) ? res.data : []
+    const data = await _get(`/news?category=${encodeURIComponent(category)}`, '/news')
+    return Array.isArray(data) ? data : []
 }
