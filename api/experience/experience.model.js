@@ -24,9 +24,10 @@
  * instruction can be ignored by a model; a guard cannot.
  *
  * NOT stored on the user document, deliberately. `stripUser` returns every field it does not
- * explicitly remove, and `GET /api/users` has no ownership gating — so a level on the user doc
- * would be readable by every authenticated user. And NOT in `preferences`, which the client owns
- * and rewrites wholesale from localStorage, destroying anything the server put there.
+ * explicitly remove, and the user list is an admin read — a level on the user doc would sit in
+ * the account record rather than beside the conversation that inferred it. (Until 2026-09-16 that
+ * list had no gate at all, which was the original reason.) And NOT in `preferences`, which the
+ * client owns and rewrites wholesale from localStorage, destroying anything the server put there.
  */
 
 import { getDb } from '../../providers/mongodb.provider.js'

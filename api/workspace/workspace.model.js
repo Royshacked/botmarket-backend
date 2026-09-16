@@ -25,9 +25,9 @@
  * broker-less-of-flag cases (manual vs live).
  *
  * NOT on the user document and NOT in `preferences`, for the reasons experience.model.js records:
- * `stripUser` returns every field it does not explicitly remove and `GET /api/users` has no
- * ownership gating, while `preferences` is rewritten wholesale by the client from localStorage and
- * would destroy anything the server put there.
+ * `stripUser` returns every field it does not explicitly remove and the user list is an admin
+ * read, while `preferences` is rewritten wholesale by the client from localStorage and would
+ * destroy anything the server put there.
  */
 
 import { getDb } from '../../providers/mongodb.provider.js'

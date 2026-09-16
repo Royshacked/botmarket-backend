@@ -775,7 +775,7 @@ GET  /equity-curve   equity points (?fromMs=)
 - **Auth** `/api/auth` — `POST /signup`, `POST /signin`, `POST /signout`, `GET /me`.
   JWT lives in an httpOnly cookie; `requireAuth` guards everything except broker OAuth callback
   and transcribe.
-- **Users** `/api/users` — CRUD + `GET /:id/usage` (token-usage stats).
+- **Users** `/api/users` — the account CRUD is `requireAdmin`; a trader reaches only their own `GET /:id/usage` (token-usage stats) and `GET|PUT /:id/preferences` (own-or-admin, checked in the controller).
 - **Workspace** `/api/workspace` — `GET` and `PUT { workspace }` → `{ workspace, stored }`. Which of
   the three books the user is standing in. Its own surface rather than a field on `/api/paper/state`,
   because a workspace is not a paper concept and `manual` is the one with no paper account behind it.

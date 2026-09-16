@@ -48,6 +48,7 @@ export async function remove(req, res, next) {
 
 export async function getTokenUsage(req, res, next) {
     try {
+        assertOwnOrAdmin(req)
         const { month } = req.query
         const usage = await userService.getTokenUsage(req.params.id, month)
         res.json(usage)
@@ -56,9 +57,14 @@ export async function getTokenUsage(req, res, next) {
     }
 }
 
-// Own-preferences only (admins may read/write any) — prefs are personal UI state.
-function assertOwnPrefs(req) {
-    if (req.params.id !== req.user?._id && !req.user?.isAdmin) {
+/**
+ * The per-user reads a trader may make about THEMSELVES — usage and preferences — and an admin
+ * about anyone. The admin check reads `role`, which is what the token carries
+ * (authentication.service mints `{ _id, username, fullname, role }`). It used to read
+ * `req.user.isAdmin`, a field no token has ever had, so the admin branch never fired.
+ */
+export function assertOwnOrAdmin(req) {
+    if (req.params.id !== req.user?._id && req.user?.role !== 'admin') {
         const err = new Error('Forbidden')
         err.status = 403
         throw err
@@ -67,7 +73,7 @@ function assertOwnPrefs(req) {
 
 export async function getPreferences(req, res, next) {
     try {
-        assertOwnPrefs(req)
+        assertOwnOrAdmin(req)
         const prefs = await userService.getPreferences(req.params.id)
         res.json(prefs)
     } catch (err) {
@@ -77,7 +83,7 @@ export async function getPreferences(req, res, next) {
 
 export async function updatePreferences(req, res, next) {
     try {
-        assertOwnPrefs(req)
+        assertOwnOrAdmin(req)
         const prefs = await userService.savePreferences(req.params.id, req.body ?? {})
         res.json(prefs)
     } catch (err) {

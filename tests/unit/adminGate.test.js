@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
 import { requireAdmin } from '../../middleware/auth.middleware.js'
+import { assertOwnOrAdmin } from '../../api/user/user.controller.js'
 import { visibleConversationsFor, ADMIN_BOT_IDS, RETIRED_BOT_IDS } from '../../api/chat/chat.service.js'
 
 // Pythia is admin-only (2026-09-14): the chat, the tilt log, the Forecasts board and the social
@@ -18,6 +19,7 @@ const routesSrc = readFileSync(join(here, '../../api/strategy/strategy.routes.js
 const scannerSrc = readFileSync(join(here, '../../api/scanner/scanner.routes.js'), 'utf8')
 const mentorSrc  = readFileSync(join(here, '../../api/mentor/mentor.routes.js'), 'utf8')
 const setupsSrc  = readFileSync(join(here, '../../api/setups/setups.routes.js'), 'utf8')
+const usersSrc   = readFileSync(join(here, '../../api/user/user.routes.js'), 'utf8')
 
 // ── the middleware ───────────────────────────────────────────────────────────
 
@@ -67,6 +69,42 @@ test('scanner, mentor and setups routes: authenticated, never admin-gated', () =
         assert.match(src, /router\.use\(requireAuth\)/)
         assert.doesNotMatch(src, /requireAdmin/)
     }
+})
+
+// ── the user router: the accounts are the admin's, a trader reaches their own two reads ──
+
+// Until 2026-09-16 every /api/users route sat behind requireAuth alone: any trader could list every
+// account, create one, rename anyone or delete the admin. Pinned per route, because the mistake was
+// per route — a router-wide gate would also have locked a trader out of their own usage.
+test('user routes: the five account moves are admin-gated', () => {
+    for (const line of [
+        /router\.get\('\/',\s+requireAdmin, list\)/,
+        /router\.get\('\/:id',\s+requireAdmin, getOne\)/,
+        /router\.post\('\/',\s+requireAdmin, create\)/,
+        /router\.patch\('\/:id',\s+requireAdmin, update\)/,
+        /router\.delete\('\/:id',\s+requireAdmin, remove\)/,
+    ]) assert.match(usersSrc, line)
+})
+
+test('user routes: usage and preferences are NOT admin-gated — ownership is checked in the controller', () => {
+    for (const line of [
+        /router\.get\('\/:id\/usage',\s+getTokenUsage\)/,
+        /router\.get\('\/:id\/preferences',\s+getPreferences\)/,
+        /router\.put\('\/:id\/preferences',\s+updatePreferences\)/,
+    ]) assert.match(usersSrc, line)
+})
+
+test('assertOwnOrAdmin: own id passes, an admin passes for anyone, another trader is 403', () => {
+    assert.doesNotThrow(() => assertOwnOrAdmin({ params: { id: 'u1' }, user: { _id: 'u1', role: 'trader' } }))
+    assert.doesNotThrow(() => assertOwnOrAdmin({ params: { id: 'u2' }, user: { _id: 'u1', role: 'admin' } }))
+    assert.throws(() => assertOwnOrAdmin({ params: { id: 'u2' }, user: { _id: 'u1', role: 'trader' } }), { status: 403 })
+    assert.throws(() => assertOwnOrAdmin({ params: { id: 'u2' }, user: null }), { status: 403 })
+})
+
+test('assertOwnOrAdmin reads role, not isAdmin — the field the token actually carries', () => {
+    // The old check read req.user.isAdmin, which no token has ever had: an admin was refused like a
+    // trader, and a forged isAdmin would have been the only thing that passed.
+    assert.throws(() => assertOwnOrAdmin({ params: { id: 'u2' }, user: { _id: 'u1', isAdmin: true } }), { status: 403 })
 })
 
 // ── the thread filter ────────────────────────────────────────────────────────
