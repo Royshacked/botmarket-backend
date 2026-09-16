@@ -2,6 +2,7 @@ import { test, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { errorHandler, makeHandle } from '../../api/_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
+import { fakeRes, runHandler } from '../helpers/http.js'
 
 // What an error may tell the client — the rule decided in the §9 review (2026-09-16), pinned.
 //
@@ -11,12 +12,6 @@ import { httpError } from '../../services/httpError.util.js'
 // Finnhub 429 inside a read would have answered the client 429 "finnhub 429".
 
 const req = { method: 'GET', originalUrl: '/api/x' }
-function fakeRes() {
-    const res = { statusCode: 200, body: null, headersSent: false }
-    res.status = c => { res.statusCode = c; return res }
-    res.json   = b => { res.body = b; return res }
-    return res
-}
 const savedEnv = process.env.NODE_ENV
 afterEach(() => { if (savedEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedEnv })
 
@@ -84,12 +79,11 @@ test('httpError carries extra fields, so a refusal can name its reason', () => {
     assert.equal(err.state, 'queued')
 })
 
-test('makeHandle → errorHandler: the whole pipe, end to end', async () => {
+test('makeHandle → errorHandler: the whole pipe, end to end — via the shared runHandler', async () => {
     process.env.NODE_ENV = 'production'
     const handle = makeHandle('[test]')
-    const res = fakeRes()
     const handler = handle('boom', async () => { throw httpError(404, 'Thread not found') })
-    await handler(req, res, err => errorHandler(err, req, res, () => {}))
+    const res = await runHandler(handler, {}, { url: '/api/x' })
     assert.equal(res.statusCode, 404)
     assert.deepEqual(res.body, { error: 'Thread not found' })
 })

@@ -13,13 +13,7 @@ import { getTilt } from '../../api/strategy/strategy.controller.js'
 // The throw is induced with a malformed request rather than a stubbed service, so the test needs no
 // seam: a missing `req.query` / `req.params` is a TypeError on the handler's first line.
 
-const fakeRes = () => {
-    const res = { statusCode: 200, body: undefined }
-    res.status = (c) => { res.statusCode = c; return res }
-    res.json   = (b) => { res.body = b; return res }
-    res.send   = res.json
-    return res
-}
+import { fakeRes } from '../helpers/http.js'
 const nextSpy = () => { const calls = []; const next = (e) => calls.push(e); next.calls = calls; return next }
 
 test('analyst: a throw inside a queue handler reaches next(err) — it does not hang the request', async () => {

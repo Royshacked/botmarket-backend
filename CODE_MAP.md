@@ -717,7 +717,14 @@ middleware/
 tests/
   unit/                     node:test unit tests — run by `npm test`
   test.*.js                 MANUAL harnesses (hit live broker/DB) — NOT run by npm test
-scripts/                    free-port, migrations, seeds
+scripts/                    ops one-offs — none run by `npm test`. Kinds: migrations
+                            (migrate-*, one-shot idempotent collection/field moves), repairs
+                            (repair-*, drop-ghost-*, dry-run-by-default data fixes), diagnostics
+                            (check-*, verify-*, fmp-candle-parity — read-only), admin (set-admin-role,
+                            create-admin-user — the latter rides userService.createUser), and dev
+                            (free-port, clone-db-for-dev). tests/unit/scriptsImport.test.js loads
+                            every one STATICALLY (they run on import) and fails if an import or a
+                            named export it reaches has been moved — the only guard they have.
   check-archive-loads.mjs   `npm run check:archive` — imports every file under archive/ and fails
                             on the first that cannot resolve. The archive reaches ~40 symbols in the
                             LIVE tree and nothing lints or tests it, so a sweep that deletes an

@@ -16,18 +16,8 @@ import { readFileSync } from 'node:fs'
 import {
     getCandidatesForTicker, shapeTickerResult, tickerWindowDays,
 } from '../../api/aether/aether.service.js'
-import { getCandidatesByTicker as _getCandidatesByTicker } from '../../api/aether/aether.controller.js'
-import { errorHandler } from '../../api/_shared/handle.util.js'
-
-// The controller rides makeHandle; run the same pipe the server does.
-const getCandidatesByTicker = (req, res) => _getCandidatesByTicker(req, res, err => errorHandler(err, { method: 'GET', originalUrl: '/api/aether/candidates/x' }, res, () => {}))
-
-function fakeRes() {
-    const res = { statusCode: 200, body: null }
-    res.status = code => { res.statusCode = code; return res }
-    res.json = payload => { res.body = payload; return res }
-    return res
-}
+import { getCandidatesByTicker } from '../../api/aether/aether.controller.js'
+import { runHandler } from '../helpers/http.js'
 
 const app = (over = {}) => ({ ticker: 'CENX', rank: 3, subject: 'Canada', survived: true, ...over })
 
@@ -118,8 +108,7 @@ test('real tickers with dots and dashes reach the read rather than being refused
 test('a ticker the engine never named is 404', async () => {
     // An invalid symbol is refused before the read, so this exercises the controller's
     // not-found path without a database.
-    const res = fakeRes()
-    await getCandidatesByTicker({ params: { ticker: '!!!' }, query: {} }, res)
+    const res = await runHandler(getCandidatesByTicker, { params: { ticker: '!!!' }, query: {} })
     assert.equal(res.statusCode, 404)
     assert.match(res.body.error, /No Aether candidate/)
 })

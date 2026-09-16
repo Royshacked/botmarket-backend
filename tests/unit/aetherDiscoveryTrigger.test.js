@@ -15,13 +15,7 @@ import { aetherSchedulerService } from '../../services/aetherScheduler.service.j
 import { startDiscovery as _startDiscovery, getDiscoveryStatus } from '../../api/aether/aether.controller.js'
 import { errorHandler } from '../../api/_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
-
-function fakeRes() {
-    const res = { statusCode: 200, body: null, headersSent: false }
-    res.status = code => { res.statusCode = code; return res }
-    res.json = payload => { res.body = payload; return res }
-    return res
-}
+import { fakeRes } from '../helpers/http.js'
 
 // The controller rides makeHandle: a throw goes to next(err), and the global handler answers. The
 // test runs the same pipe the server does, so what it asserts is what the client gets.
