@@ -16,6 +16,14 @@
 
 import { getDb } from '../../providers/mongodb.provider.js'
 
+/**
+ * What a ticker may look like on the way IN — off a URL path or a request body, before it reaches
+ * Mongo. Bounded by the pattern, never truncated into shape (see getCandidatesForTicker for the
+ * story). BRK.B and RDS-A are real, so dot and dash belong; the dash is last so it needs no escape.
+ * One definition for the two readers that validate a ticker (the candidate drill-down, the quick read).
+ */
+export const TICKER_RE = /^[A-Z0-9.-]{1,12}$/
+
 export const COLLECTIONS = {
     EVENT_RUNS:       'aether_event_runs',
     EVENT_CANDIDATES: 'aether_event_candidates',

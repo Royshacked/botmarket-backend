@@ -25,7 +25,7 @@
 // is, and it has a reason. Sixty days is the window, the same one the list shows.
 
 import { getDb } from '../providers/mongodb.provider.js'
-import { COLLECTIONS } from '../api/aether/aether.model.js'
+import { COLLECTIONS, TICKER_RE } from '../api/aether/aether.model.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[aetherQuickRead]'
@@ -171,7 +171,7 @@ const _io = {
  */
 export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _io) {
     const sym = String(ticker ?? '').trim().toUpperCase()
-    if (!runId || !/^[A-Z0-9.-]{1,12}$/.test(sym)) throw Object.assign(new Error('a run and a ticker are required'), { status: 400 })
+    if (!runId || !TICKER_RE.test(sym)) throw Object.assign(new Error('a run and a ticker are required'), { status: 400 })
 
     // The other live events naming it — read once, used both to decide whether a stored read is
     // still about the same set of claims and, if not, to write the opening.
@@ -224,4 +224,3 @@ export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _
     }
 }
 
-export const aetherQuickReadService = { quickRead, readsFor, attachReads, quickReadOpening }

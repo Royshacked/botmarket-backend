@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { journalEntry, withJournal, levelsLabel, failNote, verdictFallbackNote, readReason } from '../../monitoring/monitorJournal.js'
+import { journalEntry, withJournal, levelsLabel, failNote, verdictFallbackNote } from '../../monitoring/monitorJournal.js'
 
 // The shared monitor journal. Hermes's copy of this is pinned by hermesMonitor.test.js (the prose
 // must not drift for calls); these tests pin that the SAME builder is kind-agnostic, because the
@@ -182,20 +182,6 @@ test('market_closed keeps the holding sentence, under its new name', () => {
     assert.match(e.note, /Market's closed for AER/)
 })
 
-test('journals written before the rename still read as the market being shut', () => {
-    // Read-side only. Old entries age out of the cap on their own; until they do they must not
-    // suddenly render as a position close, which is the opposite event.
-    assert.equal(readReason('closed'), 'market_closed')
-    assert.equal(readReason('exit'), 'exit', 'anything current passes through untouched')
-})
-
-test('the zone gate\'s vocabulary still reads, mapped to the guards that replaced it', () => {
-    // Live documents hold entries written before 2026-08-22. Both name the same event, so they
-    // render as the same thing rather than as an unknown key.
-    assert.equal(readReason('zone_trip'), 'guard_price')
-    assert.equal(readReason('scheduled'), 'guard_time')
-    assert.equal(readReason('closed'),    'market_closed')
-    // …and the pulse is deliberately NOT mapped: no guard means what it meant, so relabelling it
-    // would be a claim about history rather than a translation of it.
-    assert.equal(readReason('momentum_pulse'), 'momentum_pulse')
-})
+// The legacy-reason translation (closed → market_closed, zone_trip → guard_price …) is the CLIENT's:
+// MonitorJournal.jsx renders old entries under their current names. The server-side copy and its
+// tests went on 2026-09-16 — it had no production caller.

@@ -45,30 +45,14 @@
 
 import { toNum } from '../services/format.util.js'
 
-/** Default cap. A monitor whose journal spans more eras (Hermes) passes its own. */
+/** Default cap. A monitor whose journal spans more eras may pass its own (the archived Hermes did). */
 export const JOURNAL_MAX = 50
 
-/**
- * Read-side only: entries written before the rename carry `closed` and meant the MARKET was shut.
- * Applied when rendering a stored timeline so old lines keep their meaning; never write through it.
- * Entries age out of the cap on their own, so this can be deleted once no live journal predates it.
- */
-const LEGACY_REASON = {
-    closed: 'market_closed',
-    // The zone gate's vocabulary, mapped to the guards that replaced it (2026-08-22). Same events
-    // under both names — a level was reached, or a timer brought us back — so old entries keep their
-    // meaning rather than rendering as an unknown key.
-    zone_trip: 'guard_price',
-    scheduled: 'guard_time',
-    // `momentum_pulse` is deliberately NOT mapped. It was its own kind of wake (price walking far
-    // enough from the map to buy one re-drawing read) and no guard means quite that, so relabelling
-    // it would be a claim about history. It renders under its own name until it ages out.
-}
-
-/** Normalise a stored entry's `reason` for display. Pure. */
-export function readReason(reason) {
-    return LEGACY_REASON[reason] ?? reason
-}
+// The legacy reasons (`closed` → market_closed, `zone_trip` → guard_price, `scheduled` → guard_time)
+// are translated on the READ side by the CLIENT — botmarket-frontend's MonitorJournal.jsx carries the
+// map and renders old entries under their current names. A `readReason` with the same table lived
+// here until 2026-09-16 with no production caller: the server never renders a journal, so the map
+// was the client's to own, and a second copy on this side was one more thing to keep in step.
 
 function _fmt(n) { return Number.isFinite(Number(n)) ? String(Number(n)) : '?' }
 

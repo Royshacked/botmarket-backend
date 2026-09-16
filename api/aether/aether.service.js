@@ -10,7 +10,7 @@
 // missing one — it looks exactly like a current answer.
 
 import { getDb }     from '../../providers/mongodb.provider.js'
-import { COLLECTIONS } from './aether.model.js'
+import { COLLECTIONS, TICKER_RE } from './aether.model.js'
 import { readsFor, attachReads } from '../../services/aetherQuickRead.service.js'
 import { logger }    from '../../services/logger.service.js'
 
@@ -158,13 +158,10 @@ export async function getCandidatesForTicker(ticker, { days = 90, includeDropped
     //
     // NOT TRUNCATED. `slice(0, 12)` before the test turned forty characters of junk into a
     // perfectly valid twelve-character ticker and queried for it — inventing a symbol the
-    // caller never asked about and answering as if it were the question. The regex bounds
-    // the length itself, so anything too long is refused rather than trimmed into shape.
-    //
-    // BRK.B and RDS-A are both real tickers, so dot and dash belong in the class; the dash
-    // is last so it needs no escape.
+    // caller never asked about and answering as if it were the question. TICKER_RE bounds the
+    // length itself, so anything too long is refused rather than trimmed into shape.
     const sym = String(ticker ?? '').trim().toUpperCase()
-    if (!/^[A-Z0-9.-]{1,12}$/.test(sym)) return null
+    if (!TICKER_RE.test(sym)) return null
 
     const db    = await getDb()
     const since = new Date(Date.now() - days * 86_400_000).toISOString()
@@ -204,7 +201,6 @@ export function shapeTickerResult(sym, rows = []) {
 export function tickerWindowDays(raw) {
     return Math.min(Math.max(Number(raw) || 90, 1), 365)
 }
-
 
 // ─── The scorecard — what the names did ───────────────────────────────────────
 //

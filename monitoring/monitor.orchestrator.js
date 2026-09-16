@@ -45,7 +45,9 @@ const COST = { time: -1, touch: 0, structured: 0, volume: 0, indicator: 1, news:
  * @param {string}        defaultSymbol  The traded asset — used when a leaf has no explicit symbol
  * @param {number|null}   floorAt        ms timestamp; only events at/after this count (entry: entryFloorAt ?? savedAt)
  * @param {string[]}      priorFindings  structured conditions that passed earlier in the same AND gate
+ * @param {Array|null}    out            when provided, every leaf REACHED pushes { key, pass, at } (short-circuited siblings do not)
  * @param {object|null}   ctx            cumulative-volume context { sessionStartMs, minuteCandles } (see volume.evaluator)
+ * @param {object}        [opts]         evaluator options, passed through to the structured evaluator
  * @returns {Promise<{ triggered: boolean, which?: string, finding?: string, triggerAt?: number|null }>}
  */
 export async function evaluateTree(node, symbolMap, defaultSymbol, floorAt = null, priorFindings = [], out = null, ctx = null, opts = {}) {

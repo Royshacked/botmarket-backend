@@ -18,8 +18,10 @@
 // mention any ticker, so the fetch budget is bounded by what was authored at build rather than by
 // whatever the model decides to type — see docs/desks/mentor-talos.md
 //
-// Shared deliberately: Talos uses it now, Hermes at the merge (Phase 5). Adding a second copy here
-// is what created the problem this module fixes.
+// Shared deliberately — Talos is its one caller today, and a second monitor with a plan to check
+// would import it rather than fork it. Adding a second copy is what created the problem this module
+// fixes. (It was written for Talos AND the archived Hermes; the merge that would have brought Hermes
+// onto it never came — Kairos/Hermes are archived, 2026-08-18.)
 
 import { toolsFor } from '../services/agentTools.registry.js'
 import { COMMON_TOOL_HANDLERS, makeToolHandler } from '../services/agentUtils.js'

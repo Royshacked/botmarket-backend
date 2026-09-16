@@ -17,6 +17,10 @@ monitoring/   →  services/  →  providers/            background path (poll +
 - **providers/** — thin clients for external systems (LLMs, market data, brokers, Mongo).
   This is the only layer that talks to the outside world.
 - **monitoring/** — background workers started in `server.js` (poll loop, reconciler, paper engines).
+  The arrow to services/ runs both ways for PURE modules: services import the evaluators' indicator
+  math, tilt.assess's diff, the condition parser and monitorJournal's writer. What must not happen
+  is a service reaching into the monitor tier for a FETCH or a CLIENT — those live in services/
+  (lastPrice.service, anthropic.provider) since 2026-09-16.
 
 ## Directory map
 
@@ -66,6 +70,20 @@ api/
                               stampBaselines at publish). stanceCoherence refuses a row whose words and
                               number disagree; balanceOf records an unbalanced table rather than losing
                               it. Writes ride houseArtifact.repo (`_updateSet` = only the patched fields)
+  aether/                 Aether — the EVENT-EXPOSURE desk  /api/aether/*. Node is READ-ONLY against the
+                          engine's collections: the Python aether-engine (a separate repo) writes them, and
+                          only when an admin starts a discovery run. What survived the channel-engine
+                          removal (2026-09-09): aether_event_runs (one named event), aether_event_candidates
+                          (one company it reaches, with the engine's filing verdict), aether_scorecard (ONE
+                          document, graded at expiry by the engine's nightly). Stream + discovery are
+                          admin-only; the list, the per-ticker drill-down and the scorecard are broadcast
+    aether.service.js         groupCandidatesByRun (newest event first, best rank inside — sorted BEFORE
+                              the limit, or the newest run fell off) + evidenceOf (a tally off the engine's
+                              verdicts, never a second opinion) + shapeTickerResult + shapeScorecard, all
+                              pure and tested without a database. TICKER_RE (aether.model) bounds a ticker
+                              off a URL path — refused when too long, never trimmed into shape
+    aether.controller.js      hand-rolled try/catch answering fixed slugs — the §9 error-shape decision;
+                              startDiscovery answers off err.status (409 in flight · 503 no engine here)
   broker/                 broker connections/orders/positions  /api/broker/*
     adapters/
       broker.interface.js     BrokerAdapter base class — THE contract every broker fulfils
@@ -381,6 +399,28 @@ services/
                             (userId null: no budget degrade — and no spend booked to anyone, a known gap) → onRunSettled → an Atlas
                             card `sleeve_sourced` to the requester. Pending sleeves are in-process
                             memory, like the run. See docs/desks/roles-and-sourcing.md
+  aetherScheduler.service.js  The Node side of the Python aether-engine: spawns scripts/scheduler.py as a
+                            child process when AETHER_ENGINE_PATH points at a checkout with a built venv
+                            (a quiet no-op everywhere else — every deploy), bridging the Mongo connection
+                            Node is ACTUALLY on into MONGO_URI/MONGO_DB and refusing to spawn when the db
+                            name cannot be resolved (an inherited MONGO_DB once wrote a parallel copy of
+                            every aether_* collection). Started OUTSIDE the instance lease, on purpose.
+                            runDiscovery spawns select_events.py on an admin's press — the one leg that
+                            spends real money — one at a time, progress parsed off the engine's own log
+                            lines, refusals stamped with a status
+  aetherQuickRead.service.js  Prometheus's quick read on one Aether name (credible · priced_in ·
+                            contradicted · unclear) — phases 1–2 on Sonnet, one paragraph, optional.
+                            Node OWNS aether_candidate_reads (the engine's rows are Python's); one read
+                            per name per event, one in flight, re-read only when the SET of live events
+                            naming the ticker changed. Judged against every live event, not the one pressed
+  lastPrice.service.js      fetchLastPrice(symbol): THE last-price read — quote first, a 1-minute-candle
+                            fallback second, null only when both fail; a non-positive price is NO price.
+                            The input to every zone gate, baseline stamp and coherence check. Lived in
+                            monitoring/monitorUtils until 2026-09-16, which had two services reaching up
+                            into the monitor tier for it
+  exitOrders.util.js        buildExitOrder (applies +basisOffset → broker price space) / exitOrderRecord /
+                            closeSide / orderSymbol — the closing-order shape three api services and two
+                            monitors share. Was monitoring/, importing api/broker to serve api/
   researchRun.service.js    headless Prometheus over the research queue, one name at a time, writes
                             the coverage. ONE run per process; onRunSettled(fn) is how sleeveSource
                             learns a run ended (and chains the next when its names were queued after
@@ -604,7 +644,14 @@ monitoring/
                             cooldown). The same cooldown → triggers → floor shape as remodelDecision,
                             deliberately NOT collapsed — the constants ARE the judgment
   paperFill.service.js  paperEquity.service.js
-  exitOrders.util.js        buildExitOrder (applies +basisOffset → broker price space) / exitOrderRecord / closeSide / orderSymbol
+  monitor.claude.js         the monitor tier's three one-shot LLM reads — claudeJSON (a condition parse),
+                            claudeText (a YES/NO verdict), claudeVision (a look at a chart) — as thin
+                            readings of anthropic.provider.callAnthropicOnce, model ids from llmModels.
+                            Was a SECOND Anthropic client with hardcoded ids and no usage hook
+  monitor.orchestrator.js   evaluateTree: the recursive condition-tree evaluator (AND short-circuits on
+                            the first failure, OR on the first success, children cheapest-first: time →
+                            touch/structured/volume → indicator → news → chart) + isTimeBlocked (skip the
+                            fetch when only the clock stands in the way) + the legacy flat-array shim
   monitorUtils.js           candleMs, parseYesNo, round, remainingForAccount, timeframe resolvers;
                             brokerCandleCtx + fetchCandles/buildVolumeCtx broker-candle routing
                             (primary instrument → broker candles shifted −basisOffset into authored space;

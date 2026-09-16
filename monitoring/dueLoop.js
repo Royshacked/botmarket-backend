@@ -153,14 +153,15 @@ export function createDueLoop({
  * the tick logs it and moves on, so one bad write still can't stop the loop.
  */
 export function makePersist({ collection, kind = null, timelineMax, log }) {
-    // `kind` is OPTIONAL and only Talos passes it. Adding it to Hermes's filter would be a
-    // behaviour change, not an extraction: a pre-P3b call document that predates the field would
-    // stop matching and silently never persist again.
+    // `kind` is OPTIONAL and only Talos passes it. It was left optional for the archived Hermes,
+    // whose pre-P3b call documents predate the field and would have stopped matching — and it stays
+    // optional for the same reason coverage and tilt omit it: a collection that holds one thing
+    // carries no `kind`.
     const match = kind ? (id) => ({ id, kind }) : (id) => ({ id })
-    // `db` is an OPTIONAL last argument, not a hidden dependency: Hermes threads a connection
-    // through every call site and its tests inject a fake one there, which is the only reason 131
-    // DB-less tests can exercise the write path at all. Resolving getDb() unconditionally here
-    // would have quietly taken that away.
+    // `db` is an OPTIONAL last argument, not a hidden dependency: a monitor may thread a connection
+    // through its call sites and have its tests inject a fake one there (the archived Hermes did, and
+    // 131 DB-less tests exercised the write path that way). Resolving getDb() unconditionally here
+    // would quietly take that seam away.
     return async function persist(id, $set, logEntry = null, db = null) {
         try {
             const conn = db ?? await getDb()

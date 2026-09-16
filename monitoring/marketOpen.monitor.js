@@ -60,8 +60,8 @@ function _groupKey(item) {
 }
 
 /**
- * The collaborators, injectable — the same shape Hermes and Talos use, so the sweep can be
- * exercised against fixed data and a fixed clock without a Mongo or a chat server.
+ * The collaborators, injectable — the same shape Talos uses, so the sweep can be exercised against
+ * fixed data and a fixed clock without a Mongo or a chat server.
  */
 const _DEFAULT_DEPS = {
     list:       () => entityRepo.listByOrderState('awaiting_market'),
