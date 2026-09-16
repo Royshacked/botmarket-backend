@@ -142,7 +142,33 @@ api/
                           ADMIN_BOT_IDS (`strategy`, `analyst`) + visibleConversationsFor(convs, role):
                           the admin desks' feeds are hidden from a non-admin on list AND on
                           read-by-id (getMessages takes the reader's role from the HTTP path only)
-  market/ calendar/ user/ authentication/ transcribe/
+  authentication/       signup · signin · signout · me  /api/auth/*. signin mints the session JWT
+                          ({ _id, username, fullname, role }, 7d, httpOnly cookie); signup IS
+                          userService.createUser (one path — it validates, refuses a taken name and
+                          seeds Axl's welcome; a second copy here had drifted and welcomed nobody)
+  user/                   /api/users — TWO AUDIENCES on one router: the account CRUD (list · get ·
+                          create · patch · delete) is requireAdmin; a trader reaches only their OWN
+                          /:id/usage and /:id/preferences (assertOwnOrAdmin, reading `role`).
+                          user.model: buildUserDoc, invalidUserFields (the server twin of the sign-up
+                          form's rule: username 3–32 no whitespace, fullname ≤ 80, password ≥ 8 with
+                          ≥ 2 digits), listAllUserIds / listAdminUserIds (the two fan-out reads),
+                          stripUser. Users are keyed by `id` (a UUID string), not Mongo's `_id`
+  experience/             experience.model — how to TALK to a user (beginner may be inferred,
+                          experienced only declared); its own collection, never the user doc
+  threads/                the generic draft thread API over thread.service (/api/threads: draft ·
+                          link · pin · list · unfinished · get · discard · pipeline drafts). AGENTS is
+                          the draft-save whitelist — LIVE desks only, and the second half of a pair
+                          with each panel's saveDraft (threadAgents.test pins it)
+  turns/                  POST /api/turns/:turnId/stop — stopping a turn is spoken, walking away is
+                          silent (turnRegistry); owner-scoped
+  market/ calendar/       chart candles + quotes + market status; the week's earnings / Fed / IPO
+                          calendars (calendar.service owns the shaping; the controller is three lines)
+  transcribe/             raw audio → Whisper (OpenAI SDK, the only OpenAI use). Mounted BEFORE
+                          express.json so the raw-body parser sees the bytes; authed — it is a paid API
+  health/                 /api/health (liveness — no IO, 200 while draining) and /api/health/ready
+                          (readiness — 503 the moment shutdown begins; db ping cached 5s ok / 1s fail).
+                          Unauthenticated, mounted BEFORE the rate limiters, written with .end() so
+                          Express never 304s a probe. Reports leader + loop count (roster only in dev)
   _shared/                cross-controller helpers:
       sse.util.js             startSseStream() — SSE headers + heartbeat + abort wiring
       parse.util.js           parseChatMessages / parseIdeaAccounts
@@ -295,6 +321,15 @@ services/
                           futures near-24/5 · US equity RTH. sessionFor is the ONE classifier
                           (explicit asset_class first, symbol heuristic second). NO holidays or
                           half-days, and no non-US exchange
+  lifecycle.service.js    startLoop(name, loop) / stopLoops() / loopNames() / markDraining() —
+                          the registry that makes shutdown writable: every background loop is
+                          started through it and stopped in reverse, one bad stop() never strands
+                          the rest. loopLeader.js is the one boolean (leader / follower) health reports
+  instanceLock.service.js createInstanceLock — the background-loops LEASE (system_locks): a single
+                          conditional upsert only one process can win; a duplicate-key error is the
+                          "someone else holds it" signal, not a fault. onLost stands the loops down
+                          so two reconcilers never coexist. See docs/architecture/single-instance.md
+  httpError.util.js       (below, with the utilities)
   config.js               THE configuration surface — every env var named once, with its type,
                           default and purpose. Was 43 vars read as inline `Number(process.env.X)
                           || d` at ~70 sites. It OWNS dotenv (so no module depends on having been
@@ -325,7 +360,12 @@ services/
                             orders off the broker (an `orderId` with no `positionId`). The pipe for
                             every path that stops an entity claiming its order: delete, disarm,
                             expiry. WHEN there is one to pull stays the caller's judgment
-  logger.service.js
+  logger.service.js       debug/info/warn/error → console + logs/backend.log (async appends;
+                          switchToSyncLogging() at shutdown so the tail is not lost to process.exit).
+                          Writes NO file under the test runner (_setLogSinkForTests to redirect).
+                          Timestamps are toLocaleString('he')
+  timeout.util.js         withTimeout(promise, ms, label) — THE one timeout guard (monitors, coverage
+                          refresh, the health ping); lives here so both layers reach it
   tokenUsage.service.js     recordUsage(userId, model, usage, agent, { monitor }) books every LLM
                             call into the month document; `monitor: true` (Talos assessments) also
                             accumulates `monitorCost`, and chatSpend(doc) = totalCost − monitorCost is
@@ -518,7 +558,10 @@ providers/
                                 renderer (services/chartRender); still primary when OWN_CHART_RENDER=false
   ctrader.provider.js  ctrader.session.provider.js (getTrendbars + trendbarToOHLCV)  ctrader.ws.provider.js
   ibkr.gateway.provider.js  TWS-socket client to a local IB Gateway (the Client Portal REST provider was deleted 2026-09-15)
-  mongodb.provider.js       getDb(), stripId/stripIds
+  mongodb.provider.js       getDb() — ONE MongoClient per process: concurrent first callers share the
+                            in-flight connect (the boot fires ten un-awaited index ensures; until
+                            2026-09-16 that was ten clients, nine orphaned). closeDb(), getDbName(),
+                            stripId/stripIds; _setClientFactory is the test seam
 monitoring/
   preflightEntry.js         the arm-time "is the entry level ALREADY held?" check. Two evaluations
                             of the same tree — a STATE read and an EDGE read — because the monitor
@@ -662,6 +705,15 @@ monitoring/
                             (primary instrument → broker candles shifted −basisOffset into authored space;
                             cross-assets/paper/no-broker → app feed)
   parsers/                  condition.parser.js, indicators.parser.js
+middleware/
+  auth.middleware.js        requireAuth (the session cookie → req.user, 401) · requireAdmin (role, 403)
+  rateLimit.middleware.js   THREE limiters, in-memory (single-instance): apiLimiter (per IP, the
+                            runaway backstop), authLimiter (per IP, credential stuffing), agentLimiter
+                            (per SESSION — hashed cookie — the COST ceiling on every /stream).
+                            agentLimiterCoverage.test walks the mounted streams
+  securityHeaders.middleware.js  the hardening headers, written out rather than helmet (no CSP —
+                            deliberately; see the file). HSTS in production only
+  logger.middleware.js      `log` — one line per request: METHOD originalUrl
 tests/
   unit/                     node:test unit tests — run by `npm test`
   test.*.js                 MANUAL harnesses (hit live broker/DB) — NOT run by npm test

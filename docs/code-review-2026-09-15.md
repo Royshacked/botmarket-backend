@@ -22,7 +22,7 @@ Reviewed from backend commit `55f5fbb` (`main`). Test health at start: **2815 pa
 | 6 | Argus / Prometheus / Pythia | `api/scanner`, `api/analyst`, `api/strategy`, `scanner.agent.service`, `coverage.service`, `tilt.service`, `researchRun` | ✅ done — 7 commits `2a957e8`..`b3c36b9` (+ `researchQueue.service`, read in scope), suite **2932 / 0**; CR cycle → `98b8994`, **2936 / 0** |
 | 7 | Providers + market data | `providers/**`, `price.service`, `market.service`, `news.service` | ✅ done — 8 commits `d8d7fab`..`15b562a` (+ `candleFetch`, `priceFeed`, `http.util`, the two adapters' carried items), suite **2965 / 0 in 63s**; CR cycle → `9798baa`, **2968 / 0** |
 | 8 | Aether + scheduling | `api/aether`, `aetherScheduler`, remaining `monitoring/**` | ✅ done — 4 commits `005c9c8`..`953e522`, write-up `97e716f`, CR cycle → `f9da64a`, suite **2968 / 0** |
-| 9 | Platform | `server.js`, `middleware/**`, `config.js`, `api/authentication`, `api/user`, `api/workspace`, `api/_shared`, `api/health` | |
+| 9 | Platform | `server.js`, `middleware/**`, `config.js`, `api/authentication`, `api/user`, `api/workspace`, `api/_shared`, `api/health` (+ `threads`, `turns`, `calendar`, `transcribe`, `experience`, the lifecycle/lease/logger services, read in scope) | ✅ done — 6 commits `63a9518`..`08ebf13`, suite **2991 / 0** |
 | 10 | Tests + scripts | coverage gaps vs. §1–9, `scripts/**` hygiene | |
 
 ---
@@ -902,6 +902,138 @@ None. No wire shape changed.
 
 `aetherDiscoveryTrigger` re-aimed at the status contract (+ a no-status throw is a 500 with its
 sentence kept inside). The two `readReason` tests went with the function. Suite 2965 → **2967**.
+
+---
+
+## §9 Platform — done
+
+**Verdict in one line:** the platform layer written in the last month — the loop registry and the
+lease, the two health probes, the validated config, the three rate limiters, the ordered shutdown,
+the SSE/turn split — is the best-argued code in the repository and nothing in it was wrong. The older
+layer underneath it had one open door and one leak the log confirmed: every account route sat behind
+`requireAuth` alone, and every boot opened ten Mongo clients and closed one.
+
+*Scope note:* `server.js`, `services/config.js`, `middleware/**` (4), `api/authentication`,
+`api/user`, `api/workspace`, `api/_shared` (7), `api/health` — plus what they wire (`logger`,
+`lifecycle`, `loopLeader`, `instanceLock`, `workspace.service`, `mongodb.provider`, `timeout.util`)
+and the small tiers no section had owned (`threads`, `turns`, `calendar`, `transcribe`,
+`experience.model`). Callers cross-checked in the backend, the tests and `botmarket-frontend/src`.
+
+### Bugs
+
+| | Where | What | Sev |
+|---|---|---|---|
+| 1 | `api/user/user.routes.js` | `list / getOne / create / update / remove / usage` behind `requireAuth` only: **any signed-in trader could list every account (with `role`, `budgetUsd`, `exemptFromBudget`, `preferences`), create one, rename anyone, delete the admin, and read anyone's spend.** `requireAdmin` existed and gated three desks; two model headers (`workspace.model`, `experience.model`) cited "`GET /api/users` has no ownership gating" as a *reason to keep data off the user doc* — the hole documented as a constraint. The five account moves had no client caller. And `assertOwnPrefs` read `req.user.isAdmin`, a field no token has ever carried (the token has `role`), so the admin branch never fired. `requireAdmin` per account route; own-or-admin on usage + preferences via `role`. | **high** |
+| 2 | `providers/mongodb.provider.getDb` | No in-flight guard — `_db` set only after `await connect()`, so every caller arriving in that window built its own `MongoClient`. `server.js` fires ten `ensure*Indexes()` un-awaited; `backend.log` at 09:35:15 that morning: **ten `Connected to MongoDB` lines in one second**, nine clients nothing could close (`_client` kept the last), each holding a pool and a topology monitor against Atlas for the process life. The first caller starts the connect, everyone else awaits the same promise; a failed connect rejects all and caches nothing. Pinned with ten concurrent callers against a fake driver. | **high** |
+| 3 | `server.js` global handler | Answered every error with `err.message`; the client shows `data.error` in a toast, so a duplicate username on `PATCH /api/users/:id` rendered `E11000 duplicate key error collection: test.users index: username_1 …` to the user. It also honoured ANY `err.status` — including the one `http.util.getJson` stamps from a provider, so a Finnhub 429 inside a read would have answered the client 429 "finnhub 429". **The §9 decision** — below. | medium |
+| 4 | `authentication.service.signup` vs `user.service.createUser` | The same eleven lines written twice, drifted: only `createUser` seeded Axl's welcome, and `createUser` had no live caller — **no real user, every one of whom arrived through self sign-up, had ever been welcomed.** Signup rides `createUser`. | medium |
+| 5 | `server.js` SPA fallback | `/**` in production caught unknown `GET /api/*` → **200 `text/html` index.html**. `/api` answers a JSON 404 ahead of it. | medium |
+| 6 | `threads.controller.AGENTS` | Accepted `idea` (deleted 2026-08-07) and `kairos` (archived 2026-08-18) as draft-save agents; the one client writer under `idea` was MainPage's own dead `/api/idea` flow. Live desks only; old threads still read. | low |
+| 7 | `user.service.updateUser` | Rename with no uniqueness check → 11000 → 500. The unique index is the check; its refusal answers the 409 create does. | low |
+| 8 | `authentication.controller.signup` | No server twin of the form's password rule (≥ 8, ≥ 2 digits); no bound on username or fullname. `invalidUserFields` in the model, applied on create and rename. | low |
+| 9 | `config.KNOWN_KEYS` | The hand list was already one short — `GUARD_SWEEP_INTERVAL_MS` had a getter and no entry, so setting it in `.env` would have been reported as a typo at every boot. Found by deriving the set (below). | low |
+
+### The decision: what an error may tell the client
+
+An error minted with **`httpError(status, message)`** (`services/httpError.util.js`, which sets
+`expose` — the `http-errors` / body-parser convention) answers with its status and its sentence: the
+code that threw it wrote that sentence for the user. **Anything else is a 500** — `'Internal server
+error'` in production, the message in development (Express's own default-handler split). Why not
+"any `err.status`": `getJson` stamps a PROVIDER's status on what it throws and the cTrader adapter
+reads that 401 as "reconnect" — a load-bearing convention §7 kept, and one the handler must not
+mistake for an answer to our client.
+
+`errorHandler` lives beside `makeHandle` in `api/_shared/handle.util.js`; `server.js` mounts it
+last. With the handler safe, every hand-rolled `catch → logger.error → res.status(500).json({
+error: 'Failed to X' })` was the wrapper re-typed, and **~55 of them across 14 controllers** went
+(user, authentication, workspace, threads, calendar, transcribe, aether, pendingAction, scanner, the
+analyst coverage handlers that had waited on this since §6, portfolio incl. its adopt-handler
+factory, market, trades; `chatState.util`'s two factories ride `makeHandle` too). The 28 `const err
+= new Error(msg); err.status = 404; throw err` blocks became one-line `httpError` calls. What stays
+by design: `makeEntityController`'s fixed `Failed to <verb> <noun>` (result-shaped, its own tests);
+the explicit `if (!result.ok) return res.status(500).json({ error: 'Failed to save …' })` answers
+(a stated answer, not a catch); pendingAction's execute, whose inner try/catch is the UNWIND of a
+claimed row and rethrows; the two OAuth redirect handlers, which answer a browser navigation.
+
+### The lens
+
+**(c) Duplications** — signup/createUser (above). `KNOWN_KEYS`: 54 names typed beside 54 getters,
+the "a new X must be added to the list" shape the review has removed elsewhere, guarded by a test
+that could catch only the eight it named. Every reader now goes through one `_raw(key)` that records
+what it read; `knownKeys()` is derived, and the two getters that pick by `NODE_ENV` read both
+branches so a dev `.env` holding the production redirect URI is not a typo. Six of seven stream
+controllers validated `messages` with `parseChatMessages` and then forwarded the RAW body — the
+normalized array the parse exists to produce was computed and thrown away (the desks re-normalize,
+so nothing leaked). `workspace.controller` spelled the paper-wins join `!!connections?.paper` twice
+where `activeWorkspace(connections, stored)` is the door.
+
+**(d) Dead code** — `sse.util`'s `finished` / `clientGone` getters (a documented hook nobody used);
+`ROLES`; `calendar.controller`'s two test re-exports (the tests import the service).
+
+**(b) Conventions** — `logger.middleware.log`: `async` for nothing, and a **five-line pretty-printed
+JSON object per request** — `baseUrl`, method, params, no path — into `backend.log`, which was most
+of what that file contained. One line, `GET /api/threads/unfinished`. Three `ensure*Indexes` on
+`console.warn`.
+
+**(g) Plaster** — `tokenUsage.service` explained `exemptFromBudget` by "auth.middleware force-sets
+`isAdmin` to false" (it never did); `entityController`'s JSDoc said `list (userId)` while setups
+passes `(userId, req)`.
+
+**(e) MVC** — the §9-owned controllers now hold transport judgment only; every "what the user did
+wrong" is a minted 400/404/409 in the service or a one-line guard in the handler.
+
+**Docs** — CODE_MAP listed `market/ calendar/ user/ authentication/ transcribe/` as five words and
+had no line for `threads/ turns/ workspace/ experience/ health/`, `middleware/`, `lifecycle`,
+`instanceLock`, `logger` or `timeout.util`. All in.
+
+### Judgment calls made against the plan
+
+- **Env-gated 500** (Roy's call): the message ships in development, the generic sentence in
+  production. The alternative — always the message — leaves the leak; always generic costs the
+  developer the one line they need.
+- **`expose`, not a status range.** A rule of "honour 4xx, hide 5xx" would still have answered a
+  provider's 429 as ours. The marker says *who* minted the status, which is the actual question.
+- **The sweep went the whole way** rather than the §9-owned controllers only. Once the handler is
+  safe the remaining hand-rolled blocks are pure duplication, and leaving 27 of them for §10 would
+  have left two conventions live for one more section.
+- **Self sign-up now welcomes.** A behaviour change — the intended one, evidently: the seed existed,
+  wired to the one path nobody used.
+- **`logger.service`'s timestamp left alone.** `toLocaleString('he')` is non-ISO and unsortable, and it
+  is also the format the log's one reader reads; noted in CODE_MAP, unchanged.
+
+### Behaviour changes a reader should know
+
+- A trader hitting `GET /api/users` (or create/patch/delete) gets 403; usage and preferences for
+  another user's id get 403 unless the caller is an admin.
+- A 500 in production says `Internal server error`; the sentence is in `backend.log` with the route.
+  Minted refusals (404/409/400/503) are unchanged for the client.
+- A minted status in a 4xx/5xx body is now always `{ error }` — the aether discovery refusal no
+  longer carries `started: false` (nothing read it; the client's `httpService` throws on any non-2xx).
+- Unknown `/api/...` answers `404 { error: 'Not found' }` in every environment.
+- New sign-ups receive Axl's welcome line; a sign-up with a weak password or an out-of-bounds
+  username is a 400 with the reason.
+- One Mongo client per boot; `backend.log` shows one `Connected to MongoDB` line.
+- `backend.log` request lines are one line each and carry the path.
+- A draft save under `idea` or `kairos` is a 400.
+
+### Frontend follow-ups (botmarket-frontend)
+
+- `src/services/user/user.service.remote.js` is a template leftover: `getUsers / getById / remove /
+  update / login / signup / logout` call routes that do not exist (`user`, `auth/login`,
+  `auth/logout`) and set `score` / `imgUrl`. Only `getTokenUsage` is live. Delete the rest.
+- `pages/MainPage.jsx` still saves drafts under `agent: 'idea'` from the dead `/api/idea` flow (that
+  save is now a 400 — and it was a silent no-op before, since the flow never runs).
+
+### Tests added / changed
+
+`adminGate` (+4: per-route gate, own-or-admin, the `isAdmin` field is not trusted), `dbLifecycle`
+(+2: ten concurrent callers → one client; a failed connect caches nothing), `errorHandler` (new, 9:
+minted / bare / provider status / body-parser / range / headersSent / end to end), `userSignup` (new,
+6), `config` (+2: every named key is read through a registering reader, the `NODE_ENV`-dependent
+keys are known in both environments; `KNOWN_KEYS` → `knownKeys()`), `threadAgents` (live desks
+only), `aetherDiscoveryTrigger` + `aetherCandidateByTicker` (drive the controller through the real
+pipe, not a bare `(req, res)`), `calendarWeek` / `calendarEnrich` (import the service). Suite
+2968 → **2991**.
 
 ---
 
