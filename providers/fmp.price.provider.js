@@ -12,11 +12,24 @@
 import { logger }         from '../services/logger.service.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
 import { getJson }        from '../services/http.util.js'
+import { aggregateCandles } from '../services/candleInterval.util.js'
+import { tzOffsetMs } from '../services/market.service.js'
 import { config } from '../services/config.js'
 
 const LOG     = '[fmp.price]'
 const BASE    = 'https://financialmodelingprep.com/stable'
 const API_KEY = config.fmpApiKey
+
+/**
+ * THE FMP request: base URL, key, label. Shared with fmp.provider (fundamentals) — this module is
+ * the leaf of the two, so the sibling imports it rather than carrying its own BASE / API_KEY /
+ * "is the key set" check. `opts` passes through to getJson (retries, timeout, a custom label).
+ */
+export async function fmpGet(path, opts = {}) {
+    if (!API_KEY) throw new Error('FMP_API_KEY is not set')
+    const sep = path.includes('?') ? '&' : '?'
+    return getJson(`${BASE}${path}${sep}apikey=${API_KEY}`, { label: `FMP ${path.split('?')[0]}`, ...opts })
+}
 
 // Short TTL — quotes must stay fresh for touch-fill detection, but this collapses the
 // overlapping mark/fill/equity callers to ~one real fetch per symbol per window.
@@ -91,15 +104,13 @@ export async function getFmpQuoteFull(symbol, { fresh = false } = {}) {
     const cached = fresh ? null : _quoteCache.get(key)
     if (cached) return cached.v   // wrapper distinguishes "cached null" from "not cached"
 
-    if (!API_KEY) throw new Error('FMP_API_KEY is not set')
-
     // retries: 0 — THE POLL IS THE RETRY. This is the app's highest-frequency call (the paper mark
     // and fill loops price every open symbol every 3s), and it is what spends the quota that
     // produces the 429s in the first place. Retrying here would add load precisely when the limit
     // is already breached, and buy nothing: a skipped tick is re-priced 3s later by the next cycle,
     // while an order that needs a price NOW asks with `fresh` and can fall back. Retries are for
     // the one-shot calls (candles, fundamentals) where a blip is a visible failure.
-    const arr = await getJson(`${BASE}/quote?symbol=${encodeURIComponent(key)}&apikey=${API_KEY}`, { label: `FMP /quote ${key}`, retries: 0 })
+    const arr = await fmpGet(`/quote?symbol=${encodeURIComponent(key)}`, { label: `FMP /quote ${key}`, retries: 0 })
     const quote = normalizeFmpQuote(Array.isArray(arr) ? arr[0] : arr)
     _quoteCache.set(key, { v: quote })   // cache null too (uncovered) — short TTL, avoids re-hitting
     if (quote == null) logger.info(LOG, `no FMP price for ${key} (uncovered on this plan)`)
@@ -126,12 +137,9 @@ export async function getFmpQuote(symbol, opts) {
 const NO_INTRADAY_TTL_MS = 30 * 60_000
 const _noIntraday        = createTtlCache({ ttlMs: NO_INTRADAY_TTL_MS, max: 8 })   // 1/5/15/30min, 1/4hour
 
-/** ET America/New_York offset (ms) from UTC at an instant — negative west of UTC. */
-function _etOffsetMs(instant) {
-    const asEt  = new Date(new Date(instant).toLocaleString('en-US', { timeZone: 'America/New_York' }))
-    const asUtc = new Date(new Date(instant).toLocaleString('en-US', { timeZone: 'UTC' }))
-    return asEt.getTime() - asUtc.getTime()
-}
+// ET America/New_York offset (ms) from UTC at an instant — the market-hours engine's helper, which
+// this provider used to carry a second copy of.
+const _etOffsetMs = (instant) => tzOffsetMs(new Date(instant), 'America/New_York')
 
 /**
  * Parse an FMP date into UTC epoch seconds. Pure — exported for testing.
@@ -170,31 +178,6 @@ export function etCalendarDate(ms) {
     const n = Number(ms)
     if (!Number.isFinite(n)) return null
     return new Date(n).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-}
-
-/**
- * Aggregate ascending OHLCV rows into fixed-size groups (e.g. 1hr → 2hr). Groups align to
- * END on the newest bar; an oldest partial group is dropped. Pure — mirrors
- * marketData.tools.aggregateCandles (inlined to keep this provider dependency-free /
- * cycle-proof). Exported for testing.
- */
-export function aggregateOhlc(rows, groupSize) {
-    if (!Array.isArray(rows) || rows.length === 0 || groupSize <= 1) return rows
-    const rem     = rows.length % groupSize
-    const aligned = rem ? rows.slice(rem) : rows
-    const out = []
-    for (let i = 0; i < aligned.length; i += groupSize) {
-        const grp = aligned.slice(i, i + groupSize)
-        out.push({
-            timestamp: grp[0].timestamp,
-            open:      grp[0].open,
-            high:      Math.max(...grp.map(c => c.high)),
-            low:       Math.min(...grp.map(c => c.low)),
-            close:     grp[grp.length - 1].close,
-            volume:    grp.reduce((s, c) => s + (c.volume || 0), 0),
-        })
-    }
-    return out
 }
 
 /**
@@ -306,7 +289,6 @@ export async function getFmpCandles(ticker, options = {}) {
 
     const sym = String(ticker || '').toUpperCase().trim()
     if (!sym) return null
-    if (!API_KEY) throw new Error('FMP_API_KEY is not set')
 
     // Intraday is a PLAN feature, and a refused resolution answers 402 for every symbol until the
     // subscription changes. Asking anyway is not a harmless miss: each attempt spends a request
@@ -328,12 +310,12 @@ export async function getFmpCandles(ticker, options = {}) {
     const parts = [`symbol=${encodeURIComponent(sym)}`]
     if (from != null) parts.push(`from=${dateStr(from)}`)
     if (to   != null) parts.push(`to=${dateStr(to)}`)
-    const qs   = `${parts.join('&')}&apikey=${API_KEY}`
+    const qs   = parts.join('&')
     const path = spec.kind === 'intraday' ? `/historical-chart/${spec.interval}?${qs}` : `/historical-price-eod/full?${qs}`
 
     let rows
     try {
-        rows = await getJson(`${BASE}${path}`, { label: `FMP candles ${sym}/${timeSpan}x${multiplier}` })
+        rows = await fmpGet(path, { label: `FMP candles ${sym}/${timeSpan}x${multiplier}` })
     } catch (err) {
         // 402 is the plan speaking, not the network: it is the same answer for every symbol
         // and every retry until the subscription changes. Latch it (with a TTL, so an upgrade
@@ -373,5 +355,5 @@ export async function getFmpCandles(ticker, options = {}) {
     }
     const deduped = [...bySlot.values()]
 
-    return spec.aggregate > 1 ? aggregateOhlc(deduped, spec.aggregate) : deduped
+    return spec.aggregate > 1 ? aggregateCandles(deduped, spec.aggregate) : deduped
 }

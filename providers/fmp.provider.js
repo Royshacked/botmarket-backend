@@ -20,63 +20,18 @@
 //  - Production use displaying this data to users needs FMP's Data Display &
 //    Licensing agreement. Keep that in mind before shipping.
 
-import { getDb } from './mongodb.provider.js'
 import { logger } from '../services/logger.service.js'
 import { compactMoney } from '../services/format.util.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
-import { getJson } from '../services/http.util.js'
-import { config } from '../services/config.js'
+import { makeMongoBackedCache } from '../services/mongoCache.util.js'
+import { fmpGet as _fmpGet } from './fmp.price.provider.js'
 
-const LOG     = '[fmp]'
-const BASE    = 'https://financialmodelingprep.com/stable'
-const API_KEY = config.fmpApiKey
+const LOG = '[fmp]'
 
-// ─── Two-layer cache (in-process Map over Mongo) ────────────────────────────
-// Fundamentals barely move (quarterly), so a long TTL is fine. The Mongo layer
-// survives nodemon restarts so dev reloads don't re-burn the daily quota.
-const COLLECTION  = 'fmp_fundamentals_cache'
-const TTL_MS      = 24 * 60 * 60 * 1000   // 24h
-const MEM_MAX     = 500
-const _mem        = createTtlCache({ ttlMs: TTL_MS, max: MEM_MAX }) // SYMBOL -> { asOf: ISO, text: string }
-
-async function _readCache(symbol) {
-    const hit = _mem.get(symbol)
-    if (hit) return hit
-
-    try {
-        const db  = await getDb()
-        const doc = await db.collection(COLLECTION).findOne({ symbol })
-        if (doc && Date.now() - doc.fetchedAt < TTL_MS) {
-            const entry = { asOf: doc.asOf, text: doc.text }
-            _mem.set(symbol, entry)
-            return entry
-        }
-    } catch (err) {
-        logger.warn(LOG, 'Mongo cache read failed', err.message)
-    }
-    return null
-}
-
-async function _writeCache(symbol, entry) {
-    _mem.set(symbol, { asOf: entry.asOf, text: entry.text })
-    try {
-        const db = await getDb()
-        await db.collection(COLLECTION).updateOne(
-            { symbol },
-            { $set: { symbol, ...entry } },
-            { upsert: true }
-        )
-    } catch (err) {
-        logger.warn(LOG, 'Mongo cache write failed', err.message)
-    }
-}
-
-// ─── FMP HTTP ───────────────────────────────────────────────────────────────
-async function _fmpGet(path) {
-    if (!API_KEY) throw new Error('FMP_API_KEY is not set')
-    const sep = path.includes('?') ? '&' : '?'
-    return getJson(`${BASE}${path}${sep}apikey=${API_KEY}`, { label: `FMP ${path} → HTTP` })
-}
+// ─── Fundamentals cache (in-process over Mongo — services/mongoCache.util) ───
+// Fundamentals barely move (quarterly), so a long TTL is fine. The Mongo layer survives nodemon
+// restarts so dev reloads don't re-burn the daily quota. Value shape: { asOf: ISO, text: string }.
+const _fundamentals = makeMongoBackedCache({ collection: 'fmp_fundamentals_cache', ttlMs: 24 * 60 * 60 * 1000, max: 500, log: LOG })
 
 // ─── Formatting helpers ─────────────────────────────────────────────────────
 const num  = (v, d = 2) => (Number.isFinite(Number(v)) ? Number(v).toFixed(d) : null)
@@ -367,7 +322,7 @@ export async function getFundamentals(ticker) {
     const symbol = String(ticker || '').toUpperCase().trim()
     if (!symbol) return 'No ticker provided.'
 
-    const cached = await _readCache(symbol)
+    const cached = await _fundamentals.read(symbol)
     if (cached) return cached.text
 
     const profileArr = await _fmpGet(`/profile?symbol=${symbol}`)
@@ -395,7 +350,7 @@ export async function getFundamentals(ticker) {
     }
 
     const asOf = new Date().toISOString()
-    await _writeCache(symbol, { text, asOf, fetchedAt: Date.now() })
+    await _fundamentals.write(symbol, { text, asOf })
     logger.info(LOG, 'fundamentals fetched', { symbol, isEtf: !!(p.isEtf || p.isFund) })
     return text
 }

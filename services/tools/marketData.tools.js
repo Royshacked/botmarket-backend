@@ -7,6 +7,7 @@ import { cachedChart, cachedChartImage, CHART_SOURCE } from '../chartImgCache.se
 import { buildStudies } from '../../monitoring/evaluators/chart.evaluator.js'
 import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../../monitoring/evaluators/structured.evaluator.js'
 import { sessionStartMs } from '../market.service.js'
+import { aggregateCandles } from '../candleInterval.util.js'
 import { toolError } from '../toolResult.util.js'
 import { makeToolHandler } from '../agentUtils.js'
 import { withBrokerAvailability } from './tradingContext.tools.js'
@@ -48,28 +49,11 @@ export function fmtVol(v) {
     return String(v)
 }
 
-// Yahoo offers no native 2hr/4hr interval, so get_candles fetches 1hr bars and
-// aggregates them into true 2hr/4hr OHLCV here — deterministic and exact, rather
-// than asking the model to mentally group 1hr rows. Groups are aligned to end
-// on the newest bar (any oldest partial group is dropped).
-export function aggregateCandles(rows, groupSize) {
-    if (!Array.isArray(rows) || rows.length === 0) return []
-    const rem     = rows.length % groupSize
-    const aligned = rem ? rows.slice(rem) : rows
-    const out = []
-    for (let i = 0; i < aligned.length; i += groupSize) {
-        const grp = aligned.slice(i, i + groupSize)
-        out.push({
-            timestamp: grp[0].timestamp,
-            open:      grp[0].open,
-            high:      Math.max(...grp.map(c => c.high)),
-            low:       Math.min(...grp.map(c => c.low)),
-            close:     grp[grp.length - 1].close,
-            volume:    grp.reduce((s, c) => s + (c.volume || 0), 0),
-        })
-    }
-    return out
-}
+// Yahoo offers no native 2hr/4hr interval, so get_candles fetches 1hr bars and aggregates them
+// into true 2hr/4hr OHLCV — deterministic and exact, rather than asking the model to mentally
+// group 1hr rows. The aggregate itself is candleInterval.util.aggregateCandles (one copy, shared
+// with the FMP provider); re-exported here for the callers that always read it from this module.
+export { aggregateCandles }
 
 // Fetch → (optionally aggregate) → slice to `count` most recent bars for a timeframe.
 // Exported so other OHLCV-compute tools (the SMC engine's tools) reuse ONE candle-fetch path (DRY).

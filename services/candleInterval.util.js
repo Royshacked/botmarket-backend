@@ -37,6 +37,36 @@ export function parseChartInterval(interval) {
 }
 
 /**
+ * Aggregate ascending OHLCV rows into fixed-size groups (1hr bars → 2hr bars). Groups align to END
+ * on the newest bar, so an oldest partial group is dropped; `groupSize <= 1` is a passthrough.
+ * Pure. THE one aggregate — fmp.price (a provider that cannot import the tools layer) and
+ * marketData.tools (the agents' get_candles) each carried a copy, one documented as a "mirror" of
+ * the other, which is the shape duplication takes just before it drifts.
+ *
+ * @param {Array<{timestamp:number,open:number,high:number,low:number,close:number,volume?:number}>} rows
+ * @param {number} groupSize
+ */
+export function aggregateCandles(rows, groupSize) {
+    if (!Array.isArray(rows)) return []
+    if (rows.length === 0 || !(groupSize > 1)) return rows
+    const rem     = rows.length % groupSize
+    const aligned = rem ? rows.slice(rem) : rows
+    const out = []
+    for (let i = 0; i < aligned.length; i += groupSize) {
+        const grp = aligned.slice(i, i + groupSize)
+        out.push({
+            timestamp: grp[0].timestamp,
+            open:      grp[0].open,
+            high:      Math.max(...grp.map(c => c.high)),
+            low:       Math.min(...grp.map(c => c.low)),
+            close:     grp[grp.length - 1].close,
+            volume:    grp.reduce((s, c) => s + (c.volume || 0), 0),
+        })
+    }
+    return out
+}
+
+/**
  * Default history lookback (in days) for a bar spec when the caller gives no from/to — sized to
  * yield a useful, bounded number of bars per timeframe (finer bars → shorter window). Pure.
  *

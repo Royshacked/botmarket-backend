@@ -1,6 +1,5 @@
 import { logger } from '../services/logger.service.js'
-import { getDb } from './mongodb.provider.js'
-import { createTtlCache } from '../services/ttlCache.util.js'
+import { makeMongoBackedCache } from '../services/mongoCache.util.js'
 import { getJson } from '../services/http.util.js'
 import { config } from '../services/config.js'
 
@@ -48,50 +47,16 @@ export async function fetchIpoCalendar(from, to) {
     }
 }
 
-// Company name + logo per ticker. Profiles are effectively static, so they use a
-// two-layer cache (in-process Map over Mongo), same pattern as fmp.provider. The
-// Mongo layer means the one-time rate-limit burst on a busy earnings day only
-// ever happens once — not once per process restart/deploy.
-const PROFILE_COLLECTION = 'finnhub_profile_cache'
-const PROFILE_TTL_MS     = 30 * 24 * 60 * 60 * 1000   // 30 days
-const _profileMem        = createTtlCache({ ttlMs: PROFILE_TTL_MS, max: 1000 }) // SYMBOL -> { name, logo }
-
-async function _readProfileCache(symbol) {
-    const hit = _profileMem.get(symbol)
-    if (hit) return hit
-
-    try {
-        const db  = await getDb()
-        const doc = await db.collection(PROFILE_COLLECTION).findOne({ symbol })
-        if (doc && Date.now() - doc.fetchedAt < PROFILE_TTL_MS) {
-            const entry = { name: doc.name, logo: doc.logo }
-            _profileMem.set(symbol, entry)
-            return entry
-        }
-    } catch (err) {
-        logger.warn(LOG, 'profile cache read failed', err.message)
-    }
-    return null
-}
-
-async function _writeProfileCache(symbol, entry) {
-    _profileMem.set(symbol, entry)
-    try {
-        const db = await getDb()
-        await db.collection(PROFILE_COLLECTION).updateOne(
-            { symbol },
-            { $set: { symbol, ...entry, fetchedAt: Date.now() } },
-            { upsert: true }
-        )
-    } catch (err) {
-        logger.warn(LOG, 'profile cache write failed', err.message)
-    }
-}
+// Company name + logo per ticker. Profiles are effectively static, so they ride the shared
+// two-layer cache (in-process over Mongo — services/mongoCache.util, the same one fmp.provider's
+// fundamentals use). The Mongo layer means the one-time rate-limit burst on a busy earnings day
+// only ever happens once — not once per process restart/deploy. Value shape: { name, logo }.
+const _profiles = makeMongoBackedCache({ collection: 'finnhub_profile_cache', ttlMs: 30 * 24 * 60 * 60 * 1000, max: 1000, log: LOG })
 
 export async function fetchCompanyProfile(symbol) {
     if (!symbol) return { name: null, logo: null }
 
-    const cached = await _readProfileCache(symbol)
+    const cached = await _profiles.read(symbol)
     if (cached) return cached
 
     try {
@@ -100,7 +65,7 @@ export async function fetchCompanyProfile(symbol) {
         // stable, so cache it. Network / rate-limit errors throw → caught below,
         // NOT cached, so a later refresh retries them.
         const entry = { name: data?.name || null, logo: data?.logo || null }
-        await _writeProfileCache(symbol, entry)
+        await _profiles.write(symbol, entry)
         return entry
     } catch (error) {
         logger.error(LOG, `Error getting company profile ${symbol}`, error?.message)

@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { fmpDateToEpochSec, aggregateOhlc, fmpCandleSpec, groupOhlcByPeriod, etPeriodKey, etCalendarDate } from '../../providers/fmp.price.provider.js'
+import { fmpDateToEpochSec, fmpCandleSpec, groupOhlcByPeriod, etPeriodKey, etCalendarDate } from '../../providers/fmp.price.provider.js'
+import { aggregateCandles } from '../../services/candleInterval.util.js'
 
 // Stage 2 build-step 1 (reference_fmp_pricing): the pure pieces of the FMP candle provider.
 // The timezone conversion is the critical one — FMP intraday dates are ET wall-clock, but the
@@ -34,12 +35,12 @@ test('unparseable input → null', () => {
     }
 })
 
-// ── aggregateOhlc (mirror of marketData.tools.aggregateCandles) ───────────────
+// ── aggregateCandles — ONE aggregate now (candleInterval.util), used by FMP and the agents' tools ──
 const bar = (t, o, h, l, c, v) => ({ timestamp: t, open: o, high: h, low: l, close: c, volume: v })
 
 test('groups N ascending bars into one: first open, last close, max high, min low, sum vol', () => {
     const rows = [bar(1, 10, 12, 9, 11, 100), bar(2, 11, 15, 10, 14, 200)]
-    const out  = aggregateOhlc(rows, 2)
+    const out  = aggregateCandles(rows, 2)
     assert.equal(out.length, 1)
     assert.deepEqual(out[0], { timestamp: 1, open: 10, high: 15, low: 9, close: 14, volume: 300 })
 })
@@ -47,7 +48,7 @@ test('groups N ascending bars into one: first open, last close, max high, min lo
 test('aligns to the newest bar — drops the oldest partial group', () => {
     // 5 rows, groupSize 2 → drop oldest 1, two groups of 2 (bars 2-3, 4-5)
     const rows = [1, 2, 3, 4, 5].map(i => bar(i, i, i, i, i, 10))
-    const out  = aggregateOhlc(rows, 2)
+    const out  = aggregateCandles(rows, 2)
     assert.equal(out.length, 2)
     assert.equal(out[0].timestamp, 2)
     assert.equal(out[1].timestamp, 4)
@@ -56,8 +57,8 @@ test('aligns to the newest bar — drops the oldest partial group', () => {
 
 test('groupSize 1 or empty → passthrough', () => {
     const rows = [bar(1, 1, 1, 1, 1, 1)]
-    assert.equal(aggregateOhlc(rows, 1), rows)
-    assert.deepEqual(aggregateOhlc([], 4), [])
+    assert.equal(aggregateCandles(rows, 1), rows)
+    assert.deepEqual(aggregateCandles([], 4), [])
 })
 
 // ── fmpCandleSpec (bar-spec → FMP fetch plan; null = fall back to Massive/Yahoo) ──

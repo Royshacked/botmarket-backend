@@ -37,8 +37,12 @@ function _etWall(date = new Date()) {
     return new Date(date.toLocaleString('en-US', { timeZone: ET }))
 }
 
-/** Offset (ms) of a timezone from UTC at a given instant — negative west of UTC. */
-function _tzOffsetMs(date, tz) {
+/**
+ * Offset (ms) of a timezone from UTC at a given instant — negative west of UTC. Exported for the
+ * FMP price provider, whose bars are stamped in ET wall-clock and need the same conversion (it
+ * carried its own copy).
+ */
+export function tzOffsetMs(date, tz) {
     const asTz  = new Date(date.toLocaleString('en-US', { timeZone: tz }))
     const asUtc = new Date(date.toLocaleString('en-US', { timeZone: 'UTC' }))
     return asTz.getTime() - asUtc.getTime()
@@ -388,7 +392,7 @@ export function sessionStartMs(symbol, assetClass, date = new Date()) {
     const session = _sessionForClass(assetClass) ?? _sessionForSymbol(symbol)
     if (session === 'equity') {
         const et  = _etWall(date)
-        const off = _tzOffsetMs(date, ET)   // ET→UTC offset (negative)
+        const off = tzOffsetMs(date, ET)   // ET→UTC offset (negative)
         // 09:30 on the ET calendar date, expressed in UTC ms.
         return Date.UTC(et.getFullYear(), et.getMonth(), et.getDate(), 9, 30) - off
     }
