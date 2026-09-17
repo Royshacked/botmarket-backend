@@ -30,6 +30,7 @@ import { getDbName } from '../providers/mongodb.provider.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
 import { httpError } from './httpError.util.js'
+import { broadcast } from '../api/chat/chatWs.js'
 
 const LOG = '[aetherScheduler]'
 
@@ -172,6 +173,7 @@ const _STAGES = [
         m => ({ stage: 'stored', detail: `${m[1]} stored for ${m[2]}` })],
 ]
 
+/** Returns whether the line moved the stage — the caller announces on true. */
 function _readProgress(line) {
     for (const [re, build] of _STAGES) {
         const m = re.exec(line)
@@ -185,8 +187,26 @@ function _readProgress(line) {
             events: _progress?.events ?? 0,
             at:     new Date().toISOString(),
         }
-        return
+        return true
     }
+    return false
+}
+
+// The one WS event a discovery run speaks: the same shape GET /discover answers, pushed to
+// everyone connected at each stage and at the end. This is what lets the candidate list
+// refetch the moment a run lands — it used to sit on a five-minute timer and learn of a run
+// up to ten minutes after the button already knew, if the tick fell in a Mongo wobble. The
+// button and the list now read one feed; the GET is only for a page that opens mid-run.
+export const DISCOVERY_EVENT = 'aether:discovery'
+
+function _announce() {
+    broadcast(DISCOVERY_EVENT, discoveryStatus())
+}
+
+/** One engine log line: log it, and if it moved the stage, tell everyone. Exported for tests. */
+export function _onEngineLine(line, level = 'info') {
+    if (_readProgress(line)) _announce()
+    logger[level](LOG, line)
 }
 
 /**
@@ -263,21 +283,18 @@ function runDiscovery({ maxRuns = 2, hours = 168, top = 5 } = {}) {
     _progress = { stage: 'starting', detail: 'spawning the engine', event: 0, events: maxRuns, at: startedAt }
 
     _discovery = spawn(python, args, { cwd: engineDir, env, stdio: ['ignore', 'pipe', 'pipe'] })
+    _announce()
 
     // The engine logs to stderr (Python's logging default), so BOTH streams are read for
     // progress — reading stdout alone would leave the chip on "starting" for the whole run.
     _discovery.stdout.on('data', buf => {
         for (const line of buf.toString().trim().split('\n')) {
-            if (!line) continue
-            _readProgress(line)
-            logger.info(LOG, line)
+            if (line) _onEngineLine(line, 'info')
         }
     })
     _discovery.stderr.on('data', buf => {
         for (const line of buf.toString().trim().split('\n')) {
-            if (!line) continue
-            _readProgress(line)
-            logger.warn(LOG, line)
+            if (line) _onEngineLine(line, 'warn')
         }
     })
     _discovery.on('exit', code => {
@@ -290,6 +307,7 @@ function runDiscovery({ maxRuns = 2, hours = 168, top = 5 } = {}) {
         logger.info(LOG, `discovery finished  code=${code ?? '-'}  last stage=${_progress?.stage ?? '-'}`)
         _discovery = null
         _progress = null
+        _announce()
     })
     _discovery.on('error', err => {
         _lastRun = { startedAt, finishedAt: new Date().toISOString(), code: null, ok: false,
@@ -297,6 +315,7 @@ function runDiscovery({ maxRuns = 2, hours = 168, top = 5 } = {}) {
         logger.error(LOG, 'discovery spawn failed:', err.message)
         _discovery = null
         _progress = null
+        _announce()
     })
 
     logger.info(LOG, `discovery started  pid=${_discovery.pid}  maxRuns=${maxRuns}  hours=${hours}`)

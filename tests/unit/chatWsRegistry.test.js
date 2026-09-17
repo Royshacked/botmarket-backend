@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _register, _unregister, _socketCount, emit, _sweep } from '../../api/chat/chatWs.js'
+import { _register, _unregister, _socketCount, emit, broadcast, _sweep } from '../../api/chat/chatWs.js'
 
 // The socket registry behind the unread badge. It used to hold ONE socket per user, so a second
 // connection displaced the first WITHOUT closing it: that browser saw no close, never reconnected,
@@ -74,6 +74,46 @@ test('a socket that is not OPEN is skipped, and does not stop the others', () =>
 
 test('unregistering a socket that was never registered is harmless', () => {
     assert.equal(_unregister('nobody', fakeSocket()), 0)
+})
+
+// ── Broadcast ────────────────────────────────────────────────────────────────
+// House-wide state — a discovery run landing — goes to everyone connected, in the same frame
+// shape `emit` uses, so the client's one dispatcher reads both without knowing which sent it.
+
+test('broadcast reaches every user and every tab, in the emit frame shape', () => {
+    const a1 = fakeSocket(), a2 = fakeSocket(), b = fakeSocket()
+    _register('b1', a1)
+    _register('b1', a2)
+    _register('b2', b)
+
+    broadcast('aether:discovery', { running: false })
+
+    for (const ws of [a1, a2, b]) {
+        assert.deepEqual(events(ws), [{ event: 'aether:discovery', data: { running: false } }])
+    }
+
+    _unregister('b1', a1)
+    _unregister('b1', a2)
+    _unregister('b2', b)
+})
+
+test('broadcast skips a socket that is not OPEN and does not stop at it', () => {
+    const closing = fakeSocket(2)
+    const live    = fakeSocket()
+    _register('b3', closing)
+    _register('b4', live)
+
+    broadcast('aether:discovery', { running: true })
+
+    assert.equal(events(closing).length, 0)
+    assert.equal(events(live).length, 1)
+
+    _unregister('b3', closing)
+    _unregister('b4', live)
+})
+
+test('broadcast with nobody connected is a no-op', () => {
+    assert.doesNotThrow(() => broadcast('aether:discovery', { running: false }))
 })
 
 // ── Heartbeat ────────────────────────────────────────────────────────────────

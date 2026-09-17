@@ -11,7 +11,8 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { aetherSchedulerService } from '../../services/aetherScheduler.service.js'
+import { aetherSchedulerService, _onEngineLine, DISCOVERY_EVENT } from '../../services/aetherScheduler.service.js'
+import { _register, _unregister } from '../../api/chat/chatWs.js'
 import { startDiscovery as _startDiscovery, getDiscoveryStatus } from '../../api/aether/aether.controller.js'
 import { errorHandler } from '../../api/_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
@@ -168,6 +169,48 @@ test('an unavailable host says why, in words worth reading', async () => {
         assert.match(res.body.unavailableReason, /AETHER_ENGINE_PATH/)
     } finally {
         aetherSchedulerService.discoveryStatus = real
+    }
+})
+
+// ── The run announces itself ─────────────────────────────────────────────────
+// The candidate list used to sit on a five-minute timer and learn of a finished run up to ten
+// minutes after the button already knew. A stage change now goes out over the socket to
+// everyone connected, in the shape GET /discover answers, and the list refetches on the frame
+// that says the run is over.
+
+const OPEN = 1
+function fakeSocket() {
+    return { readyState: OPEN, sent: [], send(f) { this.sent.push(JSON.parse(f)) } }
+}
+
+test('an engine line that moves the stage is broadcast in the status shape', () => {
+    const ws = fakeSocket()
+    _register('viewer', ws)
+    try {
+        _onEngineLine('INFO    selector: 358 queued -> 12 after cheap cuts', 'warn')
+
+        assert.equal(ws.sent.length, 1)
+        const { event, data } = ws.sent[0]
+        assert.equal(event, DISCOVERY_EVENT)
+        assert.equal(data.progress.stage, 'triage')
+        assert.equal(data.progress.detail, 'reading 12 of 358 headlines')
+        // The full status, not just the stage: a client that never polled still learns
+        // whether this host can run and whether one is in flight.
+        assert.equal(typeof data.running, 'boolean')
+        assert.equal(typeof data.available, 'boolean')
+    } finally {
+        _unregister('viewer', ws)
+    }
+})
+
+test('a line that says nothing about the stage is logged, not broadcast', () => {
+    const ws = fakeSocket()
+    _register('viewer2', ws)
+    try {
+        _onEngineLine('WARNING price fetch failed for NBIS: read timed out', 'warn')
+        assert.equal(ws.sent.length, 0)
+    } finally {
+        _unregister('viewer2', ws)
     }
 })
 

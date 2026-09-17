@@ -127,8 +127,26 @@ export function attach(httpServer) {
 export function emit(userId, event, data) {
     const set = socketMap.get(String(userId))
     if (!set?.size) return
+    _send(set, JSON.stringify({ event, data }))
+}
+
+/**
+ * Push an event to EVERYONE connected. For house-wide state — a discovery run landing, which
+ * every reader of the candidate list wants to hear about — where `emit` would mean knowing who
+ * is looking. Same frame shape as `emit`, so the client's one dispatcher reads both.
+ *
+ * PER-PROCESS, like the registry it walks (see the single-instance note in server.js): a user
+ * connected to another backend does not hear this. Fine for what rides it today — discovery
+ * runs on whichever host has the engine, and its readers are on that host.
+ */
+export function broadcast(event, data) {
+    if (!socketMap.size) return
     const frame = JSON.stringify({ event, data })
-    for (const ws of set) {
+    for (const set of socketMap.values()) _send(set, frame)
+}
+
+function _send(sockets, frame) {
+    for (const ws of sockets) {
         if (ws.readyState === WebSocket.OPEN) ws.send(frame)
     }
 }
