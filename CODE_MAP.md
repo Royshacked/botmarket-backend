@@ -508,7 +508,7 @@ services/
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
   tradeNotify.service.js    notify+route cards → social chat: entry_confirm (paper/live idea entry)
                             + queue_ready (the market-open nudge, from Axl) + setup_invalidation /
-                            setup_manage (Talos, from Mentor). Pure builders + thin sendBotMessage
+                            setup_manage (Talos, from Mentor). Pure builders + thin postCard
                             wrappers; card is the alert, existing UI is the destination. A few
                             builders here have callers only under archive/ and emit nothing.
                             entry_confirm carries a `note` (passed_earlier | off_hours | null) for scheduled entries

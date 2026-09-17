@@ -198,8 +198,9 @@ stop-owned and invalidation never executes.**
 
 ### Social-chat notification cards (notify + route)
 
-Major events are surfaced as typed cards in social chat via one funnel — `sendBotMessage(userId,
-content, type, payload, botId)` (`api/chat/chat.service.js`) → `chat_messages` → WebSocket →
+Major events are surfaced as typed cards in social chat via one funnel — `postCard(card)`
+(`services/notifyCard.js`) → `postBotCard` (`api/chat/chat.service.js`; `sendBotMessage` is its
+back-compat alias with no caller outside that file) → `chat_messages` → WebSocket →
 `SocialChat/ChatWindow.jsx` dispatches by `type` to a card component. Each `botId` is the authoring
 agent (`BOT_IDS` in `chat.service.js`; only Axl is conversational, the rest are notify-only feeds),
 so a card reads "from Atlas" or "from Mentor". A kind picks its sender through the one `botForKind`

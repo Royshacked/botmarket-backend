@@ -389,7 +389,7 @@ irrelevant despite a large ratio (a lease, a settlement, a bulk fuel purchase). 
 keeps it affordable — twenty descriptions in one call, a verdict list back.
 
 **A monitor, on the existing `createDueLoop`.** Grades candidates at `expires_at`, matures the row,
-writes the outcome, and notifies through `sendBotMessage` like every other desk. LLM-free by
+writes the outcome, and notifies through `postCard` → `postBotCard` like every other desk. LLM-free by
 construction — it is arithmetic on frozen prices, in the Themis-as-a-doorbell mould.
 
 **And an ingest loop**, on `createPollLoop`, daily after the 5pm ET DoD announcement.

@@ -262,26 +262,32 @@ re-worded.
 # Talos in-position management + the trades ledger (2026-08-09)
 
 Everything below shipped today with unit coverage and **has never run against a real filled
-position**. That matters more here than usual for two reasons: `take_partial` produces a card that
-places a real order at a broker, and the gate was written by two agents working in parallel — my
-`position_state` seeding and their `positionGate` only meet at runtime, never in a test.
+position**. That matters more here than usual: `take_partial` produces a card that places a real
+order at a broker, and the fill stamp and the in-position read only meet at runtime, never in a test.
 
 Commits: `ef1f6ba` · `b26e777` (in-position) · `f6bd284` (exit journal) · `97f70dd` (partial ledger).
+**G1 rewritten 2026-09-17** for the per-candle build (`3580762`): the price gate, `hit_at` and
+`in_position_idle` it used to verify are deleted.
 
-### G1 — the gate sees what the fill wrote `[BLOCKED — needs a real fill]`
+### G1 — the read sees what the fill wrote `[BLOCKED — needs a real fill]`
 
 - [ ] **A fill seeds the stop and the ladder.** After a real entry, read `position_state`: `stop.initial`
-  and `stop.current` both equal the WIDEST stop edge of the armed scenario, and `targets[]` is
-  nearest-first with `hit_at: null`. Unseeded, `positionGate` reads undefined and simply never trips —
-  the symptom is "the manager does nothing", which looks like an LLM problem and is not one.
-- [ ] **A short seeds the opposite edges.** Same check on a short: stop from the band's HIGH side,
-  targets descending. Three direction-dependent comparisons live in the gate and a sign error in any
-  one turns a losing short into "target reached".
-- [ ] **`breakeven` fires once and then stops.** Take a position to +1R with the stop still behind
-  entry: expect one `breakeven` wake, then silence after the stop is moved. A gate that re-fires
-  every wake is an LLM call per poll per position — the cost that scales with users.
-- [ ] **A quiet position costs nothing.** Watch several wakes on a position sitting mid-range:
-  `in_position_idle`, no journal line, no model call, metrics still moving.
+  and `stop.current` both equal the working stop of the armed scenario (`stopEdge`), `entry.legs[]`
+  has one leg with the fill's `zone_id`, and `targets[]` is nearest-first as `{ price, quantity,
+  watched }`. Unseeded, `computeMetrics` reads undefined and every R is null — the symptom is a read
+  with no numbers, which looks like an LLM problem and is not one.
+- [ ] **A short seeds the opposite edges.** Same check on a short: stop from the HIGH side, targets
+  descending. The direction-dependent comparisons live in `rMultiple` / `computeMetrics` and a sign
+  error turns a losing short into +R.
+- [ ] **Plain exits go dormant, once.** A position whose stop and targets carry no conditions: expect
+  ONE wake that stamps `monitor_state.dormant: true` and a log line "every exit rests at the broker",
+  then nothing — no price, no poll, no journal row. The loop's query excludes it.
+- [ ] **A watched leg is read every candle close.** Add a condition to the stop through the edit path
+  (`dormant` clears): expect one journal row per close of `monitor_state.timeframe` (+ `READ_LAG_MS`),
+  each with `reason: candle`, the conditions checked, and `tools[]` naming what it pulled — most rows
+  should pull nothing. No row between closes, none while the market is shut.
+- [ ] **The menu is the legs.** With only the stop watched, the verdicts on the rows are `hold` /
+  `move_stop` / `exit_now` and never `take_partial`; an off-menu verdict logs "treating as hold".
 
 ### G2 — the partial actually reaches the ledger `[BLOCKED — needs a real fill]`
 

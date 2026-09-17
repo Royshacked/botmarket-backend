@@ -46,10 +46,12 @@ never enter.
 
 ## Guards gain a term array
 
-Today a guard is `{ after_min, price, direction, means }` — time AND one price. That generalises:
+Today a guard is `{ price, direction, means }` — one price, no time term (the per-candle build
+of 2026-09-17 removed `after_min`: the candle close is the timer, and a guard is only the interrupt
+that brings a read forward). That generalises:
 
 ```
-guard = { after_min, when: [ term, … ], means }        // terms ANDed
+guard = { when: [ term, … ], means }                   // terms ANDed
 term  = { left, op, right, by? }
 ```
 

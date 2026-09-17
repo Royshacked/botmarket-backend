@@ -109,7 +109,7 @@ Layer A/B seam, done pragmatically (no refactor of paperExecution).
 ### Lifecycle seams (the two confirmations)
 1. **Idea entry** — `monitor._checkEntry` detects the entry hit → for a manual idea it **skips
    the broker order plan**, sets `status:'hit'` + `orderState:'awaiting_manual_fill'`, and posts a
-   1-leg `manual_entry` FillCard to social chat (`sendBotMessage`). The broker OrderConfirm dialog
+   1-leg `manual_entry` FillCard to social chat (`postCard` → `postBotCard`). The broker OrderConfirm dialog
    is suppressed for manual ideas.
 2. **Portfolio activation** — clicking *Activate* posts an **N-leg** `manual_entry` FillCard
    immediately (a market-entry basket the user is executing now — not condition-monitored entries).
@@ -131,7 +131,7 @@ Layer A/B seam, done pragmatically (no refactor of paperExecution).
 5. **Portfolio review cycle** — unchanged (shared `portfolio.monitor`).
 
 ### Social-chat cards (the only net-new UI, Phase 2)
-Reuses the existing specialist-notification pattern (`sendBotMessage` + payload + persisted
+Reuses the existing specialist-notification pattern (`postCard` → `postBotCard` + payload + persisted
 Update/Close/Dismiss, exactly like `invalidation_alert`) — **not** the abandoned social-chat
 router. One unified `FillCard`: N legs (1 for an idea, N for a portfolio), inline price input
 (+ editable qty on entry), each leg opening/closing the moment its price is submitted, card
