@@ -39,8 +39,8 @@ test('kindForDoc: a holding (portfolioId) → portfolio_item, else idea', () => 
 
 test('blank helpers are fresh (not shared references)', () => {
     const a = blankMonitorState(), b = blankMonitorState()
-    a.timeline.push('x')
-    assert.deepEqual(b.timeline, [])           // no shared array
+    a.memo = 'x'
+    assert.equal(b.memo, null)                 // no shared object
     assert.equal(blankExecution().basisOffset, 0)
     assert.deepEqual(blankExecution().brokerOrders, [])
 })
@@ -91,7 +91,6 @@ test('an idea the entry or exit loop has scheduled reports ITS wake-up time', ()
     // It used to hard-blank this and say "no loop polls the kind". Two do.
     const e = ideaToEnvelope({ id: 'i9', monitor_state: { next_check_at: '2026-08-18T20:00:00.000Z' } })
     assert.equal(e.monitorState.nextCheckAt, '2026-08-18T20:00:00.000Z')
-    assert.deepEqual(e.monitorState.timeline, [], 'neither loop journals, so that stays honestly empty')
     assert.equal(e.monitorState.checkCount, 0)
 })
 
@@ -105,7 +104,7 @@ test('callToEnvelope absorbs the snake_case field names', () => {
         id: 'call_TSLA_abc', userId: 'u9', status: 'watching', asset: 'TSLA', asset_class: 'equity',
         bias: 'long', savedAt: 2000, broker: 'paper', accounts: ['pa1'], main_account_id: 'pa1',
         broker_symbol: 'TSLA', basis_offset: 0, sizing: { max_size: 50, unit: 'shares' },
-        monitor_state: { next_check_at: 5, check_count: 3, memo: 'mm', timeline: [{ t: 1 }] },
+        monitor_state: { next_check_at: 5, check_count: 3, memo: 'mm' },
     }
     const e = callToEnvelope(doc)
     assert.equal(e.kind, KINDS.CALL)
@@ -120,7 +119,7 @@ test('callToEnvelope absorbs the snake_case field names', () => {
     assert.equal(e.execution.orderState, null)          // this fixture is pre-entry
     assert.deepEqual(e.execution.brokerOrders, [])
     assert.deepEqual(e.sizing, { unit: 'shares', requested: 50, resolvedQty: null })
-    assert.deepEqual(e.monitorState, { nextCheckAt: 5, checkCount: 3, memo: 'mm', timeline: [{ t: 1 }] })
+    assert.deepEqual(e.monitorState, { nextCheckAt: 5, checkCount: 3, memo: 'mm' })
 })
 
 test('callToEnvelope reads a CONFIRMED call\'s own execution (no idea shadow since P3b)', () => {

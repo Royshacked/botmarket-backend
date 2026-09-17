@@ -24,7 +24,7 @@ import { getDb } from '../providers/mongodb.provider.js'
 import { logger } from '../services/logger.service.js'
 import { withTimeout } from '../services/timeout.util.js'
 import { createPollLoop } from './pollLoop.js'
-import { withJournal } from './monitorJournal.js'
+import { appendJournal } from '../services/journal.service.js'
 
 /**
  * Build a monitor's poll loop.
@@ -146,13 +146,15 @@ export function createDueLoop({
 }
 
 /**
- * The write every wake ends with: the monitor's `$set`, plus the journal line appended and capped.
+ * The write every wake ends with: the monitor's `$set`, then the journal row appended
+ * (services/journal.service) when the wake has one.
  *
- * It RETHROWS. Swallowing made a failed write invisible twice over — the wake reported success, and
- * the code carried on to fire a card describing state that was never saved. The per-entity catch in
- * the tick logs it and moves on, so one bad write still can't stop the loop.
+ * It RETHROWS on the `$set`. Swallowing made a failed write invisible twice over — the wake reported
+ * success, and the code carried on to fire a card describing state that was never saved. The
+ * per-entity catch in the tick logs it and moves on, so one bad write still can't stop the loop.
+ * The journal append never throws: a lost line must not fail a wake whose state already landed.
  */
-export function makePersist({ collection, kind = null, timelineMax, log }) {
+export function makePersist({ collection, kind = null, log }) {
     // `kind` is OPTIONAL and only Talos passes it. It was left optional for the archived Hermes,
     // whose pre-P3b call documents predate the field and would have stopped matching — and it stays
     // optional for the same reason coverage and tilt omit it: a collection that holds one thing
@@ -165,10 +167,11 @@ export function makePersist({ collection, kind = null, timelineMax, log }) {
     return async function persist(id, $set, logEntry = null, db = null) {
         try {
             const conn = db ?? await getDb()
-            await conn.collection(collection).updateOne(match(id), withJournal($set, logEntry, timelineMax))
+            await conn.collection(collection).updateOne(match(id), { $set })
         } catch (err) {
             logger.error(log, `persist failed for ${id}:`, err.message)
             throw err
         }
+        if (logEntry) await appendJournal(id, logEntry, db)
     }
 }

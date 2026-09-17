@@ -72,7 +72,7 @@ export function kindForDoc(doc) {
 
 /** A fresh, empty monitor_state — the single shape carried by every kind (open-decision #4). */
 export function blankMonitorState() {
-    return { nextCheckAt: null, checkCount: 0, memo: null, timeline: [] }
+    return { nextCheckAt: null, checkCount: 0, memo: null }
 }
 
 /**
@@ -90,7 +90,7 @@ export function blankMonitorState() {
  * @property {string|null}  assetClass
  * @property {string|null}  direction     long|short (idea/portfolio_item) | long|short|both (call)
  * @property {number|null}  createdAt
- * @property {Object}       monitorState  { nextCheckAt, checkCount, memo, timeline[] }
+ * @property {Object}       monitorState  { nextCheckAt, checkCount, memo } — the journal is its own collection (journal.service)
  * @property {Object}       execution     { broker, accounts[], mainAccountId, brokerSymbol,
  *                                          basisOffset, orderState, brokerOrders[] }
  * @property {Object}       sizing        { unit, requested, resolvedQty }

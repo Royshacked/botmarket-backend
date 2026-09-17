@@ -12,8 +12,7 @@
 // Lookups return RAW docs (no stripId) because the reconciler operates on raw docs today.
 
 import { getDb } from '../../providers/mongodb.provider.js'
-// The journal path and its cap live in ONE place, so a caller cannot half-write the timeline.
-import { withJournal } from '../../monitoring/monitorJournal.js'
+import { appendJournal } from '../journal.service.js'
 import { LIVE_POSITION } from './vocabulary.js'
 import { ENTITIES } from './entityCollection.js'
 
@@ -38,7 +37,7 @@ function _positionMatch(accountId, positionId) {
 /**
  * @param {{ coll?: () => Promise<any> }} [deps]  inject a collection provider for tests.
  */
-export function makeEntityRepo({ coll = _defaultColl } = {}) {
+export function makeEntityRepo({ coll = _defaultColl, journal = appendJournal } = {}) {
     return {
         // ── broker-linkage lookups (kind-blind) ─────────────────────────────────────────────
         /** The active entity holding this account+position in its entry linkage. */
@@ -280,20 +279,21 @@ export function makeEntityRepo({ coll = _defaultColl } = {}) {
          * Flip to closed only if still active (so a concurrent close wins once). Returns the updated
          * doc, or null when someone else closed it first.
          *
-         * `entry` appends the monitor-journal line for the close in the SAME guarded write. The
-         * guard is what makes it exactly-once — a losing concurrent close matches nothing and
-         * therefore writes no line either, with no latch to maintain. Written here rather than in a
-         * monitor because a closed entity drops out of every polled status before its monitor sees
-         * it, which is why the exit was never journalled; and because this is kind-blind, one
-         * implementation covers calls and setups alike.
+         * `entry` is the journal line for the close, written ONLY by the close that won: the guard
+         * is what makes it exactly-once — a losing concurrent close matches nothing, gets null back
+         * and writes no line. Written here rather than in a monitor because a closed entity drops
+         * out of every polled status before its monitor sees it, which is why the exit was never
+         * journalled; and because this is kind-blind, one implementation covers calls and setups.
          */
         async finalizeClose(id, patch, entry = null) {
             const c = await coll()
-            return c.findOneAndUpdate(
+            const doc = await c.findOneAndUpdate(
                 { id, status: { $in: ACTIVE_STATUSES } },
-                withJournal(patch, entry),
+                { $set: patch },
                 { returnDocument: 'after' },
             )
+            if (doc && entry) await journal(id, entry)
+            return doc
         },
 
         /**

@@ -47,8 +47,8 @@ export function ideaToEnvelope(doc) {
         // caused a stop to go unwatched for weeks — so it reads the document, like the call branch
         // below, rather than asserting an absence.
         //
-        // `checkCount`, `memo` and `timeline` stay empty on purpose: those are a JOURNALLING
-        // monitor's, and neither of these two journals. Blank there is still the faithful answer.
+        // `checkCount` and `memo` stay empty on purpose: those are a JOURNALLING monitor's, and
+        // neither of these two journals. Blank there is still the faithful answer.
         monitorState: { ...blankMonitorState(), nextCheckAt: doc.monitor_state?.next_check_at ?? null },
         execution: {
             broker:        doc.broker ?? null,
@@ -94,7 +94,6 @@ export function callToEnvelope(doc) {
             nextCheckAt: ms.next_check_at ?? null,
             checkCount:  ms.check_count ?? 0,
             memo:        ms.memo ?? null,
-            timeline:    Array.isArray(ms.timeline) ? ms.timeline : [],
         },
         execution: {
             broker:        doc.broker ?? null,

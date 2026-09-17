@@ -19,7 +19,9 @@ function spyColl(returns = {}) {
         async updateOne(...a) { calls.push(['updateOne', ...a]); return returns.updateOne ?? { modifiedCount: 1 } },
         async updateMany(...a) { calls.push(['updateMany', ...a]); return returns.updateMany ?? { modifiedCount: 0 } },
     }
-    return { coll, repo: makeEntityRepo({ coll: async () => coll }) }
+    const journal = []
+    const repo = makeEntityRepo({ coll: async () => coll, journal: async (id, entry) => { journal.push([id, entry]) } })
+    return { coll, repo, journal }
 }
 
 test('findActiveByPosition → findOne active + brokerOrders elemMatch (String-coerced)', async () => {
@@ -86,27 +88,28 @@ test('patch → updateOne {id} $set', async () => {
     assert.deepEqual(coll.calls[0], ['updateOne', { id: 'i1' }, { $set: { orderState: 'placed' } }])
 })
 
-test('finalizeClose carries the exit journal line in the SAME guarded write', async () => {
-    // The guard IS the exactly-once property: a losing concurrent close matches nothing, so it
-    // writes no line either. A separate journal write would need a latch to get the same thing.
-    const { coll, repo } = spyColl({ findOneAndUpdate: { id: 'i1', status: 'closed' } })
-    const patch = { status: 'closed', closedReason: 'tp', closedAt: 5 }
+test('finalizeClose journals the exit line ONLY for the close that won the guard', async () => {
+    // The guard IS the exactly-once property: a losing concurrent close matches nothing, gets
+    // null back and writes no journal row either.
     const entry = { at: '2026-08-09T00:00:00.000Z', reason: 'exit', note: 'Out of NVDA at 190' }
+    const patch = { status: 'closed', closedReason: 'tp', closedAt: 5 }
 
-    await repo.finalizeClose('i1', patch, entry)
-
-    const [, filter, update] = coll.calls[0]
+    const won = spyColl({ findOneAndUpdate: { id: 'i1', status: 'closed' } })
+    await won.repo.finalizeClose('i1', patch, entry)
+    const [, filter, update] = won.coll.calls[0]
     assert.deepEqual(filter, { id: 'i1', status: { $in: ACTIVE_STATUSES } }, 'still guarded')
-    assert.deepEqual(update.$set, patch, 'the status flip is unchanged')
-    assert.equal(update.$push['monitor_state.timeline'].$each[0].reason, 'exit')
-    assert.ok(update.$push['monitor_state.timeline'].$slice < 0, 'the cap rides along')
+    assert.deepEqual(update, { $set: patch }, 'the status flip carries nothing else')
+    assert.deepEqual(won.journal, [['i1', entry]])
+
+    const lost = spyColl({ findOneAndUpdate: null })
+    await lost.repo.finalizeClose('i1', patch, entry)
+    assert.deepEqual(lost.journal, [], 'the loser writes no line')
 })
 
-test('finalizeClose without an entry writes no $push at all', async () => {
-    // Callers that have nothing to say must not create an empty timeline on the document.
-    const { coll, repo } = spyColl({ findOneAndUpdate: { id: 'i1' } })
+test('finalizeClose without an entry journals nothing', async () => {
+    const { repo, journal } = spyColl({ findOneAndUpdate: { id: 'i1' } })
     await repo.finalizeClose('i1', { status: 'closed' })
-    assert.equal(coll.calls[0][2].$push, undefined)
+    assert.deepEqual(journal, [])
 })
 
 test('finalizeClose → guarded findOneAndUpdate {id, status:$in ACTIVE} returning doc', async () => {

@@ -42,6 +42,7 @@ import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
 import { ensureTradeIndexes } from './services/tradeCapture.service.js'
+import { ensureJournalIndexes } from './services/journal.service.js'
 import { ensureExperienceIndexes } from './api/experience/experience.model.js'
 import { ensureWorkspaceIndexes } from './api/workspace/workspace.model.js'
 import { ensurePendingActionIndexes } from './services/pendingAction/pendingAction.repo.js'
@@ -214,6 +215,7 @@ ensureChatIndexes()
 ensureUserIndexes()
 ensureIdeaIndexes()
 ensureTradeIndexes()
+ensureJournalIndexes()
 ensureExperienceIndexes()
 ensureWorkspaceIndexes()
 ensurePendingActionIndexes()
