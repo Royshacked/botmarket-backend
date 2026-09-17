@@ -1,11 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    buildLadder, buildCadence, normalizeZone, normalizeZones, scenarioQuantity,
+    buildLadder, normalizeZone, normalizeZones, scenarioQuantity,
     normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
-    stopEdge, targetEdges, targetLevels, clampGuards, addEntryLeg, legQuantity, pendingLegs, mayScaleIn, CONDITION_MODES, TRADE_MODES,
+    stopEdge, targetEdges, targetLevels, clampGuards, addEntryLeg, legQuantity, pendingLegs, watchedLegs, hasWatchedLegs, allowedVerdicts, CONDITION_MODES, TRADE_MODES,
 } from '../../services/setup.schema.js'
 import { MODES } from '../../services/analysisModes.js'
 
@@ -42,22 +42,6 @@ test('ladder falls back for an unknown timeframe instead of returning empty', ()
 test('ladder accepts loose timeframe spellings via normalizeTimeframe', () => {
     assert.deepEqual(buildLadder('4h'), buildLadder('4hr'))
     assert.deepEqual(buildLadder('daily'), buildLadder('day'))
-})
-
-// ─── Cadence ──────────────────────────────────────────────────────────────────
-
-test('cadence widens with the horizon and is always min < max', () => {
-    const intraday = buildCadence('intraday')
-    const swing    = buildCadence('swing')
-    assert.ok(intraday.min < intraday.max)
-    assert.ok(swing.min > intraday.min, 'a swing polls lazier than an intraday')
-    assert.deepEqual(buildCadence('nonsense'), buildCadence('swing'), 'unknown horizon → swing')
-})
-
-test('cadence is a fresh object per call (callers mutate their copy)', () => {
-    const a = buildCadence('day')
-    a.min = 999
-    assert.notEqual(buildCadence('day').min, 999)
 })
 
 // ─── Zones ────────────────────────────────────────────────────────────────────
@@ -269,14 +253,13 @@ test('a well-formed draft normalises and derives its server-owned fields', () =>
     assert.equal(s.asset, 'NVDA')
     assert.equal(s.quantity, 100)
     assert.deepEqual(s.ladder, buildLadder('1hr'))
-    assert.deepEqual(s.cadence, buildCadence('swing'))
+    assert.equal(s.cadence, undefined, 'the rung is the pace — no cadence on the document')
 })
 
 test('server-derived fields overwrite anything the model tried to author', () => {
-    const s = normalizeSetup({ ...DRAFT, quantity: 9999, ladder: ['month'], cadence: { min: 1, max: 2 } })
+    const s = normalizeSetup({ ...DRAFT, quantity: 9999, ladder: ['month'] })
     assert.equal(s.quantity, 100, 'quantity comes from the entry zones')
     assert.deepEqual(s.ladder, buildLadder('1hr'))
-    assert.deepEqual(s.cadence, buildCadence('swing'))
 })
 
 test('an invalid enum falls back rather than reaching the monitor', () => {
@@ -464,7 +447,7 @@ test('a leg condition claims its id from the DOCUMENT-WIDE set, not its own list
 
 test('a zero-width tp zone is a level with nothing to discuss', () => {
     const s = normalizeSetup({ ...DRAFT, direction: 'long', tp_zones: [{ lower: 246, upper: 246 }] })
-    assert.deepEqual(targetLevels(s), [{ target: 246, conditions: [] }])
+    assert.deepEqual(targetLevels(s), [{ target: 246, quantity: null, conditions: [] }])
 })
 
 test('a setup cannot be generated without a target PRICE', () => {
@@ -894,18 +877,57 @@ test('an unfilled premise is entirely pending, and a missing scenario is not a c
     assert.equal(pendingLegs(null, { legs: [] }).length, 0)
 })
 
-test('NEVER add to a position that is pressing its stop', () => {
-    // The averaging-down reflex is the one thing this feature must not automate: it turns one
-    // planned loss into a larger unplanned one.
-    assert.equal(mayScaleIn('adverse'), false)
+// ─── Watched legs: the one predicate for an in-position read ─────────────────
+// docs/design/talos-per-candle.md. A plain level is an order at the broker; only a leg carrying a
+// condition in words costs a model call, and the verdict menu follows from which legs those are.
+
+const COND = [{ id: 'x1', text: 'out if it closes below the 4hr VWAP', weight: 'primary', mode: 'judgment', persistence: 'live' }]
+const PLAIN_SC = {
+    id: 'sc1',
+    entry_zones: [{ id: 'e1', lower: 100, upper: 100, quantity: 10, conditions: [] }],
+    stop_zones:  [{ id: 's1', lower: 95,  upper: 95,  quantity: 10, conditions: [] }],
+    tp_zones:    [{ id: 't1', lower: 110, upper: 110, quantity: 10, conditions: [] }],
+}
+
+test('a scenario of plain levels watches nothing — the broker holds it all', () => {
+    const w = watchedLegs({ entry_mode: 'limit' }, PLAIN_SC, { legs: [{ zone_id: 'e1' }] })
+    assert.deepEqual(w, { stop: null, targets: [], entries: [] })
+    assert.equal(hasWatchedLegs(w), false)
+    assert.deepEqual(allowedVerdicts(w), ['hold'])
 })
 
-test('a position doing well may still take its planned leg', () => {
-    // scale_out and breakeven mean the trade is working — exactly when a second planned leg is
-    // legitimate. Blocking on any flag at all would make the feature unreachable in practice.
-    assert.equal(mayScaleIn('scale_out'), true)
-    assert.equal(mayScaleIn('breakeven'), true)
-    assert.equal(mayScaleIn(null), true)
+test('a conditional stop is watched and unlocks the stop verdicts only', () => {
+    const sc = { ...PLAIN_SC, stop_zones: [{ ...PLAIN_SC.stop_zones[0], conditions: COND }] }
+    const w  = watchedLegs({ entry_mode: 'limit' }, sc, { legs: [{ zone_id: 'e1' }] })
+    assert.equal(w.stop?.id, 's1')
+    assert.equal(hasWatchedLegs(w), true)
+    assert.deepEqual(allowedVerdicts(w), ['hold', 'move_stop', 'exit_now'])
+})
+
+test('a conditional target is watched and unlocks take_partial only', () => {
+    const sc = { ...PLAIN_SC, tp_zones: [PLAIN_SC.tp_zones[0], { id: 't2', lower: 120, upper: 120, quantity: 5, conditions: COND }] }
+    const w  = watchedLegs({ entry_mode: 'limit' }, sc, { legs: [{ zone_id: 'e1' }] })
+    assert.deepEqual(w.targets.map(t => t.id), ['t2'], 'the plain target is not on the list')
+    assert.deepEqual(allowedVerdicts(w), ['hold', 'take_partial'])
+})
+
+test("a pending entry leg is watched while unfilled — on its own conditions, or the setup's", () => {
+    const sc = { ...PLAIN_SC, entry_zones: [PLAIN_SC.entry_zones[0], { id: 'e2', lower: 96, upper: 96, quantity: 10, conditions: [] }] }
+    const conditional = { entry_mode: 'conditional', conditions: COND }
+    // A conditional setup: the setup's own entry conditions apply to every leg.
+    assert.deepEqual(watchedLegs(conditional, sc, { legs: [{ zone_id: 'e1' }] }).entries.map(z => z.id), ['e2'])
+    assert.deepEqual(watchedLegs(conditional, sc, { legs: [{ zone_id: 'e1' }, { zone_id: 'e2' }] }).entries, [], 'filled → nothing to add')
+    assert.deepEqual(allowedVerdicts(watchedLegs(conditional, sc, { legs: [{ zone_id: 'e1' }] })), ['hold', 'add_leg'])
+    // A limit setup declares nothing: a plain pending leg is not a read.
+    assert.deepEqual(watchedLegs({ entry_mode: 'limit' }, sc, { legs: [{ zone_id: 'e1' }] }).entries, [])
+    // …unless the leg carries its own condition.
+    const own = { ...sc, entry_zones: [sc.entry_zones[0], { ...sc.entry_zones[1], conditions: COND }] }
+    assert.deepEqual(watchedLegs({ entry_mode: 'limit' }, own, { legs: [{ zone_id: 'e1' }] }).entries.map(z => z.id), ['e2'])
+})
+
+test('a missing scenario watches nothing and is not a crash', () => {
+    assert.equal(hasWatchedLegs(watchedLegs(null, null, null)), false)
+    assert.deepEqual(allowedVerdicts(null), ['hold'])
 })
 
 // ─── The condition-mode rename ────────────────────────────────────────────────
@@ -954,74 +976,47 @@ test('Mentor and Kairos offer the SAME three lenses', () => {
 })
 
 // ─── Guards: the model asks, the server decides ───────────────────────────────
-// docs/desks/talos-guards.md. A guard fires when EVERY term it carries holds, and `clampGuards` is
-// the half of the contract that cannot be talked out of it.
+// docs/design/talos-per-candle.md. A guard is a price and a side; `clampGuards` is the half of
+// the contract that cannot be talked out of it.
 
-const GSETUP = { cadence: { min: 5, max: 240 } }
-
-test('a guard keeps both terms, so the conjunction survives the clamp', () => {
-    const [g] = clampGuards([{ after_min: 30, price: 305, direction: 'above' }], GSETUP, 300)
-    assert.deepEqual(g, { after_min: 30, price: 305, direction: 'above', means: null })
-})
-
-test('the time term is clamped to the horizon band, never refused', () => {
-    // A model asking to be woken in one minute on a swing burns the budget; one asking for three
-    // days goes blind. Both are honest asks made badly, so both are corrected rather than dropped.
-    assert.equal(clampGuards([{ after_min: 1 }], GSETUP)[0].after_min, 5)
-    assert.equal(clampGuards([{ after_min: 4320 }], GSETUP)[0].after_min, 240)
+test('a guard is a price, a side and a meaning — nothing else survives', () => {
+    const [g] = clampGuards([{ after_min: 30, price: 305, direction: 'above', means: 'entry', extra: 1 }], 300)
+    assert.deepEqual(g, { price: 305, direction: 'above', means: 'entry' })
 })
 
 test('a missing direction is inferred from where price actually is', () => {
     // A level with no side is not a crossing, it is a number.
-    assert.equal(clampGuards([{ price: 311.5 }], GSETUP, 305)[0].direction, 'above')
-    assert.equal(clampGuards([{ price: 300 }],   GSETUP, 305)[0].direction, 'below')
+    assert.equal(clampGuards([{ price: 311.5 }], 305)[0].direction, 'above')
+    assert.equal(clampGuards([{ price: 300 }],   305)[0].direction, 'below')
+    assert.equal(clampGuards([{ price: 300 }],   null)[0].direction, 'any', 'unknown price → a touch, the safe error')
 })
 
 test('an ALREADY-TRUE price guard is dropped — it would be a paid infinite loop', () => {
     // "below 305" armed while price is already 300 is satisfied the instant it is written: it wakes
-    // the model, which re-arms it, which wakes the model. The backstop is what remains.
-    const out = clampGuards([{ price: 305, direction: 'below' }], GSETUP, 300)
-    assert.deepEqual(out.map(g => g.price), [null], 'only the injected backstop survives')
+    // the model, which re-arms it, which wakes the model.
+    assert.deepEqual(clampGuards([{ price: 305, direction: 'below' }], 300), [])
+    assert.deepEqual(clampGuards([{ price: 305, direction: 'above' }], 310), [])
+    assert.equal(clampGuards([{ price: 305, direction: 'any' }], 300).length, 1, 'a touch is exempt: it needs price to ARRIVE')
 })
 
-test('a guard with neither a time nor a price term cannot fire, so it is dropped', () => {
-    const out = clampGuards([{ means: 'entry' }, { price: 'soon' }], GSETUP, 300)
-    assert.equal(out.filter(g => g.price != null).length, 0)
+test('a guard without a finite price cannot fire, so it is dropped — including the old time-only guards', () => {
+    assert.deepEqual(clampGuards([{ means: 'entry' }, { price: 'soon' }, { after_min: 240 }, { price: -3 }], 300), [])
 })
 
-test('THE BACKSTOP IS INJECTED when the read forgot one', () => {
-    // Without an unconditional time guard a pure conjunction STARVES: price sits 20 away for three
-    // weeks, nothing trips, nothing looks — while earnings came and went. No symptom until far too
-    // late, so a forgotten backstop is repaired rather than reported.
-    const out = clampGuards([{ price: 311.5, direction: 'above' }], GSETUP, 305)
-    const backstop = out.find(g => g.after_min != null && g.price == null)
-    assert.ok(backstop, 'a set with only price guards must gain a heartbeat')
-    assert.equal(backstop.after_min, 240, 'at the lazy end of the setup\'s own band')
-})
-
-test('a backstop the model DID arm is not doubled', () => {
-    const out = clampGuards([{ after_min: 60 }, { price: 311.5, direction: 'above' }], GSETUP, 305)
-    assert.equal(out.filter(g => g.after_min != null && g.price == null).length, 1)
-})
-
-test('an empty or junk set still comes back with a heartbeat', () => {
-    // The starvation guarantee cannot depend on the model returning anything at all.
+test('an empty or junk set is an empty set', () => {
     for (const raw of [[], null, undefined, 'nonsense', [null, 7, 'x']]) {
-        const out = clampGuards(raw, GSETUP)
-        assert.equal(out.length, 1, `${JSON.stringify(raw)} should yield exactly the backstop`)
-        assert.equal(out[0].after_min, 240)
+        assert.deepEqual(clampGuards(raw, 300), [], JSON.stringify(raw))
     }
 })
 
 test('price levels are capped, so one read cannot arm a hedge instead of a watch', () => {
     const many = Array.from({ length: 12 }, (_, i) => ({ price: 400 + i, direction: 'above' }))
-    const out  = clampGuards(many, GSETUP, 300)
-    assert.equal(out.filter(g => g.price != null).length, 6)
+    assert.equal(clampGuards(many, 300).length, 6)
 })
 
 test('only a known MEANING survives, so a wake cannot arrive mislabelled', () => {
-    assert.equal(clampGuards([{ price: 311, direction: 'above', means: 'entry' }], GSETUP, 305)[0].means, 'entry')
-    assert.equal(clampGuards([{ price: 311, direction: 'above', means: 'vibes' }], GSETUP, 305)[0].means, null)
+    assert.equal(clampGuards([{ price: 311, direction: 'above', means: 'entry' }], 305)[0].means, 'entry')
+    assert.equal(clampGuards([{ price: 311, direction: 'above', means: 'vibes' }], 305)[0].means, null)
 })
 
 // ─── entry_mode ───────────────────────────────────────────────────────────────

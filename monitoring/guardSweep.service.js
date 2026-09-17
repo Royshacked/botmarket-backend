@@ -1,21 +1,18 @@
 /**
  * The guard sweep — Talos's tier-0.
  *
- * docs/desks/talos-guards.md. Every Talos read ends by ARMING a set of wake conditions over time
- * AND price; this loop is the thing that evaluates them, and it is deliberately the cheapest code
- * in the monitor: fetch one price per distinct symbol, compare against some numbers, write nothing
- * unless something fired.
+ * docs/design/talos-per-candle.md. Every Talos read ends by ARMING the prices that must not wait
+ * for the next candle close; this loop is the thing that evaluates them, and it is deliberately the
+ * cheapest code in the monitor: fetch one price per distinct symbol, compare against some numbers,
+ * write nothing unless something fired.
  *
  * ── WHY THIS EXISTS AT ALL ───────────────────────────────────────────────────
- * Talos's own loop (`dueLoop`) only looks at a setup when `next_check_at` has passed — 30 to 240
- * minutes apart on a swing. Between those glances nothing watched price, so a level was only ever
- * caught if price happened to be sitting on it at the moment of a scheduled look. That is what
- * price BANDS were compensating for, and it is why Mentor spent an ATR read drawing them.
- *
- * This loop closes the gap in the only way that does not cost tokens: it runs on a fast fixed
- * cadence, and it reads the RANGE since its last pass (`priceFeed.rangeSince`) rather than the spot
- * price — so a level touched and left between two passes still fires. Exact levels become as
- * catchable as a wide band ever was, which is what lets the bands go.
+ * Talos's own loop (`dueLoop`) reads a setup on the close of the rung it watches — a day or more
+ * apart on a swing. Between those reads nothing watched price, so a level would only be caught if
+ * price happened to be sitting on it at the close. This loop closes the gap in the only way that
+ * does not cost tokens: it runs on a fast fixed cadence, and it reads the RANGE since its last pass
+ * (`priceFeed.rangeSince`) rather than the spot price — so a level touched and left between two
+ * passes still fires.
  *
  * ── HOW IT WAKES ANYTHING ────────────────────────────────────────────────────
  * It does not run the model and it does not journal. A fired guard simply sets
@@ -37,7 +34,7 @@ import { getDb } from '../providers/mongodb.provider.js'
 import { ENTITIES } from '../services/entity/entityCollection.js'
 import { PAST_ENTRY } from '../services/entity/vocabulary.js'
 import { isAssetOpen } from '../services/market.service.js'
-import { guardFires, guardsFromZones } from '../services/setup.schema.js'
+import { guardFires } from '../services/setup.schema.js'
 import { partitionByFreshness, retainOnly, rangeSince } from '../services/priceFeed.service.js'
 import { quoteMapForSymbols } from '../api/broker/paperExecution.service.js'
 import { createPollLoop } from './pollLoop.js'
@@ -71,20 +68,13 @@ export const guardSweepService = { start: _loop.start, stop: _loop.stop, _tick }
  */
 const _lastSweptAt = new Map()
 
-/**
- * setup id → timer wakes skipped on their price term since its last real read. In memory for the
- * same reason the journal refuses a line per poll: recording a non-event is how a fifty-entry
- * history becomes fifty heartbeats. Cleared when the setup finally fires, and on restart.
- */
-const _skipped = new Map()
-
 async function _tick() {
     const db = await getDb()
     const setups = await db.collection(COLLECTION)
-        .find({ kind: KIND, status: { $in: WATCHED_STATUSES } },
-              { projection: { _id: 0, id: 1, asset: 1, asset_class: 1, direction: 1, status: 1, cadence: 1, scenarios: 1, monitor_state: 1 } })
+        .find({ kind: KIND, status: { $in: WATCHED_STATUSES }, 'monitor_state.dormant': { $ne: true } },
+              { projection: { _id: 0, id: 1, asset: 1, asset_class: 1, status: 1, monitor_state: 1 } })
         .toArray()
-    if (!setups.length) { _lastSweptAt.clear(); _skipped.clear(); return }
+    if (!setups.length) { _lastSweptAt.clear(); return }
 
     // A SHUT MARKET HAS NO CROSSINGS, so buying a quote for one is pure waste — and at this cadence
     // it is a lot of waste: an equity book would fetch every symbol, every sweep, all night, and our
@@ -123,35 +113,17 @@ async function _tick() {
         const nextAt = Date.parse(setup.monitor_state?.next_check_at ?? '')
         if (Number.isFinite(nextAt) && nextAt <= now) continue
 
-        const guards = _guardsFor(setup)
-        if (!guards.length) continue
+        // A setup that has never been read has no guards yet; it is due on arm and its first read
+        // arms them within a minute. Nothing to evaluate until then.
+        const guards = setup.monitor_state?.guards
+        if (!Array.isArray(guards) || !guards.length) continue
         armed++
 
-        // Since the last SWEEP for the price term (did it cross since anyone looked) and since the
-        // last READ for the time term (how long has the model been away). Two different clocks, and
-        // conflating them would let a busy sweep cadence reset the model's own patience.
-        const since   = _lastSweptAt.get(symbol) ?? (now - SWEEP_INTERVAL_MS)
-        const range   = rangeSince(symbol, since)
-        // Never read → Infinity, so the backstop fires on the first sweep. A setup nobody has ever
-        // assessed is the one case where looking immediately is unambiguously right.
-        const lastRead   = Date.parse(setup.monitor_state?.last_read_at ?? '')
-        const elapsedMin = Number.isFinite(lastRead) ? (now - lastRead) / 60_000 : Infinity
-
-        const hit = guards.find(g => guardFires(g, { elapsedMin, range }))
-        if (!hit) {
-            // THE WAKE DELIBERATELY NOT TAKEN. A conjunctive guard whose time term held while its
-            // price term did not is the saving this design exists for, made countable: under a
-            // plain timer each of these would have bought a model call whose only answer was
-            // "still nowhere near".
-            //
-            // Counted in memory and never written, because writing it would break the one rule the
-            // journal depends on — a free poll appends nothing. It rides out on the next entry that
-            // was worth paying for, and a process restart simply loses a diagnostic.
-            if (guards.some(g => g.price != null && g.after_min != null && elapsedMin >= g.after_min)) {
-                _skipped.set(setup.id, (_skipped.get(setup.id) ?? 0) + 1)
-            }
-            continue
-        }
+        // The RANGE since the last sweep — did price cross a level since anyone looked.
+        const since = _lastSweptAt.get(symbol) ?? (now - SWEEP_INTERVAL_MS)
+        const range = rangeSince(symbol, since)
+        const hit   = guards.find(g => guardFires(g, range))
+        if (!hit) continue
 
         fired++
         ops.push({
@@ -168,13 +140,11 @@ async function _tick() {
                         // WHEN THIS LINE WAS DRAWN — the whole point of recording the guard at all.
                         // It is the last read's timestamp because guards are armed as a set, whole,
                         // by exactly that read.
-                        armed_at: setup.monitor_state?.last_read_at ?? null,
-                        skipped:  _skipped.get(setup.id) ?? 0,
+                        armed_at: setup.monitor_state?.last_assessment?.at ?? null,
                     },
                 } },
             },
         })
-        _skipped.delete(setup.id)
     }
 
     // Advance the window only for symbols this pass actually observed. Advancing one we saw nothing
@@ -192,16 +162,4 @@ async function _tick() {
         logger.info(LOG, `${fired} guard(s) fired across ${armed} armed setup(s), ${symbols.length} symbol(s)` +
             ` — ${fetched.size} fetched, ${fresh.size} read from the feed`)
     }
-}
-
-/**
- * The guards to evaluate for one setup.
- *
- * MIGRATION HAPPENS HERE, not in a backfill script. A document armed before this design carries
- * zones and no `monitor_state.guards`, and treating it as "nothing to watch" would silently stop
- * monitoring a live trade. So its zones stand in until its next real read writes its own.
- */
-function _guardsFor(setup) {
-    const stored = setup?.monitor_state?.guards
-    return Array.isArray(stored) && stored.length ? stored : guardsFromZones(setup)
 }

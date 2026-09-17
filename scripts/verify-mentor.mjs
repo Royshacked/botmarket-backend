@@ -20,7 +20,7 @@
 // the dotenv-ordering reason this used to give is gone — services/config.js owns .env and loads it
 // on import, before any module that reads it.
 const { mentorAgentService, emptyMentorState } = await import('../services/agents/mentor.agent.service.js')
-const { normalizeSetup, setupReadiness, computeRR, buildLadder, buildCadence, validityProblems,
+const { normalizeSetup, setupReadiness, computeRR, buildLadder, validityProblems,
     scenarioLabel, scenarioView, declaredConditions } = await import('../services/setup.schema.js')
 const { scenarioGate, liveScenarios } = await import('../monitoring/talos.gates.js')
 const { fetchLastPrice } = await import('../services/lastPrice.service.js')
@@ -211,9 +211,9 @@ function checkSetup(setup, price) {
     JSON.stringify(setup.ladder) === JSON.stringify(buildLadder(setup.timeframe))
         ? ok(`ladder ${setup.ladder.join(' → ')}`)
         : fail('ladder does not match the derivation — the model authored it')
-    JSON.stringify(setup.cadence) === JSON.stringify(buildCadence(setup.type))
-        ? ok(`cadence ${setup.cadence.min}–${setup.cadence.max} min`)
-        : fail('cadence does not match the derivation')
+    setup.cadence === undefined
+        ? ok('no cadence on the document — the rung is the pace')
+        : fail('the document carries a cadence nothing derives any more')
 
     setup.conviction?.level ? ok(`conviction ${setup.conviction.level} — "${setup.conviction.rationale ?? ''}"`) : warn('no conviction set')
 
@@ -314,10 +314,8 @@ async function persistRun(setup, { setupService, _checkSetup, _testDeps, paperBr
     const tickDeps = (priceFn) => ({
         ..._testDeps,
         isAssetOpen: () => true,
-        nextOpenMs:  () => Date.now() + 3600_000,
         getPrice:    priceFn,
-        // `next_timeframe` is the only pacing field: the rung the read asks to open on next sets the
-        // gap, clamped to the setup's cadence. An off-ladder value falls back to the eager floor.
+        // `next_timeframe` is the only pacing field: the next read lands on that rung's candle close.
         assess:      async () => ({ verdict, read: `(stubbed) ${verdict}`, warning: verdict === 'enter' ? null : 'Stubbed objection.', next_timeframe: setup.timeframe }),
         onCard:       async (_s, a) => { carded = a },
         onManualCard: async () => {},

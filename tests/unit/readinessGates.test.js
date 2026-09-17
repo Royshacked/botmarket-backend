@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, clampGap,
+    isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus,
 } from '../../monitoring/readinessGates.js'
 import { guardFires } from '../../services/setup.schema.js'
 import * as talos from '../../monitoring/talos.monitor.service.js'
@@ -42,7 +42,7 @@ test('past expiry is a stricter question than expiring', () => {
 
 test('let_expire is only on the menu for an expiry review', () => {
     // Otherwise a zone trip could terminally kill an entity still inside its validity window.
-    assert.equal(effectiveVerdict('let_expire', 'zone_trip', false), 'stand_aside')
+    assert.equal(effectiveVerdict('let_expire', 'candle', false), 'stand_aside')
     assert.equal(effectiveVerdict('let_expire', 'expiry_review', false), 'let_expire')
 })
 
@@ -61,12 +61,6 @@ test('only entry moves the lifecycle', () => {
     for (const v of ['wait', 'stand_aside', 'edit', 'let_expire']) assert.equal(nextStatus(v), 'looking', v)
 })
 
-test('a self-chosen gap is clamped into the band', () => {
-    const band = { min: 5, max: 30, fallback: 5 }
-    assert.equal(clampGap(1, band), 5, 'too eager → floor')
-    assert.equal(clampGap(9999, band), 30, 'too lazy → ceiling')
-    assert.equal(clampGap(12, band), 12, 'in band → honoured')
-})
 
 
 // ─── The differences, pinned ──────────────────────────────────────────────────
@@ -77,12 +71,23 @@ test('a self-chosen gap is clamped into the band', () => {
 // point of the section. Hermes was archived on 2026-08-18 and took its half with it (the paired
 // versions are in archive/tests/hermesMonitor.test.js). What is kept is the live monitor's
 // behaviour, which is what a regression would actually break.
-test('a setup with no next check named falls back to the EAGER end', () => {
-    // Its band is already horizon-scaled, so the floor is cheap. (Hermes went the other way, to
-    // the ceiling, so as not to burn quota re-reading a quiet name.)
-    const setup = { cadence: { min: 30, max: 240 } }
-    const eager = talos._nextCheckAt(setup, T, undefined)
-    assert.equal(eager, new Date(T + 30 * 60_000).toISOString(), 'setup → floor')
+test('the next read is the next candle close of the rung, plus the provider lag', () => {
+    // There is no cadence band any more: the rung IS the pace (docs/design/talos-per-candle.md).
+    const setup = { asset: 'BTCUSD', status: 'looking', valid_until: null }
+    const deps  = { nextCandleCloseMs: (_s, _c, rung, now) => now + (rung === '1hr' ? 3600_000 : 300_000) }
+    assert.equal(talos._nextReadAt(setup, T, '1hr', deps),  new Date(T + 3600_000 + talos.READ_LAG_MS).toISOString())
+    assert.equal(talos._nextReadAt(setup, T, '5min', deps), new Date(T + 300_000 + talos.READ_LAG_MS).toISOString())
+})
+
+test('pre-entry, a coarse rung never sleeps through the expiry review', () => {
+    const deps  = { nextCandleCloseMs: (_s, _c, _r, now) => now + 24 * 3600_000 }
+    const setup = { asset: 'AAPL', status: 'looking', valid_until: new Date(T + 2 * 3600_000).toISOString() }
+    assert.equal(talos._nextReadAt(setup, T, 'day', deps), new Date(T + 2 * 3600_000 - 15 * 60_000).toISOString(), 'the review window wins')
+    // A limit order awaiting its fill still has an expiry to honour.
+    assert.equal(talos._nextReadAt({ ...setup, status: 'hit' }, T, 'day', deps), new Date(T + 2 * 3600_000 - 15 * 60_000).toISOString())
+    // In position there is no expiry to review — the candle close stands.
+    const pos = { ...setup, status: 'long' }
+    assert.equal(talos._nextReadAt(pos, T, 'day', deps), new Date(T + 24 * 3600_000 + talos.READ_LAG_MS).toISOString())
 })
 
 test('Talos does NOT spare `edit` from the past-expiry cutoff', () => {
@@ -97,7 +102,7 @@ test('a zero-width level IS watchable by Talos', () => {
     // fallback so a zero band did not divide by zero). Talos arms a guard on it now, and a guard
     // needs no width at all — which is the point of docs/desks/talos-guards.md: an exact level
     // became as catchable as a wide band, so the widths could go.
-    const touch = { after_min: null, price: 100, direction: 'any' }
-    assert.equal(guardFires(touch, { range: { high: 105, low: 99 } }), true, 'reached during the window')
-    assert.equal(guardFires(touch, { range: { high: 105, low: 101 } }), false, 'never came back to it')
+    const touch = { price: 100, direction: 'any' }
+    assert.equal(guardFires(touch, { high: 105, low: 99 }), true, 'reached during the window')
+    assert.equal(guardFires(touch, { high: 105, low: 101 }), false, 'never came back to it')
 })

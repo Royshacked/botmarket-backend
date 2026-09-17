@@ -230,7 +230,6 @@ export function buildSetupManage(setup, card) {
     const dir   = String(setup?.direction || '').toUpperCase()
     const asset = setup?.asset ?? 'your setup'
     const p     = card?.proposal ?? null
-    const frac  = { third: 'a third', half: 'half', two_thirds: 'two thirds' }[p?.fraction] ?? 'part'
 
     const copy = {
         move_stop: {
@@ -241,25 +240,14 @@ export function buildSetupManage(setup, card) {
             content: `Your ${dir} ${asset} — the second leg you planned is printing${Number.isFinite(p?.quantity) ? `, ${p.quantity} more` : ''}.${card?.read ? ` ${card.read}` : ''}`,
             actions: cardActions('Review'),
         },
+        // The size is the watched target's own — the user set it when they made the leg conditional.
         take_partial: {
-            content: `Your ${dir} ${asset} — I want to bank ${frac} of the position here.${card?.read ? ` ${card.read}` : ''}`,
+            content: `Your ${dir} ${asset} — the condition on your target is here. I want to bank${Number.isFinite(p?.quantity) ? ` ${p.quantity}` : ' that leg'} now.${card?.read ? ` ${card.read}` : ''}`,
             actions: cardActions('Review'),
         },
         exit_now: {
             content: `Your ${dir} ${asset} — I think the reason for this trade has gone and we should get flat now.${card?.read ? ` ${card.read}` : ''}`,
             actions: cardActions('Review'),
-        },
-        // TWO CARDS UNDER ONE VERB, told apart by whether a level came with it.
-        //   bare        a deliberate decision NOT to take profit, which the user should know was
-        //               made on purpose rather than by nobody looking. Nothing to do, so no button.
-        //   + new_tp    Talos asking to move the target further out — an amend of a resting order,
-        //               so it needs the same confirm every other change does.
-        let_run: Number.isFinite(p?.new_tp ?? p?.tp) ? {
-            content: `Your ${dir} ${asset} — there's more in this than we planned. I want to move the target out to ${p.new_tp ?? p.tp}${p?.why ? ` (${p.why})` : ''}.${card?.read ? ` ${card.read}` : ''}`,
-            actions: cardActions('Review'),
-        } : {
-            content: `Your ${dir} ${asset} is working — I'm letting it run rather than trimming here.${card?.read ? ` ${card.read}` : ''}`,
-            actions: null,
         },
     }[card?.verdict] ?? { content: `Your ${dir} ${asset} needs a look.`, actions: cardActions('Review') }
 

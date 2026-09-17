@@ -9,12 +9,11 @@ import { scenarioLabel } from '../services/setup.schema.js'
 // talos.assess.js, monitorJournal.js and readinessGates.js each came out of it before — what is
 // left reads as orchestration, which is what that file's own header claims it is.
 //
-// EVERYTHING HERE IS PURE. No IO, no clock beyond an explicit `nowMs`, no injected deps. That is
-// what makes it the cheap tier: these run on every wake for free, and only their answers decide
-// whether a wake is worth paying a model for. Four groups, in the order a wake asks them:
+// EVERYTHING HERE IS PURE. No IO, no clock beyond an explicit `nowMs`, no injected deps. Four
+// groups, in the order a wake asks them:
 //
 //   1. THE ZONE GATES      is price where this setup lives, and whose premise is it?
-//   2. IN-POSITION         where does the trade stand, and is this wake worth a read?
+//   2. IN-POSITION         where does the trade stand (R, MAE, MFE)?
 //   3. THE VALIDITY GATE   has the premise broken, or has price simply run away?
 //   4. THE RECORD          what the model answered, folded onto what the setup declared.
 //
@@ -53,23 +52,6 @@ export function _hitFromGuard(setup, woke) {
     return null
 }
 
-/**
- * What to call this wake on the record. Derived from the guard that caused it, so the journal says
- * WHY rather than merely when (docs/desks/talos-guards.md).
- *
- *   guard_price   a level was reached — `means` says whether that is an entry or an invalidation
- *   backstop      the unconditional heartbeat: nothing happened, look anyway
- *   guard_time    a conditional guard whose time AND price terms both held
- *
- * Absent `woke` is a wake the sweep did not cause — the first look at a newly armed setup, or a
- * deploy landing mid-cadence. `guard_time` is the honest label for those: a timer brought us here.
- */
-export function wakeReason(woke) {
-    if (Number.isFinite(toNum(woke?.price))) return 'guard_price'
-    if (woke && woke.after_min != null) return 'backstop'
-    return 'guard_time'
-}
-
 /** What a scenario's own invalidation axis says, or null while it is untouched. */
 export function scenarioState(setup, id) {
     return setup?.monitor_state?.scenarios?.[id] ?? null
@@ -104,20 +86,10 @@ export function scenarioGate(setup, price) {
 
 // ─── In-position arithmetic ────────────────────────────────────────────────────
 //
-// The cheap tier for a LIVE position, mirroring what the zone gate does pre-entry: decide for free
-// whether this wake is worth a model call, so a quiet position costs nothing to hold.
-//
-// THE ONLY IMPLEMENTATION. This block used to carry a note saying it was a time-boxed copy of
-// Hermes's (`_positionGate`, `_computeMetrics`, `_rMultiple`), to be reconciled "when Hermes
-// sleeps". Hermes slept: it was archived on 2026-08-18 and lives in archive/monitoring/, imported by
-// nothing and started by nothing. So there is no second copy to keep in step, and the instruction to
-// keep one in step was the more dangerous half of the note to leave standing.
-//
-// What the note got right and is worth keeping: these read a SETUP, and a setup's shape is not a
-// call's — cadence is `{min,max}`, targets are zones reduced to their near edge (so `scale_out`
-// fires at-or-beyond and a gap straight through still trips), and the stop is the widest edge across
-// `stop_zones` chosen by price, never `stop_zones[0]`. Reviving Kairos means writing its own, or
-// generalising these deliberately; it does not mean restoring a copy.
+// Where a LIVE position stands, recomputed every wake and never authored. There is no gate here any
+// more: WHETHER a position is read at all is `watchedLegs` (setup.schema), and WHEN is the candle
+// close (docs/design/talos-per-candle.md). What stays is the arithmetic the read and the pop-out
+// both want — R from the risk originally taken, and the extremes carried across wakes.
 
 /** The fill price, falling back to the intended entry until the ledger has the real one. Pure. */
 function _entryPx(ps) { return toNum(ps?.entry?.fill_price) ?? toNum(ps?.entry?.intended) ?? null }
@@ -161,64 +133,6 @@ export function metricsSet(m) {
         'position_state.metrics.updated_at':     m.updated_at,
     }
 }
-
-/**
- * The cheap in-position gate: an arithmetic flag that makes a model call worth paying for.
- * `{flag:null}` is an obvious hold — the overwhelmingly common case, and the whole reason this runs
- * before anything expensive. Pure.
- *
- * Priority is most-urgent-first and the order is load-bearing: a position pressing its stop while a
- * target is also in reach is an `adverse` wake, not a victory lap.
- *
- *   adverse     price within a quarter of the original risk of the WORKING stop. Not "the stop was
- *               hit" — the broker owns that. This is the look BEFORE it, while there is still a
- *               decision to make.
- *   scale_out   an un-hit target reached. `targets[].price` is the NEAR edge of its zone, so this
- *               is at-or-beyond: a gap clean through the target still trips.
- *   breakeven   ≥ +1R with the stop not yet protected past entry — the one free improvement in
- *               trading, and the trigger a `move_stop` verdict acts on.
- */
-export function positionGate(ps, price) {
-    if (!Number.isFinite(price)) return { flag: null }
-    const entry       = _entryPx(ps)
-    const initialStop = toNum(ps?.stop?.initial)
-    const stopCur     = toNum(ps?.stop?.current) ?? initialStop
-    const isLong      = (ps?.entry?.direction ?? 'long') !== 'short'
-    const risk        = (Number.isFinite(entry) && Number.isFinite(initialStop)) ? Math.abs(entry - initialStop) : null
-    const band        = risk != null ? 0.25 * risk : null
-
-    if (band != null && Number.isFinite(stopCur)) {
-        if (isLong  && price <= stopCur + band) return { flag: 'adverse' }
-        if (!isLong && price >= stopCur - band) return { flag: 'adverse' }
-    }
-
-    const target = (ps?.targets ?? []).find(t =>
-        t?.hit_at == null && Number.isFinite(t?.price) && (isLong ? price >= t.price : price <= t.price))
-    if (target) return { flag: 'scale_out', target }
-
-    const r = rMultiple(entry, price, initialStop, ps?.entry?.direction ?? 'long')
-    if (r != null && r >= 1 && Number.isFinite(stopCur) && Number.isFinite(entry)) {
-        const protectedBE = isLong ? stopCur >= entry : stopCur <= entry
-        if (!protectedBE) return { flag: 'breakeven' }
-    }
-    return { flag: null }
-}
-
-/**
- * Is a periodic thesis review due? The gate above only fires on price events; without this, a
- * position that simply sits there is never re-read, and "nothing moved" is not the same as "nothing
- * changed" — the news that breaks a thesis rarely moves price first.
- *
- * Measured from the last management read, falling back to the fill so a fresh position gets its
- * first review one full cadence in rather than immediately. Pure.
- */
-export function reviewDue(ps, nowMs, cadence) {
-    const lastAt = Date.parse(ps?.last_management?.at ?? ps?.entry?.fill_at ?? '')
-    return !Number.isFinite(lastAt) || (nowMs - lastAt) >= _maxGapMs(cadence)
-}
-
-export function _minGapMs(cadence) { return (Number(cadence?.min) || 5)  * 60_000 }
-function _maxGapMs(cadence) { return (Number(cadence?.max) || 30) * 60_000 }
 
 // ─── The validity gate ─────────────────────────────────────────────────────────
 //

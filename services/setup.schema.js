@@ -66,16 +66,6 @@ export const ON_BREAK = ['revise', 'close', 'notify_only']
 /** Cap on symbols a setup may pull the monitor onto — free text can name anything. */
 const MAX_REFERENCED_SYMBOLS = 6
 
-// Poll cadence (minutes) by horizon: {min, max}. `min` is the floor a self-chosen next_check_min
-// clamps up to; `max` the ceiling it clamps down to. Wider horizon → lazier loop.
-const CADENCE_BY_TYPE = {
-    'intraday':  { min: 2,   max: 15 },
-    'day':       { min: 5,   max: 60 },
-    'swing':     { min: 30,  max: 240 },
-    'long term': { min: 240, max: 1440 },
-}
-const DEFAULT_CADENCE = CADENCE_BY_TYPE.swing
-
 // How many rungs either side of the authored timeframe the monitor may reach for. Bounded so an
 // intraday setup can't have its assessment wander onto a monthly chart.
 const LADDER_SPAN = 2
@@ -144,25 +134,17 @@ export function usableLadder(setup) {
     return rungs.length ? rungs : ['15min']
 }
 
-/** Poll cadence bounds for a horizon. Unknown → swing. */
-export function buildCadence(type) {
-    return { ...(CADENCE_BY_TYPE[type] ?? DEFAULT_CADENCE) }
-}
-
 // ─── Guards — the model's own wake conditions ─────────────────────────────────
 //
-// docs/desks/talos-guards.md. Every read ends by naming the conditions under which it wants to be
-// disturbed; code evaluates them for free on a fast sweep and the model runs only on a hit.
+// docs/design/talos-per-candle.md. Talos is read on every candle close of the rung it watches;
+// a guard is the PRICE at which it wants to be woken ahead of that — the level that would change
+// its answer now rather than at the close. Code evaluates them for free on a fast sweep against
+// the RANGE since the last pass, so a level touched and left between two sweeps still fires.
 //
-// ONE NORMALISED SHAPE, because the three kinds the design names are not three schemas — they are
-// which terms are present:
+//   { price: 311.5, direction: 'above', means: 'entry' }
 //
-//   { after_min: 30, price: 305, direction: 'above' }   conditional — BOTH must hold
-//   { price: 311.5, direction: 'above', means: 'entry' } immediate  — fire ahead of the timer
-//   { after_min: 240 }                                   backstop   — unconditional heartbeat
-//
-// A guard fires when EVERY term it carries holds. That conjunction is the point: a timer firing
-// while price is still $20 away buys a model call whose only possible answer is "still $20 away".
+// There is no time term. The candle close is the timer and the backstop both; a guard that says
+// "look again in thirty minutes" is asking for what the next candle gives anyway.
 
 /** What a price crossing MEANS, so a wake arrives knowing which read it is doing. */
 export const GUARD_MEANINGS = ['entry', 'invalidation', 'manage']
@@ -170,10 +152,9 @@ export const GUARD_MEANINGS = ['entry', 'invalidation', 'manage']
  * Which way a level has to be crossed.
  *
  * `any` is a TOUCH — the range straddles the level, whichever side price came from — and it is not
- * a lazy default. It is what the zone gate meant ("price is at this level"), so it is the honest
- * synthesis for a legacy band, and it is the right answer whenever the level matters more than the
- * approach: a pullback entry can be reached from either side and a model should not have to guess
- * which. `above`/`below` are for a level that only means something crossed one way.
+ * a lazy default. It is the right answer whenever the level matters more than the approach: a
+ * pullback entry can be reached from either side and a model should not have to guess which.
+ * `above`/`below` are for a level that only means something crossed one way.
  */
 export const GUARD_DIRECTIONS = ['above', 'below', 'any']
 /** Most levels one read may arm. A model that wants nine is not watching, it is hedging. */
@@ -184,147 +165,65 @@ const MAX_GUARDS = 6
  * division `clampRung` draws, for the same reason — a rule that lives only in a prompt is a rule
  * the model drops the moment the conversation gets interesting. Pure.
  *
- * @param {Array}  raw    what the model emitted
- * @param {object} setup  for its `cadence` bounds
- * @param {?number} price the live price, for the already-true check below. Null skips that check.
+ * A guard without a finite price is dropped: there is nothing to evaluate. (Guards written before
+ * this design carried a time term; those fall out here on the first read that rewrites the set.)
+ *
+ * @param {Array}   raw    what the model emitted
+ * @param {?number} price  the live price, for the direction inference and the already-true check
  */
-export function clampGuards(raw, setup, price = null) {
-    const { min = 5, max = 30 } = setup?.cadence ?? {}
+export function clampGuards(raw, price = null) {
     const out = []
-    let levels = 0
-
     for (const g of Array.isArray(raw) ? raw : []) {
         if (!g || typeof g !== 'object' || Array.isArray(g)) continue
 
-        // The time term, clamped to the horizon's band. A model asking to be woken in one minute on
-        // a swing burns the budget; one asking for three days goes blind.
-        const askedMin = num(g.after_min)
-        const after_min = Number.isFinite(askedMin) && askedMin > 0
-            ? Math.min(Math.max(Math.round(askedMin), min), max)
-            : null
-
-        // The price term. `direction` is inferred from where price actually is when the model
-        // leaves it out — a level with no side is not a crossing, it is a number.
         const lvl = num(g.price)
-        let direction = null
-        if (Number.isFinite(lvl) && lvl > 0) {
-            direction = GUARD_DIRECTIONS.includes(g.direction)
-                ? g.direction
-                // Unstamped → inferred from where price actually is, because a level with no side
-                // is not a crossing, it is a number. Falls back to a TOUCH when price is unknown:
-                // firing on either approach is the safe error, since the cost is one read and the
-                // cost of guessing the wrong side is a move nobody saw.
-                : (Number.isFinite(price) ? (lvl > price ? 'above' : 'below') : 'any')
-        }
-        const hasPrice = Number.isFinite(lvl) && lvl > 0 && direction != null
+        if (!Number.isFinite(lvl) || lvl <= 0) continue
 
-        // Neither term → nothing to evaluate. Dropped rather than kept as a guard that can never fire.
-        if (after_min == null && !hasPrice) continue
+        const direction = GUARD_DIRECTIONS.includes(g.direction)
+            ? g.direction
+            // Unstamped → inferred from where price actually is, because a level with no side is
+            // not a crossing, it is a number. Falls back to a TOUCH when price is unknown: firing
+            // on either approach is the safe error, since the cost is one read and the cost of
+            // guessing the wrong side is a move nobody saw.
+            : (Number.isFinite(price) ? (lvl > price ? 'above' : 'below') : 'any')
 
         // ALREADY TRUE is the dangerous one, and it is why `price` is worth passing in. A guard of
         // "below 305" armed while price is already 300 is satisfied the instant it is written, so it
         // wakes the model, which re-arms it, which wakes the model — a paid loop with no exit.
         //
         // A TOUCH is exempt: `any` needs price to ARRIVE at the level, and sitting near one is not
-        // arriving at it. (It fires on the first sweep whose range straddles the level; a range that
-        // never moves off the level is one observation, not a crossing.)
-        if (hasPrice && direction !== 'any' && Number.isFinite(price)) {
+        // arriving at it.
+        if (direction !== 'any' && Number.isFinite(price)) {
             const satisfied = direction === 'above' ? price >= lvl : price <= lvl
             if (satisfied) continue
         }
 
-        if (hasPrice && ++levels > MAX_GUARDS) continue
-
-        out.push({
-            after_min,
-            price:     hasPrice ? lvl : null,
-            direction: hasPrice ? direction : null,
-            means:     GUARD_MEANINGS.includes(g.means) ? g.means : null,
-        })
+        if (out.length >= MAX_GUARDS) break
+        out.push({ price: lvl, direction, means: GUARD_MEANINGS.includes(g.means) ? g.means : null })
     }
-
-    // THE BACKSTOP IS NOT OPTIONAL. Without an unconditional time guard a pure conjunction STARVES:
-    // price sits 20 away for three weeks, no guard ever trips, and nothing looks — while earnings
-    // came and went, the sector rolled over and `valid_until` passed. Those are precisely the
-    // failures price cannot show, which is the one job the time dimension has.
-    //
-    // Injected rather than refused: a read that forgot one is not a read worth throwing away, and a
-    // setup that is never examined again has no symptom until it is far too late.
-    if (!out.some(g => g.after_min != null && g.price == null)) out.push(BACKSTOP(max))
-
     return out
 }
 
-/** The unconditional heartbeat, at the lazy end of the setup's own band. */
-const BACKSTOP = (max) => ({ after_min: max, price: null, direction: null, means: null })
-
 /**
- * Does this guard fire? Every term it carries must hold — that conjunction is the whole saving.
- * Pure.
+ * Does this guard fire on what price did since the last sweep? Pure.
  *
- * THE PRICE TERM IS TESTED AGAINST A RANGE, NOT A SPOT PRICE, and that is the change this design
- * exists for. "Did price cross 312" is a fact about an INTERVAL; asking where price happens to be
- * at the moment of a glance misses a level touched and left between two looks — which is exactly
- * what band width was compensating for. Give it the high/low since the last evaluation and an exact
- * level becomes as catchable as a wide band ever was.
+ * TESTED AGAINST A RANGE, NOT A SPOT PRICE. "Did price cross 312" is a fact about an INTERVAL;
+ * asking where price happens to be at the moment of a glance misses a level touched and left
+ * between two looks. Given the high/low since the last evaluation an exact level is as catchable
+ * as a wide band ever was.
  *
- * @param {object} guard              one clamped guard
- * @param {object} ctx
- * @param {number} ctx.elapsedMin     minutes since the last real READ (not since the last sweep)
- * @param {?{high:number,low:number}} ctx.range  what price did since the last sweep
- * @returns {boolean}
+ * @param {object} guard                        one clamped guard
+ * @param {?{high:number,low:number}} range     what price did since the last sweep
  */
-export function guardFires(guard, { elapsedMin = 0, range = null } = {}) {
-    if (!guard || typeof guard !== 'object') return false
-
-    // Neither term present — clampGuards drops these, so reaching here means a hand-written or
-    // legacy document. Refuse rather than fire: a guard that cannot say when it wants to be woken
-    // is not asking for anything.
-    if (guard.after_min == null && guard.price == null) return false
-
-    if (guard.after_min != null && !(elapsedMin >= guard.after_min)) return false
-
-    if (guard.price != null) {
-        if (!range || !Number.isFinite(range.high) || !Number.isFinite(range.low)) return false
-        const p = guard.price
-        const crossed = guard.direction === 'below' ? range.low <= p
-            // A TOUCH: the range STRADDLES the level, so price was at or through it at some point in
-            // the window — including a gap clean over it, which is the case a spot read misses worst.
-            : guard.direction === 'any' ? (range.low <= p && range.high >= p)
-            : range.high >= p
-        if (!crossed) return false
-    }
-    return true
-}
-
-/**
- * The guard set to evaluate for a setup that has never had a real read under this design.
- *
- * MIGRATION, WITHOUT A BACKFILL. Documents armed before guards existed carry zones and no
- * `monitor_state.guards`, and a setup that is watched by nothing until its next assessment is a
- * setup that has silently stopped being monitored. So its zones ARE its guards until the model
- * writes its own: every live entry edge becomes a level to wake on, which reproduces the zone gate's
- * behaviour closely enough to be safe, plus the mandatory backstop.
- *
- * Self-healing and idempotent — the first real read replaces all of this. Pure.
- */
-export function guardsFromZones(setup) {
-    const { max = 30 } = setup?.cadence ?? {}
-    const levels = []
-
-    for (const sc of setup?.scenarios ?? []) {
-        for (const z of sc?.entry_zones ?? []) {
-            // BOTH edges of a band, as TOUCHES. The zone gate fired on "price is inside [lower,
-            // upper]", and to be inside a band price must have crossed an edge — so two touch
-            // guards reproduce it. On a zero-width level the two collapse to one, which is the
-            // shape everything is authored in from now on.
-            for (const edge of [num(z?.lower), num(z?.upper)]) {
-                if (!Number.isFinite(edge) || levels.some(l => l.price === edge)) continue
-                levels.push({ after_min: null, price: edge, direction: 'any', means: 'entry' })
-            }
-        }
-    }
-    return [...levels.slice(0, MAX_GUARDS), BACKSTOP(max)]
+export function guardFires(guard, range = null) {
+    const p = num(guard?.price)
+    if (!Number.isFinite(p)) return false
+    if (!range || !Number.isFinite(range.high) || !Number.isFinite(range.low)) return false
+    return guard.direction === 'below' ? range.low <= p
+        // A TOUCH: the range STRADDLES the level, so price was at or through it at some point in the
+        // window — including a gap clean over it, which is the case a spot read misses worst.
+        : guard.direction === 'any' ? (range.low <= p && range.high >= p)
+        : range.high >= p
 }
 
 /**
@@ -688,7 +587,7 @@ function isoOrNull(v) {
  * field degrades to null/[] rather than rejecting the draft, because this also runs on every
  * streamed turn to render the live worksheet — a half-built setup is the normal case, not an error.
  *
- * Server-derived fields (`ladder`, `cadence`, `quantity`) are always recomputed here, so an
+ * Server-derived fields (`ladder`, `quantity`) are always recomputed here, so an
  * attempt by the model to author them is overwritten rather than trusted.
  */
 export function normalizeSetup(raw) {
@@ -741,7 +640,6 @@ export function normalizeSetup(raw) {
         // one when a zone trips. Authoring them directly does nothing — scenarios are the source.
         ...projectScenario({ scenarios }, raw.armed_scenario_id ?? null),
         ladder:   buildLadder(timeframe),
-        cadence:  buildCadence(type),
     }
 }
 
@@ -966,18 +864,48 @@ export function pendingLegs(scenario, entry) {
 }
 
 /**
- * May this position be added to right now? Pure.
+ * The legs of ONE scenario that Talos reads — every leg that carries a condition in words
+ * (docs/design/talos-per-candle.md). Pure.
  *
- * The rule that matters: NEVER scale into a position the gate calls `adverse`. Adding size to a
- * trade already pressing its stop is the single worst thing this feature could do — it is the
- * averaging-down reflex, automated, and it turns one planned loss into a larger unplanned one. The
- * plan said "add at this level"; it did not say "add while the thesis is failing".
+ * THE ONE PREDICATE for "does this position earn a model call", and the one source of the verdict
+ * menu (`allowedVerdicts`). A plain stop or target is an order resting at the broker and nobody
+ * reads it. Only a sentence somebody has to judge costs a read — and that is exactly what the user
+ * opted into when they attached one.
  *
- * `scale_out` and `breakeven` are not blockers: those are a position doing WELL, which is exactly
- * when a second planned leg is legitimate.
+ * `entries` are the pending legs (not yet filled). A pending leg is judged by the setup's ENTRY
+ * conditions (root ∪ scenario — the same mandate the first leg was taken on) plus any of its own,
+ * so on a conditional setup every pending leg is watched; only a `limit` setup, which declares no
+ * conditions at all, has nothing to read there.
+ *
+ * @returns {{ stop: ?object, targets: object[], entries: object[] }}
  */
-export function mayScaleIn(gateFlag) {
-    return gateFlag !== 'adverse'
+export function watchedLegs(setup, scenario, entry = null) {
+    const has     = (z) => Array.isArray(z?.conditions) && z.conditions.length > 0
+    const judged  = setup?.entry_mode !== 'limit' && declaredConditions(setup, scenario).length > 0
+    return {
+        stop:    (scenario?.stop_zones ?? []).find(has) ?? null,
+        targets: (scenario?.tp_zones ?? []).filter(has),
+        entries: pendingLegs(scenario, entry).filter(z => judged || has(z)),
+    }
+}
+
+export function hasWatchedLegs(w) {
+    return !!(w?.stop || w?.targets?.length || w?.entries?.length)
+}
+
+/**
+ * What an in-position read may decide, given which legs are watched. `hold` always; the rest only
+ * where the user wrote a condition that makes the question theirs. Pure.
+ *
+ * Derived rather than fixed so the prompt never offers a verdict the monitor would refuse, and the
+ * monitor never has to refuse one the prompt offered.
+ */
+export function allowedVerdicts(w) {
+    const out = ['hold']
+    if (w?.stop)            out.push('move_stop', 'exit_now')
+    if (w?.targets?.length) out.push('take_partial')
+    if (w?.entries?.length) out.push('add_leg')
+    return out
 }
 
 /**
@@ -1058,7 +986,7 @@ export function targetEdges(setup) {
 }
 
 /**
- * Targets NEAREST-FIRST, each as `{ target, conditions }` — the shape the position carries and the
+ * Targets NEAREST-FIRST, each as `{ target, quantity, conditions }` — the shape the position carries and the
  * order a partial ladder fires in. Pure.
  *
  * REPLACES `targetWindows`, which read a tp zone as a window: `target` at the far edge and `wake` at
@@ -1073,7 +1001,7 @@ export function targetEdges(setup) {
 export function targetLevels(setup) {
     const isLong = setup?.direction === 'long'
     return (setup?.tp_zones ?? [])
-        .map(z => ({ target: zoneLevel(z, isLong, 'tp'), conditions: z?.conditions ?? [] }))
+        .map(z => ({ target: zoneLevel(z, isLong, 'tp'), quantity: z?.quantity ?? null, conditions: z?.conditions ?? [] }))
         .filter(t => Number.isFinite(t.target))
         .sort((a, b) => (isLong ? a.target - b.target : b.target - a.target))
 }

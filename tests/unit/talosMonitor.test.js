@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    _isPreActive, _isExpiring, _nextCheckAt, _checkSetup,
-    _nextStatus, _isPastExpiry, _effectiveVerdict,
+    _isPreActive, _isExpiring, _nextReadAt, _checkSetup,
+    _nextStatus, _isPastExpiry, _effectiveVerdict, READ_LAG_MS,
 } from '../../monitoring/talos.monitor.service.js'
 // The pure tier — the decisions a wake makes before it spends anything. Split out of the monitor
 // (which kept the loop, the scheduling and the writes) when that file passed 1500 lines.
@@ -10,7 +10,7 @@ import {
     zoneGate, normalizeConditionResults, latchPatch, costPatch,
     validityBreach, breachPatch, awayEdge, adverseEdge,
     scenarioGate, liveScenarios, rollUpBreaches, scenarioState,
-    positionGate, reviewDue, computeMetrics, rMultiple,
+    computeMetrics, rMultiple,
 } from '../../monitoring/talos.gates.js'
 import { normalizeSetup, buildLadder, isFetchableRung, usableLadder, rungMinutes } from '../../services/setup.schema.js'
 import { buildToolsFor, symbolScope, openingRung } from '../../monitoring/talos.assess.js'
@@ -72,25 +72,30 @@ test('an unknown price never trips the gate', () => {
     }
 })
 
-// ─── The lazy heartbeat ───────────────────────────────────────────────────────
-// A wake with nothing to say parks on the setup's own ceiling and nothing else. This used to be
-// GRADED by distance to the nearest band (`proximityGapMin`: floor within one width, ceiling beyond
-// eight) because a scheduled glance was the only thing that could catch price arriving. The guard
-// sweep watches every armed level continuously now, so tightening this timer would buy nothing and
-// pay for it in reads (docs/desks/talos-guards.md).
+// ─── Every wake reads ─────────────────────────────────────────────────────────
+// docs/design/talos-per-candle.md. There is no quiet wake any more: a setup is read on every candle
+// close of its rung, wherever price is. What differs is the REASON the read is given.
 
-test('a wake with nothing to say comes back at the horizon ceiling, whatever price is doing', async () => {
-    // Needs last_read_at: a first-ever wake would run an assessment; this tests the idle heartbeat.
-    const setup = { ...LIVE, scenarios: [], monitor_state: { ...LIVE.monitor_state, last_read_at: new Date(T - 60_000).toISOString() } }
-    const deps = stubDeps({ price: 238.0 })          // sitting right on its own entry
-    await _checkSetup(setup, T, deps)
-    const near = deps.writes[0]['monitor_state.next_check_at']
+test('a wake reads wherever price is, and names why it was woken', async () => {
+    const seen = []
+    const mkDeps = () => stubDeps({ assess: async (_s, _hit, ctx) => { seen.push(ctx.reason); return { verdict: 'wait', read: 'x' } } })
+    const read = { ...LIVE, monitor_state: { ...LIVE.monitor_state, last_assessment: { at: 'earlier' } } }
 
-    const far = stubDeps({ price: 300.0 })           // miles away
-    await _checkSetup(setup, T, far)
+    await _checkSetup(read, T, mkDeps())                                                     // price 238 — at its level
+    await _checkSetup(read, T, { ...mkDeps(), getPrice: async () => 300 })                  // miles away — still read
+    await _checkSetup(LIVE, T, mkDeps())                                                    // never read before
+    await _checkSetup({ ...read, monitor_state: { ...read.monitor_state, woke_on: { price: 238, direction: 'any', means: 'entry' } } }, T, mkDeps())
+    assert.deepEqual(seen, ['candle', 'candle', 'first_look', 'guard'])
+})
 
-    assert.equal(near, far.writes[0]['monitor_state.next_check_at'], 'distance no longer sets the pace')
-    assert.equal(near, new Date(T + 240 * 60_000).toISOString(), 'the swing ceiling')
+test('the next read lands on the candle close plus the provider lag, wherever price is', async () => {
+    const near = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'x' }) })
+    await _checkSetup(LIVE, T, near)
+    const far  = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'x' }), getPrice: async () => 300 })
+    await _checkSetup(LIVE, T, far)
+    assert.equal(near.writes[0]['monitor_state.next_check_at'], far.writes[0]['monitor_state.next_check_at'], 'distance does not set the pace')
+    assert.equal(near.writes[0]['monitor_state.next_check_at'], new Date(T + 3600_000 + READ_LAG_MS).toISOString())
+    assert.equal(near.writes[0]['monitor_state.woke_on'], null, 'one-shot')
 })
 
 // ─── Time gates ───────────────────────────────────────────────────────────────
@@ -115,25 +120,20 @@ test('a setup with no valid_until never expires', () => {
 })
 
 // ─── next_check_at: the RUNG is the pace ──────────────────────────────────────
-// There is no second cadence field. The model names the timeframe it wants to open on next, and the
-// gap follows from it — one decision instead of two that could contradict each other.
-// SETUP is a 1hr swing: ladder 4hr·2hr·1hr·30min·15min, cadence band 30–240.
+// There is no cadence field. The model names the timeframe it wants to open on next, and the next
+// read is that rung's next candle close for this instrument (market.service.nextCandleCloseMs —
+// its own session math is pinned in candleClose.test.js).
 
-test('the requested rung sets the pace, clamped into the setup\'s band', () => {
-    assert.equal(_nextCheckAt(SETUP, T, '1hr'),   new Date(T + 60 * 60_000).toISOString(),  'in band → the rung IS the gap')
-    assert.equal(_nextCheckAt(SETUP, T, '2hr'),   new Date(T + 120 * 60_000).toISOString())
-    assert.equal(_nextCheckAt(SETUP, T, '4hr'),   new Date(T + 240 * 60_000).toISOString(), 'at the ceiling')
-    // A rung finer than the band is the model reaching for a view this setup shouldn't be traded on.
-    assert.equal(_nextCheckAt(SETUP, T, '15min'), new Date(T + 30 * 60_000).toISOString(),  'finer than the floor → floor')
+test('the next read is the rung\'s candle close, asked of the session for THIS instrument', () => {
+    const asked = []
+    const deps  = { nextCandleCloseMs: (sym, cls, rung, now) => { asked.push([sym, cls, rung]); return now + 42_000 } }
+    assert.equal(_nextReadAt(SETUP, T, '2hr', deps), new Date(T + 42_000 + READ_LAG_MS).toISOString())
+    assert.deepEqual(asked, [['NVDA', 'stock', '2hr']])
 })
 
-test('an off-ladder rung is ignored and falls back to the eager floor', () => {
-    // LADDER_SPAN is what stops a swing setup being judged on a monthly chart. It only means
-    // something if something enforces it — and the fallback must not be the LAZY end, or a model
-    // typo would quietly put the setup to sleep for four hours.
-    for (const v of [undefined, null, 'day', 'month', '1min', 'soon', 15, NaN]) {
-        assert.equal(_nextCheckAt(SETUP, T, v), new Date(T + 30 * 60_000).toISOString(), String(v))
-    }
+test('a rung the session cannot place falls back to a quarter hour rather than never', () => {
+    const deps = { nextCandleCloseMs: () => null }
+    assert.equal(_nextReadAt(SETUP, T, 'nonsense', deps), new Date(T + 15 * 60_000).toISOString())
 })
 
 // ─── The rung the model chooses ───────────────────────────────────────────────
@@ -151,7 +151,16 @@ test('a read that names a rung is opened there next time', async () => {
     const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'Structure first.', next_timeframe: '2hr' }) })
     await _checkSetup(LIVE, T, deps)
     assert.equal(deps.writes[0]['monitor_state.timeframe'], '2hr')
-    assert.equal(deps.writes[0]['monitor_state.next_check_at'], new Date(T + 120 * 60_000).toISOString(), 'and the pace follows the rung')
+})
+
+test('the next read is paced by the rung the read ASKED for, not the one it opened on', async () => {
+    const asked = []
+    const deps = stubDeps({
+        assess: async () => ({ verdict: 'wait', read: 'Structure first.', next_timeframe: '2hr' }),
+        nextCandleCloseMs: (_s, _c, rung, now) => { asked.push(rung); return now + 60_000 },
+    })
+    await _checkSetup(LIVE, T, deps)
+    assert.deepEqual(asked, ['2hr'])
 })
 
 test('an off-ladder ask leaves the stored rung ALONE rather than resetting it', async () => {
@@ -183,7 +192,7 @@ test('rung lengths are what the pace is derived from', () => {
 })
 
 // ─── Guards reach the document ────────────────────────────────────────────────
-// docs/desks/talos-guards.md. clampGuards owns WHAT is legal (setupSchema.test.js); these are about
+// docs/design/talos-per-candle.md. clampGuards owns WHAT is legal (setupSchema.test.js); these are about
 // the wiring — that a read's guards are stored at all, on both brains, and replaced rather than
 // merged. A guard set that never lands is a monitor that has stopped watching without saying so.
 
@@ -195,25 +204,22 @@ test('a readiness read stores the guards it armed', async () => {
     await _checkSetup(LIVE, T, deps)
     const armed = deps.writes[0]['monitor_state.guards']
     assert.ok(Array.isArray(armed), 'the read must leave its wake conditions behind')
-    assert.deepEqual(armed.filter(g => g.price != null), [
-        { after_min: null, price: 250, direction: 'above', means: 'entry' },
-    ])
+    assert.deepEqual(armed, [{ price: 250, direction: 'above', means: 'entry' }])
 })
 
-test('a read that armed NOTHING still leaves a backstop, so a setup cannot go unwatched', async () => {
-    // The starvation failure has no symptom until far too late: price sits away for weeks, no guard
-    // trips, nothing looks, and meanwhile the premise quietly died of something price never showed.
+test('a read that armed NOTHING is watched by the candle close alone — no backstop is invented', async () => {
+    // The candle close IS the backstop: the setup is read again at the next close whatever price
+    // does, so an empty guard set is an honest "nothing needs to interrupt me".
     const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'Nothing doing.' }) })
     await _checkSetup(LIVE, T, deps)
-    const armed = deps.writes[0]['monitor_state.guards']
-    assert.equal(armed.length, 1)
-    assert.ok(armed[0].after_min > 0 && armed[0].price === null, 'an unconditional heartbeat')
+    assert.deepEqual(deps.writes[0]['monitor_state.guards'], [])
+    assert.equal(deps.writes[0]['monitor_state.next_check_at'], new Date(T + 3600_000 + READ_LAG_MS).toISOString())
 })
 
 test('the guard set is REPLACED whole, so a level the read dropped stops being watched', async () => {
     // Half of yesterday's judgment beside half of today's is a set neither read would have written.
     const priorArmed = { ...LIVE, monitor_state: { ...LIVE.monitor_state,
-        guards: [{ after_min: null, price: 999, direction: 'above', means: 'entry' }] } }
+        guards: [{ price: 999, direction: 'above', means: 'entry' }] } }
     const deps = stubDeps({ assess: async () => ({
         verdict: 'wait', read: 'Moving my line.', guards: [{ price: 250, direction: 'above' }],
     }) })
@@ -221,6 +227,24 @@ test('the guard set is REPLACED whole, so a level the read dropped stops being w
     const armed = deps.writes[0]['monitor_state.guards']
     assert.equal(armed.some(g => g.price === 999), false, 'the abandoned level is gone, not merged forward')
     assert.equal(armed.some(g => g.price === 250), true)
+})
+
+test('a pre-entry read leaves a full row: rung, what it checked, what it pulled, what it armed', async () => {
+    const deps = stubDeps({ assess: async () => ({
+        verdict: 'wait', read: 'Base is building under the level.', warning: 'No close above 238.6 yet.',
+        timeframe_used: '15min', conditions: [{ id: 'c1', met: 'no', note: 'no CHoCH yet' }],
+        guards: [{ price: 238.6, direction: 'above', means: 'entry' }], _tools: ['get_chart', 'get_indicators'],
+    }) })
+    await _checkSetup(LIVE, T, deps)
+    const row = deps.entries[0]
+    assert.equal(row.reason, 'first_look')
+    assert.equal(row.rung, '15min')
+    assert.equal(row.warning, 'No close above 238.6 yet.')
+    assert.deepEqual(row.conditions, [{ id: 'c1', met: 'no', note: 'no CHoCH yet' }])
+    assert.deepEqual(row.tools, ['get_chart', 'get_indicators'])
+    assert.deepEqual(row.armed, [{ price: 238.6, direction: 'above', means: 'entry' }])
+    assert.deepEqual(deps.writes[0]['monitor_state.cost'], { tool_calls: 2, assessments: 1, last: ['get_chart', 'get_indicators'] })
+    assert.deepEqual(deps.writes[0]['monitor_state.last_assessment'].tools, ['get_chart', 'get_indicators'])
 })
 
 // ─── Tool mounting ────────────────────────────────────────────────────────────
@@ -462,7 +486,7 @@ test('a wick through the line does not kill the setup', () => Promise.resolve().
     const deps = rangedDeps({ getClose: async () => 236, onInvalidation: async () => { carded = true } })
     const res = await _checkSetup(RANGED, T, deps)
 
-    assert.equal(res.reason, 'guard_time', 'falls through to the normal reschedule')
+    assert.equal(res.reason, 'first_look', 'falls through to the normal read')
     assert.equal(carded, false)
     assert.equal(deps.writes[0].invalidation_status, undefined, 'nothing latched')
 }))
@@ -484,7 +508,7 @@ test('no candle means unknown, not broken', async () => {
     let carded = false
     const deps = rangedDeps({ getClose: async () => null, onInvalidation: async () => { carded = true } })
     const res = await _checkSetup(RANGED, T, deps)
-    assert.equal(res.reason, 'guard_time')
+    assert.equal(res.reason, 'first_look')
     assert.equal(carded, false)
 })
 
@@ -612,16 +636,18 @@ function stubDeps(over = {}) {
     const entries = []
     return {
         isAssetOpen: () => true,
-        nextOpenMs:  () => T + 3600_000,
+        // A fixed one-hour candle, whatever the rung: every "when do I read next" assertion below
+        // is about the LAG and the expiry clamp, not about session math (candleClose.test.js).
+        nextCandleCloseMs: (_s, _c, _rung, now) => now + 3600_000,
         getPrice:    async () => 238.0,
-        assess:      async () => ({ verdict: 'enter', read: 'Trigger is live.', next_check_min: 30 }),
+        assess:      async () => ({ verdict: 'enter', read: 'Trigger is live.' }),
         buildOrderPlan: async () => [{ accountId: 'a1', quantity: 100 }],
         onCard:         async () => {},
         onManualCard:   async () => {},
         onEditCard:     async () => {},
         onInvalidation: async () => {},
         getClose:       async () => null,
-        assessPosition: async () => ({ verdict: 'hold', read: 'Doing what it should.', next_check_min: 30 }),
+        assessPosition: async () => ({ verdict: 'hold', read: 'Doing what it should.' }),
         onManageCard:   async () => {},
         cancelOrder:    async () => {},
         onDisarmCard:   async () => {},
@@ -648,16 +674,15 @@ test('a closed market skips the price fetch AND the assessment entirely', async 
     assert.equal(assessed, false)
 })
 
-test('price outside every zone reschedules without ever calling the model', async () => {
-    let assessed = false
-    // Needs last_read_at so this is treated as an ongoing heartbeat, not a first wake.
-    const initialized = { ...LIVE, monitor_state: { ...LIVE.monitor_state, last_read_at: new Date(T - 60_000).toISOString() } }
-    const res = await _checkSetup(initialized, T, stubDeps({
+test('price away from every level is still read on the candle — but "enter" is not honoured there', async () => {
+    let hitSeen = 'unset'
+    const res = await _checkSetup(LIVE, T, stubDeps({
         getPrice: async () => 300,
-        assess:   async () => { assessed = true; return {} },
+        assess:   async (_s, hit) => { hitSeen = hit; return { verdict: 'enter', read: 'Looks great from here.' } },
     }))
-    assert.equal(res.reason, 'guard_time')
-    assert.equal(assessed, false, 'the cheap gate is the whole point')
+    assert.equal(hitSeen, null, 'the read is told no level is armed')
+    assert.equal(res.fired, undefined, 'no level, no entry')
+    assert.equal(res.verdict, 'enter', 'the verdict is recorded as given')
 })
 
 // ── The execution projection (docs/desks/mentor-talos.md) ──
@@ -942,28 +967,24 @@ test('the fill freezes the working stop and the target ladder onto the position'
 
     assert.equal($set['position_state.stop.initial'], 234.8, 'the WIDEST stop edge, not stop_zones[0].upper')
     assert.equal($set['position_state.stop.current'], 234.8, 'current starts equal to initial')
-    // `resting` is the target; `price` is where the gate wakes Talos to TALK about it, and an
-    // UNCONDITIONAL target has nothing to talk about — it just rests. Nearest-first, the order price
-    // reaches them rather than the order they were typed.
+    // Nearest-first, the order price reaches them rather than the order they were typed. `watched`
+    // says whether Talos reads the leg (a condition) or the broker simply holds it.
     assert.deepEqual($set['position_state.targets'], [
-        { price: null, resting: 245, hit_at: null },
-        { price: null, resting: 261, hit_at: null },
+        { price: 245, quantity: null, watched: false },
+        { price: 261, quantity: null, watched: false },
     ])
 })
 
-test('a target with CONDITIONS wakes the model at its level; an unconditional one never wakes', async () => {
-    // The asymmetry that makes exit conditions work at all. A conditional target does not rest
-    // (routeSetupZones holds it back, or the limit would fill and the condition would be dead
-    // letter), so the gate has to wake the model AT the level to judge the sentence.
+test('a target with CONDITIONS is marked watched; an unconditional one is the broker\'s alone', async () => {
     const mixed = { ...FILLED, ...mk({
-        tp_zones: [{ price: 245 }, { price: 261, conditions: [{ text: 'only if volume confirms' }] }],
+        tp_zones: [{ price: 245, quantity: 60 }, { price: 261, quantity: 40, conditions: [{ text: 'only if volume confirms' }] }],
     }), status: 'long', ordersPlacedAt: T - 60_000, quantity: 100 }
 
     const deps = stubDeps()
     await _checkSetup(mixed, T, deps)
     assert.deepEqual(deps.writes[0]['position_state.targets'], [
-        { price: null, resting: 245, hit_at: null },
-        { price: 261,  resting: 261, hit_at: null },
+        { price: 245, quantity: 60, watched: false },
+        { price: 261, quantity: 40, watched: true },
     ])
 })
 
@@ -979,7 +1000,7 @@ test('a short seeds the opposite edges', async () => {
     const $set = deps.writes[0]
 
     assert.equal($set['position_state.stop.initial'], 241, 'a short works against its stop level')
-    assert.deepEqual($set['position_state.targets'].map(t => t.resting), [230, 220], 'falls INTO its targets')
+    assert.deepEqual($set['position_state.targets'].map(t => t.price), [230, 220], 'falls INTO its targets')
 })
 
 test('a setup with no targets seeds an empty ladder rather than undefined', async () => {
@@ -999,13 +1020,19 @@ test('the frozen stop is never re-stamped from the plan on a later wake', async 
     assert.equal(deps.writes[0]['position_state.stop.current'], undefined, 'a moved stop stays moved')
 })
 
-test('later wakes stay quiet — an idle line every cadence is noise, not a monologue', async () => {
-    const promoted = { ...FILLED, position_state: { entry: { fill_at: '2026-07-26T11:00:00Z' } } }
-    const deps = stubDeps()
+test('a position of plain exits goes DORMANT — nothing to judge, the broker holds it all', async () => {
+    // docs/design/talos-per-candle.md. No read, no price, no journal row; the loop's query excludes
+    // it from here on. The reconciler reports the fill and the close.
+    const promoted = { ...FILLED, position_state: { entry: { fill_at: '2026-07-26T11:00:00Z', legs: [{ zone_id: 'ez1' }] } } }
+    let priced = false, assessed = false
+    const deps = stubDeps({ getPrice: async () => { priced = true; return 238 }, assessPosition: async () => { assessed = true; return {} } })
     const res = await _checkSetup(promoted, T, deps)
 
-    assert.equal(res.reason, 'in_position_idle')
-    assert.equal(deps.writes[0]['position_state.entry.fill_at'], undefined, 'nothing re-stamped')
+    assert.equal(res.reason, 'dormant')
+    assert.equal(deps.writes[0]['monitor_state.dormant'], true)
+    assert.equal(priced, false)
+    assert.equal(assessed, false)
+    assert.equal(deps.entries[0], null, 'a wake that cost no read writes no row')
 })
 
 test("a setup awaiting the user's confirm says nothing the card didn't already say", async () => {
@@ -1016,85 +1043,22 @@ test("a setup awaiting the user's confirm says nothing the card didn't already s
 })
 
 
-test('a live position parks on the lazy end of the cadence', async () => {
-    // Nothing here is time-critical: the broker holds the protective orders.
+test('the fill line schedules the next wake on the candle close, like every other write', async () => {
     const deps = stubDeps()
     await _checkSetup(FILLED, T, deps)
-    assert.equal(deps.writes[0]['monitor_state.next_check_at'], new Date(T + 240 * 60_000).toISOString())
+    assert.equal(deps.writes[0]['monitor_state.next_check_at'], new Date(T + 3600_000 + READ_LAG_MS).toISOString())
 })
 
-// ─── In-position gate + metrics ───────────────────────────────────────────────
-// These run on EVERY in-position wake for free, and the expensive management read fires only when
-// they say so. A gate that never trips is a manager that does nothing; one that always trips is an
-// LLM call every poll on every open position — the cost that scales with users.
+// ─── In-position metrics ──────────────────────────────────────────────────────
+// Recomputed on every in-position wake and never authored. There is no arithmetic gate any more —
+// whether a position is read is `watchedLegs`, and when is the candle close.
 
-// entry 100, initial stop 96 → risk 4, so the adverse band is 1.00 wide (0.25R).
+// entry 100, initial stop 96 → risk 4.
 const POS = (over = {}) => ({
     entry: { fill_price: 100, direction: 'long' },
     stop:  { initial: 96, current: 96 },
-    targets: [{ price: 110, hit_at: null }, { price: 120, hit_at: null }],
+    targets: [{ price: 110, watched: false }, { price: 120, watched: false }],
     ...over,
-})
-
-test('adverse fires BEFORE the stop, while there is still a decision to make', () => {
-    // The broker owns "the stop was hit". This is the look before it.
-    assert.equal(positionGate(POS(), 96.9).flag, 'adverse', 'inside the quarter-R band')
-    assert.equal(positionGate(POS(), 99).flag, null, 'comfortably above → nothing to say')
-})
-
-test('a moved stop moves the adverse band with it', () => {
-    // The band tracks the WORKING stop; the risk it is a quarter of stays the original.
-    const moved = POS({ stop: { initial: 96, current: 104 } })
-    assert.equal(positionGate(moved, 104.9).flag, 'adverse')
-})
-
-test('scale_out trips at OR BEYOND the target, so a gap through it still fires', () => {
-    // targets[].price is the near edge of the zone. An "inside the band" test would miss a gap.
-    assert.equal(positionGate(POS(), 110).flag, 'scale_out', 'exactly at the edge')
-    assert.equal(positionGate(POS(), 130).flag, 'scale_out', 'gapped clean past both')
-    assert.equal(positionGate(POS(), 130).target.price, 110, 'the NEAREST un-hit target, not the furthest')
-})
-
-test('a target already taken is not offered again', () => {
-    // Stop moved to entry so `breakeven` cannot fire and this isolates the scale_out tier — by 112
-    // the position is +3R, which would otherwise trip breakeven first and mask the question.
-    const partly = POS({
-        stop: { initial: 96, current: 100 },
-        targets: [{ price: 110, hit_at: '2026-07-26T11:00:00Z' }, { price: 120, hit_at: null }],
-    })
-    assert.equal(positionGate(partly, 112).flag, null, '110 is spent and 120 is not reached')
-    assert.equal(positionGate(partly, 120).target.price, 120)
-})
-
-test('pressing the stop outranks a target in reach — no victory lap on a losing wake', () => {
-    // Priority order is load-bearing: both conditions can be true at once on a whipsaw.
-    const wide = POS({ stop: { initial: 96, current: 109.5 }, targets: [{ price: 110, hit_at: null }] })
-    assert.equal(positionGate(wide, 110).flag, 'adverse')
-})
-
-test('breakeven fires once and stops once the stop is protected', () => {
-    assert.equal(positionGate(POS(), 104).flag, 'breakeven', '+2R with the stop still below entry')
-    const beProtected = POS({ stop: { initial: 96, current: 100 } })
-    assert.equal(positionGate(beProtected, 104).flag, null, 'already protected → nothing free left')
-})
-
-test('a short mirrors every edge', () => {
-    const short = { entry: { fill_price: 100, direction: 'short' }, stop: { initial: 104, current: 104 },
-                    targets: [{ price: 90, hit_at: null }] }
-    assert.equal(positionGate(short, 103.1).flag, 'adverse')
-    assert.equal(positionGate(short, 88).flag, 'scale_out', 'a short falls INTO its target')
-    assert.equal(positionGate(short, 96).flag, 'breakeven')
-})
-
-test('an unknown price never trips a gate', () => {
-    // A failed quote must read as "don't know", never as "all clear" — and never as an entry to act on.
-    for (const p of [NaN, null, undefined, 'abc']) assert.equal(positionGate(POS(), p).flag, null, String(p))
-})
-
-test('an unseeded position gates to nothing rather than throwing', () => {
-    // This is exactly the state before the fill seeds stop/targets — it must be inert, not fatal.
-    assert.equal(positionGate({}, 100).flag, null)
-    assert.equal(positionGate({ entry: { fill_price: 100 } }, 100).flag, null, 'no stop → no risk → no band')
 })
 
 test('R is measured from the ORIGINAL risk, so moving a stop never rewrites it', () => {
@@ -1125,21 +1089,6 @@ test('a fresh position starts its extremes at zero, not at the current R', () =>
     const m = computeMetrics(POS(), 104, T)   // risk 4 → 104 is +1R
     assert.equal(m.mfe, 1)
     assert.equal(m.mae, 0, 'never adverse yet → 0, not +1')
-})
-
-test('a review is due a full cadence after the last read, and immediately if there never was one', () => {
-    const cadence = { min: 5, max: 30 }
-    assert.equal(reviewDue({ entry: { fill_at: new Date(T - 31 * 60_000).toISOString() } }, T, cadence), true)
-    assert.equal(reviewDue({ entry: { fill_at: new Date(T - 10 * 60_000).toISOString() } }, T, cadence), false,
-        'a fresh position waits one cadence rather than being read on arrival')
-    assert.equal(reviewDue({}, T, cadence), true, 'no timestamp at all → look now')
-})
-
-test('the last management read resets the review clock, not the fill', () => {
-    const cadence = { min: 5, max: 30 }
-    const ps = { entry: { fill_at: new Date(T - 5 * 60_000).toISOString() },
-                 last_management: { at: new Date(T - 31 * 60_000).toISOString() } }
-    assert.equal(reviewDue(ps, T, cadence), true, 'read 31m ago wins over a 5m-old fill')
 })
 
 // ─── entry_mode: limit — pure price-touch shortcut ───────────────────────────

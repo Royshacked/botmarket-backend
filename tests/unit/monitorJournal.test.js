@@ -1,11 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { journalEntry, withJournal, levelsLabel, failNote, verdictFallbackNote } from '../../monitoring/monitorJournal.js'
+import { journalEntry, failNote, verdictFallbackNote } from '../../monitoring/monitorJournal.js'
 
-// The shared monitor journal. Hermes's copy of this is pinned by hermesMonitor.test.js (the prose
-// must not drift for calls); these tests pin that the SAME builder is kind-agnostic, because the
-// reason it exists is that Talos's fork had dropped every sentence.
+// The monitor journal row (docs/design/talos-per-candle.md): one per read, plus the events code
+// writes on a trade. What a row says is what the read LOOKED AT, DECIDED and is WAITING FOR.
 
 const NOW = Date.parse('2026-07-29T17:49:07.885Z')
 const setup = (over = {}) => ({
@@ -14,143 +13,113 @@ const setup = (over = {}) => ({
     ...over,
 })
 
-test('guard_time: a timer came back and found nothing at the levels', () => {
-    // The wake used to be called 'scheduled' and said "outside my zones". Under guards it is a TIMER
-    // that found nothing, and the price levels stay armed and watched by the sweep in the meantime —
-    // so the line says what is being watched, not merely when we will stir (docs/desks/talos-guards.md).
-    const e = journalEntry('guard_time', {
-        nowMs: NOW, entity: setup(), price: 151.45,
-        nextAt: new Date(NOW + 65 * 60_000).toISOString(),
+test('a read row carries what it checked, what it pulled, what it decided and what it waits for', () => {
+    const armed = [{ price: 318, direction: 'above', means: 'entry' }]
+    const e = journalEntry('candle', {
+        nowMs: NOW, entity: setup(), price: 312.4, rung: '15min', armed,
+        nextAt: new Date(NOW + 15 * 60_000).toISOString(),
+        raw: { verdict: 'wait', read: 'Tagged it, but the candle is still open.', warning: 'No close above 312 yet.',
+               conditions: [{ id: 'c1', met: 'no', note: 'still inside' }] },
+        tools: ['get_chart', 'get_indicators'],
     })
-    assert.equal(e.reason, 'guard_time')
-    assert.equal(e.price, 151.45)
-    assert.match(e.note, /151\.45/)
-    assert.match(e.note, /147\.28–148\.3, 145\.35–147\.27/)   // both legacy bands, plural
-    assert.match(e.note, /65m/)
-    assert.equal(e.next_check_at, new Date(NOW + 65 * 60_000).toISOString())
+    assert.equal(e.at, '2026-07-29T17:49:07.885Z')
+    assert.equal(e.reason, 'candle')
+    assert.equal(e.rung, '15min')
+    assert.equal(e.verdict, 'wait')
+    assert.equal(e.note, 'Tagged it, but the candle is still open.')
+    assert.equal(e.warning, 'No close above 312 yet.')
+    assert.deepEqual(e.conditions, [{ id: 'c1', met: 'no', note: 'still inside' }])
+    assert.deepEqual(e.tools, ['get_chart', 'get_indicators'])
+    assert.deepEqual(e.armed, armed, 'the set armed NOW, not the one just replaced')
+    assert.equal(e.next_check_at, new Date(NOW + 15 * 60_000).toISOString())
 })
 
-test('guard_time: one level → singular, and an unparseable next check drops the gap clause', () => {
-    const e = journalEntry('guard_time', {
-        nowMs: NOW, entity: setup({ entry_zones: [{ lower: 312, upper: 312 }] }), price: 305, nextAt: null,
-    })
-    assert.match(e.note, /my level 312/, 'a zero-width level prints as ONE number, never 312–312')
-    assert.doesNotMatch(e.note, /back in/)
-})
-
-test('the wake carries WHICH guard fired, when it was armed, and what is watched now', () => {
+test('a guard wake carries WHICH guard fired and when it was armed', () => {
     // The audit trail: a reader can see the line was drawn deliberately hours earlier rather than
     // stumbled into, and what replaced it.
-    const armed = [{ after_min: null, price: 318, direction: 'above', means: 'entry' },
-                   { after_min: 240, price: null, direction: null, means: null }]
-    const e = journalEntry('guard_price', {
-        nowMs: NOW, entity: setup(), price: 312.4, nextAt: null, armed,
-        woke: { price: 312, direction: 'above', means: 'entry', armed_at: '2026-08-22T08:20:00.000Z', skipped: 9 },
-        raw: { verdict: 'wait', read: 'Tagged it, but the candle is still open.' },
+    const e = journalEntry('guard', {
+        nowMs: NOW, entity: setup(), price: 312.4, nextAt: null,
+        woke: { price: 312, direction: 'above', means: 'entry', armed_at: '2026-08-22T08:20:00.000Z', at: '2026-08-22T11:00:00.000Z' },
+        raw: { verdict: 'wait', read: 'Tagged it.' },
     })
     assert.deepEqual(e.fired, { price: 312, direction: 'above', means: 'entry', armed_at: '2026-08-22T08:20:00.000Z' })
-    assert.deepEqual(e.armed, armed, 'the set armed NOW, not the one just replaced')
-    assert.equal(e.skipped, 9, 'wakes deliberately not taken — the saving, made visible')
 })
 
-test('an entry with nothing to say about guards OMITS the fields rather than nulling them', () => {
-    // Fifty capped entries per document; three null keys on each is storage bought for nothing.
-    const e = journalEntry('guard_time', { nowMs: NOW, entity: setup(), price: 151, nextAt: null })
-    assert.equal('fired' in e, false)
-    assert.equal('armed' in e, false)
-    assert.equal('skipped' in e, false)
+test('a row OMITS what it has nothing to say about rather than nulling it', () => {
+    const e = journalEntry('candle', { nowMs: NOW, entity: setup(), price: 151, nextAt: null, raw: { verdict: 'wait', read: 'x' } })
+    for (const k of ['fired', 'armed', 'tools', 'conditions', 'warning', 'proposal', 'rung', 'zone_id']) {
+        assert.equal(k in e, false, k)
+    }
 })
 
-test('closed / pre_active: named by the entity, and pre_active says which KIND when there is no asset', () => {
-    const closed = journalEntry('market_closed', { nowMs: NOW, entity: setup(), nextAt: null })
-    assert.match(closed.note, /Market's closed for AER/)
-    assert.equal(closed.price, null)
+test('armed falls back to what the entity carries when the read did not pass a set', () => {
+    const guards = [{ price: 300, direction: 'below', means: 'invalidation' }]
+    const e = journalEntry('candle', { nowMs: NOW, entity: setup({ monitor_state: { guards } }), raw: { verdict: 'wait', read: 'x' } })
+    assert.deepEqual(e.armed, guards)
+})
 
+test('pre_active is named by the entity, and says which KIND when there is no asset', () => {
     const pre = journalEntry('pre_active', { nowMs: NOW, entity: setup(), nextAt: null })
     assert.match(pre.note, /AER/)
     assert.match(pre.note, /2026-07-30T13:30/)
 
-    // No entity at all → the generic noun, never "undefined".
     const bare = journalEntry('pre_active', { nowMs: NOW, nextAt: null })
-    assert.match(bare.note, /this call/)
+    assert.match(bare.note, /this setup/)
     assert.doesNotMatch(bare.note, /undefined/)
 })
 
-test('failed: honest retry note by failure kind, no verdict', () => {
-    const io = journalEntry('zone_trip', { nowMs: NOW, entity: setup(), price: 148, failed: true })
-    assert.match(io.note, /didn't complete — retrying/i)
+test('failed: honest retry note by failure kind, no verdict, and the tools it did spend', () => {
+    const io = journalEntry('candle', { nowMs: NOW, entity: setup(), price: 148, failed: true, rung: '1hr' })
+    assert.match(io.note, /didn't complete — retrying at the next close/i)
     assert.equal(io.verdict, null)
+    assert.equal(io.rung, '1hr')
 
-    const bad = journalEntry('zone_trip', { nowMs: NOW, entity: setup(), price: 148, failed: true, failReason: 'truncated' })
+    const bad = journalEntry('candle', { nowMs: NOW, entity: setup(), price: 148, failed: true, failReason: 'truncated', tools: ['get_chart'] })
     assert.match(bad.note, /came back malformed/i)
+    assert.deepEqual(bad.tools, ['get_chart'], 'a failed read still cost what it pulled')
 
-    // The verb is the caller's — Hermes reassesses in position, Talos reads.
     assert.match(failNote('reassess', 'AER', null), /Went to reassess AER/)
 })
 
-test('assessment: the model read becomes the note, with the zone and verdict alongside', () => {
-    const e = journalEntry('zone_trip', {
-        nowMs: NOW, entity: setup(), price: 147.9, zone: setup().entry_zones[0],
-        raw: { verdict: 'stand_aside', read: 'In the zone but the tape is risk-off.' },
-    })
-    assert.equal(e.verdict, 'stand_aside')
-    assert.equal(e.note, 'In the zone but the tape is risk-off.')
-    assert.equal(e.zone_id, 'ez1')
-    assert.equal(e.axes, undefined, 'a monitor with no axes writes no axes key')
-})
-
-test('assessment: no read → the verdict speaks for itself', () => {
-    const e = journalEntry('expiry_review', { nowMs: NOW, entity: setup(), raw: { verdict: 'let_expire' } })
-    assert.match(e.note, /Nothing materialized/)
-    assert.equal(verdictFallbackNote('enter'), 'This finally looks ready — proposing an entry.')
-    // An off-menu verdict must still produce a readable line rather than an empty bubble.
-    assert.ok(journalEntry('zone_trip', { nowMs: NOW, entity: setup(), raw: { verdict: 'YOLO' } }).note.length)
-})
-
-test('assessment: axes ride along when the monitor has them (Hermes)', () => {
-    const e = journalEntry('zone_trip', {
-        nowMs: NOW, entity: setup(), raw: { verdict: 'wait', read: 'coiling' },
-        axes: { market: { score: 'neutral' }, patterns_seen: [] }, fetched: 'chart 15min',
-    })
-    assert.equal(e.axes.market.score, 'neutral')
-    assert.equal(e.fetched, 'chart 15min')
-})
-
-test('levelsLabel: exact levels print as ONE number, legacy bands still print as a range', () => {
-    assert.equal(levelsLabel(setup()).multi, true)
-    assert.equal(levelsLabel({ entry_zones: [{ lower: 312, upper: 312 }] }).text, '312',
-        'the shape everything is authored in now')
-    assert.equal(levelsLabel({ entry_zones: [{ lower: 311, upper: 313 }] }).text, '311–313',
-        'a document that really does hold a band says so')
-    assert.equal(levelsLabel({ entry_zones: [] }).text, '(no levels)')
-    assert.equal(levelsLabel(null).text, '(no levels)')
-})
-
-test('withJournal: appends under the cap, and a wake with no entry writes no $push', () => {
-    const entry = journalEntry('market_closed', { nowMs: NOW, entity: setup() })
-    const u = withJournal({ status: 'looking' }, entry, 50)
-    assert.deepEqual(u.$set, { status: 'looking' })
-    assert.deepEqual(u.$push['monitor_state.timeline'], { $each: [entry], $slice: -50 })
-
-    assert.equal(withJournal({ status: 'looking' }, null).$push, undefined)
-})
-
 test('a runaway read is described honestly, not as a broken reply', () => {
-    // 'runaway' means the model kept calling tools and never decided — a different failure from a
-    // malformed reply or a dead provider, and the journal is the only place it surfaces.
     const note = failNote('read', 'NVDA', 'runaway')
     assert.match(note, /kept digging/)
     assert.notEqual(note, failNote('read', 'NVDA', 'io'))
     assert.notEqual(note, failNote('read', 'NVDA', 'malformed'))
 })
 
-// ─── exit vs market_closed: two opposite events that used to share a word ──────
-// `closed` meant "the MARKET is shut, I'm holding off", and read to every human as "the POSITION
-// closed". The ambiguity survived long enough to mislead a reader of the docs, so the market one is
-// now spelled out and `exit` is the position one.
+test('the model read becomes the note, with the zone and verdict alongside', () => {
+    const e = journalEntry('guard', {
+        nowMs: NOW, entity: setup(), price: 147.9, zone: setup().entry_zones[0],
+        raw: { verdict: 'stand_aside', read: 'At the level but the tape is risk-off.' },
+    })
+    assert.equal(e.verdict, 'stand_aside')
+    assert.equal(e.note, 'At the level but the tape is risk-off.')
+    assert.equal(e.zone_id, 'ez1')
+})
+
+test('no read → the verdict speaks for itself, for every verdict on either menu', () => {
+    const e = journalEntry('expiry_review', { nowMs: NOW, entity: setup(), raw: { verdict: 'let_expire' } })
+    assert.match(e.note, /Nothing materialized/)
+    assert.equal(verdictFallbackNote('enter'), 'This finally looks ready — proposing an entry.')
+    for (const v of ['hold', 'move_stop', 'take_partial', 'exit_now', 'add_leg', 'wait', 'stand_aside', 'edit']) {
+        assert.ok(verdictFallbackNote(v).length > 10, v)
+    }
+    // An off-menu verdict must still produce a readable line rather than an empty bubble.
+    assert.ok(journalEntry('candle', { nowMs: NOW, entity: setup(), raw: { verdict: 'YOLO' } }).note.length)
+})
+
+test('an in-position row carries the proposal the card was built from', () => {
+    const e = journalEntry('candle', {
+        nowMs: NOW, entity: setup(), price: 160,
+        raw: { verdict: 'take_partial', read: 'Momentum faded into the target.', proposal: { leg: 't2', quantity: 5, size_pct: 50 } },
+    })
+    assert.deepEqual(e.proposal, { leg: 't2', quantity: 5, size_pct: 50 })
+})
+
+// ─── exit ─────────────────────────────────────────────────────────────────────
 
 test('exit says what happened, and does not promise a next check', () => {
-    // It is the LAST line on the timeline. A next_check_at would advertise a wake that never comes.
     const e = journalEntry('exit', {
         nowMs: NOW, entity: setup(), price: 151.45, closedReason: 'stop', pnl: -212.5,
     })
@@ -164,7 +133,6 @@ test('exit says what happened, and does not promise a next check', () => {
 })
 
 test('exit degrades rather than printing holes', () => {
-    // The reconciler can close without a price or a pnl (a broker close with no fill detail).
     const e = journalEntry('exit', { nowMs: NOW, entity: setup(), closedReason: 'manual' })
     assert.equal(e.price, null)
     assert.doesNotMatch(e.note, /null|undefined|NaN/)
@@ -175,13 +143,3 @@ test('an unknown closedReason is still reported, not swallowed', () => {
     const e = journalEntry('exit', { nowMs: NOW, entity: setup(), closedReason: 'liquidation' })
     assert.match(e.note, /liquidation/)
 })
-
-test('market_closed keeps the holding sentence, under its new name', () => {
-    const e = journalEntry('market_closed', { nowMs: NOW, entity: setup(), nextAt: null })
-    assert.equal(e.reason, 'market_closed')
-    assert.match(e.note, /Market's closed for AER/)
-})
-
-// The legacy-reason translation (closed → market_closed, zone_trip → guard_price …) is the CLIENT's:
-// MonitorJournal.jsx renders old entries under their current names. The server-side copy and its
-// tests went on 2026-09-16 — it had no production caller.

@@ -95,7 +95,7 @@ export function nextStatus(verdict) {
  *
  * Hermes and Talos each carried a byte-identical private copy, the second one commented "Mirrors
  * hermes._hasEditProposal" — which is an accurate label for a thing that should not have existed.
- * This is the shared arithmetic of the readiness ladder, exactly like clampGap and gradedGap above;
+ * This is the shared arithmetic of the readiness ladder, like the gates above;
  * what stays per-monitor is what an edit DOES to a call versus to a setup.
  */
 export function hasEditProposal(raw) {
@@ -104,18 +104,4 @@ export function hasEditProposal(raw) {
     const hasWhy     = typeof ep.why === 'string' && ep.why.trim() !== ''
     const hasChanges = ep.changes && typeof ep.changes === 'object' && Object.keys(ep.changes).length > 0
     return Boolean(hasWhy || hasChanges)
-}
-
-/**
- * Clamp the model's self-chosen gap (minutes) into the entity's cadence band.
- *
- * `fallback` is what a missing or junk request means, and the two monitors answer it differently on
- * purpose: a call falls back to the LAZY end (don't burn quota re-reading a quiet name), a setup to
- * the EAGER end (its cadence band is already horizon-scaled, so the floor is cheap). Passing it in
- * keeps that a stated choice rather than a discrepancy between two copies.
- */
-export function clampGap(requestedMin, { min, max, fallback = max }) {
-    const asked = Number(requestedMin)
-    if (!Number.isFinite(asked)) return fallback
-    return Math.min(Math.max(asked, min), max)
 }

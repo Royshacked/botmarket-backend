@@ -7,6 +7,7 @@ import { resolveVenue, resolveMode, isBindableVenue } from '../../services/venue
 import { normalizeSetup, setupReadiness, projectScenario, disarmedSetupPatch } from '../../services/setup.schema.js'
 import { resolveMainAccountId } from '../../services/agentUtils.js'
 import { cancelRestingEntryOrders } from '../../services/restingOrders.service.js'
+import { listJournal } from '../../services/journal.service.js'
 import { getDb }             from '../../providers/mongodb.provider.js'
 import { ENTITIES }          from '../../services/entity/entityCollection.js'
 
@@ -66,7 +67,7 @@ const POSITION_STATUSES = new Set(PAST_ENTRY)
 // are its EXECUTION PROJECTION, re-derived by normalizeSetup and re-stamped by Talos when a premise
 // arms. Both are written here so a re-draw leaves no stale projection behind.
 const PLAN_FIELDS = [
-    'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe', 'ladder', 'cadence',
+    'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe', 'ladder',
     'thesis', 'conditions', 'referenced_symbols', 'scenarios',
     'entry_zones', 'stop_zones', 'tp_zones', 'validity', 'quantity',
     'active_from', 'valid_until', 'event_risk', 'rr', 'conviction', 'entry_mode',
@@ -80,11 +81,12 @@ const PLAN_FIELDS = [
 // `scenarios` is here because targets and conditions now live inside it — but the ARMED scenario's
 // entry, stop and size are preserved from the current document (mergeInPositionScenarios), so the
 // promise above still holds literally.
-const LIGHT_FIELDS = ['thesis', 'conditions', 'validity', 'referenced_symbols', 'scenarios', 'tp_zones', 'valid_until', 'rr', 'conviction', 'cadence']
+const LIGHT_FIELDS = ['thesis', 'conditions', 'validity', 'referenced_symbols', 'scenarios', 'tp_zones', 'valid_until', 'rr', 'conviction']
 
 export const setupService = {
     generateSetup,
     getSetup,
+    getSetupJournal,
     listSetups,
     patchSetup,
     deleteSetup,
@@ -200,7 +202,7 @@ async function _insert(bound, userId) {
         // existence check. Empty means "never read"; the sweep falls back to the setup's own zones
         // until the first assessment writes a real set.
         monitor_state: {
-            next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {}, scenarios: {},
+            next_check_at: null, check_count: 0, memo: null, conditions: {}, scenarios: {},
             guards: [], last_read_at: null, woke_on: null, timeframe: null,
         },
         armed_zone_id:     null,
@@ -280,6 +282,11 @@ async function _update(id, bound, userId) {
         // The projection follows the ARMED premise while a position is open — not the first authored
         // one, which is what a bare re-normalise would have written.
         Object.assign($set, projectScenario({ scenarios: $set.scenarios }, cur.armed_scenario_id ?? null))
+        // A position of plain exits is DORMANT — nothing to judge, so Talos's loop never selects it.
+        // An edit may have just attached a condition to a leg; wake it and let the next tick decide
+        // (it re-parks itself if there is still nothing to read). docs/design/talos-per-candle.md
+        $set['monitor_state.dormant']       = false
+        $set['monitor_state.next_check_at'] = null
     }
     if (bound.chat_state !== undefined) $set.chat_state = bound.chat_state
 
@@ -293,13 +300,16 @@ async function _update(id, bound, userId) {
         // THE GUARDS DIE WITH THE PLAN THAT ARMED THEM. They are levels chosen for a specific map —
         // "wake me at 311.5 because the base is building under it" — and the map just changed, so
         // keeping them would watch prices that no longer mean anything while the new plan's own
-        // levels went unwatched. Emptying them is safe rather than blind: the sweep falls back to
-        // the setup's zones until the next read arms a real set.
+        // levels went unwatched. Emptying them is safe rather than blind: the first read after
+        // re-arming is immediate (`next_check_at: null` is due) and arms a real set.
         // The stored rung goes with it — the new plan may not even be on the same ladder.
         $set['monitor_state.guards']    = []
         $set['monitor_state.woke_on']   = null
         $set['monitor_state.timeframe'] = null
         $set['monitor_state.next_check_at'] = null
+        // …and the last read, which was about the old map. The first read of the new one is a
+        // first look, not a candle.
+        $set['monitor_state.last_assessment'] = null
         // Per-premise invalidation latches die with the plan that earned them: a re-drawn scenario
         // keeps its id, so without this a fresh premise would inherit the dead one's verdict and
         // never be watched again.
@@ -341,6 +351,16 @@ async function _update(id, bound, userId) {
 // `not_found` (404) — and the route could only ever answer 404 for both.
 async function getSetup(id, userId) {
     return crud.getOwnedStripped(id, userId)
+}
+
+/**
+ * One page of a setup's journal, newest first (services/journal.service). Ownership-guarded the
+ * same way the setup itself is: the rows carry no userId of their own.
+ */
+async function getSetupJournal(id, userId, { before = null, limit = 50 } = {}) {
+    const found = await crud.getOwned(id, userId, { projection: { id: 1 } })
+    if (!found.ok) return found
+    return { ok: true, rows: await listJournal(id, { before, limit }) }
 }
 
 async function listSetups(userId, { status = null, onError } = {}) {

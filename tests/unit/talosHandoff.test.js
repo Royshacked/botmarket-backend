@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { manageSetup, dismissSetupCard, disarmSetup, toExecutionProposal, FRACTION_PCT } from '../../services/talos.handoff.service.js'
+import { manageSetup, dismissSetupCard, disarmSetup, toExecutionProposal } from '../../services/talos.handoff.service.js'
 
 // The setup half of in-position management. Talos has written `position_state.pending_action` since
 // Phase 5; until this service there was nowhere to say yes, so a proposal died on the card.
@@ -53,13 +53,13 @@ function deps(db, over = {}) {
 
 // ── The dialect (pure) ────────────────────────────────────────────────────────
 
-test('toExecutionProposal: Talos speaks stop/fraction, the executor speaks new_stop/size_pct', () => {
+test('toExecutionProposal: Talos speaks stop/why and leg/size_pct, the executor speaks new_stop/size_pct', () => {
     assert.deepEqual(toExecutionProposal('move_stop', { stop: 118, why: 'structure' }),
         { new_stop: 118, ref: 'structure' })
-    assert.deepEqual(toExecutionProposal('take_partial', { fraction: 'half' }), { size_pct: 50 })
-    assert.equal(toExecutionProposal('take_partial', { fraction: 'third' }).size_pct, FRACTION_PCT.third)
-    assert.equal(toExecutionProposal('take_partial', { fraction: 'two_thirds' }).size_pct, FRACTION_PCT.two_thirds)
+    // The monitor resolved the watched target's own size into a share of the original position.
+    assert.deepEqual(toExecutionProposal('take_partial', { leg: 't2', quantity: 50, size_pct: 50 }), { size_pct: 50 })
     assert.deepEqual(toExecutionProposal('exit_now', null), {})
+    assert.deepEqual(toExecutionProposal('let_run', { new_tp: 141 }), {}, 'let_run is not a verb any more')
 })
 
 test('toExecutionProposal: a proposal already in the shared dialect passes through', () => {
@@ -70,7 +70,7 @@ test('toExecutionProposal: a proposal already in the shared dialect passes throu
 test('toExecutionProposal: a missing level resolves to null, never to a guess', () => {
     assert.equal(toExecutionProposal('move_stop', {}).new_stop, null)
     assert.equal(toExecutionProposal('move_stop', { stop: 'soon' }).new_stop, null)
-    assert.equal(toExecutionProposal('take_partial', { fraction: 'most_of_it' }).size_pct, null)
+    assert.equal(toExecutionProposal('take_partial', { fraction: 'third' }).size_pct, null, 'the old fraction dialect is not translated')
 })
 
 // ── Accept ────────────────────────────────────────────────────────────────────
@@ -92,8 +92,8 @@ test('move_stop accept → amends the native stop, clears the card, advances sto
     assert.equal(u.$set['position_state.phase'], 'breakeven')   // 118 == entry
 })
 
-test('take_partial accept → closes the fraction Talos named, in position units', async () => {
-    const db = fakeDb(inPosSetup({ pending_action: { verdict: 'take_partial', proposal: { fraction: 'third' } } }))
+test("take_partial accept → closes the watched leg's size, in position units", async () => {
+    const db = fakeDb(inPosSetup({ pending_action: { verdict: 'take_partial', proposal: { leg: 't1', quantity: 33.33, size_pct: 33.33 } } }))
     let closed = null
     const res = await manageSetup('setup_NVDA_1', 'u1', 'take_partial', deps(db, {
         closePosition: async (_b, _u, _a, _p, opts) => { closed = opts },
@@ -197,94 +197,11 @@ test('add_leg is refused with confirm_order — that leg is placed by confirming
     assert.equal(db.updates.length, 0, 'nothing was written — the pending ORDER is still the truth')
 })
 
-test('a BARE let_run is not an accept — it is a decision not to act', async () => {
-    // On the menu now, but only as the carrier for a new target. Without a level there is nothing
-    // to place: the position is already doing what a bare let_run describes.
-    const ps  = { pending_action: { verdict: 'let_run', proposal: null } }
+test('let_run is off the menu — moving a target out is an edit of the plan, not a monitor act', async () => {
+    const ps  = { pending_action: { verdict: 'let_run', proposal: { tp: 141 } } }
     const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run', deps(fakeDb(inPosSetup(ps))))
     assert.equal(res.ok, false)
-    assert.equal(res.reason, 'bad_proposal')
-})
-
-test('a let_run carrying a level moves the target OUT, and the wake level travels with it', async () => {
-    // Principle 3 of the TP window: the move has more in it than the plan assumed. The executor
-    // amends the resting limit; the ladder Talos wakes on is this desk's, and nothing else moves it.
-    let amended = null
-    const db = fakeDb(inPosSetup({
-        // Asked once at 128 already, window 2 wide, limit resting at 130.
-        targets: [{ price: 128, resting: 130, hit_at: '2026-08-15T10:00:00.000Z' }],
-        pending_action: { verdict: 'let_run', proposal: { tp: 141, why: 'measured move' } },
-    }))
-    const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run',
-        deps(db, { amendOrder: async (_b, _u, _a, _o, fields) => { amended = fields } }))
-
-    assert.equal(res.ok, true)
-    assert.equal(amended.limitPrice, 141, 'the resting limit follows')
-
-    const ladder = db.updates.map(u => u.$set?.['position_state.targets']).filter(Boolean).at(-1)
-    assert.deepEqual(ladder, [{ price: 139, resting: 141, hit_at: null }],
-        'breadth of 2 carried to the new level, and re-armed so the conversation happens again there')
-})
-
-test('on a staged ladder the window moves on the rung whose order is actually amended', async () => {
-    // The executor amends whichever tp order positionManage.workingExit finds; if the ladder guessed
-    // "nearest un-asked" instead, the two would part company — one rung's window would move while a
-    // different rung's order did, leaving a target pointing at a level nothing rests on.
-    const setup = inPosSetup({
-        targets: [
-            { price: 126, resting: 128, hit_at: null },   // nearest un-asked — NOT the resting order
-            { price: 128, resting: 130, hit_at: null },   // the one at 130, which is what is working
-        ],
-        pending_action: { verdict: 'let_run', proposal: { tp: 140 } },
-    })
-    const db  = fakeDb(setup)
-    const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run', deps(db))
-
-    assert.equal(res.ok, true)
-    const ladder = db.updates.map(u => u.$set?.['position_state.targets']).filter(Boolean).at(-1)
-    assert.deepEqual(ladder, [
-        { price: 126, resting: 128, hit_at: null },
-        { price: 138, resting: 140, hit_at: null },
-    ], 'the 130 rung moved, breadth intact; the untouched rung is left exactly alone')
-})
-
-test('a failed amend moves no ladder — the window never drifts away from the order', async () => {
-    // With nothing resting there is nothing to amend, so the executor fails. The ladder must not
-    // move anyway: a window pointing at a level no order sits on is worse than an unmoved one.
-    const setup = inPosSetup({
-        targets: [{ price: 128, resting: 130, hit_at: null }],
-        pending_action: { verdict: 'let_run', proposal: { tp: 140 } },
-    }, { exitOrders: [] })
-    const db  = fakeDb(setup)
-    const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run', deps(db))
-
-    assert.equal(res.ok, false)
-    assert.equal(db.updates.some(u => u.$set?.['position_state.targets']), false)
-})
-
-test('a manual book has no orders to read, so the ladder moves on the rung under discussion', async () => {
-    // The fallback path: manual places nothing, so there is no amended level to match against — but
-    // the user is still being told to move their target, and the ladder has to follow.
-    const setup = inPosSetup({
-        targets: [{ price: 128, resting: 130, hit_at: null }],
-        pending_action: { verdict: 'let_run', proposal: { tp: 140 } },
-    }, { broker: 'manual', exitOrders: [] })
-    const db  = fakeDb(setup)
-    const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run', deps(db))
-
-    assert.equal(res.manual, true)
-    const ladder = db.updates.map(u => u.$set?.['position_state.targets']).filter(Boolean).at(-1)
-    assert.deepEqual(ladder, [{ price: 138, resting: 140, hit_at: null }])
-})
-
-test('a let_run that cancels the target outright is an action, not a missing level', async () => {
-    let cancelled = false
-    const ps = { pending_action: { verdict: 'let_run', proposal: { cancel_tp: true } } }
-    const res = await manageSetup('setup_NVDA_1', 'u1', 'let_run',
-        deps(fakeDb(inPosSetup(ps)), { cancelOrder: async () => { cancelled = true } }))
-
-    assert.equal(res.ok, true)
-    assert.equal(cancelled, true)
+    assert.equal(res.reason, 'bad_action')
 })
 
 test('an off-menu verb is refused before anything is loaded', async () => {

@@ -167,7 +167,7 @@ export function blueprintProblems(bp, normalized) {
     if (bp?.trade_mode && normalized.trade_mode !== bp.trade_mode) {
         problems.push(`Unknown lens "${bp.trade_mode}" — opened as ${normalized.trade_mode}.`)
     }
-    // Same for the horizon and the timeframe, both of which drive the monitor's cadence and ladder.
+    // Same for the horizon and the timeframe, which drives the monitor's ladder and so its pace.
     if (bp?.type && !normalized.type)           problems.push(`Unknown horizon "${bp.type}" — pick one.`)
     if (bp?.timeframe && !normalized.timeframe) problems.push(`Unknown timeframe "${bp.timeframe}" — pick one.`)
 
