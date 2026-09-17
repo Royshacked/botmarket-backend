@@ -20,6 +20,7 @@
  */
 
 import { normSymbol, baseSymbol } from './brokerSymbol.service.js'
+import { parseTimeframe } from './timeframe.service.js'
 
 const ET   = 'America/New_York'
 const OPEN  = 9 * 60 + 30   // 09:30 in minutes  (equity RTH open)
@@ -400,3 +401,138 @@ export function sessionStartMs(symbol, assetClass, date = new Date()) {
     return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
 }
 
+
+// ─── Candle closes ─────────────────────────────────────────────────────────────
+//
+// Talos reads on every candle close of the rung it is watching (docs/design/talos-per-candle.md),
+// so "when does the next `rung` bar close for this instrument" has to have exactly one answer in
+// the app. It lives here, beside the gate, because it IS session math: a 4hr bar that would close
+// at 20:00 ET closes at 16:00 when the equity session does, and a daily bar closes when the
+// session closes, not at midnight.
+//
+// Alignment follows the providers' bars: intraday rungs are clock-aligned (multiples of the width
+// from midnight — ET for session-bound instruments, UTC for crypto), and a bar cut short by the
+// session close closes WITH the session. Daily/weekly/monthly bars close at the session's daily
+// close (equity 16:00 ET, futures/forex 17:00 ET, crypto 00:00 UTC), on the last trading day of
+// the week/month respectively. Holidays are not excluded — same approximation as the gate.
+
+/** ET daily close, in minutes from midnight, per session. Crypto closes its day at UTC midnight. */
+const DAILY_CLOSE_MIN = { equity: CLOSE, futures: FUT_DAY_CLOSE, forex: FX_OPEN_CLOSE }
+
+/** ET calendar parts of an instant. */
+function _etParts(ms) {
+    const et = _etWall(new Date(ms))
+    return { y: et.getFullYear(), m: et.getMonth(), d: et.getDate() }
+}
+
+/** ET wall-clock (calendar date + minutes from midnight) → epoch ms. */
+function _etMs(y, m, d, mins) {
+    const guess = Date.UTC(y, m, d, Math.floor(mins / 60), mins % 60)
+    return guess - tzOffsetMs(new Date(guess), ET)
+}
+
+/** Day of week of an ET calendar date. */
+const _dow = (y, m, d) => new Date(y, m, d).getDay()
+const _isWeekday = (y, m, d) => { const w = _dow(y, m, d); return w >= 1 && w <= 5 }
+
+/**
+ * Epoch ms of the next `rung` candle close for an asset, strictly after `nowMs`. Unknown rung →
+ * null, so the caller owns the fallback. Pure given `nowMs`.
+ *
+ * @param {string} symbol
+ * @param {string} [assetClass]
+ * @param {string} rung         '5min' … '4hr' | 'day' | 'week' | 'month'
+ * @param {number} [nowMs]
+ * @returns {number|null}
+ */
+export function nextCandleCloseMs(symbol, assetClass, rung, nowMs = Date.now()) {
+    const spec = parseTimeframe(rung)
+    if (!spec || !rung) return null
+    const session = sessionFor(symbol, assetClass)
+
+    switch (spec.timeSpan) {
+        case 'minute': return _nextIntradayClose(symbol, assetClass, session, spec.multiplier, nowMs)
+        case 'hour':   return _nextIntradayClose(symbol, assetClass, session, spec.multiplier * 60, nowMs)
+        case 'day':    return _nextDailyClose(session, nowMs)
+        case 'week':   return _nextWeeklyClose(session, nowMs)
+        case 'month':  return _nextMonthlyClose(session, nowMs)
+        default:       return null
+    }
+}
+
+function _nextIntradayClose(symbol, assetClass, session, widthMin, nowMs) {
+    const widthMs = widthMin * 60_000
+    // A shut market has no bar in progress: the first bar of the next session is the one closing.
+    const start = isAssetOpen(symbol, assetClass, new Date(nowMs))
+        ? nowMs
+        : getMarketStatus(symbol, assetClass, new Date(nowMs)).nextOpenMs
+
+    // Clock-aligned from midnight in the instrument's zone, strictly after `start`.
+    let midnight
+    if (session === 'crypto') {
+        const t = new Date(start)
+        midnight = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate())
+    } else {
+        const { y, m, d } = _etParts(start)
+        midnight = _etMs(y, m, d, 0)
+    }
+    const candidate = midnight + (Math.floor((start - midnight) / widthMs) + 1) * widthMs
+    if (session === 'crypto') return candidate
+
+    // The session may shut before the clock boundary — then the bar closes with the session. The
+    // gate is the one place that knows every session's close, so ask it rather than repeat it.
+    for (let t = start + 60_000; t < candidate; t += 60_000) {
+        if (!isAssetOpen(symbol, assetClass, new Date(t))) return t
+    }
+    return candidate
+}
+
+function _nextDailyClose(session, nowMs) {
+    if (session === 'crypto') {
+        const t = new Date(nowMs)
+        return Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate() + 1)
+    }
+    const closeMin  = DAILY_CLOSE_MIN[session]
+    const { y, m, d } = _etParts(nowMs)
+    for (let dd = 0; dd < 8; dd++) {
+        if (!_isWeekday(y, m, d + dd)) continue
+        const at = _etMs(y, m, d + dd, closeMin)
+        if (at > nowMs) return at
+    }
+    return null   // unreachable: eight days always hold a weekday close after now
+}
+
+function _nextWeeklyClose(session, nowMs) {
+    if (session === 'crypto') {
+        // A crypto week closes at Monday 00:00 UTC.
+        const t = new Date(nowMs)
+        const dow = t.getUTCDay()
+        const daysToMonday = ((8 - dow) % 7) || 7
+        return Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate() + daysToMonday)
+    }
+    const closeMin  = DAILY_CLOSE_MIN[session]
+    const { y, m, d } = _etParts(nowMs)
+    for (let dd = 0; dd < 8; dd++) {
+        if (_dow(y, m, d + dd) !== 5) continue
+        const at = _etMs(y, m, d + dd, closeMin)
+        if (at > nowMs) return at
+    }
+    return null
+}
+
+function _nextMonthlyClose(session, nowMs) {
+    if (session === 'crypto') {
+        const t = new Date(nowMs)
+        return Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 1)
+    }
+    const closeMin = DAILY_CLOSE_MIN[session]
+    const { y, m } = _etParts(nowMs)
+    for (let mm = 0; mm < 2; mm++) {
+        // Walk back from the month's last calendar day to its last weekday.
+        let d = new Date(y, m + mm + 1, 0).getDate()
+        while (!_isWeekday(y, m + mm, d)) d--
+        const at = _etMs(y, m + mm, d, closeMin)
+        if (at > nowMs) return at
+    }
+    return null
+}
