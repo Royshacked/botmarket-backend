@@ -916,9 +916,9 @@ export function allowedVerdicts(w) {
  * sum, and `fill_price` their SIZE-WEIGHTED average.
  *
  * The average is the load-bearing part. `rMultiple` measures from `entry.fill_price`, and it feeds
- * `positionGate`'s adverse and breakeven tiers plus `computeMetrics`' mae/mfe — so a plain mean of
- * the leg prices, or simply keeping the first fill, would misreport R on every wake of every scaled
- * position. Weight by size or the number is fiction.
+ * `computeMetrics`' R / mae / mfe — what every in-position read and the UI are handed — so a plain
+ * mean of the leg prices, or simply keeping the first fill, would misreport R on every read of
+ * every scaled position. Weight by size or the number is fiction.
  *
  * A no-op for a single-leg position: one leg weighted by its own size is that leg's price, which is
  * why this can land before per-leg execution exists.

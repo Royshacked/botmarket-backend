@@ -759,8 +759,8 @@ test('computeRR still quotes the widest stop against the nearest target', () => 
 // ─── Entry legs — the arithmetic scaling in rests on ──────────────────────────
 // A scaled position is several fills at different prices, so `entry` becomes an aggregate. This
 // lands BEFORE per-leg execution because everything downstream measures from `fill_price`:
-// rMultiple feeds positionGate's adverse and breakeven tiers and computeMetrics' mae/mfe, so an
-// average that is wrong misreports R on every wake of every scaled position.
+// rMultiple feeds computeMetrics' R / mae / mfe, which every in-position read is handed, so an
+// average that is wrong misreports R on every read of every scaled position.
 
 test('one leg is the average of one — today\'s behaviour, unchanged', () => {
     // The whole reason this is safe to ship before the rest of scaling in.
