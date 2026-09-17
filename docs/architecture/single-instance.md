@@ -14,7 +14,7 @@ This document says what is safe, what is not, and what it would take to lift the
 
 Two different things are per-process:
 
-1. **The loops.** `server.js` starts twelve background loops. They now run behind a Mongo lease
+1. **The loops.** `server.js` starts thirteen background loops. They now run behind a Mongo lease
    (see "Enforcement" below), so a second instance starts none of them — but the lease bounds the
    damage rather than making the loops safe to duplicate.
 2. **In-memory state that is load-bearing.** ~40 module-level `Map`s and TTL caches. Most are pure

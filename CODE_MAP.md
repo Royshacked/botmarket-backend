@@ -38,6 +38,18 @@ api/
     ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now")
     exitOrders.service.js     in-position exit (re)arming — through buildExitOrder, so the basis offset is
                               applied once, by the one helper, on this path as on placement
+  mentor/                 Mentor chat SSE /api/mentor/stream — the trader's desk (agents/mentor)
+  setups/                 the `setup` kind — Mentor's artifact, Talos's charge  /api/setups/*
+    setups.service.js         Generate (the readiness gate + the server-stamped binding: mode /
+                              broker / accounts / venue / event_risk) and owner-scoped CRUD over
+                              kind:'setup' in `entities`, answering in the shared crud's shape. An
+                              in-position edit touches CONTEXT only and clears monitor_state.dormant
+                              (a condition may have been added to a live leg); a pre-position edit
+                              clears last_assessment so the next read is a first_look. A live
+                              position is delete-locked. Routes: generate · blueprint · validate ·
+                              list/get · :id/journal (Talos's rows, newest first, paged by `before`)
+                              · :id/action (talos.handoff) · :id/disarm (cancel a resting limit) ·
+                              patch · delete
   portfolio/              Portfolio Agent + review    /api/portfolio/*
                           A book is NOT a document — it exists as the items carrying its
                           portfolioId — so its CRUD reads are shaped by hand rather than by
@@ -317,10 +329,13 @@ services/
   timeframe.service.js  brokerSymbol.service.js
   market.service.js       THE market-hours engine: one class-aware gate (isAssetOpen), one status
                           read (getMarketStatus → open/nextOpenMs/session/phase), sessionPhase +
-                          sessionStartMs. Four calendars — crypto 24/7 · forex 24/5 · CME index
-                          futures near-24/5 · US equity RTH. sessionFor is the ONE classifier
-                          (explicit asset_class first, symbol heuristic second). NO holidays or
-                          half-days, and no non-US exchange
+                          sessionStartMs, and nextCandleCloseMs(symbol, assetClass, rung, nowMs) —
+                          the ONE place "when does the next `rung` candle close for this instrument"
+                          is computed (session-aligned intraday, session close for `day`, first close
+                          of the next session when shut), which is Talos's whole schedule. Four
+                          calendars — crypto 24/7 · forex 24/5 · CME index futures near-24/5 · US
+                          equity RTH. sessionFor is the ONE classifier (explicit asset_class first,
+                          symbol heuristic second). NO holidays or half-days, and no non-US exchange
   lifecycle.service.js    startLoop(name, loop) / stopLoops() / loopNames() / markDraining() —
                           the registry that makes shutdown writable: every background loop is
                           started through it and stopped in reverse, one bad stop() never strands
@@ -498,7 +513,7 @@ services/
                             builders here have callers only under archive/ and emit nothing.
                             entry_confirm carries a `note` (passed_earlier | off_hours | null) for scheduled entries
                             A card WITHOUT `actions` is a statement, not a request (ran_away /
-                            invalidated_fyi / let_run) — no buttons, no pending lifecycle
+                            invalidated_fyi) — no buttons, no pending lifecycle
   positionManage.service.js THE HANDS of in-position management, shared by every desk: resolve the
                             broker links, fan the accepted action across ALL accounts (amend stop/TP,
                             partial/full close), write position_state once. Kind-BLIND — the caller
@@ -506,11 +521,24 @@ services/
                             setup they are the same doc, and the split exists for kinds where they
                             are not.
                             Execution contract: move_stop{new_stop} take_partial{size_pct}
-                            let_run{new_tp|cancel_tp} exit_now{}. Each desk translates its own dialect in
+                            let_run{new_tp|cancel_tp} exit_now{}. The contract keeps let_run (a
+                            queued row written before 2026-09-17 may still carry it) but no live
+                            desk proposes it any more — Talos's menu dropped it: moving a target is
+                            an edit of the plan, not a monitor act. Each desk translates its own dialect in
   talos.handoff.service.js  Mentor's half: POST /api/setups/:id/action → accept (move_stop|take_partial|
-                            exit_now) or dismiss. Translates Talos's {stop,why}/{fraction} into the
-                            contract above. `add_leg` → `confirm_order` (it is a parked ORDER, not a
-                            manage action — accepting here would place the size twice)
+                            exit_now) or dismiss. Translates Talos's {stop,why}/{leg,quantity,size_pct}
+                            into the contract above — the partial's size is the WATCHED TARGET's own,
+                            resolved by the monitor, never a fraction the model chose. `add_leg` →
+                            `confirm_order` (it is a parked ORDER, not a manage action — accepting
+                            here would place the size twice)
+  journal.service.js        the monitor journal's ONE owner — appendJournal / listJournal over the
+                            `journal` collection (index {entityId, at:-1}; newest first, cursor on
+                            `at`; no cap, no TTL). Left the entity document 2026-09-17: at one row per
+                            candle `monitor_state.timeline[]` could neither ride the envelope every
+                            list fetch carries nor keep its cap of 50. Writers: dueLoop.makePersist
+                            (the monitor's row) and entityRepo.finalizeClose (the close line);
+                            reader: GET /api/setups/:id/journal. monitoring/monitorJournal.js builds
+                            the row, this file stores it
   pendingAction/            the OFF-HOURS QUEUE (docs/architecture/off-hours-queue.md). RULE: nothing
                             executes off-hours, paper included — a decision confirmed while the venue
                             is shut is queued, not fired and not lost.
@@ -576,34 +604,63 @@ monitoring/
    assess.shared.js because Talos imports them.)
   talos.monitor.service.js  Talos — the Mentor-setup loop (own tick, kind:'setup'). TWO BRAINS, ONE LOOP:
                             pre-entry readiness, past-entry management (_managePosition). THE LOOP ONLY:
-                            wake handlers, scheduling, writes and the injectable IO. Pre-entry cascade,
-                            cheapest-first: (1) the arithmetic SCENARIO gate — which PREMISE price
-                            reached, not merely which zone; (2) the validity gate (close, not touch —
-                            it can only KILL: broke/drifting); (3) the full read, which runs on a zone
-                            hit, a fired price GUARD, near expiry, or a setup never read before. A
-                            guard-woken read with no armed zone may only `edit` (re-map) or wait —
-                            never enter, because outside every zone nothing is armed: no zone id, no
-                            leg size, no fill anchor. Talos NEVER executes — every verdict is a card
-                            the user confirms
+                            wake handlers, scheduling, writes and the injectable IO. THE RULE (rebuilt
+                            2026-09-17, docs/design/talos-per-candle.md): a model call only on a
+                            condition the user wrote in words. Pre-entry that is always true, so EVERY
+                            wake reads — on each candle close of the rung the model chose, and ahead of
+                            it when a price guard fires; reason = expiry_review | guard | first_look |
+                            candle. Cheap and free come first: the SCENARIO gate (which PREMISE price
+                            reached — a fired guard resolves to its own zone, _hitFromGuard, because
+                            the spot check a minute later may have missed the crossing) and the
+                            validity gate (close, not touch — it can only KILL). In position it reads
+                            only if a leg is WATCHED (setup.schema.watchedLegs); a position of plain
+                            levels is stamped monitor_state.dormant and excluded at the QUERY. The
+                            verdict is held to allowedVerdicts(watched); a take_partial is sized from
+                            the leg, an add_leg needs a watched pending leg actually printing. No
+                            cadence: next_check_at = nextCandleCloseMs(rung) + READ_LAG_MS (30s). No
+                            reads off-hours (the fill stamp and the expiry review are the exemptions).
+                            Talos NEVER executes — every verdict is a card the user confirms
+  guardSweep.service.js     Talos's tier 0 — the FREE wake. Every config.guardSweepIntervalMs it prices
+                            every open-market setup once (quoteMapForSymbols, one call for the whole
+                            set) and tests each armed guard {price, direction, means} against the
+                            RANGE since the last sweep (guardFires) — a level touched and left between
+                            two looks still fires. Writes nothing but `woke_on` + next_check_at = now;
+                            the loop's wake reads what fired. Skips shut markets. The time term and
+                            its backstop went 2026-09-17 — the candle close is the timer
+  monitorJournal.js         the journal ROW: journalEntry(reason, opts) is the one builder for every
+                            line — a read (first_look | candle | guard | expiry_review | limit_order |
+                            limit_disarmed) and the code-written events (entry | invalidation | exit |
+                            pre_active). Carries rung, price, verdict, note, the conditions checked,
+                            the tools pulled, the guard that fired and the guards armed now. Non-read
+                            wakes write nothing. Storage is services/journal.service.js
   monitorSchedule.util.js   the persisted cadence entry.monitor and exit.monitor SHARE — poll/timeout/
                             min/idle constants, the ISO next-check stamp (floored at a minute) and the
                             sleep-until-open arithmetic. Two loops that must agree on when a document
-                            is due; they used to carry a copy each. Talos is NOT a caller (its cadence
-                            is a judgment its model writes down, through the journal)
+                            is due; they used to carry a copy each. Talos is NOT a caller (it has no
+                            cadence — its next wake is a candle close)
   talos.gates.js            its PURE tier, split out 2026-09-15: the zone/scenario gates, guard
-                            resolution, the in-position arithmetic (rMultiple/metrics/positionGate),
-                            the validity + breach machinery, and the condition/cost ledger. No IO, no
-                            clock beyond an explicit nowMs — which is what makes it free to run on
-                            every wake and decide whether one is worth paying a model for
+                            resolution (_hitFromGuard), the in-position arithmetic (rMultiple /
+                            computeMetrics — R, MAE, MFE for the read and the UI), the validity + breach
+                            machinery, and the condition/cost ledger (normalizeConditionResults,
+                            latchPatch, costPatch). No IO, no clock beyond an explicit nowMs.
+                            positionGate / reviewDue went 2026-09-17 — nothing decides WHETHER to read
+                            any more, only whether a leg is watched
   talos.assess.js           the setup read (readiness + in-position). Conditions are PROSE with a
                             weight/mode, graded one entry per declared id — the model goes and checks
                             them with the shared assessTools kit rather than being pre-fetched at.
-                            TIMEFRAME IS THE MODEL'S CHOICE: it returns `next_timeframe` (clamped to
-                            the setup's ladder, stored on monitor_state.timeframe) and the next read
-                            OPENS there — openingRung. There is no next_check_min: the rung IS the
-                            pace (_nextCheckAt derives the gap from it, then clamps to cadence), so
-                            the two can never contradict each other. Ladder floors at 5min (1min is
-                            402 off-plan at FMP)
+                            EVERY READ OPENS CHEAP: candles on its rung + reference quotes + memo +
+                            what it armed, NO IMAGE (openingContext); the chart, indicators, structure
+                            reads, correlations and the web are TOOLS it calls when the numbers cannot
+                            answer, and _runRead returns the calls it made (_tools) for the journal
+                            row. One prompt core (_CORE) with a pre-entry and an in-position tail; the
+                            in-position menu line is generated from allowedVerdicts so the prompt
+                            never offers a verdict the monitor would refuse. TIMEFRAME IS THE MODEL'S
+                            CHOICE: it returns `next_timeframe` (clamped to the setup's ladder, stored
+                            on monitor_state.timeframe) and the next read OPENS there — openingRung —
+                            at that candle's close. There is no next_check_min and no cadence: the
+                            rung IS the pace, so the two can never contradict each other. Ladder floors
+                            at 5min (1min is 402 off-plan at FMP). Model default Sonnet, thinking off
+                            (assessRouting) — the saving was the image, not the model
   dueLoop.js                the wake-up chore every monitor is built on: find what is due, CLAIM it
                             against a lease, check it under a timeout. THE LEASE IS THE SUBTLE PART —
                             withTimeout ABANDONS a slow check but cannot cancel it, so without one the
@@ -718,7 +775,9 @@ tests/
   unit/                     node:test unit tests — run by `npm test`
   test.*.js                 MANUAL harnesses (hit live broker/DB) — NOT run by npm test
 scripts/                    ops one-offs — none run by `npm test`. Kinds: migrations
-                            (migrate-*, one-shot idempotent collection/field moves), repairs
+                            (migrate-*, one-shot idempotent collection/field moves — migrate-journal
+                            moved monitor_state.timeline[] into the journal collection, mapping the
+                            legacy reasons and dropping quiet-wake lines; run once after deploy), repairs
                             (repair-*, drop-ghost-*, dry-run-by-default data fixes), diagnostics
                             (check-*, verify-*, fmp-candle-parity — read-only), admin (set-admin-role,
                             create-admin-user — the latter rides userService.createUser), and dev
@@ -814,7 +873,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 
 ## Deployment shape
 
-ONE process, and ENFORCED since 2026-08-18. `server.js` starts twelve background loops through
+ONE process, and ENFORCED since 2026-08-18. `server.js` starts thirteen background loops through
 `startLoop` (`services/lifecycle.service.js`), behind a Mongo lease
 (`services/instanceLock.service.js`): the process that wins it starts them, a second process starts
 none and says so while still serving HTTP, and losing the lease mid-flight stands them back down.

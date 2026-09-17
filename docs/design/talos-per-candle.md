@@ -1,9 +1,11 @@
 # Talos per-candle — build plan
 
-**STATUS: BUILT 2026-09-17** (phases 0–6; the desk docs are updated in a later session — until
-then THIS file is the contract). Supersedes the wake model in
-[desks/talos-guards.md](../desks/talos-guards.md) (the three-tier escalation and the time term on
-guards) and the in-position gate in [desks/mentor-talos.md](../desks/mentor-talos.md).
+**STATUS: BUILT 2026-09-17** (phases 0–6). The desk docs caught up the same day: the monitor
+CONTRACT is now the Talos section of [desks/mentor-talos.md](../desks/mentor-talos.md#talos), and
+this file stays where it is as the BUILD RECORD — the plan, the decisions, and what the build
+settled differently. It superseded the wake model in [desks/talos-guards.md](../desks/talos-guards.md)
+(the three-tier escalation and the time term on guards) and the in-position gate in mentor-talos.md;
+both carry SUPERSEDED callouts pointing here.
 
 **What the build settled beyond the plan:**
 
@@ -394,13 +396,17 @@ Frontend: `TalosWatch.jsx/.scss` · `PositionPanel.jsx/.scss` · `MonitorJournal
 `tiers` · `lastWake` · `ZONE_STANDING` · `conditionRows` · `readiness` · `readEntry` legacy
 branches · `guardLabel`'s `after_min` branch · `let_run` in `setupManage.js`.
 
-## Docs to update (separate session)
+## Docs updated (2026-09-17, same day)
 
-`desks/talos-guards.md` (tiers, time term, the journal section) · `desks/mentor-talos.md` (the
-in-position gate, the TP window history stays as history) · `desks/trade-pipeline.md` ·
-`architecture/monitoring.md` · `architecture/entity-model.md` (journal leaves the document) ·
-`APP_SPEC.md` · `CODE_MAP.md` · `README.md` flow diagram · this file → moves to `desks/` as the
-contract once built.
+`desks/mentor-talos.md` (rewritten: the Talos section is the contract; the TP window stays as
+history) · `desks/talos-guards.md` (SUPERSEDED callouts on the time term, the guard set, the tiers,
+the journal, the kept list; open items 1/2/4/6 closed) · `desks/trade-pipeline.md` (the cascade,
+invariants, partials, shared services, in-position as built) · `architecture/monitoring.md` ·
+`architecture/entity-model.md` (journal leaves the document; `setup` payload row) · `APP_SPEC.md`
+(the setup_manage card, the `journal` collection, the who-watches note) · `CODE_MAP.md` (talos.*,
+guardSweep, monitorJournal, journal.service, market.service, api/setups) · `README.md` (flow
+diagram, thirteen loops). This file stays in `design/` as the build record rather than moving to
+`desks/` — the contract is mentor-talos.md, and two copies would diverge.
 
 ## Commit order
 

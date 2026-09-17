@@ -1,8 +1,19 @@
 # Guards, not zones — Talos's wake contract
 
-**BUILT 2026-08-22.** This is the contract. It replaced the zone gate described in
+**BUILT 2026-08-22.** It replaced the zone gate described in
 [mentor-talos.md](mentor-talos.md), and it changed what **Mentor authors** — both halves landed
 together, because a monitor reading a shape nobody writes is worse than either half alone.
+
+> **PARTLY SUPERSEDED 2026-09-17 — the per-candle build** ([design/talos-per-candle.md](../design/talos-per-candle.md);
+> the current monitor contract is the Talos section of [mentor-talos.md](mentor-talos.md#talos)).
+> What this doc got right and what still stands: **exact prices, not bands; a guard tested against
+> the RANGE since the last sweep; a crossing carries a meaning; the exit asymmetry and the
+> always-resting conditional stop; Mentor authors prices and conditions in words.** What it got
+> wrong, and the per-candle build replaced: the **time term** on a guard, the **backstop**, the
+> **three-tier escalation** and the **embedded, capped journal**. The timer was the problem in
+> disguise — a guard is now `{ price, direction, means }` and nothing else, because Talos is read on
+> **every candle close of its rung**, and the candle is the timer. Sections marked **SUPERSEDED**
+> below say what changed; the rest is current.
 
 The one-line version: **a price band was never the point. It was a workaround for looking at price
 too rarely, and for looking at only one price when we looked.** Fix the sampling and the band has no
@@ -57,6 +68,13 @@ After both, a band communicates nothing a price doesn't — and it actively lies
 
 ## The load-bearing decision: the LLM writes its own wake condition
 
+> **SUPERSEDED IN PART (2026-09-17).** The half that stands: every read ends by naming the PRICE
+> at which it wants to be disturbed ahead of schedule, and code evaluates it for free. The half that
+> went: the time term and the conjunction. "The model runs only when a guard fires" is no longer
+> true — **the model runs on every candle close of the rung it chose (`next_timeframe`)**, and a
+> guard is the interrupt that brings the read forward. The prompt now says it outright: *do not arm
+> a guard for what the next candle will show you anyway.* What follows is the original reasoning.
+
 Every read ends by naming the condition under which it wants to be disturbed. Code evaluates that
 condition on every poll, for free. **The model runs only when it fires.**
 
@@ -90,6 +108,15 @@ and a long timer at 20 away, tight guard and a short timer at 1 away — which i
 
 ### The guard SET — three kinds, and the third is not optional
 
+> **SUPERSEDED (2026-09-17).** Only the second kind survives. The conditional kind and the backstop
+> both existed to answer "when do I look if price does nothing" — and the candle close answers it.
+> A setup sitting 20 away for three weeks is read once per candle of its rung (a swing on `day`
+> reads once a day, which is what the backstop was trying to be), and earnings, the sector and
+> `valid_until` are seen on those reads. `BACKSTOP`, `after_min` and `and_price_above` are deleted;
+> `clampGuards` drops any guard without a finite price, drops one that is ALREADY TRUE at arm time
+> (a paid loop with no exit otherwise; a touch is exempt), infers a missing direction from where
+> price is, and caps the set at `MAX_GUARDS` (6).
+
 A read emits several guards, not one, because a pure conjunction can starve. If every guard carries
 a price term, a setup whose price sits 20 away for three weeks is **never examined** — and meanwhile
 earnings came and went, the sector rolled over and `valid_until` passed. Those are exactly the
@@ -120,6 +147,15 @@ honest.
 ---
 
 ## Escalation — cheapest thing that can answer the question
+
+> **SUPERSEDED (2026-09-17).** Two tiers, not three, and tier 1 was never built as a separate
+> read — it dissolved INTO the read. Tier 0 is the guard sweep, unchanged and still free. The read
+> **opens with numbers, not a picture**: the candles on its rung, the reference quotes, its memo and
+> what it armed. The chart, the indicators, the structure reads, the correlations and the web are
+> TOOLS it calls when the numbers cannot answer, and every call is recorded on the journal row. So
+> "tier 1 → tier 2" is now the model's own decision to pull a tool, made per read against a prompt
+> that tells it every call is money — the exit rule the open problem below asked for is that the
+> escalation is a tool call, not a second read, and its cost shows on the row.
 
 Three tiers. Each is allowed to answer and stop; only the last one is expensive.
 
@@ -233,6 +269,19 @@ case structurally impossible rather than a warning in the UI.
 ---
 
 ## The journal
+
+> **SUPERSEDED (2026-09-17).** The journal left the document. It is its own collection (`journal`,
+> `services/journal.service.js`), uncapped, newest first, one row per READ, paged through
+> `GET /api/setups/:id/journal`. Non-read wakes write nothing — a shut market, an idle poll — so the
+> rule below ("a free poll never writes") is now enforced by construction rather than by restraint.
+> The row is `{ at, reason, price, rung, verdict, note, conditions[{id, met, note}], tools[],
+> fired?, armed[], proposal?, warning?, next_check_at }`. Gone: `tier` (every read is a full read
+> and the tools it pulled say what it cost), `skipped_since_last` (there are no timer wakes to
+> skip), the `after_min` entries in `armed`, and the `market_closed` line. `reason` ∈ `first_look ·
+> candle · guard · expiry_review · limit_order · limit_disarmed · entry · invalidation · exit ·
+> pre_active` — `guard_price` became `guard`, `guard_time` and `backstop` are gone with the timer.
+> `scripts/migrate-journal.mjs` moved the old timelines once. Rendered by `TalosJournal.jsx`
+> (`MonitorJournal.jsx` / `TalosWatch.jsx` are deleted).
 
 One append-only first-person log per entity (`monitor_state.timeline`, `$slice: -50`), shared with
 Hermes and rendered by `MonitorJournal.jsx` / `TalosWatch.jsx`. **The entry shape survives.** What
@@ -361,6 +410,13 @@ estimate must not leave a live trade unwatched); `TF_RUNGS` + the ladder; `posit
 / `breakeven` arithmetic as a tier-0 guard the model does not have to author; `armed_zone_id` for
 multi-leg entries; `rangeProblems`; the whole readiness gate.
 
+> **Two of those went after all (2026-09-17).** `CADENCE_BY_TYPE` and the whole `cadence` field:
+> the rung IS the pace, clamped to the setup's stored ladder (`usableLadder`), and the next wake is
+> `nextCandleCloseMs(rung) + READ_LAG_MS`. `positionGate` and its `adverse` / `scale_out` /
+> `breakeven` tiers: a position is read on every candle close if a leg is watched and not at all if
+> none is (`watchedLegs`, dormant), so there is no cheap gate to decide WHETHER to read. `TF_RUNGS`,
+> the ladder, `armed_zone_id`, `rangeProblems` and readiness stand.
+
 `normalizeZone` already collapses to a zero-width zone and already accepts a bare `price`, so the
 **schema can carry exact prices today without a migration**. Whether `lower`/`upper` eventually
 become `price` is a separate, later cleanup — not a blocker.
@@ -388,27 +444,31 @@ become `price` is a separate, later cleanup — not a blocker.
 
 ## Still open
 
-1. **Interval vs. timeframe coupling.** The model emits both, and they can contradict: *"open the
-   15-minute chart"* + *"check in 2 minutes"* re-reads the same unfinished candle and bills 7× for
-   one bar. `next_check_min` was **built and deleted** for exactly this. Either derive the interval
-   from the rung, or floor it at a fraction of the candle period — but choose deliberately.
-2. **Tier-1 escalation rule.** Still unsolved, and still unbuilt: every read today is a full one, so
-   the ladder is two tiers rather than three. That is why journal entries carry no `tier` field —
-   recording a number that is always 2 would claim a capability we do not have.
+1. ~~**Interval vs. timeframe coupling.**~~ **CLOSED 2026-09-17** — the interval is DERIVED from the
+   rung: there is no interval to emit any more. The model asks for `next_timeframe` and is read at
+   that candle's close, so it cannot re-read an unfinished bar. (The model used to emit both, and
+   they could contradict: *"open the 15-minute chart"* + *"check in 2 minutes"* re-read the same
+   unfinished candle and billed 7× for one bar. `next_check_min` was built and deleted for exactly
+   this.)
+2. ~~**Tier-1 escalation rule.**~~ **CLOSED 2026-09-17** by dissolution — see
+   [Escalation](#escalation--cheapest-thing-that-can-answer-the-question). The read opens on
+   numbers; the chart is a tool call; the cost of each read is what it chose to pull, recorded per
+   row. Whether the prompt's "every call is money" holds the line is measured on the journal, not
+   assumed.
 3. **Resolution.** The trail is built from published marks, so a wick between two publications is
    invisible. Far better than a 30-to-240-minute glance, and the escalation if it bites is to confirm
    a near-firing guard with a real 1-minute candle. `GUARD_SWEEP_INTERVAL_MS` (default 30s) is the
    knob, and it turns UP if quota bites, not down.
-4. **Guard clamps.** Floor and ceiling on the interval; a cap on how many price levels one read may
-   arm; what happens when a guard is unreachable (a level on the wrong side of price).
+4. ~~**Guard clamps.**~~ **CLOSED** — `clampGuards`: no interval to floor or ceil any more; at most
+   `MAX_GUARDS` (6) per read; a guard on the wrong side of price (already true) is dropped rather
+   than armed, because it would wake, re-arm and wake again for ever.
 5. **Broker-native symbols.** The sweep prices through `quoteMapForSymbols` (FMP). A broker-native
    symbol that does not resolve there gets no price term — its guards degrade to the backstop
    heartbeat, silently. Roughly today's behaviour rather than a break, but worth closing.
-6. **Journal retention.** Storing `armed` on every entry duplicates what `monitor_state` already
-   holds live — deliberately, because the live copy cannot tell you what was armed *at the time*,
-   which is the whole audit value. It is small (50 short arrays), but if the cap of 50 turns out to
-   cover months rather than days once free polls stop writing, the better question is whether to
-   raise the cap or age by TIME rather than by count.
+6. ~~**Journal retention.**~~ **CLOSED 2026-09-17** — no cap. The journal is its own collection,
+   and a setup that lives weeks keeps every read. `armed` still rides on every row, for the reason
+   given: the live copy cannot tell you what was armed *at the time*, which is the whole audit
+   value.
 
 ---
 

@@ -153,6 +153,14 @@ capability**, and none of them tied to a desk's lifecycle:
 - **Both polls exclude `setup`.** Talos owns setup readiness — the same question asked about zones —
   and already claims `monitor_state.next_check_at` on those documents. Two loops claiming one
   document would each push the other's schedule forward until the loser silently stopped running.
+- **Talos is not a condition-tree loop, and it has no cadence.** A `setup` is read by a model on
+  every candle close of the rung it watches, ahead of the close when a price guard fires
+  (`monitoring/guardSweep.service.js`, a free range test on every poll), and ONLY where a condition
+  was written in words — always pre-entry, and in position only on a leg the user made conditional
+  (`watchedLegs`). A position whose every exit is a plain level is `monitor_state.dormant` and
+  leaves the query: the broker holds the exits and the reconciler reports the close. Each read
+  writes one row to the `journal` collection (§6), paged by `GET /api/setups/:id/journal`. The
+  contract is `docs/desks/mentor-talos.md`.
 - **The two polls cannot contend with each other** either: entry selects `looking`, exits select
   `long`/`short`, and a document is never both.
 - **The rising edge is the point.** Entry evaluates with `requireHeld` against a floor
@@ -205,7 +213,7 @@ Dismiss/handled state persists per-message.
 | `type` | Event | Card actions → destination |
 |---|---|---|
 | `setup_invalidation` | Talos's validity gate on a `setup` — `ran_away` · `invalidated` · `invalidated_fyi` · `stale_map` | Re-draw it → Mentor; the two FYI flavours carry NO action, because nothing is being asked |
-| `setup_manage` | Talos wants to change a position it is already in — `move_stop` · `add_leg` · `take_partial` · `exit_now` · `let_run` | Review → Mentor. `let_run` is TWO cards under one verb: bare (a deliberate decision not to trim — nothing to do, no button) vs with a `new_tp` (an amend of a resting order, so it needs the same confirm as any other change) |
+| `setup_manage` | Talos wants to change a position it is already in — `move_stop` · `add_leg` · `take_partial` · `exit_now`, and only the verbs the watched legs allow (`allowedVerdicts`) | Review → Mentor. `take_partial` names a watched target leg and carries that leg's own size. `add_leg` routes to the ORDER confirm, not the action endpoint — the leg is placed by confirming its order. (`let_run` was deleted 2026-09-17: a bare "let it run" is a `hold`, and moving a target out is an edit of the plan) |
 | `portfolio_review` | Scheduled review due | Review → Atlas review mode |
 | `manual_entry` / `manual_exit` | Broker-less fill needed | Inline FillCard (price/qty) — the one embedded-action card |
 | `entry_confirm` | Entry triggered, confirm needed | → workspace + `OrderConfirmDialog`. The payload carries a `kind`; only `idea` is emitted today |
@@ -551,7 +559,7 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   no-broker use the app feed. (Broker-served candles are also cost-free vs the paid app feed.)
 - **Execution:** order prices are shifted by `+basisOffset` into the broker's space, and that happens at EVERY price
   boundary through the one helper `brokerPrice.applyOffset` — placement (`buildExitOrder`), the resting entry, an
-  in-position stop/target edit (`armExitsInPosition`) and a Talos `move_stop` / `let_run` amend. Persisted
+  in-position stop/target edit (`armExitsInPosition`) and a Talos `move_stop` amend. Persisted
   `entryTriggerPrice` / `exitOrders.price` stay REAL (the app shows real prices; the broker order holds the shifted
   price — surfaced by a "trades as US100" pill). **Adapters round, never shift:** a price arriving at an adapter is
   already in the broker's space. The second, adapter-side mechanism (`referenceQuote`, a spot-mid shift) had been
@@ -573,6 +581,13 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   - The legacy `ideas` collection still exists in Mongo holding abandoned pre-cutover documents.
     Nothing reads it. It is queued to be archived and dropped.
 - `trades` — append-only point-in-time capture of each opened/closed idea (paper + live).
+- `journal` — the monitor's record for a `setup`, one row per READ plus the code-written events
+  (`entry`, `exit`, `invalidation`, `pre_active`): `{ entityId, at, reason, price, rung, verdict,
+  note, conditions[{id, met, note}], tools[], fired?, armed[], proposal?, next_check_at }`.
+  Uncapped, indexed `{ entityId, at: -1 }`, owned by `services/journal.service.js`; the writers are
+  `dueLoop.makePersist` and `entityRepo.finalizeClose`. It replaced `monitor_state.timeline[]`
+  (2026-09-17) — at one row per candle the record cannot ride the envelope every list fetch
+  carries, and a cap contradicted "describe every read".
 - `coverage` — the Analyst's living per-name research thesis (one doc per user+symbol): the variant
   perception (`thesis`), `rating`, OUR `price_target` + `estimates` vs consensus, the `gap` (our PT vs
   the Street — the edge), monitorable `kill_criteria`, `status` (active│thesis_broken│target_hit│retired│

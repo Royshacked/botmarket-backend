@@ -5,6 +5,15 @@ monitor (Talos).
 
 Design record, 2026-08-09. Nothing here is built yet except where marked **BUILT**.
 
+> **THE MONITOR HALF WAS REBUILT 2026-09-17** — the per-candle build
+> ([design/talos-per-candle.md](../design/talos-per-candle.md); current contract in
+> [mentor-talos.md](mentor-talos.md#talos)). The three-tier cascade, the cheap triage tier, the
+> in-position price gate, the periodic review, the partial enum and `let_run` are all gone. Talos
+> reads on every candle close of its rung wherever a condition was written — always pre-entry, and
+> in position only on the legs the user made conditional (`watchedLegs`); a position of plain
+> levels is dormant. The Argus → Mentor handoff, the lenses, the zone/scenario model and the
+> scaling-in slices are unaffected. Sections marked **SUPERSEDED** say what changed.
+
 ---
 
 ## Status
@@ -12,7 +21,7 @@ Design record, 2026-08-09. Nothing here is built yet except where marked **BUILT
 | | state |
 |---|---|
 | Argus → Mentor → Talos | the live path going forward |
-| Kairos + Hermes | **silent** — not deleted, not archived |
+| Kairos + Hermes | **ARCHIVED 2026-08-18** — under `archive/`, imported by nothing |
 | Argus → Mentor handoff | **BUILT 2026-08-10** — backend seed + lens recommendation, FE wired end to end |
 | Trading Desk steps | **REWIRED 2026-08-10** — build step is Mentor, not Kairos (`agentMeta.jsx`) |
 | Axl's prompt | **REWIRED 2026-08-13** — Kairos is no longer offered as a desk; a new trade routes to Mentor, and `<edit>call ID</edit>` is the only thing that still opens Kairos |
@@ -92,6 +101,16 @@ turn, against Mentor's ~2. Pricing it as premium aligns cost with revenue instea
 
 ## Talos — the three-tier cascade
 
+> **SUPERSEDED (2026-09-17).** What was built, and what stands now, is two tiers: the free guard
+> sweep (`guardSweep.service`, a price range test on every poll) and the READ, which runs on every
+> candle close of the chosen rung. There is no triage call and no arithmetic gate deciding WHETHER
+> to read — the only gate is whether a condition exists to judge. The read opens cheap (candles +
+> quotes, no image) and pulls the chart and the rest of the kit as tools when the numbers cannot
+> answer; the escalation this section wanted is that tool call. The validity check is still code,
+> free and first. The question tables below were the plan; the built verdict sets are
+> `enter · wait · stand_aside · edit · let_expire` pre-entry and `allowedVerdicts(watched)` in
+> position.
+
 One assessment path, gated cheapest-first, running both flat and in position.
 
 ### Tier 1 — arithmetic
@@ -150,27 +169,24 @@ is a bigger prompt and a worse answer than a narrow one.
 
 1. **Talos never executes.** Every verdict is a card the user confirms. This is what makes a wrong
    verdict survivable, and it is the first thing that will feel tempting to break once exits exist.
-2. **Tier 1 always runs first.** Tier 2 is cheap per call, not free — a thousand users with three
-   open positions is ~144k triage calls a day. Fine as an escalation; ruinous as a base cadence.
+2. ~~**Tier 1 always runs first.**~~ **Rewritten 2026-09-17:** the free sweep always runs first,
+   and the READ runs only where a condition was written. What bounds cost is no longer a gate in
+   front of the model but the rung — a `day` setup is read once a day, and a position with no
+   watched leg is never read at all. (The original: Tier 2 is cheap per call, not free — a thousand
+   users with three open positions is ~144k triage calls a day.)
 3. **One question per wake.**
-4. **Journal on Tier 3 only.** Tiers 1 and 2 stay silent. A monitor that writes a line every wake
-   turns the monologue into noise.
-5. **Latch per event, not per verdict type** — `partial` must be able to re-arm.
-6. **The model proposes `next_timeframe`; the cadence clamps it.** Reuses `_nextCheckAt`. ~~`next_check_min`~~
-   is gone: the rung the read asks to open on next IS the pace, because they are one decision and two
-   fields could contradict each other (a 15-minute chart re-read every 2 minutes is the same
-   unfinished candle). The clamp still does the same job — a rung finer than the setup's cadence floor
-   is the model reaching for a view this setup shouldn't be traded on, and one coarser than the
-   ceiling is simply checked a few times per candle.
+4. ~~**Journal on Tier 3 only.**~~ **Journal on every READ, and nothing else.** A wake that does
+   not read writes no line — a shut market, an idle poll. One row per read in its own collection,
+   so the monologue is complete without being noise.
+5. **Latch per event, not per verdict type** — a partial must be able to re-arm.
+6. **The model proposes `next_timeframe`; that IS the pace.** ~~`next_check_min`~~ is gone, and so
+   is the cadence clamp: the next wake is the close of the rung the read asked to open on next
+   (`nextCandleCloseMs` + `READ_LAG_MS`), clamped to the setup's stored ladder. Two fields could
+   contradict each other (a 15-minute chart re-read every 2 minutes is the same unfinished candle);
+   one cannot.
 
-> **Naming collision, on purpose.** The tiers above describe the POSITION pipeline (exits, scaling,
-> re-map) and are still a design. Pre-entry, "Tier 2" now means something built and different: the
-> out-of-zone **momentum pulse** in `talos.monitor.service.js` — an arithmetic gate, no cheap model,
-> that escalates straight to a full read when price leaves the map. The cheap-Haiku triage below was
-> considered for the entry side and deliberately not taken.
-7. **Re-anchor on Tier 3 only.** Tier 2 sees numbers, not a chart — that is not a real look. If the
-   anchor moved on every Tier 2 run, a slow grind would reset forever and never accumulate. Throttle
-   Tier 2 by clock instead.
+7. ~~**Re-anchor on Tier 3 only.**~~ Moot — there is no anchor and no pulse; a slow grind is seen
+   on every candle close.
 
 ---
 
@@ -199,12 +215,20 @@ things to warn the user about at build time:
   die. Ten zones inside *one* scenario is scaling in, which is a different thing and currently
   blocked.
 - Overlap is resolved by **authored order**, which is fine at two scenarios and arbitrary at ten.
-- Scattered zones keep the proximity cadence permanently at its floor — the cheap tier stops being
-  cheap. Mentor should push back during the build.
+- ~~Scattered zones keep the proximity cadence permanently at its floor~~ — moot since the
+  per-candle build: the pace is the rung, not the distance to the nearest level. Mentor should
+  still push back on ten scenarios during the build, for the first two reasons.
 
 ---
 
 ## Partials
+
+> **SUPERSEDED (2026-09-17).** A partial is a WATCHED TARGET: the user attaches a condition to a
+> target leg, and `take_partial` names that leg by id — the monitor resolves `{ leg, quantity,
+> size_pct }` from the zone's own size, so the model never chooses a number. The enum below was the
+> plan and was built (`third │ half │ two_thirds`, `FRACTION_PCT`); it is deleted. The terminating
+> property survives in a stronger form: a leg can be taken once, and a ladder of targets is a
+> ladder of legs each with its own size. Still a card — the user confirms.
 
 - Size is an **enum**: `third │ half │ two_thirds`. A free float is money chosen by a model; an enum
   is validatable and renderable. Still a card — the user confirms.
@@ -250,10 +274,12 @@ that IS the wick guard working."* Easy to lose in a rewrite, expensive to redisc
 
 Reuse, do not fork:
 
-- `assessTools.js` — the one tool registry. Tier 3 draws from it, scoped by lens.
-- `monitorJournal.js` — journal shape and cap mechanics.
-- `_nextCheckAt` / `next_check_min` — Tier 2 reuses this; no new scheduling code.
-- `sendBotMessage` — one card transport.
+- `assessTools.js` — the one tool registry. The read draws from it; the lens is a sentence, not a
+  filter.
+- `monitorJournal.js` — the journal ROW shape; `journal.service.js` — the collection (append, list).
+- `market.service.nextCandleCloseMs` — the one place "when does the next candle of this rung close"
+  is computed; no cadence code.
+- `postCard` → `postBotCard` — one card transport.
 - `zoneGate` — one function for entry and exit, parameterised by comparison direction.
 - `deferIfClosed` / `originRegistry` — the off-hours queue.
 
@@ -280,8 +306,9 @@ Order: **~~close line~~ → ~~in-position~~ → ~~scaling in~~.** The Talos back
 Five slices, the first four deliberately inert so the readiness block could stay shut until
 the protective half existed: entry became an aggregate of legs with a size-weighted
 `fill_price` (`4c2a85d`), execution sizes by the armed ZONE rather than the premise
-(`04cfc47`), a pending leg printing forces the in-position read and never while `adverse`
-(`d7e4f63`), `add_leg` places that one leg without touching status (`4b95cb4`), and the
+(`04cfc47`), a pending leg printing forces the in-position read (`d7e4f63` — the "never while
+`adverse`" code guard went with `positionGate` on 2026-09-17; it is the read's judgment now, held
+by the prompt), `add_leg` places that one leg without touching status (`4b95cb4`), and the
 resting stop GROWS by adding a leg for the delta rather than cancel-and-replace, so the
 cover never dips and never doubles (`b3bc6e2`).
 
@@ -291,6 +318,13 @@ print), and a leg drawn PAST the stop — price arriving there means the stop al
 so it reads as a plan to add twice and can only ever add once.
 
 ### In-position management, as built
+
+> **REBUILT 2026-09-17.** `_managePosition` now: metrics → READ on every candle close → verdict held
+> to `allowedVerdicts(watched)` → persist + journal row → card when the verdict out-ranks the
+> pending one. It runs only when `watchedLegs` is non-empty; otherwise the position is stamped
+> dormant and leaves the loop's query. `positionGate`, `reviewDue`, the `adverse` / `scale_out` /
+> `breakeven` flags, `let_run`, the partial enum and the Hermes copies are deleted. The paragraphs
+> below describe the 2026-08-09 build.
 
 `_managePosition` in `talos.monitor.service.js`: metrics (always) → cheap gate → assess only if the
 gate tripped or a review is due → persist, and post a card when the verdict asks for something.
@@ -328,22 +362,20 @@ widest edge across `stop_zones`, chosen by price.
 - **In-position** is the cascade above. It is most of the work.
 - **Scaling in** last — it is the only item that touches the order layer.
 
-**Not in this backlog:** the momentum pulse. It dissolves into Tier 1 — it was never a mechanism,
-only a name for *anchor + distance → escalate*. Keep the anchor field, drop the word, and escalate to
-Tier 2 rather than straight to a full visual read. Same trigger, ~100× cheaper response.
+**Not in this backlog:** the momentum pulse. It was deleted with the guards build (2026-08-22)
+and nothing replaced it — development away from the map is seen on the next candle close.
 
 ---
 
 ## Open
 
-- **Tier 1 anchor threshold.** Hermes used 4 band widths because each trigger bought a full visual
-  read. A trigger now buys a $0.0005 call, which argues for being *more* sensitive — 2 bands is the
-  starting suggestion.
-- **In position with no targets authored** — legacy setups predate the readiness rule. What gates
-  their exit question?
+- ~~**Tier 1 anchor threshold.**~~ Moot — no anchor, no pulse.
+- ~~**In position with no targets authored**~~ — answered by the per-candle rule: a position with no
+  watched leg is dormant; the stop rests and the reconciler reports the close. Nothing gates an
+  exit question because there is none.
 - **Does the `trades` ledger support partial exits?** It is frozen-at-fill with `pnl =
-  exit.realizedPnl`, which reads as a single exit. Confirm before Tier 3 can propose `partial` — if
-  it does not, that is a dependency, not a detail.
+  exit.realizedPnl`, which reads as a single exit. `take_partial` is live, so this is a dependency
+  to confirm, not a detail.
 - **[entity-model.md](../architecture/entity-model.md) is stale** — its per-kind payload and
   ownership tables list only `idea` / `call` / `portfolio_item`. `setup` and Talos are absent though
   live-verified since 2026-08-03. Fix when this lands.

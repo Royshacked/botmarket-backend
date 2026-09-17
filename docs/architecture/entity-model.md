@@ -13,7 +13,8 @@ Envelope {
   parentId      : portfolio_item → book id; else null
   status        : common lifecycle enum + per-kind extensions
   owner         : talos | themis | null               // derived from kind; null = no loop watches it
-  monitor_state : { next_check_at, check_count, memo, timeline[] }
+  monitor_state : { next_check_at, check_count, memo, ... }   // per-owner extras; NO timeline —
+                                                              // the journal is its own collection (2026-09-17)
   executionBinding : { broker, accounts[], mainAccountId,
                        brokerSymbol, basisOffset, orderState, brokerOrders[] }
   cards
@@ -28,6 +29,9 @@ Envelope {
 idea            → entry/stop/tp/additional trees, invalidation, conviction, rr, type
 call            → entry_zones, reference_levels, patterns, thesis, timeframe_ladder,
                   cadence, market_sensitivity, event_risk, position_state
+setup           → scenarios[{ entry_zones, stop_zones, tp_zones, conditions, validity }],
+                  conditions (root), ladder, entry_mode, validity, position_state,
+                  monitor_state.{ guards[], timeframe, last_assessment, dormant, cost }
 portfolio_item  → allocationRatio, targetWeight, thesis, sector, conviction, conviction_history
 ```
 
@@ -41,6 +45,11 @@ entities (single coll, kind discriminator):
                                                // holdings = entities.find({kind:'portfolio_item', parentId})
 portfolios (separate — the ONLY non-envelope, non-executed thing):
   { id: bookId, mandate, thesis, benchmark, fingerprint, reviewCadence, nextReviewAt }
+journal (the monitor's record, one row per READ — `services/journal.service.js`):
+  { entityId, at, reason, price, rung, verdict, note, conditions[], tools[], fired?, armed[] }
+  index { entityId: 1, at: -1 }; uncapped; paged newest-first through the kind's own route.
+  It used to ride the envelope as `monitor_state.timeline[]` capped at 50 — one row per candle
+  cannot live on a document every list fetch carries (`scripts/migrate-journal.mjs` moved it).
 ```
 
 ## 4. Ownership
@@ -48,7 +57,7 @@ portfolios (separate — the ONLY non-envelope, non-executed thing):
 ```
 idea            → null    (its condition-tree loop was DELETED 2026-08-18; nothing replaced it)
 call            → null    (Hermes archived 2026-08-18)
-setup           → Talos   (zone gate → LLM assess)
+setup           → Talos   (guard sweep on price, a read on every candle close where a condition was written)
 portfolio_item  → Themis  (item drift gate)  ⟶  book → Themis (book assess)
 
 `null` is a real answer, not a gap — see `ownerForKind`. It is only safe because neither kind is

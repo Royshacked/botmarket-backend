@@ -91,10 +91,10 @@ npm run server:prod  # NODE_ENV=production (serves built frontend from public/)
 npm test             # node --test tests/unit/*.test.js
 ```
 
-On boot `server.js` ensures the Mongo indexes and starts **twelve background loops**: the
+On boot `server.js` ensures the Mongo indexes and starts **thirteen background loops**: the
 market-open sweep, the **entry** and **exit** monitors, three assessment monitors (Talos /
-coverage / tilt), Themis, the execution reconciler, the three paper engines (fill / mark / equity)
-and the market-brief notifier. Each goes through `startLoop` (`services/lifecycle.service.js`),
+coverage / tilt) plus Talos's free **guard sweep**, Themis, the execution reconciler, the three
+paper engines (fill / mark / equity) and the market-brief notifier. Each goes through `startLoop` (`services/lifecycle.service.js`),
 which registers it so shutdown can stop it — a service without a `stop()` is refused and never
 runs. They do not start at import: they start when this process wins the loop lease (below).
 
@@ -107,7 +107,7 @@ ONE INSTANCE RUNS THE LOOPS, and since 2026-08-18 that is **enforced rather than
 They start behind a Mongo lease (`services/instanceLock.service.js`): the process that wins it
 calls `startBackgroundLoops()`, a second process wins nothing, starts no loops, and says so — it
 still serves HTTP. Losing the lease mid-flight (a Mongo blip, a long GC pause) stands the loops
-back down, because by then another process may legitimately hold it. All twelve are then stopped
+back down, because by then another process may legitimately hold it. All thirteen are then stopped
 in order on SIGTERM (see *Shutdown* in CODE_MAP.md).
 
 **It buys SAFETY, NOT SCALE.** A handful of module-level `Map`s are load-bearing rather than
@@ -184,6 +184,10 @@ providers/             external clients (LLMs, market data, brokers, Mongo) — 
 monitoring/            one monitor per kind + the shared execution layer
                        talos (setup) · themis (portfolio) · coverage (analyst) ·
                        tilt (strategy)
+                       talos reads on every candle close of its rung, only where a condition
+                         was written in words; guardSweep is its free tier — a price-range
+                         test every poll that brings a read forward when a level is crossed;
+                         one journal row per read, in the `journal` collection
                        entry.monitor — armed entities: `looking` → `hit` → order plan → confirm
                        exit.monitor — the residual stop/TP leg that could NOT rest at the broker
                          (both kind-blind, both split out of the deleted Minos: ONE loop, ONE
@@ -823,8 +827,10 @@ GET  /equity-curve   equity points (?fromMs=)
                              │               │             desks read (no orders)
                              ▼               ▼
                           Talos         Themis (review cadence)
-                             │               │
-                             │               │
+                   (a read per candle        │
+                    close, where a           │
+                    condition was written;   │
+                    guards bring it forward) │
                              └──────┬────────┘
                                     ▼
                      entry conditions met → order plan → USER CONFIRMS

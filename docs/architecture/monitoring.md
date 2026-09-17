@@ -40,10 +40,17 @@ against live market data. It runs as a background service inside the Express pro
 >
 > What is STILL not live: the invalidation monitor (deleted, and its authoring path with it).
 >
-> The running loops are **Talos** (`setup`), **Themis** (portfolio), **marketOpen** (kind-blind
-> deferred-order sweep), **entries** and **exits** (the two kind-blind condition-tree loops), the
-> **coverage** monitor, the **tilt** monitor, the execution reconciler and the paper-venue loops.
-> One further monitor is archived with the desk it served (`archive/README.md`).
+> The running loops are **Talos** (`setup`, plus its free guard sweep), **Themis** (portfolio),
+> **marketOpen** (kind-blind deferred-order sweep), **entries** and **exits** (the two kind-blind
+> condition-tree loops), the **coverage** monitor, the **tilt** monitor, the execution reconciler
+> and the paper-venue loops. One further monitor is archived with the desk it served
+> (`archive/README.md`).
+>
+> Talos is NOT a condition-tree loop and none of this document describes it. It reads on every
+> candle close of the rung it watches, only where a condition was written in words, and writes one
+> journal row per read to its own collection — see `docs/desks/mentor-talos.md` (the contract) and
+> `docs/design/talos-per-candle.md` (the build record). The idea-tier loops below keep their own
+> persisted cadence (`monitorSchedule.util`); Talos has no cadence — the candle close is its timer.
 >
 > The loop was switched off because its tick selected work by STATUS alone
 > (`looking`/`long`/`short`) — shared vocabulary across every kind — so it woke on `setup` entities
