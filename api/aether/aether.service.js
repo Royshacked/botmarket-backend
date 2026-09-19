@@ -97,6 +97,39 @@ export function evidenceOf(candidates = []) {
     }
 }
 
+// Whole runs the list will carry at most. The 180-day ceiling on `days` at roughly one run a
+// day is the shape this has to hold; the list has never been cut by it since the row cap went.
+const MAX_RUNS = 200
+
+/**
+ * The candidate rows the list is built from: every row of the newest `maxRuns` runs that
+ * match `query`, whole runs only.
+ *
+ * RUNS ARE CAPPED, NOT ROWS. This was `.sort({created_at:-1}).limit(200)` on rows, and the
+ * window outgrew it: on 2026-09-19 a thirty-day window held 18 runs and 273 surviving rows,
+ * so the desk header read "(200)" — the cap, not the count — the 45-name Iran run came back
+ * as its five newest rows, and the Canada run behind it vanished. Nothing on screen said so.
+ * A run is the unit the reader reasons in, so it is the unit the cut is made in: the window
+ * (`days`) is the real bound and this is only the safety net behind it, and when the net does
+ * catch it drops the OLDEST runs entire rather than the tail of whichever one straddled 200.
+ *
+ * Two reads instead of one because Mongo cannot "limit by group" in a find: the aggregate
+ * picks the run ids off the `created_at: -1` index, the find pulls their rows.
+ *
+ * Takes the collection handle so the tests can hand it a fake — ESM bindings are immutable
+ * and getDb is not stubbable (see aetherCandidateByTicker.test.js).
+ */
+export async function readCandidateRows(col, { query, maxRuns = MAX_RUNS } = {}) {
+    const runIds = (await col.aggregate([
+        { $match: query },
+        { $group: { _id: '$run_id', created_at: { $max: '$created_at' } } },
+        { $sort:  { created_at: -1 } },
+        { $limit: maxRuns },
+    ]).toArray()).map(r => r._id)
+    if (!runIds.length) return []
+    return col.find({ ...query, run_id: { $in: runIds } }, { projection: { _id: 0 } }).toArray()
+}
+
 /**
  * Event candidates for the desk list, newest event first, best rank first inside it.
  *
@@ -105,23 +138,14 @@ export function evidenceOf(candidates = []) {
  * be shown to be wrong. That is a storage rule; showing them is a display decision, and
  * the screen wants the shortlist. Pass includeDropped to see the rest.
  */
-export async function getEventCandidates({ days = 30, includeDropped = false, limit = 200 } = {}) {
+export async function getEventCandidates({ days = 30, includeDropped = false, maxRuns = MAX_RUNS } = {}) {
     try {
         const db    = await getDb()
         const since = new Date(Date.now() - days * 86_400_000).toISOString()
         const query = { created_at: { $gte: since } }
         if (!includeDropped) query.survived = true
 
-        // SORTED BEFORE THE LIMIT. Without the sort, Mongo hands back an arbitrary `limit` rows —
-        // insertion order in practice — and the newest-first ordering happened in memory on whatever
-        // survived the cut. Five forty-name runs in a thirty-day window exceed 200, and the run that
-        // fell off was the newest. The `created_at: -1` index is declared for exactly this read.
-        const rows = await db.collection(COLLECTIONS.EVENT_CANDIDATES)
-            .find(query, { projection: { _id: 0 } })
-            .sort({ created_at: -1 })
-            .limit(limit)
-            .toArray()
-
+        const rows = await readCandidateRows(db.collection(COLLECTIONS.EVENT_CANDIDATES), { query, maxRuns })
         const runs = groupCandidatesByRun(rows)
         // Prometheus's quick reads live in a Node-owned collection (the engine's rows are
         // Python's to write); joined here so the screen and the Aether tool get one shape.

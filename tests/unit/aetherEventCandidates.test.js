@@ -10,7 +10,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { groupCandidatesByRun } from '../../api/aether/aether.service.js'
+import { groupCandidatesByRun, readCandidateRows } from '../../api/aether/aether.service.js'
 
 function row(over = {}) {
     return {
@@ -83,6 +83,92 @@ test('a row stored before the category existed reads as unlabelled, not undefine
 
 test('an empty list is an empty list, not a group with no candidates', () => {
     assert.deepEqual(groupCandidatesByRun([]), [])
+})
+
+// ── The read caps RUNS, not rows ─────────────────────────────────────────────
+//
+// It was `.limit(200)` on rows. On 2026-09-19 a thirty-day window held 18 runs and 273
+// surviving rows: the desk header said "(200)", the 45-name Iran run showed five names, and
+// the Canada run behind it was gone — silently. A run is the unit the reader reasons in, so
+// the cut is made in runs, and a run is either whole or absent.
+//
+// The collection is faked at the driver surface (aggregate / find / toArray) — ESM bindings
+// are immutable, so getDb cannot be stubbed; the read takes the handle instead.
+
+function fakeCollection(rows) {
+    const calls = { find: [] }
+    const matches = q => rows.filter(r =>
+        (q.survived === undefined || r.survived === q.survived)
+        && (!q.created_at || r.created_at >= q.created_at.$gte)
+        && (!q.run_id || q.run_id.$in.includes(r.run_id)))
+    return {
+        calls,
+        aggregate(pipeline) {
+            const q = pipeline.find(s => s.$match).$match
+            const limit = pipeline.find(s => s.$limit).$limit
+            const byRun = new Map()
+            for (const r of matches(q)) {
+                const cur = byRun.get(r.run_id)
+                if (!cur || r.created_at > cur) byRun.set(r.run_id, r.created_at)
+            }
+            const out = [...byRun].map(([_id, created_at]) => ({ _id, created_at }))
+                .sort((a, b) => b.created_at.localeCompare(a.created_at))
+                .slice(0, limit)
+            return { toArray: async () => out }
+        },
+        find(q) {
+            calls.find.push(q)
+            return { toArray: async () => matches(q) }
+        },
+    }
+}
+
+function runRows(runId, createdAt, n, over = {}) {
+    return Array.from({ length: n }, (_, i) =>
+        row({ run_id: runId, created_at: createdAt, ticker: `${runId}-${i}`, rank: n - i, survived: true, ...over }))
+}
+
+test('a run is whole or absent — the cap never returns the tail of a run', async () => {
+    const col = fakeCollection([
+        ...runRows('Intel:2026-09-18', '2026-09-19T13:17:00+00:00', 15),
+        ...runRows('Iran:2026-09-09',  '2026-09-10T11:15:00+00:00', 45),
+        ...runRows('Canada:2026-09-08','2026-09-09T10:32:00+00:00', 33),
+    ])
+    const rows = await readCandidateRows(col, { query: { survived: true }, maxRuns: 2 })
+    const runs = groupCandidatesByRun(rows)
+    assert.deepEqual(runs.map(r => r.run_id), ['Intel:2026-09-18', 'Iran:2026-09-09'],
+        'the newest runs survive the cap and the oldest goes, entire')
+    assert.equal(runs[1].candidates.length, 45, 'the straddling run comes back whole, not as its newest rows')
+})
+
+test('under the cap every row in the window comes back — 273 rows is 273 rows', async () => {
+    const col = fakeCollection([
+        ...runRows('a', '2026-09-19T00:00:00+00:00', 100),
+        ...runRows('b', '2026-09-18T00:00:00+00:00', 100),
+        ...runRows('c', '2026-09-17T00:00:00+00:00', 73),
+    ])
+    const rows = await readCandidateRows(col, { query: { survived: true } })
+    assert.equal(rows.length, 273)
+})
+
+test('the window and the survived filter reach the row read too, not only the run pick', async () => {
+    // A run that has survivors also has dropped rows under the same run_id; picking the run
+    // by its survivors and then reading every row of it would let the dropped ones back in.
+    const col = fakeCollection([
+        ...runRows('a', '2026-09-19T00:00:00+00:00', 3),
+        ...runRows('a', '2026-09-19T00:00:00+00:00', 2, { survived: false }),
+    ])
+    const rows = await readCandidateRows(col, { query: { survived: true, created_at: { $gte: '2026-09-01' } } })
+    assert.equal(rows.length, 3)
+    assert.equal(col.calls.find[0].survived, true)
+    assert.ok(col.calls.find[0].created_at, 'the window is on the row read')
+})
+
+test('an empty window makes no row read at all', async () => {
+    const col = fakeCollection([])
+    const rows = await readCandidateRows(col, { query: { survived: true } })
+    assert.deepEqual(rows, [])
+    assert.equal(col.calls.find.length, 0, '`$in: []` is a pointless round trip')
 })
 
 // ── Did this event disclose at all ───────────────────────────────────────────
