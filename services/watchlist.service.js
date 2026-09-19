@@ -23,6 +23,9 @@ import { scanService } from '../api/scanner/scan.service.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
 import { listPortfolios } from './portfolioState.service.js'
 import { resolveMode } from './venue.resolve.service.js'
+import { listWaiting } from './pendingAction/pendingWork.service.js'
+import { getEventCandidates } from '../api/aether/aether.service.js'
+import { researchQueueService } from './researchQueue.service.js'
 
 const LOG = '[watchlist]'
 
@@ -37,7 +40,15 @@ const LOG = '[watchlist]'
  * opened in. Listing one would offer the user a door that is not there — the exact failure the
  * paragraph above describes, which is why it goes rather than being quietly kept for old rows.
  */
-export const DEFAULT_KINDS = ['setup', 'portfolio', 'coverage', 'scan']
+export const DEFAULT_KINDS = ['setup', 'portfolio', 'coverage', 'scan', 'queued', 'aether']
+
+/**
+ * The lists only an admin has. The research queue is the admin pipeline's artifact and its desk
+ * (Prometheus in batch) is admin-only, so a trader's read simply never has the kind — the same
+ * rule the desks apply: for a trader the list does not exist, rather than exists and is refused.
+ * Asked for by name, it is dropped before the read, so the answer names no list the user cannot see.
+ */
+export const ADMIN_KINDS = ['research_queue']
 
 /**
  * The kinds that BELONG to a workspace, and therefore get scoped to it.
@@ -62,24 +73,42 @@ export const WORKSPACE_SCOPED_KINDS = ['setup', 'portfolio']
  *                                     report should still get.
  * @returns {Promise<{ asOf:number, items:object[], counts:object, unavailable:string[] }>}
  */
-export async function listWatchedItems(userId, { kinds = DEFAULT_KINDS, includeFinished = false, symbol = null, workspace = null } = {}, deps = {}) {
+export async function listWatchedItems(userId, { kinds = null, includeFinished = false, symbol = null, workspace = null, isAdmin = false } = {}, deps = {}) {
     const {
         setups = (uid) => setupService.listSetups(uid, { onError: 'throw' }),
         scans = (uid) => scanService.getScans(uid, { onError: 'throw' }),
         coverage = () => coverageService.getCoverage({ onError: 'throw' }),
         portfolios = listPortfolios,
+        // The off-hours queue plus every entity awaiting a confirm — what the Floor's Queued list
+        // shows. Not workspace-scoped, because that list is not either: a queued row names the
+        // venue it waits for in its own reason.
+        queued = (uid) => listWaiting(uid),
+        // House artifacts, shared like coverage. One row per RUN (see aetherRunToWatchRow).
+        aether = () => getEventCandidates({ days: 30 }),
+        // `null` is listQueue's failure answer (it logs and swallows); rethrown so it lands in
+        // `unavailable` rather than reading as an empty queue.
+        researchQueue = async () => {
+            const rows = await researchQueueService.listQueue({ status: ['queued', 'in_research'] })
+            if (rows === null) throw new Error('research queue unreadable')
+            return rows
+        },
     } = deps
 
     const asOf = deps.now ?? Date.now()
     if (!userId) return { asOf, items: [], counts: {}, unavailable: [] }
 
-    const want = new Set(Array.isArray(kinds) && kinds.length ? kinds : DEFAULT_KINDS)
+    // No kinds asked → the defaults, which for an admin include the admin lists (`null`, not
+    // DEFAULT_KINDS, as the parameter default — a caller passing the constant would otherwise
+    // silently lose them).
+    const asked = Array.isArray(kinds) && kinds.length ? kinds : [...DEFAULT_KINDS, ...(isAdmin ? ADMIN_KINDS : [])]
+    const want = new Set(asked.filter(k => isAdmin || !ADMIN_KINDS.includes(k)))
     // Both sides upper-cased: a stored asset is usually uppercase but nothing enforces it, and a
     // silent miss here reads to the user as "you have nothing on NVDA".
     const wantSymbol = symbol ? String(symbol).toUpperCase() : null
     const sources = [
         ['setup', setups], ['portfolio', portfolios],
         ['coverage', coverage], ['scan', scans],
+        ['queued', queued], ['aether', aether], ['research_queue', researchQueue],
     ].filter(([kind]) => want.has(kind))
 
     // Each source is settled independently: one desk's read failing must not cost the user the

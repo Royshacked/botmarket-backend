@@ -467,7 +467,7 @@ export const TOOL_SCHEMAS = {
                 "type": "array",
                 "items": {
                     "type": "string",
-                    "enum": ["call", "setup", "portfolio", "coverage", "scan"]
+                    "enum": ["setup", "portfolio", "coverage", "scan", "queued", "aether", "research_queue"]
                 },
                 "description": "optional — narrow to these kinds. Omit for everything, which is the usual case."
             },

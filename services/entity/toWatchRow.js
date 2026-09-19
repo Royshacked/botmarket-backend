@@ -206,6 +206,79 @@ export function coverageToWatchRow(doc) {
     }
 }
 
+/**
+ * A queued decision (pendingWork.listWaiting) → a row. `status` is `released` when the venue has
+ * opened and the user may press Execute, `waiting` while it is parked for the open. Not an
+ * execution-tier status word: a queued row is ABOUT an entity, it is not one, so `isTerminal`
+ * never applies and both values pass the finished filter.
+ */
+export function queuedToWatchRow(item) {
+    if (!item?.id) return null
+    const verb = item.action?.type ?? item.action?.verb ?? 'action'
+    return {
+        kind: 'queued',
+        id: item.id,
+        symbol: item.asset ?? null,
+        title: `${verb}${item.origin?.kind ? ` on a ${item.origin.kind}` : ''}`,
+        direction: item.direction ?? null,
+        status: item.ready ? 'released' : 'waiting',
+        updatedAt: _ms(item.decidedAt),
+        detail: {
+            verb,
+            queuedBy: item.queuedBy ?? 'user',
+            reason: item.queuedReason ?? null,
+            nextOpenMs: item.nextOpenMs ?? null,
+            cancellable: item.cancellable !== false,
+            ref: item.origin?.entityId ?? null,
+        },
+    }
+}
+
+/**
+ * One Aether RUN — an event and the names it reached — → a row. Per run, not per candidate: "what
+ * is on the Aether list" is a list of events, and a forty-name run reported name by name would
+ * bury the four events it sits beside. The names ride in `detail.top` for the model to cite; the
+ * desk's own tool answers per ticker.
+ */
+export function aetherRunToWatchRow(run) {
+    if (!run?.run_id) return null
+    const cands = Array.isArray(run.candidates) ? run.candidates : []
+    return {
+        kind: 'aether',
+        id: run.run_id,
+        symbol: null,
+        title: _title(run.event || run.subject, 'Event'),
+        direction: null,
+        status: null,
+        updatedAt: _ms(run.created_at) ?? _ms(run.event_date),
+        detail: {
+            eventDate: run.event_date || null,
+            category: run.event_category || null,
+            candidates: cands.length,
+            top: cands.slice(0, 5).map(c => `${c.ticker}${c.side ? ` (${c.side})` : ''}`),
+        },
+    }
+}
+
+/** A research-queue row (Argus → Prometheus, admin pipeline) → a row. */
+export function researchQueueToWatchRow(doc) {
+    if (!doc?.id && !doc?.symbol) return null
+    return {
+        kind: 'research_queue',
+        id: doc.id ?? doc.symbol,
+        symbol: doc.symbol ?? null,
+        title: _title(doc.context?.reason ?? doc.context?.sector ?? '', doc.source ?? 'queued'),
+        direction: null,
+        status: doc.status ?? null,
+        updatedAt: _ms(doc.updated_at) ?? _ms(doc.created_at),
+        detail: {
+            source: doc.source ?? null,
+            sector: doc.context?.sector ?? null,
+            stance: doc.context?.stance ?? null,
+        },
+    }
+}
+
 /** Kind → projector, for callers that map a mixed set. */
 export const WATCH_ROW_PROJECTORS = {
     call: callToWatchRow,
@@ -213,4 +286,7 @@ export const WATCH_ROW_PROJECTORS = {
     portfolio: portfolioToWatchRow,
     scan: scanToWatchRow,
     coverage: coverageToWatchRow,
+    queued: queuedToWatchRow,
+    aether: aetherRunToWatchRow,
+    research_queue: researchQueueToWatchRow,
 }

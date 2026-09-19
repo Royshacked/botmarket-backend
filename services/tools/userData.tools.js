@@ -13,7 +13,7 @@
  */
 
 import { makeToolHandler } from '../agentUtils.js'
-import { listWatchedItems, DEFAULT_KINDS } from '../watchlist.service.js'
+import { listWatchedItems } from '../watchlist.service.js'
 import { getPerformance } from '../performance.service.js'
 import { getUpcomingEvents } from '../upcomingEvents.service.js'
 import { getActiveWorkspace } from '../workspace.service.js'
@@ -84,6 +84,21 @@ function _watchLine(row) {
                 d.ourPT != null ? `our PT ${d.ourPT}` : null,
                 d.gapPct != null ? `${d.gapPct >= 0 ? '+' : ''}${d.gapPct}% vs Street${d.streetPT != null ? ` ${d.streetPT}` : ''}` : null,
             ])}${row.title ? ` — ${row.title}` : ''}`
+        case 'queued':
+            return `- ${_tag(row)} ${row.symbol ?? '?'} ${row.direction ?? ''} · ${d.verb ?? 'action'} · ${row.status ?? '?'}${_tail([
+                d.queuedBy && d.queuedBy !== 'user' ? `queued by ${d.queuedBy}` : null,
+                d.reason ? d.reason : null,
+                d.nextOpenMs ? `opens ${new Date(d.nextOpenMs).toISOString().slice(0, 16)}Z` : null,
+            ])}`
+        case 'aether':
+            return `- ${_tag(row, 'event')} ${row.title}${d.eventDate ? ` (${d.eventDate})` : ''} · ${d.candidates ?? 0} name${d.candidates === 1 ? '' : 's'}${
+                Array.isArray(d.top) && d.top.length ? `: ${d.top.join(', ')}` : ''}${d.category ? ` — ${d.category}` : ''}`
+        case 'research_queue':
+            return `- ${_tag(row, 'research')} ${row.symbol ?? '?'} · ${row.status ?? '?'}${_tail([
+                d.source ? `from ${d.source}` : null,
+                d.sector ? d.sector : null,
+                d.stance ? d.stance : null,
+            ])}${row.title ? ` — ${row.title}` : ''}`
         default:
             return `- ${_tag(row)} ${row.symbol ?? row.title ?? row.id}`
     }
@@ -102,7 +117,7 @@ export function formatWatchedItems({ items = [], counts = {}, unavailable = [], 
     if (!items.length) {
         return unavailable.length
             ? `Could not read: ${unavailable.join(', ')}. Tell the user you couldn't check rather than saying they have nothing.`
-            : `Nothing${scope || ' in the app yet'} — no calls, setups, books, coverage or scans.`
+            : `Nothing${scope || ' in the app yet'} — no setups, books, coverage, scans, queued actions or Aether events.`
     }
     const summary = Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`).join(', ')
     return [
@@ -155,7 +170,7 @@ export function formatPerformance({ realized, calls, filter = {}, unavailable = 
     ].filter(Boolean).join('\n').trim()
 }
 
-export function formatUpcomingEvents({ from, to, scope, symbols = [], earnings = [], fed = [], unavailable = [] } = {}) {
+export function formatUpcomingEvents({ from, to, scope, symbols = [], earnings = [], fed = [], ipo = [], unavailable = [] } = {}) {
     const lines = [`Between ${from} and ${to}${scope === 'mine' ? ` for the user's own names (${symbols.length ? symbols.join(', ') : 'none found'})` : ' (market-wide)'}:`]
 
     if (earnings.length) {
@@ -175,6 +190,13 @@ export function formatUpcomingEvents({ from, to, scope, symbols = [], earnings =
         lines.push('Fed / macro: nothing scheduled in this window.')
     }
 
+    if (ipo.length) {
+        lines.push('IPOs:', ...ipo.slice(0, 15).map(i =>
+            `- ${i.date} ${i.symbol ?? '?'}${i.name ? ` ${i.name}` : ''}${i.exchange ? ` (${i.exchange})` : ''}${i.price != null ? ` · ${i.price}` : ''}${i.status ? ` · ${i.status}` : ''}`))
+    } else if (!unavailable.includes('ipo')) {
+        lines.push('IPOs: none this week.')
+    }
+
     return [...lines, _unavailableLine(unavailable)].join('\n').trim()
 }
 
@@ -185,6 +207,9 @@ export function makeUserDataHandlers(userId = null, deps = {}) {
         performance = getPerformance,
         events = getUpcomingEvents,
         workspace = getActiveWorkspace,
+        // Whether the admin-only lists exist for this read. Comes from the request (the same
+        // isAdmin every desk gets), never from the model.
+        isAdmin = false,
     } = deps
 
     return {
@@ -195,10 +220,11 @@ export function makeUserDataHandlers(userId = null, deps = {}) {
         // real-money ones looks like a complete answer.
         get_watched_items: makeToolHandler('get_watched_items',
             async ({ kinds, symbol, include_finished } = {}) => formatWatchedItems(await watched(userId, {
-                kinds: Array.isArray(kinds) && kinds.length ? kinds : DEFAULT_KINDS,
+                kinds: Array.isArray(kinds) && kinds.length ? kinds : null,   // null → the service's defaults, role-aware
                 symbol: symbol ? String(symbol).toUpperCase() : null,
                 includeFinished: include_finished === true,
                 workspace: await workspace(userId),
+                isAdmin: isAdmin === true,
             })),
             (err) => `Could not read what the user is watching: ${err.message}`, LOG),
 
@@ -230,9 +256,9 @@ export function makeUserDataHandlers(userId = null, deps = {}) {
  * here, on the newcomer.
  */
 export const USER_DATA_TOOL_SPEC = {
-    get_watched_items: `Everything the user keeps in the app: Kairos calls, Mentor setups, portfolios (as books), Prometheus coverage, and Argus scans — with status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Calls, setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Scans and coverage are research, bind to no account, and are shared across every workspace. Call it for "what am I watching / what have I got going / what's still open", and before saying the user has nothing. Finished items are excluded unless asked for.`,
+    get_watched_items: `Every list the user sees in the app: Mentor setups, portfolios (as books), Prometheus coverage, Argus scans, the QUEUED actions waiting for a venue to open, and the Aether events with the names each reached — plus, for an admin, the research queue. With status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Calls, setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Scans and coverage are research, bind to no account, and are shared across every workspace. Call it for "what am I watching / what have I got going / what's still open", and before saying the user has nothing. Finished items are excluded unless asked for.`,
 
     get_performance: `The user's CLOSED-trade record: how many, win rate, net P&L, profit factor and expectancy, split by mode (paper/live/manual), by origin and by symbol — plus Kairos's own R-multiple record for closed calls. Optionally narrowed to a mode, a symbol or a date window. Win rates come back as PERCENTAGES already — never multiply them again. Use it for "how have I done", "is paper working", "what's my win rate". It reports history only; open positions and unrealized P&L are get_trading_context.`,
 
-    get_upcoming_events: `Dated events in a window (default the next 30 days): company earnings plus Fed and macro releases. By default scoped to the USER'S OWN names — the calls, setups, coverage and holdings they have in the app — so the answer is about their book, not the whole market; pass scope 'market' for everything. Use it for "anything coming up", "what's the risk this week", or before discussing timing around a name they hold.`,
+    get_upcoming_events: `Dated events in a window (default the next 30 days): company earnings, Fed and macro releases, and this week's IPOs. By default scoped to the USER'S OWN names — the calls, setups, coverage and holdings they have in the app — so the answer is about their book, not the whole market; pass scope 'market' for everything. Use it for "anything coming up", "what's the risk this week", or before discussing timing around a name they hold.`,
 }

@@ -84,6 +84,15 @@ test('routeFields: validates the desk for the role, sanitizes the symbol, gates 
 
     assert.equal(routeFields({ route: 'strategy' }, 'trader').route, null, 'a trader is never sent to Pythia')
     assert.equal(routeFields({ route: 'strategy' }, 'admin').route, 'strategy')
+
+    // The OPENING travels to the admin desks for an admin, and is dropped with the route for a
+    // trader: a sentence for Pythia or Aether must never survive the desk it was written for.
+    for (const desk of ['strategy', 'aether']) {
+        const admin = routeFields({ route: desk, opening: 'Change the Technology stance.' }, 'admin')
+        assert.deepEqual([admin.route, admin.opening], [desk, 'Change the Technology stance.'])
+        const trader = routeFields({ route: desk, opening: 'Change the Technology stance.' }, 'trader')
+        assert.deepEqual([trader.route, trader.opening], [null, null])
+    }
     assert.equal(routeFields({ route: 'research', routeSymbol: 'Nvidia Corp' }, 'trader').routeSymbol, null)
     assert.equal(routeFields(null, 'trader').route, null)
 })

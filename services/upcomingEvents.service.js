@@ -56,6 +56,9 @@ export async function getUpcomingEvents(userId, { scope = 'mine', from = null, t
     const {
         earningsRaw = getEarningsCalendarRaw,
         fed = () => calendarService.getFed(),
+        // The calendar's third tab. Never scoped to the user's names — an IPO is by definition a
+        // name nobody holds yet — so it rides on both scopes, trimmed to the window like the Fed.
+        ipo = () => calendarService.getIpo(),
         watched = listWatchedItems,
         now = Date.now(),
     } = deps
@@ -84,9 +87,10 @@ export async function getUpcomingEvents(userId, { scope = 'mine', from = null, t
     // A personal scope with nothing to join to is answered honestly — no earnings, rather than
     // everyone's earnings. The Fed rows still come back: they apply to the user regardless.
     const wantEarnings = !mine || symbols.length > 0
-    const [earningsRes, fedRes] = await Promise.allSettled([
+    const [earningsRes, fedRes, ipoRes] = await Promise.allSettled([
         wantEarnings ? earningsRaw(f, t, mine ? symbols : []) : Promise.resolve([]),
         fed(),
+        ipo(),
     ])
 
     let earnings = []
@@ -105,9 +109,19 @@ export async function getUpcomingEvents(userId, { scope = 'mine', from = null, t
         unavailable.push('fed')
     }
 
-    // The Fed provider works to its own 45-day horizon, so trim it to the window that was asked
-    // for — otherwise "anything this week?" answers with next month's meeting too.
-    fedItems = fedItems.filter(i => !i?.date || (i.date >= f && i.date <= t))
+    let ipoItems = []
+    if (ipoRes.status === 'fulfilled') {
+        ipoItems = Array.isArray(ipoRes.value?.items) ? ipoRes.value.items : []
+    } else {
+        logger.warn(LOG, 'ipo read failed', ipoRes.reason?.message)
+        unavailable.push('ipo')
+    }
 
-    return { asOf: now, from: f, to: t, scope: mine ? 'mine' : 'market', symbols, earnings, fed: fedItems, unavailable }
+    // The Fed provider works to its own 45-day horizon, so trim it to the window that was asked
+    // for — otherwise "anything this week?" answers with next month's meeting too. The IPO
+    // calendar is the week's, so the same trim is a no-op today and a guard tomorrow.
+    fedItems = fedItems.filter(i => !i?.date || (i.date >= f && i.date <= t))
+    ipoItems = ipoItems.filter(i => !i?.date || (i.date >= f && i.date <= t))
+
+    return { asOf: now, from: f, to: t, scope: mine ? 'mine' : 'market', symbols, earnings, fed: fedItems, ipo: ipoItems, unavailable }
 }

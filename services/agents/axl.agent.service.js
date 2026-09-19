@@ -176,7 +176,9 @@ ${audienceBlock}` : ''}` },
 
     const toolHandlers = {
         ..._tradingContextHandlers(userId),
-        ..._userDataHandlers(userId),
+        // The role rides in so the admin-only lists (the research queue) exist for an admin's read
+        // and not for a trader's — the same gate the prompt's ROLE line applies to the desks.
+        ..._userDataHandlers(userId, { isAdmin: isAdmin === true }),
         // Unbound: an explanation is the same for everyone, which is why it can be authored once.
         ..._conceptHandlers(),
         // Unbound for the same reason, and a stronger one: the brief is the same for every reader,
