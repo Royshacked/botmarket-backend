@@ -8,7 +8,7 @@
  * idea long/short. On an exit trigger the app posts a card; the user reports the exit price
  * → confirmManualExit closes it. No broker, no reconciler.
  *
- * See docs/architecture/manual-mode.md.
+ * See docs/architecture/virtual-venue.md.
  */
 
 import { stripId }               from '../../providers/mongodb.provider.js'
@@ -278,7 +278,7 @@ export async function activateManualPortfolio(portfolioId, userId) {
  * User-initiated portfolio exit (for-now model): the user reports they've exited the basket
  * → post ONE N-leg exit card, one row per still-open manual leg. Each leg closes incrementally
  * via confirmManualExit as its price is submitted; partial baskets are fine (unfilled legs
- * stay open). No monitor drives this — it's the user's call. See manual-mode.md §4b.
+ * stay open). No monitor drives this — it's the user's call. See docs/architecture/virtual-venue.md, "Manual — the user is the venue".
  * @param {string} portfolioId
  */
 export async function requestManualPortfolioExit(portfolioId, userId) {

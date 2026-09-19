@@ -8,7 +8,7 @@
  * already includes real spread/commission) and NO executionBus emit (nothing to reconcile
  * — the confirm endpoint flips the idea status directly).
  *
- * See docs/architecture/manual-mode.md.
+ * See docs/architecture/virtual-venue.md.
  */
 
 import { randomUUID }         from 'crypto'

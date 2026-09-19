@@ -9,7 +9,7 @@
  * Every read is the shared VirtualAdapter's, scoped by `brokerType`. What this class adds is
  * the GUARD on every trading op — the manual lifecycle never places or closes through a
  * broker. Instead the two user confirmations (entry fill, exit fill) drive
- * manualExecution.service directly. See docs/architecture/manual-mode.md.
+ * manualExecution.service directly. See docs/architecture/virtual-venue.md.
  */
 
 import { VirtualAdapter } from './virtual.adapter.js'

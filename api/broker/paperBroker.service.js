@@ -5,7 +5,7 @@
  * broker-less MANUAL mode (same virtual-account plumbing, different fill source). The
  * paper adapter is a broker with no socket: instead of a real venue it reads/writes
  * virtual state here, so the existing monitor + reconciler drive it unchanged (see
- * docs/architecture/paper-trading-simulation.md).
+ * docs/architecture/virtual-venue.md).
  *
  * Accounts are MULTI-INSTANCE: a user owns N user-named virtual accounts per mode
  * ("Scalping", "Swing", "My Chase account"), each with its own balance, realized P&L,

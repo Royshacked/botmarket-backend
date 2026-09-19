@@ -31,7 +31,7 @@ Three ways a book comes to exist, and they are not the same desk turn:
 |---|---|---|
 | **Built here** | the five phases below, two gates, a sized plan | this doc |
 | **Adopted** — a real book at a bank the app cannot reach | reads a pasted book deterministically (`holdingsParse.util` — the model never reads a number), elicits the mandate with an anchoring rule, writes the holdings as `born: 'live'`, and reviews it monthly with a re-confirm ritual keyed on the unreadable venue | [design/adopted-book.md](../design/adopted-book.md) |
-| **Manual** — real money placed by the user at a bank | built like paper, monitored like paper, filled by the user's confirmation | [architecture/manual-mode.md](../architecture/manual-mode.md) |
+| **Manual** — real money placed by the user at a bank | built like paper, monitored like paper, filled by the user's confirmation | [architecture/virtual-venue.md](../architecture/virtual-venue.md) |
 
 ## Atlas — construction
 

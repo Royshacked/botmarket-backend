@@ -586,7 +586,7 @@ isTriggered(order, quote):
 i.e. a long TP at 432 fills the moment the high reaches 432 even if the bar closes back
 below. This is the paper "matching engine" that stands in for the fills an offloaded
 (broker-native) order would get at a real venue — for both resting entries and `positionId`
-closing exits. (See `docs/architecture/paper-trading-simulation.md`.)
+closing exits. (See `docs/architecture/virtual-venue.md`.)
 
 ---
 

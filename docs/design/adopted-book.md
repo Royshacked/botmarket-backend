@@ -5,8 +5,7 @@ Design settled 2026-08-10. Covers a user who arrives with a real portfolio alrea
 we can't wire to (a bank brokerage), and wants Atlas to take it over from today: monitor it, review it,
 notify, propose. See §10 for what is built.
 
-Relates to: [pipeline-service.md](./pipeline-service.md), `docs/architecture/manual-mode.md`,
-`docs/architecture/paper-trading-simulation.md`.
+Relates to: [pipeline-service.md](./pipeline-service.md), `docs/architecture/virtual-venue.md`.
 
 ---
 

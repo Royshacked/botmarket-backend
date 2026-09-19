@@ -170,7 +170,7 @@ export async function applyRebalance(portfolioId, userId, update) {
 
     // Manual mode: the user reports real fills, so close/trim legs post ONE N-leg exit Fill card and
     // entry legs (a scale-in or a brand-new holding) post ONE entry Fill card (the confirm endpoints
-    // apply each as its price is submitted) instead of placing broker orders. See manual-mode.md §4b.
+    // apply each as its price is submitted) instead of placing broker orders. See docs/architecture/virtual-venue.md, "Manual — the user is the venue".
     let manualExitPosted = false, manualEntryPosted = false
     // undefined = not looked up. The receipt below re-uses it when the manual branch already paid
     // for the read, and does its own when it didn't.

@@ -7,7 +7,7 @@
  * the last realized point — so we only snapshot users with open positions and let the
  * frontend hold the last value across the gaps.
  *
- * See docs/architecture/paper-trading-simulation.md (Phase 3).
+ * See docs/architecture/virtual-venue.md.
  */
 
 import { paperBrokerService }   from '../api/broker/paperBroker.service.js'

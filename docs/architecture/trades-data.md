@@ -236,5 +236,5 @@ reasoning, round-trip costs, and indexes. History below for provenance.
    idempotency), `(userId, openedAt desc)` (list + sort), and `(userId, origin.portfolioId)`
    / `(userId, origin.callId)` (analytics slices). Live-verified against the DB.
 
-See `paper-trading-simulation.md` for the equity-curve time-series (`paperEquity`),
+See `virtual-venue.md` for the equity-curve time-series (`paperEquity`),
 which is a separate, paper-only asset today.

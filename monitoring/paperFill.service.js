@@ -11,7 +11,7 @@
  * market-open sweep. Fills use the trigger price — no slippage or gap model (the cost model
  * paperExecution applies is spread + commission only).
  *
- * See docs/architecture/paper-trading-simulation.md (Phase 2).
+ * See docs/architecture/virtual-venue.md.
  */
 
 import { getDb }                 from '../providers/mongodb.provider.js'

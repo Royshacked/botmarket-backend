@@ -8,7 +8,7 @@
  * social-chat router. The frontend renders one unified FillCard (N legs, inline price/qty
  * inputs); each leg references an ideaId the confirm endpoints act on.
  *
- * See docs/architecture/manual-mode.md.
+ * See docs/architecture/virtual-venue.md.
  */
 
 import { cardActions, botForKind, BOT_USER_ID } from '../api/chat/chat.service.js'

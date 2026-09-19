@@ -26,7 +26,7 @@ function _requireId(req, res, name = 'id') {
 
 // ─── Manual (broker-less) confirmations ───────────────────────────────────────
 // The two user confirmations that drive manual mode: report the real entry fill
-// (price + size) and the real exit price. See docs/architecture/manual-mode.md.
+// (price + size) and the real exit price. See docs/architecture/virtual-venue.md.
 //
 // `already_placed` is deliberately re-worded here — in manual mode it means the FILL was already
 // reported, not that broker orders went out — but it keeps the shared 409.

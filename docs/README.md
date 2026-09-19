@@ -26,8 +26,7 @@ The mechanism docs. Read these to change the machinery.
 | [broker.md](./architecture/broker.md) | The adapter contract, capability flags, the execution reconciler |
 | [off-hours-queue.md](./architecture/off-hours-queue.md) | **Nothing executes off-hours.** The one hours gate; cancel propagation; the market-open drain |
 | [single-instance.md](./architecture/single-instance.md) | **The deployment constraint: ONE process.** What a second instance breaks, worst first |
-| [paper-trading-simulation.md](./architecture/paper-trading-simulation.md) | The virtual venue: fills, cost model, equity curve |
-| [manual-mode.md](./architecture/manual-mode.md) | Real money, no broker: user-confirmed fills, why it is never hours-gated, and the server-side workspace record |
+| [virtual-venue.md](./architecture/virtual-venue.md) | **Paper and manual on one venue.** An adapter, not a parallel engine; one store keyed by mode, N accounts per user; paper fills against the live feed, manual is filled by the user's two confirmations; the workspace record |
 | [ohlcv-price-data.md](./architecture/ohlcv-price-data.md) | The candle pipeline, providers, caching |
 | [trades-data.md](./architecture/trades-data.md) | The `trades` ledger — the canonical analytics record |
 

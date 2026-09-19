@@ -627,7 +627,7 @@ adapter + one line in `broker.factory.js`.
 read plumbing so positions and mark-to-market work unchanged, but **guards every trading op**: the
 lifecycle is driven by the user's own two confirmations (entry fill, exit fill) through a FillCard,
 never by an order. That is also why manual books are never hours-gated — a Fill card is an
-instruction, not an execution. See `docs/architecture/manual-mode.md`.
+instruction, not an execution. See `docs/architecture/virtual-venue.md`.
 
 - **Capabilities:** `trading`, `selfExecuted`, `nativeProtection`, `modifyProtection`,
   `closePosition`, `cancelOrder`, `listOrders`, `amendOrder`, `ohlcv`. The base class defaults

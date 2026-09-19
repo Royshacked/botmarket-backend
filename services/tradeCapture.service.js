@@ -14,7 +14,7 @@
  * Collection: trades. One doc per (accountId, positionId); opened on entry, patched on
  * close. Differentiated by `mode: 'paper' | 'live'`.
  *
- * See docs/architecture/paper-trading-simulation.md (Phase 4).
+ * See docs/architecture/virtual-venue.md.
  */
 
 import { randomUUID }   from 'crypto'

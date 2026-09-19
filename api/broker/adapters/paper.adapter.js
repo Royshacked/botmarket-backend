@@ -10,7 +10,7 @@
  * VirtualAdapter's; this class owns what makes paper PAPER: market orders fill instantly
  * through paperExecution, limit/stop orders rest in paperOrders for the fill engine
  * (monitoring/paperFill.service), and the cost model (spread / commission / advisory
- * leverage cap) lives on the account's settings. See docs/architecture/paper-trading-simulation.md.
+ * leverage cap) lives on the account's settings. See docs/architecture/virtual-venue.md.
  *
  * N user-named accounts per user; equity = cashBalance + Σ unrealized (open positions
  * marked to the live price). Cash moves only by realized P&L and commission, so equity is
