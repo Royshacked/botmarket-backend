@@ -30,8 +30,11 @@ function inPosSetup(psExtra = {}, extra = {}) {
 }
 
 function fakeDb(setup) {
-    const updates = []
-    return { updates, collection: () => ({ findOne: async () => setup, updateOne: async (_q, u) => { updates.push(u) } }) }
+    const updates = [], journal = []
+    // The journal collection too: an accepted action writes its row through the same db.
+    return { updates, journal, collection: (name) => name === 'journal'
+        ? { insertOne: async (row) => { journal.push(row) } }
+        : { findOne: async () => setup, updateOne: async (_q, u) => { updates.push(u) } } }
 }
 
 function deps(db, over = {}) {

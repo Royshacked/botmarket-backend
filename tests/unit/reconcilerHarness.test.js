@@ -108,7 +108,10 @@ function harness(seed, brokerOpts) {
         brokerService: fakeBroker(opLog, brokerOpts),
         tradeCaptureService: fakeCapture(opLog),
         // entityRepo now owns the reconciler's collection access — back it with the same double.
-        entityRepo: makeEntityRepo({ coll: async () => db.collection() }),
+        // The close line goes to the journal; swallowed here so the default writer never reaches
+        // for the real provider from inside a test (it logged an append error per closed trade).
+        // Not in opLog — the op sequences asserted below are the broker/store ops, exactly.
+        entityRepo: makeEntityRepo({ coll: async () => db.collection(), journal: async () => {} }),
     })
     return { opLog, store, restore }
 }

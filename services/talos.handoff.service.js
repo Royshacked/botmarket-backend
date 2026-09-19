@@ -134,7 +134,7 @@ export async function manageSetup(id, userId, verb, deps = _deps) {
     // proposal: its copy is written in its own vocabulary, which is why this stayed at the desk.
     if (res.selfExecuted) {
         await deps.notifyManage(setup, { verdict: verb, proposal: pending?.proposal ?? null, manual: true })
-        const applied = manage.manageApplied(verb, proposal, ps, {}, now)
+        const applied = manage.manageApplied(verb, proposal, ps, { manual: true }, now)
         await repo(deps).update(id, applied.update, applied.journal)
         logger.info(LOG, `setup ${id} manage ${verb} → manual instruction`)
         return { ok: true, manual: true, verb }

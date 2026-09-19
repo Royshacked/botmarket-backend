@@ -18,7 +18,7 @@ function spyDeps(over = {}) {
     return {
         called,
         deps: {
-            getDb: async () => ({ collection: () => ({ updateOne: async () => {} }) }),
+            getDb: async () => ({ collection: (name) => name === 'journal' ? { insertOne: async () => {} } : { updateOne: async () => {} } }),
             deferIfClosed:    spy('deferIfClosed', { deferred: false }),
             findOpenPosition: spy('findOpenPosition', { volume: 100 }),
             closePosition:    spy('closePosition'),
@@ -162,6 +162,21 @@ test('manageApplied writes the position change to the entity and the line to the
     assert.equal(journal.verdict, 'move_stop')
     assert.equal(journal.at, '2026-09-19T10:00:00.000Z')
     assert.match(journal.note, /Moved my stop to 118 — locking in breakeven/)
+})
+
+test('on a manual venue the row says the user was ASKED — nothing has happened at the broker yet', () => {
+    const ps = { entry: { fill_price: 118, direction: 'long' }, stop: { current: 112 } }
+    const { journal } = manageApplied('move_stop', { new_stop: 118 }, ps, { manual: true }, 1)
+    assert.match(journal.note, /^Asked you to move the stop to 118 at your institution/)
+    assert.doesNotMatch(journal.note, /^Moved/)
+    assert.match(manageApplied('exit_now', {}, ps, { manual: true }, 1).journal.note, /^Asked you to flatten/)
+})
+
+test('a fan-out that applied on some accounts and failed on others names the failures', () => {
+    const ps = { entry: { fill_price: 118, direction: 'long' }, stop: { current: 112 } }
+    const { journal } = manageApplied('move_stop', { new_stop: 115 }, ps, { failed: ['a2'] }, 1)
+    assert.match(journal.note, /Moved my stop to 115 — tightening protection\. Not on account a2 — that broker call failed/)
+    assert.doesNotMatch(manageApplied('move_stop', { new_stop: 115 }, ps, { failed: [] }, 1).journal.note, /Not on/)
 })
 
 test('a partial pushes the taken ledger, and only that', () => {

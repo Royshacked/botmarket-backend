@@ -340,7 +340,10 @@ export function _resolveMainLink(idea, call) {
 export const _resolveAllLinks      = _sharedManage.resolveAllLinks
 export const _workingExit          = _sharedManage.workingExit
 export const _partialQty           = _sharedManage.partialQty
-export const _manageAppliedUpdate  = _sharedManage.manageAppliedUpdate
+// Repointed 2026-09-19: upstream became manageApplied → { update, journal }. The archive keeps the
+// update-doc shape it wrote; the journal row it drops on the floor is a revival TODO (archive/README).
+const manageAppliedUpdate = (...args) => _sharedManage.manageApplied(...args).update
+export const _manageAppliedUpdate  = manageAppliedUpdate
 
 // Handle an in-position management action. verb ∈ MANAGE_VERBS. Accept executes the pending proposal
 // (exit_now also works bare); dismiss clears the card.
@@ -369,7 +372,7 @@ export async function manageCall(id, userId, verb, deps = _mdeps) {
     // Manual (broker-less): notify the instruction + record intent; the user acts at their broker.
     if (deriveMode(call.broker) === 'manual') {
         await deps.notifyManage(call, { verdict: verb, proposal, manual: true })
-        await db.collection(COLLECTION).updateOne({ id }, _sharedManage.manageAppliedUpdate(verb, proposal, ps, {}, now))
+        await db.collection(COLLECTION).updateOne({ id }, manageAppliedUpdate(verb, proposal, ps, {}, now))
         return { ok: true, manual: true, verb }
     }
 

@@ -119,7 +119,9 @@ export function phaseAfterStop(newStop, entry, isLong) {
 /**
  * What an executed action writes down: the entity update — $set (stop/phase, clear pending) +
  * $push (the taken ledger for a partial) — and the journal row that says what was done, in Talos's
- * first person. `extra.qty` is the executed partial size.
+ * first person. `extra.qty` is the executed partial size; `extra.manual` says the user was TOLD to
+ * do it at their own institution (nothing has happened yet, and the row must not claim it has);
+ * `extra.failed` lists the accounts whose broker call failed in a fan-out that otherwise applied.
  *
  * The row goes to the journal COLLECTION (services/journal.service), not onto the entity: this
  * used to `$push` a `monitor_state.timeline` line, which nothing has read since the journal moved
@@ -135,21 +137,30 @@ export function manageApplied(verb, proposal, ps, extra, nowMs) {
     const set  = { 'position_state.pending_action': null }
     const push = {}
 
+    const manual = !!extra?.manual
     let note
     if (verb === 'move_stop') {
         set['position_state.stop.current'] = proposal?.new_stop ?? ps?.stop?.current ?? null
         set['position_state.stop.ref']     = proposal?.ref ?? null
         set['position_state.phase']        = phaseAfterStop(proposal?.new_stop, entry, isLong)
-        note = `Moved my stop to ${proposal?.new_stop} — ${set['position_state.phase'] === 'breakeven' ? 'locking in breakeven' : 'tightening protection'}.`
+        const why = set['position_state.phase'] === 'breakeven' ? 'locking in breakeven' : 'tightening protection'
+        note = manual ? `Asked you to move the stop to ${proposal?.new_stop} at your institution — ${why} once it is in.`
+                      : `Moved my stop to ${proposal?.new_stop} — ${why}.`
     } else if (verb === 'let_run') {
         set['position_state.phase'] = 'runner'
-        note = proposal?.cancel_tp ? 'Cancelled the take-profit — letting this run.' : `Raised the take-profit to ${proposal?.new_tp} — letting it run.`
+        note = proposal?.cancel_tp
+            ? (manual ? 'Asked you to cancel the take-profit — letting this run.' : 'Cancelled the take-profit — letting this run.')
+            : (manual ? `Asked you to raise the take-profit to ${proposal?.new_tp} — letting it run.` : `Raised the take-profit to ${proposal?.new_tp} — letting it run.`)
     } else if (verb === 'take_partial') {
         push['position_state.taken'] = { at, size: extra?.qty ?? null, price: null, r_multiple: null, kind: 'partial' }
-        note = `Banked ${proposal?.size_pct}% here — taking money off the table.`
+        note = manual ? `Asked you to bank ${proposal?.size_pct}% here — taking money off the table.`
+                      : `Banked ${proposal?.size_pct}% here — taking money off the table.`
     } else if (verb === 'exit_now') {
-        note = 'Flattening the rest now — the trade is done for me.'
+        note = manual ? 'Asked you to flatten the rest now — the trade is done for me.'
+                      : 'Flattening the rest now — the trade is done for me.'
     }
+    const failed = Array.isArray(extra?.failed) ? extra.failed.filter(Boolean) : []
+    if (failed.length) note += ` Not on ${failed.length === 1 ? 'account' : 'accounts'} ${failed.join(', ')} — that broker call failed; check it by hand.`
 
     const update = Object.keys(push).length ? { $set: set, $push: push } : { $set: set }
     return { update, journal: journalEntry('manage', { nowMs, note, raw: { verdict: verb } }) }
@@ -319,7 +330,8 @@ export async function applyManage({ entity, holder, verb, proposal, userId, orig
     }
     if (!anyApplied) return { ok: false, reason: 'execution_failed', accounts: perAccount }   // every open account errored
 
-    const done = manageApplied(verb, proposal, ps, { qty: totalQty }, nowMs)
+    const failed = perAccount.filter(a => a.reason === 'execution_failed').map(a => a.accountId)
+    const done = manageApplied(verb, proposal, ps, { qty: totalQty, failed }, nowMs)
     await repo.update(entity.id, done.update, done.journal)
     logger.info(LOG, `${entity.id} managed → ${verb} across ${links.length} account(s)`)
     return { ok: true, verb, accounts: perAccount }

@@ -39,6 +39,16 @@ both carry SUPERSEDED callouts pointing here.
 - **`manage` joined the journal reasons.** An accepted management action was still `$push`ing a
   `monitor_state.timeline` line (positionManage), where nothing reads any more; it is a journal row
   now, through `entityRepo.update(id, doc, entry)` — the same seam `finalizeClose` uses.
+- **QA/CR/docs cycle, same day.** Both suites green (backend 3089/0, frontend 975 + 387/0). Five
+  low findings, all fixed: the archive's Kairos hand-off still named `manageAppliedUpdate` (member
+  access, so `check:archive` could not see it — wrapped at the import, drift recorded); the `manage`
+  row claimed the action was DONE on a manual venue (now "Asked you to …") and stayed silent about a
+  fan-out account whose broker call failed (now named); the manage/hand-off test fakes and the
+  reconciler harness had no journal collection, so every accepted action and closed trade in the
+  suite logged an append error against the real provider; the head line's `cursor: default` lost
+  the cascade to the row rule beneath it; and a NULL `next_check_at` on an armed setup — the
+  monitor's "due on the next tick", written by Arm and by a pre-position edit — rendered as `—`
+  instead of *any moment*.
 
 The phase sections keep the PLAN's names. Where a name below is marked deleted, it is gone; where
 it names something new, the built symbol may differ — the contract doc has the built names.
