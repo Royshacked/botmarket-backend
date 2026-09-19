@@ -14,8 +14,13 @@
  * and refuses to write to the source. Read-only against the source throughout.
  */
 
+import dns from 'node:dns'
 import { MongoClient, ServerApiVersion } from 'mongodb'
 import { config } from '../services/config.js'
+
+// Same pin server.js applies: a dev router that blocks SRV lookups makes `mongodb+srv://` fail
+// with `querySrv ECONNREFUSED` before the script does anything. Empty in production.
+if (config.dnsServers.length) dns.setServers(config.dnsServers)
 
 // slice(2) — argv[0] is the node binary's own path, which is not a database name.
 const TARGET = process.argv.slice(2).find(a => !a.startsWith('-')) ?? 'botmarket_dev'
