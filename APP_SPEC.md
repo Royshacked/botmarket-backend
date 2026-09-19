@@ -613,7 +613,8 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   perception (`thesis`), `rating`, OUR `price_target` + `estimates` vs consensus, the `gap` (our PT vs
   the Street — the edge), monitorable `kill_criteria`, `status` (active│thesis_broken│target_hit│retired│
   watchlist), and an append-only `revisions[]` history. `compute_valuation` (deterministic, `services/
-  valuation.engine.js`) fills the PT/gap; the Analyst agent + coverage-monitor are in progress. Buy-side
+  valuation.engine.js`) fills the PT/gap; the coverage monitor (`monitoring/coverage.monitor.service.js`,
+  since 2026-07-22) re-checks every thesis ~daily and re-models on a material verdict. Buy-side
   research — NOT an execution-tier entity, watched by its own monitor rather than Talos or Themis.
 - `pending_actions` — the OFF-HOURS QUEUE (§5): one row per decision confirmed while the venue was
   shut. An intent, not an entity — `{ userId, origin{kind,id,label}, action{verb,…}, queuedBy,

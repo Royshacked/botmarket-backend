@@ -206,7 +206,8 @@ monitoring/            one monitor per kind + the shared execution layer
 tests/unit/            node:test unit tests (`npm test`). tests/*.js are MANUAL live harnesses
 docs/                  README.md is THE index. architecture/ = how the machinery is built ·
                        desks/ = each agent + the monitor that watches its kind · design/ =
-                       proposed, not yet built · trust-gaps-todo + live-verify-checklist = open work
+                       proposals, and the RECORD of a design once it ships (each says which) ·
+                       trust-gaps-todo + live-verify-checklist = open work
 ```
 
 ---

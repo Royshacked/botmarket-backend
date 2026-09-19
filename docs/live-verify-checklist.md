@@ -62,8 +62,8 @@ now.
 - [ ] **Rename — construction/edit edits still apply** `[ANY]` — edit a portfolio in chat so Atlas
   emits `update_item`/`add_item`/`remove_item`; confirm the client-side apply path executes them
   (this would have silently no-op'd before the FE update — verify it doesn't).
-- [ ] **Back-compat — legacy `_idea` still works** `[ANY]` — a rebalance block using the old
-  `trim_idea`/`ideaId` spelling still applies via the BE aliases (covers the not-yet-redeployed FE).
+- ~~**Back-compat — legacy `_idea` still works**~~ **MOOT 2026-08-19** — the `_idea` aliases were
+  dropped after checking the data showed no block still used them (`df84511`); nothing to verify.
 - [ ] **Paper trim + scale-in** `[PAPER]` — on a **paper** portfolio holding a **crypto** name, run
   `trim_item` then `add_to_item`; confirm the paper venue reduces / increases the virtual position
   correctly (paper handles partials natively — this exercises G3/G4 logic without a real broker).
@@ -324,8 +324,9 @@ before it is verified is an unrecoverable row in a frozen ledger.
 - [ ] **A broker close writes one `exit` line**, with price, reason and realized P&L, and no
   `next_check_at` (there is no next check). It is written in `entityRepo.finalizeClose`, which is
   kind-blind, so verify it on more than one kind — every kind gets it for free, untested.
-- [ ] **The FE renders it as "closed out"**, and a pre-rename journal still renders "market closed"
-  rather than the raw `closed` slug.
+- [ ] **The FE renders it as "closed out"** (`REASON_LABEL.exit` in `TalosJournal.jsx`). The
+  pre-rename half is moot: `scripts/migrate-journal.mjs` DROPPED the old `closed` / `market_closed`
+  rows rather than renaming them, and no row is written on a shut market now.
 
 ## H. The self-executed venue answers for itself (2026-08-19)
 
