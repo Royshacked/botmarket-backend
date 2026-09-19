@@ -70,10 +70,12 @@ consumes events via `postSSE` + `buildStreamHandlers`.
 Every agent resolves its model through `services/llmModels.js` `resolveStreamFn()` — **all
 models are Anthropic Claude**: `claude-opus-4-8`, `claude-sonnet-4-6` (default),
 `claude-haiku-4-5-20251001`. Streaming runs through `providers/anthropic.provider.js`
-`streamAnthropicWithTools`. The per-turn model + reasoning effort is chosen by
-`services/modelRouter.service.js` `resolveModel()` (manual / auto phase-table / classifier
-modes — e.g. Haiku for phase-1 extraction, Sonnet elsewhere). Usage is recorded via
-`tokenUsage.service.js`.
+`streamAnthropicWithTools`. The model is the user's own pick, read off the request body and
+validated by `resolveStreamFn` (unknown → `DEFAULT_MODEL`); a user past their spend ceiling is
+routed to `CHEAP_MODEL` for the turn (`agentUtils.resolveAgentStream`). There is no per-phase
+routing — the layer that switched models mid-conversation was deleted 2026-08-14, because every
+switch invalidated the prompt cache. Reasoning effort is an internal parameter the monitors set,
+never the desks. Usage is recorded via `tokenUsage.service.js`.
 
 System prompts are hot-reloaded (mtime-gated) by `agentUtils.js` `makePromptLoader(path)`
 and sent as two cached content blocks — a stable base (`cache_control: ephemeral`) + a
@@ -268,6 +270,6 @@ emit/parse     services/llmStream.util.js (ALL_EMIT_TAGS)  +  services/agentIO.j
 trees          services/conditionTree.service.js
 persistence    api/trade-ideas/tradeIdeas.{routes,controller,service}.js
 arming         tradeIdeas.service.updateIdea  +  monitoring/preflightEntry.js
-models         services/llmModels.js  +  services/modelRouter.service.js
+models         services/llmModels.js  (+ the spend ceiling in services/agentUtils.js)
 frontend       src/pages/MainPage.jsx  +  src/cmps/{ChatPanel,PortfolioPanel,ScannerPanel,AnalystPanel,TradeIdeas}/*
 ```

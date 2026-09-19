@@ -1,6 +1,6 @@
 # botmarket-backend
 
-AI-powered trading assistant backend — Express + MongoDB + LLM agents (Anthropic / OpenAI).
+AI-powered trading assistant backend — Express + MongoDB + LLM agents (Anthropic Claude; OpenAI for transcription only).
 
 **Six conversational desks** turn natural-language chat into monitored work, then route confirmed
 entries and exits to a real broker (cTrader), a paper venue, or IBKR (data-only for now) through one
@@ -40,7 +40,11 @@ Behavioral contracts live in [APP_SPEC.md](APP_SPEC.md); file-by-file layout in
 
 - **Runtime:** Node 22, ES modules, Express 4
 - **Data:** MongoDB (native `mongodb` driver, no ODM)
-- **LLM:** Anthropic + OpenAI, selected per request by a model router (`modelRouter.service.js`)
+- **LLM:** Anthropic Claude for every desk — the model is the user's own pick per request, validated
+  by `services/llmModels.js` (`resolveStreamFn`); a user past their spend ceiling is routed to
+  `CHEAP_MODEL` for the turn (`agentUtils.resolveAgentStream`). The routing layer that chose a model
+  per phase was deleted 2026-08-14 — every switch invalidated the prompt cache and never repaid it.
+  OpenAI is Whisper transcription only (`api/transcribe`)
 - **Realtime:** SSE for agent streams; WebSocket for social chat; ProtoOA WebSocket to cTrader
 - **Auth:** JWT in an httpOnly cookie (`requireAuth` middleware)
 

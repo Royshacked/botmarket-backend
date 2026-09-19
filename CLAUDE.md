@@ -1,6 +1,6 @@
 # Project Context
 AI-powered trading assistant backend (ar2trade / TRADVICE) — Express + MongoDB +
-multi-provider LLM agents (Anthropic / OpenAI). SIX conversational desks — Axl
+LLM agents on Anthropic Claude (OpenAI for transcription only). SIX conversational desks — Axl
 (reception) · Mentor (`setup`, the trader) · Atlas (portfolio) · Argus (scan) ·
 Prometheus (`coverage`) · Pythia (`tilt`) — turn natural-language chat into monitored
 work, which each kind's own background monitor evaluates against condition trees before

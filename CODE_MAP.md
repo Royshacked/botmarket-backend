@@ -324,7 +324,6 @@ services/
                           judgment and lives in each desk's prompt (a shared generator would be the
                           cross-desk unifier the house rule forbids). Axl only, so far, and never on
                           a routing turn (see APP_SPEC §2)
-  modelRouter.service.js  resolveModel(); REASONING_EFFORT enum
   conditionTree.service.js  resolve/collect/normalize condition trees
   orderPlan.service.js  protectionPlan.service.js
   price.service.js        THE candle cache for the monitors + agent tools: an in-process envelope per
