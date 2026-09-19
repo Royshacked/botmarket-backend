@@ -4,7 +4,8 @@
 revision moved the centre of gravity from *reasoning about one headline* to *automating unowned tedium
 at volume* (§3, §4). A desk that reacts to an event and finds the second/third-order instrument that has
 not repriced yet. Working name **Tyche** (fortune) — Kairos, which literally means *the opportune
-moment*, is unfortunately already the call desk. Name not decided.
+moment*, was already the call desk when this was written (archived 2026-08-18; a new trade is
+Mentor's now, so the hand-offs below say Mentor). Name not decided.
 
 Relates to: `prompts/strategy_system_prompt.md` (Pythia — and §12 on why this is NOT her),
 `api/strategy/tilt.service.js` (the grading machinery this borrows), `docs/design/pipeline-service.md`.
@@ -207,7 +208,7 @@ trigger (headline · budget line · watchlist tripwire)
   → sigma screen .............. what has already moved?        ~30 → ~6   (§8)
   → chart read ................ shape, extended vs basing       ~6 → ~2   (§9)
   → output .................... candidate + reason + EXPIRY     (§10)
-  → hand off .................. entry/stop/target → Kairos or Mentor
+  → hand off .................. entry/stop/target → Mentor
 ```
 
 Cheap-to-expensive funnel, the same discipline Atlas already applies to sector charts (*"read the 3–5
@@ -293,7 +294,7 @@ inside a range (nothing happened)?
 
 **Its real payoff is not the filter — it is the entry level and the invalidation.** The number can only
 say "not yet moved"; the chart says "not yet moved, and here is where to buy it." Which is why the setup
-itself then goes to Kairos or Mentor, who already own entry/stop/target. No new machinery.
+itself then goes to Mentor, who already owns entry/stop/target. No new machinery.
 
 **Caution, consistent with the line already drawn for Argus:** LLM chart vision is reliable for gross
 shape and unreliable for precise levels. **Let it classify; let the numbers measure.**
@@ -379,7 +380,7 @@ none of the fit survives:
 | 11 FMP equity sectors, enum-locked | any instrument, any asset class |
 | nets to ~0bp (fully invested book) | not a book; no funding constraint |
 | benchmark-relative sector stance | instrument-level, per-row `vs` leg |
-| consumed by Atlas as an allocation input | consumed by Kairos/Mentor as a trade candidate |
+| consumed by Atlas as an allocation input | consumed by Mentor as a trade candidate |
 
 **Its own desk.** What it borrows is *mechanism*, per the shared-mechanism rule: the frozen-baseline +
 per-row clock + relative-contribution grading built in `tilt.service.js`, and the existing chart and

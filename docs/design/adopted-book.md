@@ -335,7 +335,9 @@ to end — the basket path is the part of manual mode that is complete.
 
 **`spine_state` on the lifecycle doc: `adopted` → `covered` → `under_mandate`.** The honest status
 ("we watch your prices" vs "we manage against a mandate"), and what drives the nag if the user never
-completes Allocate.
+completes Allocate. *Cut from the build:* Themis never read it and no nag exists, so the field was
+removed rather than left describing behaviour that was never built (`adoptBook.service.js` says why);
+`adoptedAt` is the one stamp that stays.
 
 It is a SETUP state, not an ongoing mode: it stops moving at `under_mandate`, and from there Themis
 runs its ordinary cycle. The "coverage is ready" prompt this doc once attributed to Themis is the
@@ -356,7 +358,7 @@ of this doc, and it would have missed a manual book built here, which has the id
 and live books get none of it: those fills we placed and watched ourselves.
 
 - **BUILT 2026-08-10.** Every review of an adopted book opens by confirming it
-  (`_buildAdoptedReviewSection`, review mode only): one short question with an easy "yes, unchanged",
+  (`_buildUnreadableVenueSection`, review mode only — keyed on the venue, not on adoption, per §10.7): one short question with an easy "yes, unchanged",
   and if anything changed, correcting the book is the FIRST move of the review rather than an
   interruption to it. The section states its own reason, because a rule without one gets optimised
   away: every judgment below it rests on quantities we were told once, so a position sold months ago

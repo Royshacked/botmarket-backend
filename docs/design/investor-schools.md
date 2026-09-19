@@ -101,7 +101,8 @@ a school that re-derives itself every turn from a slightly different sentence.
 
 ## Naming
 
-Name by **method** (`quality_value`, `risk_parity`, …), not by person — same reason Kairos's lenses
+Name by **method** (built as `quality-value`, `risk-balanced`, … — `SELECTION_SCHOOLS` /
+`ALLOCATION_SCHOOLS` in `services/investorSchools.js`), not by person — same reason Kairos's lenses
 are `discretionary`/`smc`/`institutional`. Prompt copy may say "the tradition associated with X". A
 living person's name implies replicating what they're doing right now, which we can't. User can still
 say "a Buffett-style book" and Atlas maps it.

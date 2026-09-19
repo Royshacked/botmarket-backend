@@ -1,7 +1,15 @@
 # The pipeline service — one conveyor, artifacts between desks
 
-**Status: DESIGN, nothing built.** Mostly a frontend service (the conveyor and the artifact
-envelope live in `botmarket-frontend`); the backend touchpoints are called out where they exist.
+**Status: BUILT 2026-08-04 → 08-19, in the frontend** — `botmarket-frontend/src/services/pipeline/`:
+`artifact.js` (the envelope, keyed by `kind`: `scan_request` · `mandate` · `candidate_list` ·
+`coverage_set`; `filled | empty | partial`), `contracts.js` (each desk declares what it emits and
+accepts — scanner, mentor, analyst, portfolio), `hop.js` (`planHop`, `planEntry`, `findReceiver`),
+`doors.js` (every hand-off setter, shut together), `scanOrigin.js`. Not live-verified as a whole.
+This file stays as the RECORD of the design and its migration order; §8–§9 carry the dated
+build notes. **What changed after the design was written:** Kairos was archived on 2026-08-18 and
+**Mentor takes the Argus hand-off** (`429df34`) — every "Kairos" below reads as Mentor for the
+built hop, and the `<desk><Slot>` slot names (`f4ec5a0`) replaced the ones in the table. The
+"code today" table is what the hops looked like BEFORE the service, kept because it is the why.
 
 ## Why
 
