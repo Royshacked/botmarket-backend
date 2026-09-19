@@ -443,12 +443,14 @@ services/
                             not one per user. Two consumers: Axl's tool and POST /api/axl/brief/stream
   marketBrief.tools.js      get_market_brief — UNBOUND (no userId, so the brief cannot be made
                             personal). Axl RELAYS the brief; it does not write market commentary
-  watchlist.service.js      listWatchedItems — "what am I watching?" across ALL kinds in ONE read
-                            (calls · setups · books · coverage · scans), SCOPED to the workspace the
-                            user is standing in: WORKSPACE_SCOPED_KINDS (call · setup · portfolio)
-                            bind to an account and belong to one book; scans + coverage are research,
-                            bind to none, and are shared across all three. COMPOSES the owning services
-                            rather than querying Mongo, and settles them independently: one desk's
+  watchlist.service.js      listWatchedItems — "what am I watching?" across EVERY list the Floor
+                            shows, in ONE read (setups · books · coverage · scans · the off-hours
+                            QUEUE · Aether runs, one row per event · and, for an admin, the research
+                            queue — ADMIN_KINDS, dropped before the read for a trader so the list is
+                            absent, not refused). SCOPED to the workspace the user is standing in:
+                            WORKSPACE_SCOPED_KINDS (setup · portfolio) bind to an account and belong
+                            to one book; research and the queue bind to none. COMPOSES the owning
+                            services rather than querying Mongo, and settles them independently: one
                             read failing is REPORTED in `unavailable`, never reported as zero.
                             Returns structured rows only — see entity/toWatchRow.js for the projectors
   userData.tools.js         the ADAPTER over it (+ performance / upcomingEvents): rows → the compact
