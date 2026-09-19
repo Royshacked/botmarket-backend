@@ -108,14 +108,17 @@ buffers the streamed text, **swallows the tag blocks so they never reach the UI*
 forwards each block's inner text to an `onCapture` callback. (`keepText:true` lets a block
 still stream to the user, e.g. `<ticker>`.) Each agent registers its own captures:
 
-- **Axl:** `<route>` → `onRoute`, `<edit>` → `onEdit`, `<open>` → `onOpen`,
-  `<suggest>` → the shared suggestion capture
-- **Mentor:** `<setup>` / `<setups>` → `onSetups`
-- **Portfolio:** `<portfolio_plan>` → `onPlan`, `<portfolio_update>` → `onUpdate`,
-  `<portfolio_mandate>` → `onMandate`, `<portfolio_thesis>` (post-hoc from raw)
+- **Every desk:** `<route>` / `<open>` / `<edit>` → `makeRouteCapture(agentKey)`
+  (`routing.util.js`) — the user asked to be sent to another desk, by name
+- **Axl:** plus `<adopt>` and `<suggest>` → the shared suggestion capture
+- **Mentor:** `<asset>`, `<interval>`, `<coverage>` live; `<setup>` / `<setups>` are parsed
+  from the FINISHED text (`_parseMentorResponse`), since a half-streamed plan is no plan
+- **Portfolio:** `<phase>`, `<portfolio_plan>` → `onPlan`, `<portfolio_update>` → `onUpdate`,
+  `<portfolio_mandate>` → `onMandate`; `<portfolio_thesis>` post-hoc from raw
 - **Scanner:** `<scan_list>` → `onScan`
-- **Analyst:** `<coverage>` → `onCoverage`
-- **Strategy:** `<tilt>` → `onTilt`
+- **Analyst:** `<phase>` live; `<coverage>` (or `<quickread>`) parsed from the finished text
+  (`_parseAnalystResponse`)
+- **Strategy:** `<phase>` live; `<tilt>` parsed from the finished text (`_parseStrategyResponse`)
 
 **A typed block, never a rolling parse.** Each desk emits a complete block captured through
 `buildTagCaptures` and parsed wholesale — not a regex over an accumulating `<state>` buffer, which
@@ -253,8 +256,8 @@ Orchestrated by `pages/MainPage.jsx`.
 
 A desk's live emit block drives the Generate button and a `__building__` preview
 (`deriveBuildingIdea`). Emitted/saved items surface in `cmps/TradeIdeas/*`
-(`TradeIdeasList`, `TradeIdeaCard` status dropdown, `IdeaDetail`, `ConditionTree` renders the
-AND/OR tree). Dialogs: **OrderConfirmDialog** (idea hit → order plan), **PreEntryDialog**
+(`TradeIdeasList`, the shared `EntityCard` shell with its status dropdown — every kind's card is
+built on it — `IdeaDetail`, `ConditionTree` renders the AND/OR tree). Dialogs: **OrderConfirmDialog** (idea hit → order plan), **PreEntryDialog**
 (arm-time already-satisfied), plus Delete/ClosePosition/EditOrders dialogs.
 
 ---

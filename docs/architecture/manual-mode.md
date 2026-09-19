@@ -141,7 +141,7 @@ persisting until all legs are done. Message types `manual_entry` / `manual_exit`
 1. **Phase 1 — backend:** account defaults, `manual.adapter` + factory/routing + listConnections
    + mode-scoped positions, `manualExecution.service`, the three monitor/confirm seams, the
    card payloads + endpoints, unit tests on the pure bits.
-2. **Phase 2 — frontend:** tri-state `ideaMode` + third workspace tab, manual account manager +
+2. **Phase 2 — frontend:** tri-state `ideaMode` (built as `ideaWorkspaceMode`) + third workspace tab, manual account manager +
    picker branch, the unified `FillCard` in social chat, suppress OrderConfirm for manual, badges.
 3. **Phase 3 — polish, tests, QA/CR/docs cycle.**
 

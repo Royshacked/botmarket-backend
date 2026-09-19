@@ -1,6 +1,26 @@
 # Paper Trading / Simulation Mode — Design & Plan
 
-Status: **DESIGN (not built)** · Authored 2026-06-30
+Status: **BUILT** — sim mode 2026-07-01, multi-account 2026-07-07, manual mode on the same plumbing
+2026-07-08 (see [manual-mode.md](./manual-mode.md)). Authored 2026-06-30 as the design; the sections
+below are that design plus the dated build phases, and the mechanism they describe is the one
+running. **What the build settled differently** (`api/broker/paperBroker.service.js` is the
+authoritative header):
+
+- **Accounts are N per user per mode**, not one — user-named ("Scalping", "My Chase account"),
+  keyed by a generated `accountId` = `<mode>-<userId>-<short>` whose prefix carries the mode
+  (`VIRTUAL_MODES` = paper | manual). Balance, realized P&L, cost settings, equity curve and trade
+  history are all per account; positions, orders and equity points carry `accountId`.
+- **The paper TOGGLE rides the default (oldest) paper account** — its `enabled` flag is
+  `connections.paper`, the key `resolveWorkspace` switches on. `GET /api/paper/state` and
+  `PUT /api/paper/mode` are its surface; everything else is per account under
+  `/api/paper/accounts/*` (create · rename + settings · delete · reset · cash · equity-curve ·
+  trades — the route map is at the top of `paper.routes.js`). The flat `/settings`, `/reset`,
+  `/trades`, `/equity-curve` routes below are gone.
+- **Equity snapshots are per account** (`paperEquityService.snapshotAccount`, over
+  `paperBrokerService.listActiveAccounts()`), not per user.
+- **The venue badge is derived, not stored**: the frontend reads the workspace off the position's
+  broker / account prefix (`ideaWorkspaceMode`, `tradeIdea.utils.js`) and every card is the shared
+  `EntityCard`; `IdeaCard.jsx` / `TradeIdeaCard.jsx` are gone.
 
 ## Goal
 
@@ -72,7 +92,7 @@ results predictive of live: identical evaluation engine, identical reconciler, i
 
 ## Data model (new collections, no changes to `ideas` / `portfolio_chats`)
 
-### `paperAccounts` (one per user)
+### `paperAccounts` (designed one per user — built N per user per mode, see the top)
 ```js
 {
   userId, brokerType: 'paper', currency: 'USD',
@@ -181,8 +201,8 @@ This yields live capture for free (`mode:'live'`).
    shared `computeEquity(userId)` (dedups the adapter's mark-to-market; `getAccount` now uses it).
    Equity **curve**: `paperEquity` collection + `monitoring/paperEquity.service.js` (5-min snapshot,
    env `PAPER_EQUITY_SNAPSHOT_MS`, only users with open positions; frontend holds last value across
-   flat gaps), started in `server.js`. Store gained `listActiveUserIds`/`insertEquitySnapshot`/
-   `listEquityCurve`. **Margin model (defined): cash-only, no leverage** — positions reserve no
+   flat gaps), started in `server.js`. Store gained `listActiveUserIds` (now `listActiveAccounts`)
+   / `insertEquitySnapshot` / `listEquityCurve`. **Margin model (defined): cash-only, no leverage** — positions reserve no
    margin, `freeMargin == equity`; buying-power enforcement + per-asset_class contract sizing deferred.
 4. **Trade capture** — reconciler hook + `trades` collection (covers live too).
    **DONE 2026-06-30.** `services/tradeCapture.service.js` (append-only `trades` collection, one doc
@@ -212,12 +232,13 @@ This yields live capture for free (`mode:'live'`).
    enabled so `resolveUserAccounts`/order-plan builder resolve the paper account. `routeExits` is
    already broker-agnostic (touch→nativeExit), so paper exits rest + fill with no special handling.
    **Backend API:** `api/paper/paper.routes.js` (mounted `/api/paper`) — GET `/state`, PUT `/mode`,
-   PUT `/settings`, POST `/reset`, GET `/trades`, GET `/equity-curve`. **Frontend:**
+   PUT `/settings`, POST `/reset`, GET `/trades`, GET `/equity-curve` (the last four since replaced
+   by the per-account routes — see the top). **Frontend:**
    `services/paper/paper.service.remote.js` client; `cmps/PaperTrading/PaperTradingSection.jsx` in
    UserProfile right column (toggle + starting-balance/spread/commission config + live
    equity/realized/unrealized/cash/open readout + recent-trades list + reset); paper-vs-live `PAPER`
    badge on `MonitorDashboard/IdeaCard.jsx` and `TradeIdeas/TradeIdeaCard.jsx` (branch on
-   `idea.broker==='paper'` — no new idea field needed). Not yet live-verified end-to-end (toggle →
+   `idea.broker==='paper'` — no new idea field needed; both cards are since `EntityCard`). Not yet live-verified end-to-end (toggle →
    place idea → fill → close → see results) — needs a running stack.
 
 ## Open questions / risks

@@ -15,7 +15,7 @@ Consumers
   priceService          ← orchestration: cache-first, sync on miss/stale
         │
         ▼
-  File cache            ← .cache/ohlcv/{TICKER}/{timeSpan}-{multiplier}.json
+  In-process cache      ← one envelope per `${ticker}|${timeSpan}|${multiplier}` (a Map)
         │
         ▼ (cache miss or stale)
   massive.provider      ← Massive/Polygon REST API
@@ -94,19 +94,16 @@ Filters cached candles by `fromSec`/`toSec` range. No network call.
 
 ---
 
-## File cache layout
+## Cache layout
 
-```
-.cache/
-  ohlcv/
-    AAPL/
-      day-1.json        ← daily bars (timeSpan=day, multiplier=1)
-      minute-5.json     ← 5-minute bars
-      hour-1.json       ← hourly bars
-    TSLA/
-      day-1.json
-      ...
-```
+**In the process, not on disk** (since 2026-08-19, `602c16e`). One envelope per series, keyed
+`${ticker}|${timeSpan}|${multiplier}` in a module-level Map (`price.service.js` `_envelopes`,
+capped at `MAX_CACHED_SERIES`). It used to be a JSON file per ticker/timeframe under `data/candles`,
+on the monitor's hot path — a blocking read + parse before every evaluation and an unlocked,
+non-atomic write after it, which could drop bars when two loops woke on one symbol. The app is one
+process (`single-instance.md`), so memory is the honest tier; the cost is one re-fetch per series
+after a restart. Staleness decides whether to REFRESH, never whether the data is usable — a stale
+envelope is kept, because it is what the tail-fetch appends onto.
 
 **Cache envelope shape:**
 ```json
@@ -122,7 +119,7 @@ Filters cached candles by `fromSec`/`toSec` range. No network call.
 
 **Compact row format (`ohlcv6`):** `[timestamp_sec, open, high, low, close, volume]`
 
-Stored as arrays (not objects) to keep file sizes small.
+Stored as arrays (not objects) — a habit from the file tier that costs nothing to keep.
 
 **Cache TTL:** 1 hour (`CANDLE_CACHE_TTL_MS`). After 1 hour, the next `getCandles()` call
 triggers a sync from Massive.
@@ -210,8 +207,9 @@ instead of Massive. IBKR's Client Portal API returns historical bars directly in
 `{ t, o, h, l, c, v }` format.
 
 The single integration point: `services/ohlcv.service.js` — add a
-`userId` parameter, check for active IBKR connection, call `ibkr.getHistoricalBars()`
-if available, fall back to `priceService` if not.
+`userId` parameter, check for active IBKR connection, call the adapter's `getCandles()`
+(`ibkr.adapter.js` already maps the app timeframe to IB's bar widths and returns null for one it
+lacks) if available, fall back to `priceService` if not.
 
 **Data source priority (planned):**
 1. IBKR (if user connected) — real market data, correct for IBKR users

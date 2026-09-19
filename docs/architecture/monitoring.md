@@ -380,7 +380,7 @@ and forwarded to any subsequent chart condition in the same gate.
 
 ### 2. Indicator (`type: 'indicator'`)
 
-Formerly `type: 'visual'` — `visual.evaluator.js` is now a legacy alias for `indicator.evaluator.js`.
+Formerly `type: 'visual'` — `indicator.evaluator.js` replaced it; there is no alias file left.
 
 ```
 conditionText  (e.g. "bullish engulfing on last two candles")
@@ -648,7 +648,6 @@ monitoring/
     structured.evaluator.js   Pure math evaluation + all indicator calcs + VWAP series
     touch.evaluator.js        Intra-candle price-level range check (offload fallback)
     indicator.evaluator.js    Candle table + pre-computed indicators → Claude Haiku YES/NO
-    visual.evaluator.js       Legacy alias for indicator.evaluator.js
     news.evaluator.js         GNews headlines → Claude Haiku YES/NO
     chart.evaluator.js        Chart screenshot + time/causal context → Claude vision YES/NO
     time.evaluator.js         Wall-clock after/before gate
@@ -660,8 +659,8 @@ monitoring/
   providers/
     ohlcv.service.js         Thin wrapper around priceService; normalises to {t,o,h,l,c,v}
 
-  test.monitor.js             8-section smoke test (run: node monitoring/test.monitor.js)
-  test.tree.js                Condition tree evaluator smoke test
+  tests/test.monitor.js       8-section smoke test (run: node tests/test.monitor.js)
+  tests/test.tree.js          Condition tree evaluator smoke test
 ```
 
 ---
