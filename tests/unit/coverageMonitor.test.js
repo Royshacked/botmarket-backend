@@ -195,8 +195,32 @@ test('the stamp lands BEFORE the run — an hourly tick must not start a second 
 test('a re-model that throws is contained — the rest of the tick still runs', async () => {
     const h = remodelHarness()
     h.deps.remodel = async (c) => { if (c.symbol === 'A') throw new Error('LLM timeout'); h.ran.push({ symbol: c.symbol }) }
-    await _runRemodels([cand('A'), cand('B')], h.deps)
+    const launched = await _runRemodels([cand('A'), cand('B')], h.deps)
+    await Promise.all(launched)   // every handle settles — a throw is logged, never re-thrown
     assert.deepEqual(h.ran.map(r => r.symbol), ['B'])
+})
+
+// The run is LAUNCHED, not awaited: the tick (and the loop's single-flight guard behind it) must not
+// last as long as a multi-minute research run. Until 2026-09-19 it did, and the hop's 3-min guard
+// was cutting off healthy runs to keep the loop alive.
+test('the tick returns before the re-model does — a slow run never holds the loop', async () => {
+    const h = remodelHarness()
+    let release
+    const gate = new Promise(r => { release = r })
+    h.deps.remodel = async (c) => { await gate; h.ran.push({ symbol: c.symbol }); return { ok: true, coverageId: 'covX' } }
+    const launched = await _runRemodels([cand('A')], h.deps)
+    assert.equal(h.claims.length, 1)   // claimed before the tick moved on
+    assert.equal(h.ran.length, 0)      // ...and the tick moved on while the run is still pending
+    release()
+    await Promise.all(launched)
+    assert.deepEqual(h.ran.map(r => r.symbol), ['A'])
+})
+
+test('a not-ok answer from the hop still settles the handle (logged, not thrown)', async () => {
+    const h = remodelHarness()
+    h.deps.remodel = async () => ({ ok: false, reason: 'no_draft' })
+    const launched = await _runRemodels([cand('A')], h.deps)
+    await assert.doesNotReject(Promise.all(launched))
 })
 
 test('held-by-anyone priority — a symbol held by any user gets the scarce slot', async () => {

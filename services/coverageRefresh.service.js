@@ -13,7 +13,15 @@ import { logger }              from './logger.service.js'
 
 const LOG = '[coverageRefresh]'
 // Deep re-research is multi-phase + tool-heavy; bound it so a hung run can't leak a pending job forever.
-const RESEARCH_TIMEOUT_MS = 3 * 60 * 1000
+//
+// A LEAK GUARD, not a budget. Neither caller waits on this hop any more — Atlas's refresh-by-hop
+// never did, and the coverage monitor stopped on 2026-09-19 — so the ceiling protects nothing but
+// the pending promise, and it must sit well clear of a HEALTHY run (~3 min; the local INTU re-model
+// of 2026-09-17 took 2m53s). It was 3 min while the monitor awaited it, and at that length it was
+// cutting off good runs on Render: `withTimeout` abandons the wait but cannot cancel the research,
+// so the tokens were spent, the draft arrived a minute later to nobody, and the card said "nothing
+// to store". Ten minutes is long enough that only a genuinely stuck stream ever reaches it.
+export const RESEARCH_TIMEOUT_MS = 10 * 60 * 1000
 
 // Injectable IO so tests exercise the branching (draft/no-draft, initiate/update, notify) without a
 // real LLM run or DB writes.
@@ -84,7 +92,7 @@ export async function refreshCoverage({ userId = null, ticker, question = null, 
             ...(existing ? { chatState: { existing_coverage: existing, active_symbol: sym } } : {}),
             userId,
             onToken: () => {}, onToolStart: () => {}, onReasoning: () => {}, onPhase: () => {},
-        }), RESEARCH_TIMEOUT_MS)
+        }), RESEARCH_TIMEOUT_MS, `coverage research ${sym}`)
 
         const draft = result?.coverage
         // A "no-edge" turn (or a wrong-symbol draft) yields nothing to persist — tell the user we left

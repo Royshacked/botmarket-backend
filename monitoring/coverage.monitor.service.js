@@ -118,6 +118,17 @@ export const coverageMonitorService = { start: _loop.start, stop: _loop.stop }
  * Fire the re-models this tick can afford. Held names first — they are the ones carrying risk — then
  * capped. Anything over the cap keeps its due state and is picked up on a later tick, and the drop is
  * LOGGED: a silent truncation would read as "everything was re-modelled" when it wasn't.
+ *
+ * LAUNCHED, NOT AWAITED. A re-model is a multi-minute research run, and this sits in the tick's
+ * `afterTick` — which the loop DOES await, under a single-flight guard. Until 2026-09-19 the run was
+ * awaited here, so the tick lasted as long as its slowest re-model and the hop's own timeout had to
+ * be short (3 min) to keep the loop from wedging. That is the wrong tier to protect: a healthy run
+ * takes ~3 min, so the guard was abandoning GOOD runs (INTU/CRCL/SCHW, 2026-09-17/18 — three full
+ * research runs paid for, nothing stored, and the claim below had already spent the quarter's slot).
+ * The daily checks never needed the result — the claim is stamped before the run and the hop posts
+ * its own card — so the run goes out the way Atlas's refresh-by-hop already fires the same hop:
+ * route-and-return, outcome logged when it lands. Returns the in-flight promises (settled, never
+ * rejecting) so a test can wait for them; the loop ignores the value.
  */
 export async function _runRemodels(candidates, deps = _deps) {
     const held = await deps.getHeldSymbols()
@@ -130,10 +141,8 @@ export async function _runRemodels(candidates, deps = _deps) {
         logger.info(LOG, `re-model cap reached — deferring ${deferred.length} to a later tick: ${deferred.map(c => c.cov.symbol).join(', ')}`)
     }
 
+    const launched = []
     for (const { cov, reason } of run) {
-        // Stamp BEFORE the run, not after: a re-model takes minutes, and the hourly tick must not
-        // start a second one for the same name in the meantime. It also starts the cooldown at the
-        // decision, so a run that fails doesn't immediately re-trigger on the next tick.
         // CLAIM before the run, not just stamp. A re-model takes MINUTES, so the stamp has to land
         // first or the next hourly tick starts a second one for the same name — and it also starts
         // the cooldown at the decision, so a run that fails doesn't re-trigger immediately.
@@ -151,14 +160,17 @@ export async function _runRemodels(candidates, deps = _deps) {
             continue
         }
         logger.info(LOG, 'RE-MODEL', { symbol: cov.symbol, held: isHeld({ cov }), reason })
-        try {
-            // The hop never throws; it ANSWERS. A `{ ok: false }` left unread is how a whole tier can
-            // be dead and still log as if it ran — the claim above has already stamped the cooldown, so
-            // there is no retry coming, and this line is the only place the failure can be seen.
-            const res = await deps.remodel(cov, reason)
-            if (!res?.ok) logger.warn(LOG, `re-model ${cov.symbol} produced nothing`, { reason: res?.reason ?? 'unknown', trigger: reason })
-        } catch (err) { logger.warn(LOG, `re-model ${cov.symbol} failed:`, err.message) }
+        // The hop never throws; it ANSWERS. A `{ ok: false }` left unread is how a whole tier can be
+        // dead and still log as if it ran — the claim above has already stamped the cooldown, so
+        // there is no retry coming, and this line is the only place the failure can be seen.
+        launched.push(Promise.resolve()
+            .then(() => deps.remodel(cov, reason))
+            .then(res => {
+                if (!res?.ok) logger.warn(LOG, `re-model ${cov.symbol} produced nothing`, { reason: res?.reason ?? 'unknown', trigger: reason })
+                else logger.info(LOG, `re-model ${cov.symbol} landed`, { coverageId: res.coverageId ?? null, trigger: reason })
+            }, err => logger.warn(LOG, `re-model ${cov.symbol} failed:`, err.message)))
     }
+    return launched
 }
 
 // Check one coverage: fetch fresh price + consensus → classify the gap → apply. Exported for tests.
