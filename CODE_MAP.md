@@ -171,6 +171,11 @@ api/
                           form's rule: username 3–32 no whitespace, fullname ≤ 80, password ≥ 8 with
                           ≥ 2 digits), listAllUserIds / listAdminUserIds (the two fan-out reads),
                           stripUser. Users are keyed by `id` (a UUID string), not Mongo's `_id`
+  push/                   /api/push — WEB PUSH, the device side: config (is it on, the public VAPID
+                          key), subscriptions (GET · POST · DELETE, the signed-in user's own devices).
+                          The subscription is what the browser's push service minted; it is stored on
+                          the user doc (`pushSubscriptions[]`, keyed by endpoint — a re-subscribe
+                          replaces, never twins). Off without VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY
   experience/             experience.model — how to TALK to a user (beginner may be inferred,
                           experienced only declared); its own collection, never the user doc
   threads/                the generic draft thread API over thread.service (/api/threads: draft ·
@@ -537,6 +542,16 @@ services/
                             entry_confirm carries a `note` (passed_earlier | off_hours | null) for scheduled entries
                             A card WITHOUT `actions` is a statement, not a request (ran_away /
                             invalidated_fyi) — no buttons, no pending lifecycle
+  push.service.js           WEB PUSH — the SECOND delivery of every chat message, to the user's
+                            devices (web-push, VAPID). chat.service's one `_deliver` step does socket
+                            + push for a bot card AND a human DM; nothing else calls it. The
+                            notification is the message: the desk's brand as title, the card's line
+                            as body, the card's subject as `tag` (a fresher one REPLACES the stale
+                            one on the device — the cards' supersede rule, on the OS). The server
+                            sends to every device, ALWAYS: presence is a device fact — the worker
+                            (FE src/sw.js) stays quiet when the app is focused there. Never throws;
+                            a 404/410 drops the subscription, anything else keeps it. Off without a
+                            key pair — every card still lands in chat
   positionManage.service.js THE HANDS of in-position management, shared by every desk: resolve the
                             broker links, fan the accepted action across ALL accounts (amend stop/TP,
                             partial/full close), write position_state once and the `manage` journal
@@ -895,7 +910,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | New env var | one getter in `services/config.js`, reading through `_raw` / `_str` / `_num` / `_bool` — the known-key set is derived from the readers (`knownKeys()`), and `config.test` fails on a getter that reads `process.env` directly |
 | New Axl tool | APPEND to `TOOLS` in `axl.agent.service.js` (never insert — the snapshot compares by index and the prompt cache keys off the array prefix) + append the built entry to the `axl` array in `tests/fixtures/agentTools.snapshot.json` in the same commit |
 | New agent tool that is a FACT about the venue/instrument | ride it on `get_quote` (`makeQuoteHandler`) as well as giving it a tool — a desk cannot then be unaware of it |
-| New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince` |
+| New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince`. It reaches the user's devices as a push on its own — nothing to add |
 | New admin-only desk (or route) | `requireAdmin` on the router (router-wide when the whole desk is admin's), `adminOnly: true` on its `DESKS` entry + any Floor/Radar surface (frontend `agentMeta.jsx`, `FloorLists.jsx`), its bot id in `ADMIN_BOT_IDS` on BOTH sides if it has a feed, its notifier narrowed to `listAdminUserIds` + `visibility: 'admin'`, the desk in Axl's `ADMIN_DESKS` + a line in `buildRoleSection`, and a row in `docs/desks/roles-and-sourcing.md`. `adminGate.test.js` pins the router |
 | Desk-to-desk hand-off on a new agent | four lines, all in routing.util: `+ buildRouteRule('<key>')` after its spine (before the closing LANGUAGE/VENUE/BREVITY rules), `...route.captures` in `buildTagCaptures`, `...route.result()` in the return, `...routeFields(result, req.user.role)` in the controller's done payload. Client: `useRouteOffer()` + `<RouteOffer>` in the panel, `onRoute={handleRoute}` from MainPage. Add a row to `tests/unit/routing.test.js` |
 | New emit tag (any agent) | add the name to `ALL_EMIT_TAGS` (llmStream.util.js) BEFORE anything else — unlisted tags leak into the chat and are never captured — then `buildTagCaptures({ tag })` in the agent + `stripEmitTags` on the return value |

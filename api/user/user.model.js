@@ -100,6 +100,7 @@ export async function listAdminUserIds() {
 
 export function stripUser(doc) {
     if (!doc) return doc
-    const { _id, passwordHash, ...rest } = doc
+    // pushSubscriptions carries the devices' encryption keys — it leaves only through /api/push.
+    const { _id, passwordHash, pushSubscriptions, ...rest } = doc
     return rest
 }

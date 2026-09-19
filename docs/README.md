@@ -29,6 +29,7 @@ The mechanism docs. Read these to change the machinery.
 | [virtual-venue.md](./architecture/virtual-venue.md) | **Paper and manual on one venue.** An adapter, not a parallel engine; one store keyed by mode, N accounts per user; paper fills against the live feed, manual is filled by the user's two confirmations; the workspace record |
 | [ohlcv-price-data.md](./architecture/ohlcv-price-data.md) | The candle pipeline, providers, caching |
 | [trades-data.md](./architecture/trades-data.md) | The `trades` ledger — the canonical analytics record |
+| [notifications.md](./architecture/notifications.md) | **Every alert is a card in social chat; web push is that card delivered to the devices.** The one `_deliver` step, presence decided on the device, the PWA worker and what it will never cache |
 
 ## `desks/` — what each agent does, and what watches it
 

@@ -86,6 +86,11 @@ monthly spend pair `TOKEN_BUDGET_USD` (the percentage shown in the profile) / `T
 (the spend at which chat drops to the cheap model — unset by default, so enforcing it stays a
 decision rather than a side effect of the display number).
 
+Web push: `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (`npx web-push generate-vapid-keys`; the same pair
+on every environment that serves the same users, or their subscriptions stop matching) and
+`VAPID_SUBJECT` (a mailto: or https: contact, defaulting to `CLIENT_URL` when that is https). Unset =
+push is off and every card still lands in social chat — see `docs/architecture/notifications.md`.
+
 ### Run
 ```bash
 npm install

@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import webPush from 'web-push'
-import { _deps, notificationForMessage, isValidSubscription, pushToUser, addSubscription } from '../../services/push.service.js'
+import { _deps, notificationForMessage, isValidSubscription, pushToUser, addSubscription, removeSubscription } from '../../services/push.service.js'
 
 // Web push is the second delivery of a chat message. The rules these tests hold:
 //   - the notification is the CARD's copy under the DESK's name — nothing is authored here
@@ -20,11 +20,12 @@ const SUB = (n) => ({ endpoint: `https://push.example/${n}`, keys: { p256dh: 'p'
 
 /** A users collection holding one user, recording the $pull that drops dead endpoints. */
 function fakeDb(subs) {
-    const calls = { pulled: [] }
+    const calls = { pulled: [], pulledEverywhere: [], updateOne: [] }
     const db = {
         collection: () => ({
             findOne: async () => ({ id: 'u1', pushSubscriptions: subs }),
-            updateOne: async (_q, update) => { calls.pulled.push(update.$pull?.pushSubscriptions?.endpoint ?? null); return { modifiedCount: 1 } },
+            updateOne: async (q, update) => { calls.updateOne.push(update); calls.pulled.push(update.$pull?.pushSubscriptions?.endpoint ?? null); return { modifiedCount: 1 } },
+            updateMany: async (q) => { calls.pulledEverywhere.push(q['pushSubscriptions.endpoint']); return { modifiedCount: 0 } },
             findOneAndUpdate: async () => ({ pushSubscriptions: subs }),
         }),
     }
@@ -114,4 +115,32 @@ test('a user with no devices, or a db that fails, is a quiet no-op', async () =>
     _deps.getDb = async () => { throw new Error('mongo down') }
     assert.deepEqual(await pushToUser('u1', { title: 't' }), { sent: 0, dropped: 0, failed: 0 })
     assert.deepEqual(await pushToUser(null, { title: 't' }), { sent: 0, dropped: 0, failed: 0 })
+})
+
+test('a subscribe takes the endpoint away from EVERY user first — a shared browser changes hands', async () => {
+    // A browser has one subscription per origin. A logged out, B enabled alerts: the same endpoint
+    // under both accounts would put A's cards on B's screen.
+    const { db, calls } = fakeDb([])
+    _deps.getDb = async () => db
+    await addSubscription('u2', SUB(7))
+    assert.deepEqual(calls.pulledEverywhere, ['https://push.example/7'])
+})
+
+test('removing a subscription does not stamp the user, so the count answers "was there a row?"', async () => {
+    const { db, calls } = fakeDb([])
+    _deps.getDb = async () => db
+    await removeSubscription('u1', 'https://push.example/1')
+    assert.equal(calls.updateOne.length, 1)
+    assert.equal(calls.updateOne[0].$set, undefined)
+    assert.equal(await removeSubscription('u1', ''), 0)
+})
+
+test('twin rows for one endpoint are one send', async () => {
+    const { db } = fakeDb([SUB(1), SUB(1)])
+    _deps.getDb = async () => db
+    let sends = 0
+    _deps.send = async () => { sends++ }
+    const out = await pushToUser('u1', { title: 't', body: 'b' })
+    assert.equal(sends, 1)
+    assert.equal(out.sent, 1)
 })

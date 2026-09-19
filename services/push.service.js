@@ -68,15 +68,18 @@ export function isValidSubscription(sub) {
 }
 
 /**
- * Register a device. Keyed by endpoint — a browser that re-subscribes (the push service rotated
- * it, the user toggled twice) replaces its own row rather than adding a twin that would double
- * every notification. Returns the user's subscription count, or null when the user is unknown.
+ * Register a device. Keyed by endpoint ACROSS USERS: a browser has one push subscription per
+ * origin, so the same endpoint turning up under a second account is a shared browser changing
+ * hands (A logged out, B enabled alerts) — the row moves to B, or A's cards would land on B's
+ * screen. Within a user, a re-subscribe (the push service rotated it, the user toggled twice)
+ * replaces its own row rather than adding a twin that would double every notification.
+ * Returns the user's subscription count, or null when the user is unknown.
  */
 export async function addSubscription(userId, sub, { ua = null } = {}) {
     if (!isValidSubscription(sub)) throw httpError(400, 'Not a push subscription')
     const db  = await _deps.getDb()
     const row = { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth }, ua: ua ? String(ua).slice(0, 200) : null, createdAt: Date.now() }
-    await db.collection(USERS).updateOne({ id: String(userId) }, { $pull: { pushSubscriptions: { endpoint: sub.endpoint } } })
+    await db.collection(USERS).updateMany({ 'pushSubscriptions.endpoint': sub.endpoint }, { $pull: { pushSubscriptions: { endpoint: sub.endpoint } } })
     const res = await db.collection(USERS).findOneAndUpdate(
         { id: String(userId) },
         { $push: { pushSubscriptions: row }, $set: { updatedAt: Date.now() } },
@@ -88,9 +91,11 @@ export async function addSubscription(userId, sub, { ua = null } = {}) {
 export async function removeSubscription(userId, endpoint) {
     if (typeof endpoint !== 'string' || !endpoint) return 0
     const db  = await _deps.getDb()
+    // No `updatedAt` stamp here: modifiedCount is the answer ("was there a row?"), and a $set
+    // would make it 1 for any existing user whether or not the endpoint matched.
     const res = await db.collection(USERS).updateOne(
         { id: String(userId) },
-        { $pull: { pushSubscriptions: { endpoint } }, $set: { updatedAt: Date.now() } },
+        { $pull: { pushSubscriptions: { endpoint } } },
     )
     return res.modifiedCount
 }
@@ -148,7 +153,9 @@ export async function pushToUser(userId, notification) {
         if (!_ensureConfigured()) return out
         const db   = await _deps.getDb()
         const user = await db.collection(USERS).findOne({ id: String(userId) }, { projection: { pushSubscriptions: 1 } })
-        const subs = user?.pushSubscriptions ?? []
+        // Deduped by endpoint: the pull-then-push on subscribe is two writes, and two concurrent
+        // subscribes (a double click, two tabs) can leave twin rows — one device, not two sends.
+        const subs = [...new Map((user?.pushSubscriptions ?? []).map(s => [s.endpoint, s])).values()]
         if (!subs.length) return out
 
         const payload = JSON.stringify(notification)

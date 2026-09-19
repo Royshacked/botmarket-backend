@@ -91,13 +91,14 @@ async function _tryEmit(userId, event, data) {
  *
  * Push is fire-and-forget: it round-trips to the browsers' push services, and a monitor loop
  * posting a card must not wait on Google. pushToUser never throws; the catch is belt-and-braces.
- * `tag` collapses a fresher notification onto a stale one the same way _supersedePending does
- * for the cards: per subject, so one setup is one notification, however many times it moves.
+ * `tag` collapses a fresher notification onto a stale one with the SAME scope _supersedePending
+ * uses for the cards — an actionable card, per type, per subject. A plain statement about a setup
+ * must not swallow the pending ask about it, and two different asks are two jobs.
  */
 async function _deliver(userId, msg, { senderName = null } = {}) {
     await _tryEmit(userId, 'new_message', senderName ? { ...msg, senderName } : msg)
-    const subject = cardSubject(msg?.payload)
-    const tag     = subject ? `${subject.kind}:${subject.id}` : null
+    const subject = msg?.actions ? cardSubject(msg.payload) : null
+    const tag     = subject ? `${msg.type}:${subject.kind}:${subject.id}` : null
     pushToUser(userId, notificationForMessage(msg, { senderName, tag }))
         .catch(err => logger.warn(LOG, 'push failed', err?.message ?? err))
 }
