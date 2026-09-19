@@ -341,7 +341,8 @@ Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/b
   (`lastFingerprint` — book value, benchmark price, regime, per-holding weight+conviction) is captured at
   construction and each review close, so the review computes a **benchmark-relative scoreboard** (book vs its
   benchmark over the window) and a **regime then→now delta** (rendered into the review-state block by the
-  server, not estimated by the model). The scheduled cadence (`reviewCadence`, `nextReviewAt`, 60s monitor)
+  server, not estimated by the model). The scheduled cadence (`reviewCadence`, `nextReviewAt`; Themis
+  ticks hourly and reads each book once a day at the 21:00 UTC end-of-day anchor)
   **notifies only** — but the notification carries a cheap non-LLM **pre-check** (`computeReviewSignals` →
   `triggers[]`: conviction fell / regime shift / drift / benchmark lag / imminent earnings). *The
   conviction trigger was dead from the day it was written until §4: `STATE_PROJECTION` did not carry
