@@ -100,7 +100,7 @@ test('a zero-width level IS watchable by Talos', () => {
     // The claim is unchanged and the mechanism is not. A setup level may legally be an exact price
     // the user named, and it used to need a distance RULER (`zoneDistance`, with a 0.1%-of-price
     // fallback so a zero band did not divide by zero). Talos arms a guard on it now, and a guard
-    // needs no width at all — which is the point of docs/desks/talos-guards.md: an exact level
+    // needs no width at all — which is the point of docs/desks/mentor-talos.md: an exact level
     // became as catchable as a wide band, so the widths could go.
     const touch = { price: 100, direction: 'any' }
     assert.equal(guardFires(touch, { high: 105, low: 99 }), true, 'reached during the window')

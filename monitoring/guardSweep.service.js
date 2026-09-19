@@ -157,7 +157,7 @@ async function _tick() {
 
     if (ops.length) await db.collection(COLLECTION).bulkWrite(ops, { ordered: false })
     // Logged only when something happened. A line per quiet sweep would be the same noise the
-    // journal refuses for the same reason (docs/desks/talos-guards.md, "a free poll never writes").
+    // journal refuses for the same reason (docs/desks/mentor-talos.md, "a free poll never writes").
     if (fired) {
         logger.info(LOG, `${fired} guard(s) fired across ${armed} armed setup(s), ${symbols.length} symbol(s)` +
             ` — ${fetched.size} fetched, ${fresh.size} read from the feed`)

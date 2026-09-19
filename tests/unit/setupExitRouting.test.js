@@ -132,7 +132,7 @@ test('an idea still routes through its condition trees', async () => {
 
 // ── Conditional legs: the two rules that point in opposite directions ─────────
 //
-// docs/desks/talos-guards.md, "the exit asymmetry". A condition on an exit is a SENTENCE the model
+// docs/desks/mentor-talos.md, "the exit asymmetry". A condition on an exit is a SENTENCE the model
 // judges on its next read — the same thing an entry condition is. What differs is what happens
 // while nobody is reading it, and the answer is not the same for the two legs.
 

@@ -8,14 +8,15 @@ The user's own trade, built with **Mentor** and watched by **Talos**.
 > TP window with ONE rule: **Talos spends a model call only on a condition the user wrote in words.**
 > Pre-entry that is always true, so every wake reads. In position it is true only for a leg the user
 > made conditional; a position of plain levels is DORMANT. The [Talos](#talos) section below is the
-> current contract for the monitor. [talos-guards.md](talos-guards.md) still holds the reasoning for
-> exact prices over bands and for guards over zones, but its three-tier escalation and its time term
+> current contract for the monitor. [Guards](#guards--exact-prices-not-bands) holds the reasoning
+> for exact prices over bands and for guards over zones; its three-tier escalation and its time term
 > are gone.
 >
-> **THE ZONE GATE IS GONE (2026-08-22).** [talos-guards.md](talos-guards.md) replaced it with
-> LLM-authored wake guards, and Mentor no longer draws bands — every level is an exact price.
-> Sections marked **SUPERSEDED** describe how it used to work and are kept because the reasoning
-> still explains the shape of what replaced them.
+> **THE ZONE GATE IS GONE (2026-08-22).** The guards build replaced it with LLM-authored wake
+> guards, and Mentor no longer draws bands — every level is an exact price. That doc
+> (`talos-guards.md`) was merged into this one on 2026-09-19; sections marked **SUPERSEDED** or
+> **History** describe how it used to work and are kept because the reasoning still explains the
+> shape of what replaced them.
 
 Replaces `docs/setup-entity.md` and `docs/mentor-talos-refactor.md` (2026-08-08). The refactor doc
 already superseded parts of the contract doc — the `watch[]` taxonomy — so the two disagreed with
@@ -118,6 +119,97 @@ checks while the order rests (`_disarmLimit` cancels the order on a breach or at
 
 ---
 
+## Guards — exact prices, not bands
+
+> **BUILT 2026-08-22** as "guards, not zones", **partly superseded 2026-09-17** by the per-candle
+> build. This section is the merge of the guards doc into this one (2026-09-19): what stands, with
+> its reasoning, and one paragraph on what went. The build record for what went is
+> [design/talos-per-candle.md](../design/talos-per-candle.md).
+
+**Mentor emits PRICES and CONDITIONS IN WORDS. It does not draw bands, and it does not decide
+breadth.** A user who says *"break of 312, stop 306, target 330"* gets a setup carrying 312, 306 and
+330 — not 312–313, 305.2–306.4 and 328–330.
+
+### Why zones existed, and why that reason expired
+
+The old monitor polled on a schedule and asked one free question on each wake: is the SPOT price
+inside a band right now. Two properties of that line were the whole reason bands existed. It read the
+spot — a spike through a level and back between two wakes was invisible. And the gaps were long —
+30 to 240 minutes for a swing. So a level could only be caught if price happened to be sitting on it
+at the moment of a lazy, scheduled glance, and **the band was the compensation**: wide enough that
+price was still inside it on the next look. Every zone rule Mentor's prompt ever had — the ATR-derived
+breadth, the breakout window — descended from that and from nothing else.
+
+Two changes retired the whole apparatus. **Test the RANGE since the last sweep**, not the spot: a level
+crossed at any point in the gap trips, whether or not price stayed there, so an exact price is as
+catchable as a wide band. And **let the model decide when to look next** — first as a guard it wrote
+for itself, now as the rung whose candle close it wants (`next_timeframe`). After both, a band
+communicates nothing a price does not — and it actively lied about the stop: the far edge of a stop
+band was the order that actually rested (`zoneExitLevel`, long → `lower`), so widening a stop the
+user put at 306 to 305.2–306.4 quietly rested it at 305.2, more risk than they agreed to. With no
+bands there is no edge to pick, and a stop is where the user put it.
+
+### The sweep — tier 0, and it must stay free
+
+`guardSweep.service` (`GUARD_SWEEP_INTERVAL_MS`, default 30s) prices every symbol with an armed guard
+and tests each guard against the range since that symbol was last swept. It is the one tier that must
+stay free, and it is why **the model never fetches the price itself**: if the model is the thing that
+looks, every wake costs a call including the thousands where nothing happened, and token spend
+becomes proportional to elapsed time rather than to events — the failure this whole design exists to
+avoid. The sweep reads the shared price trail before buying a quote (a mark younger than half its
+interval is as good as a fresh one — half, never the whole, or its own last publication would satisfy
+the next pass and the feed would freeze), and **skips shut markets**: a closed market has no
+crossings, and an equity book would otherwise buy every symbol every sweep all night.
+
+**A crossing carries a MEANING.** `price >= 311.5` and `price <= 300` are the same mechanism and
+completely different questions, so the guard says which: `{ price, direction, means }` — direction
+`above · below · any` (a touch, reachable from either side, and the honest translation of the old
+"inside the band" trigger), means `entry · invalidation · manage`. The wake arrives already knowing
+what read it is doing, which is most of the context a cheap read needs.
+
+**A fired guard is authoritative over spot price.** The sweep proves price reached a level; a minute
+later the wake re-checked containment and could find price gone, throwing away the very crossing that
+paid for it. `_hitFromGuard` resolves the guard to its own zone instead.
+
+**Guards are rewritten whole on every read** — what the model does not re-arm is forgotten — and
+`clampGuards` keeps the set honest: at most `MAX_GUARDS` (6), no guard without a finite price, a
+missing direction inferred from where price is, and a guard that is ALREADY TRUE at arm time dropped
+rather than armed, because it would wake, re-arm and wake again for ever (a touch is exempt). The
+prompt's own line: *do not arm a guard for what the next candle will show you anyway; arm one for the
+level that would make you say something different right now.*
+
+**The memo** carries forward why a guard was set, so a wake three hours later resumes a judgment
+instead of re-deriving the situation from scratch.
+
+**`lower` / `upper` stay as the storage shape.** Every level authored now is zero-width, so a `price`
+field would read better — and renaming it would mean migrating live armed documents for a cosmetic
+gain. `normalizeZone` accepts `{ "price": 312 }` on the way in and collapses it, so the model and the
+UI both speak prices; only the stored keys are two.
+
+### A free poll NEVER writes
+
+The sweep runs every 30 seconds and almost always answers "no". **Nothing that did not cost a model
+call may append a journal line** — a guard evaluated and not fired is not an event. Under the old
+capped array this was the difference between a readable history and none at all (1,440 evaluations a
+day into 50 slots); under the uncapped collection it is what keeps the trail a list of decisions. Every
+row still carries the guards `armed` at the time, because the live copy cannot tell you what was
+armed *then*, which is the whole audit value.
+
+### What went, and why
+
+The guards build had a **time term** on every guard (`elapsed ≥ 30min AND price ≥ 305` — the
+conjunction that made a timer wake free when price was 20 away), an unconditional **backstop**
+(`elapsed ≥ 24h`) so a setup nobody was watching was still seen once a day, a **three-tier
+escalation** (sweep → a cheap price-and-memo read → the full chart read) whose tier-1 exit rule was an
+open problem, and the journal as a capped array on the document. All four answered one question —
+*when do I look if price does nothing* — and the candle close answers it: a setup 20 away for three
+weeks is read once per candle of its rung, and earnings, the sector and `valid_until` are seen on
+those reads. Tier 1 dissolved INTO the read, which opens on numbers and pulls the chart as a tool
+call whose cost shows on the row. `BACKSTOP`, `after_min`, `and_price_above`, `CADENCE_BY_TYPE`,
+`PULSE_MOVE_BANDS`, `proximityGapMin` and `skipped_since_last` are gone.
+
+---
+
 ## Exits — what rests and what is watched
 
 The current rule, in full:
@@ -138,6 +230,28 @@ The current rule, in full:
 - **R:R measures to the NEAREST target** (`computeRR` → `targetEdges()[0]`) from the pessimistic
   fill. An R:R must never flatter; the nearest target is what the trade pays if the first one is
   the one that gets taken.
+
+### The exit asymmetry
+
+The mechanism is shared between entry, stop and target — a condition in words, judged on the candle.
+**What a missed read costs is not**, and this is the one place the symmetry must break:
+
+| leg | read late / model wrong / process down | cost |
+|---|---|---|
+| entry | the trade does not happen | opportunity — bounded |
+| conditional target | profit not taken, position runs on | bounded — the stop still holds |
+| **conditional stop** | **the position has no protection** | **unbounded** |
+
+A second multiplier is specific to this app: **Talos proposes, it never executes.** Every verdict is a
+card the user confirms, so a conditional stop firing correctly at 3am still closes nothing until
+someone taps it. Hence the rule above — a conditional stop ALWAYS carries a resting stop-market
+behind it, the condition may only tighten it, and the broker order guarantees the position ends. The
+model can get out earlier and smarter; it can never be the only thing standing between the user and
+an open loss. And the mirror, settled in the build: a conditional target's limit MUST be held back,
+or it fills the moment price prints and makes its own condition dead letter. Both legs follow one
+rule — fail in the safe direction (`routeSetupZones`). Before this, `positionMonitor.checkPosition`
+— the only code that evaluated an exit condition for a position — had had no caller since Minos was
+deleted, so a conditional stop could be authored, stored and shown as protection and never once run.
 
 ### History — the TP window (BUILT 2026-08-15, **SUPERSEDED 2026-08-22**, deleted 2026-09-17)
 
@@ -405,5 +519,12 @@ cascade from Mentor's Generate to the reconciler's close line.
   dead); a range tighter than the stop is deliberately allowed — it just warns earlier, and the stop
   still fires. It also rejects an away pivot sitting inside the envelope, where it could never fire.
 - **Read lag.** `READ_LAG_MS` starts at 30s against a 60s poll. Measure, then set.
+- **Sweep resolution.** The trail is built from published marks, so a wick between two publications
+  is invisible. Far better than a 30-to-240-minute glance; the escalation if it bites is to confirm a
+  near-firing guard with a real 1-minute candle. `GUARD_SWEEP_INTERVAL_MS` (30s) is the knob, and it
+  turns UP if quota bites, not down.
+- **Broker-native symbols in the sweep.** It prices through `quoteMapForSymbols` (FMP). A
+  broker-native symbol that does not resolve there gets no price term — its guards never fire and
+  the setup is read only on its candle closes, silently. Worth closing.
 - **FE: `ZoneEditor`** still renders tp zones as `lower`/`upper`; under exact prices a target is one
   number plus its conditions. Not in the per-candle plan; stays as it is until picked up.

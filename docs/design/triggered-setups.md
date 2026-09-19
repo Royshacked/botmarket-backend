@@ -1,7 +1,7 @@
 # Triggered setups — when the level is not knowable yet
 
 **DESIGN ONLY (2026-08-22). Nothing here is built.** It extends the guard contract in
-[desks/talos-guards.md](../desks/talos-guards.md), which IS built, and adds one new mode to the
+[desks/mentor-talos.md — Guards](../desks/mentor-talos.md#guards--exact-prices-not-bands), which IS built, and adds one new mode to the
 `setup` kind. Read that doc first: this assumes guards, the sweep, and exact levels.
 
 The one line:
@@ -127,7 +127,7 @@ or a rule that produces one at fill.
 |---|---|
 | entry | `price` · `trigger` (market on confirmation) |
 | stop | `price` · `rule` (percent \| atr) — **and never nothing** |
-| target | `price` · `rule` (r_multiple) · `condition` (does not rest — see talos-guards) |
+| target | `price` · `rule` (r_multiple) · `condition` (does not rest — see mentor-talos.md, the exit asymmetry) |
 | size | `quantity` · `risk_budget` (\$ \| % of equity) |
 
 **The stop is the one that cannot fall through.** A rule is fine; absent is not. That is the

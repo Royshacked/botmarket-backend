@@ -3,7 +3,8 @@
 **STATUS: BUILT 2026-09-17** (phases 0–6). The desk docs caught up the same day: the monitor
 CONTRACT is now the Talos section of [desks/mentor-talos.md](../desks/mentor-talos.md#talos), and
 this file stays where it is as the BUILD RECORD — the plan, the decisions, and what the build
-settled differently. It superseded the wake model in [desks/talos-guards.md](../desks/talos-guards.md)
+settled differently. It superseded the wake model in `desks/talos-guards.md` (merged into
+[desks/mentor-talos.md](../desks/mentor-talos.md#guards--exact-prices-not-bands) on 2026-09-19)
 (the three-tier escalation and the time term on guards) and the in-position gate in mentor-talos.md;
 both carry SUPERSEDED callouts pointing here.
 
@@ -405,7 +406,7 @@ branches · `guardLabel`'s `after_min` branch · `let_run` in `setupManage.js`.
 ## Docs updated (2026-09-17, same day)
 
 `desks/mentor-talos.md` (rewritten: the Talos section is the contract; the TP window stays as
-history) · `desks/talos-guards.md` (SUPERSEDED callouts on the time term, the guard set, the tiers,
+history) · `desks/talos-guards.md` (SUPERSEDED callouts on the time term, the guard set, the tiers — since merged into mentor-talos.md,
 the journal, the kept list; open items 1/2/4/6 closed) · `desks/trade-pipeline.md` (the cascade,
 invariants, partials, shared services, in-position as built) · `architecture/monitoring.md` ·
 `architecture/entity-model.md` (journal leaves the document; `setup` payload row) · `APP_SPEC.md`

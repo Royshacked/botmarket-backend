@@ -248,7 +248,7 @@ const num = (v) => (v == null || v === '' ? NaN : Number(v))
  *
  * ── WHY THE STORAGE SHAPE IS STILL `lower`/`upper` ───────────────────────────
  * A level authored today is ZERO-WIDTH — Mentor emits the price the user named and nothing wider
- * (docs/desks/talos-guards.md) — so a single `price` field would read better. It stays two keys
+ * (docs/desks/mentor-talos.md) — so a single `price` field would read better. It stays two keys
  * anyway, and that was a decision rather than an omission: renaming would mean migrating live armed
  * documents, and a migration that touches a resting stop is real risk bought for a cosmetic gain.
  *
@@ -759,7 +759,7 @@ export function validityProblems(setup) {
         const view = scenarioView(setup, sc)
         // `windowProblems` used to ride here, policing a TP band's breadth. There are no bands to
         // police: a target is the price the user named, and the "room to talk in" it used to
-        // measure is now a guard the monitor arms (docs/desks/talos-guards.md).
+        // measure is now a guard the monitor arms (docs/desks/mentor-talos.md).
         return rangeProblems(view)
             .map(p => (multi ? `${scenarioLabel(sc)}: ${p}` : p))
     })
@@ -991,7 +991,7 @@ export function targetEdges(setup) {
  *
  * REPLACES `targetWindows`, which read a tp zone as a window: `target` at the far edge and `wake` at
  * the near one, the level where Talos was allowed to start proposing. Under
- * docs/desks/talos-guards.md there is no window — a target is the price the user named, and the
+ * docs/desks/mentor-talos.md there is no window — a target is the price the user named, and the
  * room to talk in is a GUARD the monitor arms and rewrites, not breadth Mentor drew once.
  *
  * `conditions` rides along because a target may carry its own ("bank half if momentum stalls"). It

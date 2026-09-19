@@ -196,7 +196,7 @@ async function _insert(bound, userId) {
         ...bound,
         // `scenarios` here is the monitor's per-premise invalidation ledger, NOT the authored plan
         // (that rides in `bound`). Declared at birth for the same reason the axis below is.
-        // `guards` are the wake conditions Talos arms for itself (docs/desks/talos-guards.md) and
+        // `guards` are the wake conditions Talos arms for itself (docs/desks/mentor-talos.md) and
         // `last_read_at` is the clock their time term is measured against. Both are declared at
         // birth for the same reason the axis below is — so every consumer can read them without an
         // existence check. Empty means "never read"; the sweep falls back to the setup's own zones

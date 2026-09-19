@@ -34,7 +34,7 @@ const _marks = new Map()
 // `readMark` answers "where is it now". Talos's guard sweep has to answer a different question —
 // "did it CROSS this line since I last looked" — and the newest price cannot answer that. A level
 // touched and left between two polls is invisible to a spot read, which is precisely the miss that
-// price BANDS existed to paper over (docs/desks/talos-guards.md).
+// price BANDS existed to paper over (docs/desks/mentor-talos.md).
 //
 // So every publication is kept for a short while and `rangeSince` reads the high/low across them.
 // It costs no extra provider call — it reuses prices this app already pays for, from whichever

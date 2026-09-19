@@ -39,12 +39,11 @@ when to act on it only make sense together.
 | Doc | Desk → monitor |
 |---|---|
 | [trade-pipeline.md](./desks/trade-pipeline.md) | **The path a new trade takes: Argus → Mentor → Talos.** Read this first — it is the record of why the trading desk is the one it is |
-| [mentor-talos.md](./desks/mentor-talos.md) | Mentor builds a `setup`; Talos watches it. Scenarios as rivals, conditions, validity |
+| [mentor-talos.md](./desks/mentor-talos.md) | Mentor builds a `setup`; Talos watches it. Scenarios as rivals, conditions, validity, guards (exact prices, the free sweep, the exit asymmetry) — the guards doc was merged here 2026-09-19 |
 | [argus-scans.md](./desks/argus-scans.md) | Argus turns a question about a period into a ranked, grounded list — one spine, three targets (a trading list, an investing shortlist for Prometheus, one pick for Mentor). **Names come from the tape, and the code enforces it**; the server scores and ranks |
 | [atlas-themis.md](./desks/atlas-themis.md) | Atlas builds a book against a mandate from house coverage only, reviews it as a delta against its thesis, proposes Accept-gated changes; Themis is the LLM-free doorbell that says when to look |
 | [prometheus-coverage.md](./desks/prometheus-coverage.md) | Prometheus writes a house `coverage` thesis; the coverage monitor keeps it living. **The edge is the gap vs the Street, never price**; two tiers — a free daily check and a gated re-model |
 | [pythia-tilt.md](./desks/pythia-tilt.md) | Pythia publishes the house `tilt` — a regime and sector stances as active weight vs a benchmark; the monitor grades each stance by arithmetic. **The tilt is the mandate the house pipeline is steered from**; a re-author is offered, never run |
-| [talos-guards.md](./desks/talos-guards.md) | Guards, not zones (built 2026-08-22): exact prices, a crossing carries a meaning, the exit asymmetry. **Partly superseded** by the per-candle build — the sections say which |
 | [roles-and-sourcing.md](./desks/roles-and-sourcing.md) | **Trader vs admin, desk by desk** — where each gate lives — and the autonomous sleeve hop: Atlas → Argus → Prometheus → Atlas, researched as the house |
 
 Every desk and its monitor is written up above. Axl (reception) is described by its hand-off
