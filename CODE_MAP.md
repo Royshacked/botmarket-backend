@@ -802,8 +802,10 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             (backtick paths, module names, routes, emit tags, symbols, constants,
                             markdown links + anchors) and reports the ones that resolve to nothing,
                             or only to archive/. Per-doc counts first, worst first; `--json` for a
-                            fix pass; a folder or file argument to narrow. Mechanical only — it
-                            says which sentences to distrust, not whether the prose is still true.
+                            fix pass; a folder or file argument to narrow, including one in a sibling
+                            repo. Mechanical only — it says which sentences to distrust, not whether
+                            the prose is still true. Its verdict rules are pinned by
+                            tests/unit/docsDrift.test.js (the cases a code review found it passing).
 prompts/                    every prompt loaded at RUNTIME (6 desks + Argus's
                             profile/handoff + market brief + concepts). Hot-reloaded, lazily —
                             so a bad path is an ENOENT on a live turn, not an import error.

@@ -6,10 +6,10 @@ app cannot reach: it keeps the same virtual account and lets the user report the
 that *reads* a position — the monitors, the reconciler, the positions view, mark-to-market, the
 ledger — is shared with live; only how a position gets INTO the store differs.
 
-Written 2026-09-19, replacing the two build logs it descends from (`paper-trading-simulation.md`,
-2026-06-30 → built 07-01; `manual-mode.md`, 2026-07-07 → built 07-08; multi-account 07-07; the
-server-side workspace 08-14; `VirtualAdapter` 09-15). Their reasoning is carried here; their dated
-phases are in git.
+Written 2026-09-19, replacing the two build logs it descends from — the paper-trading simulation
+plan (2026-06-30 → built 07-01) and the manual-mode plan (2026-07-07 → built 07-08); multi-account
+07-07; the server-side workspace 08-14; `VirtualAdapter` 09-15. Their reasoning is carried here;
+their dated phases are in git (`git log -- docs/architecture/`, before 2026-09-19).
 
 ## The one decision: an adapter, not a parallel engine
 

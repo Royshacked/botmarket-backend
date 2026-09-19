@@ -22,7 +22,7 @@
  */
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, relative, sep, basename, extname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const FRONTEND = resolve(ROOT, '..', 'botmarket-frontend')
@@ -58,8 +58,9 @@ function loadCorpus() {
         const tier = rel.startsWith('archive/') ? 'archive' : 'live'
         files.push({ rel, tier, text: readText(full) })
     }
-    if (existsSync(join(FRONTEND, 'src'))) {
-        for (const full of walk(join(FRONTEND, 'src'))) {
+    for (const sub of ['src', 'docs', 'public']) {
+        if (!existsSync(join(FRONTEND, sub))) continue
+        for (const full of walk(join(FRONTEND, sub))) {
             files.push({ rel: 'frontend/' + toPosix(relative(FRONTEND, full)), tier: 'frontend', text: readText(full) })
         }
     }
@@ -94,6 +95,15 @@ for (const f of corpus) {
     byBasename.get(b).push(f.rel)
     moduleNames.add(b.replace(/\.[^.]+$/, ''))
 }
+
+// `service`, `util`, `routes`… — the second segment of every `name.suffix` module in the tree. A
+// dotted claim ending in one of these is a MODULE name, and a module the tree lacks is missing,
+// however many comments still mention its first half.
+const MODULE_SUFFIXES = new Set([...moduleNames].filter(m => m.split('.').length === 2).map(m => m.split('.')[1]))
+
+/** A corpus rel back to an absolute path — the sibling repos are prefixed, not real dirs. */
+const absOf = rel => rel.startsWith('frontend/') ? join(FRONTEND, rel.slice(9))
+    : rel.startsWith('aether/') ? join(AETHER, rel.slice(7)) : join(ROOT, rel)
 
 const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -142,10 +152,10 @@ function listDocs(args) {
 }
 
 // GitHub's heading slug, close enough for the anchors these docs use.
-const slug = h => h.toLowerCase().replace(/[`*_~]/g, '').replace(/[^\w\- ]/g, '').trim().replace(/ /g, '-')
+const slug = h => h.toLowerCase().replace(/[`*~]/g, '').replace(/[^\w\- ]/g, '').trim().replace(/ /g, '-')
 
 function headingsOf(rel) {
-    const text = readFileSync(join(ROOT, rel), 'utf8')
+    const text = readFileSync(absOf(rel), 'utf8')
     return new Set([...text.matchAll(/^#{1,6}\s+(.+?)\s*#*\s*$/gm)].map(m => slug(m[1])))
 }
 
@@ -193,13 +203,13 @@ function classify(raw) {
         return { kind: 'route', method, path: path.replace(/[?#].*$/, '') }
     }
     // `/api/foo/:id`, or a tail from a route table: `/connections/:type`
-    if (/^\/[\w\-/:.?=&]+$/.test(s) && !PATH_EXT.test(s.replace(/[?#].*$/, '')) && !/\/[gimsuy]*$/.test(s)) {
+    if (/^\/[\w\-/:.?=&]+$/.test(s) && !PATH_EXT.test(s.replace(/[?#].*$/, '')) && !/\/[gimsuy]+$/.test(s)) {
         return { kind: 'route', method: null, path: s.replace(/[?#].*$/, '') }
     }
     if (/^<\/?[a-z][\w-]*>$/.test(s)) return { kind: 'tag', tag: s.replace(/[<>/]/g, '') }
     if (/[<>*{}]/.test(s)) return null                         // placeholders: `<kind>.monitor.js`
     if (/^[0-9a-f]{7,40}$/.test(s)) return null                // a commit hash
-    if (s.startsWith('@') || DEPS.has(s)) return { kind: 'dep', name: s.replace(/@[^/]*$/, '') }
+    if ((s.startsWith('@') && s.includes('/')) || DEPS.has(s)) return { kind: 'dep', name: s.replace(/@[^/]*$/, '') }
     if (s.includes('/') || PATH_EXT.test(s)) {
         if (/\s|:\/\//.test(s)) return null
         s = s.replace(/:\d+$/, '')                               // `file.js:26`
@@ -233,21 +243,29 @@ function classify(raw) {
 
 /** Resolve a path claim to `ok` / `missing`, with where it landed. */
 function checkPath(raw, docRel, member) {
-    const p = raw.replace(/^\.\//, '').replace(/\/$/, '')
+    // `/img/x.svg` is a URL path — served from a static root, so it is looked up without the slash
+    const p = raw.replace(/^\.\//, '').replace(/^\//, '').replace(/\/$/, '')
     const explicitArchive = p.startsWith('archive/')
     const found = locate(p, docRel)
     if (!found) {
+        // `express.json` reads as a file and is a call. It is only ever a call when its head is a
+        // package we depend on; `logger.js` with no such file is a missing file, whatever `logger`
+        // and `js` happen to occur in.
         const parts = p.split('.')
-        if (!p.includes('/') && parts.length === 2 && parts.every(isIdent)) return checkDotted(parts)
+        if (!p.includes('/') && parts.length === 2 && parts.every(isIdent) && DEPS.has(parts[0])) return checkDotted(parts)
         return { verdict: 'missing' }
     }
     // A doc that points INTO the archive on purpose is not drifting; one whose bare filename now
     // resolves only there is.
     if (found.startsWith('archive/') && !explicitArchive) return { verdict: 'archived', at: found }
     if (member) {
-        const f = corpus.find(x => x.rel === found)
-        if (f && !new RegExp(`(?<![\\w$])${escapeRe(member)}(?![\\w$])`).test(f.text)) {
-            return { verdict: 'missing', at: found, detail: `#${member} not in file` }
+        if (found.endsWith('.md')) {
+            if (!headingsOf(found).has(member.toLowerCase())) return { verdict: 'missing', at: found, detail: `anchor #${member} not in file` }
+        } else {
+            const f = corpus.find(x => x.rel === found)
+            if (f && !new RegExp(`(?<![\\w$])${escapeRe(member)}(?![\\w$])`).test(f.text)) {
+                return { verdict: 'missing', at: found, detail: `#${member} not in file` }
+            }
         }
     }
     return { verdict: 'ok', at: found }
@@ -256,7 +274,7 @@ function checkPath(raw, docRel, member) {
 /** Where does a doc's path land? Exact → relative to the doc → sibling repos → suffix of any rel → basename. */
 function locate(p, docRel) {
     const exts = ['', '.js', '.mjs', '.jsx', '.ts', '.tsx']
-    const bases = [ROOT, resolve(ROOT, dirname(docRel)), join(ROOT, 'docs'), FRONTEND, join(FRONTEND, 'src'), AETHER]
+    const bases = [ROOT, resolve(ROOT, dirname(docRel)), join(ROOT, 'docs'), resolve(ROOT, '..'), FRONTEND, join(FRONTEND, 'src'), AETHER]
     for (const base of bases) for (const ext of exts) {
         const abs = resolve(base, p + ext)
         if (!existsSync(abs)) continue
@@ -345,6 +363,15 @@ function checkDotted(parts) {
         const elsewhere = findWord(member)
         return elsewhere ? { verdict: 'moved', detail: `${member} not in ${live[0]}, exists elsewhere` } : { verdict: 'missing', detail: `${member} not in ${live[0]}` }
     }
+    // `modelRouter.service` — shaped like a module, and no such module: missing, however many
+    // comments still say `modelRouter`. Checked before the word fallback, which would pass it.
+    if (parts.length === 2 && MODULE_SUFFIXES.has(parts[1])) {
+        // `tilt.monitor` is the docs' shorthand for tilt.monitor.service — a prefix of a module is that module
+        const longer = [...moduleNames].find(m => m.startsWith(parts.join('.') + '.'))
+        if (!longer) return { verdict: 'missing', detail: 'no such module' }
+        const rel = (byBasename.get([...byBasename.keys()].find(b => b.replace(/\.[^.]+$/, '') === longer)) || [])[0]
+        return rel?.startsWith('archive/') ? { verdict: 'archived', at: rel } : { verdict: 'ok', at: rel }
+    }
     const [head, ...rest] = parts
     const headTier = findWord(head)
     // `BRK.B` — a head that is not an identifier anywhere is a ticker or prose, not a claim
@@ -373,11 +400,16 @@ function check(claim, docRel) {
     }
 }
 
+export { classify, check, extractClaims, slug }
+
 // ---------------------------------------------------------------- run
 
-const argv = process.argv.slice(2)
+// Importable for its tests (tests/unit/docsDrift.test.js); the scan runs only as the entry point.
+const isMain = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url
+if (!isMain) process.exitCode = 0
+const argv = isMain ? process.argv.slice(2) : []
 const asJson = argv.includes('--json')
-const docs = listDocs(argv.filter(a => !a.startsWith('--')))
+const docs = isMain ? listDocs(argv.filter(a => !a.startsWith('--'))) : []
 
 const report = []
 for (const docRel of docs) {
@@ -403,10 +435,12 @@ for (const docRel of docs) {
     })
 }
 
-if (asJson) {
+if (!isMain) {
+    // imported — nothing to print
+} else if (asJson) {
     process.stdout.write(JSON.stringify(report, null, 2) + '\n')
     process.exit(0)
-}
+} else {
 
 const pad = (s, n) => String(s).padEnd(n)
 const rpad = (s, n) => String(s).padStart(n)
@@ -433,3 +467,4 @@ for (const r of report) {
     }
 }
 console.log()
+}
