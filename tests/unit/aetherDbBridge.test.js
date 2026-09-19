@@ -18,7 +18,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { getDbName } from '../../providers/mongodb.provider.js'
-import { aetherSchedulerService } from '../../services/aetherScheduler.service.js'
+import { aetherSchedulerService, _engineDbName } from '../../services/aetherScheduler.service.js'
 
 // getDbName() prefers the live connection and falls back to config.dbName, which reads
 // process.env.DB_NAME on every access. Nothing here connects, so these exercise the
@@ -110,4 +110,43 @@ test('an engine path with no venv does not spawn — the deployed-instance case'
 
 test('stop() is safe when nothing was ever started', async () => {
     await assert.doesNotReject(() => aetherSchedulerService.stop())
+})
+
+// ── The house database ────────────────────────────────────────────────────────
+//
+// Aether is house research: one news queue (filled by the deployed crons), one candidate list,
+// read by every admin on every host. A laptop on its own dev database (axl_dev, 2026-09-19)
+// must still run the engine against the HOUSE one — pointed at the local clone it reads a
+// queue nobody refreshes and writes a list nobody deployed can see. AETHER_DB says which;
+// unset keeps the old rule (the connected database), which is right for the deployed instance.
+
+function withAetherDbEnv(value, fn) {
+    const had = Object.hasOwn(process.env, 'AETHER_DB')
+    const prev = process.env.AETHER_DB
+    if (value === undefined) delete process.env.AETHER_DB
+    else process.env.AETHER_DB = value
+    try {
+        return fn()
+    } finally {
+        if (had) process.env.AETHER_DB = prev
+        else delete process.env.AETHER_DB
+    }
+}
+
+test('AETHER_DB unset → the engine follows the connected database (the deployed case)', () => {
+    withAetherDbEnv(undefined, () => withDbNameEnv('test', () => {
+        assert.equal(_engineDbName(), 'test')
+    }))
+})
+
+test('AETHER_DB set → the engine works in the house database, not the local one', () => {
+    withAetherDbEnv('test', () => withDbNameEnv('axl_dev', () => {
+        assert.equal(_engineDbName(), 'test')
+    }))
+})
+
+test('an empty AETHER_DB is unset, not a database named ""', () => {
+    withAetherDbEnv('', () => withDbNameEnv('axl_dev', () => {
+        assert.equal(_engineDbName(), 'axl_dev')
+    }))
 })

@@ -26,7 +26,8 @@
 import { spawn } from 'child_process'
 import fs       from 'fs'
 import path     from 'path'
-import { getDbName } from '../providers/mongodb.provider.js'
+import { getDbName, getSiblingDb } from '../providers/mongodb.provider.js'
+import { mirrorDiscoveryRuns } from './aetherMirror.service.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
 import { httpError } from './httpError.util.js'
@@ -42,9 +43,15 @@ function _pythonExe(engineDir) {
         : path.join(engineDir, '.venv', 'bin', 'python')
 }
 
+// The database the ENGINE works in: the house one when configured (a laptop on its own dev
+// database still runs Aether against the shared queue and list), else the one Node is on.
+function _engineDbName() {
+    return config.aetherDb ?? getDbName()
+}
+
 // Returns null when the database cannot be resolved — the caller must not spawn on null.
 function _buildEnv() {
-    const dbName = getDbName()
+    const dbName = _engineDbName()
     if (!dbName) return null
 
     const env = { ...process.env }
@@ -54,6 +61,19 @@ function _buildEnv() {
     env.MONGO_URI = config.mongoUri
     env.MONGO_DB  = dbName
     return env
+}
+
+// A finished run lives in the house database; when that is not the one this process is on,
+// copy it back so the local Aether list shows what was just spent on. See aetherMirror.
+async function _mirrorIfSplit(since) {
+    const houseDb = _engineDbName(), localDb = getDbName()
+    if (!houseDb || !localDb || houseDb === localDb) return
+    try {
+        const [from, to] = await Promise.all([getSiblingDb(houseDb), getSiblingDb(localDb)])
+        await mirrorDiscoveryRuns({ from, to, since })
+    } catch (err) {
+        logger.warn(LOG, `mirror skipped: ${err.message}`)
+    }
 }
 
 function start() {
@@ -297,7 +317,7 @@ function runDiscovery({ maxRuns = 2, hours = 168, top = 5 } = {}) {
             if (line) _onEngineLine(line, 'warn')
         }
     })
-    _discovery.on('exit', code => {
+    _discovery.on('exit', async code => {
         // The last stage reached is kept on `last`, because WHERE a failed run died is the
         // useful half of knowing that it did. The Iran run reported exit 1 and nothing
         // else; "died in verifying, 45 names already proposed" is the sentence that would
@@ -308,6 +328,9 @@ function runDiscovery({ maxRuns = 2, hours = 168, top = 5 } = {}) {
         _discovery = null
         _progress = null
         _announce()
+        // After the announce, so the button reads "done" on the run's own clock; a failed run
+        // is mirrored too — whatever it stored before dying is real and already in the house.
+        await _mirrorIfSplit(startedAt)
     })
     _discovery.on('error', err => {
         _lastRun = { startedAt, finishedAt: new Date().toISOString(), code: null, ok: false,
@@ -318,8 +341,9 @@ function runDiscovery({ maxRuns = 2, hours = 168, top = 5 } = {}) {
         _announce()
     })
 
-    logger.info(LOG, `discovery started  pid=${_discovery.pid}  maxRuns=${maxRuns}  hours=${hours}`)
+    logger.info(LOG, `discovery started  pid=${_discovery.pid}  db=${env.MONGO_DB}  maxRuns=${maxRuns}  hours=${hours}`)
     return { startedAt, pid: _discovery.pid, maxRuns, hours, top }
 }
 
 export const aetherSchedulerService = { start, stop, runDiscovery, discoveryStatus }
+export { _engineDbName }   // test seam: which database the engine is told

@@ -485,7 +485,12 @@ services/
                             every aether_* collection). Started OUTSIDE the instance lease, on purpose.
                             runDiscovery spawns select_events.py on an admin's press — the one leg that
                             spends real money — one at a time, progress parsed off the engine's own log
-                            lines, refusals stamped with a status
+                            lines, refusals stamped with a status. The engine works in AETHER_DB (the
+                            house database, `test`) when set, else the connected one; a laptop on its
+                            own dev database gets the finished run mirrored back (aetherMirror)
+  aetherMirror.service.js   Copies one discovery run (aether_event_runs + its candidates + usage, by
+                            run_id, since the spawn time) from the house database into the local one.
+                            A copy, never a second run. Read-only against the source; never throws
   aetherQuickRead.service.js  Prometheus's quick read on one Aether name (credible · priced_in ·
                             contradicted · unclear) — phases 1–2 on Sonnet, one paragraph, optional.
                             Node OWNS aether_candidate_reads (the engine's rows are Python's); one read

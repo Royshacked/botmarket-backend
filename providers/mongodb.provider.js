@@ -85,6 +85,17 @@ export function getDbName() {
 }
 
 /**
+ * A handle on ANOTHER database of the same cluster, over the one connected client — no second
+ * pool, no second topology monitor. For the one caller that legitimately reads across the
+ * laptop/deployed split: mirroring a house Aether run into the local database. Not a way to
+ * point a process at a database it does not own — the lease rule in config.dbName stands.
+ */
+export async function getSiblingDb(name) {
+    await getDb()
+    return _client.db(name)
+}
+
+/**
  * The other half of the lazy singleton above. A connected MongoClient keeps a pool AND a topology
  * monitor that pings every replica-set member on a heartbeat — all of it `ref`'d, so the event loop
  * can never drain and the process can never exit on its own.

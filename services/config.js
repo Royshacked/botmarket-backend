@@ -273,6 +273,16 @@ export const config = {
      * Leave unset to disable the scheduler — the engine still serves its read endpoints normally.
      */
     get aetherEnginePath() { return _str('AETHER_ENGINE_PATH', '') },
+    /**
+     * The HOUSE database the engine reads and writes — the one the deployed instance is on
+     * (`test`), where the daily news queue lands and where every admin's Aether list reads from.
+     * Unset = the database this process is connected to, which is right everywhere except a
+     * laptop on its own dev database: there, an engine pointed at the local clone reads a news
+     * queue nobody refreshes and writes candidates nobody on the deployed app can see. When it
+     * differs from the connected database, a finished discovery run is mirrored back locally
+     * (aetherMirror.service).
+     */
+    get aetherDb() { return _str('AETHER_DB', '') || null },
 
     // ── misc ──
     /** How often the outbound-HTTP meter logs its rolling counts. */
