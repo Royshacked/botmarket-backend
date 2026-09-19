@@ -39,19 +39,40 @@ export const _deps = {
 }
 
 let _configured = false
+let _warned     = false
+
+/**
+ * The public key as the browser must receive it: url-safe base64 of a 65-byte uncompressed P-256
+ * point. A value pasted into a dashboard with quotes, a trailing newline, or the PRIVATE key in
+ * its place reaches the browser as "applicationServerKey is not valid" — a message that names
+ * nothing. So it is checked here, once, and a bad one turns push OFF with a log line that does.
+ * PURE over the string: null when unusable.
+ */
+export function normalizePublicKey(raw) {
+    const key = String(raw ?? '').trim().replace(/^["']|["']$/g, '')
+    if (!key) return null
+    const bytes = Buffer.from(key, 'base64url')
+    return (bytes.length === 65 && bytes[0] === 0x04) ? key : null
+}
 
 export function isEnabled() {
-    return Boolean(config.vapidPublicKey && config.vapidPrivateKey)
+    if (!config.vapidPrivateKey) return false
+    const key = normalizePublicKey(config.vapidPublicKey)
+    if (!key && config.vapidPublicKey && !_warned) {
+        _warned = true
+        logger.error(LOG, 'VAPID_PUBLIC_KEY is not a valid P-256 public key (expect 87 url-safe base64 chars, no quotes) — push is OFF')
+    }
+    return Boolean(key)
 }
 
 export function publicKey() {
-    return config.vapidPublicKey
+    return normalizePublicKey(config.vapidPublicKey)
 }
 
 function _ensureConfigured() {
     if (_configured) return true
     if (!isEnabled()) return false
-    webPush.setVapidDetails(config.vapidSubject, config.vapidPublicKey, config.vapidPrivateKey)
+    webPush.setVapidDetails(config.vapidSubject, publicKey(), String(config.vapidPrivateKey).trim().replace(/^["']|["']$/g, ''))
     _configured = true
     return true
 }

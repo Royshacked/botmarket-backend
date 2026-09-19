@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import webPush from 'web-push'
-import { _deps, notificationForMessage, isValidSubscription, pushToUser, addSubscription, removeSubscription } from '../../services/push.service.js'
+import { _deps, notificationForMessage, isValidSubscription, pushToUser, addSubscription, removeSubscription, normalizePublicKey, isEnabled } from '../../services/push.service.js'
 
 // Web push is the second delivery of a chat message. The rules these tests hold:
 //   - the notification is the CARD's copy under the DESK's name — nothing is authored here
@@ -143,4 +143,18 @@ test('twin rows for one endpoint are one send', async () => {
     const out = await pushToUser('u1', { title: 't', body: 'b' })
     assert.equal(sends, 1)
     assert.equal(out.sent, 1)
+})
+
+test('a public key survives dashboard damage (quotes, whitespace) but not the wrong value', () => {
+    assert.equal(normalizePublicKey(KEYS.publicKey), KEYS.publicKey)
+    assert.equal(normalizePublicKey(`"${KEYS.publicKey}"
+`), KEYS.publicKey)
+    assert.equal(normalizePublicKey(KEYS.privateKey), null)            // the private half in the public slot
+    assert.equal(normalizePublicKey(KEYS.publicKey.slice(0, 80)), null) // truncated
+    assert.equal(normalizePublicKey(''), null)
+})
+
+test('a malformed public key turns push OFF rather than reaching a browser', () => {
+    process.env.VAPID_PUBLIC_KEY = KEYS.privateKey
+    assert.equal(isEnabled(), false)
 })
