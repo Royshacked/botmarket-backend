@@ -428,12 +428,14 @@ list, newest first, cursor on `at`, no cap, no TTL). The setup document keeps a 
 `GET /api/setups/:id/journal?before=<iso>&limit=50`, owner-scoped like every setups route.
 
 `reason` ∈ `first_look · candle · guard · expiry_review · limit_order · limit_disarmed · entry ·
-invalidation · exit · pre_active`. The row carries the rung, the price, the verdict, the conditions
-checked (`{ id, met, note }`), the tools pulled, the guard that fired and the guards armed now. The
-fill line (`entry`) and the close line (`exit`) are written by code — events on the trade — and the
-close line lives in `entityRepo.finalizeClose`, kind-blind, because a closed entity drops out of
-every polled status before its monitor wakes. Non-read wakes do not journal: a shut market writes
-nothing, and `pre_active` writes once.
+invalidation · exit · pre_active · manage`. The row carries the rung, the price, the verdict, the
+conditions checked (`{ id, met, note }`), the tools pulled, the guard that fired and the guards armed
+now. The fill line (`entry`), the close line (`exit`) and the accepted-action line (`manage`, verdict
+= the verb the user accepted, written through the same `entityRepo` journal seam by
+`positionManage.manageApplied`) are written by code — events on the trade — and the close line lives
+in `entityRepo.finalizeClose`, kind-blind, because a closed entity drops out of every polled status
+before its monitor wakes. Non-read wakes do not journal: a shut market writes nothing, and
+`pre_active` writes once.
 
 `scripts/migrate-journal.mjs` moved existing `monitor_state.timeline[]` arrays once, mapping the
 legacy reasons and dropping the quiet-wake lines the new journal never writes.

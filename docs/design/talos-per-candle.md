@@ -29,6 +29,16 @@ both carry SUPERSEDED callouts pointing here.
 - **The pop-out shipped as `SetupPlan.jsx`, not `SetupExits.jsx`.** Entry AND exits per scenario in
   one component (every leg tagged rests | watched, the live numbers merged into Exits once in
   position), with `SetupPlan.test.jsx`. Phase 6 below keeps the plan's name.
+- **2026-09-19: the column became three FOLDED sections — thesis · scenarios · Talos journal** (the
+  shared `FoldSection`, each summary line carrying the section's gist). Entry and Exits merged into
+  ONE block per scenario (`SetupScenarios`) — the two-block layout walked the scenarios twice, so a
+  two-premise plan printed four headings. The journal's head is the NEXT CALL, a row-shaped line
+  above the newest read: when (date-aware — a daily setup parked on Monday says *Mon*), on which
+  candle close, the guards that would wake it sooner, then the memo. An unarmed setup shows *not
+  armed* rather than its stale stamp; a dormant position says so.
+- **`manage` joined the journal reasons.** An accepted management action was still `$push`ing a
+  `monitor_state.timeline` line (positionManage), where nothing reads any more; it is a journal row
+  now, through `entityRepo.update(id, doc, entry)` — the same seam `finalizeClose` uses.
 
 The phase sections keep the PLAN's names. Where a name below is marked deleted, it is gone; where
 it names something new, the built symbol may differ — the contract doc has the built names.

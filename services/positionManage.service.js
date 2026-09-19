@@ -9,6 +9,8 @@ import { isSelfExecuted } from './venue.resolve.service.js'
 import { applyOffset } from '../api/broker/brokerPrice.service.js'
 import { round4 } from './number.util.js'
 import { logger } from './logger.service.js'
+import { journalEntry } from '../monitoring/monitorJournal.js'
+import { appendJournal } from './journal.service.js'
 
 /**
  * THE HANDS of in-position management — one mechanism, every desk.
@@ -60,8 +62,13 @@ export const _deps = {
 }
 
 // Every write goes through the entity repo — the ONE write funnel (P1b) — built over the injected
-// getDb so a caller's fake db (the tests, the desk hand-offs) still sees what was written.
-const _repo = deps => makeEntityRepo({ coll: async () => (await deps.getDb()).collection(ENTITIES) })
+// getDb so a caller's fake db (the tests, the desk hand-offs) still sees what was written. The
+// journal writer rides the same db for the same reason: left to its default it would open the
+// real connection from inside a unit test.
+const _repo = deps => makeEntityRepo({
+    coll:    async () => (await deps.getDb()).collection(ENTITIES),
+    journal: async (id, entry) => appendJournal(id, entry, await deps.getDb()),
+})
 
 // Keep the tracked native exit in step with a broker amend/cancel so the reconciler's resize (on a
 // later partial) doesn't cancel-and-replace it at the STALE price/id.
@@ -110,10 +117,18 @@ export function phaseAfterStop(newStop, entry, isLong) {
 }
 
 /**
- * The persisted change after an executed action: $set (stop/phase, clear pending) + $push (taken
- * ledger for a partial, always the journal). `extra.qty` is the executed partial size.
+ * What an executed action writes down: the entity update — $set (stop/phase, clear pending) +
+ * $push (the taken ledger for a partial) — and the journal row that says what was done, in Talos's
+ * first person. `extra.qty` is the executed partial size.
+ *
+ * The row goes to the journal COLLECTION (services/journal.service), not onto the entity: this
+ * used to `$push` a `monitor_state.timeline` line, which nothing has read since the journal moved
+ * out (docs/design/talos-per-candle.md) — an accepted stop move was being written where no
+ * pop-out would ever show it. Reason `manage`: a code-written event, like `entry` and `exit`.
+ *
+ * @returns {{ update: object, journal: object }}
  */
-export function manageAppliedUpdate(verb, proposal, ps, extra, nowMs) {
+export function manageApplied(verb, proposal, ps, extra, nowMs) {
     const at     = new Date(nowMs).toISOString()
     const isLong = (ps?.entry?.direction ?? 'long') !== 'short'
     const entry  = ps?.entry?.fill_price ?? ps?.entry?.intended ?? null
@@ -136,8 +151,8 @@ export function manageAppliedUpdate(verb, proposal, ps, extra, nowMs) {
         note = 'Flattening the rest now — the trade is done for me.'
     }
 
-    push['monitor_state.timeline'] = { $each: [{ at, reason: 'in_position', phase: 'in_position', price: null, verdict: verb, note, next_check_at: null }], $slice: -80 }
-    return { $set: set, $push: push }
+    const update = Object.keys(push).length ? { $set: set, $push: push } : { $set: set }
+    return { update, journal: journalEntry('manage', { nowMs, note, raw: { verdict: verb } }) }
 }
 
 // ── The broker calls ──────────────────────────────────────────────────────────
@@ -216,7 +231,7 @@ export async function applyManage({ entity, holder, verb, proposal, userId, orig
     //     an order reaching a shut venue, and today's behaviour is that it goes out immediately.
     //     Gating it here would queue it to the open instead — a real change, and not this commit's.
     //
-    //   • It WRITES NOTHING. manageAppliedUpdate stays the caller's, because the caller's order is
+    //   • It WRITES NOTHING. manageApplied stays the caller's, because the caller's order is
     //     notify-then-write: a delivery failure aborts before recording an intent the user was never
     //     told about. Writing here would invert that into "recorded, never delivered", which is the
     //     worse of the two failures for an instruction only a human can carry out.
@@ -248,7 +263,7 @@ export async function applyManage({ entity, holder, verb, proposal, userId, orig
     // loses the decision, which is the other half of what the queue is for.
     //
     // `pending_action` is deliberately LEFT STANDING on a defer. It is cleared by
-    // manageAppliedUpdate, i.e. when the thing actually happens; clearing it here would take the
+    // manageApplied, i.e. when the thing actually happens; clearing it here would take the
     // proposal off the card while nothing had been done to the position. Queueing twice is not a
     // risk either — enqueue dedupes on (user, entity, verb).
     const gate = await deps.deferIfClosed({
@@ -304,7 +319,8 @@ export async function applyManage({ entity, holder, verb, proposal, userId, orig
     }
     if (!anyApplied) return { ok: false, reason: 'execution_failed', accounts: perAccount }   // every open account errored
 
-    await repo.update(entity.id, manageAppliedUpdate(verb, proposal, ps, { qty: totalQty }, nowMs))
+    const done = manageApplied(verb, proposal, ps, { qty: totalQty }, nowMs)
+    await repo.update(entity.id, done.update, done.journal)
     logger.info(LOG, `${entity.id} managed → ${verb} across ${links.length} account(s)`)
     return { ok: true, verb, accounts: perAccount }
 }

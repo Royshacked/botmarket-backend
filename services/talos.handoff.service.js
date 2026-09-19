@@ -3,6 +3,7 @@ import { ENTITIES } from './entity/entityCollection.js'
 import { notifySetupManage, notifySetupLimitDisarm } from './tradeNotify.service.js'
 import { ownsEntity } from './entity/entityCrud.service.js'
 import { makeEntityRepo } from './entity/entityRepo.service.js'
+import { appendJournal } from './journal.service.js'
 import { isLivePosition } from './entity/vocabulary.js'
 import { disarmedSetupPatch } from './setup.schema.js'
 import { cancelRestingEntryOrders } from './restingOrders.service.js'
@@ -66,7 +67,11 @@ export function toExecutionProposal(verb, raw) {
  * funnel the rest of the execution path already uses (entity-model P1b). Built per call so a test's
  * fake db is still seen.
  */
-const repo = (deps) => makeEntityRepo({ coll: async () => (await deps.getDb()).collection(ENTITIES) })
+// The journal writer rides the injected db too — see positionManage's _repo for why.
+const repo = (deps) => makeEntityRepo({
+    coll:    async () => (await deps.getDb()).collection(ENTITIES),
+    journal: async (id, entry) => appendJournal(id, entry, await deps.getDb()),
+})
 
 const _deps = {
     getDb,
@@ -129,7 +134,8 @@ export async function manageSetup(id, userId, verb, deps = _deps) {
     // proposal: its copy is written in its own vocabulary, which is why this stayed at the desk.
     if (res.selfExecuted) {
         await deps.notifyManage(setup, { verdict: verb, proposal: pending?.proposal ?? null, manual: true })
-        await repo(deps).update(id, manage.manageAppliedUpdate(verb, proposal, ps, {}, now))
+        const applied = manage.manageApplied(verb, proposal, ps, {}, now)
+        await repo(deps).update(id, applied.update, applied.journal)
         logger.info(LOG, `setup ${id} manage ${verb} → manual instruction`)
         return { ok: true, manual: true, verb }
     }

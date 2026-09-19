@@ -269,10 +269,17 @@ export function makeEntityRepo({ coll = _defaultColl, journal = appendJournal } 
             return c.updateMany({ id: { $in: ids } }, { $set: fields })
         },
 
-        /** Generic raw update by id — for the mixed $set/$addToSet/$push the monitor composes. */
-        async update(id, updateDoc) {
+        /**
+         * Generic raw update by id — for the mixed $set/$addToSet/$push the monitor composes.
+         * `entry`, when given, is the journal row for what this update did (an accepted stop move,
+         * a banked partial) — appended after the write lands, through the same seam finalizeClose
+         * uses, so a caller never reaches for the journal service itself.
+         */
+        async update(id, updateDoc, entry = null) {
             const c = await coll()
-            return c.updateOne({ id }, updateDoc)
+            const res = await c.updateOne({ id }, updateDoc)
+            if (entry && res?.matchedCount !== 0) await journal(id, entry)
+            return res
         },
 
         /**

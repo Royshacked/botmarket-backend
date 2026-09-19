@@ -528,7 +528,8 @@ services/
                             invalidated_fyi) — no buttons, no pending lifecycle
   positionManage.service.js THE HANDS of in-position management, shared by every desk: resolve the
                             broker links, fan the accepted action across ALL accounts (amend stop/TP,
-                            partial/full close), write position_state once. Kind-BLIND — the caller
+                            partial/full close), write position_state once and the `manage` journal
+                            row with it (manageApplied → repo.update's journal seam). Kind-BLIND — the caller
                             passes `entity` (owns position_state) + `holder` (owns brokerOrders); for a
                             setup they are the same doc, and the split exists for kinds where they
                             are not.
@@ -642,7 +643,7 @@ monitoring/
   monitorJournal.js         the journal ROW: journalEntry(reason, opts) is the one builder for every
                             line — a read (first_look | candle | guard | expiry_review | limit_order |
                             limit_disarmed) and the code-written events (entry | invalidation | exit |
-                            pre_active). Carries rung, price, verdict, note, the conditions checked,
+                            pre_active | manage). Carries rung, price, verdict, note, the conditions checked,
                             the tools pulled, the guard that fired and the guards armed now. Non-read
                             wakes write nothing. Storage is services/journal.service.js
   monitorSchedule.util.js   the persisted cadence entry.monitor and exit.monitor SHARE — poll/timeout/

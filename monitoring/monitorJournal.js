@@ -2,8 +2,8 @@
 //
 // ONE append-only, first-person log per entity, in its own collection (services/journal.service),
 // read newest-first by the pop-out. A model read produces one row; so do the four events code
-// writes on a trade without a model — the fill, the close, an invalidation, and the one line a
-// not-yet-live setup writes before it sleeps. Nothing else does: a wake that cost no model call
+// writes on a trade without a model — the fill, the close, an invalidation, the one line a
+// not-yet-live setup writes before it sleeps, and an accepted management action. Nothing else does: a wake that cost no model call
 // writes nothing, which is what keeps the record a history rather than a heartbeat
 // (docs/design/talos-per-candle.md).
 //
@@ -13,7 +13,10 @@
 //     fired?, armed?, zone_id?, next_check_at }
 //
 //   reason ∈ first_look | candle | guard | expiry_review | limit_order | limit_disarmed
-//            | entry | invalidation | exit | pre_active
+//            | entry | invalidation | exit | pre_active | manage
+//
+//   `manage` is the user ACCEPTING a management proposal (or choosing exit_now) — code-written
+//   like `entry`/`exit`, `verdict` = the verb applied (positionManage.manageApplied).
 //
 //   `conditions`  what it checked — [{ id, met, note }], straight from the read
 //   `tools`       what it pulled — the tool names, in order

@@ -84,7 +84,7 @@ so a producer cannot ship a queued item whose desk can never be told it was canc
   - Cancelling one clears `position_state.pending_action`: nothing executed, so what has to be undone
     is the proposal still sitting on the position offering a decision the user has now taken twice.
   - A defer LEAVES `pending_action` standing. It is cleared when the action actually happens
-    (`manageAppliedUpdate`); clearing it at accept time would take the proposal off the card while
+    (`manageApplied`); clearing it at accept time would take the proposal off the card while
     nothing had been done to the position.
 - **4 — done.** The gate reaches `positionMonitor`: a stop or target that trips while the venue is
   shut parks the entity at `orderState: 'awaiting_market_close'` and queues the close, replayed at

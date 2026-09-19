@@ -106,6 +106,24 @@ test('finalizeClose journals the exit line ONLY for the close that won the guard
     assert.deepEqual(lost.journal, [], 'the loser writes no line')
 })
 
+test('update with an entry journals it after the write; a miss writes no line', async () => {
+    // The seam an accepted manage action uses (positionManage.manageApplied): the row used to be
+    // $pushed onto monitor_state.timeline, which nothing reads any more.
+    const entry = { at: '2026-09-19T10:00:00.000Z', reason: 'manage', verdict: 'move_stop', note: 'Moved my stop to 115' }
+    const hit = spyColl({ updateOne: { matchedCount: 1, modifiedCount: 1 } })
+    await hit.repo.update('i1', { $set: { 'position_state.stop.current': 115 } }, entry)
+    assert.deepEqual(hit.coll.calls[0], ['updateOne', { id: 'i1' }, { $set: { 'position_state.stop.current': 115 } }])
+    assert.deepEqual(hit.journal, [['i1', entry]])
+
+    const miss = spyColl({ updateOne: { matchedCount: 0, modifiedCount: 0 } })
+    await miss.repo.update('i1', { $set: {} }, entry)
+    assert.deepEqual(miss.journal, [], 'no entity, no line')
+
+    const plain = spyColl()
+    await plain.repo.update('i1', { $set: {} })
+    assert.deepEqual(plain.journal, [], 'no entry, nothing journalled — every existing caller')
+})
+
 test('finalizeClose without an entry journals nothing', async () => {
     const { repo, journal } = spyColl({ findOneAndUpdate: { id: 'i1' } })
     await repo.finalizeClose('i1', { status: 'closed' })

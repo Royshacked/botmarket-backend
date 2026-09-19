@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { applyManage } from '../../services/positionManage.service.js'
+import { applyManage, manageApplied } from '../../services/positionManage.service.js'
 
 // THE HANDS of in-position management, and until now it had no direct test — only the coverage it
 // picked up through talosHandoff. That is exactly the gap this file exists to close, because the
@@ -146,4 +146,47 @@ test('no basisOffset (every non-index instrument) is the identity — nothing ch
     const { called, deps } = spyDeps()
     await applyManage({ entity: LINKED, holder: LINKED, verb: 'move_stop', proposal: { new_stop: 115 }, userId: 'u1', deps })
     assert.deepEqual(called.find(c => c.name === 'amendOrder').args[4], { stopPrice: 115 })
+})
+
+// ── What gets written down ────────────────────────────────────────────────────
+
+test('manageApplied writes the position change to the entity and the line to the JOURNAL', () => {
+    const ps = { entry: { fill_price: 118, direction: 'long' }, stop: { current: 112 } }
+    const { update, journal } = manageApplied('move_stop', { new_stop: 118, ref: 'entry' }, ps, {}, Date.UTC(2026, 8, 19, 10))
+    assert.equal(update.$set['position_state.stop.current'], 118)
+    assert.equal(update.$set['position_state.phase'], 'breakeven')
+    assert.equal(update.$set['position_state.pending_action'], null)
+    assert.equal(update.$push, undefined, 'a stop move pushes nothing onto the entity')
+    // The journal row, not a monitor_state.timeline line — nothing reads that array any more.
+    assert.equal(journal.reason, 'manage')
+    assert.equal(journal.verdict, 'move_stop')
+    assert.equal(journal.at, '2026-09-19T10:00:00.000Z')
+    assert.match(journal.note, /Moved my stop to 118 — locking in breakeven/)
+})
+
+test('a partial pushes the taken ledger, and only that', () => {
+    const ps = { entry: { fill_price: 118, direction: 'long' }, stop: { current: 112 } }
+    const { update, journal } = manageApplied('take_partial', { size_pct: 50 }, ps, { qty: 50 }, Date.UTC(2026, 8, 19, 10))
+    assert.deepEqual(Object.keys(update.$push), ['position_state.taken'])
+    assert.equal(update.$push['position_state.taken'].size, 50)
+    assert.match(journal.note, /Banked 50%/)
+})
+
+test('applyManage journals through the repo — one write, then the line', async () => {
+    const updates = []
+    const journal = []
+    const { deps } = spyDeps()
+    // The journal is appended by the repo's own seam over the SAME injected db as the entity
+    // write — so a fake db sees both, and a unit test never opens the real connection.
+    const db = { collection: (name) => name === 'journal'
+        ? { insertOne: async (row) => { journal.push(row) } }
+        : { updateOne: async (_q, u) => { updates.push(u); return { matchedCount: 1 } } } }
+    const res = await applyManage({ entity: LINKED, holder: LINKED, verb: 'exit_now', proposal: {}, userId: 'u1', nowMs: 1, deps: { ...deps, getDb: async () => db } })
+    assert.equal(res.ok, true)
+    assert.equal(updates.length, 1)
+    assert.equal(journal.length, 1)
+    assert.equal(journal[0].entityId, 'e1')
+    assert.equal(journal[0].reason, 'manage')
+    assert.equal(journal[0].verdict, 'exit_now')
+    assert.equal(updates[0].$push, undefined, 'and nothing on the entity itself')
 })

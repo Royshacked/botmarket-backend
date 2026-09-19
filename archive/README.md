@@ -86,6 +86,7 @@ Repointed on 2026-09-15, when the check was written:
 | `readinessGates.gradedGap` | a local copy in `hermes.monitor.service.js` | Hermes was its last caller, so it came here with the desk |
 | `tradeNotify.notifyCall*` | `archive/services/kairosNotify.service.js` | the four `call` cards moved into the archive a month after their caller |
 | `monitorJournal.zonesLabel` | `monitorJournal.levelsLabel`, aliased at the import | renamed upstream when zero-width levels replaced bands |
+| `positionManage.manageAppliedUpdate` | `positionManage.manageApplied` → `{ update, journal }` (2026-09-19) | the accepted-action line moved from `monitor_state.timeline` to the journal collection; a revived Kairos hand-off passes `update` to its write and `journal` to the repo's seam |
 
 ### Known behavioural drift — a revival TODO, not a broken import
 
