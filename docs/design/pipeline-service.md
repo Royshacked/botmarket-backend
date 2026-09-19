@@ -5,6 +5,7 @@
 `coverage_set`; `filled | empty | partial`), `contracts.js` (each desk declares what it emits and
 accepts — scanner, mentor, analyst, portfolio), `hop.js` (`planHop`, `planEntry`, `findReceiver`),
 `doors.js` (every hand-off setter, shut together), `scanOrigin.js`. Not live-verified as a whole.
+**The mechanism as it runs is documented in the frontend repo — `botmarket-frontend/docs/hand-offs.md`.**
 This file stays as the RECORD of the design and its migration order; §8–§9 carry the dated
 build notes. **What changed after the design was written:** Kairos was archived on 2026-08-18 and
 **Mentor takes the Argus hand-off** (`429df34`) — every "Kairos" below reads as Mentor for the

@@ -68,7 +68,7 @@ the plan and what the build settled differently (the rule at the bottom of this 
 | [opportunist-money-flow.md](./design/opportunist-money-flow.md) | Design only — the opportunist's first hunting ground: government money flow, recipient resolution, a sigma screen |
 | [architecture-vision.md](./design/architecture-vision.md) | House vs per-user pipeline; the Pythia → Argus → Prometheus → Atlas chain. Revised 2026-09-10 after the channel-graph engine was deleted |
 | [investor-schools.md](./design/investor-schools.md) | **BUILT 2026-08-02** (record) — two axes, selection and allocation, on two different seams. Trap: a school that only changes prose is a costume |
-| [pipeline-service.md](./design/pipeline-service.md) | **BUILT 2026-08-04** in the frontend (record) — hops between desks as artifacts keyed by kind; each desk declares what it emits and accepts. Written for Kairos; Mentor holds that hop now |
+| [pipeline-service.md](./design/pipeline-service.md) | **BUILT 2026-08-04** in the frontend (record) — hops between desks as artifacts keyed by kind; each desk declares what it emits and accepts. Written for Kairos; Mentor holds that hop now. The mechanism doc is `botmarket-frontend/docs/hand-offs.md` |
 
 ## Open work
 
