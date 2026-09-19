@@ -1,5 +1,6 @@
 import { mentorAgentService, emptyMentorState } from '../../services/agents/mentor.agent.service.js'
 import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
+import { routeFields } from '../../services/routing.util.js'
 import { parseStreamBody, parseClientTime } from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
@@ -57,6 +58,8 @@ export async function streamMentor(req, res) {
                 coverage: result.coverage,
                 ...(result.setup     ? { setup: result.setup, readiness: result.readiness } : {}),
                 ...(result.setups    ? { setups: result.setups } : {}),
+                // route / routeSymbol / opening — the user asked to be sent to another desk (routing.util).
+                ...routeFields(result, req.user.role),
             }
         },
     })

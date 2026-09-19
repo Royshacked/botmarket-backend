@@ -5,8 +5,14 @@ import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
-import { _splitRoute, _splitEdit, _cleanOpening, EDIT_KIND_DESKS, axlAgentService } from '../../services/agents/axl.agent.service.js'
-import { _sanitizeRouteSymbol, _sanitizeEditRef, _validateEdit, VALID_PIPELINES, EDIT_KINDS } from '../../api/axl/axl.controller.js'
+import { axlAgentService } from '../../services/agents/axl.agent.service.js'
+// The grammar's parsers and validators are the shared routing mechanism since 2026-09-18 (every desk
+// routes now); Axl's tests still own the grammar, so they read it from where it lives.
+import {
+    splitRoute as _splitRoute, splitEdit as _splitEdit, cleanOpening as _cleanOpening, EDIT_KIND_DESKS,
+    sanitizeRouteSymbol as _sanitizeRouteSymbol, sanitizeEditRef as _sanitizeEditRef, validateEdit as _validateEdit,
+    VALID_PIPELINES, EDIT_KINDS,
+} from '../../services/routing.util.js'
 import { ALL_EMIT_TAGS } from '../../services/llmStream.util.js'
 
 // Axl's desk hand-off: `<route>research NVDA</route>` — the desk AND the name it should open on.
@@ -364,7 +370,7 @@ test('every desk adopt can arrive at is a real desk', () => {
 // closed: a trader still reads it; only authoring it is Pythia's.
 
 import { buildRoleSection, ADMIN_DESKS } from '../../services/agents/axl.agent.service.js'
-import { _routeFor } from '../../api/axl/axl.controller.js'
+import { routeFor as _routeFor } from '../../services/routing.util.js'
 
 test('role: the admin desks are Pythia and Aether', () => {
     assert.deepEqual([...ADMIN_DESKS], ['strategy', 'aether'])

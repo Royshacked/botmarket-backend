@@ -13,6 +13,7 @@ import { getEventCandidates, getCandidatesForTicker, tickerWindowDays, getScorec
 import { quickRead } from '../../services/aetherQuickRead.service.js'
 import { aetherSchedulerService }                    from '../../services/aetherScheduler.service.js'
 import { streamAgentResponse, sseAgentCallbacks }    from '../_shared/sse.util.js'
+import { routeFields }                               from '../../services/routing.util.js'
 import { parseChatMessages }                         from '../_shared/parse.util.js'
 import { makeHandle }                                from '../_shared/handle.util.js'
 import { httpError }                                 from '../../services/httpError.util.js'
@@ -39,7 +40,8 @@ export async function streamAether(req, res) {
                 signal,
                 ...sseAgentCallbacks(sendEvent),
             })
-            return { reply: result.reply }
+            // route / routeSymbol / opening: the user asked to be sent to another desk (routing.util).
+            return { reply: result.reply, ...routeFields(result, req.user.role) }
         },
     })
 }

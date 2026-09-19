@@ -4,6 +4,7 @@ import { logger }         from '../logger.service.js'
 import { normalizeMessages, makePromptLoader, stripEmitTags, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeSuggestionCapture } from '../suggestions.service.js'
+import { makeRouteCapture, ROUTE_TAGS, ADMIN_DESKS } from '../routing.util.js'
 import { runAgentStream } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
@@ -101,7 +102,10 @@ export const axlAgentService = { chatStream }
 // Rides the volatile tail of the system prompt, next to the audience block, for the same reason
 // that block does: the cached base is shared by every user, and a per-role base would split the
 // cache in two for a paragraph.
-export const ADMIN_DESKS = Object.freeze(['strategy', 'aether'])
+//
+// The list itself lives with the routing mechanism (routing.util), which every desk now shares;
+// re-exported here because Axl is where callers learned to find it.
+export { ADMIN_DESKS }
 
 /** The role paragraph for the prompt tail. Pure; exported for tests. */
 export function buildRoleSection(isAdmin) {
@@ -116,66 +120,12 @@ export function buildRoleSection(isAdmin) {
     ].join(' ')
 }
 
-// The route tag may carry the name the user is here for: `<route>research NVDA</route>`. Desk and
-// symbol travel as ONE capture because they are one decision — a desk that opens on a name the
-// router never picked is worse than a desk that opens empty. Split only; the controller validates
-// both (an unknown desk or a junk symbol must not reach the client).
-export function _splitRoute(raw) {
-    if (typeof raw !== 'string') return { desk: null, symbol: null }
-    const [desk = null, symbol = null] = raw.trim().split(/[\s:,]+/)
-    return { desk: desk ? desk.toLowerCase() : null, symbol: symbol || null }
-}
-
-// The kinds a user can be taken back INTO, and the desk that owns each.
-//
-// Editing is not routing, which is why it is a second tag rather than a third word in the first one.
-// `<route>research NVDA</route>` opens Prometheus for NEW work — a fresh thesis even on a name
-// already covered, which is exactly what went wrong when the only tag we had was this one.
-// `<edit>coverage <id></edit>` reopens the thesis that exists, in the chat that wrote it.
-//
-// kind → desk lives here beside the parse because it IS part of the grammar: the client is told
-// which desk so the pipeline crumb reads the same as any other arrival. Note the trade desk ENTERS
-// at Argus but a call EDITS in Kairos — the client resolves that, since the item picks the tab.
-export const EDIT_KIND_DESKS = { setup: 'assist', coverage: 'research', scan: 'scan', portfolio: 'portfolio' }
-
-// `<edit>coverage 3f9c…</edit>` → { kind, ref, desk }, or null when there is nothing openable.
-// BOTH halves or nothing: a kind with no handle names no item, a handle with no kind names no list
-// to find it in. Returning null in either case lets the turn fall through to a plain reply, which
-// is strictly better than sending the user to a desk that starts the wrong work.
-export function _splitEdit(raw) {
-    if (typeof raw !== 'string') return null
-    const [kind = '', ref = ''] = raw.trim().split(/[\s:,]+/)
-    const k = kind.toLowerCase()
-    const desk = EDIT_KIND_DESKS[k]
-    if (!desk || !ref) return null
-    return { kind: k, ref, desk }
-}
-
-// What the desk OPENS ON — the user's own statement of the job, in their words, as the first turn of
-// the desk's conversation.
-//
-// This is the whole hand-off now. It replaced an `objectives` record (2026-08-05) that tried to carry
-// the job as DATA — target, horizon, risk, scope — and got two things wrong at once. It outlived the
-// job it described, so a portfolio goal set in August was still telling the trade desk to assume a
-// 3-month horizon and 5% risk; and collecting it turned reception into an interrogation, asking for
-// numbers that belong to the desk's own first phase. Axl asks only what decides WHERE. Everything
-// else the user said travels as a sentence and the desk takes it from there.
-//
-// A sentence rather than fields is the point: it cannot be mistaken for an established parameter, it
-// needs no schema, and the desk reads it exactly as it would read the user typing it — because that
-// is what it is.
-//
-// It rides beside `<route>` rather than inside it: prose has spaces and newlines, and _splitRoute
-// splits on those. No route → no opening, since there is no desk to open.
-const MAX_OPENING = 600
-export function _cleanOpening(raw) {
-    if (typeof raw !== 'string') return null
-    // Collapse the hard wrapping a model does inside a tag — this becomes a chat message, not a
-    // document. Cap it because it is a first turn, not a brief: something longer is a summary Axl
-    // was not asked for, and the desk is better served by the sentence than by an essay.
-    const text = raw.replace(/\s+/g, ' ').trim().slice(0, MAX_OPENING)
-    return text || null
-}
+// The grammar — `<route>desk SYMBOL</route>`, `<edit>kind id</edit>`, `<open>…</open>` — and its
+// parsers were Axl's own until 2026-09-18, when every desk learned to hand the user on (a user at
+// Argus saying "send NVDA to Prometheus"). They live in routing.util now, shared; the reasoning that
+// used to sit here — why desk and symbol are one capture, why an edit is a second tag and not a third
+// word, why the opening is a sentence and not fields — moved with them. Axl keeps the richer
+// routing SECTION of its spine (reception's whole job is deciding where); the mechanism is common.
 
 async function chatStream({ messages = [], audience = null, isAdmin = false, model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
@@ -209,15 +159,12 @@ ${audienceBlock}` : ''}` },
 
     // The chart tag is captured and emitted by runAgentStream (shared protocol) — Axl only forwards
     // the callback, exactly like every other agent, and that ONE argument is the whole reason a
-    // toolless agent can put a chart in its chat at all. <route> is Axl's own: suppressed from the
-    // token stream here, and stripped from `raw` below because this return value is a second
-    // consumer that would otherwise hand the client "…to the trading desk. <route>trade</route>".
-    // <edit> is <route>'s sibling and is handled identically here — suppressed from the stream,
-    // stripped from `raw` below, parsed after the turn.
+    // toolless agent can put a chart in its chat at all. <route>/<edit>/<open> are the shared
+    // routing capture (routing.util): suppressed from the token stream, stripped from `raw` below
+    // because this return value is a second consumer that would otherwise hand the client "…to the
+    // trading desk. <route>trade</route>", parsed after the turn.
     let chartRow = null
-    let routeCapture = null
-    let editCapture = null
-    let openCapture = null
+    const route = makeRouteCapture()
     // <adopt> is a THIRD sibling of <route>, for the same reason <edit> is a second one: "the user
     // already owns this book" is not a destination, it is what the portfolio desk must do on arrival.
     // Squeezing it into the route tag would collide with the symbol slot (`portfolio adopt` vs
@@ -252,9 +199,7 @@ ${audienceBlock}` : ''}` },
         tools: TOOLS, toolHandlers,
         reasoningEffort, signal, onToken,
         tagCaptures: buildTagCaptures({
-            route: (text) => { routeCapture = text.trim() },
-            edit:  (text) => { editCapture = text.trim() },
-            open:  (text) => { openCapture = text },
+            ...route.captures,
             adopt: () => { adoptCapture = true },
             suggest: suggest.onCapture,
         }),
@@ -262,14 +207,10 @@ ${audienceBlock}` : ''}` },
         onChart: (row) => { chartRow = row; onChart?.(row) },
     })
 
-    const reply = stripEmitTags(raw ?? '', ['route', 'edit', 'open', 'adopt', 'suggest']).trim()
-    const { desk, symbol } = _splitRoute(routeCapture)
-    const edit = _splitEdit(editCapture)
-
-    // No desk, no opening. An `<open>` on a turn that routes nowhere has no conversation to start,
-    // and an EDIT reopens a document that already holds its own history — the desk resumes it rather
-    // than beginning again, so an opening turn there would talk over what is already on the page.
-    const opening = (desk && !edit) ? _cleanOpening(openCapture) : null
+    const reply = stripEmitTags(raw ?? '', [...ROUTE_TAGS, 'adopt', 'suggest']).trim()
+    // No desk, no opening; no opening on an edit — the capture gates the three tags against each
+    // other (see makeRouteCapture).
+    const { route: desk, routeSymbol: symbol, opening, edit } = route.result()
 
     // Chips are for a turn that STAYS here. When Axl is handing the user to a desk, the door he
     // just opened is the next step — offering three other questions beside it competes with the

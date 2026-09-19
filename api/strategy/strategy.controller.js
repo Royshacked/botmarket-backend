@@ -12,6 +12,7 @@ import { diffStances }          from '../../monitoring/tilt.assess.js'
 import { notifyTiltChanged }    from '../../services/tiltNotify.service.js'
 import { runHouseScan }         from '../../services/houseScan.service.js'
 import { streamAgentResponse, sseAgentCallbacks }  from '../_shared/sse.util.js'
+import { routeFields }                             from '../../services/routing.util.js'
 import { parseChatMessages }    from '../_shared/parse.util.js'
 import { sendReason }           from '../_shared/reason.util.js'
 import { makeHandle }           from '../_shared/handle.util.js'
@@ -52,7 +53,8 @@ export async function streamStrategy(req, res) {
             // it without owning the tolerance, which is a number that decides a verdict and has no
             // business living in a component in another repo.
             const tilt = result.tilt ? { ...result.tilt, ...balanceOf(result.tilt.tilts) } : null
-            return { reply: result.reply, phase: result.phase ?? null, ...(tilt ? { tilt } : {}) }
+            // …plus route / routeSymbol / opening: the user asked to be sent to another desk (routing.util).
+            return { reply: result.reply, phase: result.phase ?? null, ...(tilt ? { tilt } : {}), ...routeFields(result, req.user.role) }
         },
     })
 }

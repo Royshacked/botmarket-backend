@@ -18,6 +18,7 @@ import { makeChartHandler } from '../tools/marketData.tools.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { SECTORS } from '../entity/vocabulary.js'
 import { buildTagCaptures } from '../llmStream.util.js'
+import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { buildSchoolSection, normalizeAllocation, normalizeSelection } from '../investorSchools.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
@@ -226,7 +227,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // session, so caching it lets turns 2+ read it at ~0.1× instead of re-paying
     // full price every turn. A turn where it does change just re-writes it once.
     const systemPrompt = [
-        cachedBlock(_systemPrompt() + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
+        cachedBlock(_systemPrompt() + buildRouteRule('portfolio') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
         ...(dynamicSections.length
             ? [cachedBlock(dynamicSections.join('\n\n'))]
             : []),
@@ -243,13 +244,16 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     const onMandate = (json) => { try { capturedMandate = JSON.parse(json) } catch { /* malformed */ } }
 
     // All known emit tags suppressed by default; this agent captures phase, ticker
-    // (which keeps its inner text in the UI), and the plan/update/mandate blocks.
+    // (which keeps its inner text in the UI), the plan/update/mandate blocks, and the shared
+    // routing tags (the user asked to be sent to another desk with a name).
+    const route = makeRouteCapture('portfolio')
     const tagCaptures = buildTagCaptures({
         phase:             phase.capture,
         ticker:            { onCapture: onTicker, keepText: true },
         portfolio_plan:    onPlan,
         portfolio_update:  onUpdate,
         portfolio_mandate: onMandate,
+        ...route.captures,
     })
 
     const raw = await _run({
@@ -284,13 +288,13 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     const reply = stripEmitTags(
         // <ticker> keeps its inner text in the reply (unwrap, don't strip).
         raw.replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1'),
-        ['phase', 'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis', 'screen_request', 'coverage_refresh', 'coverage_request'],
+        ['phase', 'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis', 'screen_request', 'coverage_refresh', 'coverage_request', ...ROUTE_TAGS],
     ).trim()
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
 
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, coverageRequest: !!coverageRequest, phase: phase.get() })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...(coverageRequest ? { coverageRequest } : {}) }
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...(coverageRequest ? { coverageRequest } : {}), ...route.result() }
 }
 
 // ─── Coverage-refresh extraction (pure) ─────────────────────────────────────────

@@ -5,6 +5,7 @@ import { researchQueueService }   from '../../services/researchQueue.service.js'
 import { researchRunService }     from '../../services/researchRun.service.js'
 import { analystAgentService }    from '../../services/agents/analyst.agent.service.js'
 import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
+import { routeFields }             from '../../services/routing.util.js'
 import { parseChatMessages }      from '../_shared/parse.util.js'
 import { sendReason }             from '../_shared/reason.util.js'
 import { makeHandle }             from '../_shared/handle.util.js'
@@ -84,7 +85,8 @@ export async function streamAnalyst(req, res) {
                 ...sseAgentCallbacks(sendEvent),
                 onPhase:     phase => sendEvent('phase',     { phase }),
             })
-            return { reply: result.reply, phase: result.phase ?? null, ...(result.coverage ? { coverage: result.coverage } : {}) }
+            // …plus route / routeSymbol / opening: the user asked to be sent to another desk (routing.util).
+            return { reply: result.reply, phase: result.phase ?? null, ...(result.coverage ? { coverage: result.coverage } : {}), ...routeFields(result, req.user.role) }
         },
     })
 }

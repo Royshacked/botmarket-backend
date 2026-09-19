@@ -12,8 +12,10 @@ import { fileURLToPath } from 'url'
 import { dirname, join }  from 'path'
 
 import { runAgentStream } from '../agentIO.js'
+import { buildTagCaptures } from '../llmStream.util.js'
+import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { toolsFor }       from '../agentTools.registry.js'
-import { makePromptLoader, LANGUAGE_RULE, BREVITY_RULE, cachedBlock, buildDeskMessages } from '../agentUtils.js'
+import { makePromptLoader, LANGUAGE_RULE, BREVITY_RULE, cachedBlock, buildDeskMessages, stripEmitTags } from '../agentUtils.js'
 import { AETHER_TOOL_SPECS, makeAetherToolHandlers } from '../tools/aether.tools.js'
 import { logger }         from '../logger.service.js'
 
@@ -40,21 +42,24 @@ async function chatStream({
     const systemPrompt  = _buildSystemPrompt()
     const builtMessages = _buildMessages({ messages })
 
+    // The shared routing tags: the user asked to be sent to another desk with a name (routing.util).
+    const route = makeRouteCapture('aether')
     const raw = await _run({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
         tools: TOOLS, toolHandlers: TOOL_HANDLERS,
         reasoningEffort, signal, onToken, onToolStart, onReasoning,
+        tagCaptures: buildTagCaptures({ ...route.captures }),
     })
 
-    const reply = (raw ?? '').trim()
+    const reply = stripEmitTags(raw ?? '', ROUTE_TAGS).trim()
     logger.info(LOG, 'chatStream done', { replyLength: reply.length })
-    return { reply }
+    return { reply, ...route.result() }
 }
 
 function _buildSystemPrompt() {
     const today = new Date().toISOString().slice(0, 10)
     return [
-        cachedBlock(_systemPrompt() + LANGUAGE_RULE + BREVITY_RULE),
+        cachedBlock(_systemPrompt() + buildRouteRule('aether') + LANGUAGE_RULE + BREVITY_RULE),
         { type: 'text', text: `---\nCURRENT DATE: ${today}.` },
     ]
 }

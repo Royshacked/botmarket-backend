@@ -18,6 +18,7 @@ import { makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection,
 import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
+import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from '../tools/valuation.tools.js'
 import { logger } from '../logger.service.js'
 
@@ -100,7 +101,9 @@ async function chatStream({
     const phase = makePhaseCapture(6, onPhase)
     // Suppress every emit tag from the token stream; capture phase live. <coverage> is suppressed and
     // parsed from `raw` afterward (same as Pythia parses <tilt>).
-    const tagCaptures = buildTagCaptures({ phase: phase.capture })
+    // …plus the shared routing tags: the user asked to be sent to another desk with a name.
+    const route = makeRouteCapture('analyst')
+    const tagCaptures = buildTagCaptures({ phase: phase.capture, ...route.captures })
 
     const raw = await _run({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
@@ -114,9 +117,10 @@ async function chatStream({
     // model emitted one against instruction, and the <quickread> verdict is what comes back.
     const quickread = mode === MODES.QUICKREAD ? _parseQuickRead(raw) : null
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCoverage: Boolean(coverage), mode, phase: phase.get() })
-    if (mode === MODES.QUICKREAD) return { reply, phase: phase.get(), quickread }
+    const routing = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
+    if (mode === MODES.QUICKREAD) return { reply, phase: phase.get(), quickread, ...routing }
     // The coverage is a DRAFT — returned for preview, NOT saved. Initiating persists it (P1).
-    return { reply, phase: phase.get(), ...(coverage ? { coverage } : {}) }
+    return { reply, phase: phase.get(), ...(coverage ? { coverage } : {}), ...routing }
 }
 
 // ─── Coverage extraction (pure) ───────────────────────────────────────────────
@@ -124,7 +128,7 @@ async function chatStream({
 // parsed draft (null when absent, malformed, or missing a symbol). A "no-edge" turn emits no block.
 export function _parseAnalystResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['coverage', 'phase', 'quickread']).trim()
+    const reply = stripEmitTags(text, ['coverage', 'phase', 'quickread', ...ROUTE_TAGS]).trim()
     return { reply, coverage: _cleanDraft(parseEmitBlock(text, 'coverage', LOG)) }
 }
 
@@ -233,7 +237,7 @@ ${audienceBlock}
 
 ` : ''}Active name: ${active}${seedBlock}${coverageListBlock}${existingBlock}`
     return [
-        cachedBlock(_systemPrompt() + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
+        cachedBlock(_systemPrompt() + buildRouteRule('analyst') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
         // The mode module AFTER the spine and BEFORE the dynamic block, as its own cached block:
         // coverage turns keep their prefix untouched, and quick-read turns share one across names.
         ...(mode === MODES.QUICKREAD ? [cachedBlock(_quickreadMode())] : []),

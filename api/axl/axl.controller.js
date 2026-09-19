@@ -1,64 +1,15 @@
-import { axlAgentService, ADMIN_DESKS } from '../../services/agents/axl.agent.service.js'
+import { axlAgentService } from '../../services/agents/axl.agent.service.js'
+import { routeFields } from '../../services/routing.util.js'
 import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
 import { parseChatMessages } from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
 import { getMarketBrief } from '../../services/marketBrief.service.js'
 
-// The desks a reply may hand the user to. Validated here rather than trusted from the model: an
-// unknown key would leave the client trying to navigate to a tab that doesn't exist, so it becomes
-// null and the user simply stays with Axl.
-export const VALID_PIPELINES = new Set(['trade', 'portfolio', 'scan', 'assist', 'research', 'strategy', 'aether'])
-
-// The desks a TRADER may be handed to — the admin desks (Pythia, Aether) removed. The prompt tells
-// Axl which user it has (buildRoleSection); this is the gate that holds when the model forgets, so
-// a trader is never sent to a desk the hub does not show them and the routes answer 403.
-export function _routeFor(role, route) {
-    if (!VALID_PIPELINES.has(route)) return null
-    if (role !== 'admin' && ADMIN_DESKS.includes(route)) return null
-    return route
-}
 const LOG = '[axl:controller]'
 
-// The ticker a reply may hand over with the desk (`<route>research NVDA</route>`). Sanitized on the
-// same principle as the desk key: it becomes the desk's OPENING TURN, so a hallucinated "the" or a
-// company name would put an agent to work on nothing. Anything that isn't a plausible symbol is
-// dropped and the desk simply opens empty — the old behaviour, never a broken one.
-const SYMBOL_RE = /^[A-Z0-9][A-Z0-9.-]{0,11}$/
-export function _sanitizeRouteSymbol(raw) {
-    if (typeof raw !== 'string') return null
-    const symbol = raw.trim().toUpperCase()
-    return SYMBOL_RE.test(symbol) ? symbol : null
-}
-
-// The kinds `<edit>` may reopen. Same gate as the desks above and for the same reason — a kind the
-// client has no opener for would leave it mid-hand-off with nothing to show.
-//
-// A BOOK is the one whose edit is not free: reopening a plan in Atlas takes every holding back to
-// `waiting` until the user re-activates it. That is the existing pencil's behaviour, not something
-// this hand-off invents — the same click, reached by sentence — but it is why the prompt has Axl
-// say so before it hands over, rather than letting a live book quietly go unmonitored.
-// `call` left on 2026-08-18 with Kairos: an <edit> is a door into the desk that OWNS the item,
-// and that desk is archived. axlRoute.test.js fails if the prompt still teaches a kind this drops.
-export const EDIT_KINDS = new Set(['setup', 'coverage', 'scan', 'portfolio'])
-
-// The handle Axl quotes back from get_watched_items: an item id (a UUID), or — when it has none to
-// hand — a bare ticker the client can match on instead. Deliberately permissive about WHICH of the
-// two: this is used to look something up in a list the client already holds, so a wrong or invented
-// ref finds nothing and opens nothing. It can never reach another user's data. The gate is only
-// here to keep junk (a sentence, a quoted phrase) from travelling as if it were a handle.
-const EDIT_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
-export function _sanitizeEditRef(raw) {
-    if (typeof raw !== 'string') return null
-    const ref = raw.trim()
-    return EDIT_REF_RE.test(ref) ? ref : null
-}
-
-/** The whole edit hand-off, or null — kind, desk and ref all have to survive for it to mean anything. */
-export function _validateEdit(edit) {
-    if (!edit || !EDIT_KINDS.has(edit.kind) || !VALID_PIPELINES.has(edit.desk)) return null
-    const ref = _sanitizeEditRef(edit.ref)
-    return ref ? { kind: edit.kind, ref, desk: edit.desk } : null
-}
+// The desk key, the symbol, the edit handle and the opening are validated by the shared routing tier
+// (routing.util — routeFields), the same gate every desk's controller applies. Until 2026-09-18 the
+// validators lived here, because Axl was the only agent that routed.
 
 // SSE chat with Axl — the one Axl surface. It answers, remembers the thread, docks charts, and
 // routes to a desk when the user wants one (`route` + optional `routeSymbol` in the `done` payload,
@@ -87,23 +38,16 @@ export async function streamAxl(req, res) {
                 ...sseAgentCallbacks(sendEvent),
             })
 
-            const route = _routeFor(req.user.role, result.route)
+            // route / routeSymbol / edit / opening — validated for this user by the shared tier.
+            const routing = routeFields(result, req.user.role)
+            const { route } = routing
             return {
                 reply: result.reply,
-                route,
-                // A symbol only rides along WITH a desk — with no route it has nowhere to land.
-                routeSymbol: route ? _sanitizeRouteSymbol(result.routeSymbol) : null,
-                // Reopen an item the user already has, in the desk that owns it, instead of opening
-                // that desk on a blank page. Independent of `route` — it carries its own desk.
-                edit: _validateEdit(result.edit),
+                ...routing,
                 // The user already owns the book they want managed → the portfolio desk opens in
                 // ADOPT mode instead of on a blank construction. Re-gated on a real portfolio route
                 // for the same reason the symbol and the opening are: this tier is the contract.
                 adopt: route === 'portfolio' && result.adopt === true,
-                // The desk's opening turn, in the user's own words — the whole hand-off. Gated on a
-                // real route for the same reason the symbol is: with nowhere to land it is a message
-                // sent to no one. The service has already collapsed and capped it.
-                opening: route ? (result.opening ?? null) : null,
                 // Follow-up chips. Already empty on a routing turn (the agent guards it), and
                 // re-gated here for the same reason `route` itself is validated rather than
                 // trusted: this tier is the contract the client reads.

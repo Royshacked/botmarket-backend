@@ -28,7 +28,7 @@ The server owns every gate; the client hides what the server refuses, as a court
 |---|---|
 | Routes | `requireAdmin` (`middleware/auth.middleware.js`) — router-wide on `/api/strategy`, on the writes + queue under `/api/analyst`, on `/api/aether/stream` + discovery. `tests/unit/adminGate.test.js` pins it, and pins that scanner/mentor/setups routes are **never** gated |
 | Social chat | `ADMIN_BOT_IDS = ['strategy', 'analyst']` (`api/chat/chat.service.js`, mirrored in the frontend `agentMeta.jsx`). The notifiers narrow delivery to `listAdminUserIds` and stamp `visibility: 'admin'`; `visibleConversationsFor(convs, role)` hides the threads from a non-admin on list AND on read-by-id, so a demoted admin cannot read the house desk through a thread they still own |
-| Axl | `buildRoleSection(isAdmin)` in the prompt tail tells Axl who it has; `_routeFor(role, route)` (`axl.controller.js`) drops an admin desk for a non-admin whatever the model emitted |
+| Axl | `buildRoleSection(isAdmin)` in the prompt tail tells Axl who it has; `routeFor(role, route)` (`routing.util.js`, the shared routing tier every desk's controller applies) drops an admin desk for a non-admin whatever the model emitted. The desks' own route rule (`buildRouteRule`) never lists Pythia or Aether at all |
 | Atlas | `<coverage_refresh>` runs only for `req.user.role === 'admin'` (`portfolio.controller.js`); a trader's ask is logged and Atlas reads the standing coverage |
 | Client | `DESKS[].adminOnly` (hub cards), `FloorLists` desks (`Forecasts`, `Research queue`), the Radar's Forecasts card, `CoverageActions`, the "Initiate coverage" button, `useCalendarEvents` (no tilt fetch for traders) |
 

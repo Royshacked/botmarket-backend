@@ -17,6 +17,7 @@ import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
 import { makePromptLoader, stripEmitTags, makeToolHandler, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, cachedBlock, buildDeskMessages } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
+import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { getMacroSnapshot, getSectorSnapshot } from '../../providers/fmp.provider.js'
 import { getPricedIn } from '../../providers/fred.provider.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
@@ -101,7 +102,9 @@ async function chatStream({
     const phase = makePhaseCapture(5, onPhase)
     // Every emit tag is suppressed by default; <tilt> is parsed from `raw` afterward, same as
     // Prometheus parses <coverage>.
-    const tagCaptures = buildTagCaptures({ phase: phase.capture })
+    // …plus the shared routing tags: the user asked to be sent to another desk with a name.
+    const route = makeRouteCapture('strategy')
+    const tagCaptures = buildTagCaptures({ phase: phase.capture, ...route.captures })
 
     const raw = await _run({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
@@ -113,7 +116,7 @@ async function chatStream({
     const { reply, tilt } = _parseStrategyResponse(raw)
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasTilt: Boolean(tilt), rows: tilt?.tilts?.length ?? 0, phase: phase.get() })
     // A DRAFT — returned for preview, never saved. Publishing is a separate, explicit act.
-    return { reply, phase: phase.get(), ...(tilt ? { tilt } : {}) }
+    return { reply, phase: phase.get(), ...(tilt ? { tilt } : {}), ...route.result() }
 }
 
 // ─── tilt extraction (pure) ───────────────────────────────────────────────────
@@ -124,7 +127,7 @@ async function chatStream({
  */
 export function _parseStrategyResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['tilt', 'phase']).trim()
+    const reply = stripEmitTags(text, ['tilt', 'phase', ...ROUTE_TAGS]).trim()
     return { reply, tilt: _cleanDraft(parseEmitBlock(text, 'tilt', LOG)) }
 }
 
@@ -143,7 +146,7 @@ function _buildSystemPrompt() {
     // hit.
     const today = new Date().toISOString().slice(0, 10)
     return [
-        cachedBlock(_systemPrompt() + LANGUAGE_RULE + BREVITY_RULE),
+        cachedBlock(_systemPrompt() + buildRouteRule('strategy') + LANGUAGE_RULE + BREVITY_RULE),
         { type: 'text', text: `---\nCURRENT DATE: ${today}. Resolve relative dates (this quarter, the next FOMC) against it.` },
     ]
 }

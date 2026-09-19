@@ -9,6 +9,7 @@ import { makeEntityController } from '../_shared/entityController.util.js'
 import { makeHandle }          from '../_shared/handle.util.js'
 import { httpError }           from '../../services/httpError.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
+import { routeFields }         from '../../services/routing.util.js'
 
 const LOG    = '[scanner:controller]'
 const handle = makeHandle(LOG)
@@ -45,7 +46,9 @@ export async function streamScanner(req, res) {
 
             // `kairos_pick` (hand-off mode) → the single ticker Argus recommends back to the build desk.
             // The wire name outlived the desk it was written for; the client reads it by this name.
-            return { reply: result.reply, scan: result.scan ?? null, phase: result.phase ?? null, ...(result.pick ? { kairos_pick: result.pick } : {}) }
+            // `route` / `routeSymbol` / `opening` → the user asked to be sent to another desk with a
+            // name (routing.util) — validated for this user, landed by the client's one doorway.
+            return { reply: result.reply, scan: result.scan ?? null, phase: result.phase ?? null, ...(result.pick ? { kairos_pick: result.pick } : {}), ...routeFields(result, req.user.role) }
         },
     })
 }

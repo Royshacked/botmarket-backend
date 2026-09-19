@@ -388,6 +388,26 @@ hand-off is literally `<kairos_pick>` — it carries the name of the desk that f
 renaming a tag both repos parse is a migration, not a docs fix. Read it as "the single-pick
 hand-off"; it goes to Mentor.
 
+The other way out of Argus is **Prometheus**: an investing list goes there by the app's own button
+(top N to research), a single name by clicking it on a saved list — or by **asking in the chat**
+("send NVDA to Prometheus"), which is the desk-to-desk hand-off every desk has (below).
+
+### Desk-to-desk hand-off, by the user's ask (2026-09-18)
+
+Any desk can send the user to any other desk with a name, on request. The mechanism is the one Axl
+has always routed with, shared (`services/routing.util.js`): the desk's reply carries
+`<route>desk SYMBOL</route>` + `<open>…</open>`; the controller validates it for this user
+(`routeFields`: known desk, admin desks only for admins, a plausible symbol, an opening only with a
+desk); the client offers a **Go to {brand} · SYMBOL** / **Not now** bubble (`RouteOffer`) and lands
+the press on the same doorway reception uses (`handleRoute` → `handleAxlPick`). **Nothing
+structured crosses.** The `<open>` is the receiving desk's first turn, in prose, written by the
+SENDER: the user's ask plus what it found on the name — because the desk cannot see the sender's
+chat, and a sentence needs no schema and cannot be mistaken for a settled parameter. Each desk's
+spine carries one shared rule (`buildRouteRule`): the routable desks minus its own, never Pythia or
+Aether, and **only when the user asked** — one hand-off per turn, say where they are going, the
+block is the hand-off. The automatic conveyor hops (`kairos_pick`, sleeve sourcing) keep their
+artifact kinds: they carry fields the receiver's UI needs; a user's ask is a sentence.
+
 Argus runs a **systematic-discovery funnel** — candidates come from grounded sources, never
 model memory. Phase 2 casts a wide net (`screen_candidates`, `get_market_movers`,
 `get_sector_snapshot`, `get_analyst_actions`, `web_search`) then coarse-triages via

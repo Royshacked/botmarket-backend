@@ -231,6 +231,10 @@ AXL  —  POST /api/axl/stream
         ▼
   setup → Mentor (the trading desk) · coverage → Prometheus
   scan → Argus · portfolio → Atlas (edit or review — the BOOK decides, never the caller)
+
+  The same three tags are EVERY desk's, not only Axl's (services/routing.util.js):
+  a user at Argus who says "send NVDA to Prometheus" gets a Go button under the
+  reply, and Argus wrote the <open> with what it found. One doorway on the client.
 ```
 
 Risk, horizon, constraints and benchmark are the **receiving desk's** first phase, not reception's —

@@ -306,6 +306,16 @@ services/
   llmStream.util.js       createTagSuppressor({ onToken, captures }) + ALL_EMIT_TAGS — the ONE list
                           of tags suppressed from every agent's token stream. A new emit tag goes
                           here first, or it leaks raw into the chat AND is never captured
+  routing.util.js         desk-to-desk ROUTING — the shared mechanism (2026-09-18). The grammar Axl
+                          always spoke (`<route>desk SYMBOL</route>` + `<open>…</open>`, or
+                          `<edit>kind id</edit>`), its parsers, the controller-tier validation
+                          (routeFields: desk vs role, symbol, opening gated on a desk), the capture
+                          an agent wires (makeRouteCapture) and the rule a desk's spine carries
+                          (buildRouteRule — every routable desk but its own; never an admin desk).
+                          Every desk speaks it; the client lands all of them on one doorway
+                          (MainPage.handleRoute → handleAxlPick). Nothing structured crosses — the
+                          OPENING is where what the sender found travels, as prose. WHEN to route is
+                          each desk's judgment; the rule only gates it on the user's ask
   suggestions.service.js  follow-up CHIPS — the shared pipe for "what might I ask next". Owns the
                           `<suggest>` tag, the capture, the cleaning and the cap of 3; one line
                           (makeSuggestionCapture) wires any desk in and the client renders one
@@ -865,6 +875,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | New agent tool that is a FACT about the venue/instrument | ride it on `get_quote` (`makeQuoteHandler`) as well as giving it a tool — a desk cannot then be unaware of it |
 | New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince` |
 | New admin-only desk (or route) | `requireAdmin` on the router (router-wide when the whole desk is admin's), `adminOnly: true` on its `DESKS` entry + any Floor/Radar surface (frontend `agentMeta.jsx`, `FloorLists.jsx`), its bot id in `ADMIN_BOT_IDS` on BOTH sides if it has a feed, its notifier narrowed to `listAdminUserIds` + `visibility: 'admin'`, the desk in Axl's `ADMIN_DESKS` + a line in `buildRoleSection`, and a row in `docs/desks/roles-and-sourcing.md`. `adminGate.test.js` pins the router |
+| Desk-to-desk hand-off on a new agent | four lines, all in routing.util: `+ buildRouteRule('<key>')` after its spine (before the closing LANGUAGE/VENUE/BREVITY rules), `...route.captures` in `buildTagCaptures`, `...route.result()` in the return, `...routeFields(result, req.user.role)` in the controller's done payload. Client: `useRouteOffer()` + `<RouteOffer>` in the panel, `onRoute={handleRoute}` from MainPage. Add a row to `tests/unit/routing.test.js` |
 | New emit tag (any agent) | add the name to `ALL_EMIT_TAGS` (llmStream.util.js) BEFORE anything else — unlisted tags leak into the chat and are never captured — then `buildTagCaptures({ tag })` in the agent + `stripEmitTags` on the return value |
 | Follow-up chips on another desk | `makeSuggestionCapture()` (suggestions.service.js) → wire `suggest:` into that agent's `buildTagCaptures` + add `'suggest'` to its `stripEmitTags` list + return `suggestions`. The plumbing is done; write the desk's OWN "what is worth asking next" section in its prompt |
 | New off-hours-queueable action | ask `executionGate.deferIfClosed` before the order, and register the origin's `execute` + `cancel` in `originRegistry.ORIGINS` — the gate REFUSES to queue an unregistered origin. Cancel must reach back into the deciding desk |

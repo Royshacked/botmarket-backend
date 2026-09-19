@@ -7,6 +7,7 @@ import { researchQueueService }   from '../../services/researchQueue.service.js'
 import { sourceSleeve }           from '../../services/sleeveSource.service.js'
 import { logger }                from '../../services/logger.service.js'
 import { streamAgentResponse, sseAgentCallbacks }   from '../_shared/sse.util.js'
+import { routeFields }                              from '../../services/routing.util.js'
 import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { threadService }          from '../../services/thread.service.js'
@@ -287,7 +288,7 @@ export async function streamPortfolio(req, res) {
                 }).catch(err => logger.warn(LOG, 'coverage request enqueue failed', err.message))
             }
 
-            return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null, ...(result.screenRequests ? { screen_requests: result.screenRequests } : {}), ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}), ...(result.coverageRequest ? { coverage_request: result.coverageRequest } : {}) }
+            return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null, ...(result.screenRequests ? { screen_requests: result.screenRequests } : {}), ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}), ...(result.coverageRequest ? { coverage_request: result.coverageRequest } : {}), ...routeFields(result, req.user.role) }
         },
     })
 }

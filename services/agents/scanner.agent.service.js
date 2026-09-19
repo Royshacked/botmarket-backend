@@ -16,6 +16,7 @@ import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTag
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
+import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { isToolError } from '../toolResult.util.js'
 import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS } from '../scanner.grounding.js'
 import { normalizeSelection, selectionWeights } from '../investorSchools.js'
@@ -239,26 +240,29 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     // (_stampHistoryCache in the Anthropic provider), and this leaves the system prompt at one
     // normally, two in hand-off — the ceiling Atlas and Kairos already run at. Do not add a third.
     const systemPrompt = [
-        cachedBlock(promptLoader() + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
+        cachedBlock(promptLoader() + buildRouteRule('scanner') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
         ...(inHandoff ? [cachedBlock(_handoffMode())] : []),
         { type: 'text', text: dynamic.join('\n\n') },
     ]
 
 
-    let capturedScan  = null
-    let capturedPick  = null
+    let capturedScan = null
+    let capturedPick = null
+    // <route>/<open>: the user asked to be sent to another desk with a name (routing.util).
+    const route = makeRouteCapture('scanner')
 
     const onScan = (json) => { try { capturedScan = JSON.parse(json) } catch { /* malformed — ignore */ } }
     const onPick = (json) => { try { capturedPick = JSON.parse(json) } catch { /* malformed — ignore */ } }
     const phase = makePhaseCapture(4, onPhase)
 
-    // All known emit tags suppressed by default; this agent captures phase, ticker
-    // (which keeps its inner text in the UI), scan_list, and — in hand-off mode — kairos_pick.
+    // All known emit tags suppressed by default; this agent captures phase, ticker (which keeps its
+    // inner text in the UI), scan_list, kairos_pick (hand-off mode) and the shared routing tags.
     const tagCaptures = buildTagCaptures({
         phase:       phase.capture,
         ticker:      { onCapture: onTicker, keepText: true },
         scan_list:   onScan,
         kairos_pick: onPick,
+        ...route.captures,
     })
 
     const raw = await _run({
@@ -276,14 +280,15 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     const reply = stripEmitTags(
         // <ticker> keeps its inner text in the reply (unwrap, don't strip).
         raw.replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1'),
-        ['scan_list', 'phase', 'kairos_pick'],
+        ['scan_list', 'phase', 'kairos_pick', ...ROUTE_TAGS],
     ).trim()
 
     const scan = _normalizeScan(capturedScan, editList, ledger, prof)
     const pick = _normalizeKairosPick(capturedPick)
+    const routing = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, profile: prof, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, phase: phase.get() })
-    return { reply, scan, phase: phase.get(), ...(pick ? { pick } : {}) }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, profile: prof, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, route: routing.route, phase: phase.get() })
+    return { reply, scan, phase: phase.get(), ...(pick ? { pick } : {}), ...routing }
 }
 
 // Normalize a captured <kairos_pick> (hand-off mode) — the single ticker Argus recommends back to

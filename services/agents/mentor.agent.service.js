@@ -3,6 +3,7 @@ import { parseEmitBlock, mergeDraft, runAgentStream } from '../agentIO.js'
 import { dirname, join } from 'path'
 import { makePromptLoader, stripEmitTags, buildAccountLines, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock, buildDeskMessages } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
+import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
@@ -98,10 +99,13 @@ async function chatStream({
         onCoverage?.(merged)
     }
 
+    // <route>/<open>: the user asked to be sent to another desk with a name (routing.util).
+    const route = makeRouteCapture('mentor')
     const tagCaptures = buildTagCaptures({
         asset:    onAsset,
         interval: onInterval,
         coverage: onCoverageCapture,
+        ...route.captures,
     })
 
     const raw = await _run({
@@ -133,6 +137,7 @@ async function chatStream({
         coverage: capturedCoverage ?? chatState?.coverage ?? [],
         ...(normalized ? { setup: normalized, readiness } : {}),
         ...(setups && !normalized ? { setups } : {}),
+        ...route.result(),   // { route, routeSymbol, opening, edit } — the controller validates
     }
 }
 
@@ -178,7 +183,7 @@ export const _mergeSetupDraft = mergeDraft
  */
 export function _parseMentorResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['setup', 'setups', 'asset', 'interval', 'coverage']).trim()
+    const reply = stripEmitTags(text, ['setup', 'setups', 'asset', 'interval', 'coverage', ...ROUTE_TAGS]).trim()
 
     return { reply, setup: _parseBlock(text, 'setup'), setups: _parseCandidates(text) }
 }
@@ -256,7 +261,7 @@ CONVERSATION CONTEXT:
 Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}${_buildSeedSection(seed)}`
 
     return [
-        cachedBlock(_baseSystemPrompt() + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
+        cachedBlock(_baseSystemPrompt() + buildRouteRule('mentor') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
         { type: 'text', text: dynamicContext },
     ]
 }
