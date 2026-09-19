@@ -54,6 +54,7 @@ import { setupsRoutes } from './api/setups/setups.routes.js'
 import { tradeIdeasRoutes } from './api/trade-ideas/tradeIdeas.routes.js'
 import { authRoutes }   from './api/authentication/authentication.routes.js'
 import { userRoutes }   from './api/user/user.routes.js'
+import { pushRoutes }   from './api/push/push.routes.js'
 import { brokerRoutes }      from './api/broker/broker.routes.js'
 import { paperRoutes }       from './api/paper/paper.routes.js'
 import { workspaceRoutes }   from './api/workspace/workspace.routes.js'
@@ -187,6 +188,7 @@ app.use('/api/setups',      setupsRoutes)
 app.use('/api/trade-ideas', tradeIdeasRoutes)
 app.use('/api/auth',        authRoutes)
 app.use('/api/users',       userRoutes)
+app.use('/api/push',        pushRoutes)
 app.use('/api/broker',      brokerRoutes)
 app.use('/api/paper',       paperRoutes)
 // Which of the three books (live / paper / manual) the user is standing in. Persisted server-side

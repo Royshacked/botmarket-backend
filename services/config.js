@@ -180,6 +180,20 @@ export const config = {
     /** The daily offer card. Set to the literal 'off' to disable the fan-out. */
     get marketBriefOffer()       { return _bool('MARKET_BRIEF_OFFER', 'off-switch') },
 
+    // ── web push ──
+    // One VAPID key pair identifies this server to the browsers' push services (`npx web-push
+    // generate-vapid-keys`). The public half is handed to the client at subscribe time; the
+    // private half signs every send. Both unset = push is off and every card still lands in chat.
+    get vapidPublicKey()  { return _raw('VAPID_PUBLIC_KEY')  || null },
+    get vapidPrivateKey() { return _raw('VAPID_PRIVATE_KEY') || null },
+    /** The contact the push services may reach about abuse — a mailto: or https: URL. Falls back
+     *  to the app's own https origin, which is what it is in the deployed environment. */
+    get vapidSubject()    {
+        const own = _str('VAPID_SUBJECT', '')
+        if (own) return own
+        return this.clientUrl.startsWith('https:') ? this.clientUrl : 'mailto:admin@localhost'
+    },
+
     // ── cTrader ──
     get ctraderClientId()  { return _str('CTRADER_CLIENTID') },
     get ctraderSecret()    { return _str('CTRADER_SECRET') },

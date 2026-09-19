@@ -7,6 +7,7 @@ import { getExperienceLevel } from '../../services/experience.service.js'
 // the recipient search). It named 'users' inline in three places, which is the same name living in
 // four files once marketBrief.notify (which already imports it from the owner) is counted.
 import { COLLECTION as USERS } from '../user/user.model.js'
+import { pushToUser, notificationForMessage } from '../../services/push.service.js'
 
 const LOG   = '[chat]'
 // Owned here. Exported so a reader that needs to join against the inbox imports the name rather
@@ -79,6 +80,26 @@ async function _tryEmit(userId, event, data) {
         try { _emit = (await import('./chatWs.js')).emit } catch { /* ws not attached yet */ }
     }
     _emit?.(userId, event, data)
+}
+
+/**
+ * A MESSAGE REACHED THIS USER — the one step both delivery paths (a bot card, a human DM) end in.
+ * Two channels, same message: the socket, for the app that is open; web push, for the devices
+ * that are not. The server sends both, always — whether the user is actually looking is known
+ * only on the device (the service worker stays quiet when the app is focused there), so the
+ * server does not guess from a socket count that says nothing about where the human is.
+ *
+ * Push is fire-and-forget: it round-trips to the browsers' push services, and a monitor loop
+ * posting a card must not wait on Google. pushToUser never throws; the catch is belt-and-braces.
+ * `tag` collapses a fresher notification onto a stale one the same way _supersedePending does
+ * for the cards: per subject, so one setup is one notification, however many times it moves.
+ */
+async function _deliver(userId, msg, { senderName = null } = {}) {
+    await _tryEmit(userId, 'new_message', senderName ? { ...msg, senderName } : msg)
+    const subject = cardSubject(msg?.payload)
+    const tag     = subject ? `${subject.kind}:${subject.id}` : null
+    pushToUser(userId, notificationForMessage(msg, { senderName, tag }))
+        .catch(err => logger.warn(LOG, 'push failed', err?.message ?? err))
 }
 
 export async function ensureIndexes() {
@@ -245,7 +266,7 @@ export async function postBotCard({ userId, content, type = 'text', payload = nu
         // card carries the current situation, so it replaces rather than joins.
         await _supersedePending(conv.id, type, cardSubject(payload), actions)
         const msg = await sendMessage(conv.id, bot, content, type, payload, actions, visibility, forUserId)
-        await _tryEmit(String(userId), 'new_message', msg)
+        await _deliver(String(userId), msg)
         return msg
     } catch (err) {
         logger.error(LOG, 'postBotCard failed', err)
@@ -406,8 +427,9 @@ export async function postUserMessage(conversationId, senderId, content, aiPref 
             const sender = await db.collection(USERS).findOne(
                 { id: String(senderId) }, { projection: { fullname: 1, username: 1 } })
             const senderName = sender?.fullname || sender?.username || null
-            await _tryEmit(recipientId, 'new_message', { ...msg, senderName })
+            await _deliver(recipientId, msg, { senderName })
         } else if (recipientId) {
+            // A bot recipient: no device, no push — the socket emit is kept as it was.
             await _tryEmit(recipientId, 'new_message', msg)
         }
         // If the message is to Axl, generate + push a reply (fire-and-forget so the POST
