@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { normalizeCoverage, newRevision, RATINGS, STATUSES, HORIZONS, DEFAULT_HORIZON, coverageService } from '../../api/analyst/coverage.service.js'
+import { normalizeCoverage, newRevision, revisionSummary, RATINGS, STATUSES, HORIZONS, DEFAULT_HORIZON, coverageService } from '../../api/analyst/coverage.service.js'
 
 // Analyst P1 — coverage schema normalizer (pure). The CRUD methods are DB-bound (not unit-tested,
 // mirroring normalizeCall vs saveKairosCall).
@@ -199,4 +199,26 @@ test('research basis: a failing coverage read NEVER breaks the order path', asyn
         { symbol: 'TSM' },
         { getBySymbol: async () => { throw new Error('mongo down') } })
     assert.equal(b, null)
+})
+
+// ── revisionSummary: what the revision DID, for the card it answers ────────────
+// The social-chat card that asked for a revision collapses on this line. It has to name what moved,
+// or it has to say that nothing did — "Done" alone sends the reader back into the thesis to find out.
+test('revisionSummary: names each logged field that moved, in the analyst’s words', () => {
+    const rev = newRevision({ kind: 'remodel', changed: {
+        rating:       { from: 'sell', to: 'hold' },
+        price_target: { from: { value: 85 }, to: { value: 92 } },
+        thesis:       { from: 'old', to: 'new' },
+    } })
+    assert.equal(revisionSummary(rev), 'Re-modelled — rating sell → hold, PT 85 → 92, thesis rewritten')
+})
+
+test('revisionSummary: a re-examination that moved nothing still says so', () => {
+    assert.equal(revisionSummary(newRevision({ kind: 'remodel', changed: null })), 'Re-modelled — thesis held, rating and target unchanged')
+})
+
+test('revisionSummary: an unknown kind reads as an update; underscores in ratings are words; a missing target is a dash', () => {
+    const rev = newRevision({ kind: 'weird', changed: { rating: { from: 'strong_buy', to: null }, price_target: { from: null, to: { value: 10 } } } })
+    assert.equal(revisionSummary(rev), 'Updated — rating strong buy → —, PT — → 10')
+    assert.equal(revisionSummary(null), null)
 })

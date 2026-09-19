@@ -35,6 +35,16 @@ test('buildCoverageRefreshed: failure card is honest and still lets the user res
     assert.match(card.content, /Couldn't refresh research on NVDA/)
     assert.equal(card.payload.ok, false)
 })
+
+// WHAT CLOSES THE CARD. Behind a review the ask is the review (work — the portfolio write lands).
+// Without one the ask is to read what the refresh wrote, and nothing else could ever close it: the
+// house re-model cards were stamped 'work' with no write to wait for, and stayed "still waiting on
+// you" after every open. Opening a read IS doing it.
+test('buildCoverageRefreshed: a review resumes on WORK; a bare coverage read closes on OPEN', () => {
+    assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', portfolioId: 'p1' }).actions.primary.resolvesOn, 'work')
+    assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', coverageId: 'cov1' }).actions.primary.resolvesOn, 'open')
+    assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', coverageId: 'cov1', ok: false, house: true }).actions.primary.resolvesOn, 'open')
+})
 test('buildCoverageRefreshed: no user or ticker → null', () => {
     assert.equal(buildCoverageRefreshed({ userId: '', ticker: 'NVDA' }), null)
     assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: '' }), null)
@@ -48,16 +58,39 @@ test('coverage_refreshed is own-only — it is the reply to the specific user wh
 
 // ─── refreshCoverage orchestration (injected deps) ──────────────────────────────
 function harness({ draft, initResult, existing = null, updResult = { ok: true } }) {
-    const calls = { research: [], initiate: [], update: [], notify: [], existing: [] }
+    const calls = { research: [], initiate: [], update: [], notify: [], existing: [], resolve: [] }
     const deps = {
         research: async (args) => { calls.research.push(args); return draft ? { coverage: draft } : {} },
         initiate: async (d, userId) => { calls.initiate.push({ d, userId }); return initResult },
         update:   async (id, patch, userId) => { calls.update.push({ id, patch, userId }); return updResult },
         notify:   async (a) => { calls.notify.push(a) },
         existing: async (sym) => { calls.existing.push(sym); return existing },
+        resolve:  async (subject, opts) => { calls.resolve.push({ subject, opts, order: calls.notify.length }) },
     }
     return { deps, calls }
 }
+
+// THE COMPANY WAS REVISED. A re-model that lands answers every card still asking for it — the verdict
+// that triggered it, an earlier "nothing to store" — with the revision's own account of what moved,
+// and BEFORE its own "re-model is in" card, so the feed reads asked → answered → here it is. A reader
+// arriving after the write must find nothing left to click.
+test('a re-model that lands resolves the pending cards on that doc, note and all, before its own card', async () => {
+    const revised = { id: 'covOLD', revisions: [{ kind: 'remodel', changed: { price_target: { from: { value: 85 }, to: { value: 92 } } } }] }
+    const h = harness({ draft: { symbol: 'NVDA' }, initResult: { ok: false, reason: 'already_covered', id: 'covOLD' }, updResult: { ok: true, doc: revised } })
+    await refreshCoverage({ userId: null, ticker: 'NVDA' }, h.deps)
+    assert.deepEqual(h.calls.resolve, [{ subject: { kind: 'coverage', id: 'covOLD' }, opts: { outcome: 'revised', note: 'Re-modelled — PT 85 → 92' }, order: 0 }])
+    assert.equal(h.calls.notify.length, 1)
+})
+
+test('a fresh initiation resolves too — with nothing to diff, it says so; a failed persist resolves nothing', async () => {
+    let h = harness({ draft: { symbol: 'NVDA' }, initResult: { ok: true, doc: { id: 'covNEW' } } })
+    await refreshCoverage({ userId: 'u1', ticker: 'NVDA' }, h.deps)
+    assert.deepEqual(h.calls.resolve[0].opts, { outcome: 'revised', note: 'Coverage initiated' })
+
+    h = harness({ draft: { symbol: 'NVDA' }, initResult: { ok: false, reason: 'already_covered', id: 'covOLD' }, updResult: { ok: false, reason: 'rating_contradicts_target' } })
+    await refreshCoverage({ userId: 'u1', ticker: 'NVDA' }, h.deps)
+    assert.equal(h.calls.resolve.length, 0)
+})
 
 test('new name → initiate + ok ping with the new coverage id', async () => {
     const h = harness({ draft: { symbol: 'NVDA', thesis: 'edge' }, initResult: { ok: true, doc: { id: 'covNEW' } } })
@@ -154,7 +187,27 @@ test('a house run that produces no draft still reports it — with no user on th
     const r = await refreshCoverage({ userId: null, ticker: 'NVDA' }, h.deps)
     assert.equal(r.ok, false)
     assert.equal(r.reason, 'no_draft')
-    assert.deepEqual(h.calls.notify[0], { userId: null, ticker: 'NVDA', portfolioId: null, portfolioName: null, ok: false })
+    assert.deepEqual(h.calls.notify[0], { userId: null, ticker: 'NVDA', portfolioId: null, portfolioName: null, coverageId: null, ok: false })
+})
+
+// THE UNREACHABLE CARD. A failure card on a name the house already covers must still name the doc:
+// without `coverageId` it has no subject, and a card with no subject cannot be closed by any write.
+// "Scheduled re-model of X produced nothing to store" was posted exactly so, on every failure path.
+test('every failure card on a covered name carries the existing coverage id', async () => {
+    const existing = { id: 'cov_NVDA_1', symbol: 'NVDA' }
+    // no draft
+    let h = harness({ draft: null, initResult: { ok: true }, existing })
+    await refreshCoverage({ userId: null, ticker: 'NVDA' }, h.deps)
+    assert.equal(h.calls.notify[0].coverageId, 'cov_NVDA_1')
+    // research threw
+    h = harness({ draft: null, initResult: { ok: true }, existing })
+    h.deps.research = async () => { throw new Error('boom') }
+    await refreshCoverage({ userId: null, ticker: 'NVDA' }, h.deps)
+    assert.equal(h.calls.notify[0].coverageId, 'cov_NVDA_1')
+    // persist refused on an already-covered name
+    h = harness({ draft: { symbol: 'NVDA' }, initResult: { ok: false, reason: 'already_covered', id: 'cov_NVDA_1' }, existing, updResult: { ok: false, reason: 'rating_contradicts_target' } })
+    await refreshCoverage({ userId: null, ticker: 'NVDA' }, h.deps)
+    assert.equal(h.calls.notify[0].coverageId, 'cov_NVDA_1')
 })
 
 test('_buildRefreshPrompt: includes ticker always, question only when given', () => {

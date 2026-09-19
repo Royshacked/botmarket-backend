@@ -132,7 +132,12 @@ export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, por
         type:       'coverage_refreshed',
         payload:    { kind: 'coverage', symbol: sym, coverageId, portfolioId, ok, house },
         botId:      'analyst',
-        actions:    portfolioId ? cardActions('Resume review') : cardActions('Open coverage'),
+        // WHAT CLOSES IT. With a review behind it the ask is the review — work, satisfied when the
+        // portfolio write lands (the subject is the portfolio, see cardSubject). Without one the ask
+        // is to READ what the refresh wrote (or didn't) — there is no write that could ever satisfy
+        // a 'work' card here, so stamped 'work' it sat "still waiting on you" after being opened,
+        // forever. Opening it IS doing it.
+        actions:    portfolioId ? cardActions('Resume review') : cardActions('Open coverage', { resolvesOn: 'open' }),
         ...(house
             ? { visibility: 'admin' }
             : { visibility: 'own', forUserId: userId }),

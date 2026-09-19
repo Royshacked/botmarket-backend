@@ -127,6 +127,24 @@ fact about our own thesis; the rest are signals. A material state appends a revi
 traders never see it). A quiet day refreshes the recorded gap and bookkeeping with no revision — the
 quiet path is what keeps the trail auditable instead of buried under daily noise.
 
+The card is a WORK card: opening it leaves it pending ("Opened — still waiting on you"); saving the
+revision closes it. The coverage PUT route calls `resolveCardsFor` with the revision's own account of
+what moved (`revisionSummary` — "Re-modelled — rating sell → hold, PT 85 → 92", or "thesis held,
+rating and target unchanged"), and the chip in the social chat shows that line under "✓ Revised".
+Retire and delete close it the same way ("✓ Retired" / "✓ Deleted"). Pushed live over the socket
+(`message_resolved`), so a panel open beside the desk flips without a reopen. (2026-09-19)
+
+The `coverage_refreshed` card is different: with a review behind it ("Resume review") the ask is the
+review — work, subject = the portfolio; WITHOUT one ("Open coverage") the ask is to READ what the
+refresh wrote, so it closes on open (`resolvesOn: 'open'`). Stamped 'work' it had no write to wait for
+and sat "still waiting on you" forever. Every refresh card also names its doc (`coverageId`) on the
+failure paths too — "produced nothing to store" used to carry `null`, i.e. no subject, unreachable by
+any write. And a re-model that LANDS (`coverageRefresh`) resolves every pending card on that doc —
+the verdict that triggered it, an earlier "nothing to store" — with the revision's note, before its own
+"re-model is in" card goes out: a company already revised has nothing left to click.
+`scripts/backfill-coverage-refresh-cards.mjs` repairs the cards already posted: re-stamps, names the
+doc, resolves cards answered by a later revision, supersedes older duplicates. (2026-09-19)
+
 `gap.pctile` — where our PT sits inside the Street's own low→high range — is the measure that says
 whether we hold a variant view at all. A percentage off the mean does not: against targets spanning
 500–700, 12% under the mean is still inside everyone else's range.

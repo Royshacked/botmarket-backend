@@ -1,6 +1,7 @@
 // HTTP handlers for the Analyst: the streaming research agent (P3) + coverage CRUD (P1) +
 // research queue (Argus→Prometheus admin pipeline).
-import { coverageService }        from './coverage.service.js'
+import { coverageService, revisionSummary } from './coverage.service.js'
+import { resolveCardsFor }        from '../chat/chat.service.js'
 import { researchQueueService }   from '../../services/researchQueue.service.js'
 import { researchRunService }     from '../../services/researchRun.service.js'
 import { analystAgentService }    from '../../services/agents/analyst.agent.service.js'
@@ -139,12 +140,20 @@ export const updateCoverage = _handle('updateCoverage', async (req, res) => {
         overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to update coverage',
         extra: result.detail ? { detail: result.detail } : null,
     })
+    // THE WORK LANDED. Coverage writes do not go through makeEntityController, so the one seam
+    // that closes a card when its ask is satisfied never saw them — a verdict card sat "still
+    // waiting on you" after the thesis it asked for was revised. After the write, never before,
+    // and non-fatal (resolveCardsFor swallows its own failures). The note is the revision's own
+    // account of what moved — the trail entry this write just appended.
+    await resolveCardsFor({ kind: 'coverage', id: req.params.id }, { outcome: 'revised', note: revisionSummary(result.doc?.revisions?.[0]) })
     res.send(result.doc)
 })
 
 export const retireCoverage = _handle('retireCoverage', async (req, res) => {
     const result = await coverageService.retireCoverage(req.params.id)
     if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to retire coverage' })
+    // Retiring answers the ask too: there is no thesis left to revise.
+    await resolveCardsFor({ kind: 'coverage', id: req.params.id }, { outcome: 'retired', note: 'Coverage retired' })
     res.send(result.doc)
 })
 
@@ -152,6 +161,8 @@ export const deleteCoverage = _handle('deleteCoverage', async (req, res) => {
     const result = await coverageService.deleteCoverage(req.params.id)
     if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to delete coverage' })
     logger.info(LOG, 'coverage deleted', { id: req.params.id })
+    // A card asking to revise a thesis that no longer exists is a dead ask — close it as such.
+    await resolveCardsFor({ kind: 'coverage', id: req.params.id }, { outcome: 'deleted', note: 'Coverage deleted' })
     res.send({ ok: true })
 })
 

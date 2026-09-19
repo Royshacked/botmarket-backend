@@ -153,7 +153,13 @@ api/
                           fan-out notifier ("who already got today's?"), conversation→user join.
                           ADMIN_BOT_IDS (`strategy`, `analyst`) + visibleConversationsFor(convs, role):
                           the admin desks' feeds are hidden from a non-admin on list AND on
-                          read-by-id (getMessages takes the reader's role from the HTTP path only)
+                          read-by-id (getMessages takes the reader's role from the HTTP path only).
+                          resolveCardsFor(subject, { outcome, note }) = THE WORK LANDED: closes every
+                          pending card about an entity, stamps `resolveNote` (what was done, in the
+                          caller's words — coverage's is revisionSummary) and pushes
+                          `message_resolved` to the human side of each conversation so an open panel
+                          flips the chip live. Callers: entityController's patch, setups' generate,
+                          and analyst.controller's coverage update/retire/delete (its own PUT route)
   authentication/       signup · signin · signout · me  /api/auth/*. signin mints the session JWT
                           ({ _id, username, fullname, role }, 7d, httpOnly cookie); signup IS
                           userService.createUser (one path — it validates, refuses a taken name and

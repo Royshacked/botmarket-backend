@@ -413,6 +413,30 @@ async function listActiveBySector(sectors) {
 const LOGGED_FIELDS = ['rating', 'status', 'price_target', 'thesis', 'schools']
 const _diffPlan = (prev, next) => diffFields(prev, next, LOGGED_FIELDS)
 
+// What a revision DID, as one line for the card it answers. PURE.
+//
+// The coverage card in the social chat asks for a revision; when the revision lands the card
+// collapses, and a chip that only says "Done" leaves the reader to reopen the thesis to learn
+// whether anything moved. This is the analyst's own account of the change — the copy is a
+// per-desk judgment (the trail's SHAPE is shared in revisionTrail.js; what it means is not), which
+// is why it lives here and the chat transport merely carries it.
+const REVISION_VERBS = { remodel: 'Re-modelled', update: 'Updated', retire: 'Retired', rating_change: 'Rating changed', target_change: 'Target changed' }
+const _pt = v => (v && typeof v === 'object') ? v.value : v
+export function revisionSummary(revision) {
+    if (!revision || typeof revision !== 'object') return null
+    const verb    = REVISION_VERBS[revision.kind] ?? 'Updated'
+    const changed = revision.changed ?? {}
+    const parts   = []
+    if (changed.rating)       parts.push(`rating ${_ratingWord(changed.rating.from)} → ${_ratingWord(changed.rating.to)}`)
+    if (changed.price_target) parts.push(`PT ${_pt(changed.price_target.from) ?? '—'} → ${_pt(changed.price_target.to) ?? '—'}`)
+    if (changed.status)       parts.push(`status ${changed.status.from ?? '—'} → ${changed.status.to ?? '—'}`)
+    if (changed.thesis)       parts.push('thesis rewritten')
+    if (changed.schools)      parts.push('schools changed')
+    // A revision that moved nothing is still a revision — the view was re-examined and held.
+    return `${verb} — ${parts.length ? parts.join(', ') : 'thesis held, rating and target unchanged'}`
+}
+const _ratingWord = r => (typeof r === 'string' ? r.replace(/_/g, ' ') : '—')
+
 // Which plausibility inputs re-run the flags when patched.
 const FLAG_INPUTS = ['rating', 'price_target', 'risk_reward', 'conviction']
 

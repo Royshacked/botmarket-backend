@@ -6,8 +6,9 @@
 // coverage doc, Atlas RE-READS it on resume — no live agent-to-agent judgment injection.
 
 import { analystAgentService } from './agents/analyst.agent.service.js'
-import { coverageService }     from '../api/analyst/coverage.service.js'
+import { coverageService, revisionSummary } from '../api/analyst/coverage.service.js'
 import { notifyCoverageRefreshed } from './coverageNotify.service.js'
+import { resolveCardsFor }     from '../api/chat/chat.service.js'
 import { withTimeout }         from './timeout.util.js'
 import { logger }              from './logger.service.js'
 
@@ -31,6 +32,7 @@ const _deps = {
     update:   (id, patch)     => coverageService.updateCoverage(id, patch),
     notify:   (args)          => notifyCoverageRefreshed(args),
     existing: (symbol)        => coverageService.getCoverageBySymbol(symbol),
+    resolve:  (subject, opts) => resolveCardsFor(subject, opts),
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
@@ -78,13 +80,17 @@ export async function refreshCoverage({ userId = null, ticker, question = null, 
     if (!sym) return { ok: false, reason: 'bad_args' }
 
     logger.info(LOG, 'refresh start', { userId, ticker: sym, portfolioId })
+    // Outside the try so the failure cards below can name the doc too. A card with no `coverageId`
+    // has no subject (chat.service cardSubject), and a card with no subject can never be closed by
+    // the work landing — the "produced nothing to store" cards were exactly that: unreachable.
+    let existing = null
     try {
         // UPDATE MODE. Without this the agent researches from a blank slate every time and the prompt's
         // claim that it is "a refresh of an existing thesis" is a fiction — it was never shown one.
         // That mattered little when a refresh was an occasional Atlas request; now that the coverage
         // monitor schedules re-models off earnings dates, every one of them would discard the prior
         // view rather than revise against it, which is exactly what the revision trail exists to show.
-        const existing = await deps.existing(sym)
+        existing = await deps.existing(sym)
 
         const result = await withTimeout(deps.research({
             messages:  [],
@@ -99,19 +105,19 @@ export async function refreshCoverage({ userId = null, ticker, question = null, 
         // the existing coverage in place so the review can still resume.
         if (!draft || String(draft.symbol ?? '').toUpperCase().trim() !== sym) {
             logger.warn(LOG, 'no usable coverage draft', { ticker: sym })
-            await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, ok: false })
+            await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: existing?.id ?? null, ok: false })
             return { ok: false, reason: 'no_draft' }
         }
 
         // Persist: initiate a fresh thesis, or update the existing one (appends a revision). initiate
         // returns already_covered + the id when the house already holds a thesis on the symbol.
-        let coverageId = null, persisted = false, failReason = 'persist_failed'
+        let coverageId = null, persisted = false, failReason = 'persist_failed', upd = null
         const init = await deps.initiate(draft)
         if (init?.ok) {
             coverageId = init.doc?.id ?? null
             persisted  = true
         } else if (init?.reason === 'already_covered') {
-            const upd = await deps.update(init.id, draft)
+            upd = await deps.update(init.id, draft)
             coverageId = init.id
             persisted  = Boolean(upd?.ok)
             if (!upd?.ok) { failReason = _reason(upd?.reason); logger.warn(LOG, 'coverage update returned not-ok', { id: init.id, reason: upd?.reason, detail: upd?.detail }) }
@@ -124,17 +130,27 @@ export async function refreshCoverage({ userId = null, ticker, question = null, 
         // a thesis that never changed is worse than reporting the failure: the review resumes on the
         // OLD artifact either way, and only one of those messages is true.
         if (!persisted) {
-            await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId, ok: false })
+            await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: coverageId ?? existing?.id ?? null, ok: false })
             return { ok: false, reason: failReason }
         }
 
+        // THE COMPANY WAS REVISED — every card still asking for that is answered. The verdict card
+        // that triggered this re-model, a refresh card from an earlier failed run: a reader arriving
+        // after the write should find them collapsed ("✓ Revised — Re-modelled — PT 85 → 92"), not
+        // still asking for a click. Before the "re-model is in" card goes out, so the feed reads in
+        // order: asked → answered → here is the answer. The note is the revision's own account; a
+        // fresh initiation has no diff to describe.
+        if (coverageId) {
+            const note = upd?.doc ? revisionSummary(upd.doc.revisions?.[0]) : 'Coverage initiated'
+            await deps.resolve({ kind: 'coverage', id: coverageId }, { outcome: 'revised', note })
+        }
         await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId, summary: draft.thesis ?? null, ok: true })
         logger.info(LOG, 'refresh done', { ticker: sym, coverageId })
         return { ok: true, coverageId }
     } catch (err) {
         logger.warn(LOG, 'refresh failed', err.message)
         // Best-effort ping so the user isn't left waiting on a silent failure.
-        try { await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, ok: false }) } catch { /* ignore */ }
+        try { await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: existing?.id ?? null, ok: false }) } catch { /* ignore */ }
         return { ok: false, reason: 'error' }
     }
 }

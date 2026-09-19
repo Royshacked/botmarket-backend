@@ -213,6 +213,7 @@ export async function sendMessage(conversationId, senderId, content, type = 'tex
         ...cardLifecycle(actions, payload),   // { actions, status, subject } — same rule for user DMs and agent cards
         resolvedAt:     null,
         resolveOutcome: null,
+        resolveNote:    null,
         createdAt:      Date.now(),
         readAt:         null,
         visibility:     visibility ?? 'all',
@@ -280,27 +281,57 @@ async function _supersedePending(conversationId, type, subject, actions) {
  * THE WORK LANDED — resolve every pending card about this entity. The other half of the
  * stays-alive rule: a card is closed by the ask being satisfied, not by the user navigating.
  *
- * Called from the one place that can honestly claim a user did the work (makeEntityController's
- * patch — a monitor writing the same document goes through the service directly and never through
- * here). Never throws: a card left pending is a stale nag, an exception here would fail the write
- * the user actually asked for.
+ * Called from the places that can honestly claim a user did the work (makeEntityController's
+ * patch, and the per-kind write routes that do not go through it — coverage's — a monitor writing
+ * the same document goes through the service directly and never through here). Never throws: a
+ * card left pending is a stale nag, an exception here would fail the write the user actually
+ * asked for.
+ *
+ * `note` is WHAT WAS DONE, in the caller's own words ("Re-modelled — rating sell → hold, PT 85 →
+ * 92"). The card collapses to a chip that shows it, so a scrolled-back ask reads as answered
+ * rather than merely closed. The copy is the caller's judgment — this only carries it.
+ *
+ * Pushed over the socket as `message_resolved`, one frame per card, to the human side of its
+ * conversation: the write that satisfied the ask happens on a DESK, and the card is in a panel
+ * that may be open beside it. Without the push it sat there "still waiting on you" until the
+ * panel was reopened.
  *
  * Subject ids are per-entity and entities are owner-scoped, so an id cannot address another user's
  * card; no extra scoping is needed to keep this from reaching across users.
  */
-export async function resolveCardsFor(subject, { outcome = 'completed' } = {}) {
+export async function resolveCardsFor(subject, { outcome = 'completed', note = null } = {}) {
     if (!subject?.kind || !subject?.id) return 0
     try {
-        const db  = await getDb()
-        const res = await db.collection(MSGS).updateMany(
-            { status: 'pending', 'subject.kind': subject.kind, 'subject.id': String(subject.id) },
-            { $set: { status: 'done', resolvedAt: Date.now(), resolveOutcome: String(outcome) } },
-        )
+        const db    = await getDb()
+        const query = { status: 'pending', 'subject.kind': subject.kind, 'subject.id': String(subject.id) }
+        const patch = { status: 'done', resolvedAt: Date.now(), resolveOutcome: String(outcome), resolveNote: _str(note) }
+        const cards = await db.collection(MSGS).find(query, { projection: { _id: 0, id: 1, conversationId: 1 } }).toArray()
+        if (!cards.length) return 0
+        const res = await db.collection(MSGS).updateMany(query, { $set: patch })
         if (res.modifiedCount) logger.info(LOG, 'card(s) resolved by the work landing', { subject, count: res.modifiedCount })
+        await _pushResolved(db, cards, patch)
         return res.modifiedCount
     } catch (err) {
         logger.warn(LOG, 'resolveCardsFor failed (cards left pending)', err.message)
         return 0
+    }
+}
+
+const _str = v => (typeof v === 'string' && v.trim() ? v.trim() : null)
+
+// Tell the human participant of each card's conversation that it resolved. Best effort: the
+// resolution is already written, and a push that fails costs a live flip, not the resolution.
+async function _pushResolved(db, cards, patch) {
+    try {
+        const convIds = [...new Set(cards.map(c => c.conversationId))]
+        const convs   = await db.collection(CONVS).find({ id: { $in: convIds } }, { projection: { _id: 0, id: 1, participants: 1 } }).toArray()
+        const humanOf = Object.fromEntries(convs.map(c => [c.id, (c.participants ?? []).find(p => !isBot(p)) ?? null]))
+        for (const card of cards) {
+            const userId = humanOf[card.conversationId]
+            if (userId) await _tryEmit(userId, 'message_resolved', { id: card.id, conversationId: card.conversationId, ...patch })
+        }
+    } catch (err) {
+        logger.warn(LOG, 'resolved-card push failed (resolution stored)', err.message)
     }
 }
 
