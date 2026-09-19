@@ -41,12 +41,12 @@ when to act on it only make sense together.
 | [trade-pipeline.md](./desks/trade-pipeline.md) | **The path a new trade takes: Argus → Mentor → Talos.** Read this first — it is the record of why the trading desk is the one it is |
 | [mentor-talos.md](./desks/mentor-talos.md) | Mentor builds a `setup`; Talos watches it. Scenarios as rivals, conditions, validity |
 | [prometheus-coverage.md](./desks/prometheus-coverage.md) | Prometheus writes a house `coverage` thesis; the coverage monitor keeps it living. **The edge is the gap vs the Street, never price**; two tiers — a free daily check and a gated re-model |
+| [pythia-tilt.md](./desks/pythia-tilt.md) | Pythia publishes the house `tilt` — a regime and sector stances as active weight vs a benchmark; the monitor grades each stance by arithmetic. **The tilt is the mandate the house pipeline is steered from**; a re-author is offered, never run |
 | [talos-guards.md](./desks/talos-guards.md) | Guards, not zones (built 2026-08-22): exact prices, a crossing carries a meaning, the exit asymmetry. **Partly superseded** by the per-candle build — the sections say which |
 | [roles-and-sourcing.md](./desks/roles-and-sourcing.md) | **Trader vs admin, desk by desk** — where each gate lives — and the autonomous sleeve hop: Atlas → Argus → Prometheus → Atlas, researched as the house |
 
-Not yet written up: **Atlas/Themis** (portfolio — contract in APP_SPEC §3), **Argus** (scan —
-APP_SPEC §4) and **Pythia** (tilt). Atlas and Argus have their contract in APP_SPEC and are missing
-the design reasoning; Pythia has neither written down yet.
+Not yet written up: **Atlas/Themis** (portfolio — contract in APP_SPEC §3) and **Argus** (scan —
+APP_SPEC §4). Both have their contract in APP_SPEC and are missing the design reasoning.
 
 **Workspaces and what every desk is told about the venue** are in
 [APP_SPEC §8](../APP_SPEC.md#8-workspaces--venue-awareness) — the three books, which kinds are scoped
