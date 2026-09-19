@@ -59,7 +59,7 @@ export const ADMIN_KINDS = ['research_queue']
  * SHARED across all three workspaces by decision. There is nothing to scope them by and nothing
  * gained by trying.
  */
-export const WORKSPACE_SCOPED_KINDS = ['setup', 'portfolio']
+export const WORKSPACE_SCOPED_KINDS = ['setup', 'portfolio', 'queued']
 
 /**
  * @param {string} userId
@@ -80,9 +80,10 @@ export async function listWatchedItems(userId, { kinds = null, includeFinished =
         coverage = () => coverageService.getCoverage({ onError: 'throw' }),
         portfolios = listPortfolios,
         // The off-hours queue plus every entity awaiting a confirm — what the Floor's Queued list
-        // shows. Not workspace-scoped, because that list is not either: a queued row names the
-        // venue it waits for in its own reason.
-        queued = (uid) => listWaiting(uid),
+        // shows. `onError: 'throw'` so a queue the read could not reach lands in `unavailable`
+        // rather than reading as empty (listWaiting swallows by default, for the count it feeds).
+        // Scoped like a setup: each row carries the `mode` of the entity it is about.
+        queued = (uid) => listWaiting(uid, { onError: 'throw' }),
         // House artifacts, shared like coverage. One row per RUN (see aetherRunToWatchRow).
         aether = () => getEventCandidates({ days: 30 }),
         // `null` is listQueue's failure answer (it logs and swallows); rethrown so it lands in

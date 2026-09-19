@@ -27,6 +27,7 @@ import { logger } from './logger.service.js'
 import { getEarningsCalendarRaw } from '../providers/fmp.provider.js'
 import { earningsWindow } from './earningsWindow.util.js'
 import { calendarService } from '../api/calendar/calendar.service.js'
+import { fetchIpoCalendar } from '../providers/finnhub.provider.js'
 import { listWatchedItems } from './watchlist.service.js'
 
 const LOG = '[upcomingEvents]'
@@ -56,9 +57,11 @@ export async function getUpcomingEvents(userId, { scope = 'mine', from = null, t
     const {
         earningsRaw = getEarningsCalendarRaw,
         fed = () => calendarService.getFed(),
-        // The calendar's third tab. Never scoped to the user's names — an IPO is by definition a
-        // name nobody holds yet — so it rides on both scopes, trimmed to the window like the Fed.
-        ipo = () => calendarService.getIpo(),
+        // The calendar's third tab, read RAW over the window that was asked — not the UI's
+        // `getIpo()`, which is always the current trading week and enriches every row with a logo
+        // lookup the tool never reads. Never scoped to the user's names: an IPO is a name nobody
+        // holds yet. onError:'throw' so an outage lands in `unavailable`, not in "none this week".
+        ipo = (f, t) => fetchIpoCalendar(f, t, { onError: 'throw' }),
         watched = listWatchedItems,
         now = Date.now(),
     } = deps
@@ -90,7 +93,7 @@ export async function getUpcomingEvents(userId, { scope = 'mine', from = null, t
     const [earningsRes, fedRes, ipoRes] = await Promise.allSettled([
         wantEarnings ? earningsRaw(f, t, mine ? symbols : []) : Promise.resolve([]),
         fed(),
-        ipo(),
+        ipo(f, t),
     ])
 
     let earnings = []
@@ -111,15 +114,20 @@ export async function getUpcomingEvents(userId, { scope = 'mine', from = null, t
 
     let ipoItems = []
     if (ipoRes.status === 'fulfilled') {
-        ipoItems = Array.isArray(ipoRes.value?.items) ? ipoRes.value.items : []
+        // The provider's rows, projected to what the tool says: the same fields the calendar tab
+        // shows, minus the logo it fetches per row.
+        ipoItems = (Array.isArray(ipoRes.value) ? ipoRes.value : []).map(r => ({
+            date: r.date, symbol: r.symbol || null, name: r.name || '', exchange: r.exchange || '',
+            price: r.price || null, status: r.status || null,
+        }))
     } else {
         logger.warn(LOG, 'ipo read failed', ipoRes.reason?.message)
         unavailable.push('ipo')
     }
 
     // The Fed provider works to its own 45-day horizon, so trim it to the window that was asked
-    // for — otherwise "anything this week?" answers with next month's meeting too. The IPO
-    // calendar is the week's, so the same trim is a no-op today and a guard tomorrow.
+    // for — otherwise "anything this week?" answers with next month's meeting too. The IPO read
+    // already took the window; the trim is the same guard against a provider that ignores it.
     fedItems = fedItems.filter(i => !i?.date || (i.date >= f && i.date <= t))
     ipoItems = ipoItems.filter(i => !i?.date || (i.date >= f && i.date <= t))
 

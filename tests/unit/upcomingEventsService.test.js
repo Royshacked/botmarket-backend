@@ -24,6 +24,8 @@ const deps = (over = {}) => ({
         ? symbols.map(s => ({ symbol: s, date: '2026-08-05', epsEstimated: 1 }))
         : [{ symbol: 'RANDOM', date: '2026-08-05' }, { symbol: 'OTHER', date: '2026-08-06' }]),
     fed: async () => ({ items: [{ date: '2026-08-12', event: 'CPI', impact: 'high' }] }),
+    // Stubbed like the others: without it every case here reached finnhub.io (nine 401s a run).
+    ipo: async () => [{ date: '2026-08-07', symbol: 'NEWCO', name: 'NewCo Inc', exchange: 'NASDAQ', price: '18-20', status: 'expected', numberOfShares: 1 }],
     ...over,
 })
 
@@ -95,4 +97,25 @@ test('one feed failing does not cost the other', async () => {
 test('failing to resolve the user’s names is reported, not treated as "no names"', async () => {
     const res = await getUpcomingEvents('u1', {}, deps({ watched: async () => { throw new Error('down') } }))
     assert.ok(res.unavailable.includes('symbols'))
+})
+
+// ── IPOs — the calendar's third tab ─────────────────────────────────────────
+
+test('IPOs are read over the WINDOW that was asked, never the current week', async () => {
+    let asked = null
+    const res = await getUpcomingEvents('u1', { from: '2026-09-01', to: '2026-09-30' }, deps({ ipo: async (f, t) => { asked = [f, t]; return [] } }))
+    assert.deepEqual(asked, ['2026-09-01', '2026-09-30'])
+    assert.deepEqual(res.ipo, [])
+})
+
+test('an IPO row carries what the tool says and nothing the tab fetches per row', async () => {
+    const res = await getUpcomingEvents('u1', { from: '2026-08-01', to: '2026-08-31' }, deps())
+    assert.deepEqual(res.ipo, [{ date: '2026-08-07', symbol: 'NEWCO', name: 'NewCo Inc', exchange: 'NASDAQ', price: '18-20', status: 'expected' }])
+})
+
+test('an IPO calendar the provider could not reach is NAMED, not an empty week', async () => {
+    const res = await getUpcomingEvents('u1', {}, deps({ ipo: async () => { throw new Error('401') } }))
+    assert.deepEqual(res.unavailable, ['ipo'])
+    assert.deepEqual(res.ipo, [])
+    assert.ok(res.earnings.length, 'the other feeds still answer')
 })

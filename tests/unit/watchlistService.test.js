@@ -149,3 +149,17 @@ test('no user means an empty answer, without touching a single source', async ()
     assert.equal(touched, 0)
     assert.deepEqual(res.items, [])
 })
+
+test('queued rows are scoped to the workspace like a setup — a live exit is not a paper action', async () => {
+    const both = [queued({ id: 'q-live', mode: 'live' }), queued({ id: 'q-paper', mode: 'paper' })]
+    const paper = await listWatchedItems('u1', { kinds: ['queued'], workspace: 'paper' }, deps({ queued: async () => both }))
+    assert.deepEqual(paper.items.map(i => i.id), ['q-paper'])
+    const live = await listWatchedItems('u1', { kinds: ['queued'], workspace: 'live' }, deps({ queued: async () => both }))
+    assert.deepEqual(live.items.map(i => i.id), ['q-live'])
+})
+
+test('an unreadable queue is NAMED, not reported as no queued actions', async () => {
+    const res = await listWatchedItems('u1', { kinds: ['queued'] }, deps({ queued: async () => { throw new Error('mongo down') } }))
+    assert.deepEqual(res.unavailable, ['queued'])
+    assert.equal(res.counts.queued, undefined)
+})

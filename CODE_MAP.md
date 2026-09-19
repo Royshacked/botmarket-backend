@@ -448,8 +448,9 @@ services/
                             QUEUE · Aether runs, one row per event · and, for an admin, the research
                             queue — ADMIN_KINDS, dropped before the read for a trader so the list is
                             absent, not refused). SCOPED to the workspace the user is standing in:
-                            WORKSPACE_SCOPED_KINDS (setup · portfolio) bind to an account and belong
-                            to one book; research and the queue bind to none. COMPOSES the owning
+                            WORKSPACE_SCOPED_KINDS (setup · portfolio · queued) bind to an account and
+                            belong to one book — a queued row carries the mode of the entity it is
+                            about, resolved at read; research binds to none. COMPOSES the owning
                             services rather than querying Mongo, and settles them independently: one
                             read failing is REPORTED in `unavailable`, never reported as zero.
                             Returns structured rows only — see entity/toWatchRow.js for the projectors

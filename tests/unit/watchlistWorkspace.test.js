@@ -33,8 +33,8 @@ const deps = (over = {}) => ({
     ...over,
 })
 
-test('only the two account-bound kinds are scoped', () => {
-    assert.deepEqual(WORKSPACE_SCOPED_KINDS, ['setup', 'portfolio'])
+test('only the account-bound kinds are scoped — and a queued action is about one', () => {
+    assert.deepEqual(WORKSPACE_SCOPED_KINDS, ['setup', 'portfolio', 'queued'])
 })
 
 test('in paper: the paper setup and paper book stay, the live setup goes', async () => {
@@ -89,7 +89,7 @@ test('the empty answer NAMES the workspace — "nothing" and "nothing in paper" 
     // told something false about their own book.
     const out = formatWatchedItems({ items: [], counts: {}, workspace: 'paper' })
     assert.match(out, /Nothing in the PAPER workspace/)
-    assert.match(out, /scans and coverage are shared across all workspaces/)
+    assert.match(out, /scans, coverage and Aether are shared across all workspaces/)
 })
 
 test('a populated answer says which book it is counting', () => {

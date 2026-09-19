@@ -218,6 +218,10 @@ export function queuedToWatchRow(item) {
     return {
         kind: 'queued',
         id: item.id,
+        // The venue, carried so the watchlist can scope the row; the source resolved it (see
+        // pendingWork.listWaiting). Every other kind derives it from its own document in the
+        // watchlist's filter; a queued row has no such document, so it says it outright.
+        mode: item.mode ?? null,
         symbol: item.asset ?? null,
         title: `${verb}${item.origin?.kind ? ` on a ${item.origin.kind}` : ''}`,
         direction: item.direction ?? null,

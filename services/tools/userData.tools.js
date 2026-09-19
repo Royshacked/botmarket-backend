@@ -111,7 +111,7 @@ export function formatWatchedItems({ items = [], counts = {}, unavailable = [], 
     // books are scoped; scans and coverage are research, bind to no account, and are shared across
     // all three workspaces by decision — so the line says that rather than leaving it inferred.
     const scope = workspace
-        ? ` in the ${workspace.toUpperCase()} workspace (calls, setups and books are scoped to it; scans and coverage are shared across all workspaces)`
+        ? ` in the ${workspace.toUpperCase()} workspace (setups, books and queued actions are scoped to it; scans, coverage and Aether are shared across all workspaces)`
         : ''
 
     if (!items.length) {
@@ -194,7 +194,7 @@ export function formatUpcomingEvents({ from, to, scope, symbols = [], earnings =
         lines.push('IPOs:', ...ipo.slice(0, 15).map(i =>
             `- ${i.date} ${i.symbol ?? '?'}${i.name ? ` ${i.name}` : ''}${i.exchange ? ` (${i.exchange})` : ''}${i.price != null ? ` · ${i.price}` : ''}${i.status ? ` · ${i.status}` : ''}`))
     } else if (!unavailable.includes('ipo')) {
-        lines.push('IPOs: none this week.')
+        lines.push('IPOs: none in this window.')
     }
 
     return [...lines, _unavailableLine(unavailable)].join('\n').trim()

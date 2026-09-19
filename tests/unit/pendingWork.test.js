@@ -55,3 +55,27 @@ test('ids are coerced, so a non-string id cannot silently match nothing', async 
     assert.equal(f.id, '42')
     assert.equal(f.userId, '7')
 })
+
+// ── the venue on every row, and the one reader that must not see [] for a failure ─────────
+
+import { listWaiting } from '../../services/pendingAction/pendingWork.service.js'
+
+const queueRec = (over = {}) => ({ id: 'q1', state: 'queued', asset: 'TSLA', direction: 'long', action: { type: 'exit' }, origin: { kind: 'setup', entityId: 's1' }, decidedAt: 2, ...over })
+
+test('a queued row carries the mode of the entity it is about, resolved from that entity', async () => {
+    const rows = await listWaiting('u1', {}, {
+        open: async () => [queueRec(), queueRec({ id: 'q2', origin: { kind: 'setup', entityId: 'gone' } })],
+        awaiting: async () => [{ id: 'e1', asset: 'NVDA', broker: 'paper', accountId: 'paper-u1-abc', orderState: 'awaiting_confirm', decidedAt: 1 }],
+        origins: async (ids) => (ids.includes('s1') ? [{ id: 's1', broker: 'paper', accountId: 'paper-u1-abc' }] : []),
+    })
+    const byId = Object.fromEntries(rows.map(r => [r.id, r]))
+    assert.equal(byId.q1.mode, 'paper', 'a queued action is in the book its origin entity is in')
+    assert.equal(byId.q2.mode, null, 'an origin that no longer exists leaves the venue unknown, not guessed')
+    assert.equal(byId.e1.mode, 'paper', 'an awaiting entity resolves its own venue')
+})
+
+test('a failed read is [] for the count, and a THROW for the reader that asked for one', async () => {
+    const boom = { open: async () => { throw new Error('mongo down') }, awaiting: async () => [], origins: async () => [] }
+    assert.deepEqual(await listWaiting('u1', {}, boom), [])
+    await assert.rejects(() => listWaiting('u1', { onError: 'throw' }, boom), /mongo down/)
+})

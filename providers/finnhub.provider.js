@@ -35,13 +35,16 @@ export async function fetchEarningsCalendarByDate(from, to) {
 
 // Upcoming IPOs (free on Finnhub). Each row: date, symbol, name, exchange,
 // price, numberOfShares, totalSharesValue, status (expected/priced/filed/…).
-export async function fetchIpoCalendar(from, to) {
+export async function fetchIpoCalendar(from, to, { onError = null } = {}) {
     try {
         const f = toFinnhubDate(from || new Date())
         const t = toFinnhubDate(to   || new Date())
         const data = await _get(`/calendar/ipo?from=${f}&to=${t}`, '/calendar/ipo')
         return Array.isArray(data?.ipoCalendar) ? data.ipoCalendar : []
     } catch (error) {
+        // The calendar UI degrades to an empty tab; a reader that must not confuse "no IPOs" with
+        // "could not ask" passes onError:'throw' (the events tool — an outage is not an empty week).
+        if (onError === 'throw') throw error
         logger.error(LOG, 'Error getting IPO calendar', error)
         return []
     }

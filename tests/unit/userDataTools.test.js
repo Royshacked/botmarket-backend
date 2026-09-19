@@ -188,3 +188,14 @@ test('the performance description warns against re-scaling the win rate', () => 
 test('the calendar description says it is personal by default', () => {
     assert.match(USER_DATA_TOOL_SPEC.get_upcoming_events, /OWN names/)
 })
+
+test('formatUpcomingEvents: IPOs are a block of their own, and an unreachable calendar is said', () => {
+    const out = formatUpcomingEvents({ from: 'a', to: 'b', scope: 'market', earnings: [], fed: [],
+        ipo: [{ date: '2026-08-07', symbol: 'NEWCO', name: 'NewCo Inc', exchange: 'NASDAQ', price: '18-20', status: 'expected' }] })
+    assert.match(out, /IPOs:\n- 2026-08-07 NEWCO NewCo Inc \(NASDAQ\) · 18-20 · expected/)
+    const none = formatUpcomingEvents({ from: 'a', to: 'b', scope: 'market', earnings: [], fed: [], ipo: [] })
+    assert.match(none, /IPOs: none in this window\./)
+    const down = formatUpcomingEvents({ from: 'a', to: 'b', scope: 'market', earnings: [], fed: [], ipo: [], unavailable: ['ipo'] })
+    assert.ok(!/IPOs: none/.test(down), 'an outage must not read as an empty week')
+    assert.match(down, /ipo/)
+})

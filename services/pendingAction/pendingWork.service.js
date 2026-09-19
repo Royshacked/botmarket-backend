@@ -19,6 +19,7 @@
 import { logger } from '../logger.service.js'
 import { entityRepo } from '../entity/entityRepo.service.js'
 import { kindForDoc } from '../entity/envelope.js'
+import { resolveMode } from '../venue.resolve.service.js'
 import { listOpen, STATES } from './pendingAction.repo.js'
 
 const LOG = '[pendingWork]'
@@ -35,11 +36,15 @@ export const SOURCES = Object.freeze({ QUEUE: 'queue', ENTITY: 'entity' })
  * waiting for that. Both are shown, because "3 waiting, 1 of them not until Monday" is the honest
  * picture and hiding the not-yet-ready ones is how a decision gets forgotten.
  */
-function _fromQueue(rec) {
+function _fromQueue(rec, mode = null) {
     return {
         id:        rec.id,
         source:    SOURCES.QUEUE,
         ready:     rec.state === STATES.RELEASED,
+        // The workspace this action belongs to — resolved from the origin entity at read time, not
+        // stored on the record (see listWaiting). A queued row is about an account-bound entity,
+        // and a list that cannot say which book a row is in is two books shown as one.
+        mode,
         asset:     rec.asset,
         assetClass: rec.assetClass ?? null,
         direction: rec.direction ?? null,
@@ -70,6 +75,7 @@ function _fromEntity(doc) {
         id:        doc.id,
         source:    SOURCES.ENTITY,
         ready:     true,   // awaiting_confirm is by definition confirmable now
+        mode:      resolveMode(doc),
         asset:     doc.asset,
         assetClass: doc.asset_class ?? null,
         direction: doc.direction ?? null,
@@ -95,24 +101,39 @@ function _fromEntity(doc) {
 
 /**
  * Everything waiting on one user, newest decision first.
- * Never throws — this feeds a notification count and a list; both degrade to "nothing" rather than
- * taking a monitor tick or a page render down with them.
+ *
+ * Never throws BY DEFAULT — this feeds a notification count and a list; both degrade to "nothing"
+ * rather than taking a monitor tick or a page render down with them. `onError: 'throw'` is for the
+ * one reader that must not mistake a failed read for an empty queue: Axl's watchlist, whose
+ * contract is that a source it could not read is NAMED, never reported as zero.
+ *
+ * A queued record stores no venue (the surface that knew is gone by the open), so the origin
+ * entities are read in one batch and each row is stamped with the mode resolved from its own — the
+ * same `resolveMode` every list applies. An origin that no longer exists leaves `mode: null`.
  *
  * @param {string} userId
  * @param {{ readyOnly?: boolean }} [opts]  readyOnly drops items still waiting for their open
  * @returns {Promise<Array<object>>}
  */
-export async function listWaiting(userId, { readyOnly = false } = {}) {
+export async function listWaiting(userId, { readyOnly = false, onError = null } = {}, deps = {}) {
     if (!userId) return []
+    const {
+        open = listOpen,
+        awaiting = (uid) => entityRepo.listByOrderStates(uid, WAITING_ORDER_STATES),
+        origins = (ids) => entityRepo.listByIds(ids, { id: 1, broker: 1, accountId: 1, mainAccountId: 1, mode: 1 }),
+    } = deps
     try {
-        const [queued, entities] = await Promise.all([
-            listOpen(userId),
-            entityRepo.listByOrderStates(userId, WAITING_ORDER_STATES),
-        ])
-        const rows = [...queued.map(_fromQueue), ...entities.map(_fromEntity)]
-            .filter(r => (readyOnly ? r.ready : true))
+        const [queued, entities] = await Promise.all([open(userId), awaiting(userId)])
+        const originIds = [...new Set(queued.map(r => r.origin?.entityId).filter(Boolean))]
+        const originDocs = originIds.length ? await origins(originIds) : []
+        const modeOf = new Map(originDocs.map(d => [String(d.id), resolveMode(d)]))
+        const rows = [
+            ...queued.map(r => _fromQueue(r, modeOf.get(String(r.origin?.entityId)) ?? null)),
+            ...entities.map(_fromEntity),
+        ].filter(r => (readyOnly ? r.ready : true))
         return rows.sort((a, b) => (b.decidedAt ?? 0) - (a.decidedAt ?? 0))
     } catch (err) {
+        if (onError === 'throw') throw err
         logger.error(LOG, 'listWaiting failed', err.message)
         return []
     }
