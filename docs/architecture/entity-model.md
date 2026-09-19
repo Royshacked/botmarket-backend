@@ -1,18 +1,21 @@
 # Entity Model — Split & Blindness
 
-Master plan ref: split overloaded `ideas` into 3 execution-tier kinds sharing one
-envelope; services blind to kind. Waterfall step 1. Branch `feat/entity-model-split`.
+The execution tier's one shape: every kind that can place an order — `idea`, `call`, `setup`,
+`portfolio_item` — shares one envelope, and every service that moves money reads only that. §1–§5
+and §8 are the contract; **History** at the end is how it got here (the plan this doc started as,
+2026-07, and what each phase settled). Adding a kind = payload + evaluator + prompt + card, and no
+plumbing change — that is the test the whole model exists to pass.
 
 ## 1. Envelope (services see ONLY this)
 
 ```
 Envelope {
   id
-  kind          : idea | call | portfolio_item        // + future kinds
+  kind          : idea | call | setup | portfolio_item   // services/entity/envelope.js KINDS
   userId
   parentId      : portfolio_item → book id; else null
   status        : common lifecycle enum + per-kind extensions
-  owner         : talos | themis | null               // derived from kind; null = no loop watches it
+  owner         : talos | themis | null               // derived (ownerForKind); null ≠ unwatched — see §4
   monitor_state : { next_check_at, check_count, memo, ... }   // per-owner extras; NO timeline —
                                                               // the journal is its own collection (2026-09-17)
   executionBinding : { broker, accounts[], mainAccountId,
@@ -43,8 +46,9 @@ entities (single coll, kind discriminator):
   { kind: call }
   { kind: portfolio_item, parentId: bookId }   // N flat sibling docs — NEVER an embedded array
                                                // holdings = entities.find({kind:'portfolio_item', parentId})
-portfolios (separate — the ONLY non-envelope, non-executed thing):
-  { id: bookId, mandate, thesis, benchmark, fingerprint, reviewCadence, nextReviewAt }
+portfolio_chats (one per book — the ONLY non-envelope, non-executed thing; a book is the SET of
+  items carrying its portfolioId, never a document of its own):
+  { portfolioId, mandate, thesis, fingerprint, reviewCadence, nextReviewAt, messages }
 journal (the monitor's record, one row per READ — `services/journal.service.js`):
   { entityId, at, reason, price, rung, verdict, note, conditions[], tools[], fired?, armed[] }
   index { entityId: 1, at: -1 }; uncapped; paged newest-first through the kind's own route.
@@ -60,8 +64,12 @@ call            → null    (Hermes archived 2026-08-18)
 setup           → Talos   (guard sweep on price, a read on every candle close where a condition was written)
 portfolio_item  → Themis  (item drift gate)  ⟶  book → Themis (book assess)
 
-`null` is a real answer, not a gap — see `ownerForKind`. It is only safe because neither kind is
-authored any more; a holding rides the `idea` kind but is watched at the book tier by Themis.
+`null` means "no kind-specific owner", NOT "unwatched" — the difference grew teeth on 2026-08-18,
+when the entry and exit loops became kind-blind (`{ kind: { $ne: 'setup' } }`): an `idea` and a
+`portfolio_item` are watched by loops this map cannot name. Reading null as "nothing is looking"
+is wrong in the dangerous direction; a caller asking who to blame for a stale entity has to look at
+the kind-blind loops too (`ownerForKind`'s own note). A holding rides the `idea` kind for execution
+and is reviewed at the book tier by Themis ([desks/atlas-themis.md](../desks/atlas-themis.md)).
 ```
 
 ## 5. Execution — blind (keys off envelope, never off kind)
@@ -100,231 +108,42 @@ out which was canonical, and it carried a second hardcoded `'entities'` literal 
 If a kind-blind store is ever wanted again, start from `entityRepo` (already kind-blind, already
 the execution path) rather than resurrecting this — and give it a scope argument on day one.
 
-## 6. Phased plan (strangler — execution stays live every phase)
+## History — the plan, and what each phase settled
 
-```
-P0  Envelope contract + entityStore repo (NEW code, zero consumers)
-      - envelope type + owner-from-kind map
-      - entityStore: CRUD by id / query {kind,parentId,userId,status}   ← REJECTED, see 5b
-      - toEnvelope(ideaDoc) adapter  ← strangler bridge (legacy idea → envelope view)
+This doc began (2026-07) as the strangler plan to split the overloaded `ideas` collection into
+execution-tier kinds behind one envelope, with execution live at every phase. The audits and slice
+lists it carried are in git (`git log -- docs/architecture/entity-model.md`, before 2026-09-19);
+what follows is the outcome per phase.
 
-P1  Execution blind  [RISKY — money path]  still backed by `ideas`
-      - task 1: AUDIT exact idea-field reads across execution
-      - orderPlan / placement / reconciler / trades-ledger → consume Envelope
-      - reconciler match by {id,kind}; ledger key {id,kind}
-      - REGRESSION gate: existing idea trades place/reconcile/close identically
+| phase | plan | outcome |
+|---|---|---|
+| P0 | envelope contract + a generic `entityStore` | envelope + `toEnvelope` adapter built; **`entityStore` rejected and deleted** (§5b) |
+| P1 | execution blind — every money-path read off the envelope | the field audit became `tests/unit/reconcilerHarness.test.js` (2026-07-21): the real reconciler over a Mongo double, the ordered op log as the executable spec |
+| P1b | `entityRepo` — one kind-blind persistence facade for every execution write | **built**; matches on broker linkage, never on kind; `entityCrud` beside it is the owner-scoped CRUD (`_scope(userId)` is the guarantee a list is only ever the caller's own) |
+| P2 | cutover `ideas` → `entities`, flat + `kind` + `parentId` | **done** (`scripts/migrate-ideas-to-entities.mjs`); `kind` is DERIVED (`kindForDoc`: a `portfolioId` makes a `portfolio_item`, else `idea`) and stamped at insert; the envelope stayed a logical view, not a storage format |
+| P3a | calls into `entities` as `kind:'call'`, keeping the idea shadow | **done** (`scripts/migrate-calls-to-entities.mjs`); `kairos_calls` retired |
+| P3b | drop the call's idea shadow; converge status vocab in position | **moot** — Kairos and Hermes were archived 2026-08-18 (`archive/README.md`); a `call` document still exists and `KINDS.CALL` names it |
+| P4 | `portfolio_item` flat, book in a `portfolios` collection | **half**: holdings are flat sibling docs (never an embedded array) and Themis reads them; the book's own record stayed `portfolio_chats` — a separate `portfolios` collection was never needed |
+| P5 | remove `ownedBy` / `portfolioId` special-cases | `ownedBy` is gone; `portfolioId` is the join key a holding legitimately carries |
+| — | `setup` (Mentor + Talos, 2026-08-08) | the fourth kind, and the one that proved the model: payload + evaluator + prompt + card, no plumbing ([desks/mentor-talos.md](../desks/mentor-talos.md)) |
 
-P2  `idea` kind → entities
-      - saveIdea writes entities{kind:idea}; Minos reads envelopes; dual-read during cutover
-      - migrate standalone ideas
+The plan's §7 open decisions, numbered as the code still cites them, as settled:
 
-P3  split `call` (drop idea-shadow)
-      - call → entities{kind:call} w/ own executionBinding
-      - remove buildIdeaFromCall shadow; Hermes reads envelope; reconciler already blind
-      - migrate live calls
+1. **Storage** — one `entities` collection with a `kind` discriminator.
+2. **Sizing** — the common seam `{ unit, requested, resolvedQty }` was never built as such; each kind
+   sizes in its own service (`legQuantity`, `_sizePlan`).
+3. **Status** — "a common lifecycle enum + per-kind extension set": `services/entity/vocabulary.js`
+   is the one home for statuses, horizons and asset classes; a kind's extras are registered there.
+4. **Monitor state** — ONE `monitor_state` shape for every kind, gate anchors in the payload
+   (`blankMonitorState`); the journal left it for its own collection on 2026-09-17.
+5. **Owner** — derived from kind (`ownerForKind`), never stored.
+6. **Migration** — per-phase backfill scripts, idempotent, each leaving the old collection as backup.
 
-P4  split `portfolio_item`
-      - holdings → entities{kind:portfolio_item, parentId}; book → portfolios coll
-      - computePortfolioState + Themis read envelopes
-      - migrate holdings
+And one rule that outranks them: **envelope fields carry ONE name across every kind.** `userId` was
+the violator (calls stored `user_id`, which silently broke the kind-blind owner filters; converged by
+`scripts/migrate-call-userid.mjs` and, for coverage, `migrate-coverage-userid.mjs`). Payload casing
+may differ per kind (a call is snake_case) and is absorbed only through `toEnvelope`.
 
-P5  cleanup
-      - remove ownedBy / portfolioId special-cases + legacy idea-overload branches
-```
-
-## 7. Open decisions (recommendation in caps)
-
-```
-1. STORAGE     ONE `entities` coll + discriminator            [DECIDED]
-2. SIZING      common seam {unit,requested,resolvedQty}; per-kind resolver
-               (idea qty / call max_size / item ratio→qty)
-3. STATUS      common lifecycle enum + per-kind extension set
-4. MONITOR_ST  SINGLE shape all kinds; gate anchors live in payload
-5. OWNER       DERIVED from kind (no stored field)
-6. MIGRATION   per-phase backfill; existing ideas fork → {standalone / call-shadow / holding}
-```
-
-## P1 execution contract (from audit — what the refactor MUST preserve)
-
-```
-Execution obtains entity via db.collection('ideas').findOne({id})  (string id, NOT _id)
-Broker/adapter via singleton brokerService + brokerService.capabilities(broker); the ONLY
-idea field that selects a broker is `idea.broker`.
-
-EXECUTION-BINDING reads (→ envelope.execution): broker, accounts[], mainAccountId,
-  brokerSymbol, basisOffset, orderState, brokerOrders[], quantity, direction, asset,
-  asset_class, entryOrderType, entryTriggerPrice, pendingOrder.plan
-LIFECYCLE write-backs: status, ordersPlacedAt, restingPlacedAt, activatedAt, entryTriggeredAt,
-  triggeredWhileWaiting, triggerEventAt, closedReason, closedAt, realizedPnl, exitPlacedAccounts,
-  exitOrders[], nativeExit, monitorStop/Tp, stopMonitorTree/tpMonitorTree, firedExits[],
-  pendingCloseReason, conditionStates.*, additional_entries.*.triggeredAt
-PAYLOAD boundary = protectionPlan.routeExits + positionMonitor ONLY read raw condition trees;
-  everything downstream (reconciler, ledger, notify) sees only routed {nativeExit, monitorTree}
-IDENTITY/ORIGIN: id, userId, callId, portfolioId, portfolioName, groupId, allocationRatio
-```
-
-Already envelope-shaped (P1a — low risk):
-```
-- orderPlan.buildOrderPlanForIdea → reads ONLY {accounts, mainAccountId, quantity, userId}
-- exitOrders.util (buildExitOrder/orderSymbol/closeSide) → reads ONLY {brokerSymbol, asset, direction, basisOffset}
-- tradeCapture.buildOrigin → ALREADY kind-aware: origin.type∈{call,portfolio,idea}, origin.ideaId=id
-                             → {id,kind} maps 1:1; single seam to make explicit
-```
-
-Hard coupling (P1b / P2–P4 — the real work):
-```
-- ~30 write-back sites hard-code db.collection('ideas') (ideaExecution, reconciler, positionMonitor,
-  manualIdea, tradeIdeas) → the seams P2–P4 redirect
-- reconciler matches by (accountId, positionId), assumes ONE position per entity
-  → likely holds per-entity (each idea/holding/call = one position/acct); CONFIRM, not assume
-- status-value coupling (ACTIVE=[long,short], resting/hit/looking/waiting) is idea-lifecycle vocab
-- direction:'both' (calls) NOT handled by closeSide — latent gap, resolve at P3
-- casing: idea camelCase vs call snake_case PAYLOAD — absorbed ONLY if read via toEnvelope.
-  ENVELOPE fields are exempt: they carry ONE name per field across every kind. `userId` was the
-  violator (calls stored `user_id`), which silently broke the kind-blind owner filters — converged
-  by scripts/migrate-call-userid.mjs, and in the `coverage` collection by
-  scripts/migrate-coverage-userid.mjs. One owner name across every owner-scoped list is what lets
-  services/entity/entityCrud.service.js exist. Do not reintroduce a per-kind alias.
-```
-
-## P1b design — `entityRepo` persistence facade (behavior-preserving indirection)
-
-```
-GOAL: funnel EVERY execution-path db.collection('ideas') access through one kind-blind
-module, so P2 = flip one collection name (+ run migration) and every exec site follows.
-P1b changes NO behavior and does NOT flip the target — collection stays 'ideas'.
-
-WHY separate from entityStore (deleted 2026-08-07, see 5b): entityStore.COLLECTION='entities'
-was the FUTURE store.
-entityRepo.EXEC_COLLECTION='ideas' (the CURRENT backing store, strangler window: calls
-execute via an idea shadow, holdings ARE ideas). They are different collections DURING
-the transition; P2 points entityRepo at 'entities' after migrating data. ACTIVE stays
-idea-vocab ['long','short'] because everything physically in 'ideas' uses it (P3 generalizes).
-Lookups return RAW docs (no stripId) — the reconciler operates on raw docs today; match it.
-```
-
-Surface (each method = the EXACT audited inline op; String() coercion moves inside):
-```
-broker-linkage lookups (kind-blind — match on brokerOrders/exitOrders shape):
-  findActiveByPosition(acct, pos)      findOne {status:$in ACTIVE, brokerOrders elemMatch{acct,pos}}
-  findLinkedByPosition(acct, pos)      findOne {brokerOrders elemMatch{acct,pos}}
-  claimRestingFill(acct, orderId, set) findOneAndUpdate resting→live (+ $[slot] arrayFilter, after)
-  backfillPositionId(acct, pos, sym)   findOneAndUpdate unlinked-slot → stamp positionId
-  activeWithBrokerLinks()              find active+resting w/ links, projection{userId,brokerOrders}
-by-id lifecycle writes:
-  getById(id) · patch(id,fields)       updateOne {id} $set
-  finalizeClose(id, patch)             findOneAndUpdate {id, status:$in ACTIVE} $set → doc (guard)
-  claimExitAccount(id, acct)→bool      updateOne {id, exitPlacedAccounts:$ne acct} $addToSet (atomic)
-  pushExitOrders(id, orders)           updateOne {id} $push{exitOrders:$each}
-  setExitOrders(id, orders)            updateOne {id} $set{exitOrders}
-```
-
-Migration order (each step behavior-preserving, tested before the next):
-```
-1. entityRepo module + faithfulness tests (spy coll: each method issues the identical
-   filter/update/options it replaces)                                          ← THIS STEP
-2. Regression HARNESS: replay a canonical exec-event sequence (open → partial reduce →
-   resync → full close, multi-account) through the reconciler against an in-memory Mongo
-   double; snapshot entity docs + captured trades + broker calls; assert deep-equal
-   BEFORE vs AFTER the entityRepo swap.                                        ← safety net, BEFORE any reconciler edit
-3. Migrate execution.reconciler.js → entityRepo (highest risk, most self-contained). Run
-   reconciler tests + harness.
-4. Migrate ideaExecution / manualIdea / positionMonitor collection writes → entityRepo.
-5. Fold exitOrders.util → envelope.execution while those call sites are open.
-```
-
-## P2 plan — cutover to the `entities` collection (DECIDED: flat + kind)
-
-```
-STORED SHAPE = FLAT (today's idea layout) + `kind` + `parentId`. The envelope stays a
-LOGICAL adapter view (ideaToEnvelope), NOT a storage format. So NO flat-read rewrites —
-reconciler/positionMonitor/ideaExecution/tradeCapture keep reading idea.brokerOrders etc.
-kind is derived: portfolioId != null ? 'portfolio_item' : 'idea'; parentId = portfolioId ?? null.
-At P2 `entities` holds only idea + portfolio_item (migrated from `ideas`); calls join at P3.
-NO kind-filtering needed at P2 (entities set == old ideas set) — kind filters land at P3.
-```
-
-Flip surface (every physical `ideas` reference — from audit):
-```
-services/entity/entityRepo.service.js   EXEC_COLLECTION       (execution facade)
-api/trade-ideas/tradeIdeas.service.js   COLLECTION            (idea CRUD)
-api/portfolio/portfolioRebalance.service.js  COLLECTION
-api/portfolio/portfolioChat.service.js  db.collection('ideas')  (meta rows)
-services/portfolioState.service.js      db.collection('ideas')  (computePortfolioState)
-monitoring/invalidation.monitor.js      db.collection('ideas') ×3
-monitoring/hermes.monitor.service.js    getIdea dep  (reads linked idea shadow)
-services/kairos.handoff.service.js      ×3  (markIdeaOwned / getIdea / update shadow)
-```
-
-Phases:
-```
-P2a (safe, additive — commit alone):
-  - services/entity/entityCollection.js: ENTITIES='entities' (single source of truth) + kindForDoc()
-  - scripts/migrate-ideas-to-entities.mjs: idempotent — updateMany add kind/parentId to all `ideas`,
-    then rename `ideas`→`entities` (skip if `entities` exists), create indexes
-    (id unique, userId, status, kind, parentId, orderState)
-  - stamp kind/parentId on NEW inserts (saveIdea, kairos buildIdeaFromCall shadow) — harmless now
-P2b (the cutover — separate commit; run migration FIRST):
-  - repoint all 8 flip-surface references 'ideas'→ENTITIES
-  - verify (unit tests use injected fakes → unaffected; smoke-test execution + CRUD on entities)
-  - keep `ideas` renamed (reversible) until verified, then it's gone
-```
-
-## P3 plan — split `call` into its own kind (audit-grounded)
-
-```
-TODAY: a call = TWO docs. The call (kairos_calls: plan + position_state + monitor_state,
-snake_case) + an IDEA SHADOW (entities kind:'idea', callId set, ownedBy:'hermes') that carries
-ALL execution (brokerOrders/exitOrders/nativeExit/direction/quantity/status). confirmCall →
-saveIdea(buildIdeaFromCall) mints the shadow; the reconciler reconciles it kind-blindly; Hermes
-reads it back via getIdea(call.linked_idea_id). Minos stands down via ownedBy:'hermes'.
-
-KEY INSIGHT: the reconciler is ALREADY kind-blind (matches status∈[long,short]+brokerOrders,
-never reads callId/kind). Call statuses (waiting/watching/ready/confirmed/in_position/closed) do
-NOT overlap Minos's poll (looking/long/short) — so calls can live in `entities` without Minos
-scooping them up. The shadow, not the call, holds the position link.
-```
-
-Split into two slices (P3b is the risky one):
-```
-P3a (SAFE, behavior-preserving — like P2): move calls INTO entities as kind:'call', KEEP the shadow.
-  - migrate kairos_calls → entities (stamp kind:'call', parentId:null); keep kairos_calls backup
-  - repoint kind:'call'-scoped: kairos.service CRUD, kairos.handoff _loadOwned+updates,
-    hermes.monitor _tick/_claimCall/_persist, tradeCapture call-reasoning read
-  - Hermes polls entities {kind:'call'}; reconciler/Minos unaffected (call statuses don't collide)
-  - shadow mechanism UNCHANGED → zero execution-behavior change. Retires the kairos_calls collection.
-
-P3b (RISKY — drop the shadow; needs a harness like P1b):
-  - call entity carries the FLAT camelCase execution block on entry (brokerOrders/exitOrders/
-    nativeExit/direction/quantity/brokerSymbol/basisOffset/broker/status + condition-tree touch
-    leaves) — stamped where confirmCall now builds the shadow
-  - retarget shadow reads/writes → the call itself: manageCall getIdea/_resolveMainLink/_workingExit/
-    syncIdeaExit; Hermes _reconcilePosition/_promoteToInPosition/_closeFromIdea; tradeCapture origin;
-    getCallPositionMap; getIdeas filter
-  - kill ownedBy:'hermes' → owner DERIVED from kind:'call' (ownerForKind already returns 'hermes')
-  - Minos poll excludes kind:'call'
-  DECISION (made): STATUS VOCAB = **CONVERGE IN-POSITION**. One status field: PRE-position stays
-  kind-specific (call: watching/ready); ON ENTRY it converges to execution vocab (hit→long/short→
-  closed) — exactly what the shadow does today. Reconciler stays kind-blind on [long,short]; Minos
-  excludes kind:'call'; Hermes reads the call's own long/short post-entry. position_state keeps the
-  phase/scaling nuance.
-  Also: (2) bias:'both' → concrete flat direction stamped from armed-zone side at entry.
-        (3) execution path reads RAW camelCase (NOT via adapter) → brokerOrders/brokerSymbol/
-            direction/quantity/status MUST exist camelCase on the call entity.
-
-  P3b implementation slices (all money-path — needs a call-entry→reconcile→close harness like P1b):
-    1. Minos poll excludes kind:'call' (listByStatus/listByOrderState) — calls will be long/short.
-    2. ENTRY: confirmCall STAMPS the flat execution block onto the CALL (merge buildIdeaFromCall's
-       fields: direction from armed zone, quantity, userId, mainAccountId, brokerSymbol, basisOffset,
-       broker, accounts, status:'hit', immediate, entry/stop/tp touch-trees, callId=self) then
-       placeOrdersForIdea(call.id) — drop the separate saveIdea(shadow) + markIdeaOwned.
-    3. Hermes reads the CALL itself: _checkPosition getIdea(linked_idea_id)→getById(call.id);
-       _reconcilePosition/_promote/_close read call.status/direction/quantity/closedReason.
-    4. manageCall reads/writes the CALL's brokerOrders/exitOrders (drop _resolveMainLink via shadow).
-    5. tradeCapture origin.type='call' from kind (not callId); getCallPositionMap query kind:'call';
-       getIdeas filter kind:'idea' (drop ownedBy:'hermes').
-    6. Retire buildIdeaFromCall/markIdeaOwned/linked_idea_id; owner = ownerForKind('call').
-```
 
 ## 8. Invariants (hold across all phases)
 
