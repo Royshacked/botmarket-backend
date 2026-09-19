@@ -799,6 +799,12 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             LIVE tree and nothing lints or tests it, so a sweep that deletes an
                             export no live caller uses breaks it silently. Run it after any such
                             sweep. A script, not a test, so archive/ stays out of `npm test`.
+  check-docs-drift.mjs      `npm run check:docs` — pulls every checkable claim out of the living docs
+                            (backtick paths, module names, routes, emit tags, symbols, constants,
+                            markdown links + anchors) and reports the ones that resolve to nothing,
+                            or only to archive/. Per-doc counts first, worst first; `--json` for a
+                            fix pass; a folder or file argument to narrow. Mechanical only — it
+                            says which sentences to distrust, not whether the prose is still true.
 prompts/                    every prompt loaded at RUNTIME (6 desks + Argus's
                             profile/handoff + market brief + concepts). Hot-reloaded, lazily —
                             so a bad path is an ENOENT on a live turn, not an import error.
