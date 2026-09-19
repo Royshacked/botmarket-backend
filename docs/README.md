@@ -40,6 +40,7 @@ when to act on it only make sense together.
 |---|---|
 | [trade-pipeline.md](./desks/trade-pipeline.md) | **The path a new trade takes: Argus → Mentor → Talos.** Read this first — it is the record of why the trading desk is the one it is |
 | [mentor-talos.md](./desks/mentor-talos.md) | Mentor builds a `setup`; Talos watches it. Scenarios as rivals, conditions, validity |
+| [talos-guards.md](./desks/talos-guards.md) | Guards, not zones (built 2026-08-22): exact prices, a crossing carries a meaning, the exit asymmetry. **Partly superseded** by the per-candle build — the sections say which |
 | [roles-and-sourcing.md](./desks/roles-and-sourcing.md) | **Trader vs admin, desk by desk** — where each gate lives — and the autonomous sleeve hop: Atlas → Argus → Prometheus → Atlas, researched as the house |
 
 Not yet written up: **Atlas/Themis** (portfolio — contract in APP_SPEC §3), **Argus** (scan —
@@ -53,11 +54,18 @@ than left to a tool.
 
 ## `design/` — proposed, not yet the architecture
 
-Open designs. A doc here describes something that is **not fully built** — when it ships, it moves
-to `architecture/` or `desks/`, or it is deleted.
+Open designs, and build records. A doc here describes something that is **not fully built** — when
+it ships, it moves to `architecture/` or `desks/`, it is deleted, or it stays as the **record** of
+the plan and what the build settled differently (the rule at the bottom of this page).
 
 | Doc | Status |
 |---|---|
+| [talos-per-candle.md](./design/talos-per-candle.md) | **BUILD RECORD** — shipped 2026-09-17; the contract is mentor-talos.md. The plan, the decisions, what the build settled differently |
+| [triggered-setups.md](./design/triggered-setups.md) | Design only — a guard's price term becomes an array over prices and indicators; the level need not exist at authoring time |
+| [adopted-book.md](./design/adopted-book.md) | A portfolio that wasn't built here. Phase 1 (intake + write) built 2026-08-10, not live-verified; the rest is design |
+| [opportunist-desk.md](./design/opportunist-desk.md) | Design only — a desk that trades the lag after an event, not the headline. Working name Tyche |
+| [opportunist-money-flow.md](./design/opportunist-money-flow.md) | Design only — the opportunist's first hunting ground: government money flow, recipient resolution, a sigma screen |
+| [architecture-vision.md](./design/architecture-vision.md) | House vs per-user pipeline; the Pythia → Argus → Prometheus → Atlas chain. Revised 2026-09-10 after the channel-graph engine was deleted |
 | [investor-schools.md](./design/investor-schools.md) | Two axes — selection and allocation. Trap: a school that only changes prose is a costume |
 | [pipeline-service.md](./design/pipeline-service.md) | Hops between desks as data. Mostly frontend-owned |
 

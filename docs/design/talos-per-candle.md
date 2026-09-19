@@ -25,6 +25,12 @@ both carry SUPERSEDED callouts pointing here.
 - **A re-drawn plan forgets its last read** (`monitor_state.last_assessment` cleared on a
   pre-position edit), so the first read of the new map is a `first_look`.
 - **A `hit` limit setup keeps the expiry clamp** on its next read — only a live position is exempt.
+- **The pop-out shipped as `SetupPlan.jsx`, not `SetupExits.jsx`.** Entry AND exits per scenario in
+  one component (every leg tagged rests | watched, the live numbers merged into Exits once in
+  position), with `SetupPlan.test.jsx`. Phase 6 below keeps the plan's name.
+
+The phase sections keep the PLAN's names. Where a name below is marked deleted, it is gone; where
+it names something new, the built symbol may differ — the contract doc has the built names.
 
 ## The rule
 
@@ -300,7 +306,7 @@ like any other), `skipped`, `levelsLabel`, `gapMin`, the `axes`/`fetched` fields
 **Route:** `GET /api/setups/:id/journal?before=<iso>&limit=50` → `journal.service.listJournal`,
 owner-scoped like every setups route. Controller + route + one service line, no new module.
 
-**Migration** (`scripts/migrate-journal.js`, one-off, idempotent): for every entity with a
+**Migration** (`scripts/migrate-journal.mjs`, one-off, idempotent): for every entity with a
 `monitor_state.timeline`, insert each entry into `journal` with `entityId`, then `$unset` the
 array. Legacy reasons are mapped to the new vocabulary on the way (`zone_trip`/`momentum_pulse`/
 `in_position` → `candle`, `guard_price` → `guard`, `guard_time`/`backstop`/`scheduled`/
@@ -345,7 +351,7 @@ the target" on a build Talos does not read is a lie in the interview.
                "older…" loads the next page through the route
 ```
 
-**New:** `SetupExits.jsx` (absorbs `ZoneRow` for exits and everything `PositionPanel.jsx` rendered),
+**New:** `SetupExits.jsx` (built as `SetupPlan.jsx` — see the top; absorbs `ZoneRow` for exits and everything `PositionPanel.jsx` rendered),
 `TalosJournal.jsx` + `useJournal(setupId)` (fetches the route; refetches when
 `setup.monitor_state.check_count` changes, which every read bumps — no new socket event).
 
@@ -376,7 +382,7 @@ Written per phase, per the rule. The rewrites and deletions in one place:
 | `tests/unit/dueLoop.test.js` | `makePersist` without `timelineMax` |
 | `tests/unit/readinessGates.test.js` | `clampGap` cases deleted |
 | `tests/unit/setupsGenerate.test.js`, `mentorAgent.test.js` | no `cadence`, no `timeline` |
-| FE `TalosJournal.test.jsx`, `SetupExits.test.jsx` | new; `TalosWatch`/`PositionPanel`/`MonitorJournal` tests deleted |
+| FE `TalosJournal.test.jsx`, `SetupExits.test.jsx` (built as `SetupPlan.test.jsx`) | new; `TalosWatch`/`PositionPanel`/`MonitorJournal` tests deleted |
 
 ---
 
