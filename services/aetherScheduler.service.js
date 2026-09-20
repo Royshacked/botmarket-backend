@@ -219,6 +219,16 @@ function _readProgress(line) {
 // button and the list now read one feed; the GET is only for a page that opens mid-run.
 export const DISCOVERY_EVENT = 'aether:discovery'
 
+// ONE PRESS RUNS WHAT THE SELECTOR PICKED. `maxRuns` is the ceiling on discovery runs per
+// press and `top` is how many events the selector picks; they are the same number on purpose.
+// They were 2 and 5 — every press ran two and deferred three, the log said so each time
+// ("5 selections but --max-runs=2"), and with 14 runnable the queue never caught up. Each
+// event is an Opus web-search call plus an EDGAR pass, about a dollar and four minutes (the
+// 2026-09-20 run: 19-26k billed input, 7-10k output, per event) — so a press is ~$5 and
+// ~20 minutes, decided 2026-09-20. The controller clamps what the client sends; these are the
+// values a missing or junk body falls back to, and the ones the client asks for by default.
+export const DISCOVERY_DEFAULTS = Object.freeze({ maxRuns: 5, hours: 168, top: 5 })
+
 function _announce() {
     broadcast(DISCOVERY_EVENT, discoveryStatus())
 }
@@ -227,6 +237,42 @@ function _announce() {
 export function _onEngineLine(line, level = 'info') {
     if (_readProgress(line)) _announce()
     logger[level](LOG, line)
+}
+
+/**
+ * The engine process has exited: record how, land its rows where this server reads, THEN
+ * tell everyone. Exported for tests; `mirror` is the seam.
+ *
+ * MIRROR BEFORE ANNOUNCE. The frame that says "not running" is what makes every open
+ * candidate list refetch, so the rows have to be readable by the time it goes out. On a
+ * split host (engine in the house db, app in its own) this used to announce first and
+ * mirror after "so the button reads done on the run's own clock" — and the log showed
+ * the cost: `13:15:27 discovery finished`, `13:15:27 GET /candidates`, `13:15:28 mirrored
+ * 2 runs, 19 candidates`. The list looked one second before the names arrived, nothing
+ * told it to look again, and the run was only visible after a manual reload. The button
+ * now reads "done" a second later on a split host and at the same instant on a joined one.
+ *
+ * The run stays "in flight" while the mirror copies: a press in that second is a 409, which
+ * is right — its events would be re-picked before they were readable.
+ */
+export async function _onDiscoveryExit({ code, startedAt }, mirror = _mirrorIfSplit) {
+    // The last stage reached is kept on `last`, because WHERE a failed run died is the
+    // useful half of knowing that it did. The Iran run reported exit 1 and nothing
+    // else; "died in verifying, 45 names already proposed" is the sentence that would
+    // have pointed straight at the SEC outage.
+    _lastRun = { startedAt, finishedAt: new Date().toISOString(), code, ok: code === 0,
+                 lastStage: _progress?.stage ?? null, lastDetail: _progress?.detail ?? null }
+    logger.info(LOG, `discovery finished  code=${code ?? '-'}  last stage=${_progress?.stage ?? '-'}`)
+    // A failed run is mirrored too — whatever it stored before dying is real and already in
+    // the house. The mirror logs and returns rather than throwing; the finally is for the day
+    // that stops being true, because a run left "in flight" makes every later press a 409.
+    try {
+        await mirror(startedAt)
+    } finally {
+        _discovery = null
+        _progress = null
+        _announce()
+    }
 }
 
 /**
@@ -274,7 +320,7 @@ function discoveryStatus() {
  * Throws for the reasons a caller should hear about: no engine on this host, no
  * resolvable database, or a run already in flight.
  */
-function runDiscovery({ maxRuns = 2, hours = 168, top = 5 } = {}) {
+function runDiscovery({ maxRuns = DISCOVERY_DEFAULTS.maxRuns, hours = DISCOVERY_DEFAULTS.hours, top = DISCOVERY_DEFAULTS.top } = {}) {
     // The refusals carry a STATUS — 409 for "already going", 503 for "this host cannot" — so the
     // controller answers off `err.status` rather than regexing the sentence back out of the message
     // (the anti-pattern http.util's own comment names).
@@ -317,21 +363,7 @@ function runDiscovery({ maxRuns = 2, hours = 168, top = 5 } = {}) {
             if (line) _onEngineLine(line, 'warn')
         }
     })
-    _discovery.on('exit', async code => {
-        // The last stage reached is kept on `last`, because WHERE a failed run died is the
-        // useful half of knowing that it did. The Iran run reported exit 1 and nothing
-        // else; "died in verifying, 45 names already proposed" is the sentence that would
-        // have pointed straight at the SEC outage.
-        _lastRun = { startedAt, finishedAt: new Date().toISOString(), code, ok: code === 0,
-                     lastStage: _progress?.stage ?? null, lastDetail: _progress?.detail ?? null }
-        logger.info(LOG, `discovery finished  code=${code ?? '-'}  last stage=${_progress?.stage ?? '-'}`)
-        _discovery = null
-        _progress = null
-        _announce()
-        // After the announce, so the button reads "done" on the run's own clock; a failed run
-        // is mirrored too — whatever it stored before dying is real and already in the house.
-        await _mirrorIfSplit(startedAt)
-    })
+    _discovery.on('exit', code => _onDiscoveryExit({ code, startedAt }))
     _discovery.on('error', err => {
         _lastRun = { startedAt, finishedAt: new Date().toISOString(), code: null, ok: false,
                      error: err.message }

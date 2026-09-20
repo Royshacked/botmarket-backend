@@ -11,7 +11,7 @@
 import { aetherAgentService }                        from '../../services/agents/aether.agent.service.js'
 import { getEventCandidates, getCandidatesForTicker, tickerWindowDays, getScorecard } from './aether.service.js'
 import { quickRead } from '../../services/aetherQuickRead.service.js'
-import { aetherSchedulerService }                    from '../../services/aetherScheduler.service.js'
+import { aetherSchedulerService, DISCOVERY_DEFAULTS } from '../../services/aetherScheduler.service.js'
 import { streamAgentResponse, sseAgentCallbacks }    from '../_shared/sse.util.js'
 import { routeFields }                               from '../../services/routing.util.js'
 import { parseChatMessages }                         from '../_shared/parse.util.js'
@@ -116,12 +116,12 @@ export const startDiscovery = handle('startDiscovery', async (req, res) => {
     // Clamped, because this is the spend dial. --max-runs is a per-event multiplier on
     // both the model cost and the SEC traffic; a fat-fingered 200 is a very expensive
     // afternoon.
-    const maxRuns = Math.min(Math.max(Number(req.body?.maxRuns) || 2, 1), 10)
+    const maxRuns = Math.min(Math.max(Number(req.body?.maxRuns) || DISCOVERY_DEFAULTS.maxRuns, 1), 10)
     // `hours` is an AGE CEILING on unseen queue rows, not a window: the engine reads
     // every headline the selector has not yet been shown, and this only stops a
     // long gap between presses from dumping a month into one pass. A week.
-    const hours   = Math.min(Math.max(Number(req.body?.hours)   || 168, 1), 168)
-    const top     = Math.min(Math.max(Number(req.body?.top)     || 5, 1), 20)
+    const hours   = Math.min(Math.max(Number(req.body?.hours)   || DISCOVERY_DEFAULTS.hours, 1), 168)
+    const top     = Math.min(Math.max(Number(req.body?.top)     || DISCOVERY_DEFAULTS.top, 1), 20)
 
     const started = aetherSchedulerService.runDiscovery({ maxRuns, hours, top })
     logger.info(LOG, `discovery requested by ${req.user?.username ?? 'admin'}`)

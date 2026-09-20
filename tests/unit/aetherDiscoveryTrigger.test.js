@@ -11,7 +11,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { aetherSchedulerService, _onEngineLine, DISCOVERY_EVENT } from '../../services/aetherScheduler.service.js'
+import { aetherSchedulerService, _onEngineLine, _onDiscoveryExit, DISCOVERY_EVENT } from '../../services/aetherScheduler.service.js'
 import { _register, _unregister } from '../../api/chat/chatWs.js'
 import { startDiscovery as _startDiscovery, getDiscoveryStatus } from '../../api/aether/aether.controller.js'
 import { errorHandler } from '../../api/_shared/handle.util.js'
@@ -96,14 +96,15 @@ test('maxRuns is clamped — it is the spend dial, not a preference', async () =
     })
     await withRunner(ok, async calls => {
         await startDiscovery({ body: { maxRuns: 0 }, user: {} }, fakeRes())
-        assert.equal(calls[0].maxRuns, 2, 'zero is not a request for nothing, it is a missing value')
+        assert.equal(calls[0].maxRuns, 5, 'zero is not a request for nothing, it is a missing value')
     })
 })
 
 test('a junk body falls back to the defaults rather than NaN', async () => {
     await withRunner(ok, async calls => {
         await startDiscovery({ body: { maxRuns: 'lots', hours: null, top: undefined }, user: {} }, fakeRes())
-        assert.deepEqual(calls[0], { maxRuns: 2, hours: 168, top: 5 })
+        // maxRuns = top: a press runs what the selector picked, nothing deferred (2026-09-20).
+        assert.deepEqual(calls[0], { maxRuns: 5, hours: 168, top: 5 })
     })
 })
 
@@ -200,6 +201,48 @@ test('an engine line that moves the stage is broadcast in the status shape', () 
         assert.equal(typeof data.available, 'boolean')
     } finally {
         _unregister('viewer', ws)
+    }
+})
+
+test('the finished frame goes out AFTER the mirror — the list refetches on it, so the rows must be there', async () => {
+    // Split host: engine writes the house db, the app reads its own. The exit handler used to
+    // announce first and mirror after; the log read `finished` → `GET /candidates` → `mirrored`
+    // one second apart, and the new run was only on screen after a manual reload.
+    const ws = fakeSocket()
+    _register('viewer3', ws)
+    const order = []
+    try {
+        await _onDiscoveryExit({ code: 0, startedAt: '2026-09-20T13:06:23.000Z' }, async since => {
+            order.push(`mirror:${since}`)
+            await new Promise(r => setTimeout(r, 5))
+            assert.equal(ws.sent.length, 0, 'nothing announced while the mirror is still copying')
+        })
+        order.push('announced')
+
+        assert.deepEqual(order, ['mirror:2026-09-20T13:06:23.000Z', 'announced'])
+        assert.equal(ws.sent.length, 1)
+        const { event, data } = ws.sent[0]
+        assert.equal(event, DISCOVERY_EVENT)
+        assert.equal(data.running, false)
+        assert.equal(data.last.ok, true)
+        assert.equal(data.last.code, 0)
+    } finally {
+        _unregister('viewer3', ws)
+    }
+})
+
+test('a mirror that throws still ends the run — never a permanent 409', async () => {
+    const ws = fakeSocket()
+    _register('viewer4', ws)
+    try {
+        await assert.rejects(_onDiscoveryExit({ code: 1, startedAt: '2026-09-20T13:06:23.000Z' },
+                                              async () => { throw new Error('sibling db unreachable') }))
+        assert.equal(ws.sent.length, 1)
+        assert.equal(ws.sent[0].data.running, false)
+        assert.equal(ws.sent[0].data.last.ok, false)
+        assert.equal(aetherSchedulerService.discoveryStatus().running, false)
+    } finally {
+        _unregister('viewer4', ws)
     }
 })
 
