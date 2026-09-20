@@ -5,7 +5,13 @@
 
 import { streamAnthropicWithTools } from '../providers/anthropic.provider.js'
 
-export const DEFAULT_MODEL = 'claude-sonnet-4-6'
+// Sonnet 5 since 2026-09-20 (was Sonnet 4.6): $2/$10 against $3/$15, in-family, already in the
+// menu. Its tokenizer counts ~30% more, so the net is ~10-15% — more on output-heavy desks, since
+// output is where the discount bites. It reasons by default (THINKS_BY_DEFAULT floors it to `low`),
+// and the vision one-shot in monitor.claude follows this constant, which _oneShotRequest already
+// handles. A user who picked a model explicitly keeps it; an unset preference means this.
+// Talos has its own default (assess.shared ASSESS_MODEL) and did not move.
+export const DEFAULT_MODEL = 'claude-sonnet-5'
 /** Where a user past their spend ceiling is routed. Named here so it stays one of MODELS. */
 export const CHEAP_MODEL   = 'claude-haiku-4-5-20251001'
 
