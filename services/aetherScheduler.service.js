@@ -235,8 +235,15 @@ function _announce() {
 
 /** One engine log line: log it, and if it moved the stage, tell everyone. Exported for tests. */
 export function _onEngineLine(line, level = 'info') {
-    if (_readProgress(line)) _announce()
-    logger[level](LOG, line)
+    // THE ENGINE IS PYTHON ON WINDOWS, so its lines arrive CRLF. The chunk is trimmed and split on
+    // LF, which leaves a CR on every line but the chunk's last — and the one anchored pattern,
+    // `/discovery: (.+)$/`, cannot match a line ending in CR (`.` stops at it, `$` wants the end).
+    // The first event's line sat alone at the end of its chunk (the engine paused for the Opus
+    // call) and counted; the next four came in the same flush as the previous event's usage line
+    // and did not — the chip read "event 1 of 5" through a five-event run (2026-09-20).
+    const clean = String(line).replace(/\r$/, '')
+    if (_readProgress(clean)) _announce()
+    logger[level](LOG, clean)
 }
 
 /**

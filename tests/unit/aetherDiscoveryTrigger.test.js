@@ -246,6 +246,25 @@ test('a mirror that throws still ends the run — never a permanent 409', async 
     }
 })
 
+test('a line ending in CR — every line but a chunk’s last, from Python on Windows — still counts the event', () => {
+    // The chip read "event 1 of 5" through a five-event run: only the first discovery line, alone
+    // at the end of its chunk, had lost its CR to the chunk trim.
+    const ws = fakeSocket()
+    _register('viewer5', ws)
+    try {
+        _onEngineLine('INFO    discovery: Trump signs sanctions bill\r', 'warn')
+        _onEngineLine("INFO    usage Trump:2026-09-19: {'input_tokens': 382}\r", 'warn')
+        _onEngineLine('INFO    discovery: Saudi Aramco halts deliveries\r', 'warn')
+        _onEngineLine('INFO    discovery: US threatens tariffs on India', 'warn')
+        const events = ws.sent.filter(f => f.data.progress?.stage === 'proposing').map(f => f.data.progress.event)
+        assert.equal(events.length, 3)
+        assert.deepEqual(events, [events[0], events[0] + 1, events[0] + 2])
+        assert.doesNotMatch(ws.sent.at(-1).data.progress.detail, /\r/)
+    } finally {
+        _unregister('viewer5', ws)
+    }
+})
+
 test('a line that says nothing about the stage is logged, not broadcast', () => {
     const ws = fakeSocket()
     _register('viewer2', ws)
