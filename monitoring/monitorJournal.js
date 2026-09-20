@@ -69,7 +69,7 @@ export function verdictFallbackNote(verdict) {
  *
  * @param {string} reason  the wake kind
  * @param {object} opts    { nowMs, entity, price, zone, nextAt, raw, note, verb, failed, failReason,
- *                           closedReason, pnl, woke, armed, rung, tools }
+ *                           closedReason, pnl, woke, armed, rung, tools, model }
  */
 export function journalEntry(reason, {
     nowMs, entity = null, price = null, zone = null, nextAt = null,
@@ -83,6 +83,9 @@ export function journalEntry(reason, {
     armed: armedIn = null,
     rung = null,
     tools = null,
+    // Which model made this read (TALOS_MODELS id). On the row because the admin's candidate
+    // comparison IS reading rows side by side; absent on code-written events.
+    model = null,
 } = {}) {
     const at    = new Date(nowMs).toISOString()
     const noun  = entity?.kind ?? 'setup'
@@ -106,6 +109,7 @@ export function journalEntry(reason, {
         return { at, reason, price: toNum(price), verdict: null, ...(rung ? { rung } : {}),
             note: failNote(verb, entity?.asset, failReason),
             ...(tools?.length ? { tools } : {}),
+            ...(model ? { model } : {}),
             next_check_at: nextAt }
     }
 
@@ -120,6 +124,7 @@ export function journalEntry(reason, {
         ...(raw?.warning ? { warning: String(raw.warning) } : {}),
         ...(Array.isArray(raw?.conditions) && raw.conditions.length ? { conditions: raw.conditions } : {}),
         ...(tools?.length ? { tools } : {}),
+        ...(model ? { model } : {}),
         ...(raw?.proposal ? { proposal: raw.proposal } : {}),
         // Omitted, not nulled: a reader tolerating absence is cheaper than rows carrying emptiness.
         ...(woke ? { fired: { price: woke.price ?? null, direction: woke.direction ?? null,

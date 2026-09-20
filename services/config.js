@@ -125,6 +125,11 @@ export const config = {
     // ── LLM ──
     get anthropicApiKey() { return _raw('ANTHROPIC_API_KEY') },
     get openaiApiKey()    { return _raw('OPENAI_API_KEY') },        // transcription only
+    // The non-Anthropic Talos candidates' accounts (TALOS_MODELS `endpoint`): OpenRouter fronts most
+    // vendors behind one key; Mistral's own API is needed because OpenRouter serves Mistral Large 3
+    // through its Batch API only.
+    get openrouterApiKey() { return _raw('OPENROUTER_API_KEY') },
+    get mistralApiKey()    { return _raw('MISTRAL_API_KEY') },
     /** Monthly spend per user shown as a percentage in the profile, USD — see tokenUsage.service. */
     get tokenBudgetUsd()  { return _num('TOKEN_BUDGET_USD', 20) },
     /**

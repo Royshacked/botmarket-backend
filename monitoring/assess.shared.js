@@ -12,7 +12,46 @@ import { recordUsage } from '../services/tokenUsage.service.js'
 // Talos fetches only the base and reaches for the rest with tools.
 
 export const ASSESS_MODEL    = 'claude-sonnet-4-6'
-export const ALLOWED_MODELS  = new Set(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-8'])
+
+/**
+ * The models a MONITOR read may run on — its own registry, deliberately apart from the chat desks'
+ * `MODELS` (services/llmModels.js): that one feeds the chat menu, and nothing here should be
+ * offered to a desk. Keyed by the id stored in `hermesModel`.
+ *
+ *   provider   'anthropic' → the read loop in talos.assess.js; 'openai-compat' → the one
+ *              OpenAI-format loop in providers/openaiCompat.provider.js, for every non-Anthropic
+ *              candidate.
+ *   endpoint   which account that loop talks to (ENDPOINTS in the provider): 'openrouter' fronts
+ *              most vendors behind one key; 'mistral' is Mistral's own API, because OpenRouter
+ *              serves Mistral Large 3 through its Batch API only (checked 2026-09-20).
+ *   wire       the id the endpoint is sent. Same as the key for Anthropic; the endpoint's slug
+ *              otherwise.
+ *   adminOnly  a CANDIDATE under evaluation (docs/design/talos-replay-harness.md), selectable from
+ *              the admin's profile so real reads on the admin's own setups can be compared. A
+ *              non-admin document carrying one of these is routed to the default — the preference
+ *              is a client-owned snapshot anyone can PUT.
+ *
+ * The slugs were checked live on 2026-09-20 (OpenRouter's /models, Mistral's model list); a renamed
+ * slug fails the read with a provider error (a journal row, never a wrong model — the loop asserts
+ * `response.model`).
+ */
+export const TALOS_MODELS = Object.freeze({
+    'claude-sonnet-4-6':         { label: 'Claude Sonnet 4.6', provider: 'anthropic',  wire: 'claude-sonnet-4-6' },
+    'claude-sonnet-5':           { label: 'Claude Sonnet 5',   provider: 'anthropic',  wire: 'claude-sonnet-5',           adminOnly: true },
+    'claude-opus-4-8':           { label: 'Claude Opus 4.8',   provider: 'anthropic',  wire: 'claude-opus-4-8' },
+    // Kept for the one document that stored it — Haiku is not offered for a real read (rejected
+    // 2026-09-20), which is why the menu does not list it.
+    'claude-haiku-4-5-20251001': { label: 'Claude Haiku 4.5',  provider: 'anthropic',  wire: 'claude-haiku-4-5-20251001' },
+    'gpt-5.6-luna':              { label: 'GPT-5.6 Luna',      provider: 'openai-compat', endpoint: 'openrouter', wire: 'openai/gpt-5.6-luna', adminOnly: true },
+    'mistral-large-3':           { label: 'Mistral Large 3',   provider: 'openai-compat', endpoint: 'mistral',    wire: 'mistral-large-2512',   adminOnly: true },
+    'qwen3.7-plus':              { label: 'Qwen3.7-Plus',      provider: 'openai-compat', endpoint: 'openrouter', wire: 'qwen/qwen3.7-plus',   adminOnly: true },
+})
+export const ALLOWED_MODELS  = new Set(Object.keys(TALOS_MODELS))
+
+/** The registry entry for a resolved model id — always defined for what `assessRouting` returns. */
+export function talosModel(id) {
+    return TALOS_MODELS[id] ?? TALOS_MODELS[ASSESS_MODEL]
+}
 // Cheapest first — the order `capEffort` clamps along.
 const EFFORT_ORDER = ['off', 'low', 'high']
 export const ALLOWED_EFFORTS = new Set(EFFORT_ORDER)
@@ -126,19 +165,36 @@ export function bookAssessUsage(userId, model, usage, agent, _record = recordUsa
  * keeps on purpose (a wire field is not a desk). Talos is the only monitor reading it today; Hermes
  * was archived on 2026-08-18.
  */
-export async function assessRouting(userId) {
-    if (!userId) return { model: ASSESS_MODEL, reasoningEffort: 'off' }
+export async function assessRouting(userId, _getUser = userService.getUserById) {
+    const fallback = { model: ASSESS_MODEL, reasoningEffort: 'off', ...talosModel(ASSESS_MODEL) }
+    if (!userId) return fallback
     try {
-        const prefs = await userService.getPreferences(userId)
+        // The whole document, not just preferences: the admin gate below needs `role`, and the
+        // `role ?? isAdmin` fallback is the same rule the token is minted from (user.model).
+        const user  = await _getUser(userId)
+        const prefs = user?.preferences
+        const model = resolveTalosModel(prefs?.hermesModel, user?.role === 'admin' || (user?.role == null && user?.isAdmin === true))
         return {
-            model:           ALLOWED_MODELS.has(prefs?.hermesModel) ? prefs.hermesModel : ASSESS_MODEL,
+            model,
+            ...talosModel(model),
             // Capped, not rejected: a stored `high` reads as `low` — the user asked for thinking and
             // gets the affordable kind. See ASSESS_MAX_EFFORT.
             reasoningEffort: capEffort(prefs?.hermesReasoning),
         }
     } catch {
-        return { model: ASSESS_MODEL, reasoningEffort: 'off' }
+        return fallback
     }
+}
+
+/**
+ * The stored choice → the model the read runs on. Unknown → default; an `adminOnly` candidate on a
+ * non-admin document → default (silently: the document is what a client sent, not what the user
+ * was offered). Pure; exported for tests.
+ */
+export function resolveTalosModel(stored, isAdmin) {
+    if (!ALLOWED_MODELS.has(stored)) return ASSESS_MODEL
+    if (TALOS_MODELS[stored].adminOnly && !isAdmin) return ASSESS_MODEL
+    return stored
 }
 
 /**

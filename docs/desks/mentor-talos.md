@@ -366,6 +366,21 @@ question* — and its menu line is generated from `allowedVerdicts`. The default
 thinking off (`assessRouting`); the saving was the image and the tokens it dragged in, not the
 model.
 
+**Which model reads (2026-09-20).** `assessRouting` resolves `preferences.hermesModel` against
+`TALOS_MODELS` (`assess.shared.js`) — the monitors' own registry, apart from the chat desks'. Sonnet
+4.6 is the default for everyone. Four **candidates** are `adminOnly`: Sonnet 5, GPT-5.6 Luna,
+Mistral Large 3, Qwen3.7-Plus — chosen from the admin's profile (the *Monitors* card under AI
+Preferences, admin-only) so the admin's own setups are read on one of them from their next wake,
+with every journal row and the last-assessment record naming the model that made it. That is the
+live comparison the replay harness (`docs/design/talos-replay-harness.md`) was going to stage
+offline: the same prompt, the same tools, real setups, side by side in the pop-out. A non-admin
+document carrying a candidate is routed to the default. The non-Anthropic ones run through
+`providers/openaiCompat.provider.js` — one OpenAI-format loop, the same tool kit and runner, with
+`web_search` dropped (an Anthropic server tool; the condition comes back `unchecked`) and a chart
+image delivered as a `user` message after the tool message. Accounts: `OPENROUTER_API_KEY` (Luna,
+Qwen) and `MISTRAL_API_KEY` (Mistral Large 3 — OpenRouter has it batch-only). Nothing a candidate
+says executes on its own: `enter` parks `awaiting_confirm` and posts a card, as always.
+
 **What a read costs, and the two knobs on it (2026-09-20).** The September ledger split Talos into
 output (46%) and cache writes (43%); tools were the rest. Two things followed, both in
 `assess.shared.js`:

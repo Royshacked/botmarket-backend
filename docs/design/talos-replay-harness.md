@@ -1,7 +1,9 @@
 # Talos replay harness — build plan
 
-**STATUS: IN BUILD.** Step 1 (the recorder) shipped 2026-09-20; steps 2–5 are not started. This file
-is the plan and the record of what each step settled; the recorder's contract is the paragraph in
+**STATUS: IN BUILD.** Step 1 (the recorder) shipped 2026-09-20; the same day the runner's
+adapter shipped as a LIVE admin menu instead of an offline replayer (see *The live comparison*
+below); steps 2, 4 and 5 are not started. This file is the plan and the record of what each step
+settled; the recorder's contract is the paragraph in
 [desks/mentor-talos.md](../desks/mentor-talos.md#what-a-read-is).
 
 ## What it is
@@ -73,16 +75,37 @@ own stop and targets — so a replay is cheap and honest.
 Layout: `scripts/eval/talos-replay/` (`pull-reads.mjs` today; label · run · grade · report to
 come); data in `data/eval/talos-reads/`.
 
+## The live comparison (2026-09-20)
+
+Before building the offline replayer, Roy asked what the price list and the read's shape already
+say. They say: a Talos read is INPUT-heavy (~41k input tokens across its rounds vs ~1.4k out — every
+round re-sends the prefix and the chart), and Anthropic's cache turns three quarters of that into
+$0.30/M, so Sonnet's effective input price is ~$0.9/M and any vendor above ~$0.75/M list with a
+weaker cache is not cheaper. Only the sub-$0.5/M models are a different cost class — 5–10× — which
+is the difference between a 15-min setup costing ~$28/month and ~$5. Cost is arithmetic; chart-
+reading fitness is not, and no public board measures it.
+
+So the runner's adapter (step 3 — `providers/openaiCompat.provider.js`) shipped as a **live admin
+menu**: `TALOS_MODELS` in `assess.shared.js`, the *Monitors* card on the admin's profile, and the
+admin's own setups read on the chosen candidate from their next wake, every journal row naming the
+model. Same prompt, same tools, real setups, side by side in the pop-out — the fit question answered
+on the desk rather than in a harness. The recorder captures every one of those reads, so the
+offline replay (steps 2, 4, 5) stays available for the statistical proof once a candidate looks
+credible by eye. Chosen candidates: Sonnet 5 (in-family, ~10–15% cheaper), GPT-5.6 Luna (the price
+floor; vision confirmed on OpenRouter), Mistral Large 3 (open weights, vision; via Mistral's own API
+— OpenRouter has it batch-only), Qwen3.7-Plus (best open tool-caller, vision). Out: Gemini Flash
+(barely cheaper than Sonnet cached, price doubles 2027-01), Mistral Medium (dearer than Sonnet
+cached), DeepSeek (vision experimental), GLM/Kimi (no saving on this shape), gpt-oss (no vision).
+
 ## Decisions
 
 - **The monitor does not change.** Roy, 2026-09-20.
 - **Label is mechanical** (above). Roy, 2026-09-20.
 - **No consent gate per user** on whose reads go to non-Anthropic vendors — "the simplest".
   userId is hashed in every bundle. Roy, 2026-09-20.
-- **Candidates** — proposed, not yet approved: in-house Sonnet 4.6 (baseline) · Sonnet 5 · Haiku
-  4.5 (comparator only; Haiku for a real read is rejected); external GPT-5.6 Luna · Gemini 3.8
-  Flash · Mistral Medium 3.5 · Mistral Large 3 · DeepSeek V4 Pro (US host only) · Qwen3.7-Plus ·
-  gpt-oss-120B. Out: Nemotron 3 Ultra, Llama, Gemma.
+- **Candidates** — decided 2026-09-20 (see *The live comparison*): Sonnet 5 · GPT-5.6 Luna ·
+  Mistral Large 3 · Qwen3.7-Plus, against Sonnet 4.6. Haiku stays out of the menu (rejected for a
+  real read).
 
 ## Open
 

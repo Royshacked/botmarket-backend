@@ -12,6 +12,7 @@ import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
 import { declaredConditions, pickScenario, scenarioLabel, usableLadder, clampRung, allowedVerdicts } from '../services/setup.schema.js'
 import { config } from '../services/config.js'
 import { isRecording, recordRead } from './talos.recorder.js'
+import { runOpenAICompatRead } from '../providers/openaiCompat.provider.js'
 
 // Talos's read — the model call behind every wake (docs/design/talos-per-candle.md).
 //
@@ -389,7 +390,7 @@ function _armedScenario(setup) {
  */
 async function _runRead(setup, systemText, userText, meta = {}) {
     const trace  = { messages: [], usage: [], calls: [], rounds: 0 }
-    const result = await _readLoop(setup, systemText, userText, trace)
+    const result = { ...await _readLoop(setup, systemText, userText, trace), ...(trace.model ? { _model: trace.model } : {}) }
     // Fire-and-forget: the recorder fetches its data pack AFTER the answer is in hand, and its
     // failure is its own log line. The read is already over by the time it runs.
     if (isRecording()) {
@@ -403,7 +404,34 @@ async function _runRead(setup, systemText, userText, meta = {}) {
 async function _readLoop(setup, systemText, userText, trace) {
     const t0 = Date.now()
     try {
-        const { model, reasoningEffort } = await assessRouting(setup.userId)
+        const { model, provider, endpoint, wire, reasoningEffort } = await assessRouting(setup.userId)
+        const calls = trace.calls
+        const runToolUses = makeAssessToolRunner({
+            symbols: symbolScope(setup),
+            log: LOG,
+            onCall: (name) => calls.push(name),
+            // A tool's own model call (the structure-vision reads) lands on this wake's row too, at
+            // the model the provider says it used — usedModel, not `model`.
+            onUsage: (usage, usedModel) => bookAssessUsage(setup?.userId, usedModel ?? model, usage, 'talosAssess'),
+        })
+        trace.model = model
+        trace.provider = provider
+
+        // A NON-ANTHROPIC candidate (TALOS_MODELS, admin-only while under evaluation): same prompts,
+        // same tool kit and runner, same parse — the wire format is the adapter's business. The
+        // rest of this function is the Anthropic loop.
+        if (provider === 'openai-compat') {
+            const out = await runOpenAICompatRead({
+                endpoint, wire, model, systemText, userText, tools: buildToolsFor(setup), runToolUses, trace,
+                onUsage: (usage) => bookAssessUsage(setup?.userId, model, usage, 'talosAssess'),
+                runawayRounds: RUNAWAY_ROUNDS, log: LOG, tag: `[${setup.id}]`,
+            })
+            trace.elapsedMs = Date.now() - t0
+            if (out.runaway) return { _failReason: 'runaway', _tools: calls }
+            if (calls.length) logger.info(LOG, `[${setup.id}] ${calls.length} tool call(s) on ${model}: ${calls.join(', ')}`)
+            return _parseReply(setup, out.text, out.stopReason, calls)
+        }
+
         // `model` is not optional here: _thinkingConfig floors the models that reason by default to
         // 'low' when no effort is set, and without it that floor is skipped — leaving such a model
         // with thinking OFF, where it can emit a tool call as plain text that silently never runs.
@@ -416,26 +444,15 @@ async function _readLoop(setup, systemText, userText, trace) {
         // This loop calls the client DIRECTLY, so it must finalize the server tools itself — the
         // registry's web_search is at its modern base, and a Haiku-routed wake would 400 on a variant
         // Haiku does not take. Same one-model resolution streamAnthropicWithTools does.
-        const tools     = _finalizeServerTools(buildToolsFor(setup), model)
+        const tools     = _finalizeServerTools(buildToolsFor(setup), wire)
         const messages  = [{ role: 'user', content: userText }]
-        Object.assign(trace, { model, reasoningEffort, thinking, maxTokens, tools, messages })
-
-        const calls = trace.calls
-        const runToolUses = makeAssessToolRunner({
-            symbols: symbolScope(setup),
-            log: LOG,
-            onCall: (name) => calls.push(name),
-            // A tool's own model call (the structure-vision reads) lands on this wake's row too, at
-            // the model the provider says it used — usedModel, not `model`.
-            onUsage: (usage, usedModel) => bookAssessUsage(setup?.userId, usedModel ?? model, usage, 'talosAssess'),
-        })
+        Object.assign(trace, { reasoningEffort, thinking, maxTokens, tools, messages })
 
         // NO QUALITY CAP on rounds: a four-condition setup spanning two symbols does not fit a
         // guessed number, and capping silently truncates the read into a verdict formed on partial
         // evidence. RUNAWAY_ROUNDS is a backstop far above any honest read — the caller's
         // withTimeout ABANDONS a slow check but cannot CANCEL it, so a model that loops would keep
         // billing in a detached promise. Hitting this is a bug, and it logs like one.
-        const RUNAWAY_ROUNDS = 25
         let msg
         for (let round = 0; ; round++) {
             // Same breakpoint walk the desks use, so a long read pays for its earlier rounds once.
@@ -443,7 +460,7 @@ async function _readLoop(setup, systemText, userText, trace) {
             advanceToolLoopCache(messages, 1, { mutableTail: 0 })
 
             msg = await _client.messages.create({
-                model, max_tokens: maxTokens, system, messages, tools,
+                model: wire, max_tokens: maxTokens, system, messages, tools,
                 ...(thinking ?? {}),
             })
             bookAssessUsage(setup?.userId, model, msg?.usage, 'talosAssess')
@@ -476,17 +493,25 @@ async function _readLoop(setup, systemText, userText, trace) {
 
         if (calls.length) logger.info(LOG, `[${setup.id}] ${calls.length} tool call(s): ${calls.join(', ')}`)
 
-        try {
-            // `_tools` is envelope, not something the model authored — prefixed like _failReason.
-            return { ...extractFirstJSON(_allText(msg)), _tools: calls }
-        } catch (parseErr) {
-            logger.warn(LOG, `reply unparseable for ${setup.id} (stop_reason=${msg?.stop_reason}):`, parseErr.message)
-            return { _failReason: msg?.stop_reason === 'max_tokens' ? 'truncated' : 'malformed', _tools: calls }
-        }
+        return _parseReply(setup, _allText(msg), msg?.stop_reason, calls)
     } catch (err) {
         trace.elapsedMs = Date.now() - t0
         trace.error = err.message
         logger.warn(LOG, `assessment failed for ${setup?.id}:`, err.message)
         return { _failReason: 'io' }
+    }
+}
+
+// The backstop on tool rounds, shared by both loops — see the comment above the Anthropic one.
+const RUNAWAY_ROUNDS = 25
+
+/** The end of a read, whichever loop ran it: the verdict JSON out of the reply text, or a typed failure. */
+function _parseReply(setup, text, stopReason, calls) {
+    try {
+        // `_tools` is envelope, not something the model authored — prefixed like _failReason.
+        return { ...extractFirstJSON(text), _tools: calls }
+    } catch (parseErr) {
+        logger.warn(LOG, `reply unparseable for ${setup.id} (stop_reason=${stopReason}):`, parseErr.message)
+        return { _failReason: stopReason === 'max_tokens' ? 'truncated' : 'malformed', _tools: calls }
     }
 }

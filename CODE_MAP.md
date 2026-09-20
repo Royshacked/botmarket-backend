@@ -615,6 +615,18 @@ providers/
                                 stop_details category. The model is the caller's (llmModels resolves it);
                                 there is no second default here. The non-streaming twins were deleted
                                 2026-09-16 with no caller. (OpenAI SDK is used directly, transcribe only)
+  openaiCompat.provider.js      THE ONE OpenAI-format read loop (2026-09-20) — how a non-Anthropic Talos
+                                CANDIDATE is read (assess.shared TALOS_MODELS, provider 'openai-compat').
+                                Same prompts, same tool kit and runner (makeAssessToolRunner), same
+                                parse; translated here and only here: tool schemas, tool_calls →
+                                tool_use, tool results (an image cannot ride in a `tool` message — it
+                                follows in one `user` message), usage. ENDPOINTS = which account:
+                                'openrouter' (one key, most vendors) · 'mistral' (their own API —
+                                OpenRouter serves Mistral Large 3 batch-only). Drops web_search (an
+                                Anthropic server tool), no cache markers, vendor-default thinking.
+                                Asserts response.model — a substituted model is an io failure, never
+                                a wrong candidate scored as the right one. Ships as the adapter if a
+                                candidate wins; until then admin-only via the profile's Monitors card
   yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / usaspending
                             EVERY JSON call rides services/http.util.getJson — timeout per attempt, the
                             request meter, typed err.status + err.body, a jittered retry on 429/5xx.
@@ -711,7 +723,16 @@ monitoring/
                             every setup and the candle pacing outlives the 5-minute default); the
                             tool runner's ctx.onUsage books a tool's own model call (the vision reads).
                             _runRead is a wrapper over _readLoop that fills a `trace` and, under
-                            TALOS_RECORD_READS, hands it to the recorder after the answer is in
+                            TALOS_RECORD_READS, hands it to the recorder after the answer is in.
+                            WHICH MODEL: assessRouting (assess.shared) reads the user document once —
+                            `preferences.hermesModel` against TALOS_MODELS, the monitors' OWN registry
+                            (not llmModels' chat MODELS): Sonnet 4.6 default; Sonnet 5, GPT-5.6 Luna,
+                            Mistral Large 3, Qwen3.7-Plus are `adminOnly` CANDIDATES (a non-admin doc
+                            carrying one is routed to the default — the preference is a client-owned
+                            snapshot anyone can PUT). _readLoop branches once on `provider`: anthropic
+                            → the loop here; openai-compat → providers/openaiCompat.provider.js. The
+                            result carries `_model` beside `_tools`, and the journal row + the
+                            last_assessment record say which model made the read
   talos.recorder.js         the replay eval's input (docs/design/talos-replay-harness.md), 2026-09-20.
                             Opt-in (TALOS_RECORD_READS): one JSON bundle per read — the exact
                             system/user text, the finalized tool list, the whole trajectory (tool

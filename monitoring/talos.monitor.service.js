@@ -147,7 +147,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     if (!raw || raw._failReason) {
         const nextAt = _nextReadAt(setup, nowMs, rung, deps)
         await deps.persist(setup.id, _wakePatch(setup, nextAt),
-            _entry(reason, { setup, nowMs, price, rung, nextAt, failed: true, failReason: raw?._failReason, tools: raw?._tools }))
+            _entry(reason, { setup, nowMs, price, rung, nextAt, failed: true, failReason: raw?._failReason, tools: raw?._tools, model: raw?._model }))
         return { reason, failed: true }
     }
 
@@ -312,7 +312,7 @@ async function _managePosition(setup, ps, scenario, watched, nowMs, deps) {
     if (!raw || raw._failReason) {
         const nextAt = _nextReadAt(setup, nowMs, rung, deps)
         await deps.persist(setup.id, base(nextAt),
-            _entry(reason, { setup, nowMs, price, rung, nextAt, failed: true, failReason: raw?._failReason, verb: 'reassess', tools: raw?._tools }))
+            _entry(reason, { setup, nowMs, price, rung, nextAt, failed: true, failReason: raw?._failReason, verb: 'reassess', tools: raw?._tools, model: raw?._model }))
         return { reason, failed: true }
     }
 
@@ -396,7 +396,7 @@ async function _managePosition(setup, ps, scenario, watched, nowMs, deps) {
 
     await deps.persist(setup.id, set, _entry(reason, {
         setup, nowMs, price, rung, nextAt, armed: armedNow, woke,
-        raw: { ...raw, verdict, proposal, conditions }, tools: raw._tools,
+        raw: { ...raw, verdict, proposal, conditions }, tools: raw._tools, model: raw._model,
     }))
 
     if (fires) await deps.onManageCard(setup, { verdict, proposal, read: raw.read ?? null }).catch(() => {})
@@ -529,7 +529,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
     }
     const row = (extra = {}) => _entry(reason, {
         setup, nowMs, price, rung, nextAt, armed: armedNow, zone,
-        raw: { ...raw, conditions }, tools: raw._tools, ...extra,
+        raw: { ...raw, conditions }, tools: raw._tools, model: raw._model, ...extra,
     })
 
     if (reason === 'expiry_review' && raw.verdict === 'let_expire') {
@@ -616,6 +616,7 @@ function _assessmentRecord({ nowMs, reason, zone = null, scenario, raw, verdict,
         conditions,
         rung,
         tools:          raw._tools ?? [],
+        ...(raw._model ? { model: raw._model } : {}),
         price:          Number.isFinite(price) ? price : null,
         ...(raw.edit_proposal ? { edit_proposal: raw.edit_proposal } : {}),
     }
