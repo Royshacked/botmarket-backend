@@ -28,6 +28,8 @@ import { getDb } from '../providers/mongodb.provider.js'
 import { COLLECTIONS, TICKER_RE } from '../api/aether/aether.model.js'
 import { logger } from './logger.service.js'
 import { httpError } from './httpError.util.js'
+import { isAllowedModel, isAdminOnlyModel } from './llmModels.js'
+import { isAdminUser } from '../api/user/user.model.js'
 
 const LOG = '[aetherQuickRead]'
 
@@ -35,8 +37,19 @@ export const READS = 'aether_candidate_reads'
 
 // Sonnet at medium effort: the judgment is "does anything since the event contradict this", which
 // is reading, not modelling, and the whole point is that it costs a fraction of a coverage run.
+// The DEFAULT, since 2026-09-20 — the read follows the presser's AI menu (the same one choice every
+// desk runs on), so a candidate can be compared on the same name; the stored doc names the model
+// that produced it. The admin-only gate is the one every desk turn passes (resolveAgentStream);
+// it is applied here as well so the doc records what actually ran, not what was asked for.
 export const QUICKREAD_MODEL  = 'claude-sonnet-5'
 export const QUICKREAD_EFFORT = 'medium'
+
+/** The model a read runs on: the presser's choice when it is one a desk may run on, else the default. */
+export async function quickReadModel(requested, userId, _isAdmin = isAdminUser) {
+    if (!isAllowedModel(requested)) return QUICKREAD_MODEL
+    if (isAdminOnlyModel(requested) && !(await _isAdmin(userId).catch(() => false))) return QUICKREAD_MODEL
+    return requested
+}
 
 const _inflight = new Map()   // `${run_id}|${ticker}` → promise
 
@@ -153,14 +166,15 @@ const _io = {
             .sort({ created_at: -1 })
             .toArray()
     },
-    async read({ opening, userId, signal }) {
+    async read({ opening, userId, signal, model = QUICKREAD_MODEL }) {
         const { analystAgentService, MODES } = await import('./agents/analyst.agent.service.js')
         return analystAgentService.chatStream({
             messages: [], userPrompt: opening, chatState: {}, audience: AUDIENCE,
-            mode: MODES.QUICKREAD, model: QUICKREAD_MODEL, reasoningEffort: QUICKREAD_EFFORT,
+            mode: MODES.QUICKREAD, model, reasoningEffort: QUICKREAD_EFFORT,
             userId, signal,
         })
     },
+    isAdmin: isAdminUser,
     async store(doc) {
         const db = await getDb()
         await db.collection(READS).replaceOne({ run_id: doc.run_id, ticker: doc.ticker }, doc, { upsert: true })
@@ -175,7 +189,7 @@ const _io = {
  * result is a broadcast annotation on a broadcast list, so the doc carries `read_by` for the
  * record and nothing about the user reaches the prompt.
  */
-export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _io) {
+export async function quickRead({ runId, ticker, userId, signal, model: requestedModel } = {}, deps = _io) {
     const sym = String(ticker ?? '').trim().toUpperCase()
     if (!runId || !TICKER_RE.test(sym)) throw httpError(400, 'a run and a ticker are required')
 
@@ -198,8 +212,9 @@ export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _
         if (!c) throw httpError(404, 'no such candidate')
         // The event fields are denormalised onto the candidate by the engine, so the row is the run.
         const opening = quickReadOpening(c, c, others)
+        const model = await quickReadModel(requestedModel, userId, deps.isAdmin ?? isAdminUser)
         const t0 = Date.now()
-        const out = await deps.read({ opening, userId, signal })
+        const out = await deps.read({ opening, userId, signal, model })
         const q = out?.quickread
         const doc = {
             run_id: runId, ticker: sym,
@@ -217,12 +232,12 @@ export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _
             delta:      q?.delta ?? null,
             delta_basis: q?.delta_basis ?? '',
             reply:      out?.reply ?? '',
-            model:      QUICKREAD_MODEL,
+            model,
             read_by:    userId ?? null,
             read_at:    new Date().toISOString(),
             took_ms:    Date.now() - t0,
         }
-        logger.info(LOG, 'quick read', { runId, ticker: sym, verdict: doc.verdict, net: doc.net, others: otherIds.length, confidence: doc.confidence,
+        logger.info(LOG, 'quick read', { runId, ticker: sym, model, verdict: doc.verdict, net: doc.net, others: otherIds.length, confidence: doc.confidence,
                                          delta: doc.delta?.delta_price_pct ?? null, open: doc.delta?.remaining_pct ?? null, ms: doc.took_ms })
         return deps.store(doc)
     })()

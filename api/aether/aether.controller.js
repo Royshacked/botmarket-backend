@@ -93,7 +93,9 @@ export const getScorecardRead = handle('getScorecard', async (req, res) => {
  */
 export const postQuickRead = handle('postQuickRead', async (req, res) => {
     const { run_id: runId, ticker } = req.body ?? {}
-    res.json(await quickRead({ runId, ticker, userId: req.user?._id }))
+    // The presser's AI-menu model, when the client sends one — the service validates and gates it.
+    const model = typeof req.body?.model === 'string' ? req.body.model : null
+    res.json(await quickRead({ runId, ticker, userId: req.user?._id, model }))
 })
 
 // ── discovery, on demand (admin) ──────────────────────────────────────────────

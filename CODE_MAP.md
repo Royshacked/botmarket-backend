@@ -520,8 +520,9 @@ services/
                             per name per event, one in flight, re-read only when the SET of live events
                             naming the ticker changed. Judged against every live event, not the one pressed.
                             Since 2026-09-20 the read SIZES the event too (compute_event_delta; `delta` +
-                            `delta_basis` on the doc, null when unsized) and books under its own ledger
-                            row `analystAgent-quickread`
+                            `delta_basis` on the doc, null when unsized), runs on the presser's AI-menu
+                            model (quickReadModel: a candidate for an admin only, else Sonnet 5; the doc
+                            names what ran) and books under its own ledger row `analystAgent-quickread`
   lastPrice.service.js      fetchLastPrice(symbol): THE last-price read — quote first, a 1-minute-candle
                             fallback second, null only when both fail; a non-positive price is NO price.
                             The input to every zone gate, baseline stamp and coherence check. Lived in

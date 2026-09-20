@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
-    quickRead, quickReadOpening, attachReads, QUICKREAD_MODEL,
+    quickRead, quickReadOpening, attachReads, quickReadModel, QUICKREAD_MODEL,
 } from '../../services/aetherQuickRead.service.js'
 import { _parseQuickRead, _cleanDelta, _buildSystemPrompt, MODES } from '../../services/agents/analyst.agent.service.js'
 import { ALL_EMIT_TAGS } from '../../services/llmStream.util.js'
@@ -195,6 +195,38 @@ test('produces, stores and returns the read', async () => {
     assert.equal(d.calls.stored.length, 1)
     // Unsized read: the delta fields are present and empty, never absent.
     assert.equal(out.delta, null); assert.equal(out.delta_basis, '')
+})
+
+// ── the model follows the presser's menu ─────────────────────────────────────
+// The one AI-menu choice every desk runs on reaches the read too, so a candidate can be compared
+// on the same name. Gated as a desk turn is: a candidate for an admin only, anything unknown or
+// absent → the default. The doc records what RAN.
+
+test('quickReadModel: the menu choice when it is a desk model; the default otherwise', async () => {
+    const admin = async () => true, user = async () => false
+    assert.equal(await quickReadModel('claude-opus-5', 'u', user), 'claude-opus-5')
+    assert.equal(await quickReadModel(undefined, 'u', user), QUICKREAD_MODEL)
+    assert.equal(await quickReadModel('gpt-4o', 'u', admin), QUICKREAD_MODEL)
+    assert.equal(await quickReadModel('mistral-medium-3.5', 'u', admin), 'mistral-medium-3.5')
+    assert.equal(await quickReadModel('mistral-medium-3.5', 'u', user), QUICKREAD_MODEL)
+    // An unreadable role is not an admin.
+    assert.equal(await quickReadModel('mistral-medium-3.5', 'u', async () => { throw new Error('db') }), QUICKREAD_MODEL)
+})
+
+test('the read runs on the requested model and the doc names it', async () => {
+    const d = { ...deps({ quickread: Q }), isAdmin: async () => true }
+    const seen = []
+    const read = d.read; d.read = async args => { seen.push(args.model); return read(args) }
+    const out = await quickRead({ runId: CAND.run_id, ticker: 'FRO', userId: 'u1', model: 'qwen3.7-plus' }, d)
+    assert.deepEqual(seen, ['qwen3.7-plus'])
+    assert.equal(out.model, 'qwen3.7-plus')
+    assert.equal(d.calls.stored[0].model, 'qwen3.7-plus')
+})
+
+test('a non-admin asking for a candidate gets the default, and the doc says so', async () => {
+    const d = { ...deps({ quickread: Q }), isAdmin: async () => false }
+    const out = await quickRead({ runId: CAND.run_id, ticker: 'FRO', userId: 'u2', model: 'qwen3.7-plus' }, d)
+    assert.equal(out.model, QUICKREAD_MODEL)
 })
 
 test('a sized read stores the delta and its basis beside the verdict', async () => {
