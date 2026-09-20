@@ -155,9 +155,14 @@ export function requestedSymbols(input) {
  *
  * `onCall(name)` fires per executed tool, so the wake can record what it actually spent. With no
  * round cap in dev, that record IS the cost control: measure first, then set the ceiling.
+ *
+ * `onUsage(usage, model)` is the wake's booking hook, handed to every handler as its `ctx` — the
+ * same shape the desks' loop passes (provider `_runTool`) — so a tool that spends a model call of
+ * its own (the structure-vision reads) books it under this wake's user and agent.
  */
-export function makeAssessToolRunner({ symbols = [], log = LOG, onCall = null, handlers = _HANDLERS } = {}) {
+export function makeAssessToolRunner({ symbols = [], log = LOG, onCall = null, onUsage = null, handlers = _HANDLERS } = {}) {
     const allowed = new Set(symbols.filter(Boolean).map(s => String(s).toUpperCase().trim()))
+    const ctx     = { onUsage }
 
     const _err = (id, content) => ({ type: 'tool_result', tool_use_id: id, is_error: true, content })
 
@@ -190,7 +195,7 @@ export function makeAssessToolRunner({ symbols = [], log = LOG, onCall = null, h
             // The shared factories wrap every handler in makeToolHandler, which catches and returns
             // a readable error string — so a failed provider becomes a tool_result the model can
             // act on ("mark it unchecked") rather than an exception that loses the whole wake.
-            const out = await fn(input)
+            const out = await fn(input, ctx)
             results.push({ type: 'tool_result', tool_use_id: use.id, content: Array.isArray(out) ? out : String(out) })
         }
         return results

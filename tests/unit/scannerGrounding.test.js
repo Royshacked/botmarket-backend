@@ -8,7 +8,7 @@ import { dirname, join } from 'path'
 import {
     makeGroundingLedger, recordSourced, recordTouched, groundingTier, normTicker, DISCOVERY_TOOLS,
 } from '../../services/scanner.grounding.js'
-import { _normalizeScan } from '../../services/agents/scanner.agent.service.js'
+import { _normalizeScan, _wrapForGrounding } from '../../services/agents/scanner.agent.service.js'
 
 // Argus grounding — "names come from the tape, never from memory" (slice 1, A1+B1).
 
@@ -145,4 +145,24 @@ test('a web-search lead ships once a per-name tool has run on it', () => {
     const scan = { thesis: 's', direction: 'long', candidates: [cand('LEAD', 75)] }
     const out = _normalizeScan(scan, null, led)
     assert.equal(out.candidates[0].grounding, 'validated')
+})
+
+// ─── the wrapper keeps the loop's context ─────────────────────────────────────
+// _wrapForGrounding re-wraps every per-name and discovery handler. get_orderblocks and
+// get_false_breaks are per-name tools, and each spends a model call of its own that can only be
+// booked through the context the loop passes as the SECOND argument — a wrapper that forwards
+// `args` alone would silently return Argus's vision reads to being billed to nobody.
+
+test('the grounding wrapper forwards the loop context to the wrapped handler', async () => {
+    const seen = []
+    const ledger = makeGroundingLedger()
+    const wrapped = _wrapForGrounding({
+        get_orderblocks: async (args, ctx) => { seen.push(ctx); return 'OB read' },
+        get_macro_snapshot: async (args, ctx) => { seen.push(ctx); return 'macro' },   // neither per-name nor discovery
+    }, ledger)
+    const ctx = { onUsage: () => {} }
+    assert.equal(await wrapped.get_orderblocks({ ticker: 'AAPL', timeframe: '1hr' }, ctx), 'OB read')
+    assert.equal(await wrapped.get_macro_snapshot({}, ctx), 'macro')
+    assert.equal(seen[0], ctx, 'the wrapped per-name handler sees the very context')
+    assert.equal(seen[1], ctx, 'an unwrapped handler is passed through as-is')
 })

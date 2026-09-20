@@ -18,7 +18,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { agentKeyFromLog } from '../../services/agentIO.js'
-import { calcCost, ceilingFor, overCeiling, chatSpend } from '../../services/tokenUsage.service.js'
+import { calcCost, ceilingFor, overCeiling, chatSpend, searchesIn, WEB_SEARCH_USD } from '../../services/tokenUsage.service.js'
 import { resolveAgentStream } from '../../services/agentUtils.js'
 import { bookAssessUsage } from '../../monitoring/assess.shared.js'
 
@@ -278,4 +278,69 @@ test('bookAssessUsage marks its spend as a monitor’s', () => {
     bookAssessUsage('u1', 'claude-sonnet-4-6', { input_tokens: 100 }, 'talosAssess', async (...a) => { calls.push(a) })
     assert.equal(calls.length, 1)
     assert.deepEqual(calls[0][4], { monitor: true }, 'the 5th argument is what keeps it out of the ceiling')
+})
+
+// ─── the two lines that were never on the books ───────────────────────────────
+// A web search is billed per SEARCH ($10 / 1,000) and rides in `usage.server_tool_use`, not in any
+// token column; a structure-vision read is a second model call inside a tool. Both were $0 to the
+// ledger until 2026-09-20. The cost of a missing line is not the line — it is every decision taken
+// on a total that looked complete.
+
+test('a web search is priced per search, on top of the tokens', () => {
+    const tokensOnly = calcCost('claude-sonnet-4-6', { input_tokens: 1000 })
+    const withSearch = calcCost('claude-sonnet-4-6', { input_tokens: 1000, server_tool_use: { web_search_requests: 3 } })
+    assert.ok(Math.abs((withSearch - tokensOnly) - 3 * WEB_SEARCH_USD) < 1e-9)
+    assert.equal(WEB_SEARCH_USD, 0.01, '$10 per 1,000 searches — the pricing page')
+})
+
+test('searchesIn reads the server-tool counter and tolerates its absence', () => {
+    assert.equal(searchesIn({ server_tool_use: { web_search_requests: 2 } }), 2)
+    assert.equal(searchesIn({ input_tokens: 5 }), 0)
+    assert.equal(searchesIn(null), 0)
+    assert.equal(searchesIn({ server_tool_use: { web_search_requests: 'x' } }), 0, 'a non-number never becomes NaN in a $inc')
+})
+
+test('a 1-hour cache write is priced at 2x, the 5-minute one at 1.25x, from the same total', () => {
+    // The API reports the TOTAL written plus a split by TTL. The split is what tells a 2x write
+    // from a 1.25x one; a response without it (the older shape) is priced as all-5-minute.
+    const n = 1_000_000
+    const fiveMin = calcCost('claude-sonnet-4-6', { cache_creation_input_tokens: n })
+    const oneHour = calcCost('claude-sonnet-4-6', { cache_creation_input_tokens: n, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: n } })
+    const mixed   = calcCost('claude-sonnet-4-6', { cache_creation_input_tokens: n, cache_creation: { ephemeral_5m_input_tokens: n / 2, ephemeral_1h_input_tokens: n / 2 } })
+    assert.equal(fiveMin, 3.75)
+    assert.equal(oneHour, 6)
+    assert.equal(mixed, (3.75 + 6) / 2)
+})
+
+test('a 1-hour share larger than the total cannot over-bill', () => {
+    // Defensive: the split should never exceed the total, but a cost function that trusts it
+    // blindly turns a malformed usage into a phantom charge.
+    const cost = calcCost('claude-sonnet-4-6', { cache_creation_input_tokens: 100, cache_creation: { ephemeral_1h_input_tokens: 1_000_000 } })
+    assert.equal(cost, 100 * 6 / 1_000_000)
+})
+
+test('Sonnet 5 is priced at its standard $2 / $10 — the introductory rate that stayed', () => {
+    // Carried at $3/$15 until 2026-09-20 on the announced Sept-1 increase, which Anthropic
+    // withdrew. Over-reporting was the safe direction for a ceiling; it is simply wrong now.
+    assert.equal(calcCost('claude-sonnet-5', { input_tokens: 1_000_000 }), 2)
+    assert.equal(calcCost('claude-sonnet-5', { output_tokens: 1_000_000 }), 10)
+    assert.equal(calcCost('claude-sonnet-5', { cache_read_input_tokens: 1_000_000 }), 0.2)
+    assert.equal(calcCost('claude-sonnet-5', { cache_creation_input_tokens: 1_000_000 }), 2.5)
+})
+
+test('the desk hook books at the model the provider names, and at the turn’s model when it names none', async () => {
+    // A structure-vision read inside a tool runs on VISION_MODEL whatever the desk is on. The
+    // provider passes that model with the usage; booking it at the desk's model would price a
+    // Sonnet read at Opus rates on an Opus thread — or the reverse.
+    const booked = []
+    const { onUsage, model } = await resolveAgentStream('claude-opus-5', 'u1', 'analystAgent',
+        async () => null, async () => null, async (...a) => { booked.push(a) })
+
+    onUsage({ input_tokens: 10 })                          // the loop's own turn
+    onUsage({ input_tokens: 10 }, 'claude-sonnet-4-6')     // a tool's vision read
+    await new Promise(r => setImmediate(r))
+
+    assert.equal(model, 'claude-opus-5')
+    assert.deepEqual(booked.map(a => a[1]), ['claude-opus-5', 'claude-sonnet-4-6'])
+    assert.deepEqual(booked.map(a => a[3]), ['analystAgent', 'analystAgent'], 'same desk, same row')
 })

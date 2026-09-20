@@ -405,7 +405,12 @@ services/
                             call into the month document; `monitor: true` (Talos assessments) also
                             accumulates `monitorCost`, and chatSpend(doc) = totalCost − monitorCost is
                             what overCeiling compares — a user's own monitors must never degrade
-                            their chat model, and are never blocked by it (they bypass the seam)
+                            their chat model, and are never blocked by it (they bypass the seam).
+                            calcCost prices the 1-hour cache write (2×) off `usage.cache_creation`
+                            and web searches per search (WEB_SEARCH_USD, `searches` counter) off
+                            `usage.server_tool_use`; the provider's onUsage(usage, model) names the
+                            model it billed, so a tool's own model call (the structure-vision read)
+                            lands at its rate
   ohlcv.service.js          getCandles(symbol,timeframe,count) → the compact {t,o,h,l,c,v} the
                             EVALUATORS read. A relabel over priceService, not a fetcher. Was
                             providers/ohlcv.provider.js until 2026-08-07 — it reaches nothing
@@ -699,7 +704,12 @@ monitoring/
                             at that candle's close. There is no next_check_min and no cadence: the
                             rung IS the pace, so the two can never contradict each other. Ladder floors
                             at 5min (1min is 402 off-plan at FMP). Model default Sonnet, thinking off
-                            (assessRouting) — the saving was the image, not the model
+                            (assessRouting) — the saving was the image, not the model. A stored
+                            `hermesReasoning: high` is capped to `low` (ASSESS_MAX_EFFORT, capEffort
+                            in assess.shared); the system block carries the 1-HOUR cache marker
+                            (assessSystem / ASSESS_PREFIX_CACHE — tools+system are identical for
+                            every setup and the candle pacing outlives the 5-minute default); the
+                            tool runner's ctx.onUsage books a tool's own model call (the vision reads)
   dueLoop.js                the wake-up chore every monitor is built on: find what is due, CLAIM it
                             against a lease, check it under a timeout. THE LEASE IS THE SUBTLE PART —
                             withTimeout ABANDONS a slow check but cannot cancel it, so without one the

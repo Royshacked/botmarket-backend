@@ -4,7 +4,8 @@ import { sessionPhase }          from '../services/market.service.js'
 import { logger }                from '../services/logger.service.js'
 import { extractFirstJSON }      from './parsers/llmReply.parser.js'
 import { assessRouting, candlesText as _candlesText,
-    ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING, bookAssessUsage, lensLine } from './assess.shared.js'
+    ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING, assessSystem,
+    bookAssessUsage, lensLine } from './assess.shared.js'
 import { _allText, _formatEventRisk } from './assess.shared.js'
 import { _thinkingConfig, advanceToolLoopCache, _finalizeServerTools } from '../providers/anthropic.provider.js'
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
@@ -388,7 +389,10 @@ async function _runRead(setup, systemText, userText) {
         // with thinking OFF, where it can emit a tool call as plain text that silently never runs.
         const thinking  = _thinkingConfig(reasoningEffort, model)
         const maxTokens = thinking ? MAX_TOKENS_THINKING : MAX_TOKENS
-        const system    = [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
+        // Carries the 1-hour marker (ASSESS_PREFIX_CACHE): this prefix is the same for every setup
+        // and the candle-close pacing outlives the 5-minute default. It also covers `tools`, which
+        // precede the system block in the cached prefix.
+        const system    = assessSystem(systemText)
         // This loop calls the client DIRECTLY, so it must finalize the server tools itself — the
         // registry's web_search is at its modern base, and a Haiku-routed wake would 400 on a variant
         // Haiku does not take. Same one-model resolution streamAnthropicWithTools does.
@@ -400,6 +404,9 @@ async function _runRead(setup, systemText, userText) {
             symbols: symbolScope(setup),
             log: LOG,
             onCall: (name) => calls.push(name),
+            // A tool's own model call (the structure-vision reads) lands on this wake's row too, at
+            // the model the provider says it used — usedModel, not `model`.
+            onUsage: (usage, usedModel) => bookAssessUsage(setup?.userId, usedModel ?? model, usage, 'talosAssess'),
         })
 
         // NO QUALITY CAP on rounds: a four-condition setup spanning two symbols does not fit a

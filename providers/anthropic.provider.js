@@ -138,7 +138,9 @@ export async function streamAnthropicWithTools({
             for await (const event of stream) {
                 if (event.type === 'message_start') {
                     const u = event.message?.usage
-                    if (u) turnUsage = { input_tokens: u.input_tokens ?? 0, output_tokens: 0, cache_read_input_tokens: u.cache_read_input_tokens ?? 0, cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0 }
+                    // `cache_creation` (the write split by TTL) rides along because a 1-hour write
+                    // is priced differently from a 5-minute one — see tokenUsage.calcCost.
+                    if (u) turnUsage = { input_tokens: u.input_tokens ?? 0, output_tokens: 0, cache_read_input_tokens: u.cache_read_input_tokens ?? 0, cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0, ...(u.cache_creation ? { cache_creation: u.cache_creation } : {}) }
                 } else if (event.type === 'content_block_start') {
                     contentBlocks[event.index] = { ...event.content_block }
                     // Surface a tool call as soon as its block opens so the UI can
@@ -171,7 +173,7 @@ export async function streamAnthropicWithTools({
                 } else if (event.type === 'message_delta') {
                     stopReason  = event.delta.stop_reason
                     stopDetails = event.delta.stop_details ?? null
-                    if (turnUsage && event.usage?.output_tokens) turnUsage.output_tokens = event.usage.output_tokens
+                    if (turnUsage) _applyDeltaUsage(turnUsage, event.usage)
                 }
             }
         } catch (err) {
@@ -184,7 +186,7 @@ export async function streamAnthropicWithTools({
             throw err
         }
 
-        if (turnUsage) onUsage?.(turnUsage)
+        if (turnUsage) onUsage?.(turnUsage, model)
 
         // Finalise tool blocks (merge streamed partial JSON into `input`, strip the scratch field).
         _finalizeToolBlocks(contentBlocks)
@@ -207,7 +209,7 @@ export async function streamAnthropicWithTools({
             const toolUseBlocks = validBlocks.filter(b => b.type === 'tool_use')
             _compactPriorToolResults(messages)
             messages.push({ role: 'assistant', content: validBlocks })
-            const results = await Promise.all(toolUseBlocks.map(b => _runTool(toolHandlers, b)))
+            const results = await Promise.all(toolUseBlocks.map(b => _runTool(toolHandlers, b, { onUsage })))
             messages.push({ role: 'user', content: results })
             continue
         }
@@ -235,7 +237,7 @@ export async function streamAnthropicWithTools({
 
 /**
  * @param {{ model: string, systemPrompt: string, user: string, image?: string|null, maxTokens?: number,
- *           onUsage?: (usage: object) => void }} args   `image` is base64 PNG bytes, sent ahead of the text.
+ *           onUsage?: (usage: object, model: string) => void }} args   `image` is base64 PNG bytes, sent ahead of the text.
  * @returns {Promise<string>} the reply's text ('' when the model returned none)
  */
 export async function callAnthropicOnce({ model, systemPrompt, user, image = null, maxTokens = 512, onUsage }) {
@@ -251,7 +253,9 @@ export async function callAnthropicOnce({ model, systemPrompt, user, image = nul
     // monitor.claude aliases VISION_MODEL to DEFAULT_MODEL, and a default that moves to Sonnet 5
     // would have silently broken every chart verdict.)
     const msg = await client.messages.create(_oneShotRequest({ model, systemPrompt, content, maxTokens }))
-    onUsage?.(msg.usage)
+    // The model goes with the usage: a one-shot inside a tool runs on ITS model (the vision read on
+    // VISION_MODEL), not the loop's, and the hook must price it at the rate it actually paid.
+    onUsage?.(msg.usage, model)
     const text = msg.content.filter(b => b.type === 'text').map(b => b.text).join('')
     _noteStop(msg.stop_reason, msg.stop_details ?? null, model, text.length)
     return text
@@ -316,14 +320,34 @@ export function _toToolResultContent(ret) {
     return String(ret)
 }
 
+/**
+ * Fold the closing `message_delta` usage into the turn's running usage. Mutates; exported for tests.
+ *
+ * `output_tokens` is final only here. So are the server-tool counters (`web_search_requests`):
+ * message_start cannot know how many searches the turn will run, and the counter never appeared
+ * on the usage the books were handed — so every search was free as far as they knew.
+ */
+export function _applyDeltaUsage(turnUsage, usage) {
+    if (!turnUsage || !usage) return turnUsage
+    if (usage.output_tokens)   turnUsage.output_tokens   = usage.output_tokens
+    if (usage.server_tool_use) turnUsage.server_tool_use = usage.server_tool_use
+    return turnUsage
+}
+
 // Run one tool and build its tool_result block. A toolError() return — or a
 // thrown error — becomes an is_error result so the model treats it as a failed
 // call, not as data.
-async function _runTool(toolHandlers, block) {
+//
+// `ctx` is the turn's context, handed to every handler as its second argument. Today it carries
+// `onUsage` — a tool that makes its OWN model call (the structure-vision reads) books it through
+// the same hook as the loop, under the same user and desk, at the model it actually used. Before
+// this, a handler had no way to reach the books and those reads were billed to nobody.
+// Exported for tests.
+export async function _runTool(toolHandlers, block, ctx = {}) {
     const handler = toolHandlers[block.name]
     if (!handler) return _errorResult(block.id, `no handler for tool ${block.name}`)
     try {
-        const ret = await handler(block.input)
+        const ret = await handler(block.input, ctx)
         if (isToolError(ret)) return _errorResult(block.id, toolErrorText(ret))
         return { type: 'tool_result', tool_use_id: block.id, content: _toToolResultContent(ret) }
     } catch (err) {

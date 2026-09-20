@@ -366,6 +366,28 @@ question* — and its menu line is generated from `allowedVerdicts`. The default
 thinking off (`assessRouting`); the saving was the image and the tokens it dragged in, not the
 model.
 
+**What a read costs, and the two knobs on it (2026-09-20).** The September ledger split Talos into
+output (46%) and cache writes (43%); tools were the rest. Two things followed, both in
+`assess.shared.js`:
+
+- **Thinking is capped at `low`** (`ASSESS_MAX_EFFORT`, `capEffort`). A stored `hermesReasoning:
+  high` reads as `low` — the user asked for reasoning and gets the affordable kind; the preference
+  itself is never rewritten, so a tier that lifts the cap restores the user's own choice. `high` was
+  the whole difference between the two heavy users' cost per read ($0.047 vs $0.035) for a verdict
+  that is a small JSON object.
+- **The prefix is cached for an hour** (`ASSESS_PREFIX_CACHE`, `assessSystem`). Tools + system are
+  byte-identical for every setup and every user, and the wakes are paced by candle closes — 15
+  minutes and up, past the 5-minute default — so nearly every read re-wrote ~5k tokens at 1.25×. A
+  1-hour entry writes at 2× and is refreshed free by every read within the hour: one write an hour
+  across the whole book, and cheaper as the book grows. The tool-loop breakpoint on `messages` stays
+  at 5 minutes, which is also the API's order rule (longer TTL first).
+
+**Everything a read spends is on its row.** Two lines were invisible until the same day: the
+structure-vision tools (`get_orderblocks`, `get_false_breaks`) make a second model call on
+`VISION_MODEL`, now booked through the runner's `ctx.onUsage` at the model it ran on; and
+`web_search` is billed per search ($10 / 1,000) off the token columns — `usage.server_tool_use`
+now rides through to `recordUsage`, priced and counted (`searches`).
+
 ### Pre-entry — `_checkSetup`
 
 ```

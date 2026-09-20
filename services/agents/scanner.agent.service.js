@@ -153,9 +153,12 @@ function _wrapForGrounding(handlers, ledger) {
     for (const [name, fn] of Object.entries(handlers)) {
         const reader = PER_NAME_TICKER_ARGS[name]
         const isDiscovery = DISCOVERY_TOOLS.has(name)
+        // `ctx` rides through untouched: it is the loop's booking hook, and get_orderblocks /
+        // get_false_breaks (both per-name tools, so both wrapped here) spend a model call of
+        // their own that must reach it.
         wrapped[name] = (reader || isDiscovery)
-            ? async (args) => {
-                const ret = await fn(args)
+            ? async (args, ctx) => {
+                const ret = await fn(args, ctx)
                 if (!isToolError(ret)) {
                     if (isDiscovery && typeof ret === 'string') recordSourced(ledger, ret)
                     if (reader) recordTouched(ledger, reader(args))
@@ -170,7 +173,7 @@ function _wrapForGrounding(handlers, ledger) {
 export const scannerAgentService = { chatStream }
 
 // Exported for unit tests (scanner scorecard normalization + ranking).
-export { _normalizeScan, _cleanScore, scannerToolsForProfile }
+export { _normalizeScan, _cleanScore, scannerToolsForProfile, _wrapForGrounding }
 
 // Tool subset per profile (P4a). Investing drops the technical/momentum/vision kit (candles, indicators,
 // chart, orderblocks, movers, positioning, cycles) and keeps the fundamental screen. Trading = full kit.

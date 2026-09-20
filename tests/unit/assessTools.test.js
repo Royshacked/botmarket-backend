@@ -133,3 +133,36 @@ test('broken call accounting never breaks a read', async () => {
     const [res] = await run(use('get_chart', { ticker: 'NVDA' }))
     assert.equal(res.content, 'chart')
 })
+
+// ─── the booking hook reaches the tools ───────────────────────────────────────
+// A structure-vision read is a model call INSIDE a tool. The handler is built once per toolset with
+// no user in sight, so the only way it can book is through the context the runner passes per call —
+// the same `{ onUsage }` shape the desks' loop passes (provider _runTool). Without it, every such
+// read was billed to nobody.
+
+test('the runner hands every handler the wake’s onUsage as its context', async () => {
+    const booked = []
+    const seen   = []
+    const run = makeAssessToolRunner({
+        symbols: ['NVDA'],
+        onUsage: (usage, model) => booked.push([usage, model]),
+        handlers: {
+            get_orderblocks: async (input, ctx) => {
+                seen.push(ctx)
+                ctx.onUsage({ input_tokens: 1500, output_tokens: 400 }, 'claude-sonnet-4-6')
+                return 'OB read'
+            },
+        },
+    })
+    const [res] = await run(use('get_orderblocks', { ticker: 'NVDA', timeframe: '1hr' }))
+    assert.equal(res.content, 'OB read')
+    assert.equal(seen.length, 1)
+    assert.equal(typeof seen[0].onUsage, 'function')
+    assert.deepEqual(booked, [[{ input_tokens: 1500, output_tokens: 400 }, 'claude-sonnet-4-6']])
+})
+
+test('a runner built without onUsage still passes a context — a handler can guard on it', async () => {
+    const { run } = runnerWith({ get_chart: async (input, ctx) => (ctx && ctx.onUsage == null ? 'no hook' : 'hook') })
+    const [res] = await run(use('get_chart', { ticker: 'NVDA', timeframe: '15min' }))
+    assert.equal(res.content, 'no hook')
+})

@@ -5,34 +5,57 @@ import { config } from './config.js'
 const TOKEN_BUDGET_USD = config.tokenBudgetUsd
 export const COLLECTION = 'token_usage'
 
-// Pricing per 1M tokens in USD. cacheRead is 0.1x input, cacheWrite 1.25x input
-// (the 5-minute TTL premium — we never set ttl:'1h', which would be 2x).
+// Pricing per 1M tokens in USD. cacheRead is 0.1x input; cacheWrite is the 5-minute write
+// (1.25x input). A 1-hour write is 2x and is priced from the `cache_creation` breakdown the API
+// returns beside the total — see calcCost — so the row carries no separate column for it.
 // Opus is $5/$25 as of the 4.7 generation; the old $15/$75 was Opus-3-era and
 // overstated every Opus row by 3x while it was in here.
 const PRICING = {
     'claude-haiku-4-5-20251001': { input: 1.00,  output: 5.00,  cacheRead: 0.10,  cacheWrite: 1.25  },
-    // Sonnet 5 is $2/$10 introductory through 2026-08-31, then $3/$15. Priced at the STANDARD
-    // rate on purpose: over-reporting spend is the safe direction for a budget ceiling, and it
-    // needs no calendar reminder to stay correct.
-    'claude-sonnet-5':          { input: 3.00,  output: 15.00, cacheRead: 0.30,  cacheWrite: 3.75  },
+    // $2/$10 was announced as introductory through 2026-08-31; Anthropic then made it the standard
+    // price (the pricing page, read 2026-09-20). It was carried at $3/$15 until then on purpose —
+    // over-reporting is the safe direction for a ceiling — and that reason has expired.
+    'claude-sonnet-5':          { input: 2.00,  output: 10.00, cacheRead: 0.20,  cacheWrite: 2.50  },
     'claude-sonnet-4-6':        { input: 3.00,  output: 15.00, cacheRead: 0.30,  cacheWrite: 3.75  },
     'claude-opus-5':            { input: 5.00,  output: 25.00, cacheRead: 0.50,  cacheWrite: 6.25  },
     'claude-opus-4-8':          { input: 5.00,  output: 25.00, cacheRead: 0.50,  cacheWrite: 6.25  },
 }
 const DEFAULT_PRICING = { input: 3.00, output: 15.00 }
 
+// The 1-hour cache write is 2x input where the 5-minute one is 1.25x — 1.6x the 5-minute rate.
+const CACHE_WRITE_1H_OVER_5M = 2 / 1.25
+
+// web_search is billed per SEARCH on top of the tokens: $10 per 1,000 (the pricing page). It rides
+// in `usage.server_tool_use.web_search_requests`, not in any token column, so a desk that searched
+// on every turn looked exactly as cheap as one that never did until this was read.
+export const WEB_SEARCH_USD = 0.01
+
 export function monthKey(date = new Date()) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** Searches this response ran, off the server-tool counter. 0 when the response had none. */
+export function searchesIn(usage) {
+    return Number(usage?.server_tool_use?.web_search_requests ?? 0) || 0
 }
 
 // Exported for testing.
 export function calcCost(model, usage) {
     const p = PRICING[model] ?? DEFAULT_PRICING
+    // `cache_creation_input_tokens` is the TOTAL written; `cache_creation` splits it by TTL. The
+    // 1-hour share is priced at its own rate; whatever the split does not name is the 5-minute
+    // write, which keeps a response without the breakdown (older shapes, the fakes in tests)
+    // priced exactly as before.
+    const written   = usage.cache_creation_input_tokens ?? 0
+    const written1h = Math.min(written, usage.cache_creation?.ephemeral_1h_input_tokens ?? 0)
+    const write5m   = p.cacheWrite ?? 0
     return (
-        (usage.input_tokens                  ?? 0) * p.input              / 1_000_000 +
-        (usage.output_tokens                 ?? 0) * p.output             / 1_000_000 +
-        (usage.cache_read_input_tokens       ?? 0) * (p.cacheRead  ?? 0) / 1_000_000 +
-        (usage.cache_creation_input_tokens   ?? 0) * (p.cacheWrite ?? 0) / 1_000_000
+        (usage.input_tokens             ?? 0) * p.input             / 1_000_000 +
+        (usage.output_tokens            ?? 0) * p.output            / 1_000_000 +
+        (usage.cache_read_input_tokens  ?? 0) * (p.cacheRead ?? 0)  / 1_000_000 +
+        (written - written1h)                 * write5m             / 1_000_000 +
+        written1h                             * write5m * CACHE_WRITE_1H_OVER_5M / 1_000_000 +
+        searchesIn(usage)                     * WEB_SEARCH_USD
     )
 }
 
@@ -68,6 +91,7 @@ export async function recordUsage(userId, model, usage, agent, { monitor = false
     const output     = usage.output_tokens               ?? 0
     const cacheRead  = usage.cache_read_input_tokens     ?? 0
     const cacheWrite = usage.cache_creation_input_tokens ?? 0
+    const searches   = searchesIn(usage)
 
     await db.collection(COLLECTION).updateOne(
         { userId, month: key },
@@ -77,6 +101,9 @@ export async function recordUsage(userId, model, usage, agent, { monitor = false
                 outputTokens:      output,
                 cacheReadTokens:   cacheRead,
                 cacheWriteTokens:  cacheWrite,
+                // Counted, not just priced: a search is the one line item with no token behind it,
+                // so without its own counter the reports could not say where the $ went.
+                searches,
                 totalCost:         cost,
                 // A SECOND accumulator, not a second total: monitor spend is inside `totalCost` (the
                 // reports show what the user actually cost) and is ALSO summed here so the ceiling
@@ -92,6 +119,7 @@ export async function recordUsage(userId, model, usage, agent, { monitor = false
                 [`byAgent.${aKey}.outputTokens`]:     output,
                 [`byAgent.${aKey}.cacheReadTokens`]:  cacheRead,
                 [`byAgent.${aKey}.cacheWriteTokens`]: cacheWrite,
+                [`byAgent.${aKey}.searches`]:         searches,
                 [`byAgent.${aKey}.cost`]:             cost,
                 [`byAgent.${aKey}.turns`]:            1,
             },
@@ -206,6 +234,7 @@ export async function getMonthlyUsage(userId, month = monthKey()) {
         outputTokens:      doc?.outputTokens     ?? 0,
         cacheReadTokens:   doc?.cacheReadTokens  ?? 0,
         cacheWriteTokens:  doc?.cacheWriteTokens ?? 0,
+        searches:          doc?.searches         ?? 0,
         byModel:           doc?.byModel          ?? {},
         byAgent:           doc?.byAgent          ?? {},
     }

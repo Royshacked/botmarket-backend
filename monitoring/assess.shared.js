@@ -13,7 +13,47 @@ import { recordUsage } from '../services/tokenUsage.service.js'
 
 export const ASSESS_MODEL    = 'claude-sonnet-4-6'
 export const ALLOWED_MODELS  = new Set(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-8'])
-export const ALLOWED_EFFORTS = new Set(['off', 'low', 'high'])
+// Cheapest first — the order `capEffort` clamps along.
+const EFFORT_ORDER = ['off', 'low', 'high']
+export const ALLOWED_EFFORTS = new Set(EFFORT_ORDER)
+
+/**
+ * The most a monitor may think, whatever the preference says.
+ *
+ * Output was 46% of what Talos cost in September 2026 and `high` was the difference between the
+ * two heavy users' reads ($0.047 vs $0.035 each) — for a verdict that is a small JSON object. The
+ * preference is kept as written, so lifting the cap (a premium tier, say) is one constant and the
+ * user's own choice comes back; nothing is rewritten in their document.
+ */
+export const ASSESS_MAX_EFFORT = 'low'
+
+/** Clamp a stored effort to ASSESS_MAX_EFFORT. Unknown → 'off'. Pure; exported for tests. */
+export function capEffort(effort, max = ASSESS_MAX_EFFORT) {
+    const i = EFFORT_ORDER.indexOf(effort)
+    if (i === -1) return 'off'
+    return EFFORT_ORDER[Math.min(i, EFFORT_ORDER.indexOf(max))]
+}
+
+/**
+ * The cache marker for an assessment's system block — the 1-HOUR write, deliberately.
+ *
+ * The prefix (tools + system) is byte-identical for every setup and every user, and the wakes it
+ * serves are paced by candle closes: 15 minutes and up, ahead of the 5-minute TTL. So the default
+ * marker expired between wakes and nearly every read re-wrote ~5k tokens at 1.25x — cache WRITES
+ * were 43% of Talos in September 2026, with reads of the same prefix at a tenth of that. A 1-hour
+ * entry costs 2x to write and is refreshed free by every read within the hour: one write an hour
+ * across the whole book instead of one per wake, and cheaper still as the book grows.
+ *
+ * ORDER RULE (the API's): entries with the longer TTL must come before shorter ones in the prefix.
+ * The system block precedes `messages`, whose tool-loop breakpoint stays at the 5-minute default —
+ * do not put a 1-hour marker on a message.
+ */
+export const ASSESS_PREFIX_CACHE = Object.freeze({ type: 'ephemeral', ttl: '1h' })
+
+/** The `system` array for an assessment request — one text block carrying the marker. Pure. */
+export function assessSystem(text) {
+    return [{ type: 'text', text, cache_control: ASSESS_PREFIX_CACHE }]
+}
 
 // The visible reply is a small JSON object, but with thinking on the hidden reasoning tokens ALSO
 // count toward max_tokens — hence the much larger thinking cap. Too small a cap truncates the JSON
@@ -91,8 +131,10 @@ export async function assessRouting(userId) {
     try {
         const prefs = await userService.getPreferences(userId)
         return {
-            model:           ALLOWED_MODELS.has(prefs?.hermesModel)      ? prefs.hermesModel     : ASSESS_MODEL,
-            reasoningEffort: ALLOWED_EFFORTS.has(prefs?.hermesReasoning) ? prefs.hermesReasoning : 'off',
+            model:           ALLOWED_MODELS.has(prefs?.hermesModel) ? prefs.hermesModel : ASSESS_MODEL,
+            // Capped, not rejected: a stored `high` reads as `low` — the user asked for thinking and
+            // gets the affordable kind. See ASSESS_MAX_EFFORT.
+            reasoningEffort: capEffort(prefs?.hermesReasoning),
         }
     } catch {
         return { model: ASSESS_MODEL, reasoningEffort: 'off' }

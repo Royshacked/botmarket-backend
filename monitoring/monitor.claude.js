@@ -58,9 +58,11 @@ export async function claudeText(systemPrompt, userMessage) {
  * @param {string} systemPrompt
  * @param {string} userMessage
  * @param {string} imageBase64  base64-encoded PNG bytes of the chart
- * @param {{ maxTokens?: number }} [opts]
+ * @param {{ maxTokens?: number, onUsage?: (usage: object, model: string) => void }} [opts]
+ *   `onUsage` is the caller's booking hook — the read runs on VISION_MODEL, which the hook is told,
+ *   so the caller prices it at that model's rate and not at the loop's.
  * @returns {Promise<string>}
  */
-export async function claudeVision(systemPrompt, userMessage, imageBase64, { maxTokens = 64 } = {}) {
-    return _once({ model: VISION_MODEL, systemPrompt, user: userMessage, image: imageBase64, maxTokens })
+export async function claudeVision(systemPrompt, userMessage, imageBase64, { maxTokens = 64, onUsage } = {}) {
+    return _once({ model: VISION_MODEL, systemPrompt, user: userMessage, image: imageBase64, maxTokens, onUsage })
 }

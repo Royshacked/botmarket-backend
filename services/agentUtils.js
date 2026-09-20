@@ -34,7 +34,7 @@ const LOG = '[agentUtils]'
  * `_recordTurn` / `_ceiling` are injectable for the same reason `_resolve`/`_run` are elsewhere:
  * these are the IO here, and the tests that drive this seam must not need a database.
  */
-export async function resolveAgentStream(requestedModel, userId, agent, _recordTurn = recordTurn, _ceiling = userCeiling) {
+export async function resolveAgentStream(requestedModel, userId, agent, _recordTurn = recordTurn, _ceiling = userCeiling, _record = recordUsage) {
     let requested = requestedModel
     let degraded  = false
 
@@ -53,7 +53,13 @@ export async function resolveAgentStream(requestedModel, userId, agent, _recordT
     }
 
     const { model, streamFn, provider } = resolveStreamFn(requested)
-    const onUsage = userId ? (usage) => recordUsage(userId, model, usage, agent).catch(() => {}) : undefined
+    // The provider names the model it billed with each usage. It is the turn's model for the loop
+    // itself, and a different one when a TOOL made the call (a structure-vision read runs on
+    // VISION_MODEL whatever the desk is on); the turn's model is only the fallback for a caller
+    // that predates the second argument.
+    const onUsage = userId
+        ? (usage, usedModel = model) => _record(userId, usedModel, usage, agent).catch(() => {})
+        : undefined
     return { model, streamFn, provider, onUsage, degraded }
 }
 
@@ -66,9 +72,12 @@ export async function resolveAgentStream(requestedModel, userId, agent, _recordT
 // `errorMessage(err, args)` builds the exact toolError text — supplied per handler
 // so the model-visible failure string stays byte-identical to what each agent
 // returned before. `log` sets the [LOG] tag used for the warn line.
+//
+// `ctx` is the turn context the loop passes with every call (`{ onUsage }` today) — forwarded
+// untouched so a handler that spends a model call of its own can book it.
 export function makeToolHandler(name, fn, errorMessage, log = LOG) {
-    return async (args) => {
-        try { return await fn(args) }
+    return async (args, ctx) => {
+        try { return await fn(args, ctx) }
         catch (err) {
             logger.warn(log, `${name} failed:`, err.message)
             return toolError(errorMessage(err, args))

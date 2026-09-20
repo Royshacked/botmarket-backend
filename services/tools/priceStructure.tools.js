@@ -60,7 +60,11 @@ export const STRUCTURE_VISIONS = { orderblocks: OB_VISION, false_breaks: FB_VISI
 // Core read: render a PLAIN chart (no overlays) and run the focused vision pass. Returns the raw
 // chart png (for optional surfacing) + the formatted, citable text. Shared by the agent tools and
 // the Hermes assessment loop. Deps are injectable for testing (no network / no model call).
-export async function readStructure({ symbol, timeframe, kind, vision, deps = {} }) {
+//
+// `onUsage` is the caller's booking hook. This is a SECOND model call hidden inside a tool — a
+// PNG in, up to 1,024 tokens out, at VISION_MODEL's rate — and until it was passed through, every
+// structure read a desk or a monitor pulled was billed to nobody.
+export async function readStructure({ symbol, timeframe, kind, vision, onUsage, deps = {} }) {
     const {
         renderChart:  _renderChart  = cachedChartImage,   // shared 60s cache — a plain chart on the
         claudeVision: _claudeVision = claudeVision,        // same symbol+tf renders once (OB, FB, get_chart)
@@ -68,7 +72,7 @@ export async function readStructure({ symbol, timeframe, kind, vision, deps = {}
 
     const sym = String(symbol || '').toUpperCase()
     const png = await _renderChart(sym, timeframe, [])   // [] studies → bare candles (same cache key as a plain get_chart)
-    const analysis = await _claudeVision(vision.system, vision.question(sym, timeframe), png, { maxTokens: 1024 })
+    const analysis = await _claudeVision(vision.system, vision.question(sym, timeframe), png, { maxTokens: 1024, onUsage })
     const text = `${sym} ${timeframe} — ${LABEL[kind]} read:\n${String(analysis).trim()}\n\n` +
         `(Levels are read visually off the chart and are APPROXIMATE — confirm exact prices with get_candles before committing them.)`
     return { png, text }
@@ -77,11 +81,15 @@ export async function readStructure({ symbol, timeframe, kind, vision, deps = {}
 // Build a vision-backed structure handler for an agent toolset. `kind` is 'orderblocks' |
 // 'false_breaks'. `onChart` (nullable) surfaces the analyzed chart to the user's chat when the
 // agent flags show_to_user. Deps are injectable for testing.
+//
+// The handler is built ONCE per toolset with no user in sight, so the booking hook cannot be
+// closed over here — it arrives per call as the loop's `ctx.onUsage` (see the provider's
+// _runTool and the assess runner), which is the one hook that knows the user and the desk.
 export function makeStructureVisionHandler({ log, kind, vision, onChart, deps = {} }) {
     return makeToolHandler(
         `get_${kind}`,
-        async ({ ticker, timeframe, show_to_user = false }) => {
-            const { png, text } = await readStructure({ symbol: ticker, timeframe, kind, vision, deps })
+        async ({ ticker, timeframe, show_to_user = false }, ctx) => {
+            const { png, text } = await readStructure({ symbol: ticker, timeframe, kind, vision, onUsage: ctx?.onUsage, deps })
 
             if (show_to_user && typeof onChart === 'function') {
                 try { onChart({ symbol: String(ticker || '').toUpperCase(), timeframe, imageBase64: png }) }

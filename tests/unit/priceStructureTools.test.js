@@ -78,3 +78,23 @@ test('OB / FB vision configs carry a system + a question that names ticker & tim
         assert.match(q, /4hr/)
     }
 })
+
+// ── the vision read is BOOKED ─────────────────────────────────────────────
+// A second model call hidden inside a tool. The hook arrives per call as the loop's ctx (the
+// handler is built once, before any user exists) and is passed straight to claudeVision, which
+// tells it the model it ran on.
+test('structure handler forwards the loop’s onUsage into the vision read', async () => {
+    const { handler, calls } = build()
+    const onUsage = () => {}
+    await handler({ ticker: 'AAPL', timeframe: '15min' }, { onUsage })
+    assert.equal(calls.vision.length, 1)
+    assert.equal(calls.vision[0].opts.onUsage, onUsage, 'the very hook, not a wrapper')
+    assert.equal(calls.vision[0].opts.maxTokens, 1024)
+})
+
+test('structure handler without a context still reads — the hook is simply absent', async () => {
+    const { handler, calls } = build()
+    const out = await handler({ ticker: 'AAPL', timeframe: '15min' })
+    assert.match(String(out), /OB1/)
+    assert.equal(calls.vision[0].opts.onUsage, undefined)
+})

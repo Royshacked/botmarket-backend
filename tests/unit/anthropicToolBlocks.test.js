@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _finalizeToolBlocks, _toToolResultContent, _noteStop, _oneShotRequest } from '../../providers/anthropic.provider.js'
+import { _finalizeToolBlocks, _toToolResultContent, _noteStop, _oneShotRequest, _applyDeltaUsage, _runTool } from '../../providers/anthropic.provider.js'
 
 // Regression: a no-argument tool (get_macro_snapshot) streams an EMPTY input_json_delta, so the
 // block's scratch `_json` ends up ''. The old truthiness check left `_json: ''` on the block, and
@@ -113,4 +113,48 @@ test('_oneShotRequest: a reasoning model gets the thinking block and the loop\'s
     assert.equal(plain.output_config, undefined)
     assert.equal(plain.max_tokens, 64)
     assert.deepEqual(plain.messages, [{ role: 'user', content: 'q' }])
+})
+
+// ─── the usage the books are handed ───────────────────────────────────────────
+// Two things arrive only on the closing message_delta: the final output count and the server-tool
+// counters. The second was dropped on the floor, so a desk that searched on every turn billed
+// exactly like one that never did ($10 per 1,000 searches, off the token columns entirely).
+
+test('applyDeltaUsage: the closing delta supplies output_tokens and the search counter', () => {
+    const turn = { input_tokens: 500, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+    _applyDeltaUsage(turn, { output_tokens: 42, server_tool_use: { web_search_requests: 2 } })
+    assert.equal(turn.output_tokens, 42)
+    assert.deepEqual(turn.server_tool_use, { web_search_requests: 2 })
+})
+
+test('applyDeltaUsage: a delta without the counter leaves none behind, and a missing delta is a no-op', () => {
+    const turn = { input_tokens: 1, output_tokens: 0 }
+    _applyDeltaUsage(turn, { output_tokens: 7 })
+    assert.equal(turn.output_tokens, 7)
+    assert.ok(!('server_tool_use' in turn))
+    assert.equal(_applyDeltaUsage(turn, undefined), turn)
+    assert.equal(_applyDeltaUsage(null, { output_tokens: 1 }), null)
+})
+
+// ─── the context a handler is handed ──────────────────────────────────────────
+// A tool that makes its own model call (a structure-vision read) can only book it through the
+// turn's hook, and the handler is built long before any turn exists — so the loop passes the hook
+// with every call. A handler that ignores its second argument is unaffected.
+
+test('runTool: the handler receives the turn context as its second argument', async () => {
+    const seen = []
+    const handlers = { get_orderblocks: async (input, ctx) => { seen.push([input, ctx]); return 'ok' } }
+    const onUsage = () => {}
+    const res = await _runTool(handlers, { type: 'tool_use', id: 't9', name: 'get_orderblocks', input: { ticker: 'AAPL' } }, { onUsage })
+    assert.equal(res.content, 'ok')
+    assert.equal(res.tool_use_id, 't9')
+    assert.deepEqual(seen[0][0], { ticker: 'AAPL' })
+    assert.equal(seen[0][1].onUsage, onUsage, 'the very hook, not a copy')
+})
+
+test('runTool: a one-argument handler still runs, and a missing handler is an error result', async () => {
+    const res = await _runTool({ get_quote: async ({ ticker }) => `q:${ticker}` }, { id: 't1', name: 'get_quote', input: { ticker: 'NVDA' } })
+    assert.equal(res.content, 'q:NVDA')
+    const miss = await _runTool({}, { id: 't2', name: 'nope', input: {} })
+    assert.equal(miss.is_error, true)
 })
