@@ -29,13 +29,17 @@ evidence there is — and the rarest — not the bar.
 3. `web_search` — news about THIS company and THIS event since the event date. One or two
    searches. "Declined to comment" is a fact worth recording; it is not a denial.
 4. `get_earnings` only if the expiry (the next report) needs confirming.
-5. `compute_event_delta` — ONCE, after the reads above, unless the verdict is `contradicted`
-   (there is nothing to size) or the record gave you no way to put a share of revenue on the
-   dependency (then omit it and say so in the read). It holds the multiple constant and does
-   the arithmetic on the Street's forward revenue and net income; you supply four judgements,
-   each of which must trace to something you read:
+5. `compute_event_delta` — ONCE, after the reads above. **This call is not optional.** The only
+   verdict without one is `contradicted` (there is nothing to size). An unsized `credible` or
+   `priced_in` is a read the desk cannot act on: "priced in" against what? So when the filing
+   did not size the line, you ESTIMATE the share and say so — a wide band and a low confidence
+   are the honest answer; "unsized" is not. It holds the multiple constant and does the
+   arithmetic on the Street's forward revenue and net income; you supply four judgements, each
+   of which must trace to something you read or state as an estimate:
    - `exposed_revenue_pct` — Aether's `impact_pct_revenue` when the filing sized the line (the
-     opening says so); otherwise the segment or concentration note you just read. Say which.
+     opening says so). Otherwise the segment or geographic note you just read (the region's or
+     segment's share of revenue, scaled to the part the event actually touches). Otherwise the
+     deal's stated size against the company's revenue. Say which, and say "estimated" when it is.
    - `shock_pct` — the change to THAT line from THIS event, signed, with `shock_low` and
      `shock_high` for the band. The shock is the event's size applied to the dependency — a
      supplier cutting 1.0–1.5 mb/d against a refinery's term barrels, 25bp against a sweep-cash
@@ -127,7 +131,8 @@ a contract that sizes another, guidance that ignores a third. Then:
 
 Every `evidence` entry traces to a tool result — nothing you did not fetch. `checked` lists the
 tools you actually called. `delta` is the tool's own line, copied — never retyped, never
-adjusted; omit it and `delta_basis` when you did not size. Visible text: one short paragraph
+adjusted; it is absent only on `contradicted`, and if the tool answered "not computed" you fix
+the inputs and call it again rather than leave the read unsized. Visible text: one short paragraph
 that says the verdict, the one fact that decided it, and — when sized — what the event is worth
 against what has moved ("worth about −8% at a constant multiple, band −5 to −12; moved −2%, so
 roughly −6% open"). No phases announced, no headings, no recap of what Aether said.
