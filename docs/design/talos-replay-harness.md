@@ -92,10 +92,18 @@ model. Same prompt, same tools, real setups, side by side in the pop-out — the
 on the desk rather than in a harness. The recorder captures every one of those reads, so the
 offline replay (steps 2, 4, 5) stays available for the statistical proof once a candidate looks
 credible by eye. Chosen candidates: Sonnet 5 (in-family, ~10–15% cheaper), GPT-5.6 Luna (the price
-floor; vision confirmed on OpenRouter), Mistral Large 3 (open weights, vision; via Mistral's own API
-— OpenRouter has it batch-only), Qwen3.7-Plus (best open tool-caller, vision). Out: Gemini Flash
-(barely cheaper than Sonnet cached, price doubles 2027-01), Mistral Medium (dearer than Sonnet
-cached), DeepSeek (vision experimental), GLM/Kimi (no saving on this shape), gpt-oss (no vision).
+floor; vision confirmed on OpenRouter), Qwen3.7-Plus (best open tool-caller, vision), and Mistral
+Medium 3.5 — the planned Mistral Large 3 turned out unreachable (Mistral's own API lists no Large;
+OpenRouter has it batch-only), and Medium 3.5 took the slot as a fit data point rather than a cost
+case (~half of Sonnet at best with their cache). Out: Gemini Flash (barely cheaper than Sonnet
+cached, price doubles 2027-01), DeepSeek (vision experimental), GLM/Kimi (no saving on this shape),
+gpt-oss (no vision).
+
+First reads, 2026-09-20, the same NVDA first-look: Sonnet 5 wait/met in 25 s (~$0.045); Luna
+wait/NOT met in 40 s, five tools in one parallel round, OpenAI's cache active (~$0.004); Qwen
+wait/met in 165 s over four rounds, the most precise read of the three but past the monitor's
+90-second check timeout (~$0.025). Three models, two answers on the same condition — the question
+the menu exists to ask.
 
 ## Decisions
 
@@ -104,8 +112,8 @@ cached), DeepSeek (vision experimental), GLM/Kimi (no saving on this shape), gpt
 - **No consent gate per user** on whose reads go to non-Anthropic vendors — "the simplest".
   userId is hashed in every bundle. Roy, 2026-09-20.
 - **Candidates** — decided 2026-09-20 (see *The live comparison*): Sonnet 5 · GPT-5.6 Luna ·
-  Mistral Large 3 · Qwen3.7-Plus, against Sonnet 4.6. Haiku stays out of the menu (rejected for a
-  real read).
+  Mistral Medium 3.5 · Qwen3.7-Plus, against Sonnet 4.6. Haiku stays out of the menu (rejected for
+  a real read).
 
 ## Open
 

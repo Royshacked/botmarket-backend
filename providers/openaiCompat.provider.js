@@ -4,8 +4,8 @@
 // the OpenAI chat-completions wire format. So the app carries ONE translation of its read — tools,
 // tool results, usage — and the same adapter that runs the evaluation is the one that would ship if
 // a candidate won. WHICH ACCOUNT it talks to is an `endpoint` (base URL + key) on the registry
-// entry, not a second loop: OpenRouter fronts most vendors behind one key; Mistral's own API is
-// there because OpenRouter serves Mistral Large 3 through its Batch API only (2026-09-20).
+// entry, not a second loop: OpenRouter fronts most vendors behind one key; Mistral is read on
+// their own API.
 //
 // WHAT IS SHARED with the Anthropic loop in talos.assess.js: the prompts (untouched — they are the
 // desk's judgment), the tool KIT and its dispatch (makeAssessToolRunner runs the calls exactly as it

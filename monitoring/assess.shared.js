@@ -22,8 +22,7 @@ export const ASSESS_MODEL    = 'claude-sonnet-4-6'
  *              OpenAI-format loop in providers/openaiCompat.provider.js, for every non-Anthropic
  *              candidate.
  *   endpoint   which account that loop talks to (ENDPOINTS in the provider): 'openrouter' fronts
- *              most vendors behind one key; 'mistral' is Mistral's own API, because OpenRouter
- *              serves Mistral Large 3 through its Batch API only (checked 2026-09-20).
+ *              most vendors behind one key; 'mistral' is Mistral's own API.
  *   wire       the id the endpoint is sent. Same as the key for Anthropic; the endpoint's slug
  *              otherwise.
  *   adminOnly  a CANDIDATE under evaluation (docs/design/talos-replay-harness.md), selectable from
@@ -43,7 +42,10 @@ export const TALOS_MODELS = Object.freeze({
     // 2026-09-20), which is why the menu does not list it.
     'claude-haiku-4-5-20251001': { label: 'Claude Haiku 4.5',  provider: 'anthropic',  wire: 'claude-haiku-4-5-20251001' },
     'gpt-5.6-luna':              { label: 'GPT-5.6 Luna',      provider: 'openai-compat', endpoint: 'openrouter', wire: 'openai/gpt-5.6-luna', adminOnly: true },
-    'mistral-large-3':           { label: 'Mistral Large 3',   provider: 'openai-compat', endpoint: 'mistral',    wire: 'mistral-large-2512',   adminOnly: true },
+    // Mistral Large 3 was the plan; on 2026-09-20 Mistral's own API listed no Large at all (Medium 3.5
+    // is their flagship there) and OpenRouter had it batch-only. Medium 3.5 took the slot: dearer
+    // ($1.5/$7.5 — about half of Sonnet with their cache), so a fit data point more than a cost case.
+    'mistral-medium-3.5':        { label: 'Mistral Medium 3.5', provider: 'openai-compat', endpoint: 'mistral',    wire: 'mistral-medium-2604',  adminOnly: true },
     'qwen3.7-plus':              { label: 'Qwen3.7-Plus',      provider: 'openai-compat', endpoint: 'openrouter', wire: 'qwen/qwen3.7-plus',   adminOnly: true },
 })
 export const ALLOWED_MODELS  = new Set(Object.keys(TALOS_MODELS))

@@ -158,13 +158,13 @@ test('talos models: a candidate is honoured for an admin and routed to the defau
 })
 
 test('assessRouting: reads the document once, applies the gate, caps the effort, and never throws', async () => {
-    const admin  = async () => ({ id: 'u1', role: 'admin', preferences: { hermesModel: 'mistral-large-3', hermesReasoning: 'high' } })
-    const trader = async () => ({ id: 'u2', role: 'user',  preferences: { hermesModel: 'mistral-large-3' } })
+    const admin  = async () => ({ id: 'u1', role: 'admin', preferences: { hermesModel: 'mistral-medium-3.5', hermesReasoning: 'high' } })
+    const trader = async () => ({ id: 'u2', role: 'user',  preferences: { hermesModel: 'mistral-medium-3.5' } })
     const legacy = async () => ({ id: 'u3', isAdmin: true, preferences: { hermesModel: 'qwen3.7-plus' } })
     const broken = async () => { throw new Error('db down') }
 
     const a = await assessRouting('u1', admin)
-    assert.equal(a.model, 'mistral-large-3'); assert.equal(a.provider, 'openai-compat'); assert.equal(a.endpoint, 'mistral'); assert.equal(a.wire, 'mistral-large-2512'); assert.equal(a.reasoningEffort, 'low')
+    assert.equal(a.model, 'mistral-medium-3.5'); assert.equal(a.provider, 'openai-compat'); assert.equal(a.endpoint, 'mistral'); assert.equal(a.wire, 'mistral-medium-2604'); assert.equal(a.reasoningEffort, 'low')
     const t = await assessRouting('u2', trader)
     assert.equal(t.model, ASSESS_MODEL); assert.equal(t.provider, 'anthropic'); assert.equal(t.wire, ASSESS_MODEL)
     assert.equal((await assessRouting('u3', legacy)).model, 'qwen3.7-plus')

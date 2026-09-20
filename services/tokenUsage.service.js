@@ -25,7 +25,7 @@ const PRICING = {
     // rate and reports the cached share in cacheRead at 0 for visibility — over-reporting is the
     // safe direction for a ceiling, and the vendor's discount is not one published multiple.
     'gpt-5.6-luna':             { input: 0.20,  output: 1.20  },
-    'mistral-large-3':          { input: 0.50,  output: 1.50  },
+    'mistral-medium-3.5':       { input: 1.50,  output: 7.50  },
     'qwen3.7-plus':             { input: 0.32,  output: 1.28  },
 }
 const DEFAULT_PRICING = { input: 3.00, output: 15.00 }
