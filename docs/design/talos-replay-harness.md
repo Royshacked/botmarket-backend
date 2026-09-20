@@ -111,8 +111,8 @@ Roy asked whether the desks' base could move too. Two steps: (1) **Sonnet 5 is t
 default** (`llmModels.DEFAULT_MODEL`, 2026-09-20) — in-family, $2/$10, ~10–15% net after its
 tokenizer, more on output-heavy desks; (2) **GPT-5.6 Luna as an admin-only chat candidate** through
 the streaming twin `streamOpenAICompatWithTools` (same suppressor, tools and hooks as the Anthropic
-loop; OpenRouter's web plugin stands in for `web_search`). Only Luna: Qwen is too slow for chat and
-Medium 3.5 has no cost case. First Mentor turn on Luna (2026-09-20, NVDA framing): six tools in one
+loop; OpenRouter's web plugin stands in for `web_search`). Qwen3.7-Plus and Mistral Medium 3.5
+joined the chat menu the same day as fit data points (Roy: "why not put the others"). First Mentor turn on Luna (2026-09-20, NVDA framing): six tools in one
 parallel round, 14 s, a coherent entry/stop/target with R shown, emit tags captured, ~$0.015 against
 Sonnet 5's ~$0.02 warm / ~$0.10 with a cold prefix write. The desks are input-heavy through the
 cache, so the saving there is an OUTPUT story ($1.20 vs $10 per M) — the ledger's `byModel` row

@@ -119,8 +119,11 @@ test('stream: an aborted signal ends the loop with the text so far, no throw', a
 
 // ─── The chat registry gate ───────────────────────────────────────────────────
 
-test('registry: Luna is a registered admin-only candidate; the Anthropic entries are not', () => {
-    assert.equal(isAdminOnlyModel('gpt-5.6-luna'), true)
+test('registry: the three candidates are registered admin-only; the Anthropic entries are not', () => {
+    for (const id of ['gpt-5.6-luna', 'qwen3.7-plus', 'mistral-medium-3.5']) {
+        assert.equal(isAdminOnlyModel(id), true, id)
+        assert.equal(resolveStreamFn(id).provider, 'openai-compat', id)
+    }
     assert.equal(isAdminOnlyModel('claude-sonnet-5'), false)
     assert.equal(isAdminOnlyModel('nope'), false)
     const r = resolveStreamFn('gpt-5.6-luna')

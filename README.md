@@ -45,8 +45,8 @@ Behavioral contracts live in [APP_SPEC.md](APP_SPEC.md); file-by-file layout in
   their spend ceiling is routed to `CHEAP_MODEL` for the turn (`agentUtils.resolveAgentStream`). The
   routing layer that chose a model per phase was deleted 2026-08-14 — every switch invalidated the
   prompt cache and never repaid it. Non-Anthropic CANDIDATES (admin-only, under evaluation) run
-  through `providers/openaiCompat.provider.js` — GPT-5.6 Luna for the desks, and the Talos
-  candidates (`docs/design/talos-replay-harness.md`). OpenAI's own SDK is otherwise Whisper
+  through `providers/openaiCompat.provider.js` — GPT-5.6 Luna, Qwen3.7-Plus and Mistral Medium 3.5
+  for the desks, and the Talos candidates (`docs/design/talos-replay-harness.md`). OpenAI's own SDK is otherwise Whisper
   transcription only (`api/transcribe`)
 - **Realtime:** SSE for agent streams; WebSocket for social chat; ProtoOA WebSocket to cTrader
 - **Auth:** JWT in an httpOnly cookie (`requireAuth` middleware)

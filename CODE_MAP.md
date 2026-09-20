@@ -635,7 +635,8 @@ providers/
                                 signature as streamAnthropicWithTools (tag suppressor, _runTool,
                                 onToken/onToolStart/onReasoning/onUsage), tool-call deltas folded by
                                 index, web_search → OpenRouter's web plugin. Bound per MODELS entry
-                                (llmModels `gpt-5.6-luna`, adminOnly) with its endpoint + wire slug
+                                (llmModels _candidate: Luna, Qwen3.7-Plus, Mistral Medium 3.5 —
+                                adminOnly) with its endpoint + wire slug
   yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / usaspending
                             EVERY JSON call rides services/http.util.getJson — timeout per attempt, the
                             request meter, typed err.status + err.body, a jittered retry on 429/5xx.

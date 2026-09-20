@@ -29,16 +29,23 @@ const MODELS = {
     'claude-sonnet-5':          { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Sonnet 5',  webSearch: WS_NEW },
     'claude-sonnet-4-6':        { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Sonnet 4.6', webSearch: WS_NEW },
     'claude-haiku-4-5-20251001': { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Haiku 4.5', webSearch: WS_OLD },
-    // A CANDIDATE for the desks' base model (2026-09-20), admin-only while under evaluation — the
-    // same pattern as Talos's TALOS_MODELS: the admin picks it in the profile, their own desks run
-    // on it, the ledger's byModel row says what it cost. `streamFn` binds the endpoint and the
-    // wire slug so the loop never learns the registry. No `webSearch`: the provider substitutes
-    // OpenRouter's web plugin when a desk declares the tool. resolveAgentStream routes a non-admin
-    // who somehow requests it to DEFAULT_MODEL.
-    'gpt-5.6-luna': {
-        provider: 'openai-compat', label: 'GPT-5.6 Luna', adminOnly: true, webSearch: null,
-        streamFn: (args) => streamOpenAICompatWithTools({ ...args, endpoint: 'openrouter', wire: 'openai/gpt-5.6-luna' }),
-    },
+    // CANDIDATES for the desks' base model (2026-09-20), admin-only while under evaluation — the
+    // same four as Talos's TALOS_MODELS, same pattern: the admin picks one in the profile, their
+    // own desks run on it, the ledger's byModel row says what it cost. `streamFn` binds the
+    // endpoint and the wire slug so the loop never learns the registry. No `webSearch`: the
+    // provider substitutes OpenRouter's web plugin when a desk declares the tool — on OpenRouter
+    // only; a Mistral-endpoint desk simply has no web. resolveAgentStream routes a non-admin who
+    // somehow requests one to DEFAULT_MODEL.
+    ..._candidate('gpt-5.6-luna',       'GPT-5.6 Luna',       'openrouter', 'openai/gpt-5.6-luna'),
+    ..._candidate('qwen3.7-plus',       'Qwen3.7-Plus',       'openrouter', 'qwen/qwen3.7-plus'),
+    ..._candidate('mistral-medium-3.5', 'Mistral Medium 3.5', 'mistral',    'mistral-medium-2604'),
+}
+
+function _candidate(id, label, endpoint, wire) {
+    return { [id]: {
+        provider: 'openai-compat', label, adminOnly: true, webSearch: null,
+        streamFn: (args) => streamOpenAICompatWithTools({ ...args, endpoint, wire }),
+    } }
 }
 
 /**
