@@ -1,7 +1,9 @@
 import { fileURLToPath } from 'url'
 import { parseEmitBlock, mergeDraft, runAgentStream } from '../agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock, buildDeskMessages } from '../agentUtils.js'
+import { makePromptLoader, stripEmitTags, buildAccountLines, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock, buildDeskMessages, makeToolHandler } from '../agentUtils.js'
+import { makeNewsHandlers } from '../tools/news.tools.js'
+import { getAnalystActions } from '../../providers/fmp.provider.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
@@ -16,8 +18,10 @@ import { logger } from '../logger.service.js'
 // Forked from the Kairos scaffold, which is the right shape for this: the emitted worksheet IS
 // the state (no separate <state> block to carry), the client owns chat history, and nothing
 // persists until the user presses Generate. What differs is the CONVERSATION contract — Mentor
-// has no phases, so there is no phase capture — its invariants are not steps
-// (docs/desks/mentor-talos.md). The user always brings the ticker, so there is no scan hand-off.
+// has no phase capture. The guided build (a name and no plan) climbs a ladder of rungs in the
+// prompt, but the ladder is a checklist the model reads off its own last worksheet, not a state
+// the server tracks: the first blank field IS the next rung, so nothing here has to remember
+// where the conversation was (docs/desks/mentor-talos.md). The user always brings the ticker.
 //
 // The tool kit is Mentor's own — services/tools/trading.tools.js, which carried Kairos's name until
 // that desk was archived (2026-08-18) and is now named for its only live consumer. Taken WHOLE and
@@ -50,12 +54,20 @@ const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
 // declaration for nothing.
 export const MENTOR_TOOLS = [
     ...TRADING_TOOLS,
+    // Mentor's own additions past the shared kit, for the guided build's company read (rungs 3
+    // and 5 of the ladder in the prompt). APPENDED after the kit for the same cache reason as the
+    // sidecar. The descriptions are Mentor's — Axl carries get_news too, with the front-page
+    // framing reception needs; here it is the catalyst check on ONE name inside the horizon.
+    ...toolsFor({
+        get_news: `Recent NEWS on the name — dated, attributed headlines with the publisher's own summary, newest first. \`companies\` with the TICKER as \`subject\` is the one you reach for: the catalyst check inside the horizon (rung 3 and rung 5 of the guided build), and the first place to look before web_search, because it is cached and dated where a search is neither. \`topic\` for a theme with no ticker; \`headlines\` is the market's front page and is rarely a Mentor question. Read them as what was WRITTEN — a headline is a fact to weigh, never a level.`,
+        get_analyst_actions: `Recent analyst rating changes on the name — upgrades, downgrades, initiations, with the house and the date. Pass \`symbols\` with the ticker; the market-wide feed (no symbols) is a scanner's tool and not yours. Positioning's slow leg: it belongs to the \`institutional\` read at rung 5 and to a swing or long-term company read, and it is a line of context on an intraday trade at most. US-listed equities.`,
+    }),
     ...toolsFor({
         // The sidecar is contractually last at every desk that declares it
         // (agentToolsRegistry.test.js), and it sits past the tools cache breakpoint — which is
         // inside TRADING_TOOLS, on get_derivatives_context — so declaring it here touches no
         // cached prefix.
-        consult: consultDescription(`Reach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs the entry; and **placing a zone where the structure is ambiguous** — a level that is both a prior high and a supply shelf, say.`),
+        consult: consultDescription(`Reach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs — most often the direction call at rung 2 of the guided build, when the structure leans one way and momentum or positioning the other and the user is waiting on your lean; and **placing a zone where the structure is ambiguous** — a level that is both a prior high and a supply shelf, say. The wider-target check at rung 7 is NOT a consult: it is a tool question, answered by the levels.`),
     }),
 ]
 
@@ -72,13 +84,21 @@ async function chatStream({
     onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     _venueSection = buildVenueSection,
+    _newsHandlers = makeNewsHandlers,
+    _analystActions = getAnalystActions,
 }) {
 
     const tools        = MENTOR_TOOLS
     // `consult` is deliberately absent: runAgentStream builds it from the tool declaration, which is
     // also the only place that holds `onReasoning` — wiring it here would swallow the sidecar's
     // thinking silently. See the MENTOR_TOOLS note above.
-    const toolHandlers = buildTradingToolHandlers(onChart, userId)
+    const toolHandlers = {
+        ...buildTradingToolHandlers(onChart, userId),
+        ..._newsHandlers(),
+        get_analyst_actions: makeToolHandler('get_analyst_actions',
+            ({ symbols, limit }) => _analystActions(Array.isArray(symbols) ? symbols : [], limit),
+            (err) => `Could not fetch analyst actions: ${err.message}`, LOG),
+    }
 
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, audience, seed)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than
@@ -294,9 +314,9 @@ ARGUS HANDED YOU THIS NAME: ${seed.ticker}${seed.direction ? ` (${seed.direction
 
 Open on it: say the name, relay Argus's read in a sentence rather than restating it wholesale, and`
         + (lens
-            ? ` NAME THE RECOMMENDED LENS AND WHY IT FITS — then ask whether they want to build it that way. It is Argus's recommendation, not a decision: if the user wants a different lens, or the chart disagrees with it, say so and use theirs. A lens adopted without the user hearing it is one they never chose.`
-            : ` ask which lens they want to build it through.`)
-        + ` The ticker is settled unless they change it; everything else is still theirs to shape.`
+            ? ` NAME THE RECOMMENDED LENS AND WHY IT FITS. It is Argus's recommendation, not a decision: if the user wants a different lens, or the chart disagrees with it, say so and use theirs. A lens adopted without the user hearing it is one they never chose.`
+            : ` say that you will ask which lens they want to build it through when the ladder reaches it.`)
+        + ` Then run the guided build from rung 1 — the quick read — as for any name: the ticker is settled unless they change it, Argus's direction is a lean you test at rung 2 rather than a settled rung, and the lens is agreed at rung 4, not in the opening. Everything else is still theirs to shape.`
 }
 
 /**

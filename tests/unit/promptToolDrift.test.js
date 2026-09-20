@@ -19,6 +19,7 @@ import { TOOLS as PORTFOLIO_TOOLS } from '../../services/agents/portfolio.agent.
 import { TOOLS as ANALYST_TOOLS }   from '../../services/agents/analyst.agent.service.js'
 import { TOOLS as AXL_TOOLS }       from '../../services/agents/axl.agent.service.js'
 import { TOOLS as SCANNER_TOOLS, scannerToolsForProfile } from '../../services/agents/scanner.agent.service.js'
+import { MENTOR_TOOLS }             from '../../services/agents/mentor.agent.service.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/')
 
@@ -30,6 +31,9 @@ const DESKS = [
     { prompt: 'analyst_system_prompt.md',         tools: ANALYST_TOOLS },
     { prompt: 'axl_system_prompt.md',             tools: AXL_TOOLS },
     { prompt: 'scanner_system_prompt.md',         tools: SCANNER_TOOLS },
+    // Mentor's guided build names a tool at nearly every rung, so it is the prompt most likely to
+    // outrun its kit — it was missing from this list until the ladder was written.
+    { prompt: 'mentor_system_prompt.md',          tools: MENTOR_TOOLS },
     // The investing profile runs a SUBSET — checking it against the full kit would wave through a
     // tool Argus loses the moment it screens for a portfolio.
     { prompt: 'scanner_profile_investing.md',     tools: scannerToolsForProfile('investing') },

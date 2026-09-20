@@ -1385,7 +1385,7 @@
     },
     {
       "name": "get_peers",
-      "description": "Fetch the fundamental PEER SET for a ticker (same sector/size cohort) — the candidate names it may move with. Use it in the Phase 2 correlation read to STOP GUESSING peers: pull the set, pick the ones that matter (close competitors, the sector/industry ETF, a lead-lag driver), then feed those into get_correlations to measure how tightly the asset ACTUALLY tracks each. US-listed equities/ETFs.",
+      "description": "Fetch the fundamental PEER SET for a ticker (same sector/size cohort) — the candidate names it may move with. Use it in the correlation read to STOP GUESSING peers: pull the set, pick the ones that matter (close competitors, the sector/industry ETF, a lead-lag driver), then feed those into get_correlations to measure how tightly the asset ACTUALLY tracks each. US-listed equities/ETFs.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1401,7 +1401,7 @@
     },
     {
       "name": "get_macro_snapshot",
-      "description": "Hard macro read for the Phase 2 regime call: the current Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today's sector rotation (leaders/laggards). The DATA half of the regime read — pair it with web_search for the narrative. Weight by horizon: real weight for swing, a lighter backdrop for intraday/day. No arguments.",
+      "description": "Hard macro read for the regime call: the current Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today's sector rotation (leaders/laggards). The DATA half of the regime read — pair it with web_search for the narrative. Weight by horizon: real weight for swing, a lighter backdrop for intraday/day. No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -1441,7 +1441,7 @@
     },
     {
       "name": "get_correlations",
-      "description": "Pairwise correlation matrix (1y daily returns) for a set of tickers. Use it in the Phase 2 correlation read: include the traded asset alongside the names you suspect drive it — its sector/industry ETF, close peers (from get_peers), an index (SPY/QQQ), or a lead-lag driver (e.g. SMH for a chip name, BTC for a high-beta alt, a crude proxy for an E&P) — to measure how tightly it actually moves with each, beyond eyeballing charts. The numbers ground the market_sensitivity level + drivers you emit.",
+      "description": "Pairwise correlation matrix (1y daily returns) for a set of tickers. Use it in the correlation read: include the traded asset alongside the names you suspect drive it — its sector/industry ETF, close peers (from get_peers), an index (SPY/QQQ), or a lead-lag driver (e.g. SMH for a chip name, BTC for a high-beta alt, a crude proxy for an E&P) — to measure how tightly it actually moves with each, beyond eyeballing charts. The numbers ground the drivers you name in referenced_symbols.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1501,7 +1501,7 @@
     },
     {
       "name": "get_orderblocks",
-      "description": "Detect ORDER BLOCKS on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: the last opposing candle/cluster before an impulsive structure break (bullish OB = last down-candle before a rally; bearish OB = last up-candle before a selloff), whether each is fresh/untested or mitigated, and its zone vs current price. Reach for this in Phase 2/4 to find price-action entry zones and triggers — as easily as you would an indicator value. Levels are approximate; confirm exact prices with get_candles.",
+      "description": "Detect ORDER BLOCKS on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: the last opposing candle/cluster before an impulsive structure break (bullish OB = last down-candle before a rally; bearish OB = last up-candle before a selloff), whether each is fresh/untested or mitigated, and its zone vs current price. Reach for this to find price-action entry zones and triggers — as easily as you would an indicator value. Levels are approximate; confirm exact prices with get_candles.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1538,7 +1538,7 @@
     },
     {
       "name": "get_false_breaks",
-      "description": "Detect FALSE BREAKS / liquidity sweeps on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Reach for this in Phase 2/4 to find price-action triggers. Levels are approximate; confirm exact prices with get_candles.",
+      "description": "Detect FALSE BREAKS / liquidity sweeps on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Reach for this to find price-action triggers. Levels are approximate; confirm exact prices with get_candles.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1697,7 +1697,7 @@
     },
     {
       "name": "get_earnings_calendar",
-      "description": "Upcoming earnings dates (with EPS/revenue estimates) for ALL companies reporting between two dates (YYYY-MM-DD, window up to ~3 months), optionally narrowed to specific symbols. The forward-looking \"who reports when\" — use it to scan for an event inside the call horizon, or to check a shortlist for gap risk. For one ticker's next date plus its beat/miss history, prefer get_earnings.",
+      "description": "Upcoming earnings dates (with EPS/revenue estimates) for ALL companies reporting between two dates (YYYY-MM-DD, window up to ~3 months), optionally narrowed to specific symbols. The forward-looking \"who reports when\" — use it to scan for an event inside the trade horizon, or to check a shortlist for gap risk. For one ticker's next date plus its beat/miss history, prefer get_earnings.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1725,7 +1725,7 @@
     },
     {
       "name": "get_fundamentals",
-      "description": "Company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B), quality (margins, ROE, debt/equity), and growth. Weight it by horizon — light for intraday/day calls, heavily for swing calls. ETFs return exposure/profile only.",
+      "description": "Company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B), quality (margins, ROE, debt/equity), and growth. Weight it by horizon — light for intraday/day trades, heavily for swing trades. ETFs return exposure/profile only.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1990,7 +1990,7 @@
     },
     {
       "name": "get_peers",
-      "description": "Fetch the fundamental PEER SET for a ticker (same sector/size cohort) — the candidate names it may move with. Use it in the Phase 2 correlation read to STOP GUESSING peers: pull the set, pick the ones that matter (close competitors, the sector/industry ETF, a lead-lag driver), then feed those into get_correlations to measure how tightly the asset ACTUALLY tracks each. US-listed equities/ETFs.",
+      "description": "Fetch the fundamental PEER SET for a ticker (same sector/size cohort) — the candidate names it may move with. Use it in the correlation read to STOP GUESSING peers: pull the set, pick the ones that matter (close competitors, the sector/industry ETF, a lead-lag driver), then feed those into get_correlations to measure how tightly the asset ACTUALLY tracks each. US-listed equities/ETFs.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2006,7 +2006,7 @@
     },
     {
       "name": "get_macro_snapshot",
-      "description": "Hard macro read for the Phase 2 regime call: the current Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today's sector rotation (leaders/laggards). The DATA half of the regime read — pair it with web_search for the narrative. Weight by horizon: real weight for swing, a lighter backdrop for intraday/day. No arguments.",
+      "description": "Hard macro read for the regime call: the current Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today's sector rotation (leaders/laggards). The DATA half of the regime read — pair it with web_search for the narrative. Weight by horizon: real weight for swing, a lighter backdrop for intraday/day. No arguments.",
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -2046,7 +2046,7 @@
     },
     {
       "name": "get_correlations",
-      "description": "Pairwise correlation matrix (1y daily returns) for a set of tickers. Use it in the Phase 2 correlation read: include the traded asset alongside the names you suspect drive it — its sector/industry ETF, close peers (from get_peers), an index (SPY/QQQ), or a lead-lag driver (e.g. SMH for a chip name, BTC for a high-beta alt, a crude proxy for an E&P) — to measure how tightly it actually moves with each, beyond eyeballing charts. The numbers ground the market_sensitivity level + drivers you emit.",
+      "description": "Pairwise correlation matrix (1y daily returns) for a set of tickers. Use it in the correlation read: include the traded asset alongside the names you suspect drive it — its sector/industry ETF, close peers (from get_peers), an index (SPY/QQQ), or a lead-lag driver (e.g. SMH for a chip name, BTC for a high-beta alt, a crude proxy for an E&P) — to measure how tightly it actually moves with each, beyond eyeballing charts. The numbers ground the drivers you name in referenced_symbols.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2106,7 +2106,7 @@
     },
     {
       "name": "get_orderblocks",
-      "description": "Detect ORDER BLOCKS on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: the last opposing candle/cluster before an impulsive structure break (bullish OB = last down-candle before a rally; bearish OB = last up-candle before a selloff), whether each is fresh/untested or mitigated, and its zone vs current price. Reach for this in Phase 2/4 to find price-action entry zones and triggers — as easily as you would an indicator value. Levels are approximate; confirm exact prices with get_candles.",
+      "description": "Detect ORDER BLOCKS on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: the last opposing candle/cluster before an impulsive structure break (bullish OB = last down-candle before a rally; bearish OB = last up-candle before a selloff), whether each is fresh/untested or mitigated, and its zone vs current price. Reach for this to find price-action entry zones and triggers — as easily as you would an indicator value. Levels are approximate; confirm exact prices with get_candles.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2143,7 +2143,7 @@
     },
     {
       "name": "get_false_breaks",
-      "description": "Detect FALSE BREAKS / liquidity sweeps on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Reach for this in Phase 2/4 to find price-action triggers. Levels are approximate; confirm exact prices with get_candles.",
+      "description": "Detect FALSE BREAKS / liquidity sweeps on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Reach for this to find price-action triggers. Levels are approximate; confirm exact prices with get_candles.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2302,7 +2302,7 @@
     },
     {
       "name": "get_earnings_calendar",
-      "description": "Upcoming earnings dates (with EPS/revenue estimates) for ALL companies reporting between two dates (YYYY-MM-DD, window up to ~3 months), optionally narrowed to specific symbols. The forward-looking \"who reports when\" — use it to scan for an event inside the call horizon, or to check a shortlist for gap risk. For one ticker's next date plus its beat/miss history, prefer get_earnings.",
+      "description": "Upcoming earnings dates (with EPS/revenue estimates) for ALL companies reporting between two dates (YYYY-MM-DD, window up to ~3 months), optionally narrowed to specific symbols. The forward-looking \"who reports when\" — use it to scan for an event inside the trade horizon, or to check a shortlist for gap risk. For one ticker's next date plus its beat/miss history, prefer get_earnings.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2330,7 +2330,7 @@
     },
     {
       "name": "get_fundamentals",
-      "description": "Company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B), quality (margins, ROE, debt/equity), and growth. Weight it by horizon — light for intraday/day calls, heavily for swing calls. ETFs return exposure/profile only.",
+      "description": "Company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B), quality (margins, ROE, debt/equity), and growth. Weight it by horizon — light for intraday/day trades, heavily for swing trades. ETFs return exposure/profile only.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2523,8 +2523,53 @@
       }
     },
     {
+      "name": "get_news",
+      "description": "Recent NEWS on the name — dated, attributed headlines with the publisher's own summary, newest first. `companies` with the TICKER as `subject` is the one you reach for: the catalyst check inside the horizon (rung 3 and rung 5 of the guided build), and the first place to look before web_search, because it is cached and dated where a search is neither. `topic` for a theme with no ticker; `headlines` is the market's front page and is rarely a Mentor question. Read them as what was WRITTEN — a headline is a fact to weigh, never a level.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "companies",
+              "headlines",
+              "topic"
+            ],
+            "description": "which kind of news read this is. `companies` — one listed company, `subject` is its TICKER. `headlines` — the market's front page, no subject needed. `topic` — free-text search for a theme, an institution or an asset with no ticker."
+          },
+          "subject": {
+            "type": "string",
+            "description": "for `companies`, the TICKER (NVDA, BA, AAPL). For `topic`, the theme in the words a paper would print (\"Federal Reserve\", \"OPEC\", \"semiconductors\", \"gold\"). Omit for `headlines`. It is both the search and the cache key, so ask for the same subject the same way each time."
+          }
+        },
+        "required": [
+          "category"
+        ]
+      }
+    },
+    {
+      "name": "get_analyst_actions",
+      "description": "Recent analyst rating changes on the name — upgrades, downgrades, initiations, with the house and the date. Pass `symbols` with the ticker; the market-wide feed (no symbols) is a scanner's tool and not yours. Positioning's slow leg: it belongs to the `institutional` read at rung 5 and to a swing or long-term company read, and it is a line of context on an intraday trade at most. US-listed equities.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "optional — narrow to these tickers for a per-name read; omit for the market-wide discovery feed"
+          },
+          "limit": {
+            "type": "number",
+            "description": "max rows for the market-wide feed, 1–50 (default 25)"
+          }
+        }
+      }
+    },
+    {
       "name": "consult",
-      "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs the entry; and **placing a zone where the structure is ambiguous** — a level that is both a prior high and a supply shelf, say.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
+      "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs — most often the direction call at rung 2 of the guided build, when the structure leans one way and momentum or positioning the other and the user is waiting on your lean; and **placing a zone where the structure is ambiguous** — a level that is both a prior high and a supply shelf, say. The wider-target check at rung 7 is NOT a consult: it is a tool question, answered by the levels.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
       "input_schema": {
         "type": "object",
         "properties": {

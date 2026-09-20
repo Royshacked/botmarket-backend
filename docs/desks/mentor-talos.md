@@ -498,6 +498,53 @@ Mentor works on what the user brought. It does not source names (that is Argus) 
 allocate (that is Atlas). A saved setup reopens in Mentor with its worksheet and conversation
 restored — the same destination whether reached from the list pencil or from Axl's `<edit>`.
 
+### Two entry paths (2026-09-20)
+
+A setup arrives one of two ways, told apart on the first message, and the prompt runs a different
+contract for each (`prompts/mentor_system_prompt.md`):
+
+- **The interview** — the user recites a plan. One question at a time for what is missing, the
+  levels taken exactly as given, no opinions they did not ask for, no tool call needed.
+- **The guided build** — a name and no plan. Mentor climbs a **ladder**: name → quick read
+  (`get_quote` · `get_candles` · `get_chart` · structure) → direction (Mentor's read, the user may
+  overrule) → horizon (the trader's; Mentor says with tools whether the chart supports it) → lens
+  (Mentor proposes, waits for the yes) → the deep read under that lens → the scenarios (as many
+  as the chart offers ways in; the count is Mentor's, and all-pullbacks is fine) → R:R, then one
+  offer to look for a wider target the structure justifies → size and account (the user's).
+
+**The ladder is a checklist, not a state machine.** The server tracks no step. The user may pull
+Mentor to any rung at any time (the *detour rule*); afterwards Mentor returns to the first UNSETTLED
+rung, which it reads off its own last `<setup>` — the first blank field is the next rung. A detour
+that changes a settled rung unsettles everything below it. **Paced by default** — one rung per
+turn, each ending in a yes — and *"go all the way"* lifts the pauses, not the rungs: the whole
+ladder in one turn, Mentor recording each call instead of asking, then naming the calls it made
+(direction, horizon, lens) so any one can be overturned. Anything the user stated still wins, size
+is still theirs, and "no trade" is still a legal landing. The tool loop caps a turn at ten rounds
+(`DEFAULT_MAX_CONTINUATIONS`, `providers/anthropic.provider.js`); it used to THROW past the cap,
+which would have lost a whole unpaced build on an imperfectly batched run. Both loops now run the
+last round with tools off and a note on the final tool results (`TOOL_BUDGET_LANDING`,
+`services/llmStream.util.js`), so the turn lands as text — the prompt tells Mentor to batch reads
+per rung and, on that landing round, emit what is built and continue next turn.
+This is why the "no phases" rule of
+2026-08 and the ladder coexist: the invariants still govern what must be TRUE, the ladder only
+fixes the default order in which Mentor gets there, so nothing is skipped.
+
+Two grounding rules sit under the ladder: **tools, not memory** (every fact about the name comes
+from a tool result in this conversation) and **live before levels** (`get_quote` in any turn that
+places or moves a level). Both are prompt rules, not code gates — a server-side refusal was
+considered and rejected, because the one turn it would fire on most is the interview, where the
+user's own levels are filed without a tool call by design, and a refusal there has no honest way
+to be told apart from a guess.
+
+The `<setups>` candidate offer is no longer the default answer to "no plan": the fork between
+plans is settled by dialogue at the direction, horizon and lens rungs, and the ladder ends in ONE
+setup with however many scenarios it needs. Candidates remain for an explicit *"show me a few
+options"*; the parsing and the cards are unchanged.
+
+The ladder added two tools to Mentor's kit for the company read: `get_news` (the dated, cached
+catalyst check on a name — before `web_search`) and `get_analyst_actions` (positioning's slow leg,
+for the `institutional` read). Both are appended after the shared kit and before `consult`.
+
 **Share the pipe, not the judgment.** Talos posts through the one `postCard` → `postBotCard`
 transport (`tradeNotify.service`) and draws from the one tool registry, but the copy on its cards
 and the meaning of its verdicts are its own. See [trade-pipeline.md](./trade-pipeline.md) for the

@@ -619,6 +619,10 @@ providers/
                                 stop_details category. The model is the caller's (llmModels resolves it);
                                 there is no second default here. The non-streaming twins were deleted
                                 2026-09-16 with no caller. (OpenAI SDK is used directly, transcribe only)
+                                The LANDING ROUND (2026-09-20, both loops): the last of maxContinuations
+                                runs with tool_choice none and TOOL_BUDGET_LANDING (llmStream.util) on
+                                the final tool results, so a turn still reading at the cap lands as text
+                                instead of throwing the whole turn away. `client` is the test seam.
   openaiCompat.provider.js      THE ONE OpenAI-format read loop (2026-09-20) — how a non-Anthropic Talos
                                 CANDIDATE is read (assess.shared TALOS_MODELS, provider 'openai-compat').
                                 Same prompts, same tool kit and runner (makeAssessToolRunner), same
@@ -967,6 +971,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | New background loop | `startLoop('name', svc)` in `server.js` — and the service MUST export both `start` and `stop`. `startLoop` refuses one without a `stop()` with a log line and returns false, so a missing `stop` means the loop silently never runs (this happened to `execution.reconciler`). `tests/unit/loopContract.test.js` is the guard |
 | New env var | one getter in `services/config.js`, reading through `_raw` / `_str` / `_num` / `_bool` — the known-key set is derived from the readers (`knownKeys()`), and `config.test` fails on a getter that reads `process.env` directly |
 | New Axl tool | APPEND to `TOOLS` in `axl.agent.service.js` (never insert — the snapshot compares by index and the prompt cache keys off the array prefix) + append the built entry to the `axl` array in `tests/fixtures/agentTools.snapshot.json` in the same commit |
+| New Mentor tool | its own `toolsFor({...})` block in `MENTOR_TOOLS` (`mentor.agent.service.js`) AFTER the spread `TRADING_TOOLS` kit and BEFORE `consult` (contractually last) + its handler in `chatStream`'s `toolHandlers` with an injectable seam + rebuild the `mentor` row of the snapshot in live order; `promptToolDrift.test` then checks the prompt only names tools the kit has |
 | New agent tool that is a FACT about the venue/instrument | ride it on `get_quote` (`makeQuoteHandler`) as well as giving it a tool — a desk cannot then be unaware of it |
 | New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince`. It reaches the user's devices as a push on its own — nothing to add |
 | New admin-only desk (or route) | `requireAdmin` on the router (router-wide when the whole desk is admin's), `adminOnly: true` on its `DESKS` entry + any Floor/Radar surface (frontend `agentMeta.jsx`, `FloorLists.jsx`), its bot id in `ADMIN_BOT_IDS` on BOTH sides if it has a feed, its notifier narrowed to `listAdminUserIds` + `visibility: 'admin'`, the desk in Axl's `ADMIN_DESKS` + a line in `buildRoleSection`, and a row in `docs/desks/roles-and-sourcing.md`. `adminGate.test.js` pins the router |

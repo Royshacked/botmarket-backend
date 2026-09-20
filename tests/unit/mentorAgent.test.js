@@ -5,6 +5,10 @@ import {
     _buildProblemsSection, mentorAgentService,
 } from '../../services/agents/mentor.agent.service.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
+import { MENTOR_TOOLS } from '../../services/agents/mentor.agent.service.js'
+import { readFileSync } from 'fs'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
 
 // Mentor's pure seams: the cumulative coverage tag, draft carry-forward, and emit-block
 // extraction. All model-output handling — so every test here is really "what happens when the
@@ -223,4 +227,103 @@ test('no seed leaves the prompt exactly as it was', async () => {
     // The ordinary path — a user who opened Mentor themselves must not be told a name was handed over.
     const text = await seedOf(null)
     assert.doesNotMatch(text, /ARGUS HANDED YOU/)
+})
+
+// ─── The guided build ─────────────────────────────────────────────────────────
+// A name and no plan climbs a ladder (prompts/mentor_system_prompt.md, "The guided build"). The
+// ladder is prompt, not code — the server tracks no step — so what CAN be held here is the contract
+// around it: the rungs exist in order, the detour rule and the two grounding rules are stated, the
+// candidate offer is no longer the default answer to "no plan", and the tools the rungs name are
+// wired. The prose assertions are deliberately few and anchored on the bold rule names, which is
+// the level a rewrite of the section would have to preserve on purpose.
+
+const PROMPT = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../prompts/mentor_system_prompt.md'), 'utf8')
+
+test('the ladder has its eight rungs, in the order a trader settles a trade', () => {
+    const section = PROMPT.slice(PROMPT.indexOf('## The guided build'), PROMPT.indexOf('## Size comes from the user'))
+    assert.ok(section.length > 0, 'the guided build section sits before sizing')
+    const rungs = [...section.matchAll(/^\d+\. \*\*([^*]+)\*\*/gm)].map(m => m[1].replace(/\.$/, ''))
+    assert.deepEqual(rungs, [
+        'The name', 'Direction', 'Horizon', 'The lens', 'The deep read, under that lens',
+        'The scenarios', 'R:R, then the wider one', 'Size and account',
+    ])
+})
+
+test('the ladder is a checklist, not a script — the detour rule and its two grounding rules are stated', () => {
+    for (const rule of ['The detour rule.', 'One rung per turn, as a rule.', '"Go all the way" lifts the pauses, not the rungs.', 'Tools, not memory.', 'Live before levels.']) {
+        assert.ok(PROMPT.includes(`**${rule}**`), `missing rule: ${rule}`)
+    }
+    // The detour returns to the first UNSETTLED rung, read off the worksheet — never to a remembered position.
+    assert.match(PROMPT, /return to the FIRST unsettled rung/)
+    assert.match(PROMPT, /read it\s+and go to the first blank/)
+})
+
+test('"go all the way" runs the ladder in one turn without dropping a rung, and names the calls it made', () => {
+    const para = PROMPT.slice(PROMPT.indexOf('**"Go all the way"'), PROMPT.indexOf('**Tools, not memory.**'))
+    assert.ok(para.length > 0, 'the paragraph sits between the pacing rule and the grounding rules')
+    assert.match(para, /Every rung still\s+happens, in order/)
+    assert.match(para, /RECORD the call instead of asking/)
+    assert.match(para, /naming, in one line, the calls you made/)
+    assert.match(para, /ready except for size/, 'size is never invented, even unpaced')
+    assert.match(para, /no trade/, 'the unpaced run may still refuse')
+    // The tool loop caps a turn at DEFAULT_MAX_CONTINUATIONS = 10 rounds (providers/anthropic.provider.js)
+    // and THROWS past it; the prompt tells the model how to land short of the cap instead.
+    assert.match(para, /about ten rounds of tools/)
+    assert.match(para, /pick up from the first\s+unsettled rung next turn/)
+})
+
+test('horizon and lens are settled WITH the user; direction is Mentor\'s read they may overrule', () => {
+    assert.match(PROMPT, /\*\*Horizon\.\*\* The trader's, not yours/)
+    assert.match(PROMPT, /\*\*The lens\.\*\* Propose one[\s\S]{0,200}Wait for the yes/)
+    assert.match(PROMPT, /\*\*Direction\.\*\* Your read[\s\S]{0,300}Theirs to\s+accept or overrule/)
+})
+
+test('candidates are an explicit ask now — the guided build ends in one setup', () => {
+    assert.match(PROMPT, /## Offering candidates — only when they ask for options/)
+    assert.match(PROMPT, /The guided build does not reach for it on its own/)
+    assert.doesNotMatch(PROMPT, /When the user has no setup, offer a few/, 'the old default-to-candidates invariant is gone')
+})
+
+test('scenario count is Mentor\'s in the guided build — same premise at two levels is allowed, padding is not', () => {
+    assert.match(PROMPT, /if they are all pullbacks, they are all pullbacks/)
+    assert.doesNotMatch(PROMPT, /Most setups have exactly one\./)
+    assert.match(PROMPT, /never pad to two because a pair reads balanced/)
+})
+
+test('the two tools the ladder added are declared after the kit and before the sidecar', () => {
+    const names = MENTOR_TOOLS.map(t => t.name)
+    const kitEnd = names.indexOf('get_key_levels')   // SMC_TOOLS closes the shared kit
+    assert.ok(kitEnd > 0)
+    assert.deepEqual(names.slice(kitEnd + 1), ['get_news', 'get_analyst_actions', 'consult'])
+})
+
+test('the two tools are WIRED — a declared tool with no handler is a call that silently fails', async () => {
+    let handlers = null
+    const seen = []
+    await mentorAgentService.chatStream({
+        messages: [{ role: 'user', content: 'hi' }],
+        _run: async ({ toolHandlers }) => { handlers = toolHandlers; return '' },
+        _newsHandlers: () => ({ get_news: async (args) => { seen.push(['news', args]); return 'headlines' } }),
+        _analystActions: async (symbols, limit) => { seen.push(['analyst', symbols, limit]); return [{ symbol: 'NVDA' }] },
+    })
+    for (const t of MENTOR_TOOLS) {
+        if (t.name === 'consult' || t.name === 'web_search') continue   // built by runAgentStream / server-side
+        assert.equal(typeof handlers[t.name], 'function', `${t.name} is declared but has no handler`)
+    }
+    assert.equal(await handlers.get_news({ category: 'companies', subject: 'NVDA' }), 'headlines')
+    assert.deepEqual(await handlers.get_analyst_actions({ symbols: ['NVDA'], limit: 5 }), [{ symbol: 'NVDA' }])
+    // A missing `symbols` reaches the provider as an empty list, never as undefined.
+    await handlers.get_analyst_actions({})
+    assert.deepEqual(seen[2], ['analyst', [], undefined])
+})
+
+test('a provider failure on the new tools comes back as a tool error, not a thrown stream', async () => {
+    let handlers = null
+    await mentorAgentService.chatStream({
+        messages: [{ role: 'user', content: 'hi' }],
+        _run: async ({ toolHandlers }) => { handlers = toolHandlers; return '' },
+        _analystActions: async () => { throw new Error('FMP down') },
+    })
+    const out = await handlers.get_analyst_actions({ symbols: ['NVDA'] })
+    assert.match(JSON.stringify(out), /Could not fetch analyst actions: FMP down/)
 })
