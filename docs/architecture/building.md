@@ -71,10 +71,12 @@ Every agent resolves its model through `services/llmModels.js` `resolveStreamFn(
 Anthropic Claude family (`claude-opus-5`, `claude-opus-4-8`, `claude-sonnet-5` — the **default
 since 2026-09-20**, was Sonnet 4.6 — `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`) streaming
 through `providers/anthropic.provider.js` `streamAnthropicWithTools`, plus **three admin-only
-candidates under evaluation** — `gpt-5.6-luna`, `qwen3.7-plus` (OpenRouter), `mistral-medium-3.5`
-(Mistral's API) — streaming through the OpenAI-format twin `providers/openaiCompat.provider.js`
+candidates under evaluation** — `gpt-5.6-luna`, `qwen3.7-plus`, `mistral-medium-3.5`, all on
+OpenRouter — streaming through the OpenAI-format twin `providers/openaiCompat.provider.js`
 `streamOpenAICompatWithTools` (same tag suppressor, same tool handlers; `web_search` swapped for
-OpenRouter's web plugin, absent on the Mistral endpoint). A candidate is
+OpenRouter's web plugin). Mistral rode Mistral's own API until 2026-09-20, where the plugin does
+not exist and a desk simply had no web; the `mistral` endpoint stays in the provider for a model
+that only lives there. A candidate is
 `adminOnly` in `MODELS`; `resolveAgentStream` routes a non-admin who requests one to
 `DEFAULT_MODEL` (one role read, only when a candidate is asked for). The model is the user's own
 pick, read off the request body and validated by `resolveStreamFn` (unknown → `DEFAULT_MODEL`);

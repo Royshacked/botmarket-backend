@@ -377,8 +377,10 @@ offline: the same prompt, the same tools, real setups, side by side in the pop-o
 document carrying a candidate is routed to the default. The non-Anthropic ones run through
 `providers/openaiCompat.provider.js` — one OpenAI-format loop, the same tool kit and runner, with
 `web_search` dropped (an Anthropic server tool; the condition comes back `unchecked`) and a chart
-image delivered as a `user` message after the tool message. Accounts: `OPENROUTER_API_KEY` (Luna,
-Qwen) and `MISTRAL_API_KEY` (Medium 3.5, on Mistral's own API). Nothing a candidate
+image delivered as a `user` message after the tool message. Account: `OPENROUTER_API_KEY` for all
+three (Medium 3.5 moved off Mistral's own API on 2026-09-20 — same price, and the chat desks get the
+web plugin there; `MISTRAL_API_KEY` is only read for a model pinned to the `mistral` endpoint, and
+none is). Nothing a candidate
 says executes on its own: `enter` parks `awaiting_confirm` and posts a card, as always.
 
 **What a read costs, and the two knobs on it (2026-09-20).** The September ledger split Talos into

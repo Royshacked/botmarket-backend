@@ -164,7 +164,7 @@ test('assessRouting: reads the document once, applies the gate, caps the effort,
     const broken = async () => { throw new Error('db down') }
 
     const a = await assessRouting('u1', admin)
-    assert.equal(a.model, 'mistral-medium-3.5'); assert.equal(a.provider, 'openai-compat'); assert.equal(a.endpoint, 'mistral'); assert.equal(a.wire, 'mistral-medium-2604'); assert.equal(a.reasoningEffort, 'low')
+    assert.equal(a.model, 'mistral-medium-3.5'); assert.equal(a.provider, 'openai-compat'); assert.equal(a.endpoint, 'openrouter'); assert.equal(a.wire, 'mistralai/mistral-medium-3-5'); assert.equal(a.reasoningEffort, 'low')
     const t = await assessRouting('u2', trader)
     assert.equal(t.model, ASSESS_MODEL); assert.equal(t.provider, 'anthropic'); assert.equal(t.wire, ASSESS_MODEL)
     assert.equal((await assessRouting('u3', legacy)).model, 'qwen3.7-plus')

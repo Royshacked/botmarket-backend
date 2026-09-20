@@ -33,12 +33,14 @@ const MODELS = {
     // same four as Talos's TALOS_MODELS, same pattern: the admin picks one in the profile, their
     // own desks run on it, the ledger's byModel row says what it cost. `streamFn` binds the
     // endpoint and the wire slug so the loop never learns the registry. No `webSearch`: the
-    // provider substitutes OpenRouter's web plugin when a desk declares the tool — on OpenRouter
-    // only; a Mistral-endpoint desk simply has no web. resolveAgentStream routes a non-admin who
-    // somehow requests one to DEFAULT_MODEL.
+    // provider substitutes OpenRouter's web plugin when a desk declares the tool — which is why
+    // all three ride OpenRouter. Mistral was on Mistral's own API until 2026-09-20, where a desk
+    // simply had no web (Prometheus's "news since the event" step silently did not happen); the
+    // same model on OpenRouter costs the same ($1.5/$7.5) and gets the plugin. resolveAgentStream
+    // routes a non-admin who somehow requests one to DEFAULT_MODEL.
     ..._candidate('gpt-5.6-luna',       'GPT-5.6 Luna',       'openrouter', 'openai/gpt-5.6-luna'),
     ..._candidate('qwen3.7-plus',       'Qwen3.7-Plus',       'openrouter', 'qwen/qwen3.7-plus'),
-    ..._candidate('mistral-medium-3.5', 'Mistral Medium 3.5', 'mistral',    'mistral-medium-2604'),
+    ..._candidate('mistral-medium-3.5', 'Mistral Medium 3.5', 'openrouter', 'mistralai/mistral-medium-3-5'),
 }
 
 function _candidate(id, label, endpoint, wire) {

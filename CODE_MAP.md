@@ -633,7 +633,8 @@ providers/
                                 parse; translated here and only here: tool schemas, tool_calls →
                                 tool_use, tool results (an image cannot ride in a `tool` message — it
                                 follows in one `user` message), usage. ENDPOINTS = which account:
-                                'openrouter' (one key, most vendors) · 'mistral' (their own API).
+                                'openrouter' (one key, most vendors — every candidate since 2026-09-20)
+                                · 'mistral' (their own API; no web plugin there, so no model rides it now).
                                 Drops web_search (an
                                 Anthropic server tool), no cache markers, vendor-default thinking.
                                 Asserts response.model — a substituted model is an io failure, never

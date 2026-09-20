@@ -45,7 +45,9 @@ export const TALOS_MODELS = Object.freeze({
     // Mistral Large 3 was the plan; on 2026-09-20 Mistral's own API listed no Large at all (Medium 3.5
     // is their flagship there) and OpenRouter had it batch-only. Medium 3.5 took the slot: dearer
     // ($1.5/$7.5 — about half of Sonnet with their cache), so a fit data point more than a cost case.
-    'mistral-medium-3.5':        { label: 'Mistral Medium 3.5', provider: 'openai-compat', endpoint: 'mistral',    wire: 'mistral-medium-2604',  adminOnly: true },
+    // On OpenRouter since 2026-09-20 (was Mistral's own API — no web plugin there, and the desks
+    // share this slug); same price, vision confirmed on the OpenRouter card.
+    'mistral-medium-3.5':        { label: 'Mistral Medium 3.5', provider: 'openai-compat', endpoint: 'openrouter', wire: 'mistralai/mistral-medium-3-5', adminOnly: true },
     'qwen3.7-plus':              { label: 'Qwen3.7-Plus',      provider: 'openai-compat', endpoint: 'openrouter', wire: 'qwen/qwen3.7-plus',   adminOnly: true },
 })
 export const ALLOWED_MODELS  = new Set(Object.keys(TALOS_MODELS))
