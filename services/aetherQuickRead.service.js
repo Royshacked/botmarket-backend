@@ -67,6 +67,11 @@ export function quickReadOpening(c, run = {}, others = []) {
             : c.verdict === 'silent'
                 ? 'Its filings, per Aether’s verification: silent — nothing it has filed mentions this.'
                 : '',
+        // The sized share of revenue, when the filing gave one — the first of the four inputs the
+        // sizing step needs, and the one it should take from here rather than re-derive.
+        c.impact_pct_revenue != null
+            ? `The filing sizes the exposed line at ${(c.impact_pct_revenue * 100).toFixed(2)}% of revenue (impact_pct_revenue) — use that as exposed_revenue_pct.`
+            : '',
         c.excess_pct != null
             ? `Move since the event: ${(c.excess_pct * 100).toFixed(1)}% vs SPY${c.extension != null ? ` (${c.extension.toFixed(1)}σ)` : ''}${c.price_asof ? `, as of ${c.price_asof}` : ''}.`
             : 'No move measured yet.',
@@ -207,13 +212,18 @@ export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _
             read:       q?.read || out?.reply || '',
             evidence:   q?.evidence ?? [],
             checked:    q?.checked ?? [],
+            // What the event alone is worth, from compute_event_delta — null when the read did not size
+            // (contradicted, or no share of revenue to stand on). The four inputs ride inside it.
+            delta:      q?.delta ?? null,
+            delta_basis: q?.delta_basis ?? '',
             reply:      out?.reply ?? '',
             model:      QUICKREAD_MODEL,
             read_by:    userId ?? null,
             read_at:    new Date().toISOString(),
             took_ms:    Date.now() - t0,
         }
-        logger.info(LOG, 'quick read', { runId, ticker: sym, verdict: doc.verdict, net: doc.net, others: otherIds.length, confidence: doc.confidence, ms: doc.took_ms })
+        logger.info(LOG, 'quick read', { runId, ticker: sym, verdict: doc.verdict, net: doc.net, others: otherIds.length, confidence: doc.confidence,
+                                         delta: doc.delta?.delta_price_pct ?? null, open: doc.delta?.remaining_pct ?? null, ms: doc.took_ms })
         return deps.store(doc)
     })()
 

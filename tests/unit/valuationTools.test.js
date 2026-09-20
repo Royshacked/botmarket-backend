@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { formatConsensus, valuationReadText } from '../../services/tools/valuation.tools.js'
-import { computeValuation } from '../../services/valuation.engine.js'
+import { formatConsensus, valuationReadText, eventDeltaReadText, VALUATION_TOOLS } from '../../services/tools/valuation.tools.js'
+import { computeValuation, computeEventDelta } from '../../services/valuation.engine.js'
 
 // Analyst P2 — pure LLM-ready formatters over the consensus feeds + the valuation engine.
 
@@ -89,4 +89,48 @@ test('valuationReadText: a failed valuation explains why', () => {
     const t = valuationReadText('X', 'pe', bad)
     assert.match(t, /Could not value X on pe/)
     assert.match(t, /multiple/)
+})
+
+// ─── the event delta read ─────────────────────────────────────────────────────
+
+test('eventDeltaReadText: says the inputs, the band, what is open, and ends on the line to copy', () => {
+    const r = computeEventDelta({ exposed_revenue_pct: 0.12, shock_pct: -0.30, shock_low: -0.2, shock_high: -0.4, incremental_margin: 0.5,
+                                  persistence_quarters: 2, revenue: 50e9, net_income: 4e9, spot: 100, moved_pct: -2 })
+    const t = eventDeltaReadText('xyz', r, { fy: '2027' })
+    assert.match(t, /^Event delta for XYZ — this event alone, multiple held constant \(FY2027 consensus revenue \$50\.0B, net income \$4\.0B, spot 100\)/)
+    assert.match(t, /12\.0% of revenue exposed × shock -30% to that line \(band -20% to -40%\) × 50% incremental margin × 2 quarter\(s\)/)
+    assert.match(t, /Δ net income: -\$450M \(band -\$600M to -\$300M\)/)
+    assert.match(t, /Δ price at constant multiple: -11\.3% \(band -15\.0% to -7\.5%\) → implied 88\.75/)
+    assert.match(t, /Moved since the event \(vs SPY\): -2\.0% → still open: -9\.3%/)
+    // The last line is the tool's own JSON, for the model to copy into the block unchanged.
+    const last = t.trim().split('\n').pop()
+    const j = JSON.parse(last)
+    assert.equal(j.delta_price_pct, -11.25); assert.equal(j.remaining_pct, -9.25); assert.equal(j.fy, '2027')
+})
+
+test('eventDeltaReadText: the market past what the event is worth is said in words', () => {
+    const r = computeEventDelta({ exposed_revenue_pct: 0.1, shock_pct: -0.2, incremental_margin: 0.5, persistence_quarters: 1,
+                                  revenue: 10e9, net_income: 1e9, spot: 50, moved_pct: -9 })
+    // worth −2.5%, moved −9% → remaining +6.5%: the sign flipped
+    assert.match(eventDeltaReadText('A', r), /still open: \+6\.5% — the market has moved PAST what the event is worth/)
+})
+
+test('eventDeltaReadText: a loss-maker states the dollars and says why there is no percentage', () => {
+    const r = computeEventDelta({ exposed_revenue_pct: 0.5, shock_pct: 0.2, incremental_margin: 0.3, persistence_quarters: 4, revenue: 1e9, net_income: -5e7, spot: 10 })
+    const t = eventDeltaReadText('L', r)
+    assert.match(t, /Δ net income: \$30M/)
+    assert.match(t, /Δ price: n\/a — the company is loss-making/)
+    assert.equal(JSON.parse(t.trim().split('\n').pop()).delta_price_pct, null)
+})
+
+test('eventDeltaReadText: a refusal names what was missing, and has no line to copy', () => {
+    assert.match(eventDeltaReadText('B', computeEventDelta({ exposed_revenue_pct: 0.5 })), /not computed — exposed_revenue_pct, shock_pct, incremental_margin and persistence_quarters are all required/)
+    assert.match(eventDeltaReadText('B', computeEventDelta({ exposed_revenue_pct: 0.5, shock_pct: 0.1, incremental_margin: 0.5, persistence_quarters: 1 })), /no forward revenue/)
+    assert.doesNotMatch(eventDeltaReadText('B', null), /Copy this/)
+})
+
+test('compute_event_delta is registered after the two valuation tools — the cache prefix only grows at the end', () => {
+    assert.deepEqual(VALUATION_TOOLS.map(t => t.name), ['get_consensus', 'compute_valuation', 'compute_event_delta'])
+    const t = VALUATION_TOOLS[2]
+    assert.deepEqual(t.input_schema.required, ['ticker', 'exposed_revenue_pct', 'shock_pct', 'incremental_margin', 'persistence_quarters'])
 })

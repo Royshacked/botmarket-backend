@@ -24,6 +24,7 @@ import { logger } from '../logger.service.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const LOG         = '[analystAgent]'
+const QUICKREAD_LOG = '[analystAgent-quickread]'   // its own ledger row — see chatStream
 const PROMPT_PATH = join(__dirname, '../../prompts/analyst_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 const MAX_RECENT_MESSAGES = 8
@@ -105,8 +106,11 @@ async function chatStream({
     const route = makeRouteCapture('analyst')
     const tagCaptures = buildTagCaptures({ phase: phase.capture, ...route.captures })
 
+    // A quick read is booked under its own ledger key (agentKeyFromLog). It used to share
+    // `analystAgent` with full coverage turns, which is how "what does a read cost" could only be
+    // estimated (2026-09-20). The log tag is the key, so the tag is what differs.
     const raw = await _run({
-        log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
+        log: mode === MODES.QUICKREAD ? QUICKREAD_LOG : LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
         tools: TOOLS, toolHandlers: { ...TOOL_HANDLERS, ...makeTradingContextHandlers(userId) },
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
         meta: { userPrompt },
@@ -155,7 +159,25 @@ export function _parseQuickRead(raw) {
             .filter(e => e && typeof e.fact === 'string' && e.fact.trim())
             .map(e => ({ fact: e.fact.trim(), source: typeof e.source === 'string' ? e.source.trim() : '' })),
         checked:    (Array.isArray(q.checked) ? q.checked : []).filter(t => typeof t === 'string'),
+        delta:      _cleanDelta(q.delta),
+        delta_basis: typeof q.delta_basis === 'string' ? q.delta_basis.trim() : '',
     }
+}
+
+// The `delta` the model copied off compute_event_delta: numbers or null per field, nothing else
+// kept, and null when there is no usable percentage in it (an unsized read, a loss-maker's dollar
+// figure alone, or a block the model typed by hand with words in the numbers).
+const DELTA_FIELDS = ['exposed_revenue_pct', 'shock_pct', 'shock_low', 'shock_high', 'incremental_margin', 'persistence_quarters',
+                      'delta_price_pct', 'delta_price_low', 'delta_price_high', 'implied_price', 'spot', 'moved_pct', 'remaining_pct', 'delta_net_income']
+export function _cleanDelta(d) {
+    if (!d || typeof d !== 'object' || Array.isArray(d)) return null
+    const out = {}
+    for (const k of DELTA_FIELDS) {
+        const n = Number(d[k])
+        out[k] = d[k] == null || !Number.isFinite(n) ? null : n
+    }
+    out.fy = typeof d.fy === 'string' || typeof d.fy === 'number' ? String(d.fy) : null
+    return out.delta_price_pct === null ? null : out
 }
 
 // Light guard on the draft (full normalization happens at initiate): must be an object with a symbol.

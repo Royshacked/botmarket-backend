@@ -266,9 +266,14 @@ services/
                             regime then→now), computeReviewTriggers (the non-LLM pre-check signals)
   valuation.engine.js       PURE computeValuation (Analyst T1 relative: justified multiple × forward metric
                             → PT + bear/base/bull + GAP vs Street consensus); percentile/median. Shared by
-                            the Analyst agent (P3) + coverage monitor (P5) — one source of truth for "our number"
-  valuation.tools.js        get_consensus + compute_valuation agent tools over valuation.engine + FMP consensus
-                            feeds; pure LLM-ready formatters (edge classified above/below/thin vs Street). (P2)
+                            the Analyst agent (P3) + coverage monitor (P5) — one source of truth for "our number".
+                            computeEventDelta (2026-09-20): ONE event priced alone — forward revenue × exposed
+                            share × shock × drop-through × (quarters/4) → Δ EPS % = Δ price % at a constant
+                            multiple, band from the shock range, remaining after the move; a loss-maker gets
+                            dollars and no percentage
+  valuation.tools.js        get_consensus + compute_valuation + compute_event_delta agent tools over
+                            valuation.engine + FMP consensus feeds; pure LLM-ready formatters (edge classified
+                            above/below/thin vs Street; the delta read ends on the JSON line the model copies). (P2)
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue.
                           resolveAgentStream: the model for a turn — the spend ceiling → CHEAP_MODEL,
@@ -513,7 +518,10 @@ services/
                             contradicted · unclear) — phases 1–2 on Sonnet, one paragraph, optional.
                             Node OWNS aether_candidate_reads (the engine's rows are Python's); one read
                             per name per event, one in flight, re-read only when the SET of live events
-                            naming the ticker changed. Judged against every live event, not the one pressed
+                            naming the ticker changed. Judged against every live event, not the one pressed.
+                            Since 2026-09-20 the read SIZES the event too (compute_event_delta; `delta` +
+                            `delta_basis` on the doc, null when unsized) and books under its own ledger
+                            row `analystAgent-quickread`
   lastPrice.service.js      fetchLastPrice(symbol): THE last-price read — quote first, a 1-minute-candle
                             fallback second, null only when both fail; a non-positive price is NO price.
                             The input to every zone gate, baseline stamp and coherence check. Lived in

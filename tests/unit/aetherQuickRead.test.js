@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import {
     quickRead, quickReadOpening, attachReads, QUICKREAD_MODEL,
 } from '../../services/aetherQuickRead.service.js'
-import { _parseQuickRead, _buildSystemPrompt, MODES } from '../../services/agents/analyst.agent.service.js'
+import { _parseQuickRead, _cleanDelta, _buildSystemPrompt, MODES } from '../../services/agents/analyst.agent.service.js'
 import { ALL_EMIT_TAGS } from '../../services/llmStream.util.js'
 
 const CAND = {
@@ -43,6 +43,11 @@ test('a quantified filing carries its sentence', () => {
 test('the move is stated with its sigma, or its absence is stated', () => {
     assert.match(quickReadOpening(CAND, CAND), /Move since the event: 1\.2% vs SPY \(0\.4σ\), as of 2026-09-14\./)
     assert.match(quickReadOpening({ ...CAND, excess_pct: null }, CAND), /No move measured yet\./)
+})
+
+test('the opening hands the sizing step the filing’s own share of revenue when there is one', () => {
+    assert.match(quickReadOpening({ ...CAND, impact_pct_revenue: 0.1234 }, CAND), /The filing sizes the exposed line at 12\.34% of revenue \(impact_pct_revenue\) — use that as exposed_revenue_pct\./)
+    assert.doesNotMatch(quickReadOpening(CAND, CAND), /impact_pct_revenue/)
 })
 
 // ── judged against every event naming it ─────────────────────────────────────
@@ -83,7 +88,36 @@ test('a well-formed block comes through', () => {
     assert.deepEqual(_parseQuickRead(raw), {
         verdict: 'credible', net: null, confidence: 0.7, read: 'It filed.',
         evidence: [{ fact: '8-K names it', source: '8-K 2026-09-14' }], checked: ['get_sec_filings'],
+        delta: null, delta_basis: '',
     })
+})
+
+// ── the delta, copied off the tool and checked ───────────────────────────────
+// The model copies compute_event_delta's own JSON line into `delta`. Numbers or null per field,
+// nothing else kept; a block with no usable percentage (unsized, a loss-maker, hand-typed words)
+// is no delta at all — the screen must never show a sizing that was not computed.
+
+test('the delta comes through as numbers, with the basis', () => {
+    const raw = '<quickread>{"verdict":"credible","delta":{"exposed_revenue_pct":0.12,"shock_pct":-0.3,"shock_low":-0.2,"shock_high":-0.4,"incremental_margin":0.5,"persistence_quarters":2,"delta_price_pct":-11.25,"delta_price_low":-15,"delta_price_high":-7.5,"implied_price":88.75,"spot":100,"moved_pct":-2,"remaining_pct":-9.25,"delta_net_income":-450000000,"fy":"2027"},"delta_basis":"12% from the segment note"}</quickread>'
+    const q = _parseQuickRead(raw)
+    assert.equal(q.delta.delta_price_pct, -11.25)
+    assert.equal(q.delta.remaining_pct, -9.25)
+    assert.equal(q.delta.shock_low, -0.2)
+    assert.equal(q.delta.fy, '2027')
+    assert.equal(q.delta_basis, '12% from the segment note')
+    assert.deepEqual(Object.keys(q.delta).sort(), ['delta_net_income', 'delta_price_high', 'delta_price_low', 'delta_price_pct', 'exposed_revenue_pct', 'fy',
+        'implied_price', 'incremental_margin', 'moved_pct', 'persistence_quarters', 'remaining_pct', 'shock_high', 'shock_low', 'shock_pct', 'spot'])
+})
+
+test('a delta with no percentage is null — a loss-maker, or a block the model typed by hand', () => {
+    assert.equal(_cleanDelta({ delta_price_pct: null, delta_net_income: 3e7 }), null)
+    assert.equal(_cleanDelta({ delta_price_pct: 'about -8%' }), null)
+    assert.equal(_cleanDelta({}), null)
+    assert.equal(_cleanDelta('-8%'), null)
+    assert.equal(_cleanDelta(null), null)
+    // A stray extra key is dropped; a missing optional is null, not undefined.
+    const d = _cleanDelta({ delta_price_pct: -8, extra: 'x' })
+    assert.equal(d.delta_price_pct, -8); assert.equal(d.shock_low, null); assert.equal('extra' in d, false)
 })
 
 test('net comes through when it is one of the three, and is null otherwise', () => {
@@ -159,6 +193,17 @@ test('produces, stores and returns the read', async () => {
     assert.equal(out.read_by, 'u1')
     assert.equal(out.model, QUICKREAD_MODEL)
     assert.equal(d.calls.stored.length, 1)
+    // Unsized read: the delta fields are present and empty, never absent.
+    assert.equal(out.delta, null); assert.equal(out.delta_basis, '')
+})
+
+test('a sized read stores the delta and its basis beside the verdict', async () => {
+    const delta = { exposed_revenue_pct: 0.12, shock_pct: -0.3, delta_price_pct: -11.25, remaining_pct: -9.25, moved_pct: -2 }
+    const d = deps({ quickread: { ...Q, delta, delta_basis: '12% from the segment note' } })
+    const out = await quickRead({ runId: CAND.run_id, ticker: 'FRO', userId: 'u1' }, d)
+    assert.deepEqual(out.delta, delta)
+    assert.equal(out.delta_basis, '12% from the segment note')
+    assert.deepEqual(d.calls.stored[0].delta, delta)
 })
 
 test('a stored read is returned without a model call', async () => {

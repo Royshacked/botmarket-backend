@@ -75,6 +75,23 @@ byte-identical). The mode's key insight is written into it: a company does not f
 event before its next 10-Q, so "nothing filed since" is not evidence; what counts is whether the
 dependency was ever put on paper.
 
+**The read sizes the event (2026-09-20).** "Priced in" had no yardstick — it rested on the estimate
+trend and the move. The read now ends with one deterministic call, `compute_event_delta`
+(`valuation.tools.js` → `computeEventDelta` in `valuation.engine.js`): Δ net income = the Street's
+forward revenue × exposed share × shock × incremental margin × (quarters/4), expressed as Δ EPS % = Δ
+price % at a **constant multiple**, with a band from the shock range and the move since the event
+netted off to say what is still open. First-order by construction — no re-rating, no sentiment; that is
+what "this event alone" means. The model supplies the four judgement inputs and names where each came
+from (`delta_basis`); the tool does the arithmetic and hands back one JSON line the model copies into the
+block as `delta` (the parser keeps numbers only and drops a delta with no percentage — a loss-maker, or
+a block typed by hand). Skipped on `contradicted` and when the record gives no share of revenue to
+stand on. Persistence caps at four quarters: forward EPS is annual, and an effect that outlives it is a
+re-rating question. Costs one more round on top of the read (~$0.15–0.20 a press, up from ~$0.12);
+quick reads book under their own ledger row, `analystAgent-quickread`, so that number is now readable.
+The Aether drawer shows it under the verdict (`Sized: worth −11% … moved −2% · −9% open`), the
+conclusion line carries it, and the Mentor seed hands it over as a target-shaped number with what is
+already gone taken out.
+
 ## The gates — what the write refuses, and what it merely flags
 
 `coverage.service.js` holds two kinds of check, and the distinction is the point:

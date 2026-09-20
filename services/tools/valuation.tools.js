@@ -5,7 +5,7 @@
 // supply the data + the math. Pure formatters are exported for tests.
 
 import { getAnalystEstimates, getPriceTargetConsensus, getGradesConsensus, getGradesHistorical, getHistoricalMultiples } from '../../providers/fmp.provider.js'
-import { computeValuation, VALUATION_METHODS } from '../valuation.engine.js'
+import { computeValuation, computeEventDelta, VALUATION_METHODS } from '../valuation.engine.js'
 import { fetchLastPrice } from '../lastPrice.service.js'
 import { makeToolHandler } from '../agentUtils.js'
 
@@ -110,6 +110,49 @@ export function valuationReadText(sym, method, result, meta = {}) {
     ].join('\n')
 }
 
+/**
+ * Render a computeEventDelta() result as an LLM-ready read, ending in the ONE LINE the agent copies
+ * into its <quickread> block verbatim. The numbers are the tool's; the agent's job was the inputs.
+ */
+export function eventDeltaReadText(sym, result, meta = {}) {
+    const S = String(sym || '').toUpperCase().trim()
+    if (!result || result.ok !== true) {
+        const why = {
+            inputs_required: 'exposed_revenue_pct, shock_pct, incremental_margin and persistence_quarters are all required — say what you assumed for each',
+            no_revenue:      'no forward revenue on the consensus feed — there is nothing to size against',
+        }[result?.reason] ?? `could not size (${result?.reason ?? 'unknown'})`
+        return `Event delta for ${S}: not computed — ${why}.`
+    }
+    const i = result.inputs
+    const pctS = v => v == null ? 'n/a' : `${_sign(v)}${v.toFixed(1)}%`
+    const moneyS = v => (Number.isFinite(v) && v < 0) ? `-${_money(-v)}` : _money(v)   // -$450M, not $-450M
+    const lines = [
+        `Event delta for ${S} — this event alone, multiple held constant (FY${meta.fy ?? '?'} consensus revenue ${_money(result.revenue)}, net income ${moneyS(result.net_income)}${result.spot ? `, spot ${result.spot}` : ''}):`,
+        `- Inputs: ${(i.exposed_revenue_pct * 100).toFixed(1)}% of revenue exposed × shock ${_sign(i.shock_pct)}${(i.shock_pct * 100).toFixed(0)}% to that line`
+            + `${i.shock_low != null || i.shock_high != null ? ` (band ${i.shock_low != null ? `${_sign(i.shock_low)}${(i.shock_low * 100).toFixed(0)}%` : '–'} to ${i.shock_high != null ? `${_sign(i.shock_high)}${(i.shock_high * 100).toFixed(0)}%` : '–'})` : ''}`
+            + ` × ${(i.incremental_margin * 100).toFixed(0)}% incremental margin × ${i.persistence_quarters} quarter(s)${i.persistence_capped ? ' (capped at 4 — forward EPS is annual; beyond a year is a re-rating question)' : ''}`,
+        `- Δ net income: ${moneyS(result.delta_net_income)} (band ${moneyS(result.delta_net_income_low)} to ${moneyS(result.delta_net_income_high)})`,
+    ]
+    if (result.reason === 'no_earnings_base') {
+        lines.push('- Δ price: n/a — the company is loss-making on forward consensus, so there is no EPS base to express this against. State the dollar impact and say so.')
+    } else {
+        lines.push(`- Δ price at constant multiple: ${pctS(result.delta_price_pct)} (band ${pctS(result.delta_price_low)} to ${pctS(result.delta_price_high)})${result.implied_price != null ? ` → implied ${result.implied_price}` : ''}`)
+        if (result.moved_pct != null) {
+            lines.push(`- Moved since the event (vs SPY): ${pctS(result.moved_pct)} → still open: ${pctS(result.remaining_pct)}`
+                + (result.remaining_pct != null && Math.sign(result.remaining_pct) !== Math.sign(result.delta_price_pct || 0) && result.delta_price_pct ? ' — the market has moved PAST what the event is worth' : ''))
+        }
+    }
+    lines.push('- Copy this into the <quickread> block as `delta`, unchanged:')
+    lines.push(JSON.stringify({
+        exposed_revenue_pct: i.exposed_revenue_pct, shock_pct: i.shock_pct, shock_low: i.shock_low, shock_high: i.shock_high,
+        incremental_margin: i.incremental_margin, persistence_quarters: i.persistence_quarters,
+        delta_price_pct: result.delta_price_pct, delta_price_low: result.delta_price_low, delta_price_high: result.delta_price_high,
+        implied_price: result.implied_price, spot: result.spot, moved_pct: result.moved_pct, remaining_pct: result.remaining_pct,
+        delta_net_income: result.delta_net_income, fy: meta.fy ?? null,
+    }))
+    return lines.join('\n')
+}
+
 // ─── handlers ────────────────────────────────────────────────────────────────
 async function _getConsensus({ ticker }) {
     const sym = String(ticker || '').toUpperCase().trim()
@@ -151,6 +194,20 @@ async function _computeValuation({ ticker, method = 'pe', multiple, forward_metr
     return valuationReadText(sym, m, result, { fy: est?.next?.fy, consensusMetric: usingConsensus })
 }
 
+async function _computeEventDelta({ ticker, exposed_revenue_pct, shock_pct, shock_low, shock_high, incremental_margin, persistence_quarters, moved_pct }) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    if (!sym) return 'Provide a ticker.'
+    // Forward revenue and net income from the same consensus feed get_consensus reads, spot fetched —
+    // the agent supplies judgement, never the base numbers.
+    const [est, spot] = await Promise.all([getAnalystEstimates(sym), fetchLastPrice(sym).catch(() => null)])
+    const next = est?.next ?? null
+    const result = computeEventDelta({
+        exposed_revenue_pct, shock_pct, shock_low, shock_high, incremental_margin, persistence_quarters, moved_pct,
+        revenue: next?.revenue, net_income: next?.net_income, spot,
+    })
+    return eventDeltaReadText(sym, result, { fy: next?.fy })
+}
+
 export const VALUATION_TOOLS = [
     {
         name: 'get_consensus',
@@ -182,9 +239,28 @@ export const VALUATION_TOOLS = [
             required: ['ticker'],
         },
     },
+    {
+        name: 'compute_event_delta',
+        description: 'What ONE event is worth to the price, alone: Δ net income = forward revenue × exposed share × shock × incremental margin × (quarters/4), expressed as Δ EPS % = Δ price % at a CONSTANT multiple, with a band from the shock range, then netted against the move since the event to say what is still open. Deterministic — you supply the four judgement inputs and it does the arithmetic on the Street’s forward revenue and net income (fetched, with spot). First-order only: no re-rating, no sentiment. Persistence caps at 4 quarters (forward EPS is annual). A loss-maker gets a dollar impact and no percentage.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                ticker:               { type: 'string', description: 'e.g. CVX' },
+                exposed_revenue_pct:  { type: 'number', description: 'Share of revenue the event reaches, 0–1. Aether’s impact_pct_revenue when the filing sized it; else your read of the segment or concentration note. Say which in your text.' },
+                shock_pct:            { type: 'number', description: 'Change to THAT line, signed, as a fraction: −0.30 = that revenue falls 30%; +0.15 = it rises 15%. Your central case.' },
+                shock_low:            { type: 'number', description: 'Optional: the milder end of the shock (same sign convention). Gives the band.' },
+                shock_high:           { type: 'number', description: 'Optional: the harsher end of the shock.' },
+                incremental_margin:   { type: 'number', description: 'How much of a dollar on that line reaches net income, 0–1. A pass-through fee line is high (0.6–0.9); a full-cost product line is near the segment margin; a hedged line is low.' },
+                persistence_quarters: { type: 'number', description: 'How many quarters the shock lasts, 0.25–8 (capped at 4 in the math).' },
+                moved_pct:            { type: 'number', description: 'The excess move since the event in percent (Aether’s number, in the opening: "0.5% vs SPY" → 0.5). Omit if none was measured.' },
+            },
+            required: ['ticker', 'exposed_revenue_pct', 'shock_pct', 'incremental_margin', 'persistence_quarters'],
+        },
+    },
 ]
 
 export const VALUATION_TOOL_HANDLERS = {
     get_consensus:     makeToolHandler('get_consensus',     _getConsensus,     (e, { ticker }) => `Could not fetch consensus for ${ticker}: ${e.message}`, LOG),
     compute_valuation: makeToolHandler('compute_valuation', _computeValuation, (e, { ticker }) => `Could not value ${ticker}: ${e.message}`, LOG),
+    compute_event_delta: makeToolHandler('compute_event_delta', _computeEventDelta, (e, { ticker }) => `Could not size the event for ${ticker}: ${e.message}`, LOG),
 }

@@ -1129,6 +1129,54 @@
       }
     },
     {
+      "name": "compute_event_delta",
+      "description": "What ONE event is worth to the price, alone: Δ net income = forward revenue × exposed share × shock × incremental margin × (quarters/4), expressed as Δ EPS % = Δ price % at a CONSTANT multiple, with a band from the shock range, then netted against the move since the event to say what is still open. Deterministic — you supply the four judgement inputs and it does the arithmetic on the Street’s forward revenue and net income (fetched, with spot). First-order only: no re-rating, no sentiment. Persistence caps at 4 quarters (forward EPS is annual). A loss-maker gets a dollar impact and no percentage.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "e.g. CVX"
+          },
+          "exposed_revenue_pct": {
+            "type": "number",
+            "description": "Share of revenue the event reaches, 0–1. Aether’s impact_pct_revenue when the filing sized it; else your read of the segment or concentration note. Say which in your text."
+          },
+          "shock_pct": {
+            "type": "number",
+            "description": "Change to THAT line, signed, as a fraction: −0.30 = that revenue falls 30%; +0.15 = it rises 15%. Your central case."
+          },
+          "shock_low": {
+            "type": "number",
+            "description": "Optional: the milder end of the shock (same sign convention). Gives the band."
+          },
+          "shock_high": {
+            "type": "number",
+            "description": "Optional: the harsher end of the shock."
+          },
+          "incremental_margin": {
+            "type": "number",
+            "description": "How much of a dollar on that line reaches net income, 0–1. A pass-through fee line is high (0.6–0.9); a full-cost product line is near the segment margin; a hedged line is low."
+          },
+          "persistence_quarters": {
+            "type": "number",
+            "description": "How many quarters the shock lasts, 0.25–8 (capped at 4 in the math)."
+          },
+          "moved_pct": {
+            "type": "number",
+            "description": "The excess move since the event in percent (Aether’s number, in the opening: \"0.5% vs SPY\" → 0.5). Omit if none was measured."
+          }
+        },
+        "required": [
+          "ticker",
+          "exposed_revenue_pct",
+          "shock_pct",
+          "incremental_margin",
+          "persistence_quarters"
+        ]
+      }
+    },
+    {
       "name": "get_fundamentals",
       "description": "Company fundamentals for a single ticker: sector/industry, market cap, valuation, margins, ROE, growth. The Phase-1 profile read.",
       "input_schema": {

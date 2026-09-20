@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { computeValuation, percentile, median } from '../../services/valuation.engine.js'
+import { computeValuation, computeEventDelta, EVENT_DELTA_MAX_QUARTERS, percentile, median } from '../../services/valuation.engine.js'
 
 // Analyst P2 — deterministic relative valuation. Pure → exhaustively testable.
 
@@ -137,4 +137,65 @@ test('unknown method falls back to pe', () => {
     const v = computeValuation({ method: 'bogus', multiple: 20, forward_metric: 10 })
     assert.equal(v.method, 'pe')
     assert.equal(v.our_pt, 200)
+})
+
+// ─── one event, priced alone ──────────────────────────────────────────────────
+// Δ NI = revenue × exposed × shock × margin × (q/4); Δ price % = Δ NI / NI at a constant multiple;
+// remaining = Δ price % − moved. The two guesses (shock, persistence) are the model's; the
+// arithmetic is here, so a read's sizing can be checked by hand from its own inputs.
+
+const BASE = { exposed_revenue_pct: 0.12, shock_pct: -0.30, incremental_margin: 0.5, persistence_quarters: 2,
+               revenue: 50e9, net_income: 4e9, spot: 100 }
+
+test('event delta: the worked example — 12% exposed, −30% for two quarters at 50% drop-through', () => {
+    const d = computeEventDelta({ ...BASE, shock_low: -0.2, shock_high: -0.4, moved_pct: -2 })
+    assert.equal(d.ok, true)
+    assert.equal(d.delta_net_income, -450e6)          // 50e9 × 0.12 × −0.30 × 0.5 × 0.5
+    assert.equal(d.delta_price_pct, -11.25)           // −450M / 4B
+    assert.equal(d.implied_price, 88.75)
+    assert.equal(d.remaining_pct, -9.25)              // −11.25 − (−2)
+    // The band is ordered by value — the worse number left — whichever leg was called "low".
+    assert.equal(d.delta_price_low, -15); assert.equal(d.delta_price_high, -7.5)
+})
+
+test('event delta: a positive shock lifts the price; the band still reads worse-to-better', () => {
+    const d = computeEventDelta({ ...BASE, shock_pct: 0.2, shock_low: 0.1, shock_high: 0.3 })
+    assert.equal(d.delta_price_pct, 7.5)
+    assert.equal(d.delta_price_low, 3.75); assert.equal(d.delta_price_high, 11.25)
+    assert.equal(d.remaining_pct, null)               // nothing moved was given
+})
+
+test('event delta: persistence caps at a year — forward EPS is annual', () => {
+    const four = computeEventDelta({ ...BASE, persistence_quarters: 4 })
+    const eight = computeEventDelta({ ...BASE, persistence_quarters: 8 })
+    assert.equal(EVENT_DELTA_MAX_QUARTERS, 4)
+    assert.equal(eight.delta_price_pct, four.delta_price_pct)
+    assert.equal(eight.inputs.persistence_capped, true)
+    assert.equal(four.inputs.persistence_capped, false)
+})
+
+test('event delta: inputs are clamped to their ranges, never rejected for being a little over', () => {
+    const d = computeEventDelta({ ...BASE, exposed_revenue_pct: 1.4, incremental_margin: -0.2 })
+    assert.equal(d.inputs.exposed_revenue_pct, 1)
+    assert.equal(d.inputs.incremental_margin, 0)
+    assert.equal(Math.abs(d.delta_price_pct), 0)   // −0 from a negative shock × a zero margin
+})
+
+test('event delta: a loss-maker gets the dollar figure and no percentage', () => {
+    const d = computeEventDelta({ ...BASE, net_income: -5e7 })
+    assert.equal(d.ok, true); assert.equal(d.reason, 'no_earnings_base')
+    assert.equal(d.delta_net_income, -450e6)
+    assert.equal(d.delta_price_pct, null); assert.equal(d.implied_price, null); assert.equal(d.remaining_pct, null)
+})
+
+test('event delta: a missing judgement input, or no revenue, is a refusal that names itself', () => {
+    assert.deepEqual(computeEventDelta({ ...BASE, shock_pct: undefined }), { ok: false, reason: 'inputs_required' })
+    assert.deepEqual(computeEventDelta({ ...BASE, incremental_margin: 'half' }), { ok: false, reason: 'inputs_required' })
+    assert.deepEqual(computeEventDelta({ ...BASE, revenue: null }), { ok: false, reason: 'no_revenue' })
+    assert.deepEqual(computeEventDelta({ ...BASE, revenue: 0 }), { ok: false, reason: 'no_revenue' })
+})
+
+test('event delta: no spot means no implied price, and the percentages still stand', () => {
+    const d = computeEventDelta({ ...BASE, spot: null })
+    assert.equal(d.spot, null); assert.equal(d.implied_price, null); assert.equal(d.delta_price_pct, -11.25)
 })

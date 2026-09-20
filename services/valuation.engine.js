@@ -157,3 +157,79 @@ export function computeValuation(input = {}) {
         peer_median_multiple: peers.length ? roundOrNull(median(peers)) : null,
     }
 }
+
+// ─── One event, priced alone ─────────────────────────────────────────────────
+//
+// WHAT ONE EVENT IS WORTH TO THE PRICE, holding everything else still. Aether names a company as
+// exposed to an event and Prometheus's quick read says whether the exposure is credible; this
+// puts a number on it, so "priced in" has a yardstick — a name that moved 13% on an event worth
+// 3% has overshot, one that moved 1% on an event worth 8% is still open — instead of resting on
+// the estimate trend alone. It is FIRST-ORDER BY CONSTRUCTION: the multiple is held constant
+// (no re-rating, no sentiment), and the rest of the estimate is untouched. That is the point of
+// asking about the event only.
+//
+// The chain, per share of forward earnings:
+//
+//   Δ net income   = revenue × exposed_revenue_pct × shock_pct × incremental_margin × (quarters / 4)
+//   Δ EPS %        = Δ net income / net income
+//   Δ price %      = Δ EPS %                       (constant multiple)
+//   remaining      = Δ price % − what the name has already moved since the event
+//
+// The agent supplies the FOUR JUDGEMENT INPUTS — how much of revenue the event reaches, how hard
+// it hits that line, how much of a dollar there reaches the bottom line, and for how long — and
+// this does the arithmetic on the Street's forward revenue and net income, so the answer's
+// assumptions are on its face and nothing is vibed. Two of the four (shock, persistence) dominate
+// the answer, which is why the shock takes a low and a high and the result is a band, never a
+// point. Persistence is capped at a year: forward EPS is annual, and an effect that outlives it
+// is a re-rating question, not this tool's.
+//
+// A LOSS-MAKER HAS NO EPS BASE. Δ net income is still computable and is reported in dollars; the
+// percentage of price is not, and the result says so rather than dividing by a negative.
+
+export const EVENT_DELTA_MAX_QUARTERS = 4
+
+function _in(v, lo, hi) { const n = _num(v); return n === null ? null : Math.min(Math.max(n, lo), hi) }
+
+export function computeEventDelta(input = {}) {
+    const exposed  = _in(input.exposed_revenue_pct, 0, 1)
+    const shock    = _in(input.shock_pct, -1, 3)
+    const margin   = _in(input.incremental_margin, 0, 1)
+    const quarters = _in(input.persistence_quarters, 0.25, 8)
+    if (exposed === null || shock === null || margin === null || quarters === null) {
+        return { ok: false, reason: 'inputs_required' }
+    }
+    const revenue = _num(input.revenue), netIncome = _num(input.net_income), spot = _num(input.spot)
+    if (revenue === null || revenue <= 0) return { ok: false, reason: 'no_revenue' }
+
+    const persistence = Math.min(quarters, EVENT_DELTA_MAX_QUARTERS) / 4
+    const leg = s => revenue * exposed * s * margin * persistence
+    const shockLow  = _in(input.shock_low,  -1, 3)
+    const shockHigh = _in(input.shock_high, -1, 3)
+    // The band is ordered by VALUE, not by which leg was called low: a negative shock's "low" leg
+    // is the larger loss, and a reader wants the worse number on the left every time.
+    const legs = [leg(shock), shockLow !== null ? leg(shockLow) : null, shockHigh !== null ? leg(shockHigh) : null].filter(x => x !== null)
+    const dNI = leg(shock), dNILow = Math.min(...legs), dNIHigh = Math.max(...legs)
+
+    const out = {
+        ok: true,
+        inputs: { exposed_revenue_pct: exposed, shock_pct: shock, shock_low: shockLow, shock_high: shockHigh,
+                  incremental_margin: margin, persistence_quarters: quarters, persistence_capped: quarters > EVENT_DELTA_MAX_QUARTERS },
+        revenue, net_income: netIncome, spot: spot !== null && spot > 0 ? spot : null,
+        delta_net_income: roundOrNull(dNI),
+        delta_net_income_low: roundOrNull(dNILow),
+        delta_net_income_high: roundOrNull(dNIHigh),
+        delta_price_pct: null, delta_price_low: null, delta_price_high: null, implied_price: null,
+        moved_pct: _num(input.moved_pct), remaining_pct: null,
+    }
+    if (netIncome === null || netIncome <= 0) return { ...out, reason: 'no_earnings_base' }
+
+    const pct = d => d / netIncome * 100
+    out.delta_price_pct  = roundOrNull(pct(dNI))
+    out.delta_price_low  = roundOrNull(pct(dNILow))
+    out.delta_price_high = roundOrNull(pct(dNIHigh))
+    if (out.spot) out.implied_price = roundOrNull(out.spot * (1 + pct(dNI) / 100))
+    // What is still open, on the base leg. moved_pct is the excess move since the event, in %,
+    // the way Aether measures it (vs SPY): the part of the answer the market has already given.
+    if (out.moved_pct !== null) out.remaining_pct = roundOrNull(pct(dNI) - out.moved_pct)
+    return out
+}

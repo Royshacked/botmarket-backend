@@ -26,6 +26,8 @@ import { bookAssessUsage } from '../../monitoring/assess.shared.js'
 
 test('an ordinary agent tag becomes its bare name', () => {
     assert.equal(agentKeyFromLog('[analystAgent]'), 'analystAgent')
+    // A quick read books under its own row, apart from coverage — the hyphen survives, so the key reads.
+    assert.equal(agentKeyFromLog('[analystAgent-quickread]'), 'analystAgent-quickread')
     assert.equal(agentKeyFromLog('[kairos]'), 'kairos')
     assert.equal(agentKeyFromLog('[marketBrief]'), 'marketBrief')
 })
