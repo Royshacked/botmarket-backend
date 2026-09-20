@@ -709,7 +709,24 @@ monitoring/
                             in assess.shared); the system block carries the 1-HOUR cache marker
                             (assessSystem / ASSESS_PREFIX_CACHE — tools+system are identical for
                             every setup and the candle pacing outlives the 5-minute default); the
-                            tool runner's ctx.onUsage books a tool's own model call (the vision reads)
+                            tool runner's ctx.onUsage books a tool's own model call (the vision reads).
+                            _runRead is a wrapper over _readLoop that fills a `trace` and, under
+                            TALOS_RECORD_READS, hands it to the recorder after the answer is in
+  talos.recorder.js         the replay eval's input (docs/design/talos-replay-harness.md), 2026-09-20.
+                            Opt-in (TALOS_RECORD_READS): one JSON bundle per read — the exact
+                            system/user text, the finalized tool list, the whole trajectory (tool
+                            calls + results, PNGs included, cache markers stripped), routing, per-round
+                            usage, the verdict, every scenario (the label is target-before-stop
+                            arithmetic redone from here) — plus a DATA PACK fetched AFTER the read:
+                            raw candle rows for every symbol in scope × every rung of the ladder, the
+                            quotes, a plain chart of the asset on every rung. Fire-and-forget, every
+                            fetch guarded (a bad cell is a null + an `errors` line), never throws back
+                            into the read. userId is HASHED. Two sinks (TALOS_RECORD_SINK): `disk`
+                            → TALOS_RECORD_DIR/<day>/<readId>.json (gitignored — bundles are live
+                            plans); `mongo` → the `talos_reads` collection, for the deployed instance
+                            whose disk does not survive a deploy. scripts/eval/talos-replay/
+                            pull-reads.mjs brings the Mongo ones down into the disk layout
+                            (--db=test from the laptop) and stamps them `pulled`
   dueLoop.js                the wake-up chore every monitor is built on: find what is due, CLAIM it
                             against a lease, check it under a timeout. THE LEASE IS THE SUBTLE PART —
                             withTimeout ABANDONS a slow check but cannot cancel it, so without one the

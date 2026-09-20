@@ -382,6 +382,19 @@ output (46%) and cache writes (43%); tools were the rest. Two things followed, b
   across the whole book, and cheaper as the book grows. The tool-loop breakpoint on `messages` stays
   at 5 minutes, which is also the API's order rule (longer TTL first).
 
+**Every read can be recorded (2026-09-20, `monitoring/talos.recorder.js`).** `TALOS_RECORD_READS=1`
+writes each read to `data/eval/talos-reads/<day>/` as a replayable bundle — the prompt, the tool
+list, the whole trajectory with its chart PNGs, the verdict and usage, and a data pack of raw candles
+for every symbol in scope on every rung, fetched right after the read so a candidate model asking
+for a rung the real read never pulled still gets frozen data. It is the input to the replay eval
+(`docs/design/talos-replay-harness.md`) and changes nothing about the read: fire-and-forget after
+the answer, every fetch guarded, userId hashed, directory gitignored. On the deployed instance the
+disk does not survive a deploy, so `TALOS_RECORD_SINK=mongo` puts the same bundle in the
+`talos_reads` collection and `scripts/eval/talos-replay/pull-reads.mjs --db=test` brings them down
+to the laptop. Off by default; the cost of having it on is the pack — ~10 candle fetches, 5 chart renders and a quote per read, in the
+background — so it is meant for the dev laptop and for capture windows, not as a permanent
+production setting.
+
 **Everything a read spends is on its row.** Two lines were invisible until the same day: the
 structure-vision tools (`get_orderblocks`, `get_false_breaks`) make a second model call on
 `VISION_MODEL`, now booked through the runner's `ctx.onUsage` at the model it ran on; and

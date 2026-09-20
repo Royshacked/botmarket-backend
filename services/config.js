@@ -174,6 +174,17 @@ export const config = {
     // the FMP 429s before, so this is the knob to turn UP if quota bites, not down.
     get guardSweepIntervalMs()    { return _num('GUARD_SWEEP_INTERVAL_MS', 30_000) },
 
+    // ── Talos read recorder (the replay eval's input — monitoring/talos.recorder.js) ──
+    // Opt-in: every Talos read is written to disk as a replayable bundle (prompt, trajectory, verdict,
+    // frozen data pack). Off, the recorder is one boolean check per read and nothing else. The dir
+    // is gitignored (`data/`) — bundles carry users' live trading plans.
+    get talosRecordReads() { return _bool('TALOS_RECORD_READS', 'opt-in') },
+    // `disk` (the default) writes files under talosRecordDir; `mongo` inserts into the `talos_reads`
+    // collection of the app's own database — the sink for the deployed instance, whose disk is
+    // ephemeral. `scripts/eval/talos-replay/pull-reads.mjs` brings those down to the disk layout.
+    get talosRecordSink()  { return _str('TALOS_RECORD_SINK', 'disk') },
+    get talosRecordDir()   { return _str('TALOS_RECORD_DIR', 'data/eval/talos-reads') },
+
     // ── market brief ──
     get marketBriefTtlMs()       { return _num('MARKET_BRIEF_TTL_MS', 45 * 60 * 1000) },
     get marketBriefOfferHourUtc() { return _num('MARKET_BRIEF_OFFER_HOUR_UTC', 12) },

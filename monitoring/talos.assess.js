@@ -11,6 +11,7 @@ import { _thinkingConfig, advanceToolLoopCache, _finalizeServerTools } from '../
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
 import { declaredConditions, pickScenario, scenarioLabel, usableLadder, clampRung, allowedVerdicts } from '../services/setup.schema.js'
 import { config } from '../services/config.js'
+import { isRecording, recordRead } from './talos.recorder.js'
 
 // Talos's read — the model call behind every wake (docs/design/talos-per-candle.md).
 //
@@ -305,7 +306,8 @@ export async function assessSetup(setup, hit, ctx = {}) {
             ..._dataBlocks(setup, g, tf),
         ].filter(Boolean).join('\n\n')
 
-        return _runRead(setup, _PRE_ENTRY, userText)
+        return _runRead(setup, _PRE_ENTRY, userText,
+            { kind: 'pre_entry', reason: ctx.reason, woke: ctx.woke, price: ctx.price, rung: tf, ladder, scenario, zone })
     } catch (err) {
         logger.warn(LOG, `assessment failed for ${setup?.id}:`, err.message)
         return { _failReason: 'io' }
@@ -359,7 +361,8 @@ export async function assessPosition(setup, ps, ctx = {}) {
             ..._dataBlocks(setup, g, tf),
         ].filter(Boolean).join('\n\n')
 
-        return _runRead(setup, _IN_POSITION, userText)
+        return _runRead(setup, _IN_POSITION, userText,
+            { kind: 'in_position', reason: ctx.reason, woke: ctx.woke, price: ctx.price, rung: tf, ladder, scenario, watched })
     } catch (err) {
         logger.warn(LOG, `position assessment failed for ${setup?.id}:`, err.message)
         return { _failReason: 'io' }
@@ -380,8 +383,25 @@ function _armedScenario(setup) {
  * Never throws: a failed read returns a typed marker so the caller can be honest about WHY and
  * reschedule, rather than wedging the loop. `_tools` rides back on the result — the journal row
  * says what the read pulled, and per-wake cost is measured rather than guessed.
+ *
+ * `meta` is what the caller knew about the wake. It is not read here — it rides into the recorder
+ * (TALOS_RECORD_READS) so a replay has the scenario, the price and the rung beside the prompt.
  */
-async function _runRead(setup, systemText, userText) {
+async function _runRead(setup, systemText, userText, meta = {}) {
+    const trace  = { messages: [], usage: [], calls: [], rounds: 0 }
+    const result = await _readLoop(setup, systemText, userText, trace)
+    // Fire-and-forget: the recorder fetches its data pack AFTER the answer is in hand, and its
+    // failure is its own log line. The read is already over by the time it runs.
+    if (isRecording()) {
+        recordRead({ setup, symbols: symbolScope(setup), meta, systemText, userText, trace, result })
+            .catch(err => logger.warn(LOG, `[${setup?.id}] recorder rejected:`, err.message))
+    }
+    return result
+}
+
+/** The body of `_runRead`. `trace` is filled as it goes — what the recorder writes is what happened. */
+async function _readLoop(setup, systemText, userText, trace) {
+    const t0 = Date.now()
     try {
         const { model, reasoningEffort } = await assessRouting(setup.userId)
         // `model` is not optional here: _thinkingConfig floors the models that reason by default to
@@ -398,8 +418,9 @@ async function _runRead(setup, systemText, userText) {
         // Haiku does not take. Same one-model resolution streamAnthropicWithTools does.
         const tools     = _finalizeServerTools(buildToolsFor(setup), model)
         const messages  = [{ role: 'user', content: userText }]
+        Object.assign(trace, { model, reasoningEffort, thinking, maxTokens, tools, messages })
 
-        const calls = []
+        const calls = trace.calls
         const runToolUses = makeAssessToolRunner({
             symbols: symbolScope(setup),
             log: LOG,
@@ -426,6 +447,9 @@ async function _runRead(setup, systemText, userText) {
                 ...(thinking ?? {}),
             })
             bookAssessUsage(setup?.userId, model, msg?.usage, 'talosAssess')
+            trace.usage.push(msg?.usage ?? null)
+            trace.rounds = round + 1
+            trace.stopReason = msg?.stop_reason ?? null
             if (msg.stop_reason !== 'tool_use') break
 
             const results = await runToolUses(msg.content)
@@ -442,9 +466,13 @@ async function _runRead(setup, systemText, userText) {
 
             if (round >= RUNAWAY_ROUNDS) {
                 logger.error(LOG, `[${setup.id}] RUNAWAY: ${round + 1} tool rounds (${calls.join(', ')}) — abandoning the read`)
+                trace.elapsedMs = Date.now() - t0
                 return { _failReason: 'runaway', _tools: calls }
             }
         }
+        // The final reply is not pushed by the loop (nothing follows it) — the record needs it.
+        trace.messages = [...messages, { role: 'assistant', content: msg.content }]
+        trace.elapsedMs = Date.now() - t0
 
         if (calls.length) logger.info(LOG, `[${setup.id}] ${calls.length} tool call(s): ${calls.join(', ')}`)
 
@@ -456,6 +484,8 @@ async function _runRead(setup, systemText, userText) {
             return { _failReason: msg?.stop_reason === 'max_tokens' ? 'truncated' : 'malformed', _tools: calls }
         }
     } catch (err) {
+        trace.elapsedMs = Date.now() - t0
+        trace.error = err.message
         logger.warn(LOG, `assessment failed for ${setup?.id}:`, err.message)
         return { _failReason: 'io' }
     }
