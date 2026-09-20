@@ -21,7 +21,7 @@
 import OpenAI from 'openai'
 import { config } from '../services/config.js'
 import { logger } from '../services/logger.service.js'
-import { createTagSuppressor } from '../services/llmStream.util.js'
+import { createTagSuppressor, TOOL_BUDGET_LANDING } from '../services/llmStream.util.js'
 import { _runTool } from './anthropic.provider.js'
 
 const LOG = '[openaiCompat]'
@@ -271,10 +271,13 @@ export async function streamOpenAICompatWithTools({
     for (let i = 0; i < maxContinuations; i++) {
         if (signal?.aborted) { suppressor.flush(); return '' }
 
+        // The landing round — same rule as the Anthropic loop: tools off, land as text. TOOL_BUDGET_LANDING.
+        const landing = i === maxContinuations - 1
+
         const stream = await client.chat.completions.create({
             model: wire, messages, max_tokens: STREAM_MAX_TOKENS, stream: true,
             stream_options: { include_usage: true },
-            ...(oaTools.length ? { tools: oaTools, tool_choice: 'auto' } : {}),
+            ...(oaTools.length ? { tools: oaTools, tool_choice: landing ? 'none' : 'auto' } : {}),
             // OpenRouter's stand-in for the Anthropic server tool. Billed per result by OpenRouter.
             ...(wantsWeb && endpoint === 'openrouter' ? { plugins: [{ id: 'web', max_results: 5 }] } : {}),
         }, signal ? { signal } : undefined)
@@ -326,6 +329,7 @@ export async function streamOpenAICompatWithTools({
         messages.push({ role: 'assistant', content: text || null, tool_calls: toolCalls })
         const results = await Promise.all(uses.map(u => _runTool(toolHandlers, u, { onUsage })))
         messages.push(...toToolMessages(results))
+        if (i === maxContinuations - 2) messages.push({ role: 'user', content: TOOL_BUDGET_LANDING })
     }
 
     throw new Error(`OpenAI-compat stream tool loop exceeded maxContinuations (${maxContinuations})`)

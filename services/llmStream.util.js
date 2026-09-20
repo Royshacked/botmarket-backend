@@ -9,6 +9,17 @@
 // own `captures` array of tag descriptors ({ open, close, onCapture, keepText });
 // the providers forward it verbatim with no agent-specific tag knowledge.
 
+// ─── The tool loop's landing round ────────────────────────────────────────────
+// Both tool loops cap a turn at N model rounds. Past the cap they used to THROW — and a desk that
+// was still reading on round N+1 lost the whole turn: every tool result, every token already
+// streamed, and the structured block it was about to emit. That cliff was invisible to the model,
+// which cannot count rounds it cannot see, so no prompt could steer it clear of the edge. Now the
+// LAST round runs with tools switched off and this note appended to the final tool results, so
+// the model lands as text with what it has. Shared by both providers (share the pipe): a desk's
+// own prompt says what "as far as built" means for its block; this says only that the round is
+// the last.
+export const TOOL_BUDGET_LANDING = 'The tool budget for this turn is spent — this is your last round, and no further tool call will be honoured. Answer now with what you already have: emit whatever structured block you were building as far as it is built, say plainly what you did not get to check, and say you will continue next turn.'
+
 // ─── Emit-tag registry ────────────────────────────────────────────────────────
 // Every emit tag ANY agent may produce. The tag suppressor must know about all of
 // them so a stray tag from one agent never leaks raw into another agent's chat UI.

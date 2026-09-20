@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { createTagSuppressor } from '../services/llmStream.util.js'
+import { createTagSuppressor, TOOL_BUDGET_LANDING } from '../services/llmStream.util.js'
 import { isToolError, toolErrorText } from '../services/toolResult.util.js'
 import { logger } from '../services/logger.service.js'
 import { config } from '../services/config.js'
@@ -7,7 +7,7 @@ import { webSearchTypeFor } from '../services/llmModels.js'
 
 const LOG = '[anthropic]'
 
-const client = new Anthropic({ apiKey: config.anthropicApiKey })
+const _defaultClient = new Anthropic({ apiKey: config.anthropicApiKey })
 const DEFAULT_MAX_TOKENS = 8192
 // When thinking is on, reasoning tokens count toward max_tokens, so give the
 // model headroom for both the hidden reasoning and the full visible reply.
@@ -103,6 +103,7 @@ export async function streamAnthropicWithTools({
     onUsage,
     reasoningEffort,
     signal,
+    client = _defaultClient,   // the test seam — a scripted client drives the loop without a network
 }) {
     const messages   = _normalizeMessages(promptOrMessages)
     const historyLen = messages.length
@@ -120,11 +121,16 @@ export async function streamAnthropicWithTools({
         // re-paying for them. mutableTail defaults to 1 — this loop compacts.
         advanceToolLoopCache(messages, historyLen)
 
+        // The landing round: tools off, so the turn ends as text instead of at the throw below.
+        // `none` is the one tool_choice extended thinking accepts besides `auto`. See TOOL_BUDGET_LANDING.
+        const landing = i === maxContinuations - 1 && finalTools.length > 0
+
         const stream = client.messages.stream({
             model,
             system:     systemPrompt,
             messages,
             tools:      finalTools,
+            ...(landing ? { tool_choice: { type: 'none' } } : {}),
             max_tokens: reasoning ? THINKING_MAX_TOKENS : DEFAULT_MAX_TOKENS,
             ...(reasoning ?? {}),
         }, signal ? { signal } : undefined)
@@ -210,6 +216,8 @@ export async function streamAnthropicWithTools({
             _compactPriorToolResults(messages)
             messages.push({ role: 'assistant', content: validBlocks })
             const results = await Promise.all(toolUseBlocks.map(b => _runTool(toolHandlers, b, { onUsage })))
+            // The next round is the landing round: tell the model so, next to the results it lands on.
+            if (i === maxContinuations - 2) results.push({ type: 'text', text: TOOL_BUDGET_LANDING })
             messages.push({ role: 'user', content: results })
             continue
         }
@@ -252,7 +260,7 @@ export async function callAnthropicOnce({ model, systemPrompt, user, image = nul
     // the loop does and takes the loop's ceiling when it did, so the reply still fits. (CR on §8:
     // monitor.claude aliases VISION_MODEL to DEFAULT_MODEL, and a default that moves to Sonnet 5
     // would have silently broken every chart verdict.)
-    const msg = await client.messages.create(_oneShotRequest({ model, systemPrompt, content, maxTokens }))
+    const msg = await _defaultClient.messages.create(_oneShotRequest({ model, systemPrompt, content, maxTokens }))
     // The model goes with the usage: a one-shot inside a tool runs on ITS model (the vision read on
     // VISION_MODEL), not the loop's, and the hook must price it at the rate it actually paid.
     onUsage?.(msg.usage, model)
