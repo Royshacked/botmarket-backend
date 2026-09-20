@@ -40,11 +40,14 @@ Behavioral contracts live in [APP_SPEC.md](APP_SPEC.md); file-by-file layout in
 
 - **Runtime:** Node 22, ES modules, Express 4
 - **Data:** MongoDB (native `mongodb` driver, no ODM)
-- **LLM:** Anthropic Claude for every desk — the model is the user's own pick per request, validated
-  by `services/llmModels.js` (`resolveStreamFn`); a user past their spend ceiling is routed to
-  `CHEAP_MODEL` for the turn (`agentUtils.resolveAgentStream`). The routing layer that chose a model
-  per phase was deleted 2026-08-14 — every switch invalidated the prompt cache and never repaid it.
-  OpenAI is Whisper transcription only (`api/transcribe`)
+- **LLM:** Anthropic Claude for every desk (Sonnet 5 default since 2026-09-20) — the model is the
+  user's own pick per request, validated by `services/llmModels.js` (`resolveStreamFn`); a user past
+  their spend ceiling is routed to `CHEAP_MODEL` for the turn (`agentUtils.resolveAgentStream`). The
+  routing layer that chose a model per phase was deleted 2026-08-14 — every switch invalidated the
+  prompt cache and never repaid it. Non-Anthropic CANDIDATES (admin-only, under evaluation) run
+  through `providers/openaiCompat.provider.js` — GPT-5.6 Luna for the desks, and the Talos
+  candidates (`docs/design/talos-replay-harness.md`). OpenAI's own SDK is otherwise Whisper
+  transcription only (`api/transcribe`)
 - **Realtime:** SSE for agent streams; WebSocket for social chat; ProtoOA WebSocket to cTrader
 - **Auth:** JWT in an httpOnly cookie (`requireAuth` middleware)
 

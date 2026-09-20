@@ -4,6 +4,7 @@
 // and tools stay identical.
 
 import { streamAnthropicWithTools } from '../providers/anthropic.provider.js'
+import { streamOpenAICompatWithTools } from '../providers/openaiCompat.provider.js'
 
 // Sonnet 5 since 2026-09-20 (was Sonnet 4.6): $2/$10 against $3/$15, in-family, already in the
 // menu. Its tokenizer counts ~30% more, so the net is ~10-15% — more on output-heavy desks, since
@@ -28,6 +29,16 @@ const MODELS = {
     'claude-sonnet-5':          { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Sonnet 5',  webSearch: WS_NEW },
     'claude-sonnet-4-6':        { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Sonnet 4.6', webSearch: WS_NEW },
     'claude-haiku-4-5-20251001': { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Haiku 4.5', webSearch: WS_OLD },
+    // A CANDIDATE for the desks' base model (2026-09-20), admin-only while under evaluation — the
+    // same pattern as Talos's TALOS_MODELS: the admin picks it in the profile, their own desks run
+    // on it, the ledger's byModel row says what it cost. `streamFn` binds the endpoint and the
+    // wire slug so the loop never learns the registry. No `webSearch`: the provider substitutes
+    // OpenRouter's web plugin when a desk declares the tool. resolveAgentStream routes a non-admin
+    // who somehow requests it to DEFAULT_MODEL.
+    'gpt-5.6-luna': {
+        provider: 'openai-compat', label: 'GPT-5.6 Luna', adminOnly: true, webSearch: null,
+        streamFn: (args) => streamOpenAICompatWithTools({ ...args, endpoint: 'openrouter', wire: 'openai/gpt-5.6-luna' }),
+    },
 }
 
 /**
@@ -43,6 +54,11 @@ export function webSearchTypeFor(model) {
 
 export function isAllowedModel(model) {
     return typeof model === 'string' && Object.prototype.hasOwnProperty.call(MODELS, model)
+}
+
+/** A model only an admin may run a desk on — a candidate under evaluation. */
+export function isAdminOnlyModel(model) {
+    return isAllowedModel(model) && MODELS[model].adminOnly === true
 }
 
 /**

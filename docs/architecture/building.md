@@ -67,12 +67,17 @@ consumes events via `postSSE` + `buildStreamHandlers`.
 
 ## 2. Agent services & models
 
-Every agent resolves its model through `services/llmModels.js` `resolveStreamFn()` — **all
-models are Anthropic Claude**: `claude-opus-4-8`, `claude-sonnet-4-6` (default),
-`claude-haiku-4-5-20251001`. Streaming runs through `providers/anthropic.provider.js`
-`streamAnthropicWithTools`. The model is the user's own pick, read off the request body and
-validated by `resolveStreamFn` (unknown → `DEFAULT_MODEL`); a user past their spend ceiling is
-routed to `CHEAP_MODEL` for the turn (`agentUtils.resolveAgentStream`). There is no per-phase
+Every agent resolves its model through `services/llmModels.js` `resolveStreamFn()` — the
+Anthropic Claude family (`claude-opus-5`, `claude-opus-4-8`, `claude-sonnet-5` — the **default
+since 2026-09-20**, was Sonnet 4.6 — `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`) streaming
+through `providers/anthropic.provider.js` `streamAnthropicWithTools`, plus **one admin-only
+candidate under evaluation**, `gpt-5.6-luna`, streaming through the OpenAI-format twin
+`providers/openaiCompat.provider.js` `streamOpenAICompatWithTools` (OpenRouter; same tag
+suppressor, same tool handlers, `web_search` swapped for OpenRouter's web plugin). A candidate is
+`adminOnly` in `MODELS`; `resolveAgentStream` routes a non-admin who requests one to
+`DEFAULT_MODEL` (one role read, only when a candidate is asked for). The model is the user's own
+pick, read off the request body and validated by `resolveStreamFn` (unknown → `DEFAULT_MODEL`);
+a user past their spend ceiling is routed to `CHEAP_MODEL` for the turn. There is no per-phase
 routing — the layer that switched models mid-conversation was deleted 2026-08-14, because every
 switch invalidated the prompt cache. Reasoning effort is an internal parameter the monitors set,
 never the desks. Usage is recorded via `tokenUsage.service.js`.

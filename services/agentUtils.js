@@ -4,7 +4,8 @@ import { getShortInterest, getOptionsContext } from '../providers/yahoofinance.p
 import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError } from './toolResult.util.js'
 import { logger } from './logger.service.js'
-import { resolveStreamFn, CHEAP_MODEL } from './llmModels.js'
+import { resolveStreamFn, CHEAP_MODEL, DEFAULT_MODEL, isAdminOnlyModel } from './llmModels.js'
+import { isAdminUser } from '../api/user/user.model.js'
 import { recordUsage, recordTurn, userCeiling, overCeiling, chatSpend } from './tokenUsage.service.js'
 
 const LOG = '[agentUtils]'
@@ -34,9 +35,17 @@ const LOG = '[agentUtils]'
  * `_recordTurn` / `_ceiling` are injectable for the same reason `_resolve`/`_run` are elsewhere:
  * these are the IO here, and the tests that drive this seam must not need a database.
  */
-export async function resolveAgentStream(requestedModel, userId, agent, _recordTurn = recordTurn, _ceiling = userCeiling, _record = recordUsage) {
+export async function resolveAgentStream(requestedModel, userId, agent, _recordTurn = recordTurn, _ceiling = userCeiling, _record = recordUsage, _isAdmin = isAdminUser) {
     let requested = requestedModel
     let degraded  = false
+
+    // A candidate model (llmModels `adminOnly`) is honoured for an admin only. The client sends
+    // whatever its localStorage holds, so the gate is here, and it costs a read only when a
+    // candidate is actually asked for. Unreadable → not admin → the default, never the candidate.
+    if (isAdminOnlyModel(requested) && !(await _isAdmin(userId).catch(() => false))) {
+        logger.info('[agentUtils]', `admin-only model ${requested} requested by a non-admin — routing to ${DEFAULT_MODEL}`)
+        requested = DEFAULT_MODEL
+    }
 
     if (userId) {
         // The turn counter was always being written; it now returns the month's spend, so the check

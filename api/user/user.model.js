@@ -98,6 +98,14 @@ export async function listAdminUserIds() {
     return rows.map(r => r?.id).filter(Boolean).map(String)
 }
 
+/** Is this one user an admin — the same `role ?? isAdmin` rule as listAdminUserIds, for one id. */
+export async function isAdminUser(id) {
+    if (!id) return false
+    const db  = await getDb()
+    const doc = await db.collection(COLLECTION).findOne({ id: String(id) }, { projection: { role: 1, isAdmin: 1, _id: 0 } })
+    return !!doc && (doc.role === 'admin' || (doc.role == null && doc.isAdmin === true))
+}
+
 export function stripUser(doc) {
     if (!doc) return doc
     // pushSubscriptions carries the devices' encryption keys — it leaves only through /api/push.

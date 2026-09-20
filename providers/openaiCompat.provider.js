@@ -21,6 +21,8 @@
 import OpenAI from 'openai'
 import { config } from '../services/config.js'
 import { logger } from '../services/logger.service.js'
+import { createTagSuppressor } from '../services/llmStream.util.js'
+import { _runTool } from './anthropic.provider.js'
 
 const LOG = '[openaiCompat]'
 
@@ -188,4 +190,143 @@ export async function runOpenAICompatRead({
             return { runaway: true }
         }
     }
+}
+
+// ─── The desks' streaming loop ─────────────────────────────────────────────────
+// The streaming twin of streamAnthropicWithTools, same signature, for a chat desk on a non-Anthropic
+// candidate (llmModels MODELS, provider 'openai-compat'). Same tag suppressor (services/llmStream.util
+// — it was written provider-agnostic for exactly this), same _runTool and handler contract, same
+// onToken / onToolStart / onReasoning / onUsage hooks. Translated here: the system blocks, the
+// history, the streamed tool-call deltas, the tool results (images follow as a user message), the
+// usage. `web_search` becomes OpenRouter's web plugin when the endpoint is OpenRouter and the desk
+// declared the tool; elsewhere it is simply absent.
+
+/** Anthropic system blocks (or a string) → one system string. Cache markers are Anthropic's. */
+export function toSystemText(systemPrompt) {
+    if (typeof systemPrompt === 'string') return systemPrompt
+    return (systemPrompt ?? []).filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text).join('\n\n')
+}
+
+/** Anthropic-shaped history (string content, or text/image blocks) → OpenAI messages. Pure. */
+export function toOpenAIMessages(promptOrMessages) {
+    if (typeof promptOrMessages === 'string') return [{ role: 'user', content: promptOrMessages }]
+    return (promptOrMessages ?? []).map(m => {
+        if (typeof m.content === 'string') return { role: m.role, content: m.content }
+        const parts = (m.content ?? []).map(b => {
+            if (b?.type === 'text')  return { type: 'text', text: b.text }
+            if (b?.type === 'image' && b.source?.type === 'base64') {
+                return { type: 'image_url', image_url: { url: `data:${b.source.media_type || 'image/png'};base64,${b.source.data}` } }
+            }
+            return null
+        }).filter(Boolean)
+        // An assistant turn is text only in OpenAI's format; a user turn may carry parts.
+        return m.role === 'assistant'
+            ? { role: 'assistant', content: parts.filter(p => p.type === 'text').map(p => p.text).join('\n') }
+            : { role: m.role, content: parts }
+    })
+}
+
+/**
+ * Fold one streamed chunk's tool-call deltas into the accumulator (index → {id, name, args}).
+ * OpenAI streams a call's `id` and `name` on its first delta and the `arguments` string in pieces.
+ * Mutates; exported for tests.
+ */
+export function foldToolCallDeltas(acc, deltas) {
+    for (const d of deltas ?? []) {
+        const i = d.index ?? 0
+        const cur = acc[i] ?? (acc[i] = { id: null, name: null, args: '' })
+        if (d.id) cur.id = d.id
+        if (d.function?.name) cur.name = (cur.name ?? '') + d.function.name
+        if (d.function?.arguments) cur.args += d.function.arguments
+    }
+    return acc
+}
+
+/** The accumulator → the assistant message's `tool_calls` and the runner's `tool_use` blocks. */
+export function finishToolCalls(acc) {
+    const calls = Object.values(acc).filter(c => c.id && c.name)
+    const toolCalls = calls.map(c => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args || '{}' } }))
+    return { toolCalls, uses: toToolUses({ tool_calls: toolCalls }) }
+}
+
+const STREAM_MAX_TOKENS = 16_000
+
+/**
+ * @param {object} p  streamAnthropicWithTools's parameters, plus `endpoint` + `wire` (bound by the
+ *                    MODELS entry) and `client` (tests). `model` is the registry id, for the ledger.
+ * @returns {Promise<string>} the reply's visible text, emit tags suppressed
+ */
+export async function streamOpenAICompatWithTools({
+    endpoint = 'openrouter', wire, model,
+    promptOrMessages, systemPrompt, tools = [], toolHandlers = {}, maxContinuations = 10,
+    onToken, tagCaptures = [], onToolStart, onReasoning, onUsage, signal, client = null,
+}) {
+    client ??= _clientFor(endpoint)
+    if (!wire) throw new Error('streamOpenAICompatWithTools: wire is required — llmModels binds it')
+    const suppressor = createTagSuppressor({ onToken, captures: tagCaptures })
+    const oaTools    = toOpenAITools(tools)
+    const wantsWeb   = (tools ?? []).some(t => typeof t?.type === 'string' && t.type.startsWith('web_search'))
+    const messages   = [{ role: 'system', content: toSystemText(systemPrompt) }, ...toOpenAIMessages(promptOrMessages)]
+
+    for (let i = 0; i < maxContinuations; i++) {
+        if (signal?.aborted) { suppressor.flush(); return '' }
+
+        const stream = await client.chat.completions.create({
+            model: wire, messages, max_tokens: STREAM_MAX_TOKENS, stream: true,
+            stream_options: { include_usage: true },
+            ...(oaTools.length ? { tools: oaTools, tool_choice: 'auto' } : {}),
+            // OpenRouter's stand-in for the Anthropic server tool. Billed per result by OpenRouter.
+            ...(wantsWeb && endpoint === 'openrouter' ? { plugins: [{ id: 'web', max_results: 5 }] } : {}),
+        }, signal ? { signal } : undefined)
+
+        let text   = ''
+        let finish = null
+        let usage  = null
+        let served = null
+        const acc  = {}
+        const announced = new Set()
+        try {
+            for await (const chunk of stream) {
+                served ??= chunk.model ?? null
+                if (chunk.usage) usage = chunk.usage
+                const choice = chunk.choices?.[0]
+                if (!choice) continue
+                const d = choice.delta ?? {}
+                if (typeof d.content === 'string' && d.content) { text += d.content; suppressor.push(d.content) }
+                // OpenRouter normalises reasoning onto `reasoning`; some vendors spell it reasoning_content.
+                const r = d.reasoning ?? d.reasoning_content
+                if (typeof r === 'string' && r) onReasoning?.(r)
+                if (d.tool_calls?.length) {
+                    foldToolCallDeltas(acc, d.tool_calls)
+                    for (const c of d.tool_calls) {
+                        const idx  = c.index ?? 0
+                        const name = acc[idx]?.name
+                        if (name && !announced.has(idx)) { announced.add(idx); onToolStart?.(name) }
+                    }
+                }
+                if (choice.finish_reason) finish = choice.finish_reason
+            }
+        } catch (err) {
+            if (signal?.aborted || err?.name === 'AbortError') { suppressor.flush(); return text }
+            throw err
+        }
+
+        if (!servedModelMatches(served, wire)) throw new Error(`provider served "${served}" for "${wire}"`)
+        if (usage) onUsage?.(toAnthropicUsage(usage), model)
+
+        const { toolCalls, uses } = finishToolCalls(acc)
+        const stopReason = toStopReason(finish, uses.length > 0)
+
+        if (stopReason !== 'tool_use') {
+            if (stopReason === 'max_tokens') logger.warn(LOG, `reply cut by max_tokens on ${wire} after ${text.length} chars`)
+            suppressor.flush()
+            return text
+        }
+
+        messages.push({ role: 'assistant', content: text || null, tool_calls: toolCalls })
+        const results = await Promise.all(uses.map(u => _runTool(toolHandlers, u, { onUsage })))
+        messages.push(...toToolMessages(results))
+    }
+
+    throw new Error(`OpenAI-compat stream tool loop exceeded maxContinuations (${maxContinuations})`)
 }

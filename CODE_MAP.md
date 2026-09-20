@@ -271,6 +271,10 @@ services/
                             feeds; pure LLM-ready formatters (edge classified above/below/thin vs Street). (P2)
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue.
+                          resolveAgentStream: the model for a turn — the spend ceiling → CHEAP_MODEL,
+                          and (2026-09-20) an `adminOnly` candidate in llmModels MODELS → DEFAULT_MODEL
+                          unless the user is an admin (user.model.isAdminUser; read only when a
+                          candidate is asked for). DEFAULT_MODEL is Sonnet 5 since 2026-09-20.
                           formatMoney is UNGROUPED on purpose: `$94,500` read the other way round is
                           `94.500`, and the desks came back with 94.5 — money an agent READS carries
                           no thousands separator (toFixed never groups; toLocaleString does)
@@ -626,7 +630,12 @@ providers/
                                 Anthropic server tool), no cache markers, vendor-default thinking.
                                 Asserts response.model — a substituted model is an io failure, never
                                 a wrong candidate scored as the right one. Ships as the adapter if a
-                                candidate wins; until then admin-only via the profile's Monitors card
+                                candidate wins; until then admin-only via the profile's Monitors card.
+                                ALSO the desks' streaming twin, streamOpenAICompatWithTools — same
+                                signature as streamAnthropicWithTools (tag suppressor, _runTool,
+                                onToken/onToolStart/onReasoning/onUsage), tool-call deltas folded by
+                                index, web_search → OpenRouter's web plugin. Bound per MODELS entry
+                                (llmModels `gpt-5.6-luna`, adminOnly) with its endpoint + wire slug
   yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / usaspending
                             EVERY JSON call rides services/http.util.getJson — timeout per attempt, the
                             request meter, typed err.status + err.body, a jittered retry on 429/5xx.
