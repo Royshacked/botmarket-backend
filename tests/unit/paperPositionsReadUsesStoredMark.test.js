@@ -69,11 +69,13 @@ test('a mark with no timestamp is not trusted', async () => {
     assert.deepEqual(calls, ['NVDA'])
 })
 
-test('the default window is a few mark intervals, not forever', async () => {
+test('the default window outlasts the slowest sweep, and is not forever', async () => {
     const { config } = await import('../../services/config.js')
     const { calls, fetch } = fetcher()
-    const justInside = config.paperMarkIntervalMs * 5 - 1
-    const justPast   = config.paperMarkIntervalMs * 5 + 1
+    // Longer than a minute (the off-session sweep), so a live leader is never second-guessed.
+    assert.ok(config.paperMarkFreshMs > config.paperMarkClosedIntervalMs)
+    const justInside = config.paperMarkFreshMs - 1
+    const justPast   = config.paperMarkFreshMs + 1
     await adapter._priceMap([pos('A', { currentPrice: 1, markedAt: NOW - justInside })], { now: NOW, fetch })
     await adapter._priceMap([pos('B', { currentPrice: 1, markedAt: NOW - justPast })], { now: NOW, fetch })
     assert.deepEqual(calls, ['B'])

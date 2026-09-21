@@ -44,10 +44,12 @@ import { httpError }          from '../../../services/httpError.util.js'
 // plan's quota, and the reason candles for a chart came back 429 and the chart fell back to
 // chart-img. A mark a few seconds old is exactly the price this read would have bought.
 //
-// Five intervals, not one: a follower process cannot see the leader's tick, a leader mid-tick has
-// marks up to one interval old by construction, and a leader that has just died should age past
-// this and let the read start pricing again — which is what it always did, and now only then.
-const MARK_FRESH_MS = config.paperMarkIntervalMs * 5
+// Longer than the mark loop's SLOWEST sweep (it is paced by a quote budget and sweeps once a minute
+// off-session — see paperMark.service), so a live leader is never second-guessed by a read; short
+// enough that a dead one ages out and the read starts pricing again — which is what it always did,
+// and now only then. It was five tick intervals (15s) when the loop swept every tick; a read
+// against a 22s sweep would have re-bought all 45 symbols every 5s, the storm this exists to stop.
+const MARK_FRESH_MS = config.paperMarkFreshMs
 
 export class VirtualAdapter extends BrokerAdapter {
 

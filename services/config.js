@@ -167,6 +167,18 @@ export const config = {
     // ── paper venue ──
     get paperFillIntervalMs()     { return _num('PAPER_FILL_INTERVAL_MS', 3_000) },
     get paperMarkIntervalMs()     { return _num('PAPER_MARK_INTERVAL_MS', 3_000) },
+    // THE MARK LOOP IS PACED BY A QUOTE BUDGET, not by its interval alone. At 3s over 45 held symbols
+    // it spent ~900 quotes a minute — before the open, all weekend — against a plan that allows a
+    // few hundred, and the 429s it caused starved every other FMP read in the app (2026-09-21: a
+    // Prometheus sizing came back "no forward revenue" while the marker ran). The sweep now waits
+    // until symbols ÷ budget minutes have passed (45 symbols at 120/min → one mark every ~22s), and
+    // outside the US session it sweeps once a minute — crypto and forex still move, equities do not.
+    // `paperMarkFreshMs` is how old a stored mark may be before a positions READ re-prices the symbol
+    // itself: longer than the slowest sweep, so a live leader is never second-guessed, and short
+    // enough that a dead one ages out.
+    get paperMarkQuoteBudgetPerMin() { return Math.max(1, _num('PAPER_MARK_QUOTE_BUDGET_PER_MIN', 120)) },
+    get paperMarkClosedIntervalMs()  { return _num('PAPER_MARK_CLOSED_INTERVAL_MS', 60_000) },
+    get paperMarkFreshMs()           { return _num('PAPER_MARK_FRESH_MS', 120_000) },
     get paperEquitySnapshotMs()   { return _num('PAPER_EQUITY_SNAPSHOT_MS', 300_000) },
     get paperQuoteTtlMs()         { return _num('PAPER_QUOTE_TTL_MS', 5_000) },
 

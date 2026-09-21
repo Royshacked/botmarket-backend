@@ -105,13 +105,20 @@ empty for equities, so `/quote` is the only real-time price this venue has — w
 transient error must never poison the suppression cache. A fill booked off a stale price reports its
 `source`, so it never looks identical to one booked off the live quote.
 
-**Mark-to-market** (`paperMark.service`, every 3s): the venue has no push feed, so P&L only moves
-when something re-prices the open positions. One fetch per distinct symbol across every user's open
-positions, stamped as `currentPrice` / `pnl` / `markedAt`. The mark loop is the **single writer** of
-the mark, and `computeEquity` reads it rather than fetching — the client polls `getAccount`, and
-fetching there cost ~40–55 of a ~130 req/min budget re-buying what the loop had written down.
-Equity is at most one interval stale, the right trade for a readout and the wrong one for pricing an
-order, so booking a fill still goes live.
+**Mark-to-market** (`paperMark.service`, a 3s tick **paced by a quote budget**, 2026-09-21): the
+venue has no push feed, so P&L only moves when something re-prices the open positions. One fetch per
+distinct symbol across every user's open positions, stamped as `currentPrice` / `pnl` / `markedAt`.
+The SWEEP waits its turn: symbols ÷ `PAPER_MARK_QUOTE_BUDGET_PER_MIN` (120) minutes since the last
+one — 45 held symbols mark every ~22s — and once a minute outside the US session
+(`PAPER_MARK_CLOSED_INTERVAL_MS`). It used to sweep every tick: ~900 quotes a minute around the clock
+against a plan allowing a few hundred, and the 429s it produced starved every other FMP read in the
+app. The fill loop keeps its 3s — it prices only symbols with a pending order. The mark loop is the
+**single writer** of the mark, and `computeEquity` reads it rather than fetching — the client polls
+`getAccount`, and fetching there cost ~40–55 of a ~130 req/min budget re-buying what the loop had
+written down. A positions read re-prices a symbol itself only when its stored mark is older than
+`PAPER_MARK_FRESH_MS` (2 min — longer than the slowest sweep, so a live leader is never
+second-guessed; short enough that a dead one ages out). Equity is at most one sweep stale, the right
+trade for a readout and the wrong one for pricing an order, so booking a fill still goes live.
 
 **The equity curve** (`paperEquity.service`, every 5 min): one point per account that holds an open
 position (`listActiveAccounts`). A flat account's equity is constant — the last realized point — so
