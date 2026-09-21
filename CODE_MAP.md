@@ -653,7 +653,8 @@ providers/
                                 signature as streamAnthropicWithTools (tag suppressor, _runTool,
                                 onToken/onToolStart/onReasoning/onUsage), tool-call deltas folded by
                                 index, web_search → OpenRouter's web plugin. Bound per MODELS entry
-                                (llmModels _candidate: Luna, Qwen3.7-Plus, Mistral Medium 3.5 —
+                                (llmModels _candidate: Luna, Qwen3.7-Plus, Mistral Medium 3.5, and since 2026-09-21
+                                Qwen3.7 Flash, DeepSeek V4.1 Flash, Gemini 3.8 Flash —
                                 adminOnly) with its endpoint + wire slug
   yahoofinance / massive / finnhub / fmp / fred / sec / gnews / binance / usaspending
                             EVERY JSON call rides services/http.util.getJson — timeout per attempt, the
@@ -755,7 +756,8 @@ monitoring/
                             WHICH MODEL: assessRouting (assess.shared) reads the user document once —
                             `preferences.hermesModel` against TALOS_MODELS, the monitors' OWN registry
                             (not llmModels' chat MODELS): Sonnet 4.6 default; Sonnet 5, GPT-5.6 Luna,
-                            Mistral Medium 3.5, Qwen3.7-Plus are `adminOnly` CANDIDATES (a non-admin doc
+                            Mistral Medium 3.5, Qwen3.7-Plus, Qwen3.7 Flash, DeepSeek V4.1 Flash, Gemini 3.8 Flash
+                            are `adminOnly` CANDIDATES (a non-admin doc
                             carrying one is routed to the default — the preference is a client-owned
                             snapshot anyone can PUT). _readLoop branches once on `provider`: anthropic
                             → the loop here; openai-compat → providers/openaiCompat.provider.js. The

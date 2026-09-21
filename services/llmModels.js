@@ -41,6 +41,14 @@ const MODELS = {
     ..._candidate('gpt-5.6-luna',       'GPT-5.6 Luna',       'openrouter', 'openai/gpt-5.6-luna'),
     ..._candidate('qwen3.7-plus',       'Qwen3.7-Plus',       'openrouter', 'qwen/qwen3.7-plus'),
     ..._candidate('mistral-medium-3.5', 'Mistral Medium 3.5', 'openrouter', 'mistralai/mistral-medium-3-5'),
+    // Added 2026-09-21 off OpenRouter's live list, priced on Mentor's real round shape against
+    // Sonnet 5 (~$0.024/round): Qwen3.7 Flash ~65× under (the bracket below Luna — is anything
+    // there still good?), DeepSeek V4.1 Flash ~9× (the CONCRETE id: `deepseek-flash-latest` is a
+    // floating alias whose served id would fail the loop's model assertion), Gemini 3.8 Flash ~3×
+    // (the step UP from Luna that stays under Sonnet money). All three: tools + vision on the card.
+    ..._candidate('qwen3.7-flash',      'Qwen3.7 Flash',      'openrouter', 'qwen/qwen3.7-flash'),
+    ..._candidate('deepseek-v4.1-flash', 'DeepSeek V4.1 Flash', 'openrouter', 'deepseek/deepseek-v4.1-flash'),
+    ..._candidate('gemini-3.8-flash',   'Gemini 3.8 Flash',   'openrouter', 'google/gemini-3.8-flash'),
 }
 
 function _candidate(id, label, endpoint, wire) {

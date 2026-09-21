@@ -368,8 +368,9 @@ model.
 
 **Which model reads (2026-09-20).** `assessRouting` resolves `preferences.hermesModel` against
 `TALOS_MODELS` (`assess.shared.js`) — the monitors' own registry, apart from the chat desks'. Sonnet
-4.6 is the default for everyone. Four **candidates** are `adminOnly`: Sonnet 5, GPT-5.6 Luna,
-Mistral Medium 3.5, Qwen3.7-Plus — chosen from the admin's profile (the *Monitors* card under AI
+4.6 is the default for everyone. Seven **candidates** are `adminOnly`: Sonnet 5, GPT-5.6 Luna,
+Mistral Medium 3.5, Qwen3.7-Plus, and since 2026-09-21 Qwen3.7 Flash, DeepSeek V4.1 Flash and
+Gemini 3.8 Flash — chosen from the admin's profile (the *Monitors* card under AI
 Preferences, admin-only) so the admin's own setups are read on one of them from their next wake,
 with every journal row and the last-assessment record naming the model that made it. That is the
 live comparison the replay harness (`docs/design/talos-replay-harness.md`) was going to stage

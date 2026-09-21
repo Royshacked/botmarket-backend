@@ -49,6 +49,12 @@ export const TALOS_MODELS = Object.freeze({
     // share this slug); same price, vision confirmed on the OpenRouter card.
     'mistral-medium-3.5':        { label: 'Mistral Medium 3.5', provider: 'openai-compat', endpoint: 'openrouter', wire: 'mistralai/mistral-medium-3-5', adminOnly: true },
     'qwen3.7-plus':              { label: 'Qwen3.7-Plus',      provider: 'openai-compat', endpoint: 'openrouter', wire: 'qwen/qwen3.7-plus',   adminOnly: true },
+    // 2026-09-21, the same three added to the chat registry (llmModels — the reasons are there).
+    // For a read the open question is the clock as much as the verdict: Qwen3.7-Plus blew
+    // CHECK_TIMEOUT_MS on thinking rounds, and these are the faster tiers.
+    'qwen3.7-flash':             { label: 'Qwen3.7 Flash',     provider: 'openai-compat', endpoint: 'openrouter', wire: 'qwen/qwen3.7-flash',  adminOnly: true },
+    'deepseek-v4.1-flash':       { label: 'DeepSeek V4.1 Flash', provider: 'openai-compat', endpoint: 'openrouter', wire: 'deepseek/deepseek-v4.1-flash', adminOnly: true },
+    'gemini-3.8-flash':          { label: 'Gemini 3.8 Flash',  provider: 'openai-compat', endpoint: 'openrouter', wire: 'google/gemini-3.8-flash', adminOnly: true },
 })
 export const ALLOWED_MODELS  = new Set(Object.keys(TALOS_MODELS))
 

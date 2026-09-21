@@ -70,8 +70,9 @@ consumes events via `postSSE` + `buildStreamHandlers`.
 Every agent resolves its model through `services/llmModels.js` `resolveStreamFn()` — the
 Anthropic Claude family (`claude-opus-5`, `claude-opus-4-8`, `claude-sonnet-5` — the **default
 since 2026-09-20**, was Sonnet 4.6 — `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`) streaming
-through `providers/anthropic.provider.js` `streamAnthropicWithTools`, plus **three admin-only
-candidates under evaluation** — `gpt-5.6-luna`, `qwen3.7-plus`, `mistral-medium-3.5`, all on
+through `providers/anthropic.provider.js` `streamAnthropicWithTools`, plus **six admin-only
+candidates under evaluation** — `gpt-5.6-luna`, `qwen3.7-plus`, `mistral-medium-3.5`, and since
+2026-09-21 `qwen3.7-flash`, `deepseek-v4.1-flash`, `gemini-3.8-flash`, all on
 OpenRouter — streaming through the OpenAI-format twin `providers/openaiCompat.provider.js`
 `streamOpenAICompatWithTools` (same tag suppressor, same tool handlers; `web_search` swapped for
 OpenRouter's web plugin). Mistral rode Mistral's own API until 2026-09-20, where the plugin does

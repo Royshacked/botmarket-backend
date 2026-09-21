@@ -27,6 +27,20 @@ test('every selectable model is in the provider registry', () => {
     }
 })
 
+// The admin-only candidates (llmModels _candidate), mirrored the same way. Their rows carry no
+// cache rates on purpose (the vendor's cached share stays inside prompt_tokens), so the pin here
+// is plain input — a missing row would still bill at DEFAULT_PRICING, which is Sonnet money.
+const CANDIDATES = ['gpt-5.6-luna', 'qwen3.7-plus', 'mistral-medium-3.5', 'qwen3.7-flash', 'deepseek-v4.1-flash', 'gemini-3.8-flash']
+
+test('every candidate is in the registry and priced under Sonnet 5 on input', () => {
+    const sonnet = calcCost(SONNET_5, { input_tokens: 1_000_000 })
+    for (const model of CANDIDATES) {
+        assert.ok(isAllowedModel(model), `${model} would silently downgrade to the default`)
+        const cost = calcCost(model, { input_tokens: 1_000_000 })
+        assert.ok(cost > 0 && cost < sonnet, `${model} has no PRICING row of its own (${cost})`)
+    }
+})
+
 test('every selectable model has its own PRICING row', () => {
     // Probed via a CACHE READ, not plain input: DEFAULT_PRICING carries input/output but no
     // cache rates, so `p.cacheRead ?? 0` makes an unpriced model bill cache reads at ZERO while

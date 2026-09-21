@@ -27,6 +27,10 @@ const PRICING = {
     'gpt-5.6-luna':             { input: 0.20,  output: 1.20  },   // the three are desk candidates too (llmModels)
     'mistral-medium-3.5':       { input: 1.50,  output: 7.50  },
     'qwen3.7-plus':             { input: 0.32,  output: 1.28  },
+    // 2026-09-21 additions, same source (OpenRouter /models, read live that day).
+    'qwen3.7-flash':            { input: 0.03,  output: 0.13  },
+    'deepseek-v4.1-flash':      { input: 0.30,  output: 1.20  },
+    'gemini-3.8-flash':         { input: 0.75,  output: 3.75  },   // Google doubles it 2027-01-01
 }
 const DEFAULT_PRICING = { input: 3.00, output: 15.00 }
 
