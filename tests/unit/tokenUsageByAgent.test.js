@@ -22,6 +22,11 @@ import { calcCost, ceilingFor, overCeiling, chatSpend, searchesIn, WEB_SEARCH_US
 import { resolveAgentStream } from '../../services/agentUtils.js'
 import { bookAssessUsage } from '../../monitoring/assess.shared.js'
 
+// The seam's role and house reads (houseModels.service, 2026-09-21): these tests are about the
+// ceiling, so the caller is an admin — the one whose REQUESTED model is honoured — with no house.
+const ADMIN    = async () => true
+const NO_HOUSE = async () => ({ chatModel: null })
+
 // ─── the log tag → field key ──────────────────────────────────────────────────
 
 test('an ordinary agent tag becomes its bare name', () => {
@@ -94,7 +99,7 @@ test('a user turn is booked exactly once, however many tool rounds follow', asyn
     // `turns`, the ratio would be a constant 1, and the measurement would silently say nothing.
     const calls = []
     const { onUsage } = await resolveAgentStream(undefined, 'u1', 'analystAgent',
-        async (...a) => { calls.push(a); return null }, async () => null)
+        async (...a) => { calls.push(a); return null }, async () => null, undefined, ADMIN, NO_HOUSE)
 
     onUsage?.({ input_tokens: 10 })   // tool round 1
     onUsage?.({ input_tokens: 10 })   // tool round 2
@@ -110,7 +115,7 @@ test('an anonymous run books no turn, and is never degraded', async () => {
     // and there is no account whose ceiling it could be measured against.
     const calls = []
     const { onUsage, degraded } = await resolveAgentStream(undefined, null, 'analystAgent',
-        async (...a) => { calls.push(a); return null }, async () => 0.01)
+        async (...a) => { calls.push(a); return null }, async () => 0.01, undefined, ADMIN, NO_HOUSE)
     assert.equal(degraded, false, 'no user, no ceiling, no degrade')
 
     assert.equal(calls.length, 0)
@@ -122,7 +127,7 @@ test('a failed turn write never reaches the caller', async () => {
     // an unreadable ceiling must read as "no ceiling" rather than as a degrade.
     const out = await resolveAgentStream(undefined, 'u1', 'analystAgent',
         async () => { throw new Error('mongo down') },
-        async () => { throw new Error('mongo down') })
+        async () => { throw new Error('mongo down') }, undefined, ADMIN, NO_HOUSE)
     assert.ok(out.streamFn, 'the turn still runs')
     assert.equal(out.degraded, false, 'a failed read never degrades the user')
 })
@@ -184,7 +189,7 @@ test('past the ceiling the turn runs on the cheap model instead of failing', () 
     // End to end through the seam: the same call that books the turn reads the month's spend back,
     // so the check costs no extra round trip.
     return resolveAgentStream('claude-opus-5', 'u1', 'kairosAgent',
-        async () => ({ totalCost: 25 }), async () => 20,
+        async () => ({ totalCost: 25 }), async () => 20, undefined, ADMIN, NO_HOUSE,
     ).then(out => {
         assert.equal(out.degraded, true)
         assert.equal(out.model, 'claude-haiku-4-5-20251001', 'routed to the cheap model')
@@ -194,14 +199,14 @@ test('past the ceiling the turn runs on the cheap model instead of failing', () 
 
 test('under the ceiling the requested model is honoured untouched', async () => {
     const out = await resolveAgentStream('claude-opus-5', 'u1', 'kairosAgent',
-        async () => ({ totalCost: 4 }), async () => 20)
+        async () => ({ totalCost: 4 }), async () => 20, undefined, ADMIN, NO_HOUSE)
     assert.equal(out.degraded, false)
     assert.equal(out.model, 'claude-opus-5')
 })
 
 test('an exempt account keeps its model however much it has spent', async () => {
     const out = await resolveAgentStream('claude-opus-5', 'u1', 'kairosAgent',
-        async () => ({ totalCost: 9999 }), async () => null)   // null ceiling = exempt/unset
+        async () => ({ totalCost: 9999 }), async () => null, undefined, ADMIN, NO_HOUSE)   // null ceiling = exempt/unset
     assert.equal(out.degraded, false)
     assert.equal(out.model, 'claude-opus-5')
 })
@@ -336,7 +341,7 @@ test('the desk hook books at the model the provider names, and at the turn’s m
     // Sonnet read at Opus rates on an Opus thread — or the reverse.
     const booked = []
     const { onUsage, model } = await resolveAgentStream('claude-opus-5', 'u1', 'analystAgent',
-        async () => null, async () => null, async (...a) => { booked.push(a) })
+        async () => null, async () => null, async (...a) => { booked.push(a) }, ADMIN, NO_HOUSE)
 
     onUsage({ input_tokens: 10 })                          // the loop's own turn
     onUsage({ input_tokens: 10 }, 'claude-sonnet-4-6')     // a tool's vision read

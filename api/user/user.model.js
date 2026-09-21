@@ -106,6 +106,24 @@ export async function isAdminUser(id) {
     return !!doc && (doc.role === 'admin' || (doc.role == null && doc.isAdmin === true))
 }
 
+// The same answer, remembered for a few minutes. Since the house models (2026-09-21) every desk
+// turn asks it — an admin runs their own pick, anyone else the house's — and a findOne per turn
+// for a fact that changes when an account is promoted is a read the turn does not need. A
+// promotion shows up within the TTL; the throw-through on a failed read is the caller's to catch,
+// exactly as with the uncached one, and a failure is not remembered.
+const ADMIN_TTL_MS = 5 * 60 * 1000
+const _adminCache  = new Map() // id → { value, at }
+export async function isAdminUserCached(id, _lookup = isAdminUser) {
+    if (!id) return false
+    const key = String(id)
+    const hit = _adminCache.get(key)
+    if (hit && Date.now() - hit.at < ADMIN_TTL_MS) return hit.value
+    const value = await _lookup(key)
+    _adminCache.set(key, { value, at: Date.now() })
+    return value
+}
+export function _resetAdminCache() { _adminCache.clear() }
+
 export function stripUser(doc) {
     if (!doc) return doc
     // pushSubscriptions carries the devices' encryption keys — it leaves only through /api/push.

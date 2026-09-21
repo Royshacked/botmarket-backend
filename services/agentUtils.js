@@ -4,9 +4,10 @@ import { getShortInterest, getOptionsContext } from '../providers/yahoofinance.p
 import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError } from './toolResult.util.js'
 import { logger } from './logger.service.js'
-import { resolveStreamFn, CHEAP_MODEL, DEFAULT_MODEL, isAdminOnlyModel } from './llmModels.js'
-import { isAdminUser } from '../api/user/user.model.js'
-import { recordUsage, recordTurn, userCeiling, overCeiling, chatSpend } from './tokenUsage.service.js'
+import { resolveStreamFn, CHEAP_MODEL, DEFAULT_MODEL } from './llmModels.js'
+import { isAdminUserCached } from '../api/user/user.model.js'
+import { recordUsage, recordTurn, userCeiling, overCeiling, chatSpend, calcCost } from './tokenUsage.service.js'
+import { getHouseModels } from './houseModels.service.js'
 
 const LOG = '[agentUtils]'
 
@@ -32,20 +33,24 @@ const LOG = '[agentUtils]'
  * spending nothing extra on chat. `chatSpend` subtracts it. The spend is still counted in every
  * report — it is the user's money — it just cannot degrade their conversation.
  *
+ * WHOSE PICK THE MODEL IS (2026-09-21, houseModels.service): an admin's turn runs on the model
+ * their client sent — their own selector, candidates included. Anyone else's runs on the HOUSE
+ * chat model, and what their client sent is not read at all: a non-admin has no selector, and a
+ * value left in localStorage from when they had one must not keep choosing for them. A turn with
+ * no user (the market brief, the coverage re-model) is the house's too. The `adminOnly` gate on
+ * the registry is therefore about REQUESTS, and only an admin's reach it.
+ *
  * `_recordTurn` / `_ceiling` are injectable for the same reason `_resolve`/`_run` are elsewhere:
  * these are the IO here, and the tests that drive this seam must not need a database.
  */
-export async function resolveAgentStream(requestedModel, userId, agent, _recordTurn = recordTurn, _ceiling = userCeiling, _record = recordUsage, _isAdmin = isAdminUser) {
-    let requested = requestedModel
+export async function resolveAgentStream(requestedModel, userId, agent, _recordTurn = recordTurn, _ceiling = userCeiling, _record = recordUsage, _isAdmin = isAdminUserCached, _house = getHouseModels) {
     let degraded  = false
 
-    // A candidate model (llmModels `adminOnly`) is honoured for an admin only. The client sends
-    // whatever its localStorage holds, so the gate is here, and it costs a read only when a
-    // candidate is actually asked for. Unreadable → not admin → the default, never the candidate.
-    if (isAdminOnlyModel(requested) && !(await _isAdmin(userId).catch(() => false))) {
-        logger.info('[agentUtils]', `admin-only model ${requested} requested by a non-admin — routing to ${DEFAULT_MODEL}`)
-        requested = DEFAULT_MODEL
-    }
+    // Unreadable → not admin → the house model, never the client's value.
+    const admin     = userId ? await _isAdmin(userId).catch(() => false) : false
+    let   requested = admin
+        ? requestedModel
+        : ((await _house().catch(() => null))?.chatModel ?? DEFAULT_MODEL)
 
     if (userId) {
         // The turn counter was always being written; it now returns the month's spend, so the check
@@ -55,7 +60,9 @@ export async function resolveAgentStream(requestedModel, userId, agent, _recordT
             _recordTurn(userId, agent).catch(() => null),
             _ceiling(userId).catch(() => null),
         ])
-        if (overCeiling(chatSpend(doc), ceiling)) {
+        // Degrade only when it SAVES: a house model already under the cheap one (Luna is a fifth
+        // of Haiku) would otherwise be "degraded" onto something dearer.
+        if (overCeiling(chatSpend(doc), ceiling) && costlierThanCheap(requested)) {
             requested = CHEAP_MODEL
             degraded  = true
         }
@@ -70,6 +77,12 @@ export async function resolveAgentStream(requestedModel, userId, agent, _recordT
         ? (usage, usedModel = model) => _record(userId, usedModel, usage, agent).catch(() => {})
         : undefined
     return { model, streamFn, provider, onUsage, degraded }
+}
+
+/** Would a million tokens in and out on `model` cost more than on CHEAP_MODEL? An unknown id prices as the default, which is dearer. */
+export function costlierThanCheap(model) {
+    const probe = { input_tokens: 1_000_000, output_tokens: 1_000_000 }
+    return calcCost(model, probe) > calcCost(CHEAP_MODEL, probe)
 }
 
 // ─── Tool handler wrapper ─────────────────────────────────────────────────────

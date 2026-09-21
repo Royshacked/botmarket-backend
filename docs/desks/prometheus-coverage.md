@@ -88,9 +88,9 @@ a block typed by hand). Skipped on `contradicted` and when the record gives no s
 stand on. Persistence caps at four quarters: forward EPS is annual, and an effect that outlives it is a
 re-rating question. Costs one more round on top of the read (~$0.15–0.20 a press, up from ~$0.12);
 quick reads book under their own ledger row, `analystAgent-quickread`, so that number is now readable.
-The read runs on the presser's AI-menu model (the one choice every desk runs on; a candidate for an
-admin only, else Sonnet 5 — `quickReadModel`), and the stored doc names the model that produced it, so
-two admins can compare candidates on the same name.
+The read runs on the same model rule as every desk turn (`quickReadModel`, 2026-09-21): an admin's
+own menu choice, anyone else the house chat model, else Sonnet 5 — and the stored doc names the
+model that produced it, so two admins can compare candidates on the same name.
 The Aether drawer shows it under the verdict (`Sized: worth −11% … moved −2% · −9% open`), the
 conclusion line carries it, and the Mentor seed hands it over as a target-shaped number with what is
 already gone taken out.

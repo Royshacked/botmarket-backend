@@ -130,16 +130,24 @@ test('registry: the candidates are registered admin-only; the Anthropic entries 
     assert.equal(r.provider, 'openai-compat'); assert.equal(typeof r.streamFn, 'function')
 })
 
-test('resolveAgentStream: a candidate is honoured for an admin and routed to the default for anyone else', async () => {
+test('resolveAgentStream: an admin runs what they asked for; anyone else runs the house model, unasked', async () => {
     const noIO = [async () => null, async () => null, async () => {}]
-    const admin = await resolveAgentStream('gpt-5.6-luna', 'u1', 'mentorAgent', ...noIO, async () => true)
-    assert.equal(admin.model, 'gpt-5.6-luna'); assert.equal(admin.provider, 'openai-compat')
-    const trader = await resolveAgentStream('gpt-5.6-luna', 'u2', 'mentorAgent', ...noIO, async () => false)
-    assert.equal(trader.model, DEFAULT_MODEL); assert.equal(trader.provider, 'anthropic')
-    const broken = await resolveAgentStream('gpt-5.6-luna', 'u3', 'mentorAgent', ...noIO, async () => { throw new Error('db') })
-    assert.equal(broken.model, DEFAULT_MODEL)
-    // An ordinary model never triggers the role read.
-    let asked = 0
-    const plain = await resolveAgentStream('claude-sonnet-5', 'u4', 'mentorAgent', ...noIO, async () => { asked++; return false })
-    assert.equal(plain.model, 'claude-sonnet-5'); assert.equal(asked, 0)
+    const HOUSE = async () => ({ chatModel: 'gpt-5.6-luna' })
+    const admin = await resolveAgentStream('qwen3.7-plus', 'u1', 'mentorAgent', ...noIO, async () => true, HOUSE)
+    assert.equal(admin.model, 'qwen3.7-plus'); assert.equal(admin.provider, 'openai-compat')
+    // A non-admin's request is not consulted — a candidate, a plain pick, nothing: the house's.
+    for (const asked of ['qwen3.7-plus', 'claude-opus-5', undefined]) {
+        const trader = await resolveAgentStream(asked, 'u2', 'mentorAgent', ...noIO, async () => false, HOUSE)
+        assert.equal(trader.model, 'gpt-5.6-luna', String(asked)); assert.equal(trader.provider, 'openai-compat')
+    }
+    // No user (a house run) → the house model too.
+    const house = await resolveAgentStream(undefined, null, 'marketBrief', ...noIO, async () => true, HOUSE)
+    assert.equal(house.model, 'gpt-5.6-luna')
+    // An unreadable role is not an admin; no house choice, or an unreadable one, is the default.
+    const broken = await resolveAgentStream('qwen3.7-plus', 'u3', 'mentorAgent', ...noIO, async () => { throw new Error('db') }, HOUSE)
+    assert.equal(broken.model, 'gpt-5.6-luna')
+    assert.equal((await resolveAgentStream('claude-opus-5', 'u2', 'mentorAgent', ...noIO, async () => false, async () => ({ chatModel: null }))).model, DEFAULT_MODEL)
+    assert.equal((await resolveAgentStream('claude-opus-5', 'u2', 'mentorAgent', ...noIO, async () => false, async () => { throw new Error('db') })).model, DEFAULT_MODEL)
+    // A house id that left the registry falls to the default, not to a provider error.
+    assert.equal((await resolveAgentStream(undefined, 'u2', 'mentorAgent', ...noIO, async () => false, async () => ({ chatModel: 'gone' }))).model, DEFAULT_MODEL)
 })

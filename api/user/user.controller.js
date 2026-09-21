@@ -1,6 +1,9 @@
 import { userService } from './user.service.js'
 import { makeHandle }  from '../_shared/handle.util.js'
 import { httpError }   from '../../services/httpError.util.js'
+import * as houseModels from '../../services/houseModels.service.js'
+import { isAllowedModel } from '../../services/llmModels.js'
+import { ALLOWED_MODELS } from '../../monitoring/assess.shared.js'
 
 const LOG    = '[user:controller]'
 const handle = makeHandle(LOG)
@@ -49,4 +52,18 @@ export const getPreferences = handle('getPreferences', async (req, res) => {
 export const updatePreferences = handle('updatePreferences', async (req, res) => {
     assertOwnOrAdmin(req)
     res.json(await userService.savePreferences(req.params.id, req.body ?? {}))
+})
+
+// The HOUSE MODELS (services/houseModels.service.js) — what every non-admin's desks and setup
+// reads run on. Admin-only on the router; the registries' predicates are passed here so the
+// service validates a write without importing either registry (assess.shared imports it).
+export const getHouseModels = handle('getHouseModels', async (req, res) => {
+    res.json(await houseModels.getHouseModels())
+})
+
+export const setHouseModels = handle('setHouseModels', async (req, res) => {
+    const { chatModel, talosModel } = req.body ?? {}
+    res.json(await houseModels.setHouseModels({ chatModel, talosModel }, req.user?._id, {
+        allowed: { chat: isAllowedModel, talos: id => ALLOWED_MODELS.has(id) },
+    }))
 })

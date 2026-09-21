@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { list, getOne, create, update, remove, getTokenUsage, getPreferences, updatePreferences } from './user.controller.js'
+import { list, getOne, create, update, remove, getTokenUsage, getPreferences, updatePreferences, getHouseModels, setHouseModels } from './user.controller.js'
 import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
 
 const router = Router()
@@ -13,6 +13,10 @@ router.use(requireAuth)
 // create one, rename anyone, or delete the admin. Nothing in the client called the five admin
 // moves; the door was simply open, and two model headers cited it as a reason to keep data off
 // the user document.
+// The house models — admin-only, and BEFORE the `/:id` routes so `house` is never read as an id.
+router.get('/house/models',      requireAdmin, getHouseModels)
+router.put('/house/models',      requireAdmin, setHouseModels)
+
 router.get('/:id/usage',         getTokenUsage)
 router.get('/:id/preferences',   getPreferences)
 router.put('/:id/preferences',   updatePreferences)

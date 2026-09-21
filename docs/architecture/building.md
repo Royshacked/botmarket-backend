@@ -78,10 +78,15 @@ OpenRouter — streaming through the OpenAI-format twin `providers/openaiCompat.
 OpenRouter's web plugin). Mistral rode Mistral's own API until 2026-09-20, where the plugin does
 not exist and a desk simply had no web; the `mistral` endpoint stays in the provider for a model
 that only lives there. A candidate is
-`adminOnly` in `MODELS`; `resolveAgentStream` routes a non-admin who requests one to
-`DEFAULT_MODEL` (one role read, only when a candidate is asked for). The model is the user's own
-pick, read off the request body and validated by `resolveStreamFn` (unknown → `DEFAULT_MODEL`);
-a user past their spend ceiling is routed to `CHEAP_MODEL` for the turn. There is no per-phase
+`adminOnly` in `MODELS`, which since 2026-09-21 means "on the admin's own menu": **whose pick the
+model is depends on the role** (`resolveAgentStream`). An admin's turn runs on what their client
+sent, validated by `resolveStreamFn` (unknown → `DEFAULT_MODEL`). Everyone else's — and every turn
+with no user, the market brief and the coverage re-model — runs on the **house chat model**
+(`services/houseModels.service.js`: one admin-written document in `house_settings`, set from the
+profile's *House models* card via `PUT /api/users/house/models`, cached a minute), and the model
+their client still sends is not read at all. A user past their spend ceiling is routed to
+`CHEAP_MODEL` for the turn, but only when that is cheaper than what would have run
+(`costlierThanCheap` — a house model under Haiku's price is left alone). There is no per-phase
 routing — the layer that switched models mid-conversation was deleted 2026-08-14, because every
 switch invalidated the prompt cache. Reasoning effort is an internal parameter the monitors set,
 never the desks. Usage is recorded via `tokenUsage.service.js`.

@@ -28,8 +28,9 @@ import { getDb } from '../providers/mongodb.provider.js'
 import { COLLECTIONS, TICKER_RE } from '../api/aether/aether.model.js'
 import { logger } from './logger.service.js'
 import { httpError } from './httpError.util.js'
-import { isAllowedModel, isAdminOnlyModel } from './llmModels.js'
-import { isAdminUser } from '../api/user/user.model.js'
+import { isAllowedModel } from './llmModels.js'
+import { isAdminUserCached } from '../api/user/user.model.js'
+import { getHouseModels } from './houseModels.service.js'
 
 const LOG = '[aetherQuickRead]'
 
@@ -44,11 +45,16 @@ export const READS = 'aether_candidate_reads'
 export const QUICKREAD_MODEL  = 'claude-sonnet-5'
 export const QUICKREAD_EFFORT = 'medium'
 
-/** The model a read runs on: the presser's choice when it is one a desk may run on, else the default. */
-export async function quickReadModel(requested, userId, _isAdmin = isAdminUser) {
-    if (!isAllowedModel(requested)) return QUICKREAD_MODEL
-    if (isAdminOnlyModel(requested) && !(await _isAdmin(userId).catch(() => false))) return QUICKREAD_MODEL
-    return requested
+/**
+ * The model a read runs on — the same rule as every desk turn (resolveAgentStream): an admin's
+ * own choice when it is a registered one, anyone else the HOUSE chat model (houseModels.service),
+ * their request unread. Neither known → the default.
+ */
+export async function quickReadModel(requested, userId, _isAdmin = isAdminUserCached, _house = getHouseModels) {
+    const admin = await _isAdmin(userId).catch(() => false)
+    if (admin) return isAllowedModel(requested) ? requested : QUICKREAD_MODEL
+    const house = (await _house().catch(() => null))?.chatModel
+    return isAllowedModel(house) ? house : QUICKREAD_MODEL
 }
 
 const _inflight = new Map()   // `${run_id}|${ticker}` → promise
@@ -174,7 +180,8 @@ const _io = {
             userId, signal,
         })
     },
-    isAdmin: isAdminUser,
+    isAdmin: isAdminUserCached,
+    house:   getHouseModels,
     async store(doc) {
         const db = await getDb()
         await db.collection(READS).replaceOne({ run_id: doc.run_id, ticker: doc.ticker }, doc, { upsert: true })
@@ -212,7 +219,7 @@ export async function quickRead({ runId, ticker, userId, signal, model: requeste
         if (!c) throw httpError(404, 'no such candidate')
         // The event fields are denormalised onto the candidate by the engine, so the row is the run.
         const opening = quickReadOpening(c, c, others)
-        const model = await quickReadModel(requestedModel, userId, deps.isAdmin ?? isAdminUser)
+        const model = await quickReadModel(requestedModel, userId, deps.isAdmin ?? isAdminUserCached, deps.house ?? getHouseModels)
         const t0 = Date.now()
         const out = await deps.read({ opening, userId, signal, model })
         const q = out?.quickread

@@ -276,10 +276,14 @@ services/
                             above/below/thin vs Street; the delta read ends on the JSON line the model copies). (P2)
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue.
-                          resolveAgentStream: the model for a turn — the spend ceiling → CHEAP_MODEL,
-                          and (2026-09-20) an `adminOnly` candidate in llmModels MODELS → DEFAULT_MODEL
-                          unless the user is an admin (user.model.isAdminUser; read only when a
-                          candidate is asked for). DEFAULT_MODEL is Sonnet 5 since 2026-09-20.
+                          resolveAgentStream: the model for a turn. SINCE 2026-09-21 whose pick it is
+                          depends on the role (user.model.isAdminUserCached, 5-min TTL): an admin runs
+                          what their client sent (candidates included); everyone else — and a turn
+                          with no user (market brief, coverage re-model) — runs the HOUSE chat model
+                          (houseModels.service, one admin-written doc in `house_settings`), the
+                          request unread. Then the spend ceiling → CHEAP_MODEL, but only when that is
+                          cheaper than what would have run (costlierThanCheap — Luna is under Haiku).
+                          DEFAULT_MODEL (Sonnet 5 since 2026-09-20) is what an unset house resolves to.
                           formatMoney is UNGROUPED on purpose: `$94,500` read the other way round is
                           `94.500`, and the desks came back with 94.5 — money an agent READS carries
                           no thousands separator (toFixed never groups; toLocaleString does)
@@ -521,7 +525,8 @@ services/
                             naming the ticker changed. Judged against every live event, not the one pressed.
                             Since 2026-09-20 the read SIZES the event too (compute_event_delta; `delta` +
                             `delta_basis` on the doc, null when unsized), runs on the presser's AI-menu
-                            model (quickReadModel: a candidate for an admin only, else Sonnet 5; the doc
+                            model (quickReadModel: the same house rule as resolveAgentStream — an admin's
+                            own registered choice, anyone else the house chat model, else Sonnet 5; the doc
                             names what ran) and books under its own ledger row `analystAgent-quickread`
   lastPrice.service.js      fetchLastPrice(symbol): THE last-price read — quote first, a 1-minute-candle
                             fallback second, null only when both fail; a non-positive price is NO price.
@@ -754,12 +759,13 @@ monitoring/
                             _runRead is a wrapper over _readLoop that fills a `trace` and, under
                             TALOS_RECORD_READS, hands it to the recorder after the answer is in.
                             WHICH MODEL: assessRouting (assess.shared) reads the user document once —
-                            `preferences.hermesModel` against TALOS_MODELS, the monitors' OWN registry
-                            (not llmModels' chat MODELS): Sonnet 4.6 default; Sonnet 5, GPT-5.6 Luna,
+                            an ADMIN's `preferences.hermesModel` against TALOS_MODELS, the monitors' OWN
+                            registry (not llmModels' chat MODELS); since 2026-09-21 a NON-admin's own
+                            preference is not consulted and their setups read on the HOUSE Talos model
+                            (houseModels.service `talosModel`), else Sonnet 4.6. Sonnet 5, GPT-5.6 Luna,
                             Mistral Medium 3.5, Qwen3.7-Plus, Qwen3.7 Flash, DeepSeek V4.1 Flash, Gemini 3.8 Flash
-                            are `adminOnly` CANDIDATES (a non-admin doc
-                            carrying one is routed to the default — the preference is a client-owned
-                            snapshot anyone can PUT). _readLoop branches once on `provider`: anthropic
+                            are `adminOnly` CANDIDATES on the admin's own menu (the preference is a
+                            client-owned snapshot anyone can PUT, which is why it is not read for them). _readLoop branches once on `provider`: anthropic
                             → the loop here; openai-compat → providers/openaiCompat.provider.js. The
                             result carries `_model` beside `_tools`, and the journal row + the
                             last_assessment record say which model made the read
