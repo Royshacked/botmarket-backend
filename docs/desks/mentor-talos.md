@@ -555,6 +555,55 @@ transport (`tradeNotify.service`) and draws from the one tool registry, but the 
 and the meaning of its verdicts are its own. See [trade-pipeline.md](./trade-pipeline.md) for the
 cascade from Mentor's Generate to the reconciler's close line.
 
+### Sharing a setup (2026-09-21)
+
+A saved setup can be sent to another user **as a message in their social-chat DM**. The sender
+attaches one of their setups from the composer ("Share a setup" — offered on human DMs only), types
+an optional note, and sends; the recipient sees a `setup_shared` card with "Open in Mentor".
+
+**What travels is the BLUEPRINT** (`services/setup.blueprint.js` — built for the deleted express
+form, kept for exactly this caller, wired now): the plan and nothing personal. Asset, direction,
+lens, timeframe, horizon, `entry_mode`, thesis, conviction, validity window, the setup-wide
+conditions, and every scenario with its levels (with their notes and per-zone conditions) and its
+conditions. **Not** the size, the account, the broker, the workspace `mode`, the status, the
+monitor state, or the sender's Talos reads. Alongside it: the sender's note, the last price at the
+moment of sending (`drawn_price`, null-safe — a failed quote never blocks the send), and the doc's
+`rr` for display.
+
+**Quantity never travels — in either direction.** `toBlueprint` strips it on the way out and
+`hydrateBlueprint` refuses it on the way in, so a hydrated plan always fails readiness on
+`quantity` (and on `trading account` until one is marked). That is the security property, not a
+gap: nobody generates, arms or fires someone else's plan without having typed the size themselves.
+
+**The copy is a FORK.** The blueprint rides inline in the card, so it keeps opening after the
+sender revises or deletes the original; nothing links the two documents afterwards and nothing
+syncs. `from` (`{ userId, username, fullname }`) is provenance only. The card's payload keys the
+origin as `source_setup_id`, deliberately not `setupId` — `setupId` is a `cardSubject` key, and a
+subject would let the SENDER's next write to their own document auto-resolve the recipient's card.
+The card `resolvesOn: 'open'`: looking is the whole ask; sizing is the recipient's own decision.
+
+**Pipe and judgment.** `POST /api/setups/:id/share { conversationId, note }` →
+`api/setups/setupShare.service.js` (the judgment: owned read, `toBlueprint`, the price, the
+payload) → `chat.service.postUserCard` (the pipe: participant check, human-recipient check —
+`bot_recipient` otherwise — the shared `sendMessage` writer, socket + push delivery under the
+sender's name). `setupShare.service` is its own module rather than a function in `setups.service`
+because the chat pipe imports the Axl agent, whose tools read the setups list — importing it from
+`setups.service` closed an import cycle.
+
+**Opening it.** The recipient's "Open in Mentor" (`SETUP_SHARED_OPEN`, MainPage) posts the
+blueprint to `POST /api/setups/blueprint`, which hydrates it through the SAME `normalizeSetup` +
+`setupReadiness` a Mentor turn uses and reports `problems` (levels that could not be read, an
+unknown lens, a blueprint from a newer app — the last one refuses the open). The draft lands in the
+recipient's Mentor as a **fresh thread** (`chatRestore.freshThread`, so it never persists over the
+build that was open — which stays resumable), in the recipient's own workspace with their own
+marked accounts (a blueprint carries no `mode`, so `alignWorkspaceTo` is not called), and ON A TURN
+(`sharedAsk.js`): *"Roy shared this NVDA long plan with me — their note: … It was drawn with NVDA
+at 187.5. Read it against the tape now … then help me size it."* Mentor reads, the recipient sizes,
+Generate stamps THEIR `mode`/broker/accounts. The plan stays editable — it is their fork.
+
+**Deliberately not built:** signed links or any share outside the app; sharing a live draft before
+Generate; live-follow (linked setups across accounts); sharing to bots; email.
+
 ---
 
 ## Open

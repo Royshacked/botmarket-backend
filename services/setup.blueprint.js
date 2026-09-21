@@ -5,17 +5,19 @@
 // half of that sentence — the part that is true regardless of whose money is behind it. Prices,
 // conditions, direction, horizon, lens. Nothing else.
 //
-// ── NO LIVE CALLER TODAY, AND THAT IS DELIBERATE ─────────────────────────────
+// ── THE CALLER: A SHARED SETUP (wired 2026-09-21) ────────────────────────────
 // It was built for the EXPRESS SETUP FORM, which is gone (2026-08-21): a user who arrives with the
-// plan already made is now INTERVIEWED for it instead — Mentor asks one question at a time and
-// draws the bands from the answers (see "The interview" in its prompt). A form was the wrong shape
-// for that conversation, but the blueprint was never the form's idea. It is the answer to a
-// separate question — how a plan travels between two people — and that is the caller it is kept
-// for: a shared setup, where one user sends their plan to another, who opens it and sizes it.
+// plan already made is INTERVIEWED for it instead — Mentor asks one question at a time and draws
+// the bands from the answers (see "The interview" in its prompt). The blueprint was never the
+// form's idea, though. It is the answer to a separate question — how a plan travels between two
+// people — and that is what it does now: `setupShare.service.shareSetup` snapshots an owned setup with
+// `toBlueprint` and posts it as a `setup_shared` card into a social-chat DM; the recipient's
+// "Open in Mentor" runs it back through `/api/setups/blueprint` (`hydrateBlueprint` +
+// `normalizeSetup` + `blueprintProblems`) and lands the draft in THEIR Mentor worksheet.
 //
-// So this module and the two routes over it (`/api/setups/blueprint`, `/validate`) are covered by
-// their tests and reachable by nothing. Wire them to sharing, or delete them; do not quietly grow a
-// second way for a plan to travel while they sit here.
+// The copy is a FORK. The card carries the blueprint inline, so it keeps opening after the sender
+// revises or deletes the original, and nothing links the two documents afterwards. `from` is the
+// only trace, and it is provenance, not a pointer.
 //
 // ── QUANTITY IS THE FIELD A BLUEPRINT CANNOT HOLD ────────────────────────────
 // Stripped on the way out AND on the way in, which is deliberate belt-and-braces rather than an
@@ -42,9 +44,15 @@
  */
 export const BLUEPRINT_VERSION = 1
 
-/** The top-tier fields a blueprint carries verbatim. Everything else is derived or personal. */
+/**
+ * The top-tier fields a blueprint carries verbatim. Everything else is derived or personal.
+ *
+ * `entry_mode` is part of the plan, not of the person: a limit setup that travelled without it
+ * would hydrate as `conditional` (the normaliser's default) and readiness would then demand a
+ * condition the author never wrote — the recipient would be handed a different way in.
+ */
 const CARRIED = [
-    'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe',
+    'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe', 'entry_mode',
     'thesis', 'conviction', 'active_from', 'valid_until', 'referenced_symbols',
 ]
 
@@ -182,6 +190,8 @@ const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v)
 /**
  * Zone edges WITHOUT their size. `note` travels because it is the author's word about the level —
  * "the shelf from Tuesday" is exactly the kind of thing a recipient needs and cannot re-derive.
+ * So do a zone's own `conditions`: a target that only prints "if the day closes above" is a
+ * different target without that sentence (`normalizeZone` keeps them per zone).
  *
  * Deliberately NOT coerced to numbers here: `normalizeZone` owns that (including the sorting of
  * inverted edges and the single-`price` collapse), and a second coercion in this file is a second
@@ -195,6 +205,7 @@ function _carryZones(arr) {
         upper: z?.upper ?? null,
         ...(z?.price != null ? { price: z.price } : {}),
         note:  typeof z?.note === 'string' ? z.note : null,
+        conditions: _carryConditions(z?.conditions),
     }))
 }
 

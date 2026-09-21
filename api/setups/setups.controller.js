@@ -2,6 +2,7 @@ import { sendReason }   from '../_shared/reason.util.js'
 import { makeHandle }   from '../_shared/handle.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { setupService } from './setups.service.js'
+import { shareSetup as shareSetupService } from './setupShare.service.js'
 import { resolveCardsFor } from '../chat/chat.service.js'
 import { talosHandoffService } from '../../services/talos.handoff.service.js'
 import { normalizeSetup, setupReadiness, TRADE_MODES, TF_RUNGS, isFetchableRung } from '../../services/setup.schema.js'
@@ -29,6 +30,10 @@ const SETUP_REASONS = {
     bad_proposal:         [422, 'The proposal is missing the level it needs'],
     no_position_link:     [409, 'No broker position is linked to this setup'],
     not_a_pending_limit:  [409, 'This setup is not a confirmed limit order awaiting a fill'],
+    // Share refusals. A card only a person can open cannot be sent to a bot; a conversation the
+    // sender is not in is `forbidden` from the shared table.
+    invalid_conversation: [400, 'Pick a conversation to share into'],
+    bot_recipient:        [400, 'A setup can only be shared with another user'],
 }
 // Named reasons win over the prefix rules — `invalid_setup` / `invalid_zone` have their own copy and
 // must not be swallowed by the generic `invalid_*` passthrough below them.
@@ -100,6 +105,18 @@ export const getSetupJournal = _handle('getSetupJournal', async (req, res) => {
 export const patchSetup  = crud.patch
 export const deleteSetup = crud.remove
 
+/**
+ * POST /:id/share { conversationId, note? } — send this setup to another user as a card in a DM
+ * the sender is part of. Answers the posted chat message, so the client appends it exactly as it
+ * appends a text send. The judgment (what travels) is setupShare.service's.
+ */
+export const shareSetup = _handle('shareSetup', async (req, res) => {
+    const { conversationId, note = null } = req.body ?? {}
+    const result = await shareSetupService(req.params.id, req.user._id, { conversationId, note })
+    if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallbackMessage: 'share_failed' })
+    res.send(result.message)
+})
+
 // ── Generate: the one move that isn't CRUD ────────────────────────────────────
 // It binds the venue, runs the readiness gate and can re-route to an in-place edit, so it stays
 // hand-written — a shared shell has no business knowing any of that.
@@ -162,13 +179,13 @@ const FORM_VOCABULARY = Object.freeze({
 /**
  * Hydrate a setup BLUEPRINT into a draft a surface can render.
  *
- * NO CALLER TODAY. Its consumer was the express setup form, deleted in 2026-08-21 when a
- * user arriving with a finished plan started being interviewed for it instead. It is kept for the
- * one caller a blueprint was always the right answer to — a setup SHARED by another user, opened
- * and sized by the recipient. See services/setup.blueprint.js for the full note.
+ * THE RECIPIENT'S "OPEN IN MENTOR". Its first consumer was the express setup form, deleted
+ * 2026-08-21 when a user arriving with a finished plan started being interviewed for it instead;
+ * since 2026-09-21 it is the door a setup SHARED by another user comes through (the `setup_shared`
+ * card → this → the recipient's Mentor worksheet). See services/setup.blueprint.js for the note.
  *
- * Whatever opens it next reads the plan the one way: hydrate → the SAME `normalizeSetup` a Mentor
- * emit goes through → the SAME readiness gate the save path uses.
+ * It reads the plan the one way: hydrate → the SAME `normalizeSetup` a Mentor emit goes through →
+ * the SAME readiness gate the save path uses.
  *
  * Answers the shape a Mentor turn's `done` already answers with — `{ setup, readiness }` — so the
  * panel's existing apply path handles it with no second branch, plus `problems`: what was sent and

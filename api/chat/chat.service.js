@@ -404,6 +404,38 @@ export async function triggerAxlReply(userId, conversationId, aiPref = {}) {
 }
 
 /**
+ * Who is on the other side of this conversation from `senderId`. `{ ok:false }` when the sender is
+ * not a participant at all (the one refusal every human post shares); otherwise `{ ok:true,
+ * recipientId }`, null when nobody is opposite. One projection-only read; this used to be
+ * `getMessages(…, limit 0)`, which the driver reads as NO limit, so a participant check was quietly
+ * loading the whole conversation.
+ */
+async function _recipientFor(conversationId, senderId) {
+    const db   = await getDb()
+    const conv = await db.collection(CONVS).findOne({ id: conversationId }, { projection: { participants: 1 } })
+    if (!conv || !conv.participants.includes(String(senderId))) return { ok: false }
+    return { ok: true, recipientId: conv.participants.find(p => p !== String(senderId)) ?? null }
+}
+
+/**
+ * A HUMAN sent this — deliver it to whoever is opposite. A human recipient gets the full path
+ * (socket + push) with the sender's display name attached, so the incoming-message toast can say
+ * who it's from — the stored message only carries senderId; the name is emit-only, never persisted.
+ * A bot recipient has no device and no push, so it gets the socket emit and nothing else.
+ */
+async function _deliverFromUser(recipientId, senderId, msg) {
+    if (!recipientId) return
+    if (isBot(recipientId)) {
+        await _tryEmit(recipientId, 'new_message', msg)
+        return
+    }
+    const db     = await getDb()
+    const sender = await db.collection(USERS).findOne(
+        { id: String(senderId) }, { projection: { fullname: 1, username: 1 } })
+    await _deliver(recipientId, msg, { senderName: sender?.fullname || sender?.username || null })
+}
+
+/**
  * Post a user's message into a conversation: verify the sender is a participant, write the
  * message, push it to the other participant over WS, and — when the recipient is Axl — fire
  * off Axl's reply (fire-and-forget; it arrives later over WS). This is the notification-routing
@@ -411,34 +443,41 @@ export async function triggerAxlReply(userId, conversationId, aiPref = {}) {
  * { ok:false, reason:'forbidden' }.
  */
 export async function postUserMessage(conversationId, senderId, content, aiPref = {}) {
-    // Reuse getMessages' participant check (returns null when the sender isn't in the convo).
-    const allowed = await getMessages(conversationId, senderId, null, 0)
-    if (allowed === null) return { ok: false, reason: 'forbidden' }
+    const { ok, recipientId } = await _recipientFor(conversationId, senderId)
+    if (!ok) return { ok: false, reason: 'forbidden' }
 
     const msg = await sendMessage(conversationId, senderId, content)
+    await _deliverFromUser(recipientId, senderId, msg)
 
-    const db   = await getDb()
-    const conv = await db.collection(CONVS).findOne({ id: conversationId })
-    if (conv) {
-        const recipientId = conv.participants.find(p => p !== String(senderId))
-        if (recipientId && !isBot(recipientId)) {
-            // Attach the sender's display name so the recipient's incoming-message toast can show
-            // who it's from — the stored message only carries senderId. Emit-only (not persisted);
-            // only for human recipients (bots have no WS client + resolve senders from agent meta).
-            const sender = await db.collection(USERS).findOne(
-                { id: String(senderId) }, { projection: { fullname: 1, username: 1 } })
-            const senderName = sender?.fullname || sender?.username || null
-            await _deliver(recipientId, msg, { senderName })
-        } else if (recipientId) {
-            // A bot recipient: no device, no push — the socket emit is kept as it was.
-            await _tryEmit(recipientId, 'new_message', msg)
-        }
-        // If the message is to Axl, generate + push a reply (fire-and-forget so the POST
-        // returns immediately; Axl's answer arrives over WS when ready).
-        if (recipientId === BOT_USER_ID) {
-            triggerAxlReply(senderId, conversationId, aiPref).catch(() => {})
-        }
+    // If the message is to Axl, generate + push a reply (fire-and-forget so the POST
+    // returns immediately; Axl's answer arrives over WS when ready).
+    if (recipientId === BOT_USER_ID) {
+        triggerAxlReply(senderId, conversationId, aiPref).catch(() => {})
     }
+    return { ok: true, message: msg }
+}
+
+/**
+ * A CARD one user sends another — the human-sender counterpart of `postBotCard`, and the pipe a
+ * shared setup travels through (`setups.service.shareSetup`). Same writer, same lifecycle fields,
+ * same delivery as a text DM; what differs is the sender, so:
+ *
+ *   - the recipient must be HUMAN. A bot cannot open a card, and Axl would only try to answer it as
+ *     prose — `bot_recipient`, refused before anything is written;
+ *   - nothing is superseded. Bot cards are one-live-ask-per-entity because a monitor re-raises the
+ *     same job; a person sending two plans has sent two plans. The caller keeps the entity id OUT
+ *     of the subject keys (`cardSubject`) for the same reason — a shared card must not be closed by
+ *     the sender's later writes to their own document.
+ *
+ * Returns `{ ok, message }` or `{ ok:false, reason: 'forbidden' | 'bot_recipient' }`.
+ */
+export async function postUserCard({ conversationId, senderId, content, type, payload = null, actions = null }) {
+    const { ok, recipientId } = await _recipientFor(conversationId, senderId)
+    if (!ok) return { ok: false, reason: 'forbidden' }
+    if (!recipientId || isBot(recipientId)) return { ok: false, reason: 'bot_recipient' }
+
+    const msg = await sendMessage(conversationId, senderId, content, type, payload, actions)
+    await _deliverFromUser(recipientId, senderId, msg)
     return { ok: true, message: msg }
 }
 

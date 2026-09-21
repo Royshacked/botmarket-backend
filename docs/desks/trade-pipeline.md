@@ -279,7 +279,8 @@ Reuse, do not fork:
 - `monitorJournal.js` — the journal ROW shape; `journal.service.js` — the collection (append, list).
 - `market.service.nextCandleCloseMs` — the one place "when does the next candle of this rung close"
   is computed; no cadence code.
-- `postCard` → `postBotCard` — one card transport.
+- `postCard` → `postBotCard` — one card transport (bots); `postUserCard` — its human-sender twin,
+  the pipe a shared setup travels through (see mentor-talos.md "Sharing a setup").
 - `zoneGate` — one function for entry and exit, parameterised by comparison direction.
 - `deferIfClosed` / `originRegistry` — the off-hours queue.
 

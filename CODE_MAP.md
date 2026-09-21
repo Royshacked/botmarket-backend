@@ -49,7 +49,14 @@ api/
                               position is delete-locked. Routes: generate · blueprint · validate ·
                               list/get · :id/journal (Talos's rows, newest first, paged by `before`)
                               · :id/action (talos.handoff) · :id/disarm (cancel a resting limit) ·
-                              patch · delete
+                              :id/share (setupShare.service) · patch · delete
+    setupShare.service.js     SHARE a setup with another user (2026-09-21): the owned read →
+                              `toBlueprint` (the plan, never the size) + the sender's note + the
+                              price at send → a `setup_shared` card AS THE SENDER into a social-chat
+                              DM via chat's `postUserCard`. Keyed `source_setup_id`, not `setupId`,
+                              so the sender's later writes cannot resolve the recipient's card. Its
+                              own module because chat.service → the Axl agent → its tools → the
+                              setups list: importing the pipe from setups.service closed a cycle
   portfolio/              Portfolio Agent + review    /api/portfolio/*
                           A book is NOT a document — it exists as the items carrying its
                           portfolioId — so its CRUD reads are shaped by hand rather than by
@@ -144,7 +151,9 @@ api/
                           meant a second tab displaced the first WITHOUT closing it — that browser
                           never reconnected and its unread badge silently froze); postCard → postBotCard is
                           the ONE notification transport (sendBotMessage is a back-compat alias with
-                          no caller outside this file),
+                          no caller outside this file); postUserCard is its HUMAN-sender twin — a
+                          card one user sends another (the shared setup), human recipient only,
+                          nothing superseded — over the same writer and delivery as a text DM,
                           BOT_IDS (one notify bot per agent — it also keeps an ARCHIVED desk's id,
                           so the cards already in a user's thread still render with the brand that
                           sent them) + botForKind (kind → sender) and RETIRED_BOT_IDS (`idea`:

@@ -89,6 +89,30 @@ test('nothing personal rides along', () => {
     assert.equal(bp.mode, undefined)
 })
 
+// ── The plan is more than its prices ──────────────────────────────────────────
+
+test('the way in travels: a limit setup does not come back as a conditional one', () => {
+    const limit = { ...A_SETUP, entry_mode: 'limit', conditions: [], scenarios: [{ ...A_SETUP.scenarios[0], conditions: [] }] }
+    const setup = hydrated(toBlueprint(limit, { at: 1 }))
+    assert.equal(setup.entry_mode, 'limit')
+    // Without it, the normaliser's default (`conditional`) would have readiness demand a condition
+    // the author never wrote — the recipient would be handed a different trade.
+    const { missing } = setupReadiness(setup, true)
+    assert.equal(missing.includes('condition'), false, `a limit plan must not ask for a condition; got: ${missing.join(', ')}`)
+})
+
+test('a target that only prints on a condition keeps that condition', () => {
+    const gated = {
+        ...A_SETUP,
+        scenarios: [{ ...A_SETUP.scenarios[0], tp_zones: [{ id: 't1', lower: 196, upper: 200, conditions: [{ id: 't1c1', text: 'the day closes above 195', weight: 'primary' }] }] }],
+    }
+    const bp = toBlueprint(gated, { at: 1 })
+    assert.equal(bp.scenarios[0].tp_zones[0].conditions[0].text, 'the day closes above 195')
+    const setup = hydrated(bp)
+    assert.equal(setup.scenarios[0].tp_zones[0].conditions[0].text, 'the day closes above 195')
+    assert.equal(JSON.stringify(bp).includes('quantity'), false, 'still no size, even on a gated leg')
+})
+
 // ── The blank form is the same door ───────────────────────────────────────────
 
 test('no blueprint at all hydrates to the blank skeleton', () => {
