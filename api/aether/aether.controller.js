@@ -93,9 +93,8 @@ export const getScorecardRead = handle('getScorecard', async (req, res) => {
  */
 export const postQuickRead = handle('postQuickRead', async (req, res) => {
     const { run_id: runId, ticker } = req.body ?? {}
-    // The presser's AI-menu model, when the client sends one — the service validates and gates it.
-    const model = typeof req.body?.model === 'string' ? req.body.model : null
-    res.json(await quickRead({ runId, ticker, userId: req.user?._id, model }))
+    // The read runs on the HOUSE chat model; a `model` the client still sends is not read.
+    res.json(await quickRead({ runId, ticker, userId: req.user?._id }))
 })
 
 // ── discovery, on demand (admin) ──────────────────────────────────────────────

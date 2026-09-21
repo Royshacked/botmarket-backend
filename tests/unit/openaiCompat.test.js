@@ -165,16 +165,18 @@ test('assessRouting: reads the document once, applies the gate, caps the effort,
 
     const noHouse = async () => ({ talosModel: null })
 
-    const a = await assessRouting('u1', admin, noHouse)
+    // Nobody's own `hermesModel` is consulted, the admin's included: the house Talos model, else
+    // the default. The effort is still the user's own, capped.
+    const a = await assessRouting('u1', admin, async () => ({ talosModel: 'mistral-medium-3.5' }))
     assert.equal(a.model, 'mistral-medium-3.5'); assert.equal(a.provider, 'openai-compat'); assert.equal(a.endpoint, 'openrouter'); assert.equal(a.wire, 'mistralai/mistral-medium-3-5'); assert.equal(a.reasoningEffort, 'low')
-    // A non-admin's own preference is not consulted: the house Talos model, else the default.
+    assert.equal((await assessRouting('u1', admin, noHouse)).model, ASSESS_MODEL)
     const t = await assessRouting('u2', trader, noHouse)
     assert.equal(t.model, ASSESS_MODEL); assert.equal(t.provider, 'anthropic'); assert.equal(t.wire, ASSESS_MODEL)
     const h = await assessRouting('u2', trader, async () => ({ talosModel: 'gpt-5.6-luna' }))
     assert.equal(h.model, 'gpt-5.6-luna'); assert.equal(h.provider, 'openai-compat'); assert.equal(h.wire, 'openai/gpt-5.6-luna')
     assert.equal((await assessRouting('u2', trader, async () => ({ talosModel: 'gone' }))).model, ASSESS_MODEL)
     assert.equal((await assessRouting('u2', trader, async () => { throw new Error('db') })).model, ASSESS_MODEL)
-    assert.equal((await assessRouting('u3', legacy, noHouse)).model, 'qwen3.7-plus')
+    assert.equal((await assessRouting('u3', legacy, noHouse)).model, ASSESS_MODEL)
     const b = await assessRouting('u4', broken, noHouse)
     assert.equal(b.model, ASSESS_MODEL); assert.equal(b.provider, 'anthropic'); assert.equal(b.reasoningEffort, 'off')
     assert.equal((await assessRouting(null)).provider, 'anthropic')

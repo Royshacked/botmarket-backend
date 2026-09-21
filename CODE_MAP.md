@@ -276,12 +276,11 @@ services/
                             above/below/thin vs Street; the delta read ends on the JSON line the model copies). (P2)
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue.
-                          resolveAgentStream: the model for a turn. SINCE 2026-09-21 whose pick it is
-                          depends on the role (user.model.isAdminUserCached, 5-min TTL): an admin runs
-                          what their client sent (candidates included); everyone else — and a turn
-                          with no user (market brief, coverage re-model) — runs the HOUSE chat model
-                          (houseModels.service, one admin-written doc in `house_settings`), the
-                          request unread. Then the spend ceiling → CHEAP_MODEL, but only when that is
+                          resolveAgentStream: the model for a turn. SINCE 2026-09-21 EVERY turn — any
+                          user, the admin included, and a turn with no user (market brief, coverage
+                          re-model) — runs the HOUSE chat model (houseModels.service, one
+                          admin-written doc in `house_settings`, the admin's one selector), the
+                          client's `model` unread. Then the spend ceiling → CHEAP_MODEL, but only when that is
                           cheaper than what would have run (costlierThanCheap — Luna is under Haiku).
                           DEFAULT_MODEL (Sonnet 5 since 2026-09-20) is what an unset house resolves to.
                           formatMoney is UNGROUPED on purpose: `$94,500` read the other way round is
@@ -758,14 +757,14 @@ monitoring/
                             tool runner's ctx.onUsage books a tool's own model call (the vision reads).
                             _runRead is a wrapper over _readLoop that fills a `trace` and, under
                             TALOS_RECORD_READS, hands it to the recorder after the answer is in.
-                            WHICH MODEL: assessRouting (assess.shared) reads the user document once —
-                            an ADMIN's `preferences.hermesModel` against TALOS_MODELS, the monitors' OWN
-                            registry (not llmModels' chat MODELS); since 2026-09-21 a NON-admin's own
-                            preference is not consulted and their setups read on the HOUSE Talos model
-                            (houseModels.service `talosModel`), else Sonnet 4.6. Sonnet 5, GPT-5.6 Luna,
-                            Mistral Medium 3.5, Qwen3.7-Plus, Qwen3.7 Flash, DeepSeek V4.1 Flash, Gemini 3.8 Flash
-                            are `adminOnly` CANDIDATES on the admin's own menu (the preference is a
-                            client-owned snapshot anyone can PUT, which is why it is not read for them). _readLoop branches once on `provider`: anthropic
+                            WHICH MODEL: assessRouting (assess.shared) — since 2026-09-21 EVERY setup,
+                            the admin's included, reads on the HOUSE Talos model (houseModels.service
+                            `talosModel`) resolved against TALOS_MODELS, the monitors' OWN registry
+                            (not llmModels' chat MODELS), else Sonnet 4.6. Nobody's
+                            `preferences.hermesModel` is read (a client-owned snapshot anyone can
+                            PUT); the user document is still read once, for the effort cap. Sonnet 5,
+                            GPT-5.6 Luna, Mistral Medium 3.5, Qwen3.7-Plus, Qwen3.7 Flash, DeepSeek V4.1
+                            Flash, Gemini 3.8 Flash are the CANDIDATES the admin's one Models card offers. _readLoop branches once on `provider`: anthropic
                             → the loop here; openai-compat → providers/openaiCompat.provider.js. The
                             result carries `_model` beside `_tools`, and the journal row + the
                             last_assessment record say which model made the read

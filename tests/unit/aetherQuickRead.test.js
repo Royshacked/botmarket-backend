@@ -178,8 +178,7 @@ function deps({ existing = null, candidate = CAND, quickread, slow = false, othe
             return { reply: 'Credible — it filed.', quickread }
         },
         store: async doc => { calls.stored.push(doc); return doc },
-        // A plain user with no house choice — the model falls to QUICKREAD_MODEL without a database.
-        isAdmin: async () => false,
+        // No house choice — the model falls to QUICKREAD_MODEL without a database.
         house:   async () => ({ chatModel: null }),
     }
 }
@@ -205,38 +204,23 @@ test('produces, stores and returns the read', async () => {
 // on the same name. Gated as a desk turn is: a candidate for an admin only, anything unknown or
 // absent → the default. The doc records what RAN.
 
-test('quickReadModel: an admin runs their own registered choice; anyone else the house model', async () => {
-    const admin = async () => true, user = async () => false
-    const house = async () => ({ chatModel: 'gpt-5.6-luna' }), noHouse = async () => ({ chatModel: null })
-    assert.equal(await quickReadModel('claude-opus-5', 'u', admin, house), 'claude-opus-5')
-    assert.equal(await quickReadModel('mistral-medium-3.5', 'u', admin, house), 'mistral-medium-3.5')
-    assert.equal(await quickReadModel('gpt-4o', 'u', admin, house), QUICKREAD_MODEL)
-    assert.equal(await quickReadModel(undefined, 'u', admin, house), QUICKREAD_MODEL)
-    // A non-admin's request is not read — a candidate, a plain model, nothing: the house's.
-    assert.equal(await quickReadModel('claude-opus-5', 'u', user, house), 'gpt-5.6-luna')
-    assert.equal(await quickReadModel('mistral-medium-3.5', 'u', user, house), 'gpt-5.6-luna')
-    assert.equal(await quickReadModel(undefined, 'u', user, noHouse), QUICKREAD_MODEL)
-    assert.equal(await quickReadModel(undefined, 'u', user, async () => ({ chatModel: 'gone-model' })), QUICKREAD_MODEL)
-    assert.equal(await quickReadModel(undefined, 'u', user, async () => { throw new Error('db') }), QUICKREAD_MODEL)
-    // An unreadable role is not an admin.
-    assert.equal(await quickReadModel('mistral-medium-3.5', 'u', async () => { throw new Error('db') }, house), 'gpt-5.6-luna')
+test('quickReadModel: the house model, whoever asked; unset, unknown or unreadable → the default', async () => {
+    assert.equal(await quickReadModel(async () => ({ chatModel: 'gpt-5.6-luna' })), 'gpt-5.6-luna')
+    assert.equal(await quickReadModel(async () => ({ chatModel: 'mistral-medium-3.5' })), 'mistral-medium-3.5')
+    assert.equal(await quickReadModel(async () => ({ chatModel: null })), QUICKREAD_MODEL)
+    assert.equal(await quickReadModel(async () => ({ chatModel: 'gone-model' })), QUICKREAD_MODEL)
+    assert.equal(await quickReadModel(async () => { throw new Error('db') }), QUICKREAD_MODEL)
 })
 
-test('the read runs on the requested model and the doc names it', async () => {
-    const d = { ...deps({ quickread: Q }), isAdmin: async () => true }
+test('the read runs on the house model, whoever asked and whatever they asked for, and the doc names it', async () => {
+    const d = { ...deps({ quickread: Q }), house: async () => ({ chatModel: 'qwen3.7-plus' }) }
     const seen = []
     const read = d.read; d.read = async args => { seen.push(args.model); return read(args) }
-    const out = await quickRead({ runId: CAND.run_id, ticker: 'FRO', userId: 'u1', model: 'qwen3.7-plus' }, d)
+    const out = await quickRead({ runId: CAND.run_id, ticker: 'FRO', userId: 'u1', model: 'claude-opus-5' }, d)
     assert.deepEqual(seen, ['qwen3.7-plus'])
     assert.equal(out.model, 'qwen3.7-plus')
     assert.equal(d.calls.stored[0].model, 'qwen3.7-plus')
-})
-
-test('a non-admin asking for a candidate gets the house model, and the doc says so', async () => {
-    const d = { ...deps({ quickread: Q }), isAdmin: async () => false, house: async () => ({ chatModel: 'claude-sonnet-5' }) }
-    const out = await quickRead({ runId: CAND.run_id, ticker: 'FRO', userId: 'u2', model: 'qwen3.7-plus' }, d)
-    assert.equal(out.model, 'claude-sonnet-5')
-    const none = { ...deps({ quickread: Q }), isAdmin: async () => false, house: async () => ({ chatModel: null }) }
+    const none = { ...deps({ quickread: Q }), house: async () => ({ chatModel: null }) }
     assert.equal((await quickRead({ runId: CAND.run_id, ticker: 'FRO', userId: 'u2', model: 'qwen3.7-plus' }, none)).model, QUICKREAD_MODEL)
 })
 

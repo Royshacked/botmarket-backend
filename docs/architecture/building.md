@@ -78,13 +78,16 @@ OpenRouter — streaming through the OpenAI-format twin `providers/openaiCompat.
 OpenRouter's web plugin). Mistral rode Mistral's own API until 2026-09-20, where the plugin does
 not exist and a desk simply had no web; the `mistral` endpoint stays in the provider for a model
 that only lives there. A candidate is
-`adminOnly` in `MODELS`, which since 2026-09-21 means "on the admin's own menu": **whose pick the
-model is depends on the role** (`resolveAgentStream`). An admin's turn runs on what their client
-sent, validated by `resolveStreamFn` (unknown → `DEFAULT_MODEL`). Everyone else's — and every turn
-with no user, the market brief and the coverage re-model — runs on the **house chat model**
-(`services/houseModels.service.js`: one admin-written document in `house_settings`, set from the
-profile's *House models* card via `PUT /api/users/house/models`, cached a minute), and the model
-their client still sends is not read at all. A user past their spend ceiling is routed to
+`adminOnly` in `MODELS`, a registry flag that since 2026-09-21 gates nothing at run time: **every
+turn runs on the house chat model**, the admin's own included (`resolveAgentStream`). There is one
+selector, the admin's — the profile's *Models* card, `PUT /api/users/house/models`, one
+admin-written document in `house_settings` (`services/houseModels.service.js`, cached a minute) —
+and it chooses for every account and for every turn with no user (the market brief, the coverage
+re-model). The `model` a client still sends on the wire is not read at all; the house id is
+validated when the admin sets it, and resolved by `resolveStreamFn` (unset or unknown →
+`DEFAULT_MODEL`). The first cut that day kept the admin's own per-account selectors beside the
+house's, for trialling a candidate; Roy asked for that separation to go — whatever he chooses is
+for everyone. A user past their spend ceiling is routed to
 `CHEAP_MODEL` for the turn, but only when that is cheaper than what would have run
 (`costlierThanCheap` — a house model under Haiku's price is left alone). There is no per-phase
 routing — the layer that switched models mid-conversation was deleted 2026-08-14, because every

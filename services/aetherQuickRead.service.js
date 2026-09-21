@@ -29,7 +29,6 @@ import { COLLECTIONS, TICKER_RE } from '../api/aether/aether.model.js'
 import { logger } from './logger.service.js'
 import { httpError } from './httpError.util.js'
 import { isAllowedModel } from './llmModels.js'
-import { isAdminUserCached } from '../api/user/user.model.js'
 import { getHouseModels } from './houseModels.service.js'
 
 const LOG = '[aetherQuickRead]'
@@ -38,21 +37,17 @@ export const READS = 'aether_candidate_reads'
 
 // Sonnet at medium effort: the judgment is "does anything since the event contradict this", which
 // is reading, not modelling, and the whole point is that it costs a fraction of a coverage run.
-// The DEFAULT, since 2026-09-20 — the read follows the presser's AI menu (the same one choice every
-// desk runs on), so a candidate can be compared on the same name; the stored doc names the model
-// that produced it. The admin-only gate is the one every desk turn passes (resolveAgentStream);
-// it is applied here as well so the doc records what actually ran, not what was asked for.
+// The DEFAULT, since 2026-09-20 — the read runs on the HOUSE chat model (the one choice every desk
+// runs on, resolveAgentStream), whoever pressed; the stored doc names the model that produced it.
+// The client still sends `model` on the wire; it is not read.
 export const QUICKREAD_MODEL  = 'claude-sonnet-5'
 export const QUICKREAD_EFFORT = 'medium'
 
 /**
- * The model a read runs on — the same rule as every desk turn (resolveAgentStream): an admin's
- * own choice when it is a registered one, anyone else the HOUSE chat model (houseModels.service),
- * their request unread. Neither known → the default.
+ * The model a read runs on — the same rule as every desk turn (resolveAgentStream): the HOUSE
+ * chat model (houseModels.service), whoever asked. Unset, unknown or unreadable → the default.
  */
-export async function quickReadModel(requested, userId, _isAdmin = isAdminUserCached, _house = getHouseModels) {
-    const admin = await _isAdmin(userId).catch(() => false)
-    if (admin) return isAllowedModel(requested) ? requested : QUICKREAD_MODEL
+export async function quickReadModel(_house = getHouseModels) {
     const house = (await _house().catch(() => null))?.chatModel
     return isAllowedModel(house) ? house : QUICKREAD_MODEL
 }
@@ -180,7 +175,6 @@ const _io = {
             userId, signal,
         })
     },
-    isAdmin: isAdminUserCached,
     house:   getHouseModels,
     async store(doc) {
         const db = await getDb()
@@ -196,7 +190,7 @@ const _io = {
  * result is a broadcast annotation on a broadcast list, so the doc carries `read_by` for the
  * record and nothing about the user reaches the prompt.
  */
-export async function quickRead({ runId, ticker, userId, signal, model: requestedModel } = {}, deps = _io) {
+export async function quickRead({ runId, ticker, userId, signal } = {}, deps = _io) {
     const sym = String(ticker ?? '').trim().toUpperCase()
     if (!runId || !TICKER_RE.test(sym)) throw httpError(400, 'a run and a ticker are required')
 
@@ -219,7 +213,7 @@ export async function quickRead({ runId, ticker, userId, signal, model: requeste
         if (!c) throw httpError(404, 'no such candidate')
         // The event fields are denormalised onto the candidate by the engine, so the row is the run.
         const opening = quickReadOpening(c, c, others)
-        const model = await quickReadModel(requestedModel, userId, deps.isAdmin ?? isAdminUserCached, deps.house ?? getHouseModels)
+        const model = await quickReadModel(deps.house ?? getHouseModels)
         const t0 = Date.now()
         const out = await deps.read({ opening, userId, signal, model })
         const q = out?.quickread

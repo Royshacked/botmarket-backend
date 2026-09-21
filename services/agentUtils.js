@@ -5,7 +5,6 @@ import { getDerivativesContext } from '../providers/binance.provider.js'
 import { toolError } from './toolResult.util.js'
 import { logger } from './logger.service.js'
 import { resolveStreamFn, CHEAP_MODEL, DEFAULT_MODEL } from './llmModels.js'
-import { isAdminUserCached } from '../api/user/user.model.js'
 import { recordUsage, recordTurn, userCeiling, overCeiling, chatSpend, calcCost } from './tokenUsage.service.js'
 import { getHouseModels } from './houseModels.service.js'
 
@@ -33,24 +32,22 @@ const LOG = '[agentUtils]'
  * spending nothing extra on chat. `chatSpend` subtracts it. The spend is still counted in every
  * report — it is the user's money — it just cannot degrade their conversation.
  *
- * WHOSE PICK THE MODEL IS (2026-09-21, houseModels.service): an admin's turn runs on the model
- * their client sent — their own selector, candidates included. Anyone else's runs on the HOUSE
- * chat model, and what their client sent is not read at all: a non-admin has no selector, and a
- * value left in localStorage from when they had one must not keep choosing for them. A turn with
- * no user (the market brief, the coverage re-model) is the house's too. The `adminOnly` gate on
- * the registry is therefore about REQUESTS, and only an admin's reach it.
+ * WHOSE PICK THE MODEL IS (2026-09-21, houseModels.service): EVERY turn runs on the HOUSE chat
+ * model — the admin's own included. There is one selector, the admin's, and it chooses for the
+ * whole house; what a client sent (`requestedModel`, still on the wire from every desk) is not
+ * read at all, so a value left in localStorage from when there was a per-user selector cannot
+ * keep choosing for anyone. A turn with no user (the market brief, the coverage re-model) is the
+ * house's too. The registry's `adminOnly` flag therefore gates nothing at run time; the house id is
+ * validated when the admin SETS it (user.controller → setHouseModels).
  *
  * `_recordTurn` / `_ceiling` are injectable for the same reason `_resolve`/`_run` are elsewhere:
  * these are the IO here, and the tests that drive this seam must not need a database.
  */
-export async function resolveAgentStream(requestedModel, userId, agent, _recordTurn = recordTurn, _ceiling = userCeiling, _record = recordUsage, _isAdmin = isAdminUserCached, _house = getHouseModels) {
+export async function resolveAgentStream(_requestedModel, userId, agent, _recordTurn = recordTurn, _ceiling = userCeiling, _record = recordUsage, _house = getHouseModels) {
     let degraded  = false
 
-    // Unreadable → not admin → the house model, never the client's value.
-    const admin     = userId ? await _isAdmin(userId).catch(() => false) : false
-    let   requested = admin
-        ? requestedModel
-        : ((await _house().catch(() => null))?.chatModel ?? DEFAULT_MODEL)
+    // Unreadable house → the default, never the client's value.
+    let requested = (await _house().catch(() => null))?.chatModel ?? DEFAULT_MODEL
 
     if (userId) {
         // The turn counter was always being written; it now returns the month's spend, so the check

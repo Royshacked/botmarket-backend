@@ -176,24 +176,18 @@ export function bookAssessUsage(userId, model, usage, agent, _record = recordUsa
  * keeps on purpose (a wire field is not a desk). Talos is the only monitor reading it today; Hermes
  * was archived on 2026-08-18.
  *
- * WHOSE KNOB (2026-09-21, houseModels.service): an admin's setups read on their own `hermesModel`
- * — the candidate menu. Everyone else's read on the HOUSE Talos model, and their own preference
- * is not consulted (the field is a client-owned snapshot anyone can PUT). The effort cap is
- * still the user's own, capped as before. No house document → ASSESS_MODEL, as before.
+ * WHOSE KNOB (2026-09-21, houseModels.service): EVERY setup reads on the HOUSE Talos model — the
+ * admin's own included; the one selector is the admin's and it chooses for the house. The stored
+ * `hermesModel` is not consulted for anyone (the field is a client-owned snapshot anyone can PUT).
+ * The effort cap is still the user's own, capped as before. No house document → ASSESS_MODEL.
  */
 export async function assessRouting(userId, _getUser = userService.getUserById, _house = getHouseModels) {
     const fallback = { model: ASSESS_MODEL, reasoningEffort: 'off', ...talosModel(ASSESS_MODEL) }
     if (!userId) return fallback
     try {
-        // The whole document, not just preferences: the admin gate below needs `role`, and the
-        // `role ?? isAdmin` fallback is the same rule the token is minted from (user.model).
-        const user  = await _getUser(userId)
-        const prefs = user?.preferences
-        const admin = user?.role === 'admin' || (user?.role == null && user?.isAdmin === true)
+        const prefs = (await _getUser(userId))?.preferences
         // `true` for the house id: the admin chose it, so a candidate is honoured for anyone.
-        const model = admin
-            ? resolveTalosModel(prefs?.hermesModel, true)
-            : resolveTalosModel((await _house().catch(() => null))?.talosModel, true)
+        const model = resolveTalosModel((await _house().catch(() => null))?.talosModel, true)
         return {
             model,
             ...talosModel(model),

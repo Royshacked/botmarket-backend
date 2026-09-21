@@ -2,13 +2,14 @@
 //
 // Until now the chat model was the user's own pick, sent by the client on every turn off
 // localStorage, and the Talos model their own `hermesModel` preference. Roy is the developer and
-// the only one weighing models against the ledger, so the pick is his for every account that is
-// not an admin's: a non-admin has no selector any more, and whatever their client still sends is
-// not consulted. An admin keeps their own selectors (the candidate menus) for their own account —
-// that is how a model gets evaluated before it becomes the house's.
+// the only one weighing models against the ledger, so the pick is his for EVERY account, his own
+// included: there is one selector, the admin's, and nobody has a per-user one any more — whatever
+// a client still sends is not consulted. (The first cut kept the admin's own selectors next to
+// the house's so a candidate could be trialled on one account first; Roy asked for that
+// separation to go the same day — whatever he chooses is for everyone.)
 //
 // Two ids, one document: `chatModel` for every desk turn (and the house runs that have no user —
-// the market brief, the coverage re-model), `talosModel` for every non-admin's setup reads. The
+// the market brief, the coverage re-model), `talosModel` for every setup read. The
 // stored ids are NOT validated on read: each consumer resolves through its own registry
 // (resolveStreamFn → DEFAULT_MODEL, resolveTalosModel → ASSESS_MODEL), so a model removed from a
 // registry degrades to that registry's default rather than failing every turn. They ARE validated

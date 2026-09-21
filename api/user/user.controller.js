@@ -54,8 +54,8 @@ export const updatePreferences = handle('updatePreferences', async (req, res) =>
     res.json(await userService.savePreferences(req.params.id, req.body ?? {}))
 })
 
-// The HOUSE MODELS (services/houseModels.service.js) — what every non-admin's desks and setup
-// reads run on. Admin-only on the router; the registries' predicates are passed here so the
+// The HOUSE MODELS (services/houseModels.service.js) — what EVERYONE's desks and setup reads run
+// on, the admin's own included. Admin-only on the router; the registries' predicates are passed here so the
 // service validates a write without importing either registry (assess.shared imports it).
 export const getHouseModels = handle('getHouseModels', async (req, res) => {
     res.json(await houseModels.getHouseModels())

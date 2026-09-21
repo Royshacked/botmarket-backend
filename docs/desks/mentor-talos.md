@@ -366,18 +366,18 @@ question* — and its menu line is generated from `allowedVerdicts`. The default
 thinking off (`assessRouting`); the saving was the image and the tokens it dragged in, not the
 model.
 
-**Which model reads (2026-09-20; the house rule 2026-09-21).** For an ADMIN, `assessRouting`
-resolves their `preferences.hermesModel` against `TALOS_MODELS` (`assess.shared.js`) — the
-monitors' own registry, apart from the chat desks'. For everyone else the preference is not
-consulted: their setups read on the **house Talos model** (`houseModels.service.js` `talosModel`,
-set by the admin from the profile's *House models* card), and Sonnet 4.6 when none is set. Seven **candidates** are `adminOnly`: Sonnet 5, GPT-5.6 Luna,
-Mistral Medium 3.5, Qwen3.7-Plus, and since 2026-09-21 Qwen3.7 Flash, DeepSeek V4.1 Flash and
-Gemini 3.8 Flash — chosen from the admin's profile (the *Monitors* card under AI
-Preferences, admin-only) so the admin's own setups are read on one of them from their next wake,
-with every journal row and the last-assessment record naming the model that made it. That is the
-live comparison the replay harness (`docs/design/talos-replay-harness.md`) was going to stage
-offline: the same prompt, the same tools, real setups, side by side in the pop-out. A non-admin
-document carrying a candidate is not read at all — the house model is theirs. The non-Anthropic ones run through
+**Which model reads (2026-09-20; the house rule 2026-09-21).** Every setup reads on the **house
+Talos model** — the admin's own included: `assessRouting` resolves `houseModels.service.js`
+`talosModel` against `TALOS_MODELS` (`assess.shared.js`, the monitors' own registry, apart from
+the chat desks'), and Sonnet 4.6 when none is set. Nobody's `preferences.hermesModel` is
+consulted any more (it is a client-owned snapshot anyone can PUT); the effort cap is still the
+user's own. Seven **candidates** carry `adminOnly`: Sonnet 5, GPT-5.6 Luna, Mistral Medium 3.5,
+Qwen3.7-Plus, and since 2026-09-21 Qwen3.7 Flash, DeepSeek V4.1 Flash and Gemini 3.8 Flash — the
+flag gates nothing at run time now; the *Models* card on the admin's profile (the one selector,
+admin-only) offers them all, and the pick is every account's from its next wake, with every
+journal row and the last-assessment record naming the model that made it. That is the live
+comparison the replay harness (`docs/design/talos-replay-harness.md`) was going to stage offline:
+the same prompt, the same tools, real setups, side by side in the pop-out. The non-Anthropic ones run through
 `providers/openaiCompat.provider.js` — one OpenAI-format loop, the same tool kit and runner, with
 `web_search` dropped (an Anthropic server tool; the condition comes back `unchecked`) and a chart
 image delivered as a `user` message after the tool message. Account: `OPENROUTER_API_KEY` for all
