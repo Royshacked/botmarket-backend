@@ -177,7 +177,10 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
                 ..._wakePatch(setup, nextAt),
                 'monitor_state.expensive_due': tickExpensiveDue(setup),
                 ...latchPatch(setup, _cheapAsLedger(cheap), nowMs, declaredConditions(setup, hit?.scenario ?? pickScenario(setup))),
-            }, _entry(reason, { setup, nowMs, price, rung, nextAt, tier: 'cheap', read: cheap.read, model: cheap._model }))
+            }, _entry(reason, { setup, nowMs, price, rung, nextAt, tier: 'cheap', read: cheap.read, model: cheap._model,
+                // What it actually looked at. Without this a check is a row with a sentence and
+                // nothing behind it, and a user cannot see which conditions it could not settle.
+                raw: { conditions: _cheapAsLedger(cheap) } }))
             return { reason, tier: 'cheap', escalated: false }
         }
         // Escalated — fall straight through to the full read on THIS wake, not the next one. A
@@ -678,12 +681,20 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
 }
 
 /**
- * A cheap read's answers in the shape `latchPatch` speaks, so a LATCHING condition the cheap tier
- * settled stays settled and is never re-asked — of either tier. Only `fired` latches: `unknown` is
- * the tier saying it could not look, which must never be recorded as an answer. Pure.
+ * A cheap read's answers in the vocabulary the ledger and the journal both speak. `latchPatch` only
+ * acts on `yes`, so the mapping that matters is the OTHER two:
+ *
+ *   fired      → yes         it happened
+ *   not_fired  → no          checked, and it is not happening
+ *   unknown    → unchecked   COULD NOT LOOK — and that is not the same as `no`
+ *
+ * Mapping `unknown` to `no` would put "Talos checked this and it is not happening" on a row where
+ * the tier's whole answer was "I cannot tell from numbers", which is a lie in the ledger and a lie
+ * on the user's screen. Pure.
  */
+const _CHEAP_MET = { fired: 'yes', not_fired: 'no', unknown: 'unchecked' }
 function _cheapAsLedger(cheap) {
-    return (cheap?.conditions ?? []).map(c => ({ id: c.id, met: c.state === 'fired' ? 'yes' : 'no', note: c.note }))
+    return (cheap?.conditions ?? []).map(c => ({ id: c.id, met: _CHEAP_MET[c.state] ?? 'unchecked', note: c.note }))
 }
 
 /** What the last read concluded — the pop-out's "where Talos stands now", kept on the document. */

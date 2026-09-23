@@ -1509,3 +1509,23 @@ test('an expensive row carries NO tier — it is the default and the only kind t
     assert.equal(deps.entries[0].tier, undefined)
     assert.equal(deps.entries[0].verdict, 'wait')
 })
+
+test('a cheap row carries what it looked at, and `unknown` is NOT recorded as `no`', async () => {
+    // "Talos checked this and it is not happening" on a condition the tier could not settle is a
+    // lie in the ledger and a lie on the user's screen.
+    const deps = stubDeps({
+        cheapRead: async () => ({ escalate: false, read: 'Numbers say no.', conditions: [
+            { id: 'c1', state: 'not_fired', note: 'still under' },
+        ] }),
+    })
+    await _checkSetup(MID(), T, deps)
+    assert.deepEqual(deps.entries[0].conditions, [{ id: 'c1', met: 'no', note: 'still under' }])
+
+    const unsure = stubDeps({
+        cheapRead: async () => ({ escalate: false, read: 'Cannot tell.', conditions: [
+            { id: 'c1', state: 'unknown', note: 'rows cannot show a failed break' },
+        ] }),
+    })
+    await _checkSetup(MID(), T, unsure)
+    assert.equal(unsure.entries[0].conditions[0].met, 'unchecked', 'never `no`')
+})
