@@ -61,6 +61,9 @@ const EFFORT_LEVELS = { low: 'low', high: 'high' }
 // This matters far more now that reasoning is not user-selectable: EVERY request arrives with
 // no effort, so a model in this set that were missing from it would silently run at its own
 // default effort on the smaller token budget.
+//   • Opus 5.5  — adaptive thinking is ALWAYS ON; there is no disabling it. Its own default effort
+//                 is `medium` rather than Opus 5's `high`, so the floor below is a genuine
+//                 instruction here and not a restatement.
 //   • Opus 5    — reasons by default. Turning thinking explicitly off is the worse fix: with
 //                 thinking disabled it can emit a tool call as plain text instead of a tool_use
 //                 block, so the call silently never runs — fatal for tool-driven agents.
@@ -69,7 +72,7 @@ const EFFORT_LEVELS = { low: 'low', high: 'high' }
 //                 high effort against DEFAULT_MAX_TOKENS.
 // Sonnet 4.6 and Opus 4.8 are deliberately absent — they genuinely run thinking-off when the
 // field is omitted, which is what we want when nothing asks for reasoning.
-const THINKS_BY_DEFAULT = new Set(['claude-opus-5', 'claude-sonnet-5'])
+const THINKS_BY_DEFAULT = new Set(['claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5'])
 const FLOOR_EFFORT = 'low'
 
 export function _thinkingConfig(reasoningEffort, model) {

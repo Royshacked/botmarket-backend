@@ -68,7 +68,7 @@ test('write: an unregistered id, a non-string, or an empty body is a 400 and wri
 })
 
 test('the ceiling degrades only onto something cheaper than what would have run', () => {
-    assert.equal(costlierThanCheap('claude-opus-5'), true)
+    assert.equal(costlierThanCheap('claude-opus-5-5'), true)
     assert.equal(costlierThanCheap('claude-sonnet-5'), true)
     assert.equal(costlierThanCheap(CHEAP_MODEL), false)
     assert.equal(costlierThanCheap('gpt-5.6-luna'), false, 'Luna is a fifth of Haiku — "degrading" onto Haiku would cost more')

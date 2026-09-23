@@ -25,7 +25,7 @@ import { bookAssessUsage } from '../../monitoring/assess.shared.js'
 // The seam's house read (houseModels.service, 2026-09-21): every turn runs on the house model and
 // the request is not read, so a test that wants a dear model on the turn sets the HOUSE to it.
 const NO_HOUSE = async () => ({ chatModel: null })
-const OPUS     = async () => ({ chatModel: 'claude-opus-5' })
+const OPUS     = async () => ({ chatModel: 'claude-opus-5-5' })
 
 // ─── the log tag → field key ──────────────────────────────────────────────────
 
@@ -188,7 +188,7 @@ test('an over-ceiling user is moved to the cheap model, not cut off', () => {
 test('past the ceiling the turn runs on the cheap model instead of failing', () => {
     // End to end through the seam: the same call that books the turn reads the month's spend back,
     // so the check costs no extra round trip.
-    return resolveAgentStream('claude-opus-5', 'u1', 'kairosAgent',
+    return resolveAgentStream('claude-opus-5-5', 'u1', 'kairosAgent',
         async () => ({ totalCost: 25 }), async () => 20, undefined, OPUS,
     ).then(out => {
         assert.equal(out.degraded, true)
@@ -198,17 +198,17 @@ test('past the ceiling the turn runs on the cheap model instead of failing', () 
 })
 
 test('under the ceiling the house model is honoured untouched', async () => {
-    const out = await resolveAgentStream('claude-opus-5', 'u1', 'kairosAgent',
+    const out = await resolveAgentStream('claude-opus-5-5', 'u1', 'kairosAgent',
         async () => ({ totalCost: 4 }), async () => 20, undefined, OPUS)
     assert.equal(out.degraded, false)
-    assert.equal(out.model, 'claude-opus-5')
+    assert.equal(out.model, 'claude-opus-5-5')
 })
 
 test('an exempt account keeps its model however much it has spent', async () => {
-    const out = await resolveAgentStream('claude-opus-5', 'u1', 'kairosAgent',
+    const out = await resolveAgentStream('claude-opus-5-5', 'u1', 'kairosAgent',
         async () => ({ totalCost: 9999 }), async () => null, undefined, OPUS)   // null ceiling = exempt/unset
     assert.equal(out.degraded, false)
-    assert.equal(out.model, 'claude-opus-5')
+    assert.equal(out.model, 'claude-opus-5-5')
 })
 
 // ─── Monitor spend ────────────────────────────────────────────────────────────
@@ -340,14 +340,14 @@ test('the desk hook books at the model the provider names, and at the turn’s m
     // provider passes that model with the usage; booking it at the desk's model would price a
     // Sonnet read at Opus rates on an Opus thread — or the reverse.
     const booked = []
-    const { onUsage, model } = await resolveAgentStream('claude-opus-5', 'u1', 'analystAgent',
+    const { onUsage, model } = await resolveAgentStream('claude-opus-5-5', 'u1', 'analystAgent',
         async () => null, async () => null, async (...a) => { booked.push(a) }, OPUS)
 
     onUsage({ input_tokens: 10 })                          // the loop's own turn
     onUsage({ input_tokens: 10 }, 'claude-sonnet-4-6')     // a tool's vision read
     await new Promise(r => setImmediate(r))
 
-    assert.equal(model, 'claude-opus-5')
-    assert.deepEqual(booked.map(a => a[1]), ['claude-opus-5', 'claude-sonnet-4-6'])
+    assert.equal(model, 'claude-opus-5-5')
+    assert.deepEqual(booked.map(a => a[1]), ['claude-opus-5-5', 'claude-sonnet-4-6'])
     assert.deepEqual(booked.map(a => a[3]), ['analystAgent', 'analystAgent'], 'same desk, same row')
 })

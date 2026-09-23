@@ -51,9 +51,11 @@ export function consultDescription(when) {
 // literals that can drift apart silently — a mismatch would simply mean the tool never runs.
 export const CONSULT_TOOL = 'consult'
 
-// Opus 5 reasons by default and is the strongest model we route to. `high` rather than `max`:
-// max shows diminishing returns and can overthink a bounded question, which is all this ever gets.
-const DEFAULT_MODEL  = 'claude-opus-5'
+// Opus 5.5 reasons by default (adaptive, always on) and is the strongest model we route to. `high`
+// rather than `max`: max shows diminishing returns and can overthink a bounded question, which is
+// all this ever gets — and 5.5's OWN default is `medium`, so asking for high is a real instruction
+// here rather than a restatement of the default.
+const DEFAULT_MODEL  = 'claude-opus-5-5'
 const DEFAULT_EFFORT = 'high'
 
 // Booked under its own agent tag rather than the calling desk's, so the `byAgent.consult*` rows

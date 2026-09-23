@@ -17,6 +17,11 @@ const PRICING = {
     // over-reporting is the safe direction for a ceiling — and that reason has expired.
     'claude-sonnet-5':          { input: 2.00,  output: 10.00, cacheRead: 0.20,  cacheWrite: 2.50  },
     'claude-sonnet-4-6':        { input: 3.00,  output: 15.00, cacheRead: 0.30,  cacheWrite: 3.75  },
+    // Opus 5.5 is CHEAPER than Opus 5 on every axis, and its cache read uses a non-standard 0.05x
+    // multiplier ($0.20, not the 0.1x $0.40 the other models' arithmetic would predict) — read off
+    // the pricing page 2026-09-23. `claude-opus-5` stays below: a price book is a reference for
+    // whatever a row was actually billed at, not a list of what we currently choose.
+    'claude-opus-5-5':          { input: 4.00,  output: 20.00, cacheRead: 0.20,  cacheWrite: 5.00  },
     'claude-opus-5':            { input: 5.00,  output: 25.00, cacheRead: 0.50,  cacheWrite: 6.25  },
     'claude-opus-4-8':          { input: 5.00,  output: 25.00, cacheRead: 0.50,  cacheWrite: 6.25  },
     // The Talos candidates (TALOS_MODELS, via OpenRouter — pass-through rates read off the model

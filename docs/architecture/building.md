@@ -68,7 +68,7 @@ consumes events via `postSSE` + `buildStreamHandlers`.
 ## 2. Agent services & models
 
 Every agent resolves its model through `services/llmModels.js` `resolveStreamFn()` — the
-Anthropic Claude family (`claude-opus-5`, `claude-opus-4-8`, `claude-sonnet-5` — the **default
+Anthropic Claude family (`claude-opus-5-5`, `claude-opus-4-8`, `claude-sonnet-5` — the **default
 since 2026-09-20**, was Sonnet 4.6 — `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`) streaming
 through `providers/anthropic.provider.js` `streamAnthropicWithTools`, plus **six admin-only
 candidates under evaluation** — `gpt-5.6-luna`, `qwen3.7-plus`, `mistral-medium-3.5`, and since

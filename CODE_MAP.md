@@ -647,7 +647,7 @@ services/
 providers/
   anthropic.provider.js         THE ONE Anthropic call path: streamAnthropicWithTools — the request → tool
                                 → request loop, adaptive thinking + effort per model (_thinkingConfig, with
-                                THINKS_BY_DEFAULT for Opus 5 / Sonnet 5), the cache-breakpoint walk, and
+                                THINKS_BY_DEFAULT for Opus 5.5 / Opus 5 / Sonnet 5), the cache-breakpoint walk, and
                                 _noteStop, which logs a max_tokens or refusal stop with the model and the
                                 stop_details category. The model is the caller's (llmModels resolves it);
                                 there is no second default here. The non-streaming twins were deleted

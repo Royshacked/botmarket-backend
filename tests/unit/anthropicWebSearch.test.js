@@ -10,7 +10,7 @@ import { webSearchTypeFor } from '../../services/llmModels.js'
 // would have 400'd a Haiku turn that offered web_search.
 
 test('webSearchTypeFor: the modern set gets 2026-02-09, Haiku and unknowns get the basic variant', () => {
-    for (const m of ['claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-sonnet-4-6'])
+    for (const m of ['claude-opus-5-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-sonnet-4-6'])
         assert.equal(webSearchTypeFor(m), 'web_search_20260209', m)
     assert.equal(webSearchTypeFor('claude-haiku-4-5-20251001'), 'web_search_20250305')
     assert.equal(webSearchTypeFor('something-unreleased'), 'web_search_20250305', 'unknown → basic, which is accepted everywhere')

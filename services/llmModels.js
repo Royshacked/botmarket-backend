@@ -24,7 +24,7 @@ const WS_NEW = 'web_search_20260209'
 const WS_OLD = 'web_search_20250305'
 
 const MODELS = {
-    'claude-opus-5':            { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Opus 5',    webSearch: WS_NEW },
+    'claude-opus-5-5':          { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Opus 5.5',  webSearch: WS_NEW },
     'claude-opus-4-8':          { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Opus 4.8',  webSearch: WS_NEW },
     'claude-sonnet-5':          { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Sonnet 5',  webSearch: WS_NEW },
     'claude-sonnet-4-6':        { provider: 'anthropic', streamFn: streamAnthropicWithTools, label: 'Claude Sonnet 4.6', webSearch: WS_NEW },

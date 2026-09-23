@@ -11,7 +11,7 @@ import { calcCost } from '../../services/tokenUsage.service.js'
 const HAIKU    = 'claude-haiku-4-5-20251001'
 const SONNET   = 'claude-sonnet-4-6'
 const SONNET_5 = 'claude-sonnet-5'
-const OPUS     = 'claude-opus-5'
+const OPUS     = 'claude-opus-5-5'
 
 // ─── the models a user can pick ───────────────────────────────────────────────
 
@@ -135,22 +135,32 @@ test('the internal effort parameter still works when set in code', () => {
 
 // ─── pricing ──────────────────────────────────────────────────────────────────
 
-test('pricing: opus 5 is $5/$25 per 1M tokens', () => {
-    const cost = calcCost(OPUS, { input_tokens: 1_000_000, output_tokens: 1_000_000 })
-    assert.equal(+cost.toFixed(4), 30)
+test('pricing: opus 5.5 is $4/$20 per 1M tokens — CHEAPER than the Opus 5 it replaced', () => {
+    assert.equal(+calcCost(OPUS, { input_tokens: 1_000_000, output_tokens: 1_000_000 }).toFixed(4), 24)
+    // The row it replaced stays in the book: a price table answers what a stored row was BILLED at,
+    // which is not the same question as what we currently choose.
+    assert.equal(+calcCost('claude-opus-5', { input_tokens: 1_000_000, output_tokens: 1_000_000 }).toFixed(4), 30)
 })
 
 test('pricing: opus 4.8 matches opus 5 (both $5/$25, not the old $15/$75)', () => {
     const usage = { input_tokens: 500_000, output_tokens: 200_000 }
-    assert.equal(calcCost('claude-opus-4-8', usage), calcCost(OPUS, usage))
+    assert.equal(calcCost('claude-opus-4-8', usage), calcCost('claude-opus-5', usage))
 })
 
 test('pricing: cache reads/writes are billed at 0.1x / 1.25x input', () => {
-    const cost = calcCost(OPUS, {
+    const cost = calcCost('claude-opus-5', {
         cache_read_input_tokens: 1_000_000,
         cache_creation_input_tokens: 1_000_000,
     })
     assert.equal(+cost.toFixed(4), 6.75)  // 0.50 + 6.25
+})
+
+test('pricing: OPUS 5.5 BREAKS the 0.1x cache-read rule — it is 0.05x', () => {
+    // The one model in the book whose cache read is not a tenth of its input. Deriving it instead
+    // of reading it off the pricing page would over-report every cached Opus 5.5 turn by 2x, and
+    // the cache read is the biggest line on a warm prefix.
+    const cost = calcCost(OPUS, { cache_read_input_tokens: 1_000_000, cache_creation_input_tokens: 1_000_000 })
+    assert.equal(+cost.toFixed(4), 5.20)  // 0.20 + 5.00, NOT 0.40 + 5.00
 })
 
 test('pricing: a cached read is ~12x cheaper than a cold write', () => {
