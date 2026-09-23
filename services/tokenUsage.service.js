@@ -29,6 +29,10 @@ const PRICING = {
     // cached share stays INSIDE `prompt_tokens`, so the adapter prices the whole prompt at the input
     // rate and reports the cached share in cacheRead at 0 for visibility — over-reporting is the
     // safe direction for a ceiling, and the vendor's discount is not one published multiple.
+    // Luna 6 replaced Luna 5 on 2026-09-23 at HALF the rate, with an identical capability surface on
+    // OpenRouter (image + file input, tools, tool_choice, the same 1.05M context). The 5.6 row stays
+    // for the months already billed at it.
+    'gpt-6-luna':               { input: 0.10,  output: 0.50  },
     'gpt-5.6-luna':             { input: 0.20,  output: 1.20  },   // the three are desk candidates too (llmModels)
     'mistral-medium-3.5':       { input: 1.50,  output: 7.50  },
     'qwen3.7-plus':             { input: 0.32,  output: 1.28  },

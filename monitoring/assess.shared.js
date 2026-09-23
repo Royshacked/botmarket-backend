@@ -44,7 +44,7 @@ export const TALOS_MODELS = Object.freeze({
     // Kept for the one document that stored it — Haiku is not offered for a real read (rejected
     // 2026-09-20), which is why the menu does not list it.
     'claude-haiku-4-5-20251001': { label: 'Claude Haiku 4.5',  provider: 'anthropic',  wire: 'claude-haiku-4-5-20251001' },
-    'gpt-5.6-luna':              { label: 'GPT-5.6 Luna',      provider: 'openai-compat', endpoint: 'openrouter', wire: 'openai/gpt-5.6-luna', adminOnly: true },
+    'gpt-6-luna':                { label: 'GPT-6 Luna',        provider: 'openai-compat', endpoint: 'openrouter', wire: 'openai/gpt-6-luna', adminOnly: true },
     // Mistral Large 3 was the plan; on 2026-09-20 Mistral's own API listed no Large at all (Medium 3.5
     // is their flagship there) and OpenRouter had it batch-only. Medium 3.5 took the slot: dearer
     // ($1.5/$7.5 — about half of Sonnet with their cache), so a fit data point more than a cost case.

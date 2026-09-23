@@ -38,7 +38,7 @@ const MODELS = {
     // simply had no web (Prometheus's "news since the event" step silently did not happen); the
     // same model on OpenRouter costs the same ($1.5/$7.5) and gets the plugin. resolveAgentStream
     // routes a non-admin who somehow requests one to DEFAULT_MODEL.
-    ..._candidate('gpt-5.6-luna',       'GPT-5.6 Luna',       'openrouter', 'openai/gpt-5.6-luna'),
+    ..._candidate('gpt-6-luna',         'GPT-6 Luna',         'openrouter', 'openai/gpt-6-luna'),
     ..._candidate('qwen3.7-plus',       'Qwen3.7-Plus',       'openrouter', 'qwen/qwen3.7-plus'),
     ..._candidate('mistral-medium-3.5', 'Mistral Medium 3.5', 'openrouter', 'mistralai/mistral-medium-3-5'),
     // Added 2026-09-21 off OpenRouter's live list, priced on Mentor's real round shape against

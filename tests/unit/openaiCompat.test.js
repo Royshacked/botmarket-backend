@@ -67,9 +67,9 @@ test('openaiCompat: usage and finish_reason translate to the shapes the ledger a
     assert.equal(toStopReason('stop', true), 'tool_use')
     assert.equal(toStopReason('length', false), 'max_tokens')
     assert.equal(toStopReason('stop', false), 'end_turn')
-    assert.equal(servedModelMatches('openai/gpt-5.6-luna', 'openai/gpt-5.6-luna'), true)
-    assert.equal(servedModelMatches('gpt-5.6-luna-2026-07', 'openai/gpt-5.6-luna'), true)
-    assert.equal(servedModelMatches('openai/gpt-5.6-terra', 'openai/gpt-5.6-luna'), false)
+    assert.equal(servedModelMatches('openai/gpt-6-luna', 'openai/gpt-6-luna'), true)
+    assert.equal(servedModelMatches('gpt-6-luna-2026-07', 'openai/gpt-6-luna'), true)
+    assert.equal(servedModelMatches('openai/gpt-6-terra', 'openai/gpt-6-luna'), false)
     assert.equal(servedModelMatches(undefined, 'x/y'), true)
 })
 
@@ -84,10 +84,10 @@ function fakeClient(script) {
 
 test('openaiCompat: the loop runs a tool round through the shared runner and returns the final text', async () => {
     const client = fakeClient([
-        { model: 'openai/gpt-5.6-luna', usage: { prompt_tokens: 100, completion_tokens: 10 },
+        { model: 'openai/gpt-6-luna', usage: { prompt_tokens: 100, completion_tokens: 10 },
             choices: [{ finish_reason: 'tool_calls', message: { role: 'assistant', content: null,
                 tool_calls: [{ id: 'c1', type: 'function', function: { name: 'get_chart', arguments: '{"ticker":"NVDA","timeframe":"15min"}' } }] } }] },
-        { model: 'openai/gpt-5.6-luna', usage: { prompt_tokens: 900, completion_tokens: 50 },
+        { model: 'openai/gpt-6-luna', usage: { prompt_tokens: 900, completion_tokens: 50 },
             choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: '{"verdict":"wait","read":"nothing yet"}' } }] },
     ])
     const calls = []
@@ -98,27 +98,27 @@ test('openaiCompat: the loop runs a tool round through the shared runner and ret
     const booked = []
     const trace  = { calls, usage: [] }
     const out = await runOpenAICompatRead({
-        wire: 'openai/gpt-5.6-luna', model: 'gpt-5.6-luna', systemText: 'SYS', userText: 'USER', tools: TOOLS,
+        wire: 'openai/gpt-6-luna', model: 'gpt-6-luna', systemText: 'SYS', userText: 'USER', tools: TOOLS,
         runToolUses, onUsage: (u, m) => booked.push([u.input_tokens, m]), trace, client,
     })
     assert.deepEqual(out, { text: '{"verdict":"wait","read":"nothing yet"}', stopReason: 'end_turn' })
     assert.deepEqual(calls, ['get_chart'])
-    assert.deepEqual(booked, [[100, 'gpt-5.6-luna'], [900, 'gpt-5.6-luna']])
+    assert.deepEqual(booked, [[100, 'gpt-6-luna'], [900, 'gpt-6-luna']])
     assert.equal(trace.format, 'openai')
     assert.equal(trace.rounds, 2)
     assert.equal(trace.stopReason, 'end_turn')
     // system, user, assistant(tool_calls), tool, user(image), assistant(final)
     assert.deepEqual(trace.messages.map(m => m.role), ['system', 'user', 'assistant', 'tool', 'user', 'assistant'])
-    assert.equal(client.requests[0].model, 'openai/gpt-5.6-luna')
+    assert.equal(client.requests[0].model, 'openai/gpt-6-luna')
     assert.equal(client.requests[0].tools.length, 2)
     assert.equal(client.requests[1].messages[3].tool_call_id, 'c1')
 })
 
 test('openaiCompat: a substituted model is an IO failure, not a silently different candidate', async () => {
-    const client = fakeClient([{ model: 'openai/gpt-5.6-terra', usage: {}, choices: [{ finish_reason: 'stop', message: { content: '{}' } }] }])
+    const client = fakeClient([{ model: 'openai/gpt-6-terra', usage: {}, choices: [{ finish_reason: 'stop', message: { content: '{}' } }] }])
     await assert.rejects(
-        runOpenAICompatRead({ wire: 'openai/gpt-5.6-luna', model: 'gpt-5.6-luna', systemText: 'S', userText: 'U', tools: [], runToolUses: async () => [], client }),
-        /served "openai\/gpt-5.6-terra"/,
+        runOpenAICompatRead({ wire: 'openai/gpt-6-luna', model: 'gpt-6-luna', systemText: 'S', userText: 'U', tools: [], runToolUses: async () => [], client }),
+        /served "openai\/gpt-6-terra"/,
     )
 })
 
@@ -149,8 +149,8 @@ test('talos models: every entry has a provider and a wire id; the default is Ant
 })
 
 test('talos models: a candidate is honoured for an admin and routed to the default for anyone else', () => {
-    assert.equal(resolveTalosModel('gpt-5.6-luna', true),  'gpt-5.6-luna')
-    assert.equal(resolveTalosModel('gpt-5.6-luna', false), ASSESS_MODEL)
+    assert.equal(resolveTalosModel('gpt-6-luna', true),  'gpt-6-luna')
+    assert.equal(resolveTalosModel('gpt-6-luna', false), ASSESS_MODEL)
     assert.equal(resolveTalosModel('claude-sonnet-5', false), ASSESS_MODEL)
     assert.equal(resolveTalosModel('claude-opus-4-8', false), 'claude-opus-4-8')
     assert.equal(resolveTalosModel('gpt-4o', true), ASSESS_MODEL)
@@ -172,8 +172,8 @@ test('assessRouting: reads the document once, applies the gate, caps the effort,
     assert.equal((await assessRouting('u1', admin, noHouse)).model, ASSESS_MODEL)
     const t = await assessRouting('u2', trader, noHouse)
     assert.equal(t.model, ASSESS_MODEL); assert.equal(t.provider, 'anthropic'); assert.equal(t.wire, ASSESS_MODEL)
-    const h = await assessRouting('u2', trader, async () => ({ talosModel: 'gpt-5.6-luna' }))
-    assert.equal(h.model, 'gpt-5.6-luna'); assert.equal(h.provider, 'openai-compat'); assert.equal(h.wire, 'openai/gpt-5.6-luna')
+    const h = await assessRouting('u2', trader, async () => ({ talosModel: 'gpt-6-luna' }))
+    assert.equal(h.model, 'gpt-6-luna'); assert.equal(h.provider, 'openai-compat'); assert.equal(h.wire, 'openai/gpt-6-luna')
     assert.equal((await assessRouting('u2', trader, async () => ({ talosModel: 'gone' }))).model, ASSESS_MODEL)
     assert.equal((await assessRouting('u2', trader, async () => { throw new Error('db') })).model, ASSESS_MODEL)
     assert.equal((await assessRouting('u3', legacy, noHouse)).model, ASSESS_MODEL)

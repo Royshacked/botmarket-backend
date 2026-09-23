@@ -104,7 +104,7 @@ function fakeOpenAI(turns) {
         } } },
     }
 }
-const chunk = (delta, finish = null) => ({ model: 'openai/gpt-5.6-luna', choices: [{ delta, finish_reason: finish }] })
+const chunk = (delta, finish = null) => ({ model: 'openai/gpt-6-luna', choices: [{ delta, finish_reason: finish }] })
 const oaToolRound = (id) => [
     chunk({ tool_calls: [{ index: 0, id, function: { name: 'get_quote', arguments: '{"ticker":"NVDA"}' } }] }, 'tool_calls'),
 ]
@@ -112,7 +112,7 @@ const oaToolRound = (id) => [
 test('openai-compat: same landing — tool_choice none on the last round, the note as a user message before it', async () => {
     const client = fakeOpenAI([oaToolRound('c1'), oaToolRound('c2'), [chunk({ content: 'landing text' }, 'stop')]])
     const text = await streamOpenAICompatWithTools({
-        wire: 'openai/gpt-5.6-luna', model: 'gpt-5.6-luna', client,
+        wire: 'openai/gpt-6-luna', model: 'gpt-6-luna', client,
         promptOrMessages: 'go all the way NVDA', systemPrompt: 'S',
         tools: [TOOL], toolHandlers: { get_quote: async () => 'NVDA 180.2' },
         maxContinuations: 3,

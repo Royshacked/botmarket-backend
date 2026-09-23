@@ -205,7 +205,7 @@ test('produces, stores and returns the read', async () => {
 // absent → the default. The doc records what RAN.
 
 test('quickReadModel: the house model, whoever asked; unset, unknown or unreadable → the default', async () => {
-    assert.equal(await quickReadModel(async () => ({ chatModel: 'gpt-5.6-luna' })), 'gpt-5.6-luna')
+    assert.equal(await quickReadModel(async () => ({ chatModel: 'gpt-6-luna' })), 'gpt-6-luna')
     assert.equal(await quickReadModel(async () => ({ chatModel: 'mistral-medium-3.5' })), 'mistral-medium-3.5')
     assert.equal(await quickReadModel(async () => ({ chatModel: null })), QUICKREAD_MODEL)
     assert.equal(await quickReadModel(async () => ({ chatModel: 'gone-model' })), QUICKREAD_MODEL)

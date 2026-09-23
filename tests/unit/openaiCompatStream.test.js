@@ -48,24 +48,24 @@ function fakeStreamClient(turns) {
         } } },
     }
 }
-const chunk = (delta, finish = null, extra = {}) => ({ model: 'openai/gpt-5.6-luna', choices: [{ delta, finish_reason: finish }], ...extra })
+const chunk = (delta, finish = null, extra = {}) => ({ model: 'openai/gpt-6-luna', choices: [{ delta, finish_reason: finish }], ...extra })
 
 test('stream: text streams through the tag suppressor, a tool round runs the handler, usage books per round', async () => {
     const client = fakeStreamClient([
         [
             chunk({ tool_calls: [{ index: 0, id: 'c1', function: { name: 'get_chart', arguments: '' } }] }),
             chunk({ tool_calls: [{ index: 0, function: { arguments: '{"ticker":"NVDA"}' } }] }, 'tool_calls'),
-            { model: 'openai/gpt-5.6-luna', choices: [], usage: { prompt_tokens: 100, completion_tokens: 10 } },
+            { model: 'openai/gpt-6-luna', choices: [], usage: { prompt_tokens: 100, completion_tokens: 10 } },
         ],
         [
             chunk({ reasoning: 'looking at it' }),
             chunk({ content: 'Reclaim held. <state>{"phase":2}</state> Done.' }, 'stop'),
-            { model: 'openai/gpt-5.6-luna', choices: [], usage: { prompt_tokens: 900, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 100 } } },
+            { model: 'openai/gpt-6-luna', choices: [], usage: { prompt_tokens: 900, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 100 } } },
         ],
     ])
     const tokens = [], starts = [], reasoning = [], booked = [], captured = []
     const text = await streamOpenAICompatWithTools({
-        wire: 'openai/gpt-5.6-luna', model: 'gpt-5.6-luna', client,
+        wire: 'openai/gpt-6-luna', model: 'gpt-6-luna', client,
         promptOrMessages: [{ role: 'user', content: 'read NVDA' }],
         systemPrompt: [{ type: 'text', text: 'SYS', cache_control: { type: 'ephemeral' } }],
         tools: [
@@ -82,10 +82,10 @@ test('stream: text streams through the tag suppressor, a tool round runs the han
     assert.deepEqual(captured, ['{"phase":2}'])
     assert.deepEqual(starts, ['get_chart'])
     assert.deepEqual(reasoning, ['looking at it'])
-    assert.deepEqual(booked, [[100, 0, 'gpt-5.6-luna'], [900, 100, 'gpt-5.6-luna']])
+    assert.deepEqual(booked, [[100, 0, 'gpt-6-luna'], [900, 100, 'gpt-6-luna']])
 
     const r1 = client.requests[0]
-    assert.equal(r1.model, 'openai/gpt-5.6-luna')
+    assert.equal(r1.model, 'openai/gpt-6-luna')
     assert.equal(r1.stream, true)
     assert.equal(r1.messages[0].role, 'system'); assert.equal(r1.messages[0].content, 'SYS')
     assert.equal(r1.tools.length, 1, 'web_search is not a function tool')
@@ -99,13 +99,13 @@ test('stream: text streams through the tag suppressor, a tool round runs the han
 
 test('stream: no web plugin off OpenRouter, and a substituted model throws', async () => {
     const client = fakeStreamClient([[chunk({ content: 'ok' }, 'stop')]])
-    await streamOpenAICompatWithTools({ endpoint: 'mistral', wire: 'openai/gpt-5.6-luna', model: 'm', client, promptOrMessages: 'hi', systemPrompt: 'S',
+    await streamOpenAICompatWithTools({ endpoint: 'mistral', wire: 'openai/gpt-6-luna', model: 'm', client, promptOrMessages: 'hi', systemPrompt: 'S',
         tools: [{ type: 'web_search_20260209', name: 'web_search' }] })
     assert.equal(client.requests[0].plugins, undefined)
     assert.equal(client.requests[0].tools, undefined)
 
-    const bad = fakeStreamClient([[{ model: 'openai/gpt-5.6-terra', choices: [{ delta: { content: 'x' }, finish_reason: 'stop' }] }]])
-    await assert.rejects(streamOpenAICompatWithTools({ wire: 'openai/gpt-5.6-luna', model: 'm', client: bad, promptOrMessages: 'hi', systemPrompt: 'S' }), /served "openai\/gpt-5.6-terra"/)
+    const bad = fakeStreamClient([[{ model: 'openai/gpt-6-terra', choices: [{ delta: { content: 'x' }, finish_reason: 'stop' }] }]])
+    await assert.rejects(streamOpenAICompatWithTools({ wire: 'openai/gpt-6-luna', model: 'm', client: bad, promptOrMessages: 'hi', systemPrompt: 'S' }), /served "openai\/gpt-6-terra"/)
 })
 
 test('stream: an aborted signal ends the loop with the text so far, no throw', async () => {
@@ -120,27 +120,27 @@ test('stream: an aborted signal ends the loop with the text so far, no throw', a
 // ─── The chat registry gate ───────────────────────────────────────────────────
 
 test('registry: the candidates are registered admin-only; the Anthropic entries are not', () => {
-    for (const id of ['gpt-5.6-luna', 'qwen3.7-plus', 'mistral-medium-3.5', 'qwen3.7-flash', 'deepseek-v4.1-flash', 'gemini-3.8-flash']) {
+    for (const id of ['gpt-6-luna', 'qwen3.7-plus', 'mistral-medium-3.5', 'qwen3.7-flash', 'deepseek-v4.1-flash', 'gemini-3.8-flash']) {
         assert.equal(isAdminOnlyModel(id), true, id)
         assert.equal(resolveStreamFn(id).provider, 'openai-compat', id)
     }
     assert.equal(isAdminOnlyModel('claude-sonnet-5'), false)
     assert.equal(isAdminOnlyModel('nope'), false)
-    const r = resolveStreamFn('gpt-5.6-luna')
+    const r = resolveStreamFn('gpt-6-luna')
     assert.equal(r.provider, 'openai-compat'); assert.equal(typeof r.streamFn, 'function')
 })
 
 test('resolveAgentStream: everyone runs the house model, unasked — the request is not read', async () => {
     const noIO = [async () => null, async () => null, async () => {}]
-    const HOUSE = async () => ({ chatModel: 'gpt-5.6-luna' })
+    const HOUSE = async () => ({ chatModel: 'gpt-6-luna' })
     // Whatever the client asked — a candidate, a plain pick, nothing — the house's.
     for (const asked of ['qwen3.7-plus', 'claude-opus-5', undefined]) {
         const turn = await resolveAgentStream(asked, 'u2', 'mentorAgent', ...noIO, HOUSE)
-        assert.equal(turn.model, 'gpt-5.6-luna', String(asked)); assert.equal(turn.provider, 'openai-compat')
+        assert.equal(turn.model, 'gpt-6-luna', String(asked)); assert.equal(turn.provider, 'openai-compat')
     }
     // No user (a house run) → the house model too.
     const house = await resolveAgentStream(undefined, null, 'marketBrief', ...noIO, HOUSE)
-    assert.equal(house.model, 'gpt-5.6-luna')
+    assert.equal(house.model, 'gpt-6-luna')
     // No house choice, or an unreadable one, is the default.
     assert.equal((await resolveAgentStream('claude-opus-5', 'u2', 'mentorAgent', ...noIO, async () => ({ chatModel: null }))).model, DEFAULT_MODEL)
     assert.equal((await resolveAgentStream('claude-opus-5', 'u2', 'mentorAgent', ...noIO, async () => { throw new Error('db') })).model, DEFAULT_MODEL)
