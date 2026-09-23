@@ -1,7 +1,12 @@
 # Talos two tiers — build plan
 
-**STATUS: BUILT 2026-09-23** — phases 1, 2, 3, 4.1, 4.3, 5, 6, 7. Suite 3287/0, lint clean, nothing
-committed. NOT built: phase 4.2 (per-lens tool kits) and the docs pass. Supersedes the wake model in
+**STATUS: BUILT 2026-09-23** — phases 1, 2, 3, 4.1, 4.3, 5, 6, 7, and the docs pass. Suite 3287/0,
+lint clean, committed on `talos-two-tier`. NOT built: phase 4.2 (per-lens tool kits).
+
+**Both measurements are in and both hold.** The cheap tier would sleep through 78% of wakes (95
+bundles, Haiku 4.5, $0.33 — Open decision 4). The richer opening block cuts round-one tool calls 39%
+and halves the chart pulls (100 bundles, $2.99 — Phase 4.1). They compound rather than overlap: one
+removes reads, the other makes the surviving ones cheaper. Supersedes the wake model in
 [talos-per-candle.md](talos-per-candle.md) — that build made every candle close a full model read,
 which is the thing this one undoes. The per-candle doc stays as the record of how the *timer*
 became the candle; what changes here is what happens when it fires.
@@ -244,6 +249,35 @@ read in the system, which makes it the best-caching object here.
 into `candleRows` (the fetch) + `formatCandles` + `indicatorsText` in `assess.shared.js`;
 `openingContext` fetches once and returns both blocks. Zero extra fetches. This is the direct
 attack on 0-of-71: the model reaches for a picture because the rows alone are a thin hand.
+
+**MEASURED 2026-09-23 — it works.** A/B over 100 recorded bundles, 200 model calls, $2.99. Both arms
+got the same system prompt, the same tool kit, the same model (`claude-sonnet-4-6`) and the same
+user turn; the only difference was the indicator block, computed from the candles that read actually
+saw (parsed back out of its own recorded `userText`, so the numbers describe exactly those bars).
+
+| round-1 behaviour | rows only | + indicators |
+|---|---|---|
+| tool calls per read | 0.85 | **0.52** — −39% |
+| reads pulling NOTHING | 36 / 100 | **61 / 100** |
+| `get_chart` (the vision call) | 41 | **17** — −59% |
+| `get_candles` | 30 | 26 |
+
+36 reads changed their ask and 30 of those pulled fewer, in exactly the shape the change was built
+on — `A[get_chart, get_chart] → B[]`, `A[get_chart, get_false_breaks] → B[]`. A read that was
+pulling a picture now answers off the numbers.
+
+**Two caveats, and they matter:**
+
+- **This is ROUND ONE, not the whole loop.** A read that asks for nothing in round one is finished;
+  one that asks may ask again after seeing the result. So −39% on round-1 asks is not −39% on the
+  3.77 tools/read baseline. It is the right leading indicator — round one is where "I have nothing
+  but rows, let me look at a picture" happens — not the same number moved.
+- **Six reads asked for MORE.** `ISRG/day A[get_quotes] → B[get_quotes, get_candles]`,
+  `OUST/30min A[get_chart] → B[get_chart, get_false_breaks]`. Handing a model numbers sometimes
+  makes it curious rather than satisfied. The net is strongly favourable; it is not monotone.
+
+Run on `ASSESS_MODEL`. If the house selector points elsewhere in prod the direction should hold, but
+the magnitude is untested there.
 
 **What the build settled beyond the plan:**
 
