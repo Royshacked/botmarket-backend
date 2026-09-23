@@ -50,9 +50,14 @@ export const BLUEPRINT_VERSION = 1
  * `entry_mode` is part of the plan, not of the person: a limit setup that travelled without it
  * would hydrate as `conditional` (the normaliser's default) and readiness would then demand a
  * condition the author never wrote — the recipient would be handed a different way in.
+ *
+ * `pace_rungs` travels for the same reason. "Watch this on the 15min" is the author's decision about
+ * the plan, and a blueprint arriving without it would silently hand the recipient the horizon's
+ * default ladder instead of the rung the sender deliberately chose. `market_cap` and `read_mode` do
+ * NOT travel: the first is re-derived at Generate, the second is Talos's to own.
  */
 const CARRIED = [
-    'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe', 'entry_mode',
+    'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe', 'pace_rungs', 'entry_mode',
     'thesis', 'conviction', 'active_from', 'valid_until', 'referenced_symbols',
 ]
 

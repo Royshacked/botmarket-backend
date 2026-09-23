@@ -1,5 +1,12 @@
 # Talos per-candle — build plan
 
+> **PARTLY SUPERSEDED 2026-09-23** by [talos-two-tier.md](talos-two-tier.md). What this build
+> settled stands — the candle close is the timer, there is no cadence field and no time term on a
+> guard. What changed is that a wake is no longer the same as a READ: it now costs the full read, a
+> cheap numbers-only one, or nothing, and the expensive read paces its own next look. The derived
+> `ladder` this doc's Phase 1 introduced is DELETED (pace is authored), and the entry gate is the
+> verdict rather than the level. Read that doc for the current contract.
+
 **STATUS: BUILT 2026-09-17** (phases 0–6). The desk docs caught up the same day: the monitor
 CONTRACT is now the Talos section of [desks/mentor-talos.md](../desks/mentor-talos.md#talos), and
 this file stays where it is as the BUILD RECORD — the plan, the decisions, and what the build

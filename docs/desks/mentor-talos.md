@@ -2,6 +2,16 @@
 
 The user's own trade, built with **Mentor** and watched by **Talos**.
 
+> **A WAKE IS CHEAP BY DEFAULT (2026-09-23).** Talos still wakes on every candle close, but what a
+> wake COSTS is now one of three: the full read, a CHEAP numbers-only read that decides whether the
+> full one is worth paying for, or nothing at all. Every expensive read declares how many closes
+> until it is worth another look and what the cheap passes should check meanwhile. Measured on 95
+> recorded reads: **78% of wakes needed no expensive read**, $15.68 → $3.80 on that sample. The
+> build plan and what it settled differently is
+> [design/talos-two-tier.md](../design/talos-two-tier.md); [Tiers](#tiers--what-a-wake-costs) below
+> is the contract. That build also deleted the derived `ladder` ([Rungs](#rungs--the-premise-and-the-pace))
+> and made the entry gate the VERDICT rather than the level ([Guards](#guards--exact-prices-not-bands)).
+>
 > **TALOS READS ON EVERY CANDLE CLOSE (2026-09-17).** The per-candle rebuild
 > ([design/talos-per-candle.md](../design/talos-per-candle.md), which stays the record of what the
 > build settled) replaced the cadence timer, the guard time term, the in-position price gate and the
@@ -12,11 +22,19 @@ The user's own trade, built with **Mentor** and watched by **Talos**.
 > for exact prices over bands and for guards over zones; its three-tier escalation and its time term
 > are gone.
 >
-> **THE ZONE GATE IS GONE (2026-08-22).** The guards build replaced it with LLM-authored wake
-> guards, and Mentor no longer draws bands — every level is an exact price. That doc
-> (`talos-guards.md`) was merged into this one on 2026-09-19; sections marked **SUPERSEDED** or
+> **THE ZONE GATE IS GONE (2026-08-22, finished 2026-09-23).** The guards build replaced it with
+> LLM-authored wake guards, and Mentor no longer draws bands — every level is an exact price. That
+> doc (`talos-guards.md`) was merged into this one on 2026-09-19; sections marked **SUPERSEDED** or
 > **History** describe how it used to work and are kept because the reasoning still explains the
 > shape of what replaced them.
+>
+> What survived until 2026-09-23 was the LAST thing the zone still gated: an `enter` verdict only
+> fired if price was also standing inside an entry zone. Against a zero-width price that containment
+> test matched a live quote by coincidence — measured in prod, **18 of 18 entry zones were points
+> and only 2 of 70 journal rows carried a zone at all**. Entries worked because the model happened
+> to arm its guards at the exact authored price. **The entry gate is now the VERDICT and only the
+> verdict**; the zone keeps the order price, the size and the r:r, and `firingLeg` says which leg.
+> See [Entry — the verdict decides](#entry--the-verdict-decides).
 
 Replaces `docs/setup-entity.md` and `docs/mentor-talos-refactor.md` (2026-08-08). The refactor doc
 already superseded parts of the contract doc — the `watch[]` taxonomy — so the two disagreed with
@@ -119,6 +137,100 @@ checks while the order rests (`_disarmLimit` cancels the order on a breach or at
 
 ---
 
+## Rungs — the premise, and the pace
+
+> **BUILT 2026-09-23.** Replaced the derived `ladder` (the authored timeframe ±2 rungs), which is
+> deleted, not renamed. A stored `ladder` is simply not read any more; nothing to migrate, because
+> it was server-derived and carried no user intent.
+
+**Reading and pacing are different permissions**, and one field used to do both.
+
+- **Reading is free.** Talos may chart, measure or check any timeframe at any time — it always could
+  at the tool boundary (`assessTools`) and now that is the design rather than a local exception.
+- **Pacing is not**, because the rung IS the wake clock and therefore the bill.
+
+So a setup carries two independent fields:
+
+| field | what it is |
+|---|---|
+| `timeframe` | the **PREMISE** — the one chart the plan was drawn on. The opening view of a read with no stored rung, and the default for `validity.timeframe`. Never constrains pace. |
+| `pace_rungs[]` | the rungs Talos may be **READ** on. **Authored**, never derived, and never empty. |
+
+**Two sources, one shape.** What the user named, or `ladderFor(horizon, marketCap, premise)` when
+they named nothing (`services/setup.ladder.js`). Nothing records which, because nothing behaves
+differently.
+
+**NAMED RUNGS ARE ABSOLUTE.** This is where a user forces their own approach: Mentor may not add to
+them, Talos may not roam outside them in either tier, and there is no cap on how many may be named —
+a cap would be the system overruling the user. Mentor may argue in the conversation and must then
+file what was said, exactly as it must with a price. A spoken range expands to every rung between
+its endpoints: *"15min to 1hr"* is `["15min","30min","1hr"]`, never the two ends.
+
+This costs nothing in reach, because reading stays unfenced. Being paced on the 15min decides when
+Talos is read, never what it may look at — so **a swing drawn on the daily and triggered on the
+15-minute** is finally expressible: `{"timeframe": "day", "pace_rungs": ["15min"]}`. Under ±2 those
+rungs were five apart and that setup could not exist.
+
+**The ladder is horizon × market cap**, because horizon alone hands a mega cap and a microcap the
+same rungs and their noise floors are nothing alike — a 15-minute candle on a $2T name is structure;
+on a $200M name it is two prints and a spread. The cap is bucketed ONCE at Generate and never
+re-fetched: a setup's rungs must not move under it because the stock had a good quarter. An unknown
+cap lands in the middle rather than refusing the setup. The band always widens to reach the premise,
+because a default for people who did not choose is not a reason to overrule the rung they did.
+
+`1min` is never offered anywhere: it is off-plan at the provider, so it is a rung whose fetch can
+only fail.
+
+---
+
+## Tiers — what a wake costs
+
+> **BUILT 2026-09-23** ([design/talos-two-tier.md](../design/talos-two-tier.md)). Until then every
+> pre-entry wake was a full read at roughly $0.165.
+
+A wake is one of three things. `talos.tiers.tierFor` decides, and it is pure:
+
+| | when |
+|---|---|
+| **EXPENSIVE** — the full read, tools and all | a first look · an expiry review · a fired guard · `expensive_only` · the countdown elapsed · **the cheap read escalated, on this same wake** |
+| **CHEAP** — `talos.cheap`, numbers only, no tools, no vision | inside the countdown, with a `watch` declared · `cheap_only` |
+| **NOTHING** | inside the countdown with `watch: null` — the last expensive read said no numbers-only pass could help |
+
+**The cheap read answers two questions**: is the setup fired, and should the expensive read run. It
+has no verdict vocabulary, no guards, no proposals, and **no order is ever placed off it**. Both
+tiers answer "is the setup fired?" on purpose — the cheap one detects, the expensive one confirms
+and commits.
+
+**Its answers are three-valued** — `fired` · `not_fired` · `unknown` — and `unknown` is the point,
+not a failure. A numbers-only pass cannot tell whether a push below a level *failed*, and saying so
+is exactly what it is for. Both `fired` and `unknown` escalate; so does an unparseable reply, a dead
+provider, and any condition the model did not mention. **The model cannot decline to escalate.** The
+asymmetry is the whole safety property: wrong towards escalate costs one read the user was going to
+pay for anyway, wrong towards sleep costs them the trade.
+
+**What is never triaged**, whatever the mode says: the first look (nothing to triage against), the
+expiry review (a decision, not a "did something happen" — the replay found this the hard way), and a
+fired guard (the expensive read armed that level precisely because it wanted waking there).
+
+**The countdown is the expensive read's own**, and it is a MATURITY estimate rather than a budget.
+`next_expensive_in` asks how far this setup is from being decidable, and only a model can answer: a
+head-and-shoulders with one shoulder printed needs a head, a right shoulder and a neckline break,
+which is twenty-odd closes, and re-reading next candle buys a picture of the same shoulder. Counted
+in CLOSES, never minutes — a second clock alongside the candle is two timers that can disagree.
+Capped at 24, which is the only backstop for a setup whose completion has no price to arm a guard at
+("RSI divergence forming"); most chart patterns finish AT a level and a guard covers those exactly.
+
+**`read_mode` barely matters.** Of the five, only `cheap_only` and `expensive_only` are overrides;
+`cheap_then_expensive`, `expensive_then_cheap` and `both` are the same machine from different
+starting points, and which one a setup is in falls out of what its own reads keep asking for. It is
+derived from the conditions at Generate (`defaultReadMode`) and owned by Talos after that. It is
+`read_mode` and not `mode` because a setup's `mode` is the WORKSPACE.
+
+`cheap_only` still escalates — it only declines the expensive read *on a schedule*. A setup that can
+never be looked at properly is one bad `not_fired` away from a missed trade.
+
+---
+
 ## Guards — exact prices, not bands
 
 > **BUILT 2026-08-22** as "guards, not zones", **partly superseded 2026-09-17** by the per-candle
@@ -207,6 +319,34 @@ weeks is read once per candle of its rung, and earnings, the sector and `valid_u
 those reads. Tier 1 dissolved INTO the read, which opens on numbers and pulls the chart as a tool
 call whose cost shows on the row. `BACKSTOP`, `after_min`, `and_price_above`, `CADENCE_BY_TYPE`,
 `PULSE_MOVE_BANDS`, `proximityGapMin` and `skipped_since_last` are gone.
+
+---
+
+## Entry — the verdict decides
+
+> **BUILT 2026-09-23.** The last thing the zone gated, removed.
+
+**An `enter` verdict fires the confirm card. That is the whole gate.** It does not additionally have
+to be standing on a level that a containment test agrees about. Whether the setup is fulfilled is
+what `conditions[]` is for, and the READ is what judges them.
+
+What the level still decides is WHICH leg (`firingLeg`): the one price is at when the wake resolved
+to a specific zone, else the scenario's first unfilled leg. `hit` is still computed and still told to
+the model as ARMED LEVEL — entering far from your own entry is usually a worse trade — but that is
+the read's judgment, not the monitor's veto.
+
+**Why it had to go.** The shape that broke it is the commonest there is: price arrives, the
+conditions confirm two candles later. By then `clampGuards` has dropped the already-satisfied entry
+guard (it would be a paid re-arm loop) and `woke_on` is one-shot and long cleared — so a pullback, a
+reclaim or a sweep-and-go could reach the point where every condition was true with **no path to
+`enter` at all**.
+
+**What an `enter` places: an order at the plan's OWN authored entry price, never at spot.** So an
+`enter` while price sits past that level is a resting order that may never fill, and if price has run
+far enough that the plan no longer works, the honest answers are `wait` or `edit`. The prompt says
+this outright and names the failure — *entering because the conditions are technically true, at a
+price that left your entry behind*. Deliberately a judgment the read makes rather than a rule the
+monitor enforces: the monitor cannot tell "price ran away" from "price came back to me".
 
 ---
 
@@ -334,10 +474,14 @@ from it. The record of the build, with what it settled differently from the plan
 | never | market shut, `pre_active`, a `limit` setup (the order IS the plan) | market shut, awaiting fill, dormant |
 
 The rung is the pace: the model asks for the timeframe it wants to open on next (`next_timeframe`),
-clamped to the setup's stored `ladder` (`usableLadder` — its fetchable rungs, `1min` never). The next wake is
-`market.service.nextCandleCloseMs(symbol, assetClass, rung)` + `READ_LAG_MS` (30s; `dueLoop` polls
-at 60s, so the real lag is 30–90s). There is no `cadence`, no backstop and no quiet wake — a wake
-that does not read does not exist, and every read journals.
+held to `paceRungs` — the rungs this setup may be READ on ([Rungs](#rungs--the-premise-and-the-pace)).
+The next wake is `market.service.nextCandleCloseMs(symbol, assetClass, rung)` + `READ_LAG_MS` (30s;
+`dueLoop` polls at 60s, so the real lag is 30–90s). There is no `cadence` and no clock — the close
+is the timer.
+
+**A wake is no longer the same as a READ** (2026-09-23). Which tier runs is
+[Tiers](#tiers--what-a-wake-costs); a wake that costs nothing writes its schedule and no journal
+row.
 
 **Guards are `{ price, direction, means }` and nothing else** — rewritten whole on every read, so
 what the model does not re-arm is forgotten. The time term went with the timer: with a read on every
@@ -563,7 +707,7 @@ an optional note, and sends; the recipient sees a `setup_shared` card with "Open
 
 **What travels is the BLUEPRINT** (`services/setup.blueprint.js` — built for the deleted express
 form, kept for exactly this caller, wired now): the plan and nothing personal. Asset, direction,
-lens, timeframe, horizon, `entry_mode`, thesis, conviction, validity window, the setup-wide
+lens, premise `timeframe`, `pace_rungs`, horizon, `entry_mode`, thesis, conviction, validity window, the setup-wide
 conditions, and every scenario with its levels (with their notes and per-zone conditions) and its
 conditions. **Not** the size, the account, the broker, the workspace `mode`, the status, the
 monitor state, or the sender's Talos reads. Alongside it: the sender's note, the last price at the

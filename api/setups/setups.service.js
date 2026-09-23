@@ -5,6 +5,8 @@ import { buildEventRisk }    from '../../services/eventRisk.service.js'
 import { makeEntityCrud }    from '../../services/entity/entityCrud.service.js'
 import { resolveVenue, resolveMode, isBindableVenue } from '../../services/venue.resolve.service.js'
 import { normalizeSetup, setupReadiness, projectScenario, disarmedSetupPatch } from '../../services/setup.schema.js'
+import { bucketForMarketCap } from '../../services/setup.ladder.js'
+import { getMarketCap } from '../../providers/fmp.provider.js'
 import { resolveMainAccountId } from '../../services/agentUtils.js'
 import { cancelRestingEntryOrders } from '../../services/restingOrders.service.js'
 import { listJournal } from '../../services/journal.service.js'
@@ -67,7 +69,8 @@ const POSITION_STATUSES = new Set(PAST_ENTRY)
 // are its EXECUTION PROJECTION, re-derived by normalizeSetup and re-stamped by Talos when a premise
 // arms. Both are written here so a re-draw leaves no stale projection behind.
 const PLAN_FIELDS = [
-    'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe', 'ladder',
+    'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe', 'pace_rungs',
+    'market_cap', 'read_mode',
     'thesis', 'conditions', 'referenced_symbols', 'scenarios',
     'entry_zones', 'stop_zones', 'tp_zones', 'validity', 'quantity',
     'active_from', 'valid_until', 'event_risk', 'rr', 'conviction', 'entry_mode',
@@ -151,14 +154,23 @@ async function generateSetup(rawSetup, { userId, accounts = [], mainAccountId = 
         const gate = validateSetup(setup, broker, list)
         if (!gate.ok) return gate
 
-        const [{ broker_symbol, basis_offset }, event_risk] = await Promise.all([
+        const [{ broker_symbol, basis_offset }, event_risk, marketCap] = await Promise.all([
             resolveVenue(broker, userId, main?.id ?? null, setup.asset),
             // Never blocks a Generate: buildEventRisk swallows provider failures and returns [].
             buildEventRisk({ asset: setup.asset, assetClass: setup.asset_class }).catch(() => []),
+            // Bucketed ONCE, here, and never re-fetched: a setup's default rungs must not move
+            // under it because the stock had a good quarter. Null on any failure — `ladderFor`
+            // reads that as "assume the middle" rather than as a reason to refuse the setup.
+            getMarketCap(setup.asset).catch(() => null),
         ])
 
+        // Re-normalised with the cap in hand: a setup whose rungs nobody named gets its ladder from
+        // ladderFor(horizon, cap), and the cap is only knowable here. A setup that DID name rungs
+        // is untouched by this — normalizeSetup never overrules a named set.
+        const priced = normalizeSetup({ ...setup, market_cap: bucketForMarketCap(marketCap) })
+
         const bound = {
-            ...setup,
+            ...priced,
             mode:     resolveMode({ broker, accounts: list, mainAccountId: main?.id }),
             broker,
             accounts: list.map(a => String(a.id)),

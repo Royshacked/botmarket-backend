@@ -168,7 +168,8 @@ test('the journal row says what the read checked and pulled', async () => {
     })
     await _checkSetup(INPOS(), T, deps)
     const row = deps.entries[0]
-    assert.equal(row.rung, '15min')
+    // Where the read STOOD — the premise — not the `timeframe_used` it reported.
+    assert.equal(row.rung, '1hr')
     assert.deepEqual(row.tools, ['get_chart'])
     assert.deepEqual(row.conditions, [{ id: 'tz1c1', met: 'no', note: 'volume still expanding' }])
     assert.deepEqual(deps.writes[0]['monitor_state.cost'].last, ['get_chart'])
@@ -229,8 +230,9 @@ test('the rung the read asks for is opened next time and paces the next read', a
     })
     await _checkSetup(INPOS(), T, deps)
     assert.equal(deps.writes[0]['monitor_state.timeframe'], '4hr')
-    // The NEXT read is paced by the rung it opened on this time (the stored one, finest by default).
-    assert.deepEqual(asked, ['15min'])
+    // The NEXT read is paced by the rung it opened on this time (the stored one, the premise by
+    // default) — not by the one it just asked for.
+    assert.deepEqual(asked, ['1hr'])
 })
 
 // ─── Off-hours ────────────────────────────────────────────────────────────────

@@ -13,9 +13,13 @@ import { normalizeAssetClass } from './entity/vocabulary.js'
 import { cleanConviction } from './conviction.util.js'
 import { TRADE_HORIZONS } from './entity/vocabulary.js'
 import { MODES } from './analysisModes.js'
+import { TF_RUNGS, isFetchableRung, ladderFor, MARKET_CAPS } from './setup.ladder.js'
 
-// Coarse → fine. The ladder is a contiguous slice of this, centred on the authored timeframe.
-export const TF_RUNGS = ['month', 'week', 'day', '4hr', '2hr', '1hr', '30min', '15min', '5min', '1min']
+// The rung VOCABULARY lives in setup.ladder.js, not here. This module is the entity contract and
+// consumes rung facts; that one owns what a rung is and which rungs a horizon reaches for. The
+// dependency runs one way on purpose — the ladder used to import TF_RUNGS back off this file,
+// which is a cycle waiting to bite whoever adds the next import.
+export { TF_RUNGS, isFetchableRung }
 
 // The LENS a setup was built through — the same three Kairos offers (kairos.modes MODES), so a
 // user hears one vocabulary across both desks. `classical` was the old name for the first one and
@@ -66,72 +70,122 @@ export const ON_BREAK = ['revise', 'close', 'notify_only']
 /** Cap on symbols a setup may pull the monitor onto — free text can name anything. */
 const MAX_REFERENCED_SYMBOLS = 6
 
-// How many rungs either side of the authored timeframe the monitor may reach for. Bounded so an
-// intraday setup can't have its assessment wander onto a monthly chart.
-const LADDER_SPAN = 2
-
-/**
- * The timeframes the monitor's tools may request, coarse→fine. A contiguous window of TF_RUNGS
- * centred on `timeframe` (±LADDER_SPAN), clamped at both ends of the rung list.
- * Unknown/absent timeframe → a sane day-trade ladder.
- */
-export function buildLadder(timeframe) {
-    const tf = normalizeTimeframe(timeframe)
-    const i  = TF_RUNGS.indexOf(tf)
-    if (i === -1) return ['1hr', '30min', '15min'].filter(isFetchableRung)
-    return TF_RUNGS
-        .slice(Math.max(0, i - LADDER_SPAN), Math.min(TF_RUNGS.length, i + LADDER_SPAN + 1))
-        .filter(isFetchableRung)
-}
-
-// The finest rung we can actually GET. `1min` is off-plan at FMP (402) — the rest of the intraday
-// tier is fine — so a ladder that offers it hands the monitor a rung whose fetch can only fail, and
-// the read silently degrades to "no candles" at the one end it looks at first.
+// ─── Pace ── which rungs Talos is READ on ──────────────────────────────
 //
-// A DATA-AVAILABILITY floor, deliberately not a vocabulary change: `1min` stays in TF_RUNGS (the
-// legacy `idea` kind still speaks it, and it is what a 1-minute condition parses to), so lifting
-// this when the plan allows is one line here. It is also no real loss as a SETUP rung — a setup
-// judged off a 1-minute chart is reading noise, not structure.
-const FINEST_RUNG = '5min'
-
-/** Is this rung one the providers can actually serve? Pure. */
-export function isFetchableRung(tf) {
-    const i = TF_RUNGS.indexOf(normalizeTimeframe(tf))
-    return i !== -1 && i <= TF_RUNGS.indexOf(FINEST_RUNG)
-}
+// READING AND PACING ARE DIFFERENT PERMISSIONS, and until 2026-09-23 one derived field did both.
+// `ladder` was the authored timeframe ±2 rungs, and it fenced BOTH what the monitor could look at
+// and how often it woke. The first half was already wrong and had been deleted at the tool boundary
+// (monitoring/assessTools.js) — Talos may chart anything its conditions name. The second half is
+// real and stays, because the rung IS the wake clock and therefore the bill.
+//
+// `pace_rungs` is the AUTHORED answer, and it is never empty (docs/design/talos-two-tier.md):
+//
+//   the user named rungs  →  exactly those. Absolutely.
+//   nobody named any      →  ladderFor(horizon, marketCap)
+//
+// NAMED RUNGS ARE THE USER FORCING THEIR OWN APPROACH. Mentor may not add to them, Talos may not
+// roam outside them, and there is no cap on how many may be named — a cap would be the system
+// overruling the user, which is the one thing this field exists to prevent. Mentor may argue in the
+// conversation and must then file what was said, exactly as it must with a price.
+//
+// This costs nothing in reach: pacing decides when Talos is READ, never what it may LOOK AT.
+//
+// `timeframe` is now purely the PREMISE — the chart the plan was drawn on. It no longer constrains
+// pace, which is what makes "drawn on the daily, triggered on the 15min" expressible at last:
+// { timeframe: 'day', pace_rungs: ['15min'] }. Under ±2 that setup could not exist.
 
 /**
- * A rung's length in minutes — how long the model is asking to wait when it asks to look at that
- * rung next. Unknown/absent → null, so a caller can fall back rather than invent a cadence.
+ * The authored pace set: normalised, fetchable-only, deduped, coarse→fine. Empty in, empty out —
+ * `normalizeSetup` is what falls back to the ladder, because only it knows the horizon and the cap.
+ * Pure.
  */
-export function rungMinutes(tf) {
-    return RUNG_MINUTES[normalizeTimeframe(tf)] ?? null
-}
-const RUNG_MINUTES = {
-    month: 30 * 1440, week: 7 * 1440, day: 1440,
-    '4hr': 240, '2hr': 120, '1hr': 60, '30min': 30, '15min': 15, '5min': 5, '1min': 1,
+export function normalizePaceRungs(raw) {
+    const want = new Set((Array.isArray(raw) ? raw : []).map(normalizeTimeframe).filter(isFetchableRung))
+    return TF_RUNGS.filter(r => want.has(r))
 }
 
 /**
- * Hold a requested rung to the ones this setup was laddered onto. The model picks the view it wants
- * next; WHICH views exist is not its call — LADDER_SPAN is what stops an intraday setup being judged
- * on a monthly chart, and it only means something if something enforces it.
+ * The rungs this setup may be paced on, coarse→fine. Never empty: a document that somehow carries
+ * none falls to its premise, then to the horizon's ladder. Pure.
+ */
+export function paceRungs(setup) {
+    const stored = normalizePaceRungs(setup?.pace_rungs)
+    if (stored.length) return stored
+    const premise = normalizePaceRungs([setup?.timeframe])
+    return premise.length ? premise : ladderFor(setup?.type, setup?.market_cap, setup?.timeframe)
+}
+
+/**
+ * Resolve a requested pace rung: itself when this setup may be read on it, else null so the caller
+ * owns the fallback. Membership, and nothing else — there is no floor under a ladder. Pure.
+ */
+export function resolveRung(tf, setup) {
+    const want = normalizeTimeframe(tf)
+    return want && paceRungs(setup).includes(want) ? want : null
+}
+
+// ─── Tiers — which read runs on a candle ──────────────────────────────────────
+//
+// `read_mode`, never `mode`: a setup's `mode` is the WORKSPACE (live | paper | manual), stamped at
+// Generate, and one key meaning two things is the trap the condition-`mode` rename exists to avoid.
+
+/**
+ * `cheap_then_expensive` and `expensive_then_cheap` are the same machine from different starting
+ * points; which one a setup starts in falls out of what its conditions need, so nobody authors it.
+ */
+export const READ_MODES = [
+    'cheap_only',            // every close is a cheap read; never escalates
+    'expensive_only',        // every close is a full read
+    'cheap_then_expensive',  // cheap watches; `fired` or `unknown` escalates
+    'expensive_then_cheap',  // expensive until the structural conditions settle, then cheap
+    'both',                  // cheap every close AND expensive on its own declared cadence
+]
+
+/**
+ * The opening mode, read off the conditions rather than asked for. A `measured` condition names a
+ * test numbers can apply; a `judgment` one hands the call to whoever is looking. So:
  *
- * Also floors a STORED ladder at `FINEST_RUNG`: a document written before that floor existed still
- * carries `1min` in its own `ladder`, and rebuilding the ladder on read would be a lie about what the
- * setup was authored as. Returns null when nothing usable is asked for, so the caller owns the
- * fallback. Pure.
+ *   nothing but measured   → cheap_only            the numbers are the whole question
+ *   nothing but judgment   → expensive_only        nothing a cheap read could settle
+ *   judgment that LATCHES  → expensive_then_cheap  a structural precondition, then arithmetic
+ *   otherwise              → cheap_then_expensive  the default
+ *
+ * Talos owns it after the first read; Mentor only sets where it starts, because Mentor does not
+ * know what will happen. Pure.
  */
-export function clampRung(tf, ladder) {
-    const want  = normalizeTimeframe(tf)
-    const rungs = (Array.isArray(ladder) ? ladder : []).filter(isFetchableRung)
-    return want && rungs.includes(want) ? want : null
+export function defaultReadMode(setup) {
+    const all = declaredConditions(setup, setup?.scenarios?.[0] ?? null)
+    if (!all.length) return 'cheap_then_expensive'
+
+    const judgment = all.filter(c => c.mode === 'judgment')
+    if (!judgment.length) return 'cheap_only'
+    if (judgment.length === all.length) return 'expensive_only'
+    // A judgment condition that latches is a precondition: once settled it never needs eyes again,
+    // and what is left is arithmetic. That is the shape "false break, then reclaim VWAP" has.
+    if (judgment.every(c => c.persistence === 'latching')) return 'expensive_then_cheap'
+    return 'cheap_then_expensive'
 }
 
-/** The rungs of a stored ladder that are actually fetchable, finest LAST. Never empty. Pure. */
-export function usableLadder(setup) {
-    const rungs = (setup?.ladder ?? []).filter(isFetchableRung)
-    return rungs.length ? rungs : ['15min']
+/** Most indicators one cheap read computes. Past a handful it is not watching, it is hedging. */
+const MAX_WATCH_INDICATORS = 6
+
+/**
+ * What the cheap reads compute until the next expensive one. Written by the EXPENSIVE read and
+ * rewritten whole each time, exactly as guards are — what it does not re-declare is forgotten.
+ *
+ * NULL IS A REAL ANSWER, not a gap: it means no numbers-only pass could usefully check anything, so
+ * the setup sleeps entirely until its next expensive read or a guard fires. A read watching a
+ * head-and-shoulders form says exactly this. Pure.
+ */
+export function normalizeWatch(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const rung = normalizeTimeframe(raw.rung)
+    if (!isFetchableRung(rung)) return null
+    const indicators = [...new Set(
+        (Array.isArray(raw.indicators) ? raw.indicators : [])
+            .filter(s => typeof s === 'string' && s.trim())
+            .map(s => s.trim().toLowerCase()))].slice(0, MAX_WATCH_INDICATORS)
+    return { rung, indicators }
 }
 
 // ─── Guards — the model's own wake conditions ─────────────────────────────────
@@ -587,8 +641,11 @@ function isoOrNull(v) {
  * field degrades to null/[] rather than rejecting the draft, because this also runs on every
  * streamed turn to render the live worksheet — a half-built setup is the normal case, not an error.
  *
- * Server-derived fields (`ladder`, `quantity`) are always recomputed here, so an
- * attempt by the model to author them is overwritten rather than trusted.
+ * Server-derived fields (`quantity`, the execution projection) are always recomputed here, so an
+ * attempt by the model to author them is overwritten rather than trusted. `pace_rungs` is NOT one
+ * of them — which chart a plan is read on is the plan's own decision, so it is normalised from the
+ * model's own field like any other authored value, and only falls back to the ladder when nothing
+ * was named.
  */
 export function normalizeSetup(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
@@ -596,6 +653,12 @@ export function normalizeSetup(raw) {
     const type      = TRADE_HORIZONS.includes(raw.type) ? raw.type : null
     const timeframe = VALID_TIMEFRAMES.has(normalizeTimeframe(raw.timeframe)) ? normalizeTimeframe(raw.timeframe) : null
     const direction = raw.direction === 'short' ? 'short' : raw.direction === 'long' ? 'long' : null
+    const marketCap = MARKET_CAPS.includes(raw.market_cap) ? raw.market_cap : null
+
+    // THE TWO SOURCES, resolved here because this is the only place that holds both the named rungs
+    // and the horizon+cap the ladder needs. Named wins outright and is never added to.
+    const named     = normalizePaceRungs(raw.pace_rungs)
+    const paced     = named.length ? named : ladderFor(type, marketCap, timeframe)
 
     // ONE id space for the whole document — the root tier first, then each scenario, so the single
     // resolved-condition ledger can never have two conditions answering to the same key.
@@ -612,7 +675,18 @@ export function normalizeSetup(raw) {
         direction,
         type,
         trade_mode:  TRADE_MODES.includes(raw.trade_mode) ? raw.trade_mode : 'discretionary',
+        // The PREMISE rung — the chart the plan was drawn on. Context for every read, and the
+        // default for a validity range that names none. It does NOT set the pace.
         timeframe,
+        // The rungs Talos is READ on. Never empty: what the user named, else the horizon's ladder.
+        pace_rungs:  paced,
+        // Bucketed once at Generate and never re-fetched — a setup's ladder must not move under it
+        // because the stock had a good quarter.
+        market_cap:  marketCap,
+        // Which TIER runs each candle. `read_mode`, not `mode`: a setup's `mode` is already the
+        // WORKSPACE (live | paper | manual), bound at Generate, and two meanings on one key is the
+        // trap the condition `mode` rename was written to avoid.
+        read_mode:   READ_MODES.includes(raw.read_mode) ? raw.read_mode : defaultReadMode({ conditions, scenarios }),
         active_from: isoOrNull(raw.active_from),
         valid_until: isoOrNull(raw.valid_until),
 
@@ -639,7 +713,6 @@ export function normalizeSetup(raw) {
         // one scenario (projectScenario): pre-arm the first, and re-stamped by Talos to the armed
         // one when a zone trips. Authoring them directly does nothing — scenarios are the source.
         ...projectScenario({ scenarios }, raw.armed_scenario_id ?? null),
-        ladder:   buildLadder(timeframe),
     }
 }
 
@@ -861,6 +934,26 @@ export function legQuantity(scenario, zoneId) {
 export function pendingLegs(scenario, entry) {
     const filled = new Set((entry?.legs ?? []).map(l => l?.zone_id).filter(Boolean))
     return (scenario?.entry_zones ?? []).filter(z => z?.id && !filled.has(z.id))
+}
+
+/**
+ * Which entry leg an `enter` verdict fires on. The one price is AT when the wake resolved to a
+ * specific level, else the scenario's first unfilled leg.
+ *
+ * WHY THE FALLBACK EXISTS. Until 2026-09-23 an `enter` could only fire when `hit` was non-null,
+ * and `hit` came from a containment test against what is now a zero-width price — so it matched a
+ * live quote only by coincidence. In prod, 18 of 18 entry zones were points and only 2 of 70
+ * journal rows carried a zone at all: entries worked solely because the model happened to arm its
+ * guards at the exact authored price. The shape that broke it is the commonest one there is —
+ * price arrives, conditions confirm two candles later, and by then `clampGuards` has dropped the
+ * already-satisfied entry guard and `woke_on` is long cleared, leaving no path to `enter`.
+ *
+ * So the level stopped being a second opinion on a decision the read already made. The zone keeps
+ * its three real jobs — the order price, the size, the r:r — and the verdict decides. Pure.
+ */
+export function firingLeg(scenario, zone = null) {
+    if (zone?.id) return zone
+    return pendingLegs(scenario, null)[0] ?? null
 }
 
 /**

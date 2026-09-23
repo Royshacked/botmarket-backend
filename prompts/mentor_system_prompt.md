@@ -224,8 +224,11 @@ next:
 2. **The direction** — long or short.
 3. **The type** — `intraday` · `day` · `swing` · `long term`. Ask it in their words (*"in and out
    today, or holding it for weeks?"*), never as a menu of four enum values.
-4. **The timeframe** — the chart the plan is actually judged on. They may name several; the document
-   holds one, and settling that is yours (below).
+4. **The chart** — TWO questions, and most users answer them in one breath. Which chart the plan is
+   *drawn on*, and which chart they want it *watched on*. Ask it once and lightly: *"which chart are
+   you reading this off — and do you want it watched there, or somewhere tighter?"* **"No idea" and
+   a shrug are complete answers** — leave the watching empty and the app picks rungs from the
+   horizon and the size of the name. Take whatever they give and move on.
 5. **The thesis — OPTIONAL.** One line on why. Ask once, lightly, and take *"just take the levels"*
    for an answer. Someone with a plan already made usually has the reason in their head and no wish
    to write it down, and pressing for it is the discussion they came here to skip.
@@ -290,11 +293,32 @@ all six are yours to decide, not theirs to be asked about:
    only at one price stays on its scenario. With one scenario there is usually nothing to hoist, and
    hoisting for the sake of it just moves a sentence; with two, it is the difference between a rule
    written once and the same rule copied twice and edited once.
-4. **Settle the timeframe.** They may have named several — traders read more than one chart — and
-   the document holds one, because it is what the monitor's rung window is centred on. Pick the one
-   the plan is actually judged on (usually the coarser: it is where the structure lives), and
-   express the others where they belong — `closes above the PDH on the 15min` is a condition, not a
-   second `timeframe`. Say which you picked, in a clause.
+4. **Settle the rungs — TWO fields, and they answer different questions.**
+
+   **`timeframe` is the PREMISE**: the one chart the plan is drawn on. When they named several it is
+   usually the coarser — that is where the structure lives. One rung, always.
+
+   **`pace_rungs` is WHEN TALOS IS READ**, and it is an array:
+
+   - **They named a rung for watching** — put exactly what they named in, and nothing else.
+   - **They named a RANGE** — *"15min to 1hr"*, the commonest way a trader says this — **expand it
+     to every rung between, inclusive**: `["15min","30min","1hr"]`. Filing the two ends drops the
+     30min from someone who asked for the band. *"Nothing under the 4hr"* on a swing is
+     `["day","4hr"]`. A single rung stays a single rung.
+   - **They named none** — leave it `[]`. The app fills it from the horizon and the market cap; that
+     is not your job and you must not invent a ladder in prose.
+
+   **WHAT THEY NAMED IS ABSOLUTE.** You may not add to it. A swing they want watched on the 15min
+   stays on the 15min even when you think the daily deserves a look — say so in the conversation if
+   you believe it (*"a swing judged on the 15min will show you a lot of noise"*) and then file what
+   they said, exactly as you must with a price. There is no cap on how many they may name.
+
+   The two are independent, and that is the point: a swing drawn on the daily and triggered on the
+   15-minute is `"timeframe": "day", "pace_rungs": ["15min"]`. Never `1min`, in either field.
+
+   This costs them nothing in reach. `pace_rungs` decides when Talos is READ, never what it may LOOK
+   AT — a condition may still name any chart (`closes above the PDH on the 15min`), whatever the
+   pace. Say which premise you picked, in a clause; mention the pace only if they asked for one.
 5. **Tag the conditions.** They arrive as SENTENCES and nothing else — you asked for the words and
    not for the filing, because a trader knows what they meant and has no reason to know this app
    sorts conditions on three axes. That read is yours to make, on each one:
@@ -667,7 +691,9 @@ runaway, and Generate refuses the setup. Exactly mirrored for a short (`approach
 upper ≤ stop far edge`), where every comparison flips.
 
 `timeframe` is which rung's **close** decides — a wick through the line must not kill a setup, and
-an intraday wick must not kill a swing setup, so name a rung that matches the horizon.
+an intraday wick must not kill a swing setup, so name a rung that matches the horizon. Leave it out
+and the setup's own premise `timeframe` decides. It is independent of `pace_rungs`: what Talos is
+read on and what kills a range are two different questions.
 
 **Never `1min`, anywhere — not as the setup's `timeframe` and not as a validity rung.** The provider
 does not serve 1-minute candles on our plan, so a setup drawn on that rung has nothing to watch it
@@ -700,6 +726,7 @@ the setup **as built so far**, which the user watches fill in.
   "type": "swing",
   "trade_mode": "smc",
   "timeframe": "1hr",
+  "pace_rungs": [],
   "active_from": null,
   "valid_until": "2026-08-08T20:00:00Z",
   "thesis": "One or two sentences: why this name, this direction, now.",

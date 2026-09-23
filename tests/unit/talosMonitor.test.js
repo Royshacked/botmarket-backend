@@ -12,7 +12,8 @@ import {
     scenarioGate, liveScenarios, rollUpBreaches, scenarioState,
     computeMetrics, rMultiple,
 } from '../../monitoring/talos.gates.js'
-import { normalizeSetup, buildLadder, isFetchableRung, usableLadder, rungMinutes } from '../../services/setup.schema.js'
+import { normalizeSetup, isFetchableRung, resolveRung, paceRungs } from '../../services/setup.schema.js'
+import { rungMinutes } from '../../services/setup.ladder.js'
 import { buildToolsFor, symbolScope, openingRung } from '../../monitoring/talos.assess.js'
 
 // Talos's gates. Everything here runs on EVERY wake for free — the expensive assessment only fires
@@ -138,13 +139,31 @@ test('a rung the session cannot place falls back to a quarter hour rather than n
 
 // ─── The rung the model chooses ───────────────────────────────────────────────
 
-test('the opening view is the ladder\'s finest rung until a read asks for another', () => {
-    // The old behaviour, kept as the fallback: with nothing stored there is no reason to prefer
-    // any rung, and the finest is where a trigger would show up first.
-    assert.equal(openingRung(SETUP), '15min')
-    assert.equal(openingRung({ ...SETUP, monitor_state: { timeframe: '1hr' } }), '1hr', 'stored choice wins')
-    assert.equal(openingRung({ ...SETUP, monitor_state: { timeframe: 'month' } }), '15min', 'off-ladder is not a choice')
-    assert.equal(openingRung({}), '15min', 'a document with no ladder still opens somewhere')
+test('the opening view is the PREMISE rung until a read asks for another', () => {
+    // Until 2026-09-23 this fell back to the finest rung of the derived ladder. The premise is both
+    // cheaper and more honest: the first read of a plan opens on the chart it was drawn on.
+    assert.equal(openingRung(SETUP), '1hr', 'PLAN.timeframe')
+    assert.equal(openingRung({ ...SETUP, monitor_state: { timeframe: '4hr' } }), '4hr', 'stored choice wins')
+    assert.equal(openingRung({ ...SETUP, monitor_state: { timeframe: '1min' } }), '1hr',
+        'an unfetchable ask is not a choice — back to the premise')
+    assert.equal(openingRung({ ...SETUP, monitor_state: { timeframe: '15min' } }), '1hr',
+        'nor is a rung outside what this setup is paced on — SETUP is a swing, its band stops at 1hr')
+    assert.ok(openingRung({}), 'a bare document still opens somewhere')
+})
+
+test('the ladder always reaches the PREMISE, even when the horizon band would not', () => {
+    // A swing on an unknown cap bands day–2hr. A plan drawn on the 1hr must still be readable on
+    // the 1hr: a default for people who did not choose is not a reason to overrule the rung they did.
+    const s = normalizeSetup({ ...PLAN, timeframe: '1hr', type: 'swing' })
+    assert.deepEqual(s.pace_rungs, ['day', '4hr', '2hr', '1hr'])
+    assert.ok(s.pace_rungs.includes(s.timeframe))
+})
+
+test('a named pace rung is binding on the opening view too, premise or not', () => {
+    const told = { ...SETUP, timeframe: 'day', pace_rungs: ['15min'] }
+    assert.equal(openingRung(told), '15min')
+    assert.equal(openingRung({ ...told, monitor_state: { timeframe: '4hr' } }), '15min',
+        'the model cannot climb off a rung somebody chose')
 })
 
 test('a read that names a rung is opened there next time', async () => {
@@ -163,25 +182,23 @@ test('the next read is paced by the rung the read ASKED for, not the one it open
     assert.deepEqual(asked, ['2hr'])
 })
 
-test('an off-ladder ask leaves the stored rung ALONE rather than resetting it', async () => {
+test('an unresolvable ask leaves the stored rung ALONE rather than resetting it', async () => {
     // Reverting to the finest rung on a typo would quietly undo a deliberate climb — the setup would
     // be judged on structure one wake and on noise the next, with nothing in the record saying why.
     const climbed = { ...LIVE, monitor_state: { ...LIVE.monitor_state, timeframe: '2hr' } }
-    const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'Still there.', next_timeframe: 'week' }) })
+    const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'Still there.', next_timeframe: 'fortnight' }) })
     await _checkSetup(climbed, T, deps)
     assert.equal(deps.writes[0]['monitor_state.timeframe'], undefined, 'not written, so the stored 2hr stands')
 })
 
-test('the ladder floors at 5min — 1min is off-plan at the provider', () => {
-    // Only 1min is 402 at FMP; the rest of the intraday tier is fine. A ladder offering it hands the
-    // read a rung whose fetch can only fail, and the opening view is the FIRST thing it degrades.
-    assert.deepEqual(buildLadder('15min'), ['1hr', '30min', '15min', '5min'])
-    assert.deepEqual(buildLadder('5min'), ['30min', '15min', '5min'])
+test('1min is never fetchable, at any rung list — it is off-plan at the provider', () => {
     assert.equal(isFetchableRung('1min'), false)
     assert.equal(isFetchableRung('5min'), true)
-    // A document written before the floor existed still carries 1min in its stored ladder.
-    assert.deepEqual(usableLadder({ ladder: ['15min', '5min', '1min'] }), ['15min', '5min'])
-    assert.equal(openingRung({ ladder: ['15min', '5min', '1min'] }), '5min', 'never opens on a rung it cannot fetch')
+    assert.equal(resolveRung('1min', { pace_rungs: ['5min', '1min'] }), null)
+    // A legacy document still carrying the deleted `ladder` is one nobody named a rung on — the
+    // key is not read any more, so it falls to its horizon's default.
+    assert.deepEqual(paceRungs({ ladder: ['15min', '5min', '1min'], type: 'swing', market_cap: 'large' }),
+        ['day', '4hr', '2hr', '1hr'])
 })
 
 test('rung lengths are what the pace is derived from', () => {
@@ -238,7 +255,8 @@ test('a pre-entry read leaves a full row: rung, what it checked, what it pulled,
     await _checkSetup(LIVE, T, deps)
     const row = deps.entries[0]
     assert.equal(row.reason, 'first_look')
-    assert.equal(row.rung, '15min')
+    // Where the read STOOD — the premise, nothing stored yet — not the `timeframe_used` it reported.
+    assert.equal(row.rung, '1hr')
     assert.equal(row.warning, 'No close above 238.6 yet.')
     assert.deepEqual(row.conditions, [{ id: 'c1', met: 'no', note: 'no CHoCH yet' }])
     assert.deepEqual(row.tools, ['get_chart', 'get_indicators'])
@@ -641,6 +659,10 @@ function stubDeps(over = {}) {
         nextCandleCloseMs: (_s, _c, _rung, now) => now + 3600_000,
         getPrice:    async () => 238.0,
         assess:      async () => ({ verdict: 'enter', read: 'Trigger is live.' }),
+        // The cheap tier ESCALATES by default in this harness, so every test written against the
+        // expensive path still exercises it. The tier routing has its own tests (talosTiers) and
+        // the sleep/escalate wiring is pinned below.
+        cheapRead:   async () => ({ conditions: [], escalate: true, read: null }),
         buildOrderPlan: async () => [{ accountId: 'a1', quantity: 100 }],
         onCard:         async () => {},
         onManualCard:   async () => {},
@@ -674,15 +696,19 @@ test('a closed market skips the price fetch AND the assessment entirely', async 
     assert.equal(assessed, false)
 })
 
-test('price away from every level is still read on the candle — but "enter" is not honoured there', async () => {
+test('price away from every level is still read on the candle, and the read is told so', async () => {
+    // Until 2026-09-23 this test asserted "no level, no entry". The level stopped being the
+    // permission (docs/design/talos-two-tier.md §Phase 6) — it is still told to the model as
+    // ARMED LEVEL, because entering far from your own entry is usually a worse trade, but that is
+    // the read's judgment to make and no longer the monitor's veto.
     let hitSeen = 'unset'
     const res = await _checkSetup(LIVE, T, stubDeps({
         getPrice: async () => 300,
-        assess:   async (_s, hit) => { hitSeen = hit; return { verdict: 'enter', read: 'Looks great from here.' } },
+        assess:   async (_s, hit) => { hitSeen = hit; return { verdict: 'enter', read: 'Conditions are in.' } },
     }))
     assert.equal(hitSeen, null, 'the read is told no level is armed')
-    assert.equal(res.fired, undefined, 'no level, no entry')
     assert.equal(res.verdict, 'enter', 'the verdict is recorded as given')
+    assert.equal(res.fired, true, 'and it is acted on — the verdict is the gate')
 })
 
 // ── The execution projection (docs/desks/mentor-talos.md) ──
@@ -1258,4 +1284,160 @@ test('a conditional (non-limit) hit setup is not affected by the disarm path', a
     const res  = await _checkSetup({ ...ARMED, status: 'hit', entry_mode: 'conditional',
         valid_until: '2026-07-26T11:55:00Z' }, T, deps)
     assert.equal(res.reason, 'awaiting_fill', 'conditional setups never go through the disarm path')
+})
+
+// ─── The entry gate is the VERDICT (2026-09-23) ────────────────────────────────
+//
+// docs/design/talos-two-tier.md §Phase 6. An `enter` used to fire only when `hit` was non-null, and
+// `hit` came from a containment test against what is now a zero-width price. In prod, 18 of 18
+// entry zones were points and only 2 of 70 journal rows carried a zone at all — entries worked
+// because the model happened to arm its guards at the exact authored price, not because the gate
+// worked. These pin the gate to the verdict and the LEG to the scenario.
+
+test('an enter fires with NO zone under it — price need not be standing on the level', async () => {
+    // The shape that broke: price arrives first, the conditions confirm two candles later, and by
+    // then the already-satisfied entry guard has been dropped and woke_on is long cleared.
+    const deps = stubDeps({
+        getPrice: async () => 999,            // nowhere near any entry zone → scenarioGate finds nothing
+        assess:   async () => ({ verdict: 'enter', read: 'Both conditions came true.' }),
+    })
+    const res = await _checkSetup(LIVE, T, deps)
+    assert.equal(res.fired, true, 'the verdict fired the entry')
+    assert.equal(deps.writes[0].status, 'hit')
+    assert.equal(deps.writes[0].armed_zone_id, 'ez1', 'the scenario supplied the leg')
+    assert.ok(deps.writes[0].entryTriggeredAt)
+})
+
+test('the order is placed at the AUTHORED price, never at where price happened to be', async () => {
+    let planned = null
+    const deps = stubDeps({
+        getPrice:       async () => 999,
+        assess:         async () => ({ verdict: 'enter', read: 'Go.' }),
+        buildOrderPlan: async (executable) => { planned = executable; return [{ accountId: 'a1', quantity: 100 }] },
+    })
+    await _checkSetup(LIVE, T, deps)
+    assert.deepEqual(planned.entry_zones, LIVE.entry_zones, 'the zone is still the order price')
+    assert.equal(planned.quantity, 100, 'and still the size')
+})
+
+test('a zone under the wake still picks the leg — it just stopped being the permission', async () => {
+    const deps = stubDeps({
+        getPrice: async () => 238.0,          // inside ez1
+        assess:   async () => ({ verdict: 'enter', read: 'At the level and confirmed.' }),
+    })
+    const res = await _checkSetup(LIVE, T, deps)
+    assert.equal(res.fired, true)
+    assert.equal(deps.writes[0].armed_zone_id, 'ez1')
+})
+
+test('a non-enter verdict still arms the premise price reached, and fires nothing', async () => {
+    let carded = false
+    const deps = stubDeps({
+        getPrice: async () => 238.0,
+        assess:   async () => ({ verdict: 'wait', read: 'At the level, not confirmed.' }),
+        onCard:   async () => { carded = true },
+    })
+    const res = await _checkSetup(LIVE, T, deps)
+    assert.equal(res.watching, true)
+    assert.equal(res.fired, undefined)
+    assert.equal(carded, false, 'no confirm card without an enter')
+    assert.equal(deps.writes[0].armed_zone_id, 'ez1', 'the leg is stamped for a later enter')
+    assert.equal(deps.writes[0].status, 'looking')
+})
+
+test('an enter on a premise with no entry leg places nothing rather than throwing', async () => {
+    // Readiness refuses this at Generate; the monitor must not blow up on a document that got
+    // through some other way.
+    const legless = mk({ scenarios: [{ id: 's1', stop_zones: [{ price: 234 }] }] },
+        { broker: 'ctrader', accounts: ['a1'], mainAccountId: 'a1', valid_until: null })
+    const deps = stubDeps({ assess: async () => ({ verdict: 'enter', read: 'Go.' }) })
+    const res = await _checkSetup(legless, T, deps)
+    assert.equal(res.fired, undefined, 'nothing fired')
+    assert.equal(deps.writes.length, 1, 'but the read is still recorded')
+})
+
+// ─── The two tiers, wired (2026-09-23) ─────────────────────────────────────────
+// docs/design/talos-two-tier.md §Phase 5. talosTiers.test.js pins WHICH tier; these pin what the
+// monitor actually does with that answer.
+
+const MID = (ms = {}) => ({
+    ...LIVE,
+    read_mode: 'cheap_then_expensive',
+    monitor_state: {
+        ...LIVE.monitor_state, last_assessment: { at: 'earlier' },
+        expensive_due: 3, watch: { rung: '15min', indicators: ['vwap'] }, ...ms,
+    },
+})
+
+test('a cheap read that clears sleeps: no expensive read, one journal row, no card', async () => {
+    let assessed = false, carded = false
+    const deps = stubDeps({
+        assess:    async () => { assessed = true; return { verdict: 'wait', read: 'x' } },
+        onCard:    async () => { carded = true },
+        cheapRead: async () => ({ conditions: [{ id: 'c1', state: 'not_fired', note: 'still below' }], escalate: false, read: 'Nothing moved.' }),
+    })
+    const res = await _checkSetup(MID(), T, deps)
+    assert.equal(res.tier, 'cheap')
+    assert.equal(res.escalated, false)
+    assert.equal(assessed, false, 'the expensive read never ran')
+    assert.equal(carded, false)
+    assert.equal(deps.writes[0]['monitor_state.expensive_due'], 2, 'the countdown ticked')
+    assert.ok(deps.entries[0], 'and the wake is still on the record')
+})
+
+test('an escalating cheap read runs the expensive one on the SAME wake, not the next', async () => {
+    // A trigger that fired does not wait a candle for the tier above to notice.
+    let assessed = false
+    const deps = stubDeps({
+        assess:    async () => { assessed = true; return { verdict: 'wait', read: 'Had a proper look.' } },
+        cheapRead: async () => ({ conditions: [{ id: 'c1', state: 'fired' }], escalate: true, read: 'Something moved.' }),
+    })
+    await _checkSetup(MID(), T, deps)
+    assert.equal(assessed, true)
+})
+
+test('watch NULL inside the countdown costs nothing — no read of either kind', async () => {
+    let assessed = false, cheaped = false
+    const deps = stubDeps({
+        assess:    async () => { assessed = true; return {} },
+        cheapRead: async () => { cheaped = true; return {} },
+    })
+    const res = await _checkSetup(MID({ watch: null }), T, deps)
+    assert.equal(res.tier, 'sleep')
+    assert.equal(assessed, false)
+    assert.equal(cheaped, false)
+    assert.equal(deps.writes[0]['monitor_state.expensive_due'], 2)
+    assert.equal(deps.entries[0], null, 'a free wake writes no journal row')
+})
+
+test('an expensive read stores the countdown and the watch it declared', async () => {
+    const deps = stubDeps({
+        assess: async () => ({
+            verdict: 'wait', read: 'Shoulder is only half there.',
+            next_expensive_in: 12, watch: { rung: '15min', indicators: ['VWAP', 'vwap'] },
+        }),
+    })
+    await _checkSetup({ ...LIVE, monitor_state: { ...LIVE.monitor_state, last_assessment: { at: 'earlier' } } }, T, deps)
+    assert.equal(deps.writes[0]['monitor_state.expensive_due'], 12)
+    assert.deepEqual(deps.writes[0]['monitor_state.watch'], { rung: '15min', indicators: ['vwap'] })
+})
+
+test('an expensive read that declares NOTHING falls back to "read me next close"', async () => {
+    const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'x' }) })
+    await _checkSetup({ ...LIVE, monitor_state: { ...LIVE.monitor_state, last_assessment: { at: 'earlier' } } }, T, deps)
+    assert.equal(deps.writes[0]['monitor_state.expensive_due'], 1, 'the safe direction for an unfilled field')
+    assert.equal(deps.writes[0]['monitor_state.watch'], null)
+})
+
+test('a cheap read LATCHES what it settled, so neither tier re-asks it', async () => {
+    const latching = mk({
+        conditions: [{ id: 'c1', text: 'the sweep has happened', weight: 'primary', mode: 'measured', persistence: 'latching' }],
+    }, { broker: 'ctrader', accounts: ['a1'], mainAccountId: 'a1', valid_until: null,
+        monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {}, scenarios: {},
+            last_assessment: { at: 'earlier' }, expensive_due: 3, watch: { rung: '15min', indicators: [] } } })
+    const deps = stubDeps({
+        cheapRead: async () => ({ conditions: [{ id: 'c1', state: 'fired', note: 'swept at 234.8' }], escalate: false, read: 'Sweep is in.' }),
+    })
+    await _checkSetup({ ...latching, read_mode: 'cheap_then_expensive' }, T, deps)
+    assert.equal(deps.writes[0]['monitor_state.conditions.c1']?.met, true, 'settled by the cheap tier, and it stays settled')
 })

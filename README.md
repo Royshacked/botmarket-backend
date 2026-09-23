@@ -196,10 +196,13 @@ providers/             external clients (LLMs, market data, brokers, Mongo) — 
 monitoring/            one monitor per kind + the shared execution layer
                        talos (setup) · themis (portfolio) · coverage (analyst) ·
                        tilt (strategy)
-                       talos reads on every candle close of its rung, only where a condition
-                         was written in words; guardSweep is its free tier — a price-range
-                         test every poll that brings a read forward when a level is crossed;
-                         one journal row per read, in the `journal` collection
+                       talos WAKES on every candle close of its rung, only where a condition
+                         was written in words — and a wake costs one of three things: the full
+                         read, a CHEAP numbers-only read that decides whether the full one is
+                         worth it, or nothing at all (talos.tiers). Each expensive read paces
+                         its own next look, in closes. guardSweep is the free tier under both —
+                         a price-range test every poll that brings a read forward when a level
+                         is crossed; one journal row per read, in the `journal` collection
                        entry.monitor — armed entities: `looking` → `hit` → order plan → confirm
                        exit.monitor — the residual stop/TP leg that could NOT rest at the broker
                          (both kind-blind, both split out of the deleted Minos: ONE loop, ONE

@@ -20,7 +20,7 @@
 // the dotenv-ordering reason this used to give is gone — services/config.js owns .env and loads it
 // on import, before any module that reads it.
 const { mentorAgentService, emptyMentorState } = await import('../services/agents/mentor.agent.service.js')
-const { normalizeSetup, setupReadiness, computeRR, buildLadder, validityProblems,
+const { normalizeSetup, setupReadiness, computeRR, paceRungs, validityProblems,
     scenarioLabel, scenarioView, declaredConditions } = await import('../services/setup.schema.js')
 const { scenarioGate, liveScenarios } = await import('../monitoring/talos.gates.js')
 const { fetchLastPrice } = await import('../services/lastPrice.service.js')
@@ -208,9 +208,10 @@ function checkSetup(setup, price) {
 
     // Derived fields must be the server's, not the model's.
     head('Derived fields')
-    JSON.stringify(setup.ladder) === JSON.stringify(buildLadder(setup.timeframe))
-        ? ok(`ladder ${setup.ladder.join(' → ')}`)
-        : fail('ladder does not match the derivation — the model authored it')
+    setup.ladder === undefined
+        ? ok('no ladder on the document — pace is authored, not derived')
+        : fail('the document carries a ladder nothing derives any more')
+    ok(`paced on ${paceRungs(setup).join(' · ')}${setup.pace_rungs?.length ? ' (named)' : ' (ladder)'}`)
     setup.cadence === undefined
         ? ok('no cadence on the document — the rung is the pace')
         : fail('the document carries a cadence nothing derives any more')

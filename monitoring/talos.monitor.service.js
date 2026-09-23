@@ -11,7 +11,9 @@ import { isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, ha
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, openingRung } from './talos.assess.js'
-import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetLevels, addEntryLeg, legQuantity, clampRung, clampGuards, usableLadder, disarmedSetupPatch, watchedLegs, hasWatchedLegs, allowedVerdicts } from '../services/setup.schema.js'
+import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetLevels, addEntryLeg, legQuantity, firingLeg, resolveRung, clampGuards, normalizeWatch, disarmedSetupPatch, watchedLegs, hasWatchedLegs, allowedVerdicts } from '../services/setup.schema.js'
+import { tierFor, clampExpensiveGap, tickExpensiveDue } from './talos.tiers.js'
+import { cheapRead as _cheapRead } from './talos.cheap.js'
 import { cancelRestingEntryOrders } from '../services/restingOrders.service.js'
 import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage, notifySetupLimitDisarm } from '../services/tradeNotify.service.js'
 import { isSelfExecuted } from '../services/venue.resolve.service.js'
@@ -20,11 +22,16 @@ import { zoneGate, scenarioGate, liveScenarios, _hitFromGuard, computeMetrics, m
 
 // Talos — the guardian of the `setup` kind (docs/design/talos-per-candle.md).
 //
-// THE RULE: Talos spends a model call only on a condition the user wrote in words. Pre-entry that
-// is always true — the entry trigger is the condition — so every wake here is a READ: one on every
-// candle close of the rung the model chose to watch, and one ahead of it whenever a price guard the
-// model armed fires. In position it is true only for a leg the user made conditional (`watchedLegs`);
-// a position of plain levels is DORMANT — the broker holds its orders and this loop never selects it.
+// THE RULE: Talos spends a model call only on a condition the user wrote in words. In position that
+// is true only for a leg the user made conditional (`watchedLegs`); a position of plain levels is
+// DORMANT — the broker holds its orders and this loop never selects it.
+//
+// WHAT A WAKE COSTS (2026-09-23, docs/design/talos-two-tier.md). Until then every pre-entry wake was
+// a full read. It is now one of three, decided by `talos.tiers.tierFor`: the EXPENSIVE read (a
+// first look, an expiry review, a fired guard, or the countdown the last read set having elapsed),
+// a CHEAP read (numbers only, no tools — it answers "is this fired" and escalates on this same wake
+// if it is), or NOTHING at all when the last expensive read said no numbers-only pass could help.
+// Measured on 95 recorded reads: 78% of wakes needed no expensive read.
 //
 // It polls kind:'setup' exclusively and shares no mutable state with any other loop. The guard
 // sweep (guardSweep.service) is the free tier between reads: it evaluates the armed prices against
@@ -124,11 +131,16 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     // WHY THIS WAKE HAPPENED, as recorded by the sweep that caused it (guardSweep.service.js).
     // One-shot: cleared by every write below, so it describes this wake and no later one.
     const woke  = setup.monitor_state?.woke_on ?? null
-    // Which PREMISE price reached. `scenarioGate` asks where price is RIGHT NOW; the sweep already
-    // established where it has BEEN, up to a minute earlier — a level touched and left in that
-    // minute would make the spot check say "nothing here" and throw away the very crossing that
-    // paid for the wake. So a fired price guard resolves to its own zone, whatever price is doing
-    // by the time we look.
+    // Which PREMISE price reached, when it reached one. `scenarioGate` asks where price is RIGHT
+    // NOW; the sweep already established where it has BEEN, up to a minute earlier — a level touched
+    // and left in that minute would make the spot check say "nothing here" and throw away the very
+    // crossing that paid for the wake. So a fired price guard resolves to its own zone, whatever
+    // price is doing by the time we look.
+    //
+    // SINCE 2026-09-23 THIS NO LONGER GATES THE ENTRY. It tells the READ which premise is on the
+    // table (the ARMED LEVEL block) and stamps the leg when one is reached; whether the setup fires
+    // is the verdict's call alone (`_applyVerdict`, `firingLeg`). Against a zero-width price this
+    // check matches a live quote only by coincidence, which is exactly why it stopped deciding.
     const hit   = scenarioGate(setup, price) ?? _hitFromGuard(setup, woke)
 
     // Validity is a hard safety check — code, free, and always first. A breached premise fires
@@ -136,12 +148,43 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     const breached = await _checkValidity(setup, price, nowMs, deps)
     if (breached) return breached
 
-    // EVERY WAKE READS. What differs is why.
     const reason = expiring ? 'expiry_review'
         : woke ? 'guard'
         : !setup.monitor_state?.last_assessment ? 'first_look'
         : 'candle'
     const rung = openingRung(setup)
+
+    // WHAT THIS WAKE COSTS (talos.tiers). Until 2026-09-23 every wake was a full read; measured on
+    // 95 recorded reads, 78% of them needed no such thing.
+    const tier = tierFor(setup, { reason, woke })
+
+    // Nothing a numbers-only pass could check, and the countdown has not elapsed — the last
+    // expensive read said so by returning `watch: null`. The guard sweep is still watching prices.
+    if (tier === 'sleep') {
+        const nextAt = _nextReadAt(setup, nowMs, rung, deps)
+        await deps.persist(setup.id, {
+            ..._wakePatch(setup, nextAt),
+            'monitor_state.expensive_due': tickExpensiveDue(setup),
+        }, null)
+        return { reason, tier: 'sleep' }
+    }
+
+    if (tier === 'cheap') {
+        const cheap = await deps.cheapRead(setup, { price, scenario: hit?.scenario ?? null })
+        if (!cheap.escalate) {
+            const nextAt = _nextReadAt(setup, nowMs, rung, deps)
+            await deps.persist(setup.id, {
+                ..._wakePatch(setup, nextAt),
+                'monitor_state.expensive_due': tickExpensiveDue(setup),
+                ...latchPatch(setup, _cheapAsLedger(cheap), nowMs, declaredConditions(setup, hit?.scenario ?? pickScenario(setup))),
+            }, _entry(reason, { setup, nowMs, price, rung, nextAt, tier: 'cheap', read: cheap.read, model: cheap._model }))
+            return { reason, tier: 'cheap', escalated: false }
+        }
+        // Escalated — fall straight through to the full read on THIS wake, not the next one. A
+        // trigger that fired does not wait a candle for the tier above to notice.
+        logger.info(LOG, `[${setup.id}] cheap read escalated${cheap._failReason ? ` (${cheap._failReason})` : ''}`)
+    }
+
     const raw  = await deps.assess(setup, hit, { reason, price, woke })
 
     if (!raw || raw._failReason) {
@@ -353,7 +396,7 @@ async function _managePosition(setup, ps, scenario, watched, nowMs, deps) {
     const pending  = ps?.pending_action ?? null
     const fires    = verdict !== 'hold'
         && (VERDICT_SEVERITY[verdict] ?? 0) > (pending ? (VERDICT_SEVERITY[pending.verdict] ?? 0) : -1)
-    const nextRung = clampRung(raw.next_timeframe, usableLadder(setup))
+    const nextRung = resolveRung(raw.next_timeframe, setup)
     const armedNow = clampGuards(raw.guards, price)
     const declared = [watched.stop, ...watched.targets, ...watched.entries].filter(Boolean).flatMap(z => z.conditions ?? [])
     const conditions = normalizeConditionResults(raw.conditions, declared)
@@ -441,7 +484,10 @@ async function _checkValidity(setup, price, nowMs, deps) {
         const suspected = validityBreach(view, price)
         if (!suspected) continue
 
-        const tf = sc.validity.timeframe || setup.ladder?.[0] || setup.timeframe
+        // Which close decides the breach: the range's own rung, else the PREMISE. It used to fall
+        // to `ladder[0]` — the coarsest of the derived ±2 window — which on a setup drawn at the
+        // bottom of the rung list was a chart two rungs above anything the plan spoke about.
+        const tf = sc.validity.timeframe || setup.timeframe
         if (!closes.has(tf)) closes.set(tf, await deps.getClose(setup, tf))
         const close = closes.get(tf)
         if (!Number.isFinite(close)) {
@@ -500,20 +546,30 @@ async function _checkValidity(setup, price, nowMs, deps) {
 /**
  * Act on a pre-entry verdict.
  *
- * THE ENTRY GATE IS THE SETUP, NOT THE LEVEL. Price at an entry level says the setup is WHERE it
- * lives; whether it is fulfilled is what `conditions[]` is for — so only an `enter` verdict AT a
- * level asks the user to confirm an entry. Anything else keeps looking, the read recorded so it is
- * visible on the setup without a card. Card spam isn't a risk: firing moves the setup to 'hit'.
+ * THE ENTRY GATE IS THE VERDICT, AND ONLY THE VERDICT (2026-09-23). Whether the setup is fulfilled
+ * is what `conditions[]` is for, and the read is what judges them — so an `enter` fires the confirm
+ * card, full stop. It no longer has to ALSO be standing on a level that a containment test agrees
+ * about.
+ *
+ * What the level still decides is WHICH leg (`firingLeg`): the one price is at when the wake
+ * resolved to a specific zone, else the scenario's first unfilled leg. The zone keeps the order
+ * price, the size and the r:r; it stopped being a second opinion (see firingLeg for what that cost
+ * in prod).
+ *
+ * Anything other than `enter` keeps looking, the read recorded so it is visible on the setup
+ * without a card. Card spam isn't a risk: firing moves the setup to 'hit'.
  */
 async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
     const zone     = hit?.zone ?? null
     const scenario = hit?.scenario ?? pickScenario(setup)
     const declared = declaredConditions(setup, scenario)
     const rung     = openingRung(setup)
+    // Resolved for an `enter` whether or not price is standing on a level right now.
+    const leg      = raw.verdict === 'enter' ? firingLeg(scenario, zone) : null
 
     const conditions = normalizeConditionResults(raw.conditions, declared)
     const armedNow   = clampGuards(raw.guards, price)
-    const nextRung   = clampRung(raw.next_timeframe, usableLadder(setup))
+    const nextRung   = resolveRung(raw.next_timeframe, setup)
     const assessment = _assessmentRecord({ nowMs, reason, zone, scenario, raw, verdict: raw.verdict, conditions, price, rung })
     const nextAt     = _nextReadAt(setup, nowMs, nextRung ?? rung, deps)
 
@@ -524,6 +580,10 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         ...(nextRung ? { 'monitor_state.timeframe': nextRung } : {}),
         // Written WHOLE on every read, never merged: what the model does not re-arm is forgotten.
         'monitor_state.guards': armedNow,
+        // The two fields that pace the NEXT expensive read and configure the cheap passes between
+        // (talos.tiers). Rewritten whole each read, for the same reason guards are.
+        'monitor_state.expensive_due': clampExpensiveGap(raw.next_expensive_in),
+        'monitor_state.watch':         normalizeWatch(raw.watch),
         ...latchPatch(setup, conditions, nowMs, declared),
         ...costPatch(setup, raw._tools),
     }
@@ -551,21 +611,16 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         return { reason, verdict: raw.verdict, edited: true }
     }
 
-    if (zone && raw.verdict !== 'enter') {
-        await deps.persist(setup.id, { ...base, status: _nextStatus(raw.verdict), armed_zone_id: zone.id, armed_scenario_id: scenario?.id ?? null }, row())
-        return { reason, verdict: raw.verdict, watching: true }
-    }
-
-    if (zone) {
+    if (leg) {
         const projection = projectScenario(setup, scenario?.id ?? null)
         const executable = {
             ...setup, ...projection,
-            quantity: legQuantity(scenario, zone.id) ?? projection.quantity,
+            quantity: legQuantity(scenario, leg.id) ?? projection.quantity,
         }
         const patch = {
             ...base, ...projection,
             status: _nextStatus(raw.verdict),
-            armed_zone_id: zone.id,
+            armed_zone_id: leg.id,
             armed_scenario_id: scenario?.id ?? null,
             entryTriggeredAt: nowMs,
         }
@@ -599,8 +654,31 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         return { reason, verdict: raw.verdict, fired: true, orderState: patch.orderState ?? null }
     }
 
+    // An `enter` with no leg to fire on — a premise carrying no entry zone, which readiness refuses
+    // at Generate. Recorded rather than silently swallowed, because the alternative is a user whose
+    // setup said "enter" and did nothing, with nothing anywhere saying why.
+    if (raw.verdict === 'enter') {
+        logger.warn(LOG, `[${setup.id}] enter verdict with no entry leg on ${scenario?.id ?? 'any scenario'} — nothing to place`)
+    }
+
+    // Not an entry. Arm the premise price reached, when it reached one, so the fill stamps against
+    // the right leg if a later read does say enter.
+    if (zone) {
+        await deps.persist(setup.id, { ...base, status: _nextStatus(raw.verdict), armed_zone_id: zone.id, armed_scenario_id: scenario?.id ?? null }, row())
+        return { reason, verdict: raw.verdict, watching: true }
+    }
+
     await deps.persist(setup.id, base, row())
     return { reason, verdict: raw.verdict }
+}
+
+/**
+ * A cheap read's answers in the shape `latchPatch` speaks, so a LATCHING condition the cheap tier
+ * settled stays settled and is never re-asked — of either tier. Only `fired` latches: `unknown` is
+ * the tier saying it could not look, which must never be recorded as an answer. Pure.
+ */
+function _cheapAsLedger(cheap) {
+    return (cheap?.conditions ?? []).map(c => ({ id: c.id, met: c.state === 'fired' ? 'yes' : 'no', note: c.note }))
 }
 
 /** What the last read concluded — the pop-out's "where Talos stands now", kept on the document. */
@@ -691,6 +769,7 @@ const _deps = {
     nextCandleCloseMs,
     getPrice:   (setup) => fetchLastPrice(setup.asset),
     assess:     assessSetup,
+    cheapRead:  _cheapRead,
     assessPosition,
     persist:    _persist,
     // The CLOSE of the last completed candle on a timeframe — the validity gate's verdict, as

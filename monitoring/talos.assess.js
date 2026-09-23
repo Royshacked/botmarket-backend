@@ -3,13 +3,13 @@ import { getQuotes }             from '../providers/yahoofinance.provider.js'
 import { sessionPhase }          from '../services/market.service.js'
 import { logger }                from '../services/logger.service.js'
 import { extractFirstJSON }      from './parsers/llmReply.parser.js'
-import { assessRouting, candlesText as _candlesText,
+import { assessRouting, candleRows as _candleRows, formatCandles, indicatorsText,
     ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING, assessSystem,
     bookAssessUsage, lensLine } from './assess.shared.js'
 import { _allText, _formatEventRisk } from './assess.shared.js'
 import { _thinkingConfig, advanceToolLoopCache, _finalizeServerTools } from '../providers/anthropic.provider.js'
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
-import { declaredConditions, pickScenario, scenarioLabel, usableLadder, clampRung, allowedVerdicts } from '../services/setup.schema.js'
+import { declaredConditions, pickScenario, scenarioLabel, paceRungs, resolveRung, allowedVerdicts } from '../services/setup.schema.js'
 import { config } from '../services/config.js'
 import { isRecording, recordRead } from './talos.recorder.js'
 import { runOpenAICompatRead } from '../providers/openaiCompat.provider.js'
@@ -59,41 +59,59 @@ export function symbolScope(setup) {
 
 /**
  * The rung this wake OPENS on, and therefore the candle whose close paced it: whatever the last
- * read said it wanted to look at next, else the finest rung. The model picks it — a read that is
- * confidently wrong never feels unsure, so it never climbs on its own; letting it choose the rung
- * up front is what stops the noisiest view deciding setups built on structure.
+ * read said it wanted to look at next, else the PREMISE, else the coarsest rung this setup is paced
+ * on. The model picks it — a read that is confidently wrong never feels unsure, so it never climbs
+ * on its own; letting it choose the rung up front is what stops the noisiest view deciding setups
+ * built on structure.
+ *
+ * Falling back to the premise rather than the finest rung (as it did until 2026-09-23, when the
+ * fence was the derived ±2 ladder) is both cheaper and more honest: the FIRST read of a plan opens
+ * on the chart that plan was drawn on, and walks down when it has a reason to. Every step runs
+ * through `resolveRung`, so named rungs beat the premise — "watch it on the 15min" is not a
+ * preference the fallback chain can talk its way around.
  */
 export function openingRung(setup) {
-    const ladder = usableLadder(setup)
-    return clampRung(setup?.monitor_state?.timeframe, ladder) ?? ladder[ladder.length - 1]
+    return resolveRung(setup?.monitor_state?.timeframe, setup)
+        ?? resolveRung(setup?.timeframe, setup)
+        ?? paceRungs(setup)[0]
 }
 
-function _ladderLine(setup, ladder, tf) {
-    const premise = setup?.timeframe && ladder.includes(setup.timeframe) ? setup.timeframe : ladder[0]
-    return `LADDER (coarse→fine, the rungs you may work on): ${ladder.join(', ')}`
-        + `\n  PREMISE rung (what this setup was drawn on): ${premise}`
+/**
+ * What the model is told about rungs. THE SET IS PRINTED, never merely enforced: a request that is
+ * silently dropped teaches the model nothing, and it will ask again next wake.
+ */
+function _ladderLine(setup, rungs, tf) {
+    const named   = (setup?.pace_rungs ?? []).length > 0
+    const premise = setup?.timeframe || rungs[0]
+    return `RUNGS`
+        + `\n  PREMISE (what this plan was drawn on): ${premise}`
+        + `\n  YOU MAY BE READ ON: ${rungs.join(', ')}${named ? ' — chosen deliberately; not yours to move' : ''}`
         + `\n  YOU ARE ON: ${tf} — you are read again at its next close`
+        + `\n  You may CHART any rung at any time. This list is only about when you are read NEXT.`
 }
 
 // ─── Opening context ──────────────────────────────────────────────────────────
 
 /**
- * What a read starts with: the recent candles on its rung and the live prices of the names the
- * setup leans on. Text only — no chart. Each fetch is independently guarded so a failed provider
- * degrades its own block to empty rather than killing the read.
+ * What a read starts with: the recent candles on its rung, the indicators computed from them, and
+ * the live prices of the names the setup leans on. Text only — no chart. Each fetch is
+ * independently guarded so a failed provider degrades its own block to empty rather than killing
+ * the read.
  *
  * Deps injectable so the monitor's tests exercise this without network IO.
  */
 export async function openingContext(setup, tf, deps = {}) {
-    const { candlesText = _candlesText, quotes = getQuotes } = deps
+    const { candleRows = _candleRows, quotes = getQuotes } = deps
     const asset      = String(setup.asset).toUpperCase()
     const refSymbols = (setup.referenced_symbols ?? []).slice(0, 6)
 
-    const [candles, refQ] = await Promise.all([
-        candlesText(asset, tf).catch(() => ''),
+    const [bars, refQ] = await Promise.all([
+        candleRows(asset, tf).catch(() => []),
         refSymbols.length ? quotes(refSymbols).catch(() => '') : Promise.resolve(''),
     ])
-    return { candles, refQ }
+    // ONE fetch, two blocks. The indicators are arithmetic on the bars already in hand — no second
+    // fetch, no tool round trip, no model call.
+    return { candles: formatCandles(bars), indicators: indicatorsText(asset, bars, tf), refQ }
 }
 
 // ─── Prompts ──────────────────────────────────────────────────────────────────
@@ -104,9 +122,13 @@ export async function openingContext(setup, tf, deps = {}) {
 
 const _CORE = `HOW YOU LOOK. You open with numbers, not a picture: the recent candles on your rung, the live price, your own memo from last time. Read them first. Call get_chart when a condition needs a SHAPE the rows cannot show you — structure, a pattern, a discretionary read of how price is behaving. Call get_indicators when a condition names a level the plan was built on. Call the structure, correlation, positioning or search tools when a condition actually rests on them. Do NOT call a tool to confirm what the rows already say, and do not pull the chart out of habit: every call is money the user is paying for this read, and a read that spent nothing because the numbers answered is a good read.
 
-WHEN YOU ARE READ AGAIN. At the next close of the rung you are on — every candle. That is your timer and your backstop both. "next_timeframe" is the rung you want to open on next time, and it sets the pace with it: a coarser rung means fewer reads, a finer one means you want to watch closely. Pick it from your LADDER; anything else is ignored.
+WHEN YOU ARE READ AGAIN. At the close of the rung you are on, "next_expensive_in" closes from now — YOU set that below. "next_timeframe" is the rung you want to open on next time, and the two together are your pace: a coarser rung and a longer countdown mean fewer, bigger looks. Pick the rung from the ones RUNGS says you may be read on — anything else is ignored and you stay where you are. Charting is separate and unrestricted: pull any timeframe a condition needs, whatever you are paced on. Between your reads, the cheap pass you configure with "watch" keeps an eye on the numbers and wakes you early if anything moves.
 
 "guards" ARE THE PRICES THAT MUST NOT WAIT FOR A CANDLE. Between your reads nothing looks at this trade except a cheap price check against these lines. Do not arm one for what the next close will show you anyway; arm one where price arriving would change your answer NOW — the trigger, the level that breaks the premise, the level where the stop starts being pressed. Each is {"price":311.5,"direction":"above|below|any","means":"entry|invalidation|manage"}; "any" is a touch from either side. Every guard is rewritten from scratch each read, so what you do not re-arm is forgotten. Arm the levels that matter and no more.
+
+"next_expensive_in" IS HOW FAR THIS IS FROM BEING DECIDABLE, in closes of the rung you are on — not a budget, and not how often you would like to run. You are the only thing here that can answer it: if a pattern still needs two more legs to form, or a level is far away and nothing is near it, say 6 or 12 and mean it. Reading again next candle to look at the same half-built shape costs the user real money for no information. Say 1 when the next close genuinely could change your answer. The most you may say is 24.
+
+"watch" IS WHAT A NUMBERS-ONLY PASS SHOULD CHECK between now and then — {"rung":"15min","indicators":["vwap","ema(20)"]}. Every close until your next read, a cheap pass gets those candles and those indicators and the plan's conditions, and wakes you early if anything fired or it could not tell. Name only what a NUMBER could settle. If the whole question is a shape forming, or news, or anything a row of OHLCV cannot answer, return "watch":null — the setup then rests until your countdown elapses or a guard fires, which is exactly right and costs nothing. Both fields are rewritten from scratch each read, like guards.
 
 Each condition carries how it should be judged:
 - "measured" — the user named a specific test. Apply THAT test, not your own.
@@ -125,7 +147,9 @@ const _PRE_ENTRY = `You are Talos, the guardian watching a trade SETUP the user 
 - "first_look" — your first read of this setup. Read the map, arm your guards.
 - "expiry_review" — the setup is near its expiry. Judge whether it dies, or is still worth carrying.
 
-"enter" is only honoured when price is AT an entry level (ARMED LEVEL says so). Off a level, the question is whether the plan still makes sense here: "wait" with a note and re-arm guards at the levels that now matter, or "edit" with an edit_proposal if the map is stale.
+"enter" IS YOUR DECISION, not the level's. ARMED LEVEL tells you whether price is standing on one of this plan's entry levels right now; it is information, not permission. If the conditions are fulfilled, say "enter" and the user gets a confirm card.
+
+WHAT AN "enter" ACTUALLY PLACES: an order at the plan's OWN authored entry price, never at wherever price happens to be. So an "enter" while price sits well past that level is a resting order that may simply never fill — and if price has run far enough that the plan no longer works from here, the honest answers are "wait" with the guards re-armed at the levels that now matter, or "edit" with an edit_proposal if the map is stale. Entering because the conditions are technically true, at a price that left your entry behind, is the one way this verdict goes wrong.
 
 A setup can hold more than one way in: a false break at one level and a break-and-go at another are rival premises, not two halves of one trade. Judge ONLY the scenario on the table, with its own levels, its own stop and its own conditions. If it isn't there, say so — the others stay armed on their own terms.
 
@@ -145,7 +169,7 @@ Verdicts: "enter" (this is the moment), "wait" (not yet, keep watching), "stand_
 
 ${_CORE}
 Return one entry per declared condition, keyed by its id:
-{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw, or why you couldn't look"}],"verdict":"enter|wait|stand_aside|edit|let_expire","warning":"<one line, ONLY when the verdict is not enter: what is missing or wrong, for the record>","next_timeframe":"15min","guards":[{"price":311.5,"direction":"above","means":"entry"}],"memo_update":"..."}
+{"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"c1","met":"yes|no|unchecked","note":"what you actually saw, or why you couldn't look"}],"verdict":"enter|wait|stand_aside|edit|let_expire","warning":"<one line, ONLY when the verdict is not enter: what is missing or wrong, for the record>","next_timeframe":"15min","next_expensive_in":1,"watch":{"rung":"15min","indicators":["vwap","ema(20)"]},"guards":[{"price":311.5,"direction":"above","means":"entry"}],"memo_update":"..."}
 Include "edit_proposal":{"why":"...","changes":{}} only when the verdict is "edit".`
 
 const _IN_POSITION = `You are Talos, watching a trade the user is ALREADY IN. The entry is done. The stop and every plain target are ORDERS resting at the broker, and nobody reads those — you are here because the user attached a CONDITION IN WORDS to one or more legs, and a sentence has to be judged. WATCHED LEGS lists exactly those, with their conditions. They are your whole mandate.
@@ -238,6 +262,10 @@ function _otherScenariosBlock(setup, scenario) {
 function _dataBlocks(setup, g, tf) {
     const out = []
     if (g.candles) out.push(`RECENT CANDLES (${tf}):\n${g.candles}`)
+    // Computed from those same bars, free, and handed over WITHOUT being asked for. A read given
+    // nothing but OHLCV rows reaches for a picture; these are the numbers most conditions are
+    // actually written against, and they are the same numbers get_indicators would return.
+    if (g.indicators) out.push(`INDICATORS (${tf}, computed from the candles above):\n${g.indicators}`)
     if (g.refQ)    out.push(`REFERENCED NAMES (live quotes):\n${g.refQ}`)
 
     const ev = _formatEventRisk(setup?.event_risk)
@@ -280,7 +308,7 @@ export async function assessSetup(setup, hit, ctx = {}) {
     try {
         const zone     = hit?.zone ?? null
         const scenario = hit?.scenario ?? pickScenario(setup)
-        const ladder   = usableLadder(setup)
+        const rungs    = paceRungs(setup)
         const tf       = openingRung(setup)
         const g        = await openingContext(setup, tf)
 
@@ -300,7 +328,7 @@ export async function assessSetup(setup, hit, ctx = {}) {
             `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
             `SESSION NOW: ${sessionPhase(setup.asset, setup.asset_class)}`,
             _wokenLine(ctx.reason, ctx.woke),
-            _ladderLine(setup, ladder, tf),
+            _ladderLine(setup, rungs, tf),
             `LENS: ${lensLine(setup.trade_mode)}`,
             _armedLine(setup),
             `PRIOR MEMO: ${setup.monitor_state?.memo || '(none)'}`,
@@ -308,7 +336,7 @@ export async function assessSetup(setup, hit, ctx = {}) {
         ].filter(Boolean).join('\n\n')
 
         return _runRead(setup, _PRE_ENTRY, userText,
-            { kind: 'pre_entry', reason: ctx.reason, woke: ctx.woke, price: ctx.price, rung: tf, ladder, scenario, zone })
+            { kind: 'pre_entry', reason: ctx.reason, woke: ctx.woke, price: ctx.price, rung: tf, pace: rungs, scenario, zone })
     } catch (err) {
         logger.warn(LOG, `assessment failed for ${setup?.id}:`, err.message)
         return { _failReason: 'io' }
@@ -326,7 +354,7 @@ export async function assessSetup(setup, hit, ctx = {}) {
 export async function assessPosition(setup, ps, ctx = {}) {
     try {
         const scenario = _armedScenario(setup)
-        const ladder   = usableLadder(setup)
+        const rungs    = paceRungs(setup)
         const tf       = openingRung(setup)
         const g        = await openingContext(setup, tf)
         const watched  = ctx.watched ?? { stop: null, targets: [], entries: [] }
@@ -355,7 +383,7 @@ export async function assessPosition(setup, ps, ctx = {}) {
             `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
             `SESSION NOW: ${sessionPhase(setup.asset, setup.asset_class)}`,
             _wokenLine(ctx.reason, ctx.woke),
-            _ladderLine(setup, ladder, tf),
+            _ladderLine(setup, rungs, tf),
             `LENS: ${lensLine(setup.trade_mode)}`,
             _armedLine(setup),
             `PRIOR MEMO: ${setup.monitor_state?.memo || '(none)'}`,
@@ -363,7 +391,7 @@ export async function assessPosition(setup, ps, ctx = {}) {
         ].filter(Boolean).join('\n\n')
 
         return _runRead(setup, _IN_POSITION, userText,
-            { kind: 'in_position', reason: ctx.reason, woke: ctx.woke, price: ctx.price, rung: tf, ladder, scenario, watched })
+            { kind: 'in_position', reason: ctx.reason, woke: ctx.woke, price: ctx.price, rung: tf, pace: rungs, scenario, watched })
     } catch (err) {
         logger.warn(LOG, `position assessment failed for ${setup?.id}:`, err.message)
         return { _failReason: 'io' }

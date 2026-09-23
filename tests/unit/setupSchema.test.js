@@ -1,9 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    buildLadder, normalizeZone, normalizeZones, scenarioQuantity,
+    normalizeZone, normalizeZones, scenarioQuantity,
     normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
+    normalizePaceRungs, paceRungs, resolveRung, defaultReadMode, normalizeWatch,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
     stopEdge, targetEdges, targetLevels, clampGuards, addEntryLeg, legQuantity, pendingLegs, watchedLegs, hasWatchedLegs, allowedVerdicts, CONDITION_MODES, TRADE_MODES,
 } from '../../services/setup.schema.js'
@@ -12,36 +13,103 @@ import { MODES } from '../../services/analysisModes.js'
 // The `setup` entity contract (docs/desks/mentor-talos.md). Mentor authors loosely, Talos monitors
 // strictly — this module is the seam, so these tests pin the coercions the monitor depends on.
 
-// ─── Ladder ───────────────────────────────────────────────────────────────────
+// ─── Pace ──────────────────────────────────────────────────────────────
+//
+// `pace_rungs` replaced the derived `ladder` on 2026-09-23 (docs/design/talos-two-tier.md). READING
+// is unfenced; what a setup constrains is the rung it is READ ON, because the rung is the wake clock.
 
-test('ladder is a contiguous coarse→fine window around the authored timeframe', () => {
-    assert.deepEqual(buildLadder('1hr'), ['4hr', '2hr', '1hr', '30min', '15min'])
-    // Order always matches the canonical rung order, never the model's whim.
-    const ladder = buildLadder('15min')
-    const idx = ladder.map(tf => TF_RUNGS.indexOf(tf))
-    assert.deepEqual(idx, [...idx].sort((a, b) => a - b))
+test('an authored pace set is normalised to canonical rungs, coarse→fine, deduped', () => {
+    assert.deepEqual(normalizePaceRungs(['15min', '4h', '15min', 'daily']), ['day', '4hr', '15min'])
+    const rungs = normalizePaceRungs(['5min', '1hr', '30min'])
+    const idx = rungs.map(tf => TF_RUNGS.indexOf(tf))
+    assert.deepEqual(idx, [...idx].sort((a, b) => a - b), 'canonical order, never the model\'s')
 })
 
-test('ladder clamps at both ends rather than running off the rung list', () => {
-    // Both ends yield a SHORTER ladder rather than wrapping or padding.
-    assert.deepEqual(buildLadder('month'), ['month', 'week', 'day'])
-    // The fine end stops at 5min: 1min is off-plan at the provider (402), so offering it would hand
-    // the monitor a rung whose fetch can only fail. Note a 1min-authored setup therefore has NO rung
-    // at its own timeframe — which is why Mentor must not author one.
-    assert.deepEqual(buildLadder('1min'), ['15min', '5min'])
-    assert.deepEqual(buildLadder('5min'), ['30min', '15min', '5min'])
-})
-
-test('ladder falls back for an unknown timeframe instead of returning empty', () => {
-    // An empty ladder would leave the monitor's tool enum with no valid value at all.
-    for (const bad of [null, undefined, '', 'fortnight', 42]) {
-        assert.ok(buildLadder(bad).length > 0, String(bad))
+test('an unusable rung falls out rather than rejecting the field', () => {
+    assert.deepEqual(normalizePaceRungs(['1hr', '1min', 'fortnight', null, 42]), ['1hr'])
+    for (const bad of [null, undefined, 'day', 42, {}]) {
+        assert.deepEqual(normalizePaceRungs(bad), [], String(bad))
     }
 })
 
-test('ladder accepts loose timeframe spellings via normalizeTimeframe', () => {
-    assert.deepEqual(buildLadder('4h'), buildLadder('4hr'))
-    assert.deepEqual(buildLadder('daily'), buildLadder('day'))
+test('THERE IS NO CAP on how many rungs a user may name', () => {
+    // A cap would be the system overruling the user, which is the one thing this field is for.
+    const many = ['month', 'week', 'day', '4hr', '2hr', '1hr', '30min', '15min', '5min']
+    assert.deepEqual(normalizePaceRungs(many), many)
+})
+
+test('paceRungs falls back premise-then-ladder, and is never empty', () => {
+    assert.deepEqual(paceRungs({ pace_rungs: ['15min'] }), ['15min'])
+    assert.deepEqual(paceRungs({ timeframe: '4hr' }), ['4hr'], 'no pace set → the premise')
+    assert.deepEqual(paceRungs({ type: 'swing', market_cap: 'large' }), ['day', '4hr', '2hr', '1hr'])
+    assert.ok(paceRungs({}).length, 'a bare document still has somewhere to be read')
+})
+
+test('a named rung is ABSOLUTE — Talos may not roam outside it', () => {
+    const told = { timeframe: 'day', pace_rungs: ['15min'] }
+    assert.equal(resolveRung('15min', told), '15min')
+    assert.equal(resolveRung('4hr', told), null, 'not even to the premise it was drawn on')
+    assert.equal(resolveRung('day', told), null)
+})
+
+test('pace and premise are independent — a daily plan may be read on the 15min', () => {
+    // The case the derived ±2 ladder could not express at all: the two are 5 rungs apart.
+    const s = normalizeSetup({ ...DRAFT, timeframe: 'day', pace_rungs: ['15min'] })
+    assert.equal(s.timeframe, 'day')
+    assert.deepEqual(s.pace_rungs, ['15min'])
+})
+
+test('resolveRung rejects what it cannot place, so the caller owns the fallback', () => {
+    assert.equal(resolveRung('1min', { pace_rungs: ['5min'] }), null, 'never fetchable')
+    assert.equal(resolveRung('fortnight', {}), null)
+    assert.equal(resolveRung(null, {}), null)
+    assert.equal(resolveRung('4h', { pace_rungs: ['4hr'] }), '4hr', 'loose spellings still resolve')
+})
+
+// ─── read_mode ────────────────────────────────────────────────────────
+
+const conds = (...specs) => specs.map((sp, i) => ({ id: `c${i + 1}`, text: `condition ${i + 1}`, ...sp }))
+
+test('the opening read_mode is read off the conditions, never asked for', () => {
+    const mk = (cs) => defaultReadMode({ conditions: cs, scenarios: [] })
+    assert.equal(mk(conds({ mode: 'measured' }, { mode: 'measured' })), 'cheap_only',
+        'numbers are the whole question')
+    assert.equal(mk(conds({ mode: 'judgment' }, { mode: 'judgment' })), 'expensive_only',
+        'nothing a cheap read could settle')
+    assert.equal(mk(conds({ mode: 'judgment', persistence: 'latching' }, { mode: 'measured' })),
+        'expensive_then_cheap', 'a structural precondition, then arithmetic')
+    assert.equal(mk(conds({ mode: 'judgment', persistence: 'live' }, { mode: 'measured' })),
+        'cheap_then_expensive', 'a judgment that can flip needs eyes every time')
+    assert.equal(mk([]), 'cheap_then_expensive', 'nothing declared → the default')
+})
+
+test('a model-authored read_mode is honoured when it is one of ours', () => {
+    assert.equal(normalizeSetup({ ...DRAFT, read_mode: 'both' }).read_mode, 'both')
+    assert.equal(normalizeSetup({ ...DRAFT, read_mode: 'whenever' }).read_mode,
+        normalizeSetup(DRAFT).read_mode, 'junk falls to the derived default')
+})
+
+test('read_mode is NOT `mode` — that key is the workspace', () => {
+    // live | paper | manual is stamped at Generate. Two meanings on one key is the trap the
+    // condition-`mode` rename exists to avoid.
+    const s = normalizeSetup({ ...DRAFT, read_mode: 'cheap_only' })
+    assert.equal(s.read_mode, 'cheap_only')
+    assert.equal(s.mode, undefined, 'normalizeSetup never writes the workspace')
+})
+
+// ─── watch ───────────────────────────────────────────────────────────
+
+test('watch normalises to a fetchable rung plus deduped indicators', () => {
+    assert.deepEqual(normalizeWatch({ rung: '15m', indicators: ['VWAP', 'vwap', ' ema(20) '] }),
+        { rung: '15min', indicators: ['vwap', 'ema(20)'] })
+    assert.deepEqual(normalizeWatch({ rung: '4hr', indicators: [] }), { rung: '4hr', indicators: [] })
+})
+
+test('watch is NULL when there is nothing a numbers-only pass could check', () => {
+    // Not a gap — it puts the setup to sleep until the next expensive read or a guard.
+    for (const bad of [null, undefined, {}, [], 'vwap', { rung: '1min' }, { rung: 'fortnight' }]) {
+        assert.equal(normalizeWatch(bad), null, JSON.stringify(bad))
+    }
 })
 
 // ─── Zones ────────────────────────────────────────────────────────────────────
@@ -252,14 +320,19 @@ test('a well-formed draft normalises and derives its server-owned fields', () =>
     const s = normalizeSetup(DRAFT)
     assert.equal(s.asset, 'NVDA')
     assert.equal(s.quantity, 100)
-    assert.deepEqual(s.ladder, buildLadder('1hr'))
+    assert.equal(s.ladder, undefined, 'the derived ladder is gone — pace is authored now')
     assert.equal(s.cadence, undefined, 'the rung is the pace — no cadence on the document')
 })
 
 test('server-derived fields overwrite anything the model tried to author', () => {
     const s = normalizeSetup({ ...DRAFT, quantity: 9999, ladder: ['month'] })
     assert.equal(s.quantity, 100, 'quantity comes from the entry zones')
-    assert.deepEqual(s.ladder, buildLadder('1hr'))
+    assert.equal(s.ladder, undefined, 'a model-authored ladder is not a field any more')
+})
+
+test('pace_rungs IS taken from the model — which chart a plan is read on is the plan\'s call', () => {
+    const s = normalizeSetup({ ...DRAFT, pace_rungs: ['15min', '1min'] })
+    assert.deepEqual(s.pace_rungs, ['15min'], 'authored, with the unfetchable rung dropped')
 })
 
 test('an invalid enum falls back rather than reaching the monitor', () => {

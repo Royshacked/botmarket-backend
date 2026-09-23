@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import {
-    BUNDLE_VERSION, COLLECTION, userHash, stripCacheControl, buildDataPack, buildBundle, bundlePath,
+    BUNDLE_VERSION, COLLECTION, userHash, stripCacheControl, buildDataPack, packRungs, buildBundle, bundlePath,
     diskSink, mongoSink, recordRead, isRecording,
 } from '../../monitoring/talos.recorder.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
@@ -104,7 +104,7 @@ test('recorder: an empty trace (the read threw before routing) still builds a bu
 test('recorder: the data pack covers every symbol × every rung, charts for the asset only, and a bad cell is a hole', async () => {
     const asked = []
     const pack = await buildDataPack(SETUP, ['NVDA', 'SMH'], {
-        ladder: ['1hr', '15min'],
+        rungs: ['1hr', '15min'],
         fetchCandleRows: async (sym, tf) => {
             asked.push(`${sym}/${tf}`)
             if (sym === 'SMH' && tf === '15min') throw new Error('yahoo down')
@@ -124,11 +124,22 @@ test('recorder: the data pack covers every symbol × every rung, charts for the 
     assert.equal('SMH' in pack.charts, false)
     assert.equal(pack.quotesText, 'NVDA: $1.00\nSMH: $1.00')
     assert.deepEqual(pack.errors.sort(), ['candles SMH/15min: yahoo down', 'chart NVDA/15min: renderer busy'])
-    assert.deepEqual(pack.ladder, ['1hr', '15min'])
+    assert.deepEqual(pack.rungs, ['1hr', '15min'])
     assert.ok(pack.asOf)
 })
 
-const PACK_DEPS = { ladder: ['1hr'], fetchCandleRows: async () => ({ bars: [] }), renderChart: async () => ({ png: 'P', source: 'own' }), quotes: async () => 'NVDA: $1' }
+// A pack is a candle fetch per symbol per rung PLUS a headless-browser render per rung, running
+// beside live reads. It freezes what a replay plausibly opens on — never every rung in scope.
+test('recorder: a pack freezes the premise, the rung read on, and any rung the plan is paced on', () => {
+    assert.deepEqual(packRungs({ timeframe: 'day' }, '1hr'), ['day', '1hr'])
+    assert.deepEqual(packRungs({ timeframe: '1hr' }, '1hr'), ['1hr'], 'deduped')
+    assert.deepEqual(packRungs({ timeframe: 'day', pace_rungs: ['15min', '4hr'] }, '15min'),
+        ['day', '4hr', '15min'], 'canonical order whatever order they arrive in')
+    assert.deepEqual(packRungs({ timeframe: '1min' }, '5min'), ['5min'], 'never an unfetchable rung')
+    assert.deepEqual(packRungs({}, null), [], 'nothing known yet is not an empty pack by accident')
+})
+
+const PACK_DEPS = { rungs: ['1hr'], fetchCandleRows: async () => ({ bars: [] }), renderChart: async () => ({ png: 'P', source: 'own' }), quotes: async () => 'NVDA: $1' }
 
 test('recorder: the disk sink writes one JSON file under <dir>/<day>/ and recordRead returns its path', async () => {
     const writes = []

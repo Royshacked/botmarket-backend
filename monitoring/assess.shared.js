@@ -1,5 +1,7 @@
 import { getTickerAggregates } from '../providers/candles.provider.js'
-import { CANDLE_CFG, aggregateCandles } from '../services/tools/marketData.tools.js'
+import { CANDLE_CFG, aggregateCandles, _formatIndicator } from '../services/tools/marketData.tools.js'
+import { sessionStartMs } from '../services/market.service.js'
+import { isIntradayTimeframe } from '../services/timeframe.service.js'
 import { userService } from '../api/user/user.service.js'
 import { recordUsage } from '../services/tokenUsage.service.js'
 import { getHouseModels } from '../services/houseModels.service.js'
@@ -212,20 +214,62 @@ export function resolveTalosModel(stored, isAdmin) {
 }
 
 /**
- * Recent candles as the assessment's numeric price block. Uses the shared CANDLE_CFG so the
- * lookback window + bar count scale with the timeframe (a `day` request pulls ~40 daily bars, not
- * the ~7 a fixed 10-day window used to yield) and 2hr/4hr aggregate from native 1hr bars — the same
- * math the agents' get_candles uses. Unknown timeframe → the daily config.
+ * The bars behind a read's opening block. Uses the shared CANDLE_CFG so the lookback window + bar
+ * count scale with the timeframe (a `day` request pulls ~40 daily bars, not the ~7 a fixed 10-day
+ * window used to yield) and 2hr/4hr aggregate from native 1hr bars — the same math the agents'
+ * get_candles uses. Unknown timeframe → the daily config.
+ *
+ * SPLIT FROM `candlesText` on 2026-09-23 so ONE fetch can serve both the candle block and the
+ * indicator block. The indicators used to be a tool call that re-fetched these same bars for the
+ * same ticker and rung, seconds later, to do arithmetic on them.
  */
-export async function candlesText(asset, tf) {
+export async function candleRows(asset, tf) {
     const cfg  = CANDLE_CFG[tf] ?? CANDLE_CFG['day']
     const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
     const raw  = await getTickerAggregates(String(asset).toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
     const bars = cfg.aggregate ? aggregateCandles(raw, cfg.aggregate) : raw
-    return (bars ?? []).slice(-cfg.count).map(c => {
+    return (bars ?? []).slice(-cfg.count)
+}
+
+/** Bars → the numeric price block. Pure. */
+export function formatCandles(bars) {
+    return (bars ?? []).map(c => {
         const d = new Date(c.timestamp * 1000).toISOString().slice(0, 16).replace('T', ' ')
         return `${d} O:${c.open} H:${c.high} L:${c.low} C:${c.close} V:${c.volume}`
     }).join('\n')
+}
+
+/** Recent candles as the assessment's numeric price block. */
+export async function candlesText(asset, tf) {
+    return formatCandles(await candleRows(asset, tf))
+}
+
+// What a read opens with beside the rows. Not a menu the model picks from — the point is that these
+// arrive WITHOUT being asked for, because a read handed nothing but OHLCV reaches for a picture.
+//
+// VWAP is intraday-only in meaning: on a daily+ rung the bars pre-date any session anchor and the
+// number is noise wearing a name, so it is simply absent there rather than printed as `n/a`.
+const OPENING_INDICATORS = [
+    { name: 'ema', period: 20 },
+    { name: 'ema', period: 50 },
+    { name: 'rsi', period: 14 },
+    { name: 'atr', period: 14 },
+]
+
+/**
+ * The indicator block, computed from bars ALREADY IN HAND — no fetch, no model call, no tool round
+ * trip. Uses the same `_formatIndicator` the `get_indicators` tool uses, so the numbers a read
+ * opens with and the numbers it would get by asking are the same numbers, formatted the same way.
+ * Two VWAPs that disagree is a bug nobody would ever find.
+ */
+export function indicatorsText(asset, bars, tf) {
+    if (!bars?.length) return ''
+    const closes = bars.map(b => b.close)
+    // Monitor-form candles (t/o/h/l/c/v) for ATR + VWAP.
+    const mon    = bars.map(b => ({ t: b.timestamp, o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume }))
+    const specs  = isIntradayTimeframe(tf) ? [{ name: 'vwap' }, ...OPENING_INDICATORS] : OPENING_INDICATORS
+    const anchor = isIntradayTimeframe(tf) ? sessionStartMs(String(asset).toUpperCase()) : null
+    return specs.map(s => _formatIndicator(s.name, s.period, closes, mon, anchor)).join('\n')
 }
 
 // ─── Reply / block formatting ─────────────────────────────────────────────────

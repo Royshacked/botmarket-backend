@@ -200,6 +200,12 @@ export const config = {
     // ephemeral. `scripts/eval/talos-replay/pull-reads.mjs` brings those down to the disk layout.
     get talosRecordSink()  { return _str('TALOS_RECORD_SINK', 'disk') },
     get talosRecordDir()   { return _str('TALOS_RECORD_DIR', 'data/eval/talos-reads') },
+    // The model behind Talos's CHEAP tier (monitoring/talos.cheap.js) — the numbers-only pass that
+    // decides whether the expensive read runs. Deliberately its own knob, not the house Talos
+    // model: paying the expensive tier's rate to decide whether to run the expensive tier would
+    // defeat the point. Empty → the module's own default (Haiku 4.5, which the 95-read replay
+    // measured at 78% slept).
+    get talosCheapModel()  { return _str('TALOS_CHEAP_MODEL', '') },
 
     // ── market brief ──
     get marketBriefTtlMs()       { return _num('MARKET_BRIEF_TTL_MS', 45 * 60 * 1000) },

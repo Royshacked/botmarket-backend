@@ -159,34 +159,55 @@ function _formatStock(symbol, p, ratios = {}, growth = {}, km = {}, ptc = null, 
     ].filter(Boolean).join('\n')
 }
 
-// ─── Sector lookup ──────────────────────────────────────────────────────────
-// Lightweight profile cache keyed by symbol — stores only sector/industry so
-// portfolioState.service can group positions by sector without re-fetching the
-// full fundamentals blob. Shares the same 24h TTL as fundamentals.
+// ─── Profile basics ─────────────────────────────────────────────────────────
+// Lightweight profile cache keyed by symbol — the few fields callers want without re-fetching the
+// full fundamentals blob: sector/industry (portfolioState.service groups positions by sector) and
+// market cap (setup.ladder buckets a setup's default rungs by it). ONE fetch behind both, because
+// they come off the same /profile row and two caches would mean two calls for one answer.
+// Shares the same 24h TTL as fundamentals.
 const SECTOR_TTL_MS = 24 * 60 * 60 * 1000
-const _sectorCache = createTtlCache({ ttlMs: SECTOR_TTL_MS }) // SYMBOL -> { sector, industry }
+const _profileCache = createTtlCache({ ttlMs: SECTOR_TTL_MS }) // SYMBOL -> { sector, industry, marketCap }
+
+/** The cached `/profile` basics for a symbol, or null. */
+async function _profileBasics(ticker) {
+    const symbol = String(ticker || '').toUpperCase().trim()
+    if (!symbol) return null
+
+    const hit = _profileCache.get(symbol)
+    if (hit) return hit
+
+    try {
+        const arr = await _fmpGet(`/profile?symbol=${symbol}`)
+        const p   = Array.isArray(arr) ? arr[0] : null
+        if (!p) return null
+        const cap   = Number(p.marketCap)
+        const entry = {
+            sector: p.sector || null,
+            industry: p.industry || null,
+            marketCap: Number.isFinite(cap) && cap > 0 ? cap : null,
+        }
+        _profileCache.set(symbol, entry)
+        return entry
+    } catch {
+        return null
+    }
+}
+
+/**
+ * A symbol's market cap in USD, or null. Null is not an error — `ladderFor` reads it as "assume the
+ * middle", because a setup does not fail to be authored because a profile fetch came back empty.
+ */
+export async function getMarketCap(ticker) {
+    return (await _profileBasics(ticker))?.marketCap ?? null
+}
 
 /**
  * Sector and industry for a ticker as raw strings, cached 24h.
  * Returns { sector, industry } or null when the ticker is unknown / ETF / foreign.
  */
 export async function getSectorRaw(ticker) {
-    const symbol = String(ticker || '').toUpperCase().trim()
-    if (!symbol) return null
-
-    const hit = _sectorCache.get(symbol)
-    if (hit) return { sector: hit.sector, industry: hit.industry }
-
-    try {
-        const arr = await _fmpGet(`/profile?symbol=${symbol}`)
-        const p   = Array.isArray(arr) ? arr[0] : null
-        if (!p) return null
-        const entry = { sector: p.sector || null, industry: p.industry || null }
-        _sectorCache.set(symbol, entry)
-        return { sector: entry.sector, industry: entry.industry }
-    } catch {
-        return null
-    }
+    const p = await _profileBasics(ticker)
+    return p ? { sector: p.sector, industry: p.industry } : null
 }
 
 // ─── Earnings calendar (forward-looking) ────────────────────────────────────

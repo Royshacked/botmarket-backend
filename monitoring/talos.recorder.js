@@ -26,7 +26,7 @@ import { getDb } from '../providers/mongodb.provider.js'
 import { _fetchCandleRows } from '../services/tools/marketData.tools.js'
 import { cachedChart } from '../services/chartImgCache.service.js'
 import { getQuotes } from '../providers/yahoofinance.provider.js'
-import { usableLadder } from '../services/setup.schema.js'
+import { TF_RUNGS, isFetchableRung } from '../services/setup.schema.js'
 
 const LOG = '[talos.recorder]'
 
@@ -59,11 +59,24 @@ export function stripCacheControl(messages) {
 }
 
 /**
+ * The rungs a pack freezes: the PREMISE the plan was drawn on, the rung the read actually opened on,
+ * and any rung the plan is paced on — deduped, coarse→fine, fetchable only. Pure.
+ *
+ * A pack is not free: a candle fetch per symbol per rung plus a headless-browser render per rung,
+ * running beside live reads. These are the rungs a replay plausibly opens on; anything else it asks
+ * for is a hole in the pack, which is what `errors` is for.
+ */
+export function packRungs(setup, rung) {
+    const want = new Set([setup?.timeframe, rung, ...(setup?.pace_rungs ?? [])].filter(Boolean))
+    return TF_RUNGS.filter(r => want.has(r) && isFetchableRung(r))
+}
+
+/**
  * The frozen market as of the read. `symbols` is the read's own scope (`symbolScope`), rungs are
- * the setup's ladder. Every cell fetched independently and guarded, so one bad symbol/rung leaves
- * a hole (recorded in `errors`), not an empty pack. Charts are drawn for the setup's OWN asset
- * only and one at a time — a render is a headless-browser page, and this runs beside live reads
- * that also need the renderer.
+ * `packRungs`. Every cell fetched independently and guarded, so one bad symbol/rung leaves a hole
+ * (recorded in `errors`), not an empty pack. Charts are drawn for the setup's OWN asset only and
+ * one at a time — a render is a headless-browser page, and this runs beside live reads that also
+ * need the renderer.
  *
  * Deps injectable for the tests.
  */
@@ -72,7 +85,7 @@ export async function buildDataPack(setup, symbols, deps = {}) {
         fetchCandleRows = _fetchCandleRows,
         renderChart     = cachedChart,
         quotes          = getQuotes,
-        ladder          = usableLadder(setup),
+        rungs           = packRungs(setup, setup?.monitor_state?.timeframe),
     } = deps
 
     const asset  = String(setup?.asset ?? '').toUpperCase()
@@ -82,7 +95,7 @@ export async function buildDataPack(setup, symbols, deps = {}) {
     const bars = {}
     await Promise.all(symbols.map(async (sym) => {
         bars[sym] = {}
-        await Promise.all(ladder.map(async (tf) => {
+        await Promise.all(rungs.map(async (tf) => {
             try {
                 const { bars: rows } = await fetchCandleRows(sym, tf)
                 bars[sym][tf] = rows ?? []
@@ -92,7 +105,7 @@ export async function buildDataPack(setup, symbols, deps = {}) {
 
     const charts = {}
     if (asset) {
-        for (const tf of ladder) {
+        for (const tf of rungs) {
             try {
                 const { png, source } = await renderChart(asset, tf, [])
                 charts[tf] = { png, source }
@@ -104,7 +117,7 @@ export async function buildDataPack(setup, symbols, deps = {}) {
     try { quotesText = symbols.length ? await quotes(symbols) : '' }
     catch (err) { note('quotes', err) }
 
-    return { asOf: new Date().toISOString(), ladder, symbols, bars, charts: asset ? { [asset]: charts } : {}, quotesText, errors }
+    return { asOf: new Date().toISOString(), rungs, symbols, bars, charts: asset ? { [asset]: charts } : {}, quotesText, errors }
 }
 
 /**
@@ -145,7 +158,7 @@ export function buildBundle({ setup, meta = {}, systemText, userText, trace = {}
             woke: meta.woke ?? null,
             price: meta.price ?? null,
             rung: meta.rung ?? null,
-            ladder: meta.ladder ?? null,
+            pace: meta.pace ?? null,
             scenario: meta.scenario ?? null,
             zone: meta.zone ?? null,
             watched: meta.watched ?? null,
@@ -210,7 +223,10 @@ function _sinkFor(name) {
 export async function recordRead({ setup, symbols = [], meta, systemText, userText, trace, result }, deps = {}) {
     const { sink = _sinkFor(config.talosRecordSink), pack: packDeps = {} } = deps
     try {
-        const pack   = await buildDataPack(setup, symbols, packDeps)
+        // `meta.rung` is what this read ACTUALLY opened on, which is what a replay most wants
+        // frozen — buildDataPack's own default reads the stored rung, one wake behind.
+        const pack   = await buildDataPack(setup, symbols,
+            { rungs: packRungs(setup, meta?.rung ?? setup?.monitor_state?.timeframe), ...packDeps })
         const bundle = buildBundle({ setup, meta, systemText, userText, trace, result, pack })
         const where  = await sink(bundle)
         logger.info(LOG, `[${setup?.id}] recorded ${bundle.readId} → ${where} (${bundle.trajectory.rounds} round(s), ${pack.errors.length} pack error(s))`)

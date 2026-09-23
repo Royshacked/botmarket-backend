@@ -464,6 +464,13 @@ services/
                               klinecharts built-ins); paneId 'candle_pane' for overlays.
     studyTranslate.js         studiesToIndicators/translateStudy — _buildStudies TradingView study
                               objects → klinecharts indicator descriptors (overlay vs own-pane split).
+    NB: setup.ladder.js owns the RUNG VOCABULARY (TF_RUNGS, isFetchableRung, rungMinutes) and the
+        DEFAULT pace — ladderFor(horizon, marketCap, premise) → the rungs a setup is read on when
+        nobody named any, as a contiguous band that always widens to reach the premise. Coarser as
+        the cap falls (a 15min candle on a $2T name is structure; on a $200M name it is two prints
+        and a spread) and as the horizon lengthens. rungsBetween is also what a spoken range means —
+        "15min to 1hr" is three rungs, not two. The dependency runs ONE way: setup.schema consumes
+        rung facts and re-exports them, the ladder never imports back.
     NB: computeRR in services/setup.schema.js (PESSIMISTIC r:r — worst entry, furthest stop,
         NEAREST target) is mirrored by the FE cmps/TradeIdeas/orderRisk.util.js, which is what the
         OrderConfirmDialog shows at approval. Keep the convention in sync.
@@ -704,10 +711,16 @@ monitoring/
                             pre-entry readiness, past-entry management (_managePosition). THE LOOP ONLY:
                             wake handlers, scheduling, writes and the injectable IO. THE RULE (rebuilt
                             2026-09-17, docs/design/talos-per-candle.md): a model call only on a
-                            condition the user wrote in words. Pre-entry that is always true, so EVERY
-                            wake reads — on each candle close of the rung the model chose, and ahead of
-                            it when a price guard fires; reason = expiry_review | guard | first_look |
-                            candle. Cheap and free come first: the SCENARIO gate (which PREMISE price
+                            condition the user wrote in words. It wakes on each candle close of the
+                            rung the model chose, and ahead of it when a price guard fires; reason =
+                            expiry_review | guard | first_look | candle. A WAKE IS NOT A READ since
+                            2026-09-23 (docs/design/talos-two-tier.md): talos.tiers routes it to the
+                            EXPENSIVE read, a CHEAP one, or nothing — 78% of wakes needed no expensive
+                            read on the 95 recorded. Every expensive read stores what paces the next
+                            (monitor_state.expensive_due, from `next_expensive_in`) and what the cheap
+                            passes check meanwhile (monitor_state.watch; null = sleep), both rewritten
+                            whole like guards. The ENTRY GATE is the verdict alone — `_applyVerdict`
+                            acts on `enter` with no zone under it and takes the leg from `firingLeg`. Cheap and free come first: the SCENARIO gate (which PREMISE price
                             reached — a fired guard resolves to its own zone, _hitFromGuard, because
                             the spot check a minute later may have missed the crossing) and the
                             validity gate (close, not touch — it can only KILL). In position it reads
@@ -736,6 +749,24 @@ monitoring/
                             sleep-until-open arithmetic. Two loops that must agree on when a document
                             is due; they used to carry a copy each. Talos is NOT a caller (it has no
                             cadence — its next wake is a candle close)
+  talos.tiers.js            WHICH TIER a wake runs on (2026-09-23) — pure, no IO, no clock. tierFor →
+                            'expensive' | 'cheap' | 'sleep'. Never triaged, whatever read_mode says: a
+                            first look, an expiry review (a DECISION, not a "did something happen" —
+                            the 95-read replay's one missed action was a let_expire slept through) and
+                            a fired guard (the read's own alarm). Else the countdown the last expensive
+                            read set: elapsed → expensive; inside it → cheap when a `watch` was
+                            declared, nothing when it was null. clampExpensiveGap floors at 1 (the safe
+                            direction for a field the model may not fill) and caps at 24 — the only
+                            backstop for a setup whose completion has no price to guard
+  talos.cheap.js            the CHEAP read (2026-09-23): one model call, NO tools, no vision, its own
+                            model knob (TALOS_CHEAP_MODEL, default Haiku 4.5) and its own ledger key
+                            (`talosCheap`). Answers is-it-fired + should-the-expensive-read-run, three
+                            valued per condition — fired | not_fired | unknown, and `unknown` is the
+                            point: a numbers-only pass cannot tell whether a push below a level FAILED.
+                            normalizeCheapReply is where the safety lives — fired, unknown, an off-menu
+                            state, a condition the model skipped, junk, a dead provider and an
+                            unparseable reply ALL escalate; the model may ask for a read but can never
+                            decline one. No verdict vocabulary, no guards, no order ever placed off it
   talos.gates.js            its PURE tier, split out 2026-09-15: the zone/scenario gates, guard
                             resolution (_hitFromGuard), the in-position arithmetic (rMultiple /
                             computeMetrics — R, MAE, MFE for the read and the UI), the validity + breach
@@ -753,11 +784,16 @@ monitoring/
                             row. One prompt core (_CORE) with a pre-entry and an in-position tail; the
                             in-position menu line is generated from allowedVerdicts so the prompt
                             never offers a verdict the monitor would refuse. TIMEFRAME IS THE MODEL'S
-                            CHOICE: it returns `next_timeframe` (clamped to the setup's ladder, stored
-                            on monitor_state.timeframe) and the next read OPENS there — openingRung —
-                            at that candle's close. There is no next_check_min and no cadence: the
-                            rung IS the pace, so the two can never contradict each other. Ladder floors
-                            at 5min (1min is 402 off-plan at FMP). Model default Sonnet, thinking off
+                            CHOICE: it returns `next_timeframe` (held to setup.schema `paceRungs`,
+                            stored on monitor_state.timeframe) and the next read OPENS there —
+                            openingRung, falling back to the PREMISE `timeframe`. There is no
+                            next_check_min and no clock: the close is the timer. Since 2026-09-23 the
+                            derived `ladder` is gone — READING is unfenced (any rung, any time) and
+                            what a setup constrains is the rung it is PACED on (authored `pace_rungs`,
+                            never empty). The opening block now carries INDICATORS computed from the
+                            bars already fetched (assess.shared indicatorsText, through the same
+                            _formatIndicator get_indicators uses, so the two can never disagree) —
+                            0 of 71 recorded reads had declined to pull a tool. Model default Sonnet, thinking off
                             (assessRouting) — the saving was the image, not the model. A stored
                             `hermesReasoning: high` is capped to `low` (ASSESS_MAX_EFFORT, capEffort
                             in assess.shared); the system block carries the 1-HOUR cache marker
@@ -783,8 +819,10 @@ monitoring/
                             calls + results, PNGs included, cache markers stripped), routing, per-round
                             usage, the verdict, every scenario (the label is target-before-stop
                             arithmetic redone from here) — plus a DATA PACK fetched AFTER the read:
-                            raw candle rows for every symbol in scope × every rung of the ladder, the
-                            quotes, a plain chart of the asset on every rung. Fire-and-forget, every
+                            raw candle rows for every symbol in scope × every PACKED rung (packRungs
+                            — the premise, the rung read on, any paced rung; deliberately not every
+                            rung in scope, which a pack cannot afford), the quotes, a plain chart of
+                            the asset on each. Fire-and-forget, every
                             fetch guarded (a bad cell is a null + an `errors` line), never throws back
                             into the read. userId is HASHED. Two sinks (TALOS_RECORD_SINK): `disk`
                             → TALOS_RECORD_DIR/<day>/<readId>.json (gitignored — bundles are live
