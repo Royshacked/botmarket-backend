@@ -120,6 +120,9 @@ export function journalEntry(reason, {
         ...(rung ? { rung } : {}),
         ...(zone?.id ? { zone_id: zone.id } : {}),
         verdict: raw?.verdict ?? null,
+        // Omitted when intact, which is most rows — the journal should show a flagged map, not
+        // repeat the absence of one.
+        ...(raw?.premise && raw.premise !== 'intact' ? { premise: raw.premise } : {}),
         note:    read || verdictFallbackNote(raw?.verdict),
         ...(raw?.warning ? { warning: String(raw.warning) } : {}),
         ...(Array.isArray(raw?.conditions) && raw.conditions.length ? { conditions: raw.conditions } : {}),

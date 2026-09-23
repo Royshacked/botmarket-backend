@@ -11,7 +11,7 @@ import { isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, ha
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, openingRung } from './talos.assess.js'
-import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetLevels, addEntryLeg, legQuantity, firingLeg, resolveRung, clampGuards, normalizeWatch, disarmedSetupPatch, watchedLegs, hasWatchedLegs, allowedVerdicts } from '../services/setup.schema.js'
+import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetLevels, addEntryLeg, legQuantity, firingLeg, resolveRung, clampGuards, normalizeWatch, normalizePremise, disarmedSetupPatch, watchedLegs, hasWatchedLegs, allowedVerdicts } from '../services/setup.schema.js'
 import { tierFor, clampExpensiveGap, tickExpensiveDue } from './talos.tiers.js'
 import { cheapRead as _cheapRead } from './talos.cheap.js'
 import { cancelRestingEntryOrders } from '../services/restingOrders.service.js'
@@ -582,7 +582,12 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         'monitor_state.guards': armedNow,
         // The two fields that pace the NEXT expensive read and configure the cheap passes between
         // (talos.tiers). Rewritten whole each read, for the same reason guards are.
-        'monitor_state.expensive_due': clampExpensiveGap(raw.next_expensive_in),
+        // A read that flagged the map is not triaged next time: whatever countdown it asked for,
+        // a damaged or stale premise comes back to the expensive tier on the very next close. The
+        // cheap tier cannot judge a map — it can only check numbers against conditions.
+        'monitor_state.expensive_due': normalizePremise(raw.premise) === 'intact'
+            ? clampExpensiveGap(raw.next_expensive_in)
+            : 1,
         'monitor_state.watch':         normalizeWatch(raw.watch),
         ...latchPatch(setup, conditions, nowMs, declared),
         ...costPatch(setup, raw._tools),
@@ -689,6 +694,9 @@ function _assessmentRecord({ nowMs, reason, zone = null, scenario, raw, verdict,
         zone_id:        zone?.id ?? null,
         scenario_id:    scenario?.id ?? null,
         verdict,
+        // The MAP, asked separately from the moment — a read can wait on an intact premise for weeks
+        // or wait on a stale one, and those are different things to be told.
+        premise:        normalizePremise(raw.premise),
         read:           raw.read ?? null,
         warning:        verdict === 'enter' ? null : (raw.warning ?? null),
         conditions,

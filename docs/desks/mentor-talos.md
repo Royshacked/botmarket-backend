@@ -322,6 +322,33 @@ call whose cost shows on the row. `BACKSTOP`, `after_min`, `and_price_above`, `C
 
 ---
 
+## The premise — is the MAP still true
+
+> **BUILT 2026-09-23.** A `premise` field on every pre-entry read: `intact` | `damaged` | `stale`.
+
+**Asked separately from the verdict, and answered every read**, because they are different
+questions. The verdict is about the MOMENT — is this the entry. `premise` is about the MAP — does
+this plan still describe what price is doing at all.
+
+Before this, the only way to say "the thesis is rotting" was a verdict that also ACTED on it —
+`stand_aside` stands down, `edit` proposes the re-draw. So a read that wanted to keep waiting while
+flagging decay had no way to say so, and a setup could sit at `wait` for six candles while its map
+quietly stopped being true, with nothing in the journal saying anything.
+
+`wait` + `intact` is the normal case, for weeks. **`wait` + `stale` is the sentence that did not
+exist**: keep your hands off while somebody re-draws it.
+
+**A flagged map is not triaged.** Whatever countdown the read asked for, `damaged` or `stale` comes
+back to the EXPENSIVE tier on the very next close — the cheap tier can check numbers against
+conditions, it cannot judge a map. **Absence means `intact`**, deliberately: that is exactly the old
+behaviour, and defaulting an omission to `damaged` would force a full read every time the model
+simply did not fill the field in.
+
+The journal carries it only when it is not `intact` — most rows are, and a row should show a flagged
+map rather than repeat the absence of one.
+
+---
+
 ## Entry — the verdict decides
 
 > **BUILT 2026-09-23.** The last thing the zone gated, removed.

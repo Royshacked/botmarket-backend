@@ -1441,3 +1441,44 @@ test('a cheap read LATCHES what it settled, so neither tier re-asks it', async (
     await _checkSetup({ ...latching, read_mode: 'cheap_then_expensive' }, T, deps)
     assert.equal(deps.writes[0]['monitor_state.conditions.c1']?.met, true, 'settled by the cheap tier, and it stays settled')
 })
+
+// ─── premise: the map, asked apart from the moment ─────────────────────────────
+
+test('a read can WAIT on an intact premise — the normal case, and the countdown it asked for holds', async () => {
+    const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'Building.', premise: 'intact', next_expensive_in: 8 }) })
+    await _checkSetup({ ...LIVE, monitor_state: { ...LIVE.monitor_state, last_assessment: { at: 'earlier' } } }, T, deps)
+    assert.equal(deps.writes[0]['monitor_state.last_assessment'].premise, 'intact')
+    assert.equal(deps.writes[0]['monitor_state.expensive_due'], 8)
+})
+
+test('a read can WAIT on a STALE premise — the thing it could not say before', async () => {
+    // "Keep your hands off while somebody re-draws it" was previously unsayable: the only way to
+    // flag a rotting map was `edit`, which also proposes the re-draw.
+    const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'Levels stopped describing this.', premise: 'stale', next_expensive_in: 12 }) })
+    await _checkSetup({ ...LIVE, monitor_state: { ...LIVE.monitor_state, last_assessment: { at: 'earlier' } } }, T, deps)
+    const row = deps.writes[0]['monitor_state.last_assessment']
+    assert.equal(row.verdict, 'wait')
+    assert.equal(row.premise, 'stale')
+})
+
+test('a flagged map is NOT triaged next time — it comes back to the expensive tier next close', async () => {
+    // The cheap tier can check numbers against conditions. It cannot judge a map.
+    for (const premise of ['damaged', 'stale']) {
+        const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'x', premise, next_expensive_in: 24 }) })
+        await _checkSetup({ ...LIVE, monitor_state: { ...LIVE.monitor_state, last_assessment: { at: 'earlier' } } }, T, deps)
+        assert.equal(deps.writes[0]['monitor_state.expensive_due'], 1, `${premise} overrides the countdown it asked for`)
+    }
+})
+
+test('the journal shows a flagged map and stays quiet about an intact one', async () => {
+    const mkDeps = (premise) => stubDeps({ assess: async () => ({ verdict: 'wait', read: 'x', premise }) })
+    const read = { ...LIVE, monitor_state: { ...LIVE.monitor_state, last_assessment: { at: 'earlier' } } }
+
+    const flagged = mkDeps('damaged')
+    await _checkSetup(read, T, flagged)
+    assert.equal(flagged.entries[0].premise, 'damaged')
+
+    const quiet = mkDeps('intact')
+    await _checkSetup(read, T, quiet)
+    assert.equal(quiet.entries[0].premise, undefined, 'most rows are intact — the journal should not repeat it')
+})

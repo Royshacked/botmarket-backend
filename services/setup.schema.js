@@ -166,6 +166,26 @@ export function defaultReadMode(setup) {
     return 'cheap_then_expensive'
 }
 
+// ─── The premise ──────────────────────────────────────────────────────────────
+//
+// IS THE MAP STILL TRUE — asked separately from "is this the moment", because they are different
+// questions and a read can answer them differently. Until 2026-09-23 the only way to say "the
+// thesis is rotting" was a verdict that also acted on it (`stand_aside`, `edit`), so a read that
+// wanted to keep waiting while flagging decay had no way to say so, and the journal showed nothing.
+//
+//   intact   — the plan still describes what price is doing
+//   damaged  — the premise is hurt; this may not be a trade any more
+//   stale    — the levels no longer describe the chart; it wants re-drawing
+//
+// ABSENCE MEANS `intact`, and deliberately so: that is exactly today's behaviour, where nothing
+// flags anything. A read that does not raise a concern has not raised one.
+export const PREMISE_STATES = ['intact', 'damaged', 'stale']
+
+/** The premise a read reported. Unknown/absent → `intact`. Pure. */
+export function normalizePremise(raw) {
+    return PREMISE_STATES.includes(raw) ? raw : 'intact'
+}
+
 /** Most indicators one cheap read computes. Past a handful it is not watching, it is hedging. */
 const MAX_WATCH_INDICATORS = 6
 

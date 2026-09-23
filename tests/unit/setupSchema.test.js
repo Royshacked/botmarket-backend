@@ -5,6 +5,7 @@ import {
     normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
     normalizePaceRungs, paceRungs, resolveRung, defaultReadMode, normalizeWatch,
+    normalizePremise, PREMISE_STATES,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
     stopEdge, targetEdges, targetLevels, clampGuards, addEntryLeg, legQuantity, pendingLegs, watchedLegs, hasWatchedLegs, allowedVerdicts, CONDITION_MODES, TRADE_MODES,
 } from '../../services/setup.schema.js'
@@ -1103,4 +1104,20 @@ test('entry_mode defaults to "conditional" when absent or unknown', () => {
 
 test('entry_mode is "limit" only when the model explicitly says so', () => {
     assert.equal(normalizeSetup({ entry_mode: 'limit' }).entry_mode, 'limit')
+})
+
+// ─── premise — is the MAP still true (2026-09-23) ──────────────────────────────
+//
+// Asked separately from the verdict, because they are different questions. Until this existed the
+// only way to say "the thesis is rotting" was a verdict that also ACTED on it, so a read that
+// wanted to keep waiting while flagging decay had no way to say so.
+
+test('the three premise states, and absence means intact', () => {
+    assert.deepEqual(PREMISE_STATES, ['intact', 'damaged', 'stale'])
+    for (const ok of PREMISE_STATES) assert.equal(normalizePremise(ok), ok)
+    // Absence is today's behaviour — nothing flagged. A read that did not raise a concern has not
+    // raised one, and defaulting to `damaged` would force an expensive read on every omission.
+    for (const bad of [null, undefined, '', 'broken', 'INTACT', 42, {}]) {
+        assert.equal(normalizePremise(bad), 'intact', String(bad))
+    }
 })
