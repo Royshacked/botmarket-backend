@@ -86,6 +86,10 @@ export function journalEntry(reason, {
     // Which model made this read (TALOS_MODELS id). On the row because the admin's candidate
     // comparison IS reading rows side by side; absent on code-written events.
     model = null,
+    // Which TIER produced this row (2026-09-23). Omitted for the expensive read, which is the
+    // default and the only kind that existed before — a cheap row has no verdict and no guards, and
+    // without this it is indistinguishable from an expensive read that failed to answer.
+    tier = null,
 } = {}) {
     const at    = new Date(nowMs).toISOString()
     const noun  = entity?.kind ?? 'setup'
@@ -119,11 +123,13 @@ export function journalEntry(reason, {
         price:   toNum(price),
         ...(rung ? { rung } : {}),
         ...(zone?.id ? { zone_id: zone.id } : {}),
+        ...(tier && tier !== 'expensive' ? { tier } : {}),
         verdict: raw?.verdict ?? null,
         // Omitted when intact, which is most rows — the journal should show a flagged map, not
         // repeat the absence of one.
         ...(raw?.premise && raw.premise !== 'intact' ? { premise: raw.premise } : {}),
-        note:    read || verdictFallbackNote(raw?.verdict),
+        note:    read || (tier === 'cheap' ? 'Checked the numbers — nothing the plan is waiting on has moved.'
+                                          : verdictFallbackNote(raw?.verdict)),
         ...(raw?.warning ? { warning: String(raw.warning) } : {}),
         ...(Array.isArray(raw?.conditions) && raw.conditions.length ? { conditions: raw.conditions } : {}),
         ...(tools?.length ? { tools } : {}),

@@ -1482,3 +1482,30 @@ test('the journal shows a flagged map and stays quiet about an intact one', asyn
     await _checkSetup(read, T, quiet)
     assert.equal(quiet.entries[0].premise, undefined, 'most rows are intact — the journal should not repeat it')
 })
+
+test('a cheap row is MARKED as cheap and carries its own sentence', async () => {
+    // Without the tier it is indistinguishable from an expensive read that failed to answer: no
+    // verdict, no guards, no tools.
+    const deps = stubDeps({
+        cheapRead: async () => ({ conditions: [{ id: 'c1', state: 'not_fired' }], escalate: false, read: 'Still 4 handles under it.' }),
+    })
+    await _checkSetup(MID(), T, deps)
+    const row = deps.entries[0]
+    assert.equal(row.tier, 'cheap')
+    assert.equal(row.note, 'Still 4 handles under it.')
+    assert.equal(row.verdict, null, 'the cheap tier has no verdict vocabulary')
+})
+
+test('a cheap read that says nothing still reads as a cheap read, not as a failure', async () => {
+    const deps = stubDeps({ cheapRead: async () => ({ conditions: [], escalate: false, read: null }) })
+    await _checkSetup(MID(), T, deps)
+    assert.equal(deps.entries[0].tier, 'cheap')
+    assert.match(deps.entries[0].note, /Checked the numbers/)
+})
+
+test('an expensive row carries NO tier — it is the default and the only kind there used to be', async () => {
+    const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'Had a proper look.' }) })
+    await _checkSetup({ ...LIVE, monitor_state: { ...LIVE.monitor_state, last_assessment: { at: 'earlier' } } }, T, deps)
+    assert.equal(deps.entries[0].tier, undefined)
+    assert.equal(deps.entries[0].verdict, 'wait')
+})
