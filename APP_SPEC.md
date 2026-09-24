@@ -211,6 +211,15 @@ rendering with the brand that sent them. The card is the alert + a
 clickable preview; the **existing action UI stays the destination** (deep-link, not embedded action).
 Dismiss/handled state persists per-message.
 
+A card carries one of **three action shapes** (`chat.service`): `cardActions(label)` — a primary and
+a Dismiss, the usual two; `dismissOnly()` — a Dismiss and no primary, for a card that reports
+something but asks for nothing, which keeps its pending/dismissed lifecycle so it stands in the feed
+until cleared; and `actions: null` — inert, no lifecycle at all. The middle one exists because a
+primary that opens nothing is worse than no primary: it switches a surface, the surface shows
+whatever it was already showing, and the card reads as the agent answering it with someone else's
+work. A label must also say what its primary DOES — two Prometheus cards both saying "Open coverage"
+while only one started a revise turn was the same failure by another route. (2026-09-24)
+
 | `type` | Event | Card actions → destination |
 |---|---|---|
 | `setup_invalidation` | Talos's validity gate on a `setup` — `ran_away` · `invalidated` · `invalidated_fyi` · `stale_map` | Re-draw it → Mentor; the two FYI flavours carry NO action, because nothing is being asked |
@@ -222,8 +231,8 @@ Dismiss/handled state persists per-message.
 | `market_brief_offer` | Daily broadcast offer, one per user per weekday (`marketBrief.notify.js`) | Get the brief → routes to **Axl**, who writes it in his thread · Dismiss |
 | `tilt_review` | The house view is past its clock — a stance matured, a macro catalyst landed, or the monthly floor expired (`tilt.monitor` → `reviewDecision`) | Run the review → routes to **Pythia**, who runs it in his thread · Dismiss |
 | `tilt_event` | A publish MOVED a sector (`tilt.assess.diffStances` against the view in force; a reaffirming republish tells nobody) | Open sector view — a READ, so it completes on open (`resolvesOn: 'open'`). Every admin, the whole change |
-| `coverage_event` | The coverage monitor's material verdict on a name — `target_hit` · `target_hit_early` (reads as a MISS: the number was too low, so it re-opens the call) · `validating` · `diverging` (`coverage.assess.classifyGapState`) | Open coverage. Every admin — the card asks for a revision only an admin can make |
-| `coverage_refreshed` | A headless Prometheus run rewrote a name's coverage — Atlas's `<coverage_refresh>` hop mid-review, or the monitor's scheduled re-model | Resume review (→ Atlas, when a portfolioId rides along) or Open coverage. The hop's card goes to the ONE user who asked; the scheduled re-model has no user and goes to every admin |
+| `coverage_event` | The coverage monitor's material verdict on a name — `target_hit` · `target_hit_early` (reads as a MISS: the number was too low, so it re-opens the call) · `validating` · `diverging` (`coverage.assess.classifyGapState`) | **Revise thesis** — the primary runs the revise doorway, which is what distinguishes it from the refresh card's "Open coverage". Every admin — the card asks for a revision only an admin can make |
+| `coverage_refreshed` | A headless Prometheus run rewrote a name's coverage — Atlas's `<coverage_refresh>` hop mid-review, or the monitor's scheduled re-model | Resume review (→ Atlas, when a portfolioId rides along); Open coverage when it stored something; **Dismiss only** when it stored nothing — a refresh that wrote nothing has no read behind a button, and its "Open coverage" merely switched to a desk still showing the last name worked on there. The hop's card goes to the ONE user who asked; the scheduled re-model has no user and goes to every admin |
 | `sleeve_sourced` | The research run finished the names a `<screen_request>` queued for a book's sleeve (`sleeveSource.service`) | Resume → Atlas, for the requester |
 
 Two cards are **not about the user** — `market_brief_offer` and `tilt_review`. Both announce a

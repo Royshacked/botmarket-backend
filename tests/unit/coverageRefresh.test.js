@@ -43,7 +43,20 @@ test('buildCoverageRefreshed: failure card is honest and still lets the user res
 test('buildCoverageRefreshed: a review resumes on WORK; a bare coverage read closes on OPEN', () => {
     assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', portfolioId: 'p1' }).actions.primary.resolvesOn, 'work')
     assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', coverageId: 'cov1' }).actions.primary.resolvesOn, 'open')
-    assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', coverageId: 'cov1', ok: false, house: true }).actions.primary.resolvesOn, 'open')
+    // A review behind it is still somewhere to go even when the refresh failed.
+    assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', portfolioId: 'p1', ok: false }).actions.primary.resolvesOn, 'work')
+})
+
+// A refresh that stored NOTHING has no read to offer — the thesis is unchanged and already in the
+// book — so it carries a Dismiss and no primary (2026-09-24). It used to say "Open coverage", which
+// only switched to the Analyst desk; that desk keeps its last conversation, so the click looked like
+// Prometheus answering this card with the previous name's revise turn.
+test('buildCoverageRefreshed: a failed refresh with no review has NO primary to press', () => {
+    const card = buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', coverageId: 'cov1', ok: false, house: true })
+    assert.equal(card.actions.primary, undefined)
+    assert.equal(card.actions.dismiss, true)
+    // Still carries its subject, so a later re-model that LANDS can close it.
+    assert.equal(card.payload.coverageId, 'cov1')
 })
 test('buildCoverageRefreshed: no user or ticker → null', () => {
     assert.equal(buildCoverageRefreshed({ userId: '', ticker: 'NVDA' }), null)

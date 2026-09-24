@@ -10,7 +10,7 @@
 //    (Atlas mid-review). The userId comes from the requesting user, not the doc — and that hop is
 //    itself admin-only now (portfolio.controller), since it REWRITES house coverage.
 
-import { cardActions }      from '../api/chat/chat.service.js'
+import { cardActions, dismissOnly } from '../api/chat/chat.service.js'
 import { listAdminUserIds } from '../api/user/user.model.js'
 import { postCard }         from './notifyCard.js'
 import { logger }           from './logger.service.js'
@@ -65,7 +65,12 @@ export function buildCoverageEvent(coverage, verdict, userId) {
         type:       'coverage_event',
         payload:    { kind: 'coverage', symbol: sym, coverageId: coverage.id ?? null, state, edge_gone: !!verdict.edge_gone },
         botId:      'analyst',
-        actions:    cardActions('Open coverage'),
+        // "Revise thesis", not "Open coverage". This card's primary runs the REVISE doorway — it
+        // opens Prometheus on the thesis with the turn already in flight — while the refresh card
+        // below merely shows the book. Both said "Open coverage", so the two were indistinguishable
+        // in the feed and a user who had just revised one name read the other's click as the desk
+        // answering with the wrong thesis. The label is the only thing that told them apart.
+        actions:    cardActions('Revise thesis'),
         visibility: 'admin',
     }
 }
@@ -119,25 +124,43 @@ export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, por
     const gist    = (ok && typeof summary === 'string' && summary.trim())
         ? ` — ${summary.trim().length > 140 ? summary.trim().slice(0, 137) + '…' : summary.trim()}`
         : ''
+    // The copy must promise only what the card's buttons can deliver — "resume the review" belongs
+    // to a card that HAS a review behind it. Atlas's hop does not always carry one (the doc above:
+    // with a portfolioId it routes back to the review, otherwise it opens coverage), and the failed
+    // half said "You can resume the review" either way. That was merely wrong before; now that a
+    // failed refresh with no review is posted Dismiss-only, it would name an action with no button.
+    const resume = portfolioId ? ' You can resume the review.' : ''
     const content = house
         ? (ok
             ? `Scheduled re-model of ${sym} is in${gist}. Read the revised thesis.`
             : `Scheduled re-model of ${sym} produced nothing to store — the existing coverage stands.`)
         : (ok
-            ? `Fresh research on ${sym} is ready${forBook}${gist}. Resume the review to fold it in.`
-            : `Couldn't refresh research on ${sym} right now — leaving the existing coverage in place. You can resume the review.`)
+            ? `Fresh research on ${sym} is ready${forBook}${gist}.${portfolioId ? ' Resume the review to fold it in.' : ''}`
+            : `Couldn't refresh research on ${sym} right now — leaving the existing coverage in place.${resume}`)
     return {
         userId,
         content,
         type:       'coverage_refreshed',
         payload:    { kind: 'coverage', symbol: sym, coverageId, portfolioId, ok, house },
         botId:      'analyst',
-        // WHAT CLOSES IT. With a review behind it the ask is the review — work, satisfied when the
-        // portfolio write lands (the subject is the portfolio, see cardSubject). Without one the ask
-        // is to READ what the refresh wrote (or didn't) — there is no write that could ever satisfy
-        // a 'work' card here, so stamped 'work' it sat "still waiting on you" after being opened,
+        // WHAT CLOSES IT, in three shapes.
+        //
+        // With a review behind it the ask is the review — work, satisfied when the portfolio write
+        // lands (the subject is the portfolio, see cardSubject). That holds whether the refresh
+        // succeeded or not: there is still somewhere to go back to.
+        //
+        // A SUCCESSFUL house refresh asks to READ what it wrote — no write could ever satisfy a
+        // 'work' card here, so stamped 'work' it sat "still waiting on you" after being opened,
         // forever. Opening it IS doing it.
-        actions:    portfolioId ? cardActions('Resume review') : cardActions('Open coverage', { resolvesOn: 'open' }),
+        //
+        // A FAILED one has nowhere to send anyone: it stored nothing, so the thesis is the one
+        // already in the book. It carried "Open coverage" anyway, which only switched to the
+        // Analyst desk — and that desk keeps its last conversation, so the click appeared to answer
+        // this card with the PREVIOUS name's revise turn. A statement with a Dismiss says what
+        // happened and asks for nothing.
+        actions:    portfolioId ? cardActions('Resume review')
+                  : ok         ? cardActions('Open coverage', { resolvesOn: 'open' })
+                  :              dismissOnly(),
         ...(house
             ? { visibility: 'admin' }
             : { visibility: 'own', forUserId: userId }),

@@ -170,6 +170,22 @@ export const cardActions = (label, { resolvesOn = 'work' } = {}) => ({
     dismiss: true,
 })
 
+/**
+ * A card with a Dismiss and NO primary: a statement that asks for nothing, but is still the user's
+ * to clear.
+ *
+ * The third shape, between `cardActions` (there is something to do) and `actions: null` (inert, no
+ * lifecycle at all). It exists because a primary that opens nothing is worse than no primary: the
+ * button switches a surface, the surface shows whatever it was already showing, and the card reads
+ * as though the agent answered it with someone else's work. Prometheus's "the re-model produced
+ * nothing to store" is exactly that — the thesis is unchanged and already in the book, so there is
+ * no fresh read behind an "Open coverage".
+ *
+ * Keeps the pending/dismissed lifecycle (cardLifecycle only asks whether `actions` is an object),
+ * so an unread statement still stands in the feed until the user clears it.
+ */
+export const dismissOnly = () => ({ dismiss: true })
+
 // payload key → what the card is ABOUT. First match wins, so the order is the judgment: a coverage
 // refresh raised mid-review carries BOTH a portfolioId and a coverageId, and its ask ("resume the
 // review") is satisfied by the review, not by the thesis — so portfolio outranks coverage.

@@ -147,6 +147,9 @@ fact about our own thesis; the rest are signals. A material state appends a revi
 traders never see it). A quiet day refreshes the recorded gap and bookkeeping with no revision — the
 quiet path is what keeps the trail auditable instead of buried under daily noise.
 
+Its primary reads **"Revise thesis"**, not "Open coverage" — the refresh card below used the same
+words while doing something entirely different, so in the feed the two were one button. (2026-09-24)
+
 The card is a WORK card: opening it leaves it pending ("Opened — still waiting on you"); saving the
 revision closes it. The coverage PUT route calls `resolveCardsFor` with the revision's own account of
 what moved (`revisionSummary` — "Re-modelled — rating sell → hold, PT 85 → 92", or "thesis held,
@@ -154,10 +157,16 @@ rating and target unchanged"), and the chip in the social chat shows that line u
 Retire and delete close it the same way ("✓ Retired" / "✓ Deleted"). Pushed live over the socket
 (`message_resolved`), so a panel open beside the desk flips without a reopen. (2026-09-19)
 
-The `coverage_refreshed` card is different: with a review behind it ("Resume review") the ask is the
-review — work, subject = the portfolio; WITHOUT one ("Open coverage") the ask is to READ what the
-refresh wrote, so it closes on open (`resolvesOn: 'open'`). Stamped 'work' it had no write to wait for
-and sat "still waiting on you" forever. Every refresh card also names its doc (`coverageId`) on the
+The `coverage_refreshed` card is different, and comes in three shapes. With a review behind it
+("Resume review") the ask is the review — work, subject = the portfolio — whether the refresh
+succeeded or not. WITHOUT one, a refresh that SUCCEEDED ("Open coverage") asks to READ what it
+wrote, so it closes on open (`resolvesOn: 'open'`); stamped 'work' it had no write to wait for and
+sat "still waiting on you" forever. A refresh that STORED NOTHING gets no primary at all
+(`chat.service` `dismissOnly` — a Dismiss and nothing else): the thesis is unchanged and already in
+the book, so there is no read behind a button. It carried "Open coverage" anyway, which only
+switched the left column to the Analyst desk — and that desk keeps its last conversation, so the
+click appeared to answer the card with the PREVIOUS name's revise turn. The copy follows the same
+rule: it offers to "resume the review" only when there is one. (2026-09-24) Every refresh card also names its doc (`coverageId`) on the
 failure paths too — "produced nothing to store" used to carry `null`, i.e. no subject, unreachable by
 any write. And a re-model that LANDS (`coverageRefresh`) resolves every pending card on that doc —
 the verdict that triggered it, an earlier "nothing to store" — with the revision's note, before its own
